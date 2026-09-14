@@ -61,6 +61,26 @@ def test_run_standalone_success_and_retry_exhaustion(tmp_path: Path) -> None:
         assert exc_info.value is plain_err
         mock_run.assert_called_once()
 
+    # 6. Retryable provider output error recovers on attempt 2 (two attempts)
+    out_err1 = runner.RetryableProviderOutputError("malformed output 1")
+    with mock.patch.object(runner, "run", side_effect=[out_err1, out_dir]) as mock_run:
+        res = runner.run_standalone(tmp_path, task_path, "worker", "base-w-out", 30)
+        assert res == out_dir
+        assert mock_run.call_count == 2
+        assert [c.args[3] for c in mock_run.call_args_list] == ["base-w-out", "base-w-out-retry-1"]
+
+    # 7. Two provider output errors stop immediately after two attempts without retry-2
+    out_err2 = runner.RetryableProviderOutputError("malformed output 2")
+    with mock.patch.object(runner, "run", side_effect=[out_err1, out_err2]) as mock_run:
+        with pytest.raises(runner.ProposalError) as exc_info:
+            runner.run_standalone(tmp_path, task_path, "worker", "base-w-out-stop", 30)
+        assert type(exc_info.value) is runner.ProposalError
+        assert not isinstance(exc_info.value, runner.RetryableProviderSessionError)
+        assert exc_info.value.__cause__ is out_err2
+        assert "repeated provider output failure for base-w-out-stop after 2 output attempts" in str(exc_info.value)
+        assert mock_run.call_count == 2
+        assert [c.args[3] for c in mock_run.call_args_list] == ["base-w-out-stop", "base-w-out-stop-retry-1"]
+
 
 def test_existing_directory_fails_closed_without_overwrite(tmp_path: Path) -> None:
     task_path = tmp_path / "task.json"
@@ -142,3 +162,15 @@ def test_main_routing_check_arguments_and_pipeline_delegation(tmp_path: Path, mo
         )
         assert (attempt_id, run_dir) == ("pipe-id-retry-1", fake_out)
         assert [c.args[3] for c in mock_pipe_run.call_args_list] == ["pipe-id", "pipe-id-retry-1"]
+
+    # Pipeline delegation stops after two output errors without retry-2
+    pipe_out_err1 = runner.RetryableProviderOutputError("pipe-out-1")
+    pipe_out_err2 = runner.RetryableProviderOutputError("pipe-out-2")
+    with mock.patch.object(pipeline, "runner_run", side_effect=[pipe_out_err1, pipe_out_err2]) as mock_pipe_run:
+        with pytest.raises(runner.ProposalError) as exc_info:
+            pipeline.run_provider_session(tmp_path, task_file, "worker", "pipe-out", 30, state_check=mock.Mock())
+        assert type(exc_info.value) is runner.ProposalError
+        assert not isinstance(exc_info.value, runner.RetryableProviderSessionError)
+        assert "repeated provider output failure for pipe-out after 2 output attempts" in str(exc_info.value)
+        assert [c.args[3] for c in mock_pipe_run.call_args_list] == ["pipe-out", "pipe-out-retry-1"]
+        assert mock_pipe_run.call_count == 2

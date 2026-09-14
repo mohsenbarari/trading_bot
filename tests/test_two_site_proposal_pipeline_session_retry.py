@@ -12,12 +12,14 @@ try:
     from scripts import two_site_proposal_pipeline as pipeline
     from scripts.two_site_proposal_runner import (
         ProposalError,
+        RetryableProviderOutputError,
         RetryableProviderSessionError,
     )
 except ModuleNotFoundError:
     import two_site_proposal_pipeline as pipeline  # type: ignore[no-redef]
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         ProposalError,
+        RetryableProviderOutputError,
         RetryableProviderSessionError,
     )
 
@@ -408,6 +410,171 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                 self.assertEqual(
                     sentinel.read_text(encoding="utf-8"),
                     "reviewer baseline payload",
+                )
+
+    def test_one_output_error_then_success_returns_retry_1_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            task_path = root / "task.json"
+            base_run_id = "test-worker-out-retry"
+            expected_dir = root / "evidence" / f"{base_run_id}-retry-1"
+            state_check = mock.Mock()
+
+            out_err = RetryableProviderOutputError("provider output format error")
+            with patch.object(pipeline, "runner_run") as mock_run:
+                mock_run.side_effect = [out_err, expected_dir]
+
+                run_id, run_dir = pipeline.run_provider_session(
+                    root=root,
+                    task_path=task_path,
+                    role="worker",
+                    base_run_id=base_run_id,
+                    timeout=90,
+                    state_check=state_check,
+                )
+
+                self.assertEqual(run_id, f"{base_run_id}-retry-1")
+                self.assertEqual(run_dir, expected_dir)
+                self.assertEqual(mock_run.call_count, 2)
+                self.assertEqual(state_check.call_count, 2)
+                self.assertEqual(
+                    [c.args[3] for c in mock_run.call_args_list],
+                    [base_run_id, f"{base_run_id}-retry-1"],
+                )
+
+    def test_two_output_errors_stop_after_two_attempts_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            task_path = root / "task.json"
+            base_run_id = "test-worker-out-stop"
+            proposals_dir = root / ".local/two-site-refactor/proposals"
+            state_check = mock.Mock()
+
+            out_err1 = RetryableProviderOutputError("provider output error 1")
+            out_err2 = RetryableProviderOutputError("provider output error 2")
+
+            with patch.object(pipeline, "runner_run") as mock_run:
+                mock_run.side_effect = [out_err1, out_err2]
+
+                with self.assertRaises(ProposalError) as ctx:
+                    pipeline.run_provider_session(
+                        root=root,
+                        task_path=task_path,
+                        role="worker",
+                        base_run_id=base_run_id,
+                        timeout=90,
+                        state_check=state_check,
+                    )
+
+                exc = ctx.exception
+                self.assertIs(type(exc), ProposalError)
+                self.assertNotIsInstance(exc, RetryableProviderSessionError)
+                self.assertIs(exc.__cause__, out_err2)
+                self.assertEqual(
+                    str(exc),
+                    f"repeated provider output failure for {base_run_id} after 2 output attempts",
+                )
+                self.assertEqual(mock_run.call_count, 2)
+                self.assertEqual(state_check.call_count, 2)
+                self.assertEqual(
+                    [c.args[3] for c in mock_run.call_args_list],
+                    [base_run_id, f"{base_run_id}-retry-1"],
+                )
+                self.assertFalse((proposals_dir / f"{base_run_id}-retry-2").exists())
+
+    def test_two_output_errors_stop_after_two_attempts_reviewer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            task_path = root / "task.json"
+            base_run_id = "test-reviewer-out-stop"
+            proposals_dir = root / ".local/two-site-refactor/proposals"
+            state_check = mock.Mock()
+
+            out_err1 = RetryableProviderOutputError("reviewer output error 1")
+            out_err2 = RetryableProviderOutputError("reviewer output error 2")
+
+            with patch.object(pipeline, "runner_run") as mock_run:
+                mock_run.side_effect = [out_err1, out_err2]
+
+                with self.assertRaises(ProposalError) as ctx:
+                    pipeline.run_provider_session(
+                        root=root,
+                        task_path=task_path,
+                        role="verifier",
+                        base_run_id=base_run_id,
+                        timeout=60,
+                        state_check=state_check,
+                    )
+
+                exc = ctx.exception
+                self.assertIs(type(exc), ProposalError)
+                self.assertNotIsInstance(exc, RetryableProviderSessionError)
+                self.assertIs(exc.__cause__, out_err2)
+                self.assertEqual(
+                    str(exc),
+                    f"repeated provider output failure for {base_run_id} after 2 output attempts",
+                )
+                self.assertEqual(mock_run.call_count, 2)
+                self.assertEqual(state_check.call_count, 2)
+                self.assertEqual(
+                    [c.args[3] for c in mock_run.call_args_list],
+                    [base_run_id, f"{base_run_id}-retry-1"],
+                )
+                self.assertFalse((proposals_dir / f"{base_run_id}-retry-2").exists())
+
+    def test_mixed_generic_and_output_errors_allow_overall_three_attempt_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            task_path = root / "task.json"
+            state_check = mock.Mock()
+
+            base_run_id1 = "mixed-run-1"
+            sess_err = RetryableProviderSessionError("generic session failure")
+            out_err1 = RetryableProviderOutputError("output failure 1")
+            out_err2 = RetryableProviderOutputError("output failure 2")
+            with patch.object(pipeline, "runner_run") as mock_run:
+                mock_run.side_effect = [sess_err, out_err1, out_err2]
+                with self.assertRaises(ProposalError) as ctx:
+                    pipeline.run_provider_session(
+                        root=root,
+                        task_path=task_path,
+                        role="worker",
+                        base_run_id=base_run_id1,
+                        timeout=30,
+                        state_check=state_check,
+                    )
+                self.assertEqual(
+                    str(ctx.exception),
+                    f"repeated provider output failure for {base_run_id1} after 2 output attempts",
+                )
+                self.assertEqual(mock_run.call_count, 3)
+                self.assertEqual(
+                    [c.args[3] for c in mock_run.call_args_list],
+                    [base_run_id1, f"{base_run_id1}-retry-1", f"{base_run_id1}-retry-2"],
+                )
+
+            base_run_id2 = "mixed-run-2"
+            sess_err1 = RetryableProviderSessionError("generic session failure 1")
+            sess_err2 = RetryableProviderSessionError("generic session failure 2")
+            with patch.object(pipeline, "runner_run") as mock_run:
+                mock_run.side_effect = [out_err1, sess_err1, sess_err2]
+                with self.assertRaises(ProposalError) as ctx:
+                    pipeline.run_provider_session(
+                        root=root,
+                        task_path=task_path,
+                        role="worker",
+                        base_run_id=base_run_id2,
+                        timeout=30,
+                        state_check=state_check,
+                    )
+                self.assertEqual(
+                    str(ctx.exception),
+                    f"provider session retry exhausted for {base_run_id2} after 3 attempts",
+                )
+                self.assertEqual(mock_run.call_count, 3)
+                self.assertEqual(
+                    [c.args[3] for c in mock_run.call_args_list],
+                    [base_run_id2, f"{base_run_id2}-retry-1", f"{base_run_id2}-retry-2"],
                 )
 
 

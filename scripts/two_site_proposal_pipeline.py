@@ -15,14 +15,16 @@ from typing import Any, Callable, Mapping
 
 try:
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError, RetryableProviderSessionError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError,
+        RetryableProviderOutputError, RetryableProviderSessionError,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError, RetryableProviderSessionError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError,
+        RetryableProviderOutputError, RetryableProviderSessionError,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
@@ -391,6 +393,7 @@ def run_provider_session(
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
     last_error: RetryableProviderSessionError | None = None
+    output_errors = 0
     label = "reviewer" if role == "verifier" else "worker"
     for attempt_id in attempts:
         state_check()
@@ -408,6 +411,13 @@ def run_provider_session(
                 root, task_path, role, attempt_id, timeout, **runner_kwargs
             )
             return attempt_id, run_dir
+        except RetryableProviderOutputError as exc:
+            output_errors += 1
+            last_error = exc
+            if output_errors >= 2:
+                raise ProposalError(
+                    f"repeated provider output failure for {base_run_id} after 2 output attempts"
+                ) from exc
         except RetryableProviderSessionError as exc:
             last_error = exc
     raise ProposalError(

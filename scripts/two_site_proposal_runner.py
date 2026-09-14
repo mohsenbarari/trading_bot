@@ -1611,6 +1611,7 @@ def run_standalone(
         f"{base_run_id}-retry-2",
     )
     last_error: RetryableProviderSessionError | None = None
+    output_errors = 0
     label = "reviewer" if role == "verifier" else "worker"
     for attempt_id in attempts:
         if (proposals_dir / attempt_id).exists():
@@ -1627,6 +1628,13 @@ def run_standalone(
                 cli=cli,
                 test_evidence=test_evidence,
             )
+        except RetryableProviderOutputError as exc:
+            output_errors += 1
+            last_error = exc
+            if output_errors >= 2:
+                raise ProposalError(
+                    f"repeated provider output failure for {base_run_id} after 2 output attempts"
+                ) from exc
         except RetryableProviderSessionError as exc:
             last_error = exc
     raise ProposalError(
