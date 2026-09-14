@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "58fe013c89c81679a60a29feaed86870599ee01f",
+  "inspected_head": "b80b9becf592c1ba137677da8390ac6aae288720",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
     "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
     "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
   ],
-  "units_since_reconciliation": 0,
+  "units_since_reconciliation": 5,
   "records": [
     {
       "path": "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py",
@@ -259,6 +259,24 @@
         "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_tier2_customer_snapshots_relation_and_commission",
         "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_accountant_context_rejected_early_with_403",
         "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_super_admin_eligible_without_customer_relation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py",
+      "sha256": "efb1069b4de481bd1e7562de12b25b5cc03d3b389a8aae4342b424e6fda84002",
+      "last_commit": "b80b9becf592c1ba137677da8390ac6aae288720",
+      "seed_ids": [
+        "BOT-ADMIN-MESSAGE-ADMIN-START-INVITATION-CREATION-L140",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-START-INVITATION-CREATION-INLINE-L160",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-PROCESS-INVITATION-ROLE-L278"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_process_invitation_role_denial_for_police_role",
+        "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_process_invitation_role_denial_for_standard_role",
+        "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_inline_denial_for_police_role",
+        "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_inline_denial_for_standard_role",
+        "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_message_silent_denial_for_police_role",
+        "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_message_silent_denial_for_standard_role"
       ]
     }
   ],
