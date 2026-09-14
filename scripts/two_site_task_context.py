@@ -17,6 +17,94 @@ PERSISTENCE_RE = re.compile(
 )
 
 
+def _task_contract_text(task) -> str:
+    if not isinstance(task, dict):
+        return ""
+    goal = task.get("goal")
+    if isinstance(goal, str):
+        goal = goal.split("CANONICAL_SOURCE_EXCERPTS_JSON:", 1)[0]
+    else:
+        goal = ""
+    requirements = task.get("requirements")
+    if not isinstance(requirements, list):
+        requirements = []
+    return "\n".join([goal] + [item for item in requirements if isinstance(item, str)])
+
+
+def _call_leaf(node) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _model_contract_hints(task, sources):
+    """Return compact SQLAlchemy fixture facts for models named by the task."""
+    contract_text = _task_contract_text(task)
+    if not contract_text or not isinstance(sources, dict):
+        return [], 0
+
+    hints = []
+    omitted = 0
+    for path, item in sorted(sources.items(), key=lambda pair: str(pair[0])):
+        if not isinstance(path, str) or not path.startswith("models/") or not path.endswith(".py"):
+            continue
+        content = item.get("content") if isinstance(item, dict) else item
+        if not isinstance(content, str):
+            continue
+        try:
+            tree = ast.parse(content)
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            continue
+        for model in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+            if not re.search(rf"\b{re.escape(model.name)}\b", contract_text):
+                continue
+            for statement in model.body:
+                if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                    continue
+                target = statement.target if isinstance(statement, ast.AnnAssign) else (
+                    statement.targets[0] if len(statement.targets) == 1 else None
+                )
+                value = statement.value
+                if not isinstance(target, ast.Name) or not isinstance(value, ast.Call):
+                    continue
+                if _call_leaf(value.func) not in {"Column", "mapped_column"} or not value.args:
+                    continue
+                column_type = value.args[0]
+                type_name = _call_leaf(column_type.func) if isinstance(column_type, ast.Call) else _call_leaf(column_type)
+                keywords = {kw.arg: kw.value for kw in value.keywords if kw.arg is not None}
+                nullable_false = isinstance(keywords.get("nullable"), ast.Constant) and keywords["nullable"].value is False
+                primary_key = isinstance(keywords.get("primary_key"), ast.Constant) and keywords["primary_key"].value is True
+                has_default = "default" in keywords or "server_default" in keywords
+                required = nullable_false and not primary_key and not has_default
+                is_enum = type_name == "Enum"
+                is_datetime = type_name in {"Date", "DateTime"}
+                if not (required or is_enum or is_datetime):
+                    continue
+                if len(hints) >= 32:
+                    omitted += 1
+                    continue
+                try:
+                    rendered_type = ast.unparse(column_type)
+                except Exception:
+                    rendered_type = type_name or "unknown"
+                hint = {
+                    "path": path,
+                    "model": model.name,
+                    "field": target.id,
+                    "column_type": rendered_type[:160],
+                    "required_without_declared_default": required,
+                }
+                if is_enum and isinstance(column_type, ast.Call):
+                    hint["enum_database_representation"] = (
+                        "value" if any(kw.arg == "values_callable" for kw in column_type.keywords)
+                        else "member_name"
+                    )
+                hints.append(hint)
+    return hints, omitted
+
+
 def _is_python_test_file(path: str) -> bool:
     if not isinstance(path, str):
         return False
@@ -256,11 +344,14 @@ def preparation_notes(task, sources):
         p for p in required_full_model_paths if not _has_full_content(p, sources)
     ]
 
+    model_contract_hints, omitted_model_contract_hint_count = _model_contract_hints(task, sources)
     dep_ctx = {
         "persistence_contract_requested": persistence_contract_requested,
         "required_full_model_paths": required_full_model_paths,
         "missing_full_model_paths": missing_full_model_paths,
         "omitted_model_path_count": omitted_model_path_count,
+        "model_contract_hints": model_contract_hints,
+        "omitted_model_contract_hint_count": omitted_model_contract_hint_count,
     }
 
     allowed_files = task.get("allowed_files") if isinstance(task, dict) else None
@@ -369,6 +460,9 @@ def preparation_notes(task, sources):
         res["omitted_literal_count"] += 1
     while res["output_contract"]["new_test_files"] and len(json.dumps(res).encode("utf-8")) > 8192:
         res["output_contract"]["new_test_files"].pop()
+    while res["dependency_context"]["model_contract_hints"] and len(json.dumps(res).encode("utf-8")) > 8192:
+        res["dependency_context"]["model_contract_hints"].pop()
+        res["dependency_context"]["omitted_model_contract_hint_count"] += 1
     while res["dependency_context"]["required_full_model_paths"] and len(json.dumps(res).encode("utf-8")) > 8192:
         popped = res["dependency_context"]["required_full_model_paths"].pop()
         res["dependency_context"]["omitted_model_path_count"] += 1

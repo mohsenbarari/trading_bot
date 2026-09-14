@@ -869,6 +869,7 @@ class AutopilotContracts(unittest.TestCase):
         context = json.loads(context_json)
         self.assertEqual(context["cycle"], 2)
         self.assertEqual(context["recovery"], recovery)
+        self.assertIs(context["startup_validation"], True)
 
     def test_rescope_recovery_handoff_into_next_cycle(self):
         rescope_result = self.result(

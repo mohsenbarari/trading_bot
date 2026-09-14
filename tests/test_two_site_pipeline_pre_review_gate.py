@@ -306,7 +306,7 @@ class TestPipelinePreReviewGate(unittest.TestCase):
         self.assertTrue(any("exit code 1" in f for f in fb1_data["findings"]))
         self.assertIsInstance(fb1_data["test_evidence"], list)
         self.assertTrue(any("returncode: 1" in e for e in fb1_data["test_evidence"]))
-        self.assertTrue(any("stdout_tail:" in e for e in fb1_data["test_evidence"]))
+        self.assertTrue(any("normalized_failure_facts:" in e for e in fb1_data["test_evidence"]))
         for ev in fb1_data["test_evidence"]:
             self.assertLessEqual(len(ev.encode("utf-8")), 8192)
         fb1_sha = file_sha256(fb1_path)
@@ -514,6 +514,32 @@ class TestPipelinePreReviewGate(unittest.TestCase):
         self.assertIsInstance(fb["test_evidence"], list)
         for ev in fb["test_evidence"]:
             self.assertLessEqual(len(ev.encode("utf-8")), 8192)
+
+    def test_failure_signature_collapses_same_assertion_root_across_local_snapshot_names(self):
+        common = (
+            "FAILED tests/test_retry.py::RetryTests::test_outbox - AssertionError: 1 != 0\n"
+            "E       AssertionError: 1 != 0\n"
+        )
+        before = build_test_receipt(
+            state="FAILED",
+            returncode=1,
+            stdout_tail=common + '>       self.assertEqual(counts_before["outbox"], 0)\n',
+        )
+        after = build_test_receipt(
+            state="FAILED",
+            returncode=1,
+            stdout_tail=common + '>       self.assertEqual(counts_after_1["outbox"], 0)\n',
+        )
+
+        self.assertEqual(
+            pipeline.test_failure_signature(before),
+            pipeline.test_failure_signature(after),
+        )
+        feedback = pipeline.test_gate_feedback(before, before["proposal_sha256"])
+        serialized = json.dumps(feedback, ensure_ascii=False)
+        self.assertIn("normalized_failure_facts", serialized)
+        self.assertNotIn("warnings summary", serialized)
+        self.assertLess(len(serialized.encode("utf-8")), 4096)
 
 
 if __name__ == "__main__":

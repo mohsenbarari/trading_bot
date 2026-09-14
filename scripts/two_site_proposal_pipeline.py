@@ -8,6 +8,7 @@ exact-byte application, tests and all Git operations.
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import contextmanager
 import fcntl, hashlib, json, os, re, stat, subprocess
 from pathlib import Path
@@ -301,6 +302,64 @@ def _bound_utf8(text: str, max_bytes: int = 8192) -> str:
     return head.decode("utf-8", errors="ignore")
 
 
+class _FailureNameNormalizer(ast.NodeTransformer):
+    """Remove local variable spelling while retaining asserted APIs and constants."""
+
+    def visit_Name(self, node: ast.Name) -> ast.Name:  # noqa: N802 - ast API name
+        return ast.copy_location(ast.Name(id="_", ctx=node.ctx), node)
+
+
+def _normalized_failure_statement(statement: str) -> str:
+    compact = " ".join(statement.strip().split())
+    try:
+        tree = ast.parse(compact)
+        normalized = _FailureNameNormalizer().visit(tree)
+        ast.fix_missing_locations(normalized)
+        return ast.dump(normalized, annotate_fields=True, include_attributes=False)
+    except (SyntaxError, ValueError, RecursionError):
+        return compact
+
+
+def test_failure_facts(receipt: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Extract bounded stable pytest root-cause facts, excluding trace/warning noise."""
+    proposal_sha = (
+        receipt.get("proposal_sha256")
+        if isinstance(receipt, Mapping) and not isinstance(receipt, (str, bytes))
+        else ""
+    )
+    if not isinstance(proposal_sha, str):
+        proposal_sha = ""
+    validated = validate_test_receipt(receipt, proposal_sha)
+    if validated["state"] != "FAILED":
+        raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+
+    tests: list[str] = []
+    exceptions: list[str] = []
+    statements: list[str] = []
+
+    def add_unique(bucket: list[str], value: str, limit: int) -> None:
+        value = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", " ".join(value.split()))[:1024]
+        if value and value not in bucket and len(bucket) < limit:
+            bucket.append(value)
+
+    combined = validated["stdout_tail"] + "\n" + validated["stderr_tail"]
+    for raw_line in combined.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("FAILED ") or stripped.startswith("ERROR "):
+            add_unique(tests, stripped, 16)
+        if stripped.startswith("E "):
+            add_unique(exceptions, stripped[2:].strip(), 16)
+        marker = raw_line.lstrip()
+        if marker.startswith(">"):
+            add_unique(statements, _normalized_failure_statement(marker[1:]), 16)
+
+    if not tests and not exceptions and not statements:
+        fallback = _bound_utf8(" ".join(combined.split()), 2048)
+        if fallback:
+            exceptions.append(fallback)
+    return {"tests": tests, "exceptions": exceptions, "statements": statements}
+
+
 def test_failure_signature(receipt: Mapping[str, Any]) -> str:
     proposal_sha = (
         receipt.get("proposal_sha256")
@@ -315,8 +374,7 @@ def test_failure_signature(receipt: Mapping[str, Any]) -> str:
     payload = {
         "returncode": validated["returncode"],
         "selectors": validated["selectors"],
-        "stderr_tail": validated["stderr_tail"],
-        "stdout_tail": validated["stdout_tail"],
+        "facts": test_failure_facts(validated),
     }
     canonical_json = json.dumps(
         payload,
@@ -337,8 +395,7 @@ def test_gate_feedback(
 
     rc = validated["returncode"]
     selectors = validated["selectors"]
-    stdout_tail = validated["stdout_tail"]
-    stderr_tail = validated["stderr_tail"]
+    facts = test_failure_facts(validated)
 
     selector_count = len(selectors)
     sample_limit = 10
@@ -347,24 +404,20 @@ def test_gate_feedback(
     else:
         selector_sample = ", ".join(selectors[:sample_limit]) + f" ... ({selector_count - sample_limit} more)"
 
-    finding = (
-        f"Pre-review candidate tests failed with exit code {rc}; "
-        f"resolve test failures and ensure all test selectors pass."
+    root_causes = facts["exceptions"][:3] or facts["tests"][:3] or facts["statements"][:3]
+    cause_text = "; ".join(root_causes)
+    finding = _bound_utf8(
+        f"Pre-review candidate tests failed with exit code {rc}. "
+        f"Resolve every occurrence of the bounded root cause, not only the displayed line: {cause_text}",
+        4096,
     )
 
-    prefix_out = "stdout_tail:\n"
-    max_out_bytes = max(0, 8192 - len(prefix_out.encode("utf-8")))
-    stdout_str = prefix_out + _bound_utf8_tail(stdout_tail, max_out_bytes)
-
-    prefix_err = "stderr_tail:\n"
-    max_err_bytes = max(0, 8192 - len(prefix_err.encode("utf-8")))
-    stderr_str = prefix_err + _bound_utf8_tail(stderr_tail, max_err_bytes)
+    facts_text = json.dumps(facts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
     evidence = [
         _bound_utf8(f"returncode: {rc}", 8192),
         _bound_utf8(f"selectors (count={selector_count}): {selector_sample}", 8192),
-        _bound_utf8(stdout_str, 8192),
-        _bound_utf8(stderr_str, 8192),
+        _bound_utf8("normalized_failure_facts: " + facts_text, 8192),
     ]
 
     feedback: dict[str, Any] = {

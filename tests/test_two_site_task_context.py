@@ -185,3 +185,32 @@ def test_deep_ast_recursion_handling():
     n_cf = preparation_notes(make_task(), {"scripts/deep_cf.py": {"content": code_cf}})
     assert n_cf["schema_version"] == 1 and len(n_cf["literal_hints"]) == 1
     assert len(json.dumps(n_cf).encode("utf-8")) <= 8192
+
+
+def test_named_sqlalchemy_models_emit_required_type_and_enum_storage_hints():
+    model = '''
+import enum
+from sqlalchemy import Column, DateTime, Enum, Integer, String
+class State(str, enum.Enum):
+    READY = "ready"
+class Ledger:
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    state = Column(Enum(State), nullable=False, default=State.READY)
+    value_state = Column(Enum(State, values_callable=lambda cls: [x.value for x in cls]), nullable=False)
+'''
+    task = make_task(
+        goal="Persist a Ledger database row in sqlite.",
+        reqs=["Construct Ledger with a valid expires_at and inspect its state."],
+    )
+    notes = preparation_notes(task, {"models/ledger.py": {"content": model}})
+    hints = notes["dependency_context"]["model_contract_hints"]
+    by_field = {item["field"]: item for item in hints if item["model"] == "Ledger"}
+
+    assert by_field["name"]["required_without_declared_default"] is True
+    assert by_field["expires_at"]["column_type"] == "DateTime(timezone=True)"
+    assert by_field["expires_at"]["required_without_declared_default"] is True
+    assert by_field["state"]["enum_database_representation"] == "member_name"
+    assert by_field["value_state"]["enum_database_representation"] == "value"
+    assert by_field["value_state"]["required_without_declared_default"] is True

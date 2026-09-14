@@ -125,6 +125,20 @@ HEAD و بازهٔ خط در goal بسته‌بندی می‌شود. هنگام 
 این اهداف گیت سخت جدید نیستند. Reviewer علاوه بر زمینه، فایل کامل خروجی را دریافت
 می‌کند؛ کم‌بودن Worker input یا استفاده از replacement به‌تنهایی کافی نیست.
 
+گیت persistence اکنون علاوه بر importهای موجود، نام هر کلاس واقعی زیر `models/` را که
+در goal/requirements صریحاً آمده با یک index محلی و محدود کشف می‌کند. نبود فایل کامل آن
+مدل پیش از تماس با Gemini رد می‌شود. `model_contract_hints` نیز برای مدل‌های حاضر، فیلدهای
+بدون default، نوع Date/DateTime و شیوهٔ ذخیرهٔ Enum در دیتابیس را فشرده می‌کند؛ این metadata
+جای source یا review را نمی‌گیرد. خروجی Python نامعتبر نیز پیش از اجرای pytest به‌عنوان
+output defect محدود شناسایی می‌شود و از همان سقف retry خروجی عبور می‌کند.
+
+شکست pytest با receipt خام و تغییرناپذیر نگهداری می‌شود، اما correction دیگر traceback و
+warningهای طولانی را دوباره به مدل نمی‌فرستد. نام تست شکست‌خورده، exception و AST نرمال‌شدهٔ
+assertion به‌صورت bounded ارسال و برای تشخیص ریشهٔ تکراری استفاده می‌شوند؛ تفاوت نام متغیر
+محلی یا شمارهٔ خط نباید همان فرض غلط را correction تازه جلوه دهد. برای تست تازه‌ای که به
+session/table/patch سفارشی سنگین نیاز دارد، Coordinator آن را حداکثر به چهار requirement و
+یک outcome محدود می‌کند یا ابتدا helper موجود را بازاستفاده می‌کند؛ سقف‌های کیفیت ثابت‌اند.
+
 اگر محتوای نهایی UTF-8 یک فایل موجود حداقل ۸۱۹۲ بایت است، transport حتماً باید از
 replacement دقیق استفاده کند؛ برای فایل موجود کوچک‌تر نیز replacement مجاز است.
 فایل تازه همیشه با content کامل منتقل می‌شود.
@@ -228,6 +242,11 @@ stdout+stderr Gemini حین stream سقف مشترک ۲ مگابایت دارن�
 عبور از سقف یا timeout process group همان اجرا را متوقف می‌کند.
 Runner و Supervisor قفل انحصاری nonblocking مستقل دارند؛ اجرای هم‌زمان دوم مجاز نیست.
 نشست Codex ephemeral است؛ nested Codex reviewer اجرا نمی‌شود.
+
+Supervisor پس از اعتبارسنجی runtime، Git، protected refs، control blobs، registry و Assignment
+فلگ `startup_validation=true` را در context همان چرخه می‌گذارد. Codex این کنترل‌های مکانیکی
+آغاز چرخه را دوباره اجرا نمی‌کند و فقط پس از mutation/drift یا در بازرسی نهایی probe لازم را
+تکرار می‌کند؛ review معنایی، تست و کنترل نهایی دقیق bytes/refs حذف نشده‌اند.
 
 ```bash
 scripts/two_site_autopilot_tmux.sh start

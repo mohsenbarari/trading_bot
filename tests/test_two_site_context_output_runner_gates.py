@@ -91,6 +91,30 @@ def test_complete_model_context_passes_check(tmp_path: Path):
     assert dep_ctx["missing_full_model_paths"] == []
 
 
+def test_explicitly_named_repository_model_is_required_without_supplied_import(tmp_path: Path):
+    root = _make_mock_root(tmp_path)
+    service_file = root / "scripts/mock_service.py"
+    service_file.parent.mkdir(parents=True, exist_ok=True)
+    service_file.write_text("def persist_fixture():\n    return None\n", encoding="utf-8")
+
+    model_file = root / "models/accountant_relation.py"
+    model_file.parent.mkdir(parents=True, exist_ok=True)
+    model_file.write_text("class AccountantRelation:\n    pass\n", encoding="utf-8")
+
+    task_data = {
+        "task_id": "task-explicit-model-without-import",
+        "goal": "Persist an AccountantRelation database fixture in sqlite.",
+        "context_files": ["scripts/mock_service.py"],
+        "allowed_files": ["scripts/mock_service.py"],
+        "requirements": ["Construct AccountantRelation and query the durable row."],
+        "test_selectors": ["pytest -q"],
+    }
+    task_path = _write_task(root, "task.json", task_data)
+
+    with pytest.raises(ProposalError, match="missing model context: models/accountant_relation.py"):
+        check(root, task_path)
+
+
 def test_unrelated_warnings_do_not_block_readiness():
     advisory_notes = {
         "schema_version": 1,

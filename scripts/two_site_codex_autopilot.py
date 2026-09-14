@@ -698,6 +698,7 @@ def prompt_for_cycle(
         "starting_head": before["head"],
         "protected_refs": before["protected_refs"],
         "assignment_scope": scope_data,
+        "startup_validation": True,
     }
     if recovery is not None:
         context["recovery"] = recovery

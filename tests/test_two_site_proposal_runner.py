@@ -118,6 +118,16 @@ class ProposalContracts(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(runner.ProposalError):
                 runner.validate_result(dict(self.result(), **change), self.task, self.sources, "worker")
 
+    def test_generated_python_syntax_error_is_a_bounded_output_retry(self):
+        result = self.result()
+        result["changes"][0]["content"] = "def broken(:\n    pass\n"
+        with self.assertRaisesRegex(
+            runner.ProposalError,
+            r"generated Python syntax is invalid: test_new\.py:1:",
+        ) as ctx:
+            runner.validate_result(result, self.task, self.sources, "worker")
+        self.assertTrue(runner._provider_output_is_retryable(ctx.exception))
+
     def test_wrong_and_noop_changes_rejected(self):
         for field, value in [("path", "source.py"), ("original_sha256", "wrong"),
                              ("content", ""), ("content", "\0")]:

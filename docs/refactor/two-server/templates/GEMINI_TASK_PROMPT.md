@@ -34,6 +34,19 @@ Context precision applies to Worker and Verifier:
   or repeatedly resubmitting oversized bytes; never rely on continuation after truncation.
   Do not reduce requirements, independent assertions, semantic review, tests, or the
   tracked Worker medium / Reviewer high role contract.
+- For every supplied dependency_context.model_contract_hints entry, treat
+  required_without_declared_default as a fixture obligation and use a value of the
+  declared column_type. Never put placeholder strings into Date/DateTime/numeric fields.
+  For SQLAlchemy Enum columns, member_name means raw database storage uses the enum member
+  name unless the supplied source proves otherwise; value means the values_callable form
+  stores the enum value. Keep Python response values and raw SQLite representations distinct.
+- Before emitting a persistence test, make one internal field-by-field fixture audit:
+  every directly constructed model has all supplied required fields, valid types, and no
+  duplicate table/index creation already performed by the supplied fixture. `checkfirst`
+  does not make two same-named Index objects safe. Reuse the canonical isolated-database
+  helper instead of inventing broad table setup. A `unittest.mock.patch` object has no
+  supported public `target` field; never filter patchers by private/internal attributes—use
+  explicit target descriptors or an explicit safe patch list.
 - Preserve literal Unicode code points, especially Persian U+200C/U+200D and bidi marks.
   Distinguish a JSON escape, a Python source escape, and the resulting runtime string.
   Keep fixed independent expected values in tests: never compute the expected value
@@ -84,6 +97,9 @@ Context precision applies to Worker and Verifier:
    schema and earliest validation failure from canonical source: do not confuse raw request/transport
    shape with normalized result shape or assert a later error when an earlier validator rejects
    the case. Correct drafts before output and preserve unaffected accepted work in corrections.
+   In a correction, search the complete candidate for the same semantic assumption and repair
+   every occurrence in one response; moving the same expectation to a later assertion is not a
+   distinct fix. Keep the result under the original drafting target after every correction.
 5. Return status PROPOSAL_READY only with substantive changes and all requirements
    covered. This means ready for execution/review, not tested or accepted.
    Summary should state what changed and why, with file/function references and a concise
@@ -126,6 +142,12 @@ The rule must apply even if the model believes more context is desirable.
    If a definition is absent or a symbol is unproven/invented, return CHANGES_REQUIRED
    with the exact missing definition or invalid reference; do not infer members such as
    UserRole.BUYER and do not author a fix.
+   Before VERIFIED, build an internal requirement-to-evidence matrix: each requested persisted
+   field, exact argument, failure suppression, ordering and cardinality must map to a concrete
+   independent assertion. Trace every synthetic status/reason/enum combination to a reachable
+   branch in supplied production source; a plausible but unreachable fixture is a finding.
+   State a compact R1..Rn evidence mapping in summary so Codex can verify the review without
+   repeating discovery. Missing one explicitly named field requires CHANGES_REQUIRED.
 3. Treat supplied test feedback as execution evidence only to the extent it states;
    distinguish static review from tests actually run by the controller.
    PASSED is not semantic approval: inspect actual assertions, literal code points,

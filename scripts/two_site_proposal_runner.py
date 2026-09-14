@@ -8,6 +8,7 @@ tool attempts invalidate its result. Each invocation is a fresh session.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import difflib
 import fcntl
@@ -168,6 +169,7 @@ def _provider_output_is_retryable(exc: ProposalError) -> bool:
         or message.startswith("replacements count must be between ")
         or message.startswith("replacement target not found in original:")
         or message.startswith("replacement target occurs more than once in original:")
+        or message.startswith("generated Python syntax is invalid:")
     )
 
 
@@ -851,6 +853,11 @@ def validate_task_readiness(
         notes = task_or_notes
     dep_ctx = notes.get("dependency_context") if isinstance(notes, dict) else {}
     if isinstance(dep_ctx, dict) and dep_ctx.get("persistence_contract_requested"):
+        omitted = dep_ctx.get("omitted_model_path_count", 0)
+        if type(omitted) is not int or omitted < 0:
+            raise ProposalError("invalid omitted model dependency count")
+        if omitted:
+            raise ProposalError("too many model dependencies: split the task")
         missing = [p for p in dep_ctx.get("missing_full_model_paths", []) if isinstance(p, str)]
         if missing:
             bounded_missing = sorted(dict.fromkeys(missing))[:16]
@@ -858,10 +865,82 @@ def validate_task_readiness(
     return notes
 
 
+def _task_contract_text(task: dict) -> str:
+    goal = task.get("goal", "")
+    if isinstance(goal, str):
+        goal = goal.split("CANONICAL_SOURCE_EXCERPTS_JSON:", 1)[0]
+    else:
+        goal = ""
+    requirements = task.get("requirements", [])
+    if not isinstance(requirements, list):
+        requirements = []
+    return "\n".join([goal] + [value for value in requirements if isinstance(value, str)])
+
+
+def _repository_model_class_paths(root: Path) -> dict[str, set[str]]:
+    """Index bounded top-level model declarations without adding them to model input."""
+    model_root = root / "models"
+    if not model_root.is_dir():
+        return {}
+    candidates = sorted(path for path in model_root.iterdir() if path.name.endswith(".py"))
+    if len(candidates) > 256:
+        raise ProposalError("model dependency index exceeds file limit")
+    index: dict[str, set[str]] = {}
+    for path in candidates:
+        relative = path.relative_to(root).as_posix()
+        raw = bounded_file_bytes(root, path, MAX_CONTEXT, "model dependency " + relative)
+        try:
+            tree = ast.parse(raw.decode("utf-8"), filename=relative)
+        except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError) as exc:
+            raise ProposalError("cannot index authoritative model dependency: " + relative) from exc
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                index.setdefault(node.name, set()).add(relative)
+    return index
+
+
+def enrich_repository_dependency_context(
+    root: Path,
+    task: dict,
+    sources: dict,
+    notes: dict,
+) -> dict:
+    """Require full context for every repository model explicitly named by a persistence task."""
+    enriched = dict(notes)
+    dependency = dict(notes.get("dependency_context", {}))
+    enriched["dependency_context"] = dependency
+    if not dependency.get("persistence_contract_requested"):
+        return enriched
+
+    contract_text = _task_contract_text(task)
+    required = {
+        value for value in dependency.get("required_full_model_paths", [])
+        if isinstance(value, str)
+    }
+    for symbol, paths in _repository_model_class_paths(root).items():
+        if re.search(rf"\b{re.escape(symbol)}\b", contract_text):
+            required.update(paths)
+
+    ordered = sorted(required)
+    if len(ordered) > 16:
+        dependency["required_full_model_paths"] = ordered[:16]
+        dependency["omitted_model_path_count"] = len(ordered) - 16
+    else:
+        dependency["required_full_model_paths"] = ordered
+        dependency["omitted_model_path_count"] = 0
+    dependency["missing_full_model_paths"] = [
+        path for path in dependency["required_full_model_paths"]
+        if path not in sources or sources[path].get("content") is None
+    ]
+    return enriched
+
+
 def check(root: Path, task_path: Path) -> dict:
     root = root.resolve(strict=True)
     task, sources = load_task(root, task_path)
-    notes = task_preparation_notes(task, sources)
+    notes = enrich_repository_dependency_context(
+        root, task, sources, task_preparation_notes(task, sources)
+    )
     validate_task_readiness(notes)
     snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
     return {
@@ -1113,6 +1192,16 @@ def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
             is_new = sources[name]["sha256"] is None and sources[name]["content"] is None
             if (is_new or name in new_test_files) and len(change["content"].encode("utf-8")) > max_new_test:
                 raise ProposalError(f"new test file content exceeds budget: {name}")
+        if role == "worker" and success and name.endswith(".py"):
+            try:
+                ast.parse(change["content"], filename=name)
+            except SyntaxError as exc:
+                line = exc.lineno if isinstance(exc.lineno, int) else 0
+                column = exc.offset if isinstance(exc.offset, int) else 0
+                message = (exc.msg or "syntax error").replace("\n", " ")[:160]
+                raise ProposalError(
+                    f"generated Python syntax is invalid: {name}:{line}:{column}: {message}"
+                ) from exc
     return result
 
 
@@ -1461,7 +1550,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     # before the Gemini CLI can consume a token or create a run artifact.
     validate_runtime_contract(root)
     task, sources = load_task(root, task_path)
-    prep_notes = task_preparation_notes(task, sources)
+    prep_notes = enrich_repository_dependency_context(
+        root, task, sources, task_preparation_notes(task, sources)
+    )
     validate_task_readiness(prep_notes)
     head = git(root, "rev-parse", "HEAD")
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
