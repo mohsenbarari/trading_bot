@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "3d2323109c692c3711114d69754ddc7234382be6",
+  "inspected_head": "9d29480b0ff4b2aa85d908812961e452378158e0",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -452,6 +452,81 @@
       ],
       "test_selectors": [
         "tests/test_p1_00b_characterization_overtime_owner_decision_approve_requester_missing.py::OvertimeOwnerDecisionApproveRequesterMissingCharacterizationTests::test_approve_missing_requester_alerts_m37_after_claim_without_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_publisher_channel_callback_adapters.py",
+      "sha256": "d4dc27d25869163f92a037515adec57bcb149476d85aaa896c69495451bd6fc9",
+      "last_commit": "ad308f31c6d7f4d322d930c4e308cefcbd3ef7fc",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-TRADE-CALLBACK-L31",
+        "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-EXPIRY-CALLBACK-L61"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_publisher_channel_callback_adapters.py::PublisherChannelCallbackAdapterCharacterizationTests::test_trade_callback_forwards_default_contention_flags",
+        "tests/test_p1_00b_characterization_publisher_channel_callback_adapters.py::PublisherChannelCallbackAdapterCharacterizationTests::test_trade_callback_forwards_explicit_contention_flags",
+        "tests/test_p1_00b_characterization_publisher_channel_callback_adapters.py::PublisherChannelCallbackAdapterCharacterizationTests::test_expiry_callback_delegates_exact_arguments"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_default_fallback_handlers.py",
+      "sha256": "168ca26c676861caa978e110518b23fca89d7aadad1da2f9a884f87869ca698c",
+      "last_commit": "649b8e7b2c2fe1bd514855e3fc7570833124df90",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-DEFAULT-ACKNOWLEDGE-NOOP-CALLBACK-L17",
+        "BOT-TG-CALLBACK-QUERY-DEFAULT-HANDLE-UNMATCHED-CALLBACK-L24",
+        "BOT-TG-MESSAGE-DEFAULT-HANDLE-UNAUTHORIZED-MESSAGES-L43"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_stale_panel_button_message_constant_matches_expected",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_acknowledge_noop_callback_awaits_answer_without_copy_or_side_effects",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_handle_unmatched_callback_authenticated_user_with_long_prefix",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_handle_unmatched_callback_unauthenticated_user_none_data_none",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_handle_unauthorized_messages_authenticated_user_ignored",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_handle_unauthorized_messages_deleted_telegram_user_suppressed",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_handle_unauthorized_messages_unknown_user_answers_pre_auth",
+        "tests/test_p1_00b_characterization_default_fallback_handlers.py::P100bDefaultFallbackHandlersCharacterizationTests::test_handle_unauthorized_messages_missing_from_user_answers_pre_auth_without_lookup"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_commodity_catalog_delivery_boundaries.py",
+      "sha256": "8ac7bff1c2e4dcdca2d126a48e3a65e5e1acdcf911799233dd6022fdc318b8c2",
+      "last_commit": "5c669192f45519f3d2251a499bac7fefd8848287",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-COMMODITY-CATALOG-SHOW-COMMODITY-CATALOG-L225",
+        "BOT-OFFER-CALLBACK-QUERY-COMMODITY-CATALOG-PAGINATE-COMMODITY-CATALOG-L248"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_commodity_catalog_delivery_boundaries.py::CommodityCatalogDeliveryBoundariesCharacterizationTests::test_show_commodity_catalog_queue_v1_suppresses_local_anchor",
+        "tests/test_p1_00b_characterization_commodity_catalog_delivery_boundaries.py::CommodityCatalogDeliveryBoundariesCharacterizationTests::test_show_commodity_catalog_double_rejection_returns_without_anchor",
+        "tests/test_p1_00b_characterization_commodity_catalog_delivery_boundaries.py::CommodityCatalogDeliveryBoundariesCharacterizationTests::test_paginate_commodity_catalog_rejected_edit_swallowed_and_callback_acknowledged"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_link_account_state_boundaries.py",
+      "sha256": "8b10d3481967861c354e49aedf74fa9931f70f83bd717fd88ab73dc0aa3c1456",
+      "last_commit": "adda1a82dd9cb7c958e2e8f1237aa346ddd51b8b",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-HANDLE-CONTACT-L446",
+        "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-HANDLE-ADDRESS-COMPLETION-L689"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_link_account_state_boundaries.py::LinkAccountStateBoundariesCharacterizationTests::test_handle_contact_without_link_token_returns_neutral_without_database",
+        "tests/test_p1_00b_characterization_link_account_state_boundaries.py::LinkAccountStateBoundariesCharacterizationTests::test_handle_contact_rejects_selected_account_phone_mismatch_before_side_effects",
+        "tests/test_p1_00b_characterization_link_account_state_boundaries.py::LinkAccountStateBoundariesCharacterizationTests::test_handle_address_completion_continues_already_linked_sync_v2_without_token_state"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_live_handler_paths.py",
+      "sha256": "a76e5bf368b7d1591ecf021baa8b10753176a662d4d5807f2dc3744f76cc5051",
+      "last_commit": "9d29480b0ff4b2aa85d908812961e452378158e0",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_live_handler_paths.py::TestP100bChannelTradeLiveHandlerPaths::test_handle_channel_trade_legacy_id_local_success",
+        "tests/test_p1_00b_characterization_channel_trade_live_handler_paths.py::TestP100bChannelTradeLiveHandlerPaths::test_handle_channel_trade_public_identity_local_success"
       ]
     }
   ],
