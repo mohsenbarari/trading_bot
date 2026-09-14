@@ -5,6 +5,7 @@ Blocker: P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE
 Seed: BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-L3047
 Seed: BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-WHILE-CONFIRMATION-PENDING-L3066
 Seed: BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-FROM-STALE-TRADE-STATE-L3167
+Seed: BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-UNEXPECTED-TRADE-BUILDER-MESSAGE-L3191
 """
 
 from __future__ import annotations
@@ -21,7 +22,9 @@ from bot.handlers.trade_create import (
     handle_text_offer,
     handle_text_offer_from_stale_trade_state,
     handle_text_offer_while_confirmation_pending,
+    handle_unexpected_trade_builder_message,
 )
+from bot.states import Trade
 
 
 class TestTradeCreateTextOfferCharacterization(unittest.IsolatedAsyncioTestCase):
@@ -297,6 +300,87 @@ class TestTradeCreateTextOfferCharacterization(unittest.IsolatedAsyncioTestCase)
         self.assertIs(mock_handle.await_args.args[3], bot_sentinel)
 
         self.assertEqual(call_order, ["get_state", "clear", "log", "delegate"])
+
+    async def test_unexpected_trade_builder_message_unauthenticated_guard(self) -> None:
+        message = SimpleNamespace(
+            text="پیام غیرمنتظره",
+            message_id=501,
+            chat=SimpleNamespace(id=555),
+        )
+        state = mock.AsyncMock()
+
+        with mock.patch(
+            "bot.handlers.trade_create.logger.info",
+        ) as mock_logger_info, mock.patch(
+            "bot.handlers.trade_create._send_stale_trade_builder_guidance",
+            new_callable=mock.AsyncMock,
+        ) as mock_guidance:
+            result = await handle_unexpected_trade_builder_message(
+                message,
+                state=state,
+                user=None,
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(state.mock_calls, [])
+        mock_logger_info.assert_not_called()
+        mock_guidance.assert_not_called()
+
+    async def test_unexpected_trade_builder_message_authenticated_ordering_and_guidance(self) -> None:
+        principal = SimpleNamespace(id=276)
+        message = SimpleNamespace(
+            text="پیام غیرمنتظره",
+            message_id=502,
+            chat=SimpleNamespace(id=555),
+        )
+
+        call_order: list[str] = []
+
+        async def record_get_state() -> str:
+            call_order.append("get_state")
+            return Trade.awaiting_trade_type.state
+
+        def record_log(*args: object, **kwargs: object) -> None:
+            call_order.append("log")
+
+        async def record_guidance(*args: object, **kwargs: object) -> None:
+            call_order.append("guidance")
+
+        state = mock.AsyncMock()
+        state.get_state.side_effect = record_get_state
+
+        with mock.patch(
+            "bot.handlers.trade_create.logger.info",
+            side_effect=record_log,
+        ) as mock_logger_info, mock.patch(
+            "bot.handlers.trade_create._send_stale_trade_builder_guidance",
+            new_callable=mock.AsyncMock,
+            side_effect=record_guidance,
+        ) as mock_guidance:
+            result = await handle_unexpected_trade_builder_message(
+                message,
+                state=state,
+                user=principal,
+            )
+
+        self.assertIsNone(result)
+        state.get_state.assert_awaited_once_with()
+        self.assertEqual(state.mock_calls, [mock.call.get_state()])
+
+        mock_logger_info.assert_called_once_with(
+            "Unexpected message while trade builder awaits a callback",
+            extra={
+                "event": "telegram.offer_fsm_unexpected_message",
+                "trade_state": Trade.awaiting_trade_type.state,
+                "user_id": 276,
+            },
+        )
+
+        mock_guidance.assert_awaited_once_with(message, user=principal)
+        self.assertIs(mock_guidance.await_args.args[0], message)
+        self.assertIs(mock_guidance.await_args.kwargs["user"], principal)
+
+        self.assertEqual(call_order, ["get_state", "log", "guidance"])
 
 
 if __name__ == "__main__":
