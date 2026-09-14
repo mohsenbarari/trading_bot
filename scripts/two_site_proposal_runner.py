@@ -470,15 +470,85 @@ def cli_identity(cli: Path) -> dict[str, str]:
     return {"path": str(cli), "version": version_text, "sha256": digest}
 
 
+def _unique_pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise ProposalError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
 def unique_json(text: str):
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ProposalError("duplicate JSON key")
-            result[key] = value
-        return result
-    return json.loads(text, object_pairs_hook=pairs)
+    return json.loads(text, object_pairs_hook=_unique_pairs)
+
+
+def _exact_equal(a: object, b: object) -> bool:
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        if a.keys() != b.keys():
+            return False
+        return all(_exact_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return False
+        return all(_exact_equal(x, y) for x, y in zip(a, b))
+    return a == b
+
+
+def _deduplicate_response(text: str) -> dict:
+    decoder = json.JSONDecoder(object_pairs_hook=_unique_pairs)
+    idx = 0
+    n = len(text)
+    while idx < n and text[idx].isspace():
+        idx += 1
+    docs = []
+    while idx < n:
+        if len(docs) >= 4:
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            )
+        try:
+            doc, end = decoder.raw_decode(text, idx)
+        except (json.JSONDecodeError, ProposalError) as exc:
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            ) from exc
+        docs.append(doc)
+        idx = end
+        if idx < n:
+            if not text[idx].isspace():
+                raise RetryableProviderSessionError(
+                    "CLI response is not one valid JSON document"
+                )
+            while idx < n and text[idx].isspace():
+                idx += 1
+
+    if len(docs) < 2:
+        raise RetryableProviderSessionError(
+            "CLI response is not one valid JSON document"
+        )
+
+    first = docs[0]
+    first_bytes = json.dumps(
+        first, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    for other in docs[1:]:
+        if not _exact_equal(first, other):
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            )
+        if (
+            json.dumps(
+                other, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+            != first_bytes
+        ):
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            )
+    return first
 
 
 def load_runtime_contract(root: Path) -> dict[str, str]:
@@ -1310,9 +1380,11 @@ def _parse_stream(
         try:
             result = unique_json(envelope["response"])
         except json.JSONDecodeError as exc:
-            raise RetryableProviderSessionError(
-                "CLI response is not one valid JSON document"
-            ) from exc
+            if not exc.msg.startswith("Extra data"):
+                raise RetryableProviderSessionError(
+                    "CLI response is not one valid JSON document"
+                ) from exc
+            result = _deduplicate_response(envelope["response"])
     try:
         result = normalize_result(
             result, task, sources, role, strict_transport=True,

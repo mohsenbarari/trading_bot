@@ -54,6 +54,20 @@ VALID_PROPOSAL = {
     ],
 }
 
+EXPECTED_NORMALIZED_PROPOSAL = {
+    "status": "PROPOSAL_READY",
+    "summary": "Implement minimal change",
+    "covered_requirements": [1],
+    "findings": [],
+    "changes": [
+        {
+            "path": "file.py",
+            "original_sha256": "1355e9731dc401dd2f73831607210ce164884eb2bda373d314b40239303ca3f2",
+            "content": "new_file_content\n",
+        }
+    ],
+}
+
 
 def make_stream(
     terminal_envelope: dict,
@@ -355,6 +369,170 @@ class TestIsRetryableZeroTokenStream(unittest.TestCase):
             with self.subTest(name=name):
                 raw = make_zero_token_stream(mutator)
                 self.assertFalse(is_retryable_zero_token_stream(raw), f"Expected false for {name}")
+
+
+class TestIdenticalJsonResponseDeduplication(unittest.TestCase):
+    def test_unchanged_valid_single_response(self):
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": json.dumps(VALID_PROPOSAL),
+        }
+        raw = make_stream(envelope)
+        result, env = parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(result, EXPECTED_NORMALIZED_PROPOSAL)
+        self.assertEqual(env["status"], "SUCCESS")
+        self.assertEqual(env["conversation_id"], "session-test-id")
+
+    def test_exactly_two_identical_worker_documents_accepted(self):
+        multi = f"{json.dumps(VALID_PROPOSAL)}\n{json.dumps(VALID_PROPOSAL)}"
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        result, env = parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(result, EXPECTED_NORMALIZED_PROPOSAL)
+        self.assertEqual(env["status"], "SUCCESS")
+
+    def test_exactly_four_identical_worker_documents_accepted(self):
+        multi = "\n\n".join([json.dumps(VALID_PROPOSAL)] * 4)
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        result, env = parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(result, EXPECTED_NORMALIZED_PROPOSAL)
+        self.assertEqual(env["status"], "SUCCESS")
+
+    def test_exactly_four_identical_verifier_documents_with_empty_changes_accepted(self):
+        verifier_proposal = {
+            "status": "VERIFIED",
+            "summary": "Verified proposal payload.",
+            "covered_requirements": [1],
+            "findings": [],
+            "changes": [],
+        }
+        multi = "\n".join([json.dumps(verifier_proposal)] * 4)
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        result, env = parse_stream(raw, VALID_TASK, VALID_SOURCES, "verifier")
+        self.assertEqual(result, verifier_proposal)
+        self.assertEqual(env["status"], "SUCCESS")
+
+    def test_five_identical_documents_rejected(self):
+        multi = "\n".join([json.dumps(VALID_PROPOSAL)] * 5)
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_differing_field_rejected(self):
+        different_proposal = dict(VALID_PROPOSAL, summary="Differing summary text")
+        multi = f"{json.dumps(VALID_PROPOSAL)}\n{json.dumps(different_proposal)}"
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_int_vs_float_rejected(self):
+        float_proposal = dict(VALID_PROPOSAL, covered_requirements=[1.0])
+        multi = f"{json.dumps(VALID_PROPOSAL)}\n{json.dumps(float_proposal)}"
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_duplicate_key_in_later_document_rejected(self):
+        dup_later = (
+            '{"status": "PROPOSAL_READY", "summary": "first", "summary": "second", '
+            '"covered_requirements": [1], "findings": [], "changes": []}'
+        )
+        multi = f"{json.dumps(VALID_PROPOSAL)}\n{dup_later}"
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_trailing_prose_rejected(self):
+        multi = f"{json.dumps(VALID_PROPOSAL)}\n{json.dumps(VALID_PROPOSAL)}\nHere is extra prose commentary."
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_malformed_later_json_rejected(self):
+        multi = f"{json.dumps(VALID_PROPOSAL)}\n" + '{"status": "PROPOSAL_READY", "summary": incomplete'
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_no_whitespace_direct_concatenation_rejected(self):
+        multi = f"{json.dumps(VALID_PROPOSAL)}{json.dumps(VALID_PROPOSAL)}"
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(RetryableProviderSessionError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual(str(ctx.exception), "CLI response is not one valid JSON document")
+
+    def test_duplicate_key_in_first_document_preserves_proposal_error(self):
+        dup_first = (
+            '{"status": "PROPOSAL_READY", "summary": "first", "summary": "second", '
+            '"covered_requirements": [1], "findings": [], "changes": []}'
+        )
+        multi = f"{dup_first}\n{json.dumps(VALID_PROPOSAL)}"
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": multi,
+        }
+        raw = make_stream(envelope)
+        with self.assertRaises(ProposalError) as ctx:
+            parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
+        self.assertNotIsInstance(ctx.exception, RetryableProviderSessionError)
+        self.assertIn("duplicate JSON key", str(ctx.exception))
 
 
 if __name__ == "__main__":

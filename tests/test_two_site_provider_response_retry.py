@@ -91,16 +91,28 @@ def test_truncated_response_raises_retryable_provider_session_error():
     assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
 
 
-def test_concatenated_multiple_response_raises_retryable_provider_session_error():
+def test_concatenated_identical_multiple_response_accepted():
     task, sources = make_task_and_sources()
     proposal = make_valid_proposal()
     multi_json = f"{json.dumps(proposal)}\n{json.dumps(proposal)}"
+    raw = make_stream_raw(response=multi_json)
+    result, envelope = parse_stream(raw, task, sources, "verifier")
+    assert result == proposal
+    assert envelope["status"] == "SUCCESS"
+    assert envelope["conversation_id"] == "test-session-001"
+
+
+def test_concatenated_divergent_multiple_response_raises_retryable_provider_session_error():
+    task, sources = make_task_and_sources()
+    proposal1 = make_valid_proposal()
+    proposal2 = dict(proposal1)
+    proposal2["summary"] = "divergent summary"
+    multi_json = f"{json.dumps(proposal1)}\n{json.dumps(proposal2)}"
     raw = make_stream_raw(response=multi_json)
     with pytest.raises(RetryableProviderSessionError) as exc_info:
         parse_stream(raw, task, sources, "verifier")
     assert type(exc_info.value) is RetryableProviderSessionError
     assert str(exc_info.value) == "CLI response is not one valid JSON document"
-    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
 
 
 def test_valid_single_response_passes():
