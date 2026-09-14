@@ -1097,6 +1097,126 @@ def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
     return feedback
 
 
+class _FinishLifecycleValidator:
+    def __init__(self, session: str) -> None:
+        self.session = session
+        self.mode: str | None = None
+        self.legacy_count = 0
+        self.distinct_indexes: list[int] = []
+        self.current_index: int | None = None
+        self.current_state: str | None = None
+        self.current_params: dict | None = None
+
+    def record_step(self, event: dict, step: dict) -> None:
+        if (
+            step.get("step_type") != "tool"
+            or step.get("tool_name") != "finish"
+            or "subagent_info" in step
+        ):
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        step_cid = step.get("conversation_id")
+        event_cid = event.get("conversation_id")
+        if (step_cid is not None and step_cid != self.session) or (
+            event_cid is not None and event_cid != self.session
+        ):
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        has_state = "state" in step
+        has_index = "step_index" in step
+
+        if not has_state and not has_index:
+            if self.mode is not None and self.mode != "legacy":
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            if self.legacy_count >= 1:
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            tool_info = step.get("tool_info")
+            if (
+                not isinstance(tool_info, dict)
+                or set(tool_info.keys()) != {"name", "parameters"}
+                or tool_info.get("name") != "finish"
+            ):
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            params = tool_info.get("parameters")
+            if (
+                not isinstance(params, dict)
+                or set(params.keys()) != CANONICAL_RESPONSE_KEYS
+            ):
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            if not set(step.keys()).issubset({"step_type", "tool_name", "tool_info", "conversation_id"}):
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            self.mode = "legacy"
+            self.legacy_count += 1
+            return
+
+        if self.mode is not None and self.mode != "lifecycle":
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+        if not (has_state and has_index):
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        step_index = step.get("step_index")
+        if type(step_index) is not int or isinstance(step_index, bool) or step_index <= 0:
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        state = step.get("state")
+        if state not in {"ACTIVE", "ERROR"}:
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        if not set(step.keys()).issubset({
+            "step_type", "tool_name", "step_index", "state", "tool_info",
+            "conversation_id", "duration_seconds",
+        }):
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        if "duration_seconds" in step:
+            dur = step["duration_seconds"]
+            if type(dur) not in (int, float) or isinstance(dur, bool) or dur < 0:
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        tool_info = step.get("tool_info")
+        if not isinstance(tool_info, dict) or tool_info.get("name") != "finish":
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+
+        if state == "ACTIVE":
+            if set(tool_info.keys()) != {"name", "parameters"}:
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            params = tool_info.get("parameters")
+            if not isinstance(params, dict) or set(params.keys()) != CANONICAL_RESPONSE_KEYS:
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            if self.current_state == "ACTIVE":
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            if self.current_index is not None and step_index <= self.current_index:
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            if len(self.distinct_indexes) >= 3:
+                raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+            self.mode = "lifecycle"
+            self.distinct_indexes.append(step_index)
+            self.current_index = step_index
+            self.current_state = "ACTIVE"
+            self.current_params = params
+            return
+
+        if self.current_state != "ACTIVE":
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+        if step_index != self.current_index:
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+        if set(tool_info.keys()) != {"name", "parameters", "error"}:
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+        params = tool_info.get("parameters")
+        if params != self.current_params:
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+        err = tool_info.get("error")
+        if (
+            not isinstance(err, dict)
+            or set(err.keys()) != {"type", "message"}
+            or err.get("type") != "TOOL_ERROR"
+            or not isinstance(err.get("message"), str)
+            or len(err["message"].encode("utf-8")) > 4096
+        ):
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
+        self.current_state = "ERROR"
+
+
 def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, dict]:
     return _parse_stream(raw, task, sources, role)
 
@@ -1152,7 +1272,7 @@ def _parse_stream(
             )
         raise ProposalError("CLI did not complete one successful session")
 
-    finish_submissions = 0
+    validator = _FinishLifecycleValidator(session)
     for event in events:
         if "conversation_id" in event and event.get("conversation_id") != session:
             raise ProposalError("CLI did not complete one successful session")
@@ -1177,23 +1297,7 @@ def _parse_stream(
         )
         if not is_tool_or_subagent:
             continue
-        tool_info = step.get("tool_info")
-        params = tool_info.get("parameters") if isinstance(tool_info, dict) else None
-        is_finish_submission = (
-            step.get("step_type") == "tool"
-            and step.get("tool_name") == "finish"
-            and "subagent_info" not in step
-            and isinstance(tool_info, dict)
-            and set(tool_info.keys()) == {"name", "parameters"}
-            and tool_info.get("name") == "finish"
-            and isinstance(params, dict)
-            and set(params.keys()) == CANONICAL_RESPONSE_KEYS
-            and (step_cid is None or step_cid == session)
-            and (event.get("conversation_id") is None or event.get("conversation_id") == session)
-        )
-        if not is_finish_submission or finish_submissions >= 1:
-            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
-        finish_submissions += 1
+        validator.record_step(event, step)
 
     # With --json-schema the documented machine payload is structured_output.
     # CLI 1.1.27 may also append its submission object to free-text response.

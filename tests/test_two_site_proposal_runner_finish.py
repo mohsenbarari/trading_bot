@@ -92,6 +92,64 @@ def _build_stream(step_events=(), *, session=SESSION, structured_output=_OMIT, r
     return "\n".join(json.dumps(e) for e in [init_ev, *step_events, result_ev]) + "\n"
 
 
+def _valid_tool_error(message="Tool execution denied by policy.") -> dict:
+    return {"type": "TOOL_ERROR", "message": message}
+
+
+def _build_lifecycle_step(
+    step_index: int = 1,
+    state: str = "ACTIVE",
+    *,
+    parameters=_OMIT,
+    error=_OMIT,
+    duration_seconds=_OMIT,
+    conversation_id=_OMIT,
+    extra=None,
+) -> dict:
+    params = _valid_params() if parameters is _OMIT else parameters
+    tool_info = {"name": "finish", "parameters": params}
+    if state == "ERROR" and error is not None:
+        tool_info["error"] = _valid_tool_error() if error is _OMIT else error
+    step = {
+        "step_type": "tool",
+        "tool_name": "finish",
+        "step_index": step_index,
+        "state": state,
+        "tool_info": tool_info,
+    }
+    if duration_seconds is not _OMIT:
+        step["duration_seconds"] = duration_seconds
+    if conversation_id is not _OMIT:
+        step["conversation_id"] = conversation_id
+    if extra:
+        step.update(extra)
+    return step
+
+
+def _build_lifecycle_event(
+    step_index: int = 1,
+    state: str = "ACTIVE",
+    *,
+    parameters=_OMIT,
+    error=_OMIT,
+    duration_seconds=_OMIT,
+    step_cid=_OMIT,
+    env_cid=_OMIT,
+    step_extra=None,
+    event_extra=None,
+) -> dict:
+    step = _build_lifecycle_step(
+        step_index,
+        state,
+        parameters=parameters,
+        error=error,
+        duration_seconds=duration_seconds,
+        conversation_id=step_cid,
+        extra=step_extra,
+    )
+    return _build_step_update_event(step, conversation_id=env_cid, extra=event_extra)
+
+
 class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
     def setUp(self):
         self.task = {
@@ -256,6 +314,207 @@ class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
                 ev = {"event": "step_update", "step_update": {}, **marker}
                 with self.assertRaisesRegex(runner.ProposalError, "tool attempt invalidates"):
                     self._parse(_build_stream([ev]))
+
+    def test_lifecycle_active_error_active_success_accepts_structured_output(self):
+        ev1 = _build_lifecycle_event(1, "ACTIVE", duration_seconds=0.01)
+        ev2 = _build_lifecycle_event(1, "ERROR", error=_valid_tool_error("policy denied"), duration_seconds=0.04)
+        ev3 = _build_lifecycle_event(2, "ACTIVE", duration_seconds=0.02)
+        canonical = _valid_result()
+        raw = _build_stream([ev1, ev2, ev3], structured_output=canonical)
+        result, envelope = self._parse(raw)
+        self.assertEqual(result, canonical)
+        self.assertEqual(envelope["status"], "SUCCESS")
+        self.assertEqual(envelope["conversation_id"], SESSION)
+
+    def test_lifecycle_three_failed_submissions_followed_by_success(self):
+        events = []
+        for idx in (1, 2, 3):
+            events.append(_build_lifecycle_event(idx, "ACTIVE", duration_seconds=0.01 * idx))
+            events.append(_build_lifecycle_event(idx, "ERROR", error=_valid_tool_error(f"failed attempt {idx}"), duration_seconds=0.05 * idx))
+        canonical = _valid_result()
+        raw = _build_stream(events, structured_output=canonical)
+        result, envelope = self._parse(raw)
+        self.assertEqual(result, canonical)
+        self.assertEqual(envelope["status"], "SUCCESS")
+        self.assertEqual(envelope["conversation_id"], SESSION)
+
+    def test_lifecycle_terminal_truncation_remains_non_retryable(self):
+        ev = _build_lifecycle_event(1, "ACTIVE", duration_seconds=0.02)
+        init_ev = {"event": "init", "conversation_id": SESSION, "init": {"model": runner.MODEL}}
+        res_dict = {
+            "status": "ERROR",
+            "conversation_id": SESSION,
+            "error": "MODEL_OUTPUT_TRUNCATED: output token limit exceeded",
+            "structured_output": _valid_result(),
+        }
+        raw = "\n".join(json.dumps(e) for e in [init_ev, ev, {"event": "result", "result": res_dict}]) + "\n"
+        with self.assertRaisesRegex(runner.ProposalError, "MODEL_OUTPUT_TRUNCATED: rescope to a smaller task"):
+            self._parse(raw)
+
+    def test_lifecycle_tool_parameters_cannot_replace_or_alter_terminal_bytes(self):
+        canonical = _valid_result(
+            changes=[{"path": "test_new.py", "original_sha256": None, "content": "assert 1 == 1\n# full\n"}]
+        )
+        shortened_params = _valid_params(
+            changes=[{"path": "test_new.py", "original_sha256": None, "content": "short"}]
+        )
+        ev1 = _build_lifecycle_event(1, "ACTIVE", parameters=shortened_params, duration_seconds=0.01)
+        ev2 = _build_lifecycle_event(1, "ERROR", parameters=shortened_params, error=_valid_tool_error(), duration_seconds=0.05)
+        ev3 = _build_lifecycle_event(2, "ACTIVE", parameters=shortened_params, duration_seconds=0.02)
+        raw = _build_stream([ev1, ev2, ev3], structured_output=canonical)
+        result, envelope = self._parse(raw)
+        self.assertEqual(result, canonical)
+        self.assertEqual(result["changes"][0]["content"], "assert 1 == 1\n# full\n")
+        self.assertNotEqual(result["changes"][0]["content"], "short")
+        self.assertEqual(envelope["structured_output"], canonical)
+
+    def test_table_driven_lifecycle_rejections(self):
+        valid_params = _valid_params()
+        alt_params = _valid_params(summary="Different summary for testing parameter tampering.")
+        cases = [
+            ("duplicate_active_same_index", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ACTIVE"),
+            ]),
+            ("active_then_active_different_index", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(2, "ACTIVE"),
+            ]),
+            ("duplicate_error", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR"),
+                _build_lifecycle_event(1, "ERROR"),
+            ]),
+            ("error_without_prior_active", [
+                _build_lifecycle_event(1, "ERROR"),
+            ]),
+            ("error_index_mismatch", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(2, "ERROR"),
+            ]),
+            ("changed_parameters_in_error", [
+                _build_lifecycle_event(1, "ACTIVE", parameters=valid_params),
+                _build_lifecycle_event(1, "ERROR", parameters=alt_params),
+            ]),
+            ("non_increasing_index_reused", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR"),
+                _build_lifecycle_event(1, "ACTIVE"),
+            ]),
+            ("decreasing_index", [
+                _build_lifecycle_event(2, "ACTIVE"),
+                _build_lifecycle_event(2, "ERROR"),
+                _build_lifecycle_event(1, "ACTIVE"),
+            ]),
+            ("more_than_three_distinct_submissions", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR"),
+                _build_lifecycle_event(2, "ACTIVE"),
+                _build_lifecycle_event(2, "ERROR"),
+                _build_lifecycle_event(3, "ACTIVE"),
+                _build_lifecycle_event(3, "ERROR"),
+                _build_lifecycle_event(4, "ACTIVE"),
+            ]),
+            ("unknown_state_pending", [
+                _build_lifecycle_event(1, "PENDING"),
+            ]),
+            ("unknown_state_failed", [
+                _build_lifecycle_event(1, "FAILED"),
+            ]),
+            ("unknown_state_empty", [
+                _build_lifecycle_event(1, ""),
+            ]),
+            ("unknown_state_none", [
+                _build_lifecycle_event(1, None),
+            ]),
+            ("step_index_zero", [
+                _build_lifecycle_event(0, "ACTIVE"),
+            ]),
+            ("step_index_negative", [
+                _build_lifecycle_event(-1, "ACTIVE"),
+            ]),
+            ("step_index_string", [
+                _build_lifecycle_event("1", "ACTIVE"),
+            ]),
+            ("step_index_bool", [
+                _build_lifecycle_event(True, "ACTIVE"),
+            ]),
+            ("step_index_none", [
+                _build_lifecycle_event(None, "ACTIVE"),
+            ]),
+            ("duration_seconds_negative", [
+                _build_lifecycle_event(1, "ACTIVE", duration_seconds=-0.5),
+            ]),
+            ("duration_seconds_string", [
+                _build_lifecycle_event(1, "ACTIVE", duration_seconds="0.5s"),
+            ]),
+            ("duration_seconds_bool", [
+                _build_lifecycle_event(1, "ACTIVE", duration_seconds=True),
+            ]),
+            ("extra_step_key_active", [
+                _build_lifecycle_event(1, "ACTIVE", step_extra={"unexpected": True}),
+            ]),
+            ("extra_step_key_error", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", step_extra={"unexpected": True}),
+            ]),
+            ("active_tool_info_extra_key", [
+                _build_step_update_event(_build_step(
+                    tool_info=_build_tool_info(parameters=valid_params, extra={"extra": 1}),
+                    extra={"step_index": 1, "state": "ACTIVE"},
+                )),
+            ]),
+            ("error_tool_info_extra_key", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_step_update_event(_build_step(
+                    tool_info=_build_tool_info(parameters=valid_params, extra={"error": _valid_tool_error(), "extra": 1}),
+                    extra={"step_index": 1, "state": "ERROR"},
+                )),
+            ]),
+            ("error_tool_info_missing_error", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_step_update_event(_build_step(
+                    tool_info=_build_tool_info(parameters=valid_params),
+                    extra={"step_index": 1, "state": "ERROR"},
+                )),
+            ]),
+            ("error_not_dict", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", error="failed"),
+            ]),
+            ("error_wrong_type", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", error={"type": "OTHER_ERROR", "message": "fail"}),
+            ]),
+            ("error_missing_message", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", error={"type": "TOOL_ERROR"}),
+            ]),
+            ("error_message_not_string", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", error={"type": "TOOL_ERROR", "message": 123}),
+            ]),
+            ("error_extra_key", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", error={"type": "TOOL_ERROR", "message": "fail", "code": 1}),
+            ]),
+            ("error_message_unbounded", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                _build_lifecycle_event(1, "ERROR", error={"type": "TOOL_ERROR", "message": "x" * 4097}),
+            ]),
+            ("mixing_legacy_then_lifecycle", [
+                self._valid_step_event(),
+                _build_lifecycle_event(1, "ACTIVE"),
+            ]),
+            ("mixing_lifecycle_then_legacy", [
+                _build_lifecycle_event(1, "ACTIVE"),
+                self._valid_step_event(),
+            ]),
+        ]
+        for name, stream_events in cases:
+            with self.subTest(case=name):
+                with self.assertRaises(runner.RetryableProviderSessionError):
+                    self._parse(_build_stream(stream_events))
 
 
 if __name__ == "__main__":
