@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "459a3144c98af57207c01c9cc4a7132b838be5a8",
+  "inspected_head": "6e93c0968345ef32b6cbdb0afe0e7ecc61766893",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -588,6 +588,71 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_notification_delete_all.py::NotificationDeleteAllCharacterizationTests::test_delete_all_notifications_populated_owner_success",
         "tests/test_p1_00b_characterization_notification_delete_all.py::NotificationDeleteAllCharacterizationTests::test_delete_all_notifications_empty_owner_noop"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_stream.py",
+      "sha256": "39302079aae4a581d8f466ff2e08de61bd4bb9610fe31eddbc79e62e79f1f951",
+      "last_commit": "f332e96982abb88b0e758579ef335bf6eb68528b",
+      "seed_ids": [
+        "API-NOTIFY-GET-NOTIFICATIONS-STREAM-NOTIFICATIONS-L386"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_stream.py::NotificationStreamCharacterizationTests::test_named_event_preserves_channel_response_metadata_chunk_order_and_cancellation_cleanup",
+        "tests/test_p1_00b_characterization_notification_stream.py::NotificationStreamCharacterizationTests::test_valid_json_without_event_is_emitted_as_original_raw_data",
+        "tests/test_p1_00b_characterization_notification_stream.py::NotificationStreamCharacterizationTests::test_missing_event_data_falls_back_to_raw_and_non_message_is_ignored"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_preview_coin_commodity_inference_results.py",
+      "sha256": "66f0168c8c5a5dcb89a3a636a32bf7262d2e575d19ff83700216e5196992d226",
+      "last_commit": "975e214eaf4ead7b01984bb197bfe299a1acccc4",
+      "seed_ids": [
+        "API-OFFER-POST-OFFERS-PREVIEW-COIN-COMMODITY-INFERENCE-L1592"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_preview_coin_commodity_inference_results.py::PreviewCoinCommodityInferenceResultCharacterizationTests::test_cash_success_maps_complete_response_and_observer_call",
+        "tests/test_p1_00b_characterization_preview_coin_commodity_inference_results.py::PreviewCoinCommodityInferenceResultCharacterizationTests::test_commit_failure_rolls_back_logs_and_returns_unavailable",
+        "tests/test_p1_00b_characterization_preview_coin_commodity_inference_results.py::PreviewCoinCommodityInferenceResultCharacterizationTests::test_observer_http_exception_is_re_raised_without_transaction_or_unavailable_log"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_mark_read_success.py",
+      "sha256": "5f2fc7b440e8c14492c94774a63651588cdbe4fac45a41d7105da967bcb3588f",
+      "last_commit": "0dbfc7e31979f0fb7a3a9a797d7ac3b3154ec3da",
+      "seed_ids": [
+        "API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_mark_read_success.py::NotificationMarkReadSuccessCharacterizationTests::test_owner_unread_success_marks_read_and_syncs_remaining_count"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_back_navigation.py",
+      "sha256": "8b5de1720a489a582be21f1de30c0fe354d8a6523ae8095b379ca42bffe90bd4",
+      "last_commit": "d218de11730ad1742780adde23c3a0bb0e62a07f",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-SETTLEMENT-L2174",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-COMMODITY-L2187",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-QUANTITY-L2202"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_back_navigation.py::TestTradeCreateBackNavigationCharacterization::test_handle_back_to_settlement_authenticated_success",
+        "tests/test_p1_00b_characterization_trade_create_back_navigation.py::TestTradeCreateBackNavigationCharacterization::test_handle_back_to_commodity_authenticated_success",
+        "tests/test_p1_00b_characterization_trade_create_back_navigation.py::TestTradeCreateBackNavigationCharacterization::test_handle_back_to_quantity_authenticated_success"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_wizard_cancel.py",
+      "sha256": "1c8487cde6fabc06c53c689ce90d1455715fd6ffb13296ad9539f2427e63dd0b",
+      "last_commit": "6e93c0968345ef32b6cbdb0afe0e7ecc61766893",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-CANCEL-L1386"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_wizard_cancel.py::TradeCreateWizardCancelCharacterizationTests::test_authenticated_current_wizard_clears_then_acknowledges_and_edits",
+        "tests/test_p1_00b_characterization_trade_create_wizard_cancel.py::TradeCreateWizardCancelCharacterizationTests::test_missing_user_returns_without_state_or_delivery",
+        "tests/test_p1_00b_characterization_trade_create_wizard_cancel.py::TradeCreateWizardCancelCharacterizationTests::test_stale_wizard_alerts_without_clearing_or_editing"
       ]
     }
   ],
