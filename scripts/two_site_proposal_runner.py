@@ -114,6 +114,39 @@ MAX_AUTOPILOT_RUN_ID_LENGTH = 64
 AUTOPILOT_RUN_ID_REGEX = re.compile(
     r"^cycle-[0-9]{4,8}-[0-9]{8}T[0-9]{6}Z-[0-9]{1,10}\Z"
 )
+MAX_SESSION_FLOW_SYMBOLS = 48
+MAX_SESSION_FLOW_MISSING = 16
+MAX_SESSION_QUERY_HINTS = 24
+MAX_SESSION_SOURCE_BYTES = 512_000
+SESSION_OPERATIONS = frozenset({
+    "execute", "scalar", "scalars", "stream", "stream_scalars", "get", "add",
+    "delete", "merge", "flush", "commit", "rollback", "refresh", "expire",
+    "expire_all", "begin_nested",
+})
+SESSION_RESULT_APIS = frozenset({
+    "all", "fetchall", "fetchmany", "fetchone", "first", "mappings", "one",
+    "one_or_none", "partitions", "scalar", "scalar_one", "scalar_one_or_none",
+    "scalars", "tuples", "unique",
+})
+SESSION_CALL_SAFE_BUILTINS = frozenset({
+    "bool", "callable", "getattr", "hasattr", "id", "isinstance", "repr", "setattr",
+    "str", "type",
+})
+PROJECT_MODULE_ROOTS = frozenset({"api", "bot", "core", "scripts"})
+LIVE_PATH_RE = re.compile(
+    r"\b(?:live|real|authoritative)(?:[-_ ]+(?:execution|production|trade))?[-_ ]+path\b|"
+    r"\b(?:live|real|authoritative)\s+(?:handler|query|route|call)\b|"
+    r"\b(?:call|invoke|execute|exercise)s?\s+(?:the\s+)?(?:live|real|authoritative)\b",
+    re.IGNORECASE,
+)
+SESSION_TEXT_RE = re.compile(
+    r"\b(?:custom|fake|hybrid|stub)[-_ ]+session\b|\bsession[-_ ]+adapter\b|"
+    r"\breus(?:e|ing)\b[^\n]{0,80}\bsession\b",
+    re.IGNORECASE,
+)
+QUALIFIED_PROJECT_SYMBOL_RE = re.compile(
+    r"\b((?:api|bot|core|scripts)(?:\.[A-Za-z_]\w*)+)\.([A-Za-z_]\w*)\b"
+)
 
 
 def validate_autopilot_run_id(raw: str | None) -> str | None:
@@ -862,6 +895,37 @@ def validate_task_readiness(
         if missing:
             bounded_missing = sorted(dict.fromkeys(missing))[:16]
             raise ProposalError(f"missing model context: {', '.join(bounded_missing)}")
+    session_ctx = dep_ctx.get("session_context") if isinstance(dep_ctx, dict) else None
+    if isinstance(session_ctx, dict) and session_ctx.get("requested"):
+        if not session_ctx.get("adapter_symbols"):
+            raise ProposalError(
+                "missing live session adapter context: first supply or create a reusable adapter"
+            )
+        if not session_ctx.get("root_symbols"):
+            raise ProposalError("missing explicit live session entrypoint context")
+        omitted_required = session_ctx.get("omitted_required_symbol_count", 0)
+        omitted_missing = session_ctx.get("omitted_missing_symbol_count", 0)
+        omitted_queries = session_ctx.get("omitted_query_operation_count", 0)
+        omitted_unresolved = session_ctx.get("omitted_unresolved_symbol_count", 0)
+        if any(type(value) is not int or value < 0 for value in (
+            omitted_required, omitted_missing, omitted_queries, omitted_unresolved
+        )):
+            raise ProposalError("invalid live session dependency counts")
+        if omitted_required or omitted_missing or omitted_queries or omitted_unresolved:
+            raise ProposalError("live session dependency closure exceeds bounded context: split the task")
+        unresolved = [
+            value for value in session_ctx.get("unresolved_symbols", [])
+            if isinstance(value, str)
+        ]
+        missing = [
+            value for value in session_ctx.get("missing_symbols", [])
+            if isinstance(value, str)
+        ]
+        incomplete = sorted(dict.fromkeys(unresolved + missing))
+        if incomplete:
+            raise ProposalError("missing live session context: " + ", ".join(incomplete[:32]))
+        if not session_ctx.get("query_operations"):
+            raise ProposalError("live session path has no proven query/result contract")
     return notes
 
 
@@ -899,6 +963,459 @@ def _repository_model_class_paths(root: Path) -> dict[str, set[str]]:
     return index
 
 
+def _canonical_excerpt_blocks(task: dict) -> list[tuple[str, tuple[str, ...], str]]:
+    """Return bounded canonical excerpt text with its declared symbols."""
+    goal = task.get("goal", "")
+    marker = "CANONICAL_SOURCE_EXCERPTS_JSON:\n"
+    if not isinstance(goal, str) or marker not in goal:
+        return []
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(goal.split(marker, 1)[1].lstrip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    excerpts = payload.get("excerpts", []) if isinstance(payload, dict) else []
+    blocks: list[tuple[str, tuple[str, ...], str]] = []
+    for excerpt in excerpts[:32] if isinstance(excerpts, list) else []:
+        if not isinstance(excerpt, dict):
+            continue
+        path = excerpt.get("path")
+        symbols = excerpt.get("symbols", [])
+        ranges = excerpt.get("ranges", [])
+        if not isinstance(path, str) or not path.endswith(".py"):
+            continue
+        declared = tuple(value for value in symbols if isinstance(value, str))
+        for item in ranges[:64] if isinstance(ranges, list) else []:
+            text = item.get("text") if isinstance(item, dict) else None
+            if isinstance(text, str):
+                blocks.append((path, declared, text))
+    return blocks
+
+
+def _parse_python_fragment(text: str) -> ast.Module | None:
+    try:
+        return ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        lines = text.splitlines()
+        indents = [len(line) - len(line.lstrip()) for line in lines if line.strip()]
+        minimum = min(indents) if indents else 0
+        try:
+            return ast.parse("\n".join(line[minimum:] for line in lines))
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            return None
+
+
+def _supplied_python_facts(task: dict, sources: dict) -> tuple[set[str], list[tuple[str, ast.Module]]]:
+    """Return supplied path:symbol identities and parseable source fragments."""
+    supplied: set[str] = set()
+    trees: list[tuple[str, ast.Module]] = []
+    for path, item in sorted(sources.items()):
+        content = item.get("content") if isinstance(item, dict) else None
+        if not isinstance(path, str) or not path.endswith(".py") or not isinstance(content, str):
+            continue
+        tree = _parse_python_fragment(content)
+        if tree is None:
+            continue
+        trees.append((path, tree))
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                supplied.add(f"{path}:{node.name}")
+    for path, declared, text in _canonical_excerpt_blocks(task):
+        supplied.update(f"{path}:{symbol}" for symbol in declared)
+        tree = _parse_python_fragment(text)
+        if tree is not None:
+            trees.append((path, tree))
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    supplied.add(f"{path}:{node.name}")
+    return supplied, trees
+
+
+def _class_has_session_execute(node: ast.ClassDef) -> bool:
+    return any(
+        isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and member.name == "execute"
+        for member in node.body
+    )
+
+
+def _walk_import_scope(tree: ast.AST) -> Iterator[ast.AST]:
+    """Walk imports in one module/function scope without crossing nested definitions."""
+    stack = list(reversed(getattr(tree, "body", [])))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def _project_imports(tree: ast.AST, current_module: str) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
+    symbols: dict[str, tuple[str, str]] = {}
+    modules: dict[str, str] = {}
+    package = current_module.split(".")[:-1]
+    for node in _walk_import_scope(tree):
+        if isinstance(node, ast.ImportFrom):
+            prefix = package[:max(0, len(package) - max(0, node.level - 1))] if node.level else []
+            module_parts = prefix + (node.module.split(".") if node.module else [])
+            module = ".".join(module_parts)
+            if not module or module.split(".", 1)[0] not in PROJECT_MODULE_ROOTS:
+                continue
+            for alias in node.names:
+                if alias.name != "*":
+                    symbols[alias.asname or alias.name] = (module, alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".", 1)[0] in PROJECT_MODULE_ROOTS:
+                    modules[alias.asname or alias.name.split(".", 1)[0]] = alias.name
+    return symbols, modules
+
+
+def _module_path(module: str) -> str:
+    return module.replace(".", "/") + ".py"
+
+
+def _module_for_path(path: str) -> str:
+    return path[:-3].replace("/", ".") if path.endswith(".py") else path.replace("/", ".")
+
+
+def _load_project_module(root: Path, module: str, cache: dict) -> dict | None:
+    if module in cache:
+        return cache[module]
+    path = _module_path(module)
+    target = root / path
+    if not target.is_file():
+        init_path = module.replace(".", "/") + "/__init__.py"
+        target = root / init_path
+        path = init_path
+        if not target.is_file():
+            cache[module] = None
+            return None
+    raw = bounded_file_bytes(root, target, MAX_SESSION_SOURCE_BYTES, "session dependency " + path)
+    try:
+        tree = ast.parse(raw.decode("utf-8"), filename=path)
+    except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise ProposalError("cannot index live session dependency: " + path) from exc
+    definitions = {
+        node.name: node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    imports, imported_modules = _project_imports(tree, module)
+    result = {
+        "module": module,
+        "path": path,
+        "tree": tree,
+        "definitions": definitions,
+        "imports": imports,
+        "imported_modules": imported_modules,
+    }
+    cache[module] = result
+    return result
+
+
+def _resolve_project_symbol(root: Path, module: str, symbol: str, cache: dict) -> tuple[dict, ast.AST] | None:
+    """Resolve a function, following bounded project re-exports."""
+    seen: set[tuple[str, str]] = set()
+    for _ in range(8):
+        identity = (module, symbol)
+        if identity in seen:
+            return None
+        seen.add(identity)
+        data = _load_project_module(root, module, cache)
+        if data is None:
+            return None
+        definition = data["definitions"].get(symbol)
+        if definition is not None:
+            return data, definition
+        imported = data["imports"].get(symbol)
+        if imported is None:
+            return None
+        module, symbol = imported
+    return None
+
+
+def _walk_function_body(function: ast.AST) -> Iterator[ast.AST]:
+    """Walk one function while excluding nested function/class bodies."""
+    stack = list(reversed(getattr(function, "body", [])))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def _call_leaf_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _explicit_mock_expression(node: ast.AST) -> bool:
+    if isinstance(node, ast.Call):
+        return _call_leaf_name(node.func) in {"AsyncMock", "MagicMock", "Mock"}
+    return isinstance(node, ast.Name) and node.id in {"AsyncMock", "MagicMock", "Mock"}
+
+
+def _explicit_patch_targets(trees: list[tuple[str, ast.Module]]) -> set[str]:
+    targets: set[str] = set()
+    for _, tree in trees:
+        mock_names = {
+            target.id
+            for assignment in ast.walk(tree)
+            if isinstance(assignment, (ast.Assign, ast.AnnAssign))
+            for target in (
+                assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            )
+            if isinstance(target, ast.Name)
+            and isinstance(assignment.value, ast.Call)
+            and _call_leaf_name(assignment.value.func) in {"AsyncMock", "MagicMock", "Mock"}
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _call_leaf_name(node.func) != "patch" or not node.args:
+                continue
+            target = node.args[0]
+            if not isinstance(target, ast.Constant) or not isinstance(target.value, str):
+                continue
+            keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+            explicit = "return_value" in keywords or "new_callable" in keywords
+            new_value = keywords.get("new", ast.Constant(None))
+            explicit = explicit or _explicit_mock_expression(new_value)
+            explicit = explicit or (isinstance(new_value, ast.Name) and new_value.id in mock_names)
+            explicit = explicit or (len(node.args) > 1 and _explicit_mock_expression(node.args[1]))
+            if explicit:
+                targets.add(target.value)
+    return targets
+
+
+def _session_parameter_names(function: ast.AST) -> set[str]:
+    arguments = getattr(function, "args", None)
+    if arguments is None:
+        return set()
+    names = [arg.arg for arg in arguments.posonlyargs + arguments.args + arguments.kwonlyargs]
+    return {
+        name for name in names
+        if name == "db" or name.endswith("_db") or "session" in name.lower()
+    }
+
+
+def _call_passes_session(call: ast.Call, session_names: set[str]) -> bool:
+    values = list(call.args) + [kw.value for kw in call.keywords]
+    return any(isinstance(value, ast.Name) and value.id in session_names for value in values)
+
+
+def _resolve_called_symbol(call: ast.Call, data: dict) -> tuple[str, str] | None:
+    func = call.func
+    if isinstance(func, ast.Name):
+        if func.id in data["definitions"]:
+            return data["module"], func.id
+        return data["imports"].get(func.id)
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        module = data["imported_modules"].get(func.value.id)
+        if module:
+            return module, func.attr
+    return None
+
+
+def _result_apis_for_call(function: ast.AST, execute_call: ast.Call) -> str:
+    nodes = list(_walk_function_body(function))
+    parents = {
+        child: parent for parent in nodes
+        for child in ast.iter_child_nodes(parent)
+    }
+    apis: list[str] = []
+    cursor: ast.AST = execute_call
+    for _ in range(8):
+        cursor = parents.get(cursor)
+        if cursor is None:
+            break
+        if isinstance(cursor, ast.Attribute) and cursor.attr in SESSION_RESULT_APIS:
+            apis.append(cursor.attr)
+    assigned_names: set[str] = set()
+    cursor = execute_call
+    for _ in range(8):
+        cursor = parents.get(cursor)
+        if cursor is None:
+            break
+        if isinstance(cursor, (ast.Assign, ast.AnnAssign)):
+            targets = cursor.targets if isinstance(cursor, ast.Assign) else [cursor.target]
+            assigned_names.update(target.id for target in targets if isinstance(target, ast.Name))
+            break
+        if isinstance(cursor, ast.stmt):
+            break
+    longest_assigned_chain: list[str] = []
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        chain: list[str] = []
+        chain_cursor: ast.AST = node
+        while isinstance(chain_cursor, (ast.Call, ast.Attribute, ast.Await)):
+            if isinstance(chain_cursor, ast.Call):
+                chain_cursor = chain_cursor.func
+            elif isinstance(chain_cursor, ast.Await):
+                chain_cursor = chain_cursor.value
+            else:
+                chain.append(chain_cursor.attr)
+                chain_cursor = chain_cursor.value
+        if isinstance(chain_cursor, ast.Name) and chain_cursor.id in assigned_names:
+            result_chain = [name for name in reversed(chain) if name in SESSION_RESULT_APIS]
+            if len(result_chain) > len(longest_assigned_chain):
+                longest_assigned_chain = result_chain
+    apis.extend(longest_assigned_chain)
+    return ".".join(dict.fromkeys(apis)) or "direct"
+
+
+def _statement_text(function: ast.AST, call: ast.Call) -> str:
+    if not call.args:
+        return ""
+    expression = call.args[0]
+    if isinstance(expression, ast.Name):
+        for node in _walk_function_body(function):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if (node.value is not None and any(
+                    isinstance(target, ast.Name) and target.id == expression.id for target in targets
+                )):
+                    expression = node.value
+                    break
+    try:
+        return " ".join(ast.unparse(expression).split())[:160]
+    except (ValueError, RecursionError):
+        return ""
+
+
+def _live_session_roots(contract_text: str, trees: list[tuple[str, ast.Module]]) -> list[tuple[str, str]]:
+    roots = {(module, symbol) for module, symbol in QUALIFIED_PROJECT_SYMBOL_RE.findall(contract_text)}
+    if roots:
+        return sorted(roots)
+    for path, tree in trees:
+        current_module = _module_for_path(path)
+        imports, _ = _project_imports(tree, current_module)
+        for visible_name, target in imports.items():
+            if (visible_name[:1].islower() or visible_name.startswith("_")) and re.search(
+                rf"\b{re.escape(visible_name)}\b", contract_text
+            ):
+                roots.add(target)
+    return sorted(roots)
+
+
+def _build_live_session_context(root: Path, task: dict, sources: dict) -> dict:
+    supplied, trees = _supplied_python_facts(task, sources)
+    contract_text = _task_contract_text(task)
+    test_only = bool(task.get("allowed_files")) and all(
+        isinstance(path, str) and (path.startswith("tests/") or "/test" in path)
+        for path in task.get("allowed_files", [])
+    )
+    adapters = sorted({
+        f"{path}:{node.name}" for path, tree in trees for node in tree.body
+        if isinstance(node, ast.ClassDef) and _class_has_session_execute(node)
+    })
+    requested = bool(
+        test_only and LIVE_PATH_RE.search(contract_text)
+        and (SESSION_TEXT_RE.search(contract_text) or adapters)
+    )
+    context = {
+        "requested": requested,
+        "adapter_symbols": adapters[:8],
+        "root_symbols": [],
+        "required_symbol_count": 0,
+        "missing_symbols": [],
+        "omitted_missing_symbol_count": 0,
+        "query_operations": [],
+        "omitted_query_operation_count": 0,
+        "unresolved_symbols": [],
+        "omitted_unresolved_symbol_count": 0,
+        "omitted_required_symbol_count": 0,
+    }
+    if not requested:
+        return context
+
+    roots = _live_session_roots(contract_text, trees)
+    context["root_symbols"] = [f"{_module_path(module)}:{symbol}" for module, symbol in roots[:8]]
+    patched = _explicit_patch_targets(trees)
+    cache: dict = {}
+    queue = [(module, symbol, 0) for module, symbol in roots[:8]]
+    enqueued = {f"{module}.{symbol}" for module, symbol in roots[:8]}
+    visited: set[str] = set()
+    unresolved: set[str] = set()
+    queries: list[dict] = []
+    omitted_required = max(0, len(roots) - 8)
+    while queue:
+        module, symbol, depth = queue.pop(0)
+        qualified = f"{module}.{symbol}"
+        if qualified in patched:
+            continue
+        resolved = _resolve_project_symbol(root, module, symbol, cache)
+        if resolved is None:
+            unresolved.add(f"{_module_path(module)}:{symbol}")
+            continue
+        data, function = resolved
+        identity = f"{data['path']}:{function.name}"
+        if identity in visited:
+            continue
+        if len(visited) >= MAX_SESSION_FLOW_SYMBOLS:
+            omitted_required += 1
+            continue
+        visited.add(identity)
+        session_names = _session_parameter_names(function)
+        if not session_names:
+            continue
+        local_imports, local_modules = _project_imports(function, data["module"])
+        resolution_data = dict(data)
+        resolution_data["imports"] = {**data["imports"], **local_imports}
+        resolution_data["imported_modules"] = {
+            **data["imported_modules"], **local_modules,
+        }
+        for node in _walk_function_body(function):
+            if not isinstance(node, ast.Call):
+                continue
+            if (isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in session_names
+                    and node.func.attr in SESSION_OPERATIONS):
+                if len(queries) < MAX_SESSION_QUERY_HINTS:
+                    queries.append({
+                        "path": data["path"],
+                        "symbol": function.name,
+                        "line": getattr(node, "lineno", 0),
+                        "operation": node.func.attr,
+                        "result_api": _result_apis_for_call(function, node),
+                        "statement": _statement_text(function, node),
+                    })
+                else:
+                    context["omitted_query_operation_count"] += 1
+                continue
+            if depth >= 8 or not _call_passes_session(node, session_names):
+                continue
+            called = _resolve_called_symbol(node, resolution_data)
+            if called is None:
+                leaf = _call_leaf_name(node.func)
+                if leaf and leaf not in SESSION_CALL_SAFE_BUILTINS:
+                    unresolved.add(f"{data['path']}:{function.name}->{leaf}")
+                continue
+            called_name = f"{called[0]}.{called[1]}"
+            if called_name in patched or called_name in enqueued:
+                continue
+            if len(enqueued) >= MAX_SESSION_FLOW_SYMBOLS:
+                omitted_required += 1
+                continue
+            enqueued.add(called_name)
+            queue.append((called[0], called[1], depth + 1))
+
+    missing = sorted(visited - supplied)
+    context["required_symbol_count"] = len(visited) + omitted_required
+    context["missing_symbols"] = missing[:MAX_SESSION_FLOW_MISSING]
+    context["omitted_missing_symbol_count"] = max(0, len(missing) - MAX_SESSION_FLOW_MISSING)
+    context["query_operations"] = queries
+    ordered_unresolved = sorted(unresolved)
+    context["unresolved_symbols"] = ordered_unresolved[:MAX_SESSION_FLOW_MISSING]
+    context["omitted_unresolved_symbol_count"] = max(
+        0, len(ordered_unresolved) - MAX_SESSION_FLOW_MISSING
+    )
+    context["omitted_required_symbol_count"] = omitted_required
+    return context
+
+
 def enrich_repository_dependency_context(
     root: Path,
     task: dict,
@@ -909,29 +1426,43 @@ def enrich_repository_dependency_context(
     enriched = dict(notes)
     dependency = dict(notes.get("dependency_context", {}))
     enriched["dependency_context"] = dependency
-    if not dependency.get("persistence_contract_requested"):
-        return enriched
+    if dependency.get("persistence_contract_requested"):
+        contract_text = _task_contract_text(task)
+        required = {
+            value for value in dependency.get("required_full_model_paths", [])
+            if isinstance(value, str)
+        }
+        for symbol, paths in _repository_model_class_paths(root).items():
+            if re.search(rf"\b{re.escape(symbol)}\b", contract_text):
+                required.update(paths)
 
-    contract_text = _task_contract_text(task)
-    required = {
-        value for value in dependency.get("required_full_model_paths", [])
-        if isinstance(value, str)
-    }
-    for symbol, paths in _repository_model_class_paths(root).items():
-        if re.search(rf"\b{re.escape(symbol)}\b", contract_text):
-            required.update(paths)
+        ordered = sorted(required)
+        if len(ordered) > 16:
+            dependency["required_full_model_paths"] = ordered[:16]
+            dependency["omitted_model_path_count"] = len(ordered) - 16
+        else:
+            dependency["required_full_model_paths"] = ordered
+            dependency["omitted_model_path_count"] = 0
+        dependency["missing_full_model_paths"] = [
+            path for path in dependency["required_full_model_paths"]
+            if path not in sources or sources[path].get("content") is None
+        ]
 
-    ordered = sorted(required)
-    if len(ordered) > 16:
-        dependency["required_full_model_paths"] = ordered[:16]
-        dependency["omitted_model_path_count"] = len(ordered) - 16
-    else:
-        dependency["required_full_model_paths"] = ordered
-        dependency["omitted_model_path_count"] = 0
-    dependency["missing_full_model_paths"] = [
-        path for path in dependency["required_full_model_paths"]
-        if path not in sources or sources[path].get("content") is None
-    ]
+    session_context = _build_live_session_context(root, task, sources)
+    if session_context.get("requested"):
+        dependency["session_context"] = session_context
+        for hints_key in ("literal_hints",):
+            while enriched.get(hints_key) and len(json.dumps(enriched).encode("utf-8")) > 8192:
+                enriched[hints_key].pop()
+                enriched["omitted_literal_count"] = enriched.get("omitted_literal_count", 0) + 1
+        while (dependency.get("model_contract_hints")
+               and len(json.dumps(enriched).encode("utf-8")) > 8192):
+            dependency["model_contract_hints"].pop()
+            dependency["omitted_model_contract_hint_count"] = (
+                dependency.get("omitted_model_contract_hint_count", 0) + 1
+            )
+        if len(json.dumps(enriched).encode("utf-8")) > 8192:
+            raise ProposalError("live session dependency context exceeds metadata budget: split the task")
     return enriched
 
 

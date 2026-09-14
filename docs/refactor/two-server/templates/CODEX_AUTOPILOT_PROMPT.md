@@ -41,19 +41,20 @@ and unrelated remote-service mutation. This does not widen any other gate.
    if recovery.defer_prior_unit is true, choose a dependency-ready gap unlike recovery.deferred_unit
    (no paraphrase; no alternative means HALT).
 
-3. Prepare complete authoritative current definitions for every referenced enum,
-   constant, import, signature, model field and dependency. UserRole.BUYER is
-   forbidden unless its authoritative definition proves it exists.
-   Prefer one contract/shared flow with 2–3 related scenarios; split independent work. Normally
-   <=6 requirements. A new test needing custom session/table/patch scaffolding gets <=4 and one
-   outcome, or first reuses/builds a bounded helper; never demand an implausible >18000-byte harness.
+3. Supply authoritative current definitions for every referenced enum, constant, import,
+   signature, model field and dependency. UserRole.BUYER is forbidden unless its authoritative definition proves it exists.
+   Prefer one shared flow with 2–3 related scenarios and normally <=6 requirements.
+   A custom session/table test gets <=4 and one outcome, or first reuses/builds a bounded helper.
    State scenarios/exclusions explicitly; do not bundle Stages or skip gates.
-   Before provider contact, resolve advisory preparation_notes warnings: supply exact blocker ID,
-   canonical reference, authoritative signatures/dependencies, valid success fixtures and
-   testable outcomes in goal/requirements/context; do not ask for or invent absent items.
+   Before provider contact resolve preparation_notes warnings with exact blocker ID,
+   canonical reference, dependencies, valid fixtures and testable outcomes.
    Persistence tasks require every named repository model's full context. Use TASK_READY
    model_contract_hints for required fields, date types and Enum storage. Characterization asserts
    only source/evidence-backed values; otherwise capture bounded observed behavior.
+   A live-path test with a custom Session requires TASK_READY session_context: exact entrypoint,
+   transitive DB-call closure and query/result contracts. Add every missing path:symbol in one
+   rebuild. If the closure exceeds bounds, split it or first build/reuse a real-AsyncSession
+   canonical helper. Never use ordered result queues or generic owner/None fallbacks.
    Use scripts/two_site_cycle_tools.py build --spec <ignored-spec.json> --output
    .local/two-site-refactor/tasks/<fresh-id>.json. Spec keys: task (the exact six-key runner contract),
    snippets ([{path, symbols}] or []), gap_reference (tracked doc#gap), and scenario_key (stable
@@ -63,10 +64,9 @@ and unrelated remote-service mutation. This does not widen any other gate.
    definitions, decorators and imports; rechecked locally against full-file SHA, HEAD and ranges.
    Include dependency closure (provenance, not completeness). Writable files remain full sources;
    full-context tasks remain supported when excerpts hide behavior.
-   The builder marker binds HEAD, gap, excerpts and semantic identity (Stage, normalized gap,
-   symbols, scenario key, source SHAs). The pipeline validates it and atomically reserves one
-   immutable local attempt per fingerprint before provider contact; no bypass, TTL, deletion or
-   auto-release. Retry requires material source/Stage/gap/symbol/scenario change or audited maintenance.
+   The builder marker binds HEAD, gap, excerpts, Stage, symbols, scenario and source SHAs.
+   The pipeline validates it and reserves one immutable local attempt per fingerprint before
+   provider contact; retry requires material identity change or audited maintenance.
    After creating/resizing a task require the actual command
    python3 scripts/two_site_proposal_runner.py check --task <path>
    and actual TASK_READY before any provider call. Fix preflight failures locally; do not spend

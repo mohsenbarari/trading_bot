@@ -40,6 +40,11 @@ Context precision applies to Worker and Verifier:
   For SQLAlchemy Enum columns, member_name means raw database storage uses the enum member
   name unless the supplied source proves otherwise; value means the values_callable form
   stores the enum value. Keep Python response values and raw SQLite representations distinct.
+- For a requested dependency_context.session_context, use every supplied query_operations
+  entry as an exact adapter obligation: route by statement/entity, operation and result_api,
+  and fail closed on an unmatched query. Never use a positional result queue or a generic
+  owner/None fallback. An absent/omitted root, dependency or query contract is BLOCKED,
+  not permission to reconstruct the live call graph from guesses.
 - Before emitting a persistence test, make one internal field-by-field fixture audit:
   every directly constructed model has all supplied required fields, valid types, and no
   duplicate table/index creation already performed by the supplied fixture. `checkfirst`
@@ -47,6 +52,9 @@ Context precision applies to Worker and Verifier:
   helper instead of inventing broad table setup. A `unittest.mock.patch` object has no
   supported public `target` field; never filter patchers by private/internal attributes—use
   explicit target descriptors or an explicit safe patch list.
+  Never leave a mutation of `Model.__table__.indexes` behind: prefer isolated metadata;
+  if exact temporary mutation is unavoidable, restore the original objects on every failure
+  path and independently assert the original index identities and names afterward.
 - Preserve literal Unicode code points, especially Persian U+200C/U+200D and bidi marks.
   Distinguish a JSON escape, a Python source escape, and the resulting runtime string.
   Keep fixed independent expected values in tests: never compute the expected value

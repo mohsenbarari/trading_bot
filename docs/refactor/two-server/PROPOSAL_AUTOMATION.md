@@ -132,6 +132,16 @@ HEAD و بازهٔ خط در goal بسته‌بندی می‌شود. هنگام 
 جای source یا review را نمی‌گیرد. خروجی Python نامعتبر نیز پیش از اجرای pytest به‌عنوان
 output defect محدود شناسایی می‌شود و از همان سقف retry خروجی عبور می‌کند.
 
+برای characterization تستی که مسیر `live/real/authoritative` را با Session adapter سفارشی
+اجرا می‌کند، `check` زنجیرهٔ محدود و ایستای فراخوانی‌های دارای `db/session` را از entrypoint
+صریح تا عملیات دیتابیس می‌سازد. `session_context` باید تعریف تمام `path:symbol`های این زنجیره
+و قرارداد هر `execute/scalar/scalars/get` و API نتیجه مانند `scalar_one` یا `scalars().all()`
+را پیش از تماس با Gemini داشته باشد. gate تمام کمبودهای قابل‌نمایش را یک‌جا گزارش می‌کند؛
+نبود entrypoint/adapter، وابستگی حل‌نشده، حذف hint یا عبور closure از سقف، همگی fail-closed
+هستند. در حالت بزرگ، Coordinator باید سناریو را تقسیم کند یا ابتدا helper کانونی مبتنی بر
+AsyncSession واقعی بسازد/بازاستفاده کند. صف ترتیبی نتیجه و fallback عمومی `owner/None` مجاز
+نیستند، چون تغییر یک کوئری می‌تواند نتیجهٔ معتبرنما را به مصرف‌کنندهٔ اشتباه تحویل دهد.
+
 شکست pytest با receipt خام و تغییرناپذیر نگهداری می‌شود، اما correction دیگر traceback و
 warningهای طولانی را دوباره به مدل نمی‌فرستد. نام تست شکست‌خورده، exception و AST نرمال‌شدهٔ
 assertion به‌صورت bounded ارسال و برای تشخیص ریشهٔ تکراری استفاده می‌شوند؛ تفاوت نام متغیر
