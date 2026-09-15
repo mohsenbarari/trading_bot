@@ -233,6 +233,67 @@ class LinkAccountStateBoundariesCharacterizationTests(unittest.IsolatedAsyncioTe
         )
         self.assertEqual(state.cleared, 1)
 
+    async def test_handle_address_completion_rejects_normalized_short_address_without_state_or_database_side_effects(self):
+        initial_data = {
+            "link_user_id": 42,
+            BOT_ACCOUNT_LINK_TOKEN_STATE_KEY: "sample-token",
+            BOT_ACCOUNT_LINK_MOBILE_STATE_KEY: "09121111111",
+        }
+        state = FakeState(initial_data=initial_data)
+        state.get_data = AsyncMock(wraps=state.get_data)
+
+        raw_address = "   کوتاه   "
+        self.assertGreaterEqual(len(raw_address), 10)
+        self.assertLess(len(raw_address.strip()), 10)
+
+        message = make_message(text=raw_address)
+        mock_answer_pre_auth = AsyncMock()
+        mock_get_db = MagicMock()
+
+        with patch.object(link_account, "settings", SimpleNamespace(registration_sync_v2_enabled=False)), \
+             patch("bot.handlers.link_account.answer_pre_auth_message_via_runtime", new=mock_answer_pre_auth), \
+             patch("bot.handlers.link_account.get_db", new=mock_get_db):
+            await handle_address_completion(message, state)
+
+        mock_get_db.assert_not_called()
+        state.get_data.assert_not_called()
+        self.assertEqual(state.cleared, 0)
+        self.assertEqual(state.data, initial_data)
+        self.assertEqual(state.states, [])
+
+        expected_text = "❌ آدرس وارد شده کوتاه است. لطفاً آدرس کامل\u200cتری وارد کنید."
+        mock_answer_pre_auth.assert_awaited_once_with(message, expected_text)
+        self.assertEqual(mock_answer_pre_auth.await_args.kwargs, {})
+
+    async def test_handle_address_completion_without_link_user_id_clears_state_and_reports_expiry_without_database(self):
+        initial_data = {
+            BOT_ACCOUNT_LINK_TOKEN_STATE_KEY: "sample-token",
+            BOT_ACCOUNT_LINK_MOBILE_STATE_KEY: "09121111111",
+        }
+        state = FakeState(initial_data=initial_data)
+        self.assertNotIn("link_user_id", state.data)
+
+        raw_address = "  تهران خیابان آزادی پلاک ۱۰  "
+        self.assertGreaterEqual(len(raw_address.strip()), 10)
+
+        message = make_message(text=raw_address)
+        mock_answer_pre_auth = AsyncMock()
+        mock_get_db = MagicMock()
+
+        with patch.object(link_account, "settings", SimpleNamespace(registration_sync_v2_enabled=False)), \
+             patch("bot.handlers.link_account.answer_pre_auth_message_via_runtime", new=mock_answer_pre_auth), \
+             patch("bot.handlers.link_account.get_db", new=mock_get_db):
+            await handle_address_completion(message, state)
+
+        mock_get_db.assert_not_called()
+        self.assertEqual(state.cleared, 1)
+        self.assertEqual(state.data, initial_data)
+        self.assertEqual(state.states, [])
+
+        expected_text = "❌ فرآیند تکمیل ثبت\u200cنام منقضی شده است. لطفاً دوباره /link را بزنید."
+        mock_answer_pre_auth.assert_awaited_once_with(message, expected_text)
+        self.assertEqual(mock_answer_pre_auth.await_args.kwargs, {})
+
 
 if __name__ == "__main__":
     unittest.main()
