@@ -1200,6 +1200,24 @@ def _session_parameter_names(function: ast.AST) -> set[str]:
     }
 
 
+def _handler_session_names(function: ast.AST) -> set[str]:
+    names = set(_session_parameter_names(function))
+    for node in _walk_function_body(function):
+        if isinstance(node, ast.AsyncWith):
+            for item in node.items:
+                if (
+                    isinstance(item.context_expr, ast.Call)
+                    and _call_leaf_name(item.context_expr.func) == "AsyncSessionLocal"
+                ):
+                    if isinstance(item.optional_vars, ast.Name):
+                        names.add(item.optional_vars.id)
+                    elif item.optional_vars is not None:
+                        for target in ast.walk(item.optional_vars):
+                            if isinstance(target, ast.Name):
+                                names.add(target.id)
+    return names
+
+
 def _call_passes_session(call: ast.Call, session_names: set[str]) -> bool:
     values = list(call.args) + [kw.value for kw in call.keywords]
     return any(isinstance(value, ast.Name) and value.id in session_names for value in values)
@@ -1285,6 +1303,70 @@ def _statement_text(function: ast.AST, call: ast.Call) -> str:
         return ""
 
 
+def _parse_explicit_session_declarations(contract_text: str) -> list[tuple[str, str]]:
+    declarations: list[tuple[str, str]] = []
+    in_fence = False
+    for line in contract_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        for match in re.finditer(r"(?<![A-Za-z0-9_])session_context\s*:", line):
+            start = match.start()
+            prefix = line[:start]
+            if prefix.count("`") % 2 == 1 or prefix.count('"') % 2 == 1:
+                continue
+            if prefix.count("'") % 2 == 1 and "'" in line[match.end():]:
+                continue
+            if prefix and prefix[-1] in ("`", '"', "'"):
+                continue
+
+            rest = line[match.end():]
+            body = rest.split(";", 1)[0] if ";" in rest else rest
+            body = body.strip()
+            if not body:
+                raise ProposalError("malformed session_context declaration: missing body")
+            exact_prefix = "exact entrypoint"
+            if body.startswith(exact_prefix):
+                remainder = body[len(exact_prefix):]
+                if not remainder or not remainder[0].isspace():
+                    raise ProposalError(f"malformed session_context declaration: {body}")
+                entrypoint_str = remainder.strip()
+            else:
+                entrypoint_str = body
+            if not entrypoint_str or len(entrypoint_str.split()) != 1:
+                raise ProposalError(f"malformed session_context declaration: {body}")
+            entrypoint = entrypoint_str.split()[0]
+            if ":" in entrypoint:
+                parts = entrypoint.split(":")
+                if len(parts) != 2:
+                    raise ProposalError(f"malformed session_context entrypoint: {entrypoint}")
+                path_part, symbol = parts
+                if not symbol.isidentifier():
+                    raise ProposalError(f"malformed session_context entrypoint symbol: {entrypoint}")
+                if "\\" in path_part or path_part.startswith("/") or not path_part.endswith(".py"):
+                    raise ProposalError(f"noncanonical session_context entrypoint path: {entrypoint}")
+                segments = path_part[:-3].split("/")
+                if any(not seg.isidentifier() for seg in segments):
+                    raise ProposalError(f"noncanonical session_context entrypoint path: {entrypoint}")
+                if segments[0] not in PROJECT_MODULE_ROOTS:
+                    raise ProposalError(f"out-of-project session_context entrypoint: {entrypoint}")
+                module = ".".join(segments)
+                declarations.append((module, symbol))
+            else:
+                parts = entrypoint.split(".")
+                if len(parts) < 3 or any(not part.isidentifier() for part in parts):
+                    raise ProposalError(f"malformed session_context entrypoint: {entrypoint}")
+                if parts[0] not in PROJECT_MODULE_ROOTS:
+                    raise ProposalError(f"out-of-project session_context entrypoint: {entrypoint}")
+                module = ".".join(parts[:-1])
+                symbol = parts[-1]
+                declarations.append((module, symbol))
+    return declarations
+
+
 def _live_session_roots(contract_text: str, trees: list[tuple[str, ast.Module]]) -> list[tuple[str, str]]:
     roots = {(module, symbol) for module, symbol in QUALIFIED_PROJECT_SYMBOL_RE.findall(contract_text)}
     if roots:
@@ -1311,12 +1393,36 @@ def _build_live_session_context(root: Path, task: dict, sources: dict) -> dict:
         f"{path}:{node.name}" for path, tree in trees for node in tree.body
         if isinstance(node, ast.ClassDef) and _class_has_session_execute(node)
     })
-    requested = bool(
-        test_only and LIVE_PATH_RE.search(contract_text)
+    explicit_roots: list[tuple[str, str]] = []
+    if test_only:
+        declared = _parse_explicit_session_declarations(contract_text)
+        if declared:
+            unique_declared = sorted(set(declared))
+            if len(unique_declared) > 1:
+                root_strs = [f"{_module_path(m)}:{s}" for m, s in unique_declared]
+                raise ProposalError(f"ambiguous session context entrypoints: {', '.join(root_strs)}")
+            explicit_roots = unique_declared
+
+    if explicit_roots:
+        requested = True
+        activation_reason = "EXPLICIT_DECLARATION"
+        roots = explicit_roots
+    elif (
+        test_only
+        and LIVE_PATH_RE.search(contract_text)
         and (SESSION_TEXT_RE.search(contract_text) or adapters)
-    )
+    ):
+        requested = True
+        activation_reason = "LEGACY_HEURISTIC"
+        roots = _live_session_roots(contract_text, trees)
+    else:
+        requested = False
+        activation_reason = "NOT_REQUESTED"
+        roots = []
+
     context = {
         "requested": requested,
+        "activation_reason": activation_reason,
         "adapter_symbols": adapters[:8],
         "root_symbols": [],
         "required_symbol_count": 0,
@@ -1331,7 +1437,6 @@ def _build_live_session_context(root: Path, task: dict, sources: dict) -> dict:
     if not requested:
         return context
 
-    roots = _live_session_roots(contract_text, trees)
     context["root_symbols"] = [f"{_module_path(module)}:{symbol}" for module, symbol in roots[:8]]
     patched = _explicit_patch_targets(trees)
     cache: dict = {}
@@ -1358,7 +1463,7 @@ def _build_live_session_context(root: Path, task: dict, sources: dict) -> dict:
             omitted_required += 1
             continue
         visited.add(identity)
-        session_names = _session_parameter_names(function)
+        session_names = _handler_session_names(function)
         if not session_names:
             continue
         local_imports, local_modules = _project_imports(function, data["module"])

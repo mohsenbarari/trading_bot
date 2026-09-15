@@ -7,6 +7,7 @@ import pytest
 
 from scripts.two_site_proposal_runner import (
     ProposalError,
+    _build_live_session_context,
     _parse_stream,
     check,
     run,
@@ -175,6 +176,7 @@ def test_complete_live_session_closure_exposes_query_result_contract(tmp_path: P
     session_context = result["preparation_notes"]["dependency_context"]["session_context"]
     assert result["state"] == "TASK_READY"
     assert session_context["requested"] is True
+    assert session_context["activation_reason"] == "LEGACY_HEURISTIC"
     assert session_context["missing_symbols"] == []
     assert session_context["unresolved_symbols"] == []
     assert session_context["required_symbol_count"] == 2
@@ -457,3 +459,194 @@ def test_parse_stream_rejects_error_model_output_truncated_with_structured_outpu
     with pytest.raises(ProposalError) as exc:
         _parse_stream(raw_stream, task, sources, "worker", expected_model="gemini-2.5-pro")
     assert "MODEL_OUTPUT_TRUNCATED" in str(exc.value)
+
+
+def _make_explicit_session_fixture(root: Path) -> dict:
+    helper = root / "tests/test_trade.py"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_text(
+        "class TestSession:\n"
+        "    async def execute(self, statement):\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    handler = root / "bot/handlers/trade_create.py"
+    handler.parent.mkdir(parents=True, exist_ok=True)
+    handler.write_text(
+        "async def handle_commodity_selection():\n"
+        "    async with AsyncSessionLocal() as session:\n"
+        "        result = await session.execute('select commodity')\n"
+        "        return result.scalar_one_or_none()\n",
+        encoding="utf-8",
+    )
+    return {
+        "task_id": "task-explicit-session-handler",
+        "goal": (
+            "Review commodity selection flow.\n"
+            "session_context: exact entrypoint bot/handlers/trade_create.py:handle_commodity_selection; "
+            "transitive closure prose with repeated bot/handlers/trade_create.py:handle_commodity_selection"
+        ),
+        "context_files": ["tests/test_trade.py", "bot/handlers/trade_create.py"],
+        "allowed_files": ["tests/test_trade.py"],
+        "requirements": ["Exercise the commodity selection handler."],
+        "test_selectors": ["pytest -q tests/test_trade.py"],
+    }
+
+
+def test_explicit_session_declaration_replays_semicolon_line_and_async_session_local(tmp_path: Path):
+    root = _make_mock_root(tmp_path)
+    task_data = _make_explicit_session_fixture(root)
+    task_path = _write_task(root, "task.json", task_data)
+
+    result = check(root, task_path)
+    assert result["state"] == "TASK_READY"
+    session_ctx = result["preparation_notes"]["dependency_context"]["session_context"]
+    assert session_ctx["requested"] is True
+    assert session_ctx["activation_reason"] == "EXPLICIT_DECLARATION"
+    assert session_ctx["root_symbols"] == ["bot/handlers/trade_create.py:handle_commodity_selection"]
+    assert len(session_ctx["root_symbols"]) == 1
+    assert session_ctx["query_operations"] == [{
+        "path": "bot/handlers/trade_create.py",
+        "symbol": "handle_commodity_selection",
+        "line": 3,
+        "operation": "execute",
+        "result_api": "scalar_one_or_none",
+        "statement": "'select commodity'",
+    }]
+
+
+def test_explicit_session_duplicate_roots_pass_and_distinct_roots_raise_ambiguous(tmp_path: Path):
+    root = _make_mock_root(tmp_path)
+    task_data = _make_explicit_session_fixture(root)
+    task_data["goal"] = (
+        "Duplicate declarations of the same root.\n"
+        "session_context: exact entrypoint bot/handlers/trade_create.py:handle_commodity_selection;\n"
+        "session_context: bot.handlers.trade_create.handle_commodity_selection;\n"
+    )
+    task_path = _write_task(root, "task.json", task_data)
+    result = check(root, task_path)
+    assert result["state"] == "TASK_READY"
+    session_ctx = result["preparation_notes"]["dependency_context"]["session_context"]
+    assert session_ctx["requested"] is True
+    assert session_ctx["root_symbols"] == ["bot/handlers/trade_create.py:handle_commodity_selection"]
+
+    task_data["goal"] = (
+        "Distinct valid roots in task.\n"
+        "session_context: exact entrypoint bot/handlers/trade_create.py:handle_commodity_selection;\n"
+        "session_context: api/live.py:live;\n"
+    )
+    task_path_ambig = _write_task(root, "task_ambig.json", task_data)
+    with pytest.raises(ProposalError) as exc_ambig:
+        check(root, task_path_ambig)
+    assert "ambiguous session context entrypoints:" in str(exc_ambig.value)
+    assert "bot/handlers/trade_create.py:handle_commodity_selection" in str(exc_ambig.value)
+    assert "api/live.py:live" in str(exc_ambig.value)
+
+
+def test_explicit_session_invalid_syntax_and_paths_block_before_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = _make_mock_root(tmp_path)
+    base_task = _make_explicit_session_fixture(root)
+
+    invalid_cases = [
+        ("session_context:;", "malformed session_context declaration: missing body"),
+        ("session_context: exact entrypoint a b;", "malformed session_context declaration"),
+        ("session_context: external/mod.py:sym;", "out-of-project session_context entrypoint"),
+        ("session_context: bot/../api/live.py:live;", "noncanonical session_context entrypoint path"),
+        ("session_context: /bot/handlers/trade.py:sym;", "noncanonical session_context entrypoint path"),
+    ]
+
+    cli_reached = False
+
+    def _trap_cli(*args, **kwargs):
+        nonlocal cli_reached
+        cli_reached = True
+        raise AssertionError("provider must not be contacted")
+
+    monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    monkeypatch.setattr("scripts.two_site_proposal_runner.proposal_cli_context", _trap_cli)
+
+    for idx, (decl, err_msg) in enumerate(invalid_cases):
+        task = dict(base_task)
+        task["goal"] = f"Invalid declaration test\n{decl}\n"
+        task["task_id"] = f"task-invalid-{idx}"
+        task_path = _write_task(root, f"task_invalid_{idx}.json", task)
+
+        with pytest.raises(ProposalError) as exc_check:
+            check(root, task_path)
+        assert err_msg in str(exc_check.value)
+
+        with pytest.raises(ProposalError) as exc_run:
+            run(root, task_path, "worker", f"run-invalid-{idx}", 60)
+        assert err_msg in str(exc_run.value)
+
+    assert not cli_reached
+
+
+def test_explicit_session_missing_adapter_and_closure_block_before_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = _make_mock_root(tmp_path)
+    task_data = _make_explicit_session_fixture(root)
+
+    # Missing adapter: context_files omits tests/test_trade.py
+    task_no_adapter = dict(task_data)
+    task_no_adapter["task_id"] = "task-no-adapter"
+    task_no_adapter["context_files"] = ["bot/handlers/trade_create.py"]
+    task_no_adapter["allowed_files"] = ["tests/test_trade_new.py"]
+    task_no_adapter["test_selectors"] = ["pytest -q tests/test_trade_new.py"]
+    task_path_no_adapter = _write_task(root, "task_no_adapter.json", task_no_adapter)
+
+    with pytest.raises(ProposalError) as exc_no_adapter:
+        check(root, task_path_no_adapter)
+    assert "missing live session adapter context" in str(exc_no_adapter.value)
+
+    # Missing handler closure context: context_files omits bot/handlers/trade_create.py
+    task_no_closure = dict(task_data)
+    task_no_closure["task_id"] = "task-no-closure"
+    task_no_closure["context_files"] = ["tests/test_trade.py"]
+    task_path_no_closure = _write_task(root, "task_no_closure.json", task_no_closure)
+
+    with pytest.raises(ProposalError) as exc_no_closure:
+        check(root, task_path_no_closure)
+    assert "missing live session context: bot/handlers/trade_create.py:handle_commodity_selection" in str(exc_no_closure.value)
+
+    cli_reached = False
+
+    def _trap_cli(*args, **kwargs):
+        nonlocal cli_reached
+        cli_reached = True
+        raise AssertionError("provider must not be contacted")
+
+    monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    monkeypatch.setattr("scripts.two_site_proposal_runner.proposal_cli_context", _trap_cli)
+
+    with pytest.raises(ProposalError, match="missing live session adapter context"):
+        run(root, task_path_no_adapter, "worker", "run-no-adapter", 60)
+    with pytest.raises(ProposalError, match="missing live session context"):
+        run(root, task_path_no_closure, "worker", "run-no-closure", 60)
+
+    assert not cli_reached
+
+
+def test_explicit_session_backticked_prose_mention_remains_not_requested(tmp_path: Path):
+    root = _make_mock_root(tmp_path)
+    task_data = _make_explicit_session_fixture(root)
+    task_data["goal"] = (
+        "Documentation prose:\n"
+        "Here is `session_context: exact entrypoint bot/handlers/trade_create.py:handle_commodity_selection;` in code.\n"
+    )
+    task_path = _write_task(root, "task_backtick.json", task_data)
+
+    result = check(root, task_path)
+    assert result["state"] == "TASK_READY"
+    dep_ctx = result["preparation_notes"]["dependency_context"]
+    assert "session_context" not in dep_ctx
+
+    raw_ctx = _build_live_session_context(root, task_data, {
+        "tests/test_trade.py": {"content": (root / "tests/test_trade.py").read_text("utf-8")},
+        "bot/handlers/trade_create.py": {"content": (root / "bot/handlers/trade_create.py").read_text("utf-8")},
+    })
+    assert raw_ctx["requested"] is False
+    assert raw_ctx["activation_reason"] == "NOT_REQUESTED"
