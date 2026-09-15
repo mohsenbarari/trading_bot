@@ -15,6 +15,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 
 try:
@@ -93,6 +94,7 @@ DEFAULT_TIMEOUT_SECONDS = 10_800
 MAX_RETRYABLE_FAILURES = 2
 MAX_CONSECUTIVE_RESCOPES = 3
 KEEP_RUNS = 20
+SUPERVISOR_HEARTBEAT_SECONDS = 10
 PROMPT_REL = Path("docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md")
 SCHEMA_REL = Path("docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json")
 PROTECTED_REFS = (
@@ -766,6 +768,8 @@ def run_cycle(
     continuation: dict | None = None,
 ) -> tuple[Path, dict]:
     global _ACTIVE_PROCESS
+    heartbeat_stop: threading.Event | None = None
+    heartbeat_thread: threading.Thread | None = None
     before = validate_repository(root, require_clean=True)
     scope = before.get("assignment_scope")
     if not isinstance(scope, AssignmentScope):
@@ -783,6 +787,9 @@ def run_cycle(
         "cycle": cycle,
         "state": "RUNNING",
         "started_at": time.time(),
+        "phase": "COORDINATOR",
+        "phase_started_at": time.time(),
+        "heartbeat_at": time.time(),
         "head_before": before["head"],
         "protected_refs": before["protected_refs"],
         "codex": identity,
@@ -818,6 +825,22 @@ def run_cycle(
             _ACTIVE_PROCESS = process
             meta["pid"] = process.pid
             write_json(run_dir / "status.json", meta)
+            phase_started_at = time.time()
+            heartbeat_stop = threading.Event()
+            write_supervisor_state(
+                state_root, "RUNNING", announce=False, cycle=cycle,
+                head=before["head"], phase="COORDINATOR",
+                phase_started_at=phase_started_at, heartbeat_at=phase_started_at,
+                summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                blockers=[],
+            )
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_running_cycle,
+                args=(heartbeat_stop, state_root, cycle, before["head"], phase_started_at),
+                name="two-site-supervisor-heartbeat",
+                daemon=True,
+            )
+            heartbeat_thread.start()
             capture_bounded_process(
                 process, b"", run_dir / "stream.jsonl", run_dir / "stderr.txt",
                 timeout, max_output=MAX_CODEX_OUTPUT,
@@ -866,6 +889,10 @@ def run_cycle(
         write_json(run_dir / "status.json", meta)
         raise
     finally:
+        if heartbeat_stop is not None:
+            heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join()
         _ACTIVE_PROCESS = None
         # Telemetry must neither authorize nor block a valid transition. Persist
         # before run pruning, including failed/interrupted attempts.
@@ -910,10 +937,42 @@ def prune_runs(state_root: Path, keep: int = KEEP_RUNS) -> list[str]:
     return removed
 
 
-def write_supervisor_state(state_root: Path, state: str, **fields: object) -> None:
+def write_supervisor_state(
+    state_root: Path, state: str, *, announce: bool = True, **fields: object
+) -> None:
     payload = {"state": state, "updated_at": time.time(), **fields}
     write_json(state_root / "status.json", payload)
-    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    if announce:
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def _heartbeat_running_cycle(
+    stopped: threading.Event,
+    state_root: Path,
+    cycle: int,
+    head: object,
+    phase_started_at: float,
+    *,
+    interval: float = SUPERVISOR_HEARTBEAT_SECONDS,
+) -> None:
+    """Refresh bounded, source-free liveness evidence while Codex is running.
+
+    Heartbeats are observability only: an I/O failure cannot accept, retry, stop,
+    or otherwise alter a cycle.  The monitor may report stale evidence, but never
+    terminates a live supervisor merely because a heartbeat is missing.
+    """
+    while not stopped.wait(interval):
+        try:
+            now = time.time()
+            write_supervisor_state(
+                state_root, "RUNNING", announce=False, cycle=cycle, head=head,
+                phase="COORDINATOR", phase_started_at=phase_started_at,
+                heartbeat_at=now,
+                summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                blockers=[],
+            )
+        except OSError:
+            pass
 
 
 def signal_handler(_signum: int, _frame: object) -> None:
@@ -942,8 +1001,11 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
             if cycle == 1:
                 previous_success = persisted_continuation(root, state_root, cycle_start_head)
             cycle_start_refs = ref_snapshot(root)
+            phase_started_at = time.time()
             write_supervisor_state(
                 state_root, "RUNNING", cycle=cycle, head=cycle_start_head,
+                phase="PREPARING", phase_started_at=phase_started_at,
+                heartbeat_at=phase_started_at,
                 summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
                 blockers=[],
             )

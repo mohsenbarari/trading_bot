@@ -16,6 +16,18 @@ def test_monitor_requires_and_recovers_the_provider_broker():
     assert 'recovery_reason="provider_broker_missing"' in src
     assert 'broker=$broker_count' in src
 
+
+def test_monitor_reports_liveness_without_restarting_a_live_stale_supervisor():
+    src = MONITOR.read_text()
+    assert 'running_heartbeat_max_age_seconds=90' in src
+    assert 'liveness="STALE"' in src
+    assert 'health="STALE"' in src
+    assert 'action="liveness_stale_no_restart"' in src
+    assert 'status_phase=$status_phase' in src
+    assert 'phase_age_seconds=$phase_age_seconds' in src
+    assert 'heartbeat_age_seconds=$heartbeat_age_seconds' in src
+    assert 'liveness=$liveness' in src
+
 CASES = [
     ("Assignment expired", False, "assignment_expired", "false"),
     ("approval denied", False, "authority_blocked", "false"),

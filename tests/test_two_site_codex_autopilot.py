@@ -680,11 +680,19 @@ class AutopilotContracts(unittest.TestCase):
                 patch.object(autopilot, "write_supervisor_state") as publish:
             with self.assertRaises(KeyboardInterrupt):
                 autopilot.run_loop(self.root, self.root / "codex", 1, 300, True)
-        publish.assert_called_once_with(
-            state_root, "RUNNING", cycle=1, head="a" * 40,
-            summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
-            blockers=[],
+        publish.assert_called_once()
+        args, kwargs = publish.call_args
+        self.assertEqual(args, (state_root, "RUNNING"))
+        self.assertEqual(kwargs["cycle"], 1)
+        self.assertEqual(kwargs["head"], "a" * 40)
+        self.assertEqual(kwargs["phase"], "PREPARING")
+        self.assertIsInstance(kwargs["phase_started_at"], float)
+        self.assertEqual(kwargs["heartbeat_at"], kwargs["phase_started_at"])
+        self.assertEqual(
+            kwargs["summary"],
+            "Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
         )
+        self.assertEqual(kwargs["blockers"], [])
 
     def test_run_loop_contains_unexpected_cycle_errors(self):
         state_root = self.root / ".local/two-site-refactor/autopilot"

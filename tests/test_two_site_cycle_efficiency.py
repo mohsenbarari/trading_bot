@@ -1,6 +1,7 @@
 """Offline regression tests for bounded continuation and usage accounting."""
 import json
 import os
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -200,6 +201,31 @@ def test_loop_reuses_only_persisted_accepted_continuation(tmp_path):
     assert calls[0]["continuation"]["commit"] == "a" * 40
 
 
+def test_heartbeat_is_source_free_best_effort_and_silent(tmp_path):
+    stopped = threading.Event()
+    calls = []
+
+    def publish(_root, state, *, announce=True, **fields):
+        calls.append((state, announce, fields))
+        stopped.set()
+
+    with patch.object(ap, "write_supervisor_state", side_effect=publish):
+        ap._heartbeat_running_cycle(
+            stopped, tmp_path, 7, "a" * 40, 123.0, interval=0.001
+        )
+
+    assert len(calls) == 1
+    state, announce, fields = calls[0]
+    assert state == "RUNNING"
+    assert announce is False
+    assert fields["cycle"] == 7
+    assert fields["head"] == "a" * 40
+    assert fields["phase"] == "COORDINATOR"
+    assert fields["phase_started_at"] == 123.0
+    assert fields["blockers"] == []
+    assert isinstance(fields["heartbeat_at"], float)
+
+
 def test_persistent_metrics_are_bounded_idempotent_and_keep_failed_runs(tmp_path, monkeypatch):
     state = tmp_path / ".local/two-site-refactor/autopilot"
     monkeypatch.setattr(metrics, "MAX_RECORDS", 2)
@@ -286,3 +312,6 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
     status = json.loads(saved.read_text())
     assert status["state"] == ("FAILED" if capture_fails else "CONTINUE")
     assert status["metrics_error"] == "RuntimeError"
+    assert status["phase"] == "COORDINATOR"
+    assert isinstance(status["phase_started_at"], float)
+    assert isinstance(status["heartbeat_at"], float)

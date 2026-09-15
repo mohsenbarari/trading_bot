@@ -13,6 +13,7 @@ expected_candidate="c3fe6ae72038c0059ef04474d908e819785bef07"
 recovery_file="$report_root/recovery.json"
 antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.1.27-93eb2118b778a400.pin"
 expected_antigravity_sha256="93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
+running_heartbeat_max_age_seconds=90
 
 cd "$integration_root" || exit 1
 
@@ -50,6 +51,9 @@ state="UNKNOWN"
 cycle="-"
 status_head="-"
 status_age_seconds="-1"
+status_phase="UNKNOWN"
+phase_age_seconds="-1"
+heartbeat_age_seconds="-1"
 blockers_text=""
 status_dirty="false"
 status_ambiguous="false"
@@ -60,12 +64,21 @@ if [[ -f "$status_file" && ! -L "$status_file" ]]; then
     state="$(/usr/bin/jq -r '.state // "UNKNOWN"' "$status_file" 2>/dev/null || printf 'INVALID')"
     cycle="$(/usr/bin/jq -r '.cycle // "-"' "$status_file" 2>/dev/null || printf '-')"
     status_head="$(/usr/bin/jq -r '.head // "-"' "$status_file" 2>/dev/null || printf '-')"
+    status_phase="$(/usr/bin/jq -r 'if (.phase | type) == "string" then .phase else "UNKNOWN" end' "$status_file" 2>/dev/null || printf 'INVALID')"
     blockers_text="$(/usr/bin/jq -r '[.blockers[]? | select(type == "string")] | join(" ")' "$status_file" 2>/dev/null || true)"
     status_dirty="$(/usr/bin/jq -r '.dirty // false' "$status_file" 2>/dev/null || printf 'false')"
     status_ambiguous="$(/usr/bin/jq -r '.ambiguous_change // false' "$status_file" 2>/dev/null || printf 'false')"
     status_mtime="$(/usr/bin/stat -c %Y -- "$status_file" 2>/dev/null || printf '0')"
     if [[ "$status_mtime" =~ ^[0-9]+$ && "$status_mtime" -gt 0 ]]; then
       status_age_seconds="$((now_epoch - status_mtime))"
+    fi
+    phase_started_epoch="$(/usr/bin/jq -r 'if (.phase_started_at | type) == "number" then (.phase_started_at | floor) else 0 end' "$status_file" 2>/dev/null || printf '0')"
+    heartbeat_epoch="$(/usr/bin/jq -r 'if (.heartbeat_at | type) == "number" then (.heartbeat_at | floor) elif (.updated_at | type) == "number" then (.updated_at | floor) else 0 end' "$status_file" 2>/dev/null || printf '0')"
+    if [[ "$phase_started_epoch" =~ ^[0-9]+$ && "$phase_started_epoch" -gt 0 ]]; then
+      phase_age_seconds="$((now_epoch - phase_started_epoch))"
+    fi
+    if [[ "$heartbeat_epoch" =~ ^[0-9]+$ && "$heartbeat_epoch" -gt 0 ]]; then
+      heartbeat_age_seconds="$((now_epoch - heartbeat_epoch))"
     fi
   fi
 fi
@@ -105,9 +118,19 @@ if [[ "$current_main" == "$expected_main" && "$current_origin_main" == "$expecte
 fi
 
 health="DEGRADED"
+liveness="UNKNOWN"
+if [[ "$state" == "RUNNING" && "$supervisor_count" -gt 0 ]]; then
+  if [[ "$heartbeat_age_seconds" =~ ^[0-9]+$ && "$heartbeat_age_seconds" -le "$running_heartbeat_max_age_seconds" ]]; then
+    liveness="FRESH"
+  else
+    liveness="STALE"
+  fi
+fi
 if [[ "$tmux_observation" == "present" && "$supervisor_count" -gt 0 \
-      && "$broker_count" -eq 1 && "$state" == "RUNNING" ]]; then
+      && "$broker_count" -eq 1 && "$state" == "RUNNING" && "$liveness" == "FRESH" ]]; then
   health="HEALTHY"
+elif [[ "$state" == "RUNNING" && "$liveness" == "STALE" ]]; then
+  health="STALE"
 elif [[ "$tmux_observation" == "absent" && "$state" == "COMPLETE" ]]; then
   health="COMPLETE"
 elif [[ "$state" == "BLOCKED" ]]; then
@@ -120,6 +143,12 @@ action="none"
 recovery_attempts=0
 next_attempt_epoch=0
 recovery_reason="none"
+# A stale live supervisor is evidence for investigation, not authority to kill
+# or replace it.  A separately absent Broker may still use its existing guarded
+# recovery path; stale liveness never authorizes a Supervisor restart.
+if [[ "$health" == "STALE" ]]; then
+  action="liveness_stale_no_restart"
+fi
 if [[ -f "$recovery_file" && ! -L "$recovery_file" ]]; then
   recovery_size="$(/usr/bin/stat -c %s -- "$recovery_file" 2>/dev/null || printf '65537')"
   recovery_links="$(/usr/bin/stat -c %h -- "$recovery_file" 2>/dev/null || printf '2')"
@@ -304,7 +333,7 @@ if [[ "$restart_eligible" == true ]]; then
   fi
 fi
 
-report="$timestamp health=$health state=$state cycle=$cycle phase=$phase session=$session_running tmux_observation=$tmux_observation supervisor=$supervisor_count broker=$broker_count git_branch=$git_branch git_head=$git_head status_head=$short_status_head git_clean=$git_clean protected_refs=$protected_refs_ok action=$action recovery_attempts=$recovery_attempts status_age_seconds=$status_age_seconds"
+report="$timestamp health=$health state=$state cycle=$cycle phase=$phase status_phase=$status_phase phase_age_seconds=$phase_age_seconds heartbeat_age_seconds=$heartbeat_age_seconds liveness=$liveness session=$session_running tmux_observation=$tmux_observation supervisor=$supervisor_count broker=$broker_count git_branch=$git_branch git_head=$git_head status_head=$short_status_head git_clean=$git_clean protected_refs=$protected_refs_ok action=$action recovery_attempts=$recovery_attempts status_age_seconds=$status_age_seconds"
 
 latest_tmp="$(/usr/bin/mktemp "$report_root/.latest.XXXXXX")"
 /usr/bin/printf '%s\n' "$report" >"$latest_tmp"

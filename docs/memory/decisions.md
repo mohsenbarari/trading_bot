@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-15 | A live automation cycle publishes only bounded phase/heartbeat metadata, never prompt or source. The monitor reports observed phase, phase age and heartbeat freshness; stale liveness is report-only and must never by itself terminate or restart a live Supervisor. Existing recovery for a separately missing Broker remains guarded and independent.
+
 - 2026-09-15 | Automation efficiency must preserve final review and all quality gates: a known oversized Codex command event is drained without retaining its body so later completed-turn usage remains observable; other malformed telemetry remains UNKNOWN/fail-closed. Task identity may read non-model source only through the same link-safe reader with a 2 MB cap. A restart reuses only an exact committed `CONTINUE` checkpoint, and normal STOP keeps the Broker available until the Supervisor records `STOPPED` at a cycle boundary.
 
 - 2026-09-12 | Automation deduplicates work by immutable semantic identity rather than task/run names: Stage + normalized documented gap + referenced symbols + scenario + source SHA manifest. Reservation occurs atomically before evidence/provider work, has no automatic expiry/release, and duplicate aliases fail closed. Existing-file outputs >=8192 UTF-8 bytes require compact replacements; full bytes are materialized for isolated focused tests before independent Gemini review. Equivalent substantive failures rescope instead of repeating.
