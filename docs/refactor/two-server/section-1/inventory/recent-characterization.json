@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "ecb84b52edf5a5b4609372ba6f0c60cabff3c66e",
+  "inspected_head": "76227c4b78503f914c2f9682a227687d73191e71",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1039,6 +1039,71 @@
         "tests/test_p1_00b_characterization_trade_history_export_excel_router.py::TestTradeHistoryExportExcelRouterCharacterization::test_export_excel_router_unauthenticated_suppresses_all_work",
         "tests/test_p1_00b_characterization_trade_history_export_excel_router.py::TestTradeHistoryExportExcelRouterCharacterization::test_export_excel_router_progress_precedes_state_and_access_denied_short_circuit",
         "tests/test_p1_00b_characterization_trade_history_export_excel_router.py::TestTradeHistoryExportExcelRouterCharacterization::test_export_excel_router_empty_history_uses_default_months_and_warns"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_pdf_routers.py",
+      "sha256": "3660e5c767b3fcc05b5ad4837d5eb8db9239af9f9a199b870cc731e43a95382d",
+      "last_commit": "d7190a7bf0c9d1a662070d4baa447c8af8a95869",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PDF-L440",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PROFILE-TRADE-PDF-L498"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_pdf_routers.py::TestTradeHistoryPdfRoutersCharacterization::test_export_pdf_router_unauthenticated_suppresses_all_work",
+        "tests/test_p1_00b_characterization_trade_history_pdf_routers.py::TestTradeHistoryPdfRoutersCharacterization::test_export_pdf_router_success_uses_state_months_and_cleans_up",
+        "tests/test_p1_00b_characterization_trade_history_pdf_routers.py::TestTradeHistoryPdfRoutersCharacterization::test_export_profile_trade_pdf_router_success_forces_three_months_and_cleans_up"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_public_and_mutual_routers.py",
+      "sha256": "eb6ee6e9d984776addb743020fcfee87c8d0d4ec04ac9f99ee6dcd4e22ff6f10",
+      "last_commit": "ed8ecccfc4d02c0b85591af936377345f5c43c10",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-PUBLIC-PROFILE-USERNAME-UNAVAILABLE-L52",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-MUTUAL-TRADE-HISTORY-L607"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_public_and_mutual_routers.py::TestTradeHistoryPublicAndMutualRoutersCharacterization::test_public_profile_username_unavailable_router_alerts_exactly",
+        "tests/test_p1_00b_characterization_trade_history_public_and_mutual_routers.py::TestTradeHistoryPublicAndMutualRoutersCharacterization::test_mutual_history_router_unauthenticated_short_circuit",
+        "tests/test_p1_00b_characterization_trade_history_public_and_mutual_routers.py::TestTradeHistoryPublicAndMutualRoutersCharacterization::test_mutual_history_router_empty_self_history_success_ordering"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_back_to_profile_router.py",
+      "sha256": "4781b886733810c12f933b97c0212dacf487d8510dcd09d00bd9719c63849e1c",
+      "last_commit": "c179725b42b8dea6dcf96e3be23af075e20a6aae",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-BACK-TO-PROFILE-L554"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_back_to_profile_router.py::TestTradeHistoryBackToProfileRouterCharacterization::test_registered_unavailable_profile_alerts_once_without_edit",
+        "tests/test_p1_00b_characterization_trade_history_back_to_profile_router.py::TestTradeHistoryBackToProfileRouterCharacterization::test_registered_accessible_profile_edits_then_answers_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_back_lot_price_routers.py",
+      "sha256": "bc8f2a8d7f1f50aa5ac407ae55f287c55d146e39759c01f4eeb4482777d0a472",
+      "last_commit": "e72d0f08007ed031c861cf655511b30a36e86ca8",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-LOT-TYPE-L2221",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-PRICE-L2234"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_back_lot_price_routers.py::TestTradeCreateBackLotPriceRoutersCharacterization::test_scenario_1_back_to_lot_type_stale",
+        "tests/test_p1_00b_characterization_trade_create_back_lot_price_routers.py::TestTradeCreateBackLotPriceRoutersCharacterization::test_scenario_2_back_to_lot_type_current",
+        "tests/test_p1_00b_characterization_trade_create_back_lot_price_routers.py::TestTradeCreateBackLotPriceRoutersCharacterization::test_scenario_3_back_to_price_current"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_link_account_cmd_router.py",
+      "sha256": "172864ee009b207d889661aff310a8fef43e11e741df18f1f45e0a3394e1d476",
+      "last_commit": "76227c4b78503f914c2f9682a227687d73191e71",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-CMD-LINK-L423"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_link_account_cmd_router.py::TestLinkAccountCmdRouterCharacterization::test_cmd_link_router_missing_user_sends_neutral_copy_and_clears_state"
       ]
     }
   ],
