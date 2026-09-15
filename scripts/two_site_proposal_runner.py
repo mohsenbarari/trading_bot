@@ -929,6 +929,82 @@ def validate_task_readiness(
     return notes
 
 
+def derive_session_gate(notes: dict) -> dict[str, object]:
+    if not isinstance(notes, dict):
+        raise ProposalError("invalid preparation_notes for session gate derivation")
+    dep_ctx = notes.get("dependency_context")
+    if not isinstance(dep_ctx, dict):
+        raise ProposalError("missing or invalid dependency_context for session gate derivation")
+    session_ctx = dep_ctx.get("session_context")
+    if session_ctx is None:
+        return {
+            "state": "NOT_REQUESTED",
+            "activation_reason": "NOT_REQUESTED",
+            "root_count": 0,
+            "required_symbol_count": 0,
+            "query_operation_count": 0,
+        }
+    if not isinstance(session_ctx, dict):
+        raise ProposalError("invalid session_context in dependency_context")
+    requested = session_ctx.get("requested")
+    if requested is False:
+        reason = session_ctx.get("activation_reason")
+        if reason != "NOT_REQUESTED":
+            raise ProposalError("invalid activation_reason for unrequested session context")
+        roots = session_ctx.get("root_symbols", [])
+        if not isinstance(roots, list) or len(roots) != 0:
+            raise ProposalError("non-empty root_symbols for unrequested session context")
+        req_count = session_ctx.get("required_symbol_count", 0)
+        if type(req_count) is not int or isinstance(req_count, bool) or req_count != 0:
+            raise ProposalError("non-zero required_symbol_count for unrequested session context")
+        queries = session_ctx.get("query_operations", [])
+        if not isinstance(queries, list) or len(queries) != 0:
+            raise ProposalError("non-empty query_operations for unrequested session context")
+        return {
+            "state": "NOT_REQUESTED",
+            "activation_reason": "NOT_REQUESTED",
+            "root_count": 0,
+            "required_symbol_count": 0,
+            "query_operation_count": 0,
+        }
+    if requested is True:
+        reason = session_ctx.get("activation_reason")
+        if reason not in ("EXPLICIT_DECLARATION", "LEGACY_HEURISTIC"):
+            raise ProposalError(f"invalid session context activation reason: {reason}")
+        roots = session_ctx.get("root_symbols")
+        if not isinstance(roots, list) or any(not isinstance(r, str) or not r.strip() for r in roots):
+            raise ProposalError("invalid root_symbols in session_context")
+        root_count = len(roots)
+        if root_count > 8:
+            raise ProposalError("root_count exceeds bounded maximum")
+        req_count = session_ctx.get("required_symbol_count")
+        if type(req_count) is not int or isinstance(req_count, bool) or not (0 <= req_count <= MAX_SESSION_FLOW_SYMBOLS):
+            raise ProposalError("invalid required_symbol_count in session_context")
+        queries = session_ctx.get("query_operations")
+        if not isinstance(queries, list):
+            raise ProposalError("invalid query_operations in session_context")
+        query_count = len(queries)
+        if query_count > MAX_SESSION_QUERY_HINTS:
+            raise ProposalError("query_operation_count exceeds bounded maximum")
+        if (
+            session_ctx.get("omitted_required_symbol_count", 0) != 0
+            or session_ctx.get("omitted_query_operation_count", 0) != 0
+            or session_ctx.get("omitted_missing_symbol_count", 0) != 0
+            or session_ctx.get("omitted_unresolved_symbol_count", 0) != 0
+            or session_ctx.get("missing_symbols")
+            or session_ctx.get("unresolved_symbols")
+        ):
+            raise ProposalError("session_context contains unpassed or omitted symbols")
+        return {
+            "state": "REQUESTED_AND_PASSED",
+            "activation_reason": reason,
+            "root_count": root_count,
+            "required_symbol_count": req_count,
+            "query_operation_count": query_count,
+        }
+    raise ProposalError("invalid requested flag in session_context")
+
+
 def _task_contract_text(task: dict) -> str:
     goal = task.get("goal", "")
     if isinstance(goal, str):
@@ -2276,6 +2352,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):
         # The lock covers every CLI invocation, including identity probes.
         initial_cli_identity = cli_identity(disposable_cli)
+        session_gate = derive_session_gate(prep_notes)
         out = local / run_id
         out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
         workspace = out / "workspace"
@@ -2289,7 +2366,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "head": head, "model": role_model, "effort": role_effort, "state": "RUNNING", "started_at": time.time(),
                 "retain_until": time.time() + 7 * 86400,
                 "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
-                "cli": initial_cli_identity, "cli_source": cli_source}
+                "cli": initial_cli_identity, "cli_source": cli_source,
+                "session_gate": session_gate}
         if autopilot_run_id is not None:
             meta["controller_run_id"] = autopilot_run_id
         if prior_status is not None:
