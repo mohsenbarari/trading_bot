@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "6eac29e06a632515803a18d3dfb2c1312236b254",
+  "inspected_head": "e2d41e710ddfcb5e4e8a54c66ae3990a9a0d4b6c",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1112,15 +1112,32 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py",
-      "sha256": "f1216264cfa23937334391fc9c3397aa373039a8ac539504b0ae8ed20004eb28",
-      "last_commit": "4be746ddef8079f9fb6463dcf1e5971797f38512",
+      "sha256": "8a9a8978830cf81b22302ab4fbcef33d089d8ac9a9043eebba04bb4e6983dfd4",
+      "last_commit": "23fdee3f7a93e9af9ba27c29bf0051e705481428",
       "seed_ids": [
         "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74"
       ],
       "test_selectors": [
         "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_unauthenticated_guard_answers_m33_without_reading_callback_data_or_downstream_work",
         "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_malformed_callback_guard_answers_m33_without_session_or_downstream_work",
-        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_valid_callback_pre_mutation_ledger_and_requester_guards_answer_m33_with_single_unlocked_load"
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_valid_callback_pre_mutation_ledger_and_requester_guards_answer_m33_with_single_unlocked_load",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_matched_requester_overtime_remote_home_success_scenario",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_matched_requester_overtime_local_home_success_scenario_with_absent_owner",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_matched_requester_overtime_local_home_success_scenario_with_present_owner",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_matched_requester_overtime_remote_home_forwarding_error_does_not_edit_or_commit",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_guards.py::OvertimeRequesterCancelGuardsCharacterizationTests::test_matched_requester_overtime_local_home_locked_reload_terminal_guards"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py",
+      "sha256": "f75982060607f3c53ba3fb4e6033253eebf2e4ab0d982a2c4316f2d8fe6df774",
+      "last_commit": "e2d41e710ddfcb5e4e8a54c66ae3990a9a0d4b6c",
+      "seed_ids": [
+        "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py::OvertimeRequesterCancelTerminalMappingCharacterizationTests::test_overtime_requester_cancel_not_requester_error_maps_to_m33",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py::OvertimeRequesterCancelTerminalMappingCharacterizationTests::test_overtime_requester_cancel_already_terminal_error_maps_to_m33"
       ]
     },
     {
