@@ -91,6 +91,25 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(notes["schema_version"], 1)
         self.assertEqual(json.loads(self.task_path.read_text()), original)
 
+    def test_assignment_scope_failures_have_safe_actionable_codes(self):
+        environment = {
+            "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED": "1",
+            "TWO_SITE_ASSIGNMENT_ID": "WA-TEST-001",
+            "TWO_SITE_ASSIGNMENT_SHA256": "a" * 64,
+        }
+        cases = {
+            "Task allowed_file is outside assignment scope": "TASK_PATH_OUTSIDE_SCOPE",
+            "task.goal does not contain assignment ID as a bounded token": "TASK_ASSIGNMENT_TOKEN_MISSING",
+            "Assignment has expired": "ASSIGNMENT_EXPIRED",
+            "unexpected parser detail": "ASSIGNMENT_CONTRACT_INVALID",
+        }
+        for reason, code in cases.items():
+            with self.subTest(code=code), \
+                 patch.dict(os.environ, environment, clear=True), \
+                 patch.object(runner, "load_expected_assignment_scope", side_effect=runner.AssignmentScopeError(reason)):
+                with self.assertRaisesRegex(runner.ProposalError, rf"validation failed \[{code}\]"):
+                    runner.validate_assignment_scope(self.root, self.task)
+
     def test_preparation_injected_before_provider_and_prompt_limits(self):
         with patch.object(runner, "git", return_value="head"), \
              patch.object(runner, "proposal_cli_context", side_effect=RuntimeError("sentinel")) as provider, \

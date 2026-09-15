@@ -19,10 +19,14 @@ except ModuleNotFoundError:
 
 __all__ = ["SemanticTaskBuilderError", "build_task_identity", "validate_task_identity"]
 
+# Identity binds the exact source bytes but does not send this file to either
+# model. Its safe bound may therefore exceed the smaller model-context bound.
+MAX_IDENTITY_SOURCE_BYTES = 2_000_000
+
 class SemanticTaskBuilderError(ValueError):
     """Raised when semantic task identity building or validation fails."""
 
-_RUNNER_ERRS = tuple(c for n in ("ProposalRunnerError", "RunnerError") if isinstance(c := getattr(runner, n, None), type))
+_RUNNER_ERRS = tuple(c for n in ("ProposalError", "ProposalRunnerError", "RunnerError") if isinstance(c := getattr(runner, n, None), type))
 _KNOWN = (AssignmentScopeError, SemanticTaskError, OSError, RuntimeError, TypeError, KeyError, UnicodeError, *_RUNNER_ERRS)
 
 def _wrap_errors(func):
@@ -54,6 +58,16 @@ def _load_stage(root: Path) -> str:
     if not isinstance(st, str) or not st:
         raise SemanticTaskBuilderError(f"invalid stage from active scope: {st!r}")
     return st
+
+
+def _identity_source_bytes(root: Path, target: Path, label: str) -> bytes:
+    """Read a source for hashing with a bounded, link-safe identity allowance."""
+    try:
+        return runner.bounded_file_bytes(root, target, runner.MAX_CONTEXT, label)
+    except runner.ProposalError as exc:
+        if "exceeds the safe context budget" not in str(exc):
+            raise
+    return runner.bounded_file_bytes(root, target, MAX_IDENTITY_SOURCE_BYTES, label)
 
 @_wrap_errors
 def build_task_identity(root: Any, gap: Any, scenario: Any, context_files: Any, allowed_files: Any, excerpts: Any) -> dict[str, Any]:
@@ -99,7 +113,7 @@ def build_task_identity(root: Any, gap: Any, scenario: Any, context_files: Any, 
                 manifest[name] = None
                 continue
             raise SemanticTaskBuilderError(f"missing required file: {name}")
-        manifest[name] = runner.sha(runner.bounded_file_bytes(r, target, runner.MAX_CONTEXT, name))
+        manifest[name] = runner.sha(_identity_source_bytes(r, target, name))
         if name in exc_map and manifest[name] != exc_map[name]:
             raise SemanticTaskBuilderError(f"stale excerpt sha for {name}")
     ident = build_identity(stage_id=stage_id, gap_reference=gap, scenario_key=scenario, symbol_groups=sym_groups, source_manifest=manifest)

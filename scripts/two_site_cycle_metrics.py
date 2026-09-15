@@ -22,6 +22,32 @@ MAX_STREAM = 16_000_000
 MAX_LINE = 1_000_000
 MAX_RECORDS = 2000
 MAX_LEDGER = 2_000_000
+_SKIPPABLE_OVERSIZED_EVENT = re.compile(
+    rb'"type"\s*:\s*"item\.completed".{0,4096}?"type"\s*:\s*"command_execution"',
+    re.DOTALL,
+)
+
+
+def _drain_oversized_event(stream, first: bytes, total: int) -> tuple[int, bool]:
+    """Discard one known large command record without buffering its output.
+
+    Codex event streams can contain a command result larger than MAX_LINE while a
+    later, small turn.completed record still contains valid usage.  The command
+    body is not telemetry and must not make that later accounting disappear.
+    Only the well-known command-completion envelope is skippable; all other
+    oversized or unterminated records remain invalid.
+    """
+    if not _SKIPPABLE_OVERSIZED_EVENT.search(first[:8192]):
+        return total, False
+    chunk = first
+    while not chunk.endswith(b"\n"):
+        chunk = stream.readline(MAX_LINE + 1)
+        if not chunk:
+            return total, False
+        total += len(chunk)
+        if total > MAX_STREAM:
+            raise ProposalError("oversized metrics stream")
+    return total, True
 
 
 def usage_from_stream(root: Path, path: Path) -> dict:
@@ -37,14 +63,22 @@ def usage_from_stream(root: Path, path: Path) -> dict:
         if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > MAX_STREAM:
             raise ProposalError("unsafe or oversized metrics stream")
         totals = dict.fromkeys(missing, 0)
-        turns = commands = count = reasoning = 0
+        turns = commands = count = reasoning = skipped_oversized_events = 0
         reasoning_known = True
         while True:
             line = stream.readline(MAX_LINE + 1)
             if not line:
                 break
             count += len(line)
-            if len(line) > MAX_LINE or count > MAX_STREAM or not line.endswith(b"\n"):
+            if count > MAX_STREAM:
+                raise ProposalError("oversized metrics stream")
+            if len(line) > MAX_LINE:
+                count, skipped = _drain_oversized_event(stream, line, count)
+                if not skipped:
+                    raise ProposalError("oversized or incomplete metrics line")
+                skipped_oversized_events += 1
+                continue
+            if not line.endswith(b"\n"):
                 raise ProposalError("oversized or incomplete metrics line")
             item = unique_json(line.decode("utf-8"))
             if not isinstance(item, dict):
@@ -80,7 +114,8 @@ def usage_from_stream(root: Path, path: Path) -> dict:
     return {"usage_state": "OBSERVED_COMPLETED_TURNS" if turns else "UNKNOWN",
             **(totals if turns else missing), "completed_turns": turns,
             "reasoning_output_tokens": reasoning if turns and reasoning_known else None,
-            "completed_commands": commands, "stream_bytes": count}
+            "completed_commands": commands, "stream_bytes": count,
+            "skipped_oversized_events": skipped_oversized_events}
 
 
 def atomic_json(root: Path, path: Path, value: object, limit: int) -> None:

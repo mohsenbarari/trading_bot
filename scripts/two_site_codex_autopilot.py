@@ -681,6 +681,37 @@ def continuation_hint(result: object, current_head: object) -> dict | None:
     return hint
 
 
+def persisted_continuation(root: Path, state_root: Path, current_head: object) -> dict | None:
+    """Recover only an exact accepted checkpoint from the prior supervisor state.
+
+    This is an optimization hint, never an authority receipt.  It is deliberately
+    ignored on any malformed, incomplete, stale, or non-CONTINUE state so a restart
+    cannot turn a historical summary into permission to skip current inspection.
+    """
+    status_path = state_root / "status.json"
+    try:
+        state = unique_json(bounded_file_text(
+            root, status_path, MAX_RESULT_BYTES, "persisted supervisor status"
+        ))
+    except (OSError, ValueError, UnicodeError):
+        return None
+    if not isinstance(state, dict):
+        return None
+    candidate = {
+        "state": state.get("state"),
+        "head_changed": state.get("head_changed"),
+        "head_after": state.get("head_after"),
+        "commit": state.get("commit"),
+        "blockers": state.get("blockers"),
+        "summary": state.get("summary"),
+        "next_action": state.get("next_action"),
+        "gemini_worker_run_id": state.get("gemini_worker_run_id"),
+        "gemini_reviewer_run_id": state.get("gemini_reviewer_run_id"),
+        "proposal_sha256": state.get("proposal_sha256"),
+    }
+    return candidate if continuation_hint(candidate, current_head) is not None else None
+
+
 def prompt_for_cycle(
     root: Path,
     cycle: int,
@@ -908,6 +939,8 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                 write_supervisor_state(state_root, "STOPPED", cycle=cycle)
                 return 0
             cycle_start_head = git(root, "rev-parse", "HEAD")
+            if cycle == 1:
+                previous_success = persisted_continuation(root, state_root, cycle_start_head)
             cycle_start_refs = ref_snapshot(root)
             write_supervisor_state(
                 state_root, "RUNNING", cycle=cycle, head=cycle_start_head,
@@ -952,6 +985,9 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                         summary=result["summary"], next_action=result["next_action"],
                         blockers=result["blockers"],
                         advisories=result.get("advisories", []),
+                        head_after=result["head_after"],
+                        head_changed=result["head_changed"],
+                        commit=result["commit"],
                         gemini_worker_run_id=result["gemini_worker_run_id"],
                         gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
                         proposal_sha256=result["proposal_sha256"],

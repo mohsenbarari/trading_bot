@@ -118,6 +118,88 @@ def test_stream_limits_links_and_unknown(tmp_path, monkeypatch):
         metrics.usage_from_stream(tmp_path, path)
 
 
+def test_large_command_record_does_not_hide_later_usage(tmp_path, monkeypatch):
+    path = tmp_path / "stream.jsonl"
+    monkeypatch.setattr(metrics, "MAX_LINE", 256)
+    command = {
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "command": "bounded command",
+            "aggregated_output": "x" * 1024,
+        },
+    }
+    write_stream(path, [command, turn(200, 150, 10)])
+    value = metrics.usage_from_stream(tmp_path, path)
+    assert value["usage_state"] == "OBSERVED_COMPLETED_TURNS"
+    assert value["input_tokens"] == 200
+    assert value["uncached_input_tokens"] == 50
+    assert value["output_tokens"] == 10
+    assert value["completed_commands"] == 0
+    assert value["skipped_oversized_events"] == 1
+
+
+def test_large_non_command_record_is_not_silently_accepted(tmp_path, monkeypatch):
+    path = tmp_path / "stream.jsonl"
+    monkeypatch.setattr(metrics, "MAX_LINE", 128)
+    write_stream(path, [{"type": "turn.completed", "padding": "x" * 1024}])
+    with pytest.raises(ValueError):
+        metrics.usage_from_stream(tmp_path, path)
+
+
+def test_persisted_continuation_requires_exact_accepted_checkpoint(tmp_path):
+    state = tmp_path / ".local/two-site-refactor/autopilot"
+    state.mkdir(parents=True)
+    accepted = success("a" * 40)
+    state_value = {
+        "state": accepted["state"],
+        "head_changed": accepted["head_changed"],
+        "head_after": accepted["head_after"],
+        "commit": accepted["commit"],
+        "blockers": accepted["blockers"],
+        "summary": accepted["summary"],
+        "next_action": accepted["next_action"],
+        "gemini_worker_run_id": accepted["gemini_worker_run_id"],
+        "gemini_reviewer_run_id": accepted["gemini_reviewer_run_id"],
+        "proposal_sha256": accepted["proposal_sha256"],
+    }
+    (state / "status.json").write_text(json.dumps(state_value))
+    hint = ap.persisted_continuation(tmp_path, state, "a" * 40)
+    assert hint is not None
+    assert hint["commit"] == "a" * 40
+    assert ap.persisted_continuation(tmp_path, state, "b" * 40) is None
+    state_value.pop("proposal_sha256")
+    (state / "status.json").write_text(json.dumps(state_value))
+    assert ap.persisted_continuation(tmp_path, state, "a" * 40) is None
+
+
+def test_loop_reuses_only_persisted_accepted_continuation(tmp_path):
+    state = tmp_path / ".local/two-site-refactor/autopilot"
+    state.mkdir(parents=True)
+    accepted = success("a" * 40)
+    (state / "status.json").write_text(json.dumps({
+        "state": accepted["state"], "head_changed": accepted["head_changed"],
+        "head_after": accepted["head_after"], "commit": accepted["commit"],
+        "blockers": accepted["blockers"], "summary": accepted["summary"],
+        "next_action": accepted["next_action"],
+        "gemini_worker_run_id": accepted["gemini_worker_run_id"],
+        "gemini_reviewer_run_id": accepted["gemini_reviewer_run_id"],
+        "proposal_sha256": accepted["proposal_sha256"],
+    }))
+    calls = []
+
+    def cycle(root, codex, s_root, cycle, timeout, recovery=None, **kwargs):
+        calls.append(kwargs)
+        return s_root / "runs" / "fake", success("c" * 40)
+
+    with patch.object(ap, "git", side_effect=lambda *a: "" if "status" in a else "a" * 40), \
+         patch.object(ap, "ref_snapshot", return_value={}), \
+         patch.object(ap, "run_cycle", side_effect=cycle), \
+         patch.object(ap, "prune_runs", return_value=[]):
+        assert ap.run_loop(tmp_path, Path("codex"), 1, 10, True) == 2
+    assert calls[0]["continuation"]["commit"] == "a" * 40
+
+
 def test_persistent_metrics_are_bounded_idempotent_and_keep_failed_runs(tmp_path, monkeypatch):
     state = tmp_path / ".local/two-site-refactor/autopilot"
     monkeypatch.setattr(metrics, "MAX_RECORDS", 2)

@@ -334,6 +334,33 @@ def test_running_provider_call_refreshes_filesystem_heartbeat(
     assert writes.count("RUNNING") >= 2
 
 
+def test_normal_stop_waits_for_supervisor_boundary_acknowledgement(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    state_root = root / ".local/two-site-refactor/autopilot"
+    state_root.mkdir(parents=True)
+    (state_root / "STOP").write_text("controlled\n", encoding="utf-8")
+    broker.write_json(state_root / "status.json", {"state": "RUNNING"})
+    sleeps = 0
+
+    def acknowledge_after_one_poll(_seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        broker.write_json(state_root / "status.json", {"state": "STOPPED"})
+
+    monkeypatch.setattr(broker.time, "sleep", acknowledge_after_one_poll)
+    result = broker.serve(
+        root,
+        once=False,
+        scope_loader=lambda _root: (_ for _ in ()).throw(AssertionError("no request")),
+        install_signal_handlers=False,
+    )
+
+    assert result == 0
+    assert sleeps == 1
+
+
 def test_exclusive_lock_rejects_second_broker(tmp_path: Path) -> None:
     lock = tmp_path / "broker.lock"
     with broker.exclusive_broker_lock(lock):

@@ -854,7 +854,16 @@ def validate_assignment_scope(root: Path, task: dict) -> None:
         scope = load_expected_assignment_scope(root, assignment_id, assignment_sha256)
         validate_task_scope(scope, task)
     except AssignmentScopeError as exc:
-        raise ProposalError("assignment scope validation failed") from exc
+        reason = str(exc)
+        if reason == "Task allowed_file is outside assignment scope":
+            code = "TASK_PATH_OUTSIDE_SCOPE"
+        elif reason == "task.goal does not contain assignment ID as a bounded token":
+            code = "TASK_ASSIGNMENT_TOKEN_MISSING"
+        elif reason == "Assignment has expired":
+            code = "ASSIGNMENT_EXPIRED"
+        else:
+            code = "ASSIGNMENT_CONTRACT_INVALID"
+        raise ProposalError(f"assignment scope validation failed [{code}]") from exc
     except Exception as exc:
         raise ProposalError("assignment scope validation failed") from exc
 

@@ -166,6 +166,25 @@ def _read_json_file(root: Path, path: Path, limit: int, label: str) -> dict:
     return value
 
 
+def _supervisor_stop_acknowledged(root: Path) -> bool:
+    """Return true only after the supervisor has durably stopped at a boundary.
+
+    ``STOP`` asks the supervisor not to begin another cycle.  It must not make
+    the broker disappear while that supervisor is still waiting for the one
+    bounded provider request already in flight.  The supervisor status is
+    untrusted operational input, so malformed or unsafe data is fail-closed:
+    keep serving rather than mistake it for a completed boundary.
+    """
+    status_path = root / ".local/two-site-refactor/autopilot/status.json"
+    try:
+        status = _read_json_file(
+            root, status_path, MAX_REQUEST_BYTES, "supervisor stop status"
+        )
+    except (OSError, ProposalError):
+        return False
+    return status.get("state") == "STOPPED"
+
+
 def _atomic_new_json(path: Path, value: Mapping[str, object], limit: int) -> None:
     encoded = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -557,7 +576,14 @@ def serve(
         last_prune = time.time()
         _write_status(status_path, "IDLE", started_at=started_at)
         try:
-            while not _STOP and not (stop_path.exists() and not once):
+            # A normal STOP is a supervisor boundary request, not a cancellation
+            # of its active broker call.  Exit only after that supervisor has
+            # acknowledged STOPPED; ``once`` remains an explicit test/CLI mode.
+            while not _STOP and not (
+                stop_path.exists()
+                and not once
+                and _supervisor_stop_acknowledged(root)
+            ):
                 claimed_path = _claim_next(requests, claimed)
                 if claimed_path is None:
                     if time.time() - last_prune >= 60:

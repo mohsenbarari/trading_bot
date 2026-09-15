@@ -3,7 +3,12 @@ from __future__ import annotations
 import copy, hashlib, pytest
 from pathlib import Path
 from scripts import two_site_proposal_runner as runner
-from scripts.two_site_semantic_task_builder import SemanticTaskBuilderError, build_task_identity, validate_task_identity
+from scripts.two_site_semantic_task_builder import (
+    MAX_IDENTITY_SOURCE_BYTES,
+    SemanticTaskBuilderError,
+    build_task_identity,
+    validate_task_identity,
+)
 
 def _setup_repo(tmp_path: Path, stage: str = "stage_1") -> tuple[Path, dict]:
     root = tmp_path / "repo"
@@ -37,6 +42,22 @@ def test_valid_manifest_and_bounded_reader(tmp_path: Path, monkeypatch: pytest.M
     ident["symbol_groups"].append({"path": "fake", "symbols": []})
     val = validate_task_identity(root, args["gap"], args["scenario"], args["context_files"], args["allowed_files"], args["excerpts"], build_task_identity(root, args["gap"], args["scenario"], args["context_files"], args["allowed_files"], args["excerpts"]))
     assert "mutated" not in val["source_manifest"]
+
+
+def test_large_gap_reference_is_hashed_with_independent_bounded_allowance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, args = _setup_repo(tmp_path)
+    monkeypatch.setattr("scripts.two_site_semantic_task_builder.load_active_assignment_scope", lambda *a, **k: {"stage_id": "stage_1"})
+    (root / "gap.md").write_bytes(b"# Gap\n" + b"x" * (runner.MAX_CONTEXT + 1))
+    identity = build_task_identity(root, args["gap"], args["scenario"], args["context_files"], args["allowed_files"], args["excerpts"])
+    assert identity["source_manifest"]["gap.md"]
+
+
+def test_identity_source_cap_still_rejects_oversized_reference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, args = _setup_repo(tmp_path)
+    monkeypatch.setattr("scripts.two_site_semantic_task_builder.load_active_assignment_scope", lambda *a, **k: {"stage_id": "stage_1"})
+    (root / "gap.md").write_bytes(b"# Gap\n" + b"x" * MAX_IDENTITY_SOURCE_BYTES)
+    with pytest.raises(SemanticTaskBuilderError, match="safe context budget"):
+        build_task_identity(root, args["gap"], args["scenario"], args["context_files"], args["allowed_files"], args["excerpts"])
 
 @pytest.mark.parametrize("variation", ["stage", "scenario", "symbols", "source"])
 def test_task_id_irrelevance_and_sensitivity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variation: str) -> None:
