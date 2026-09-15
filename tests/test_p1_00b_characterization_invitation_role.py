@@ -92,7 +92,7 @@ class CharacterizeInvitationRoleTests(unittest.IsolatedAsyncioTestCase):
     @patch("bot.handlers.admin.answer_callback_message_via_runtime", new_callable=AsyncMock)
     @patch("bot.handlers.admin.answer_callback_query_via_runtime", new_callable=AsyncMock)
     @patch("bot.handlers.admin.forward_standard_invitation_to_iran")
-    async def test_successful_standard_role_creation_backed_by_sqlite_row(
+    async def test_successful_standard_role_forwards_without_local_invitation_row(
         self,
         mock_forward: AsyncMock,
         mock_answer_callback_query: AsyncMock,
@@ -108,34 +108,51 @@ class CharacterizeInvitationRoleTests(unittest.IsolatedAsyncioTestCase):
         )
         target_account_name = "standard_user"
         target_mobile_number = "09123456789"
-        expected_token = "INV-test-token-standard-42"
-        expected_short_code = "STD00042"
-        deterministic_bot_link = f"https://t.me/test_bot?start={expected_token}"
-        deterministic_web_link = f"https://web.example.com/i/{expected_short_code}"
+        deterministic_bot_link = "https://t.me/test_bot?start=INV-test-token-standard-42"
+        deterministic_web_link = "https://web.example.com/i/STD00042"
+
+        expected_payload = {
+            "requester_identity": {
+                "account_name": "admin_creator",
+                "mobile_number": "09120000000",
+                "telegram_id": 1234567,
+            },
+            "account_name": "standard_user",
+            "mobile_number": "09123456789",
+            "role": "عادی",
+            "source_server": "foreign",
+            "idempotency_key": "standard-invitation:f5ea0a21864f9508b9bfffae012713bcb2b9abfb",
+        }
+        expected_message_text = (
+            "✅ لینک دعوت برای نقش **عادی** آماده است:\n\n"
+            f"**نام کاربری:** `{target_account_name}`\n"
+            f"**موبایل:** `{target_mobile_number}`\n\n"
+            "لینک تلگرام:\n"
+            f"`{deterministic_bot_link}`\n\n"
+            "لینک وب‌اپ:\n"
+            f"`{deterministic_web_link}`"
+        )
 
         captured_payloads: list[dict[str, Any]] = []
         validated_requests: list[InternalInvitationCreateRequest] = []
+        execution_order: list[str] = []
+
+        state = FakeFSMContext({
+            "account_name": target_account_name,
+            "mobile_number": target_mobile_number,
+        })
+        original_clear = state.clear
+
+        async def recording_clear() -> None:
+            execution_order.append("state_clear")
+            await original_clear()
+
+        state.clear = recording_clear
 
         async def fake_forward_adapter(payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+            execution_order.append("forward")
             captured_payloads.append(payload)
-            validated = InternalInvitationCreateRequest.model_validate(payload)
-            validated_requests.append(validated)
-
-            with Session(self.engine) as session:
-                invitation = Invitation(
-                    account_name=validated.account_name,
-                    mobile_number=validated.mobile_number,
-                    token=expected_token,
-                    short_code=expected_short_code,
-                    role=validated.role,
-                    kind=InvitationKind.STANDARD,
-                    created_by_id=inviter.id,
-                    is_used=False,
-                    expires_at=datetime.utcnow() + timedelta(days=7),
-                )
-                session.add(invitation)
-                session.commit()
-
+            validated_requests.append(InternalInvitationCreateRequest.model_validate(payload))
             return 200, {
                 "bot_link": deterministic_bot_link,
                 "web_link": deterministic_web_link,
@@ -143,46 +160,73 @@ class CharacterizeInvitationRoleTests(unittest.IsolatedAsyncioTestCase):
 
         mock_forward.side_effect = fake_forward_adapter
 
-        state = FakeFSMContext({
-            "account_name": target_account_name,
-            "mobile_number": target_mobile_number,
-        })
+        async def recording_answer_callback_message(*args: Any, **kwargs: Any) -> None:
+            execution_order.append("success_message")
+
+        mock_answer_callback_message.side_effect = recording_answer_callback_message
+
+        async def recording_return_to_admin_panel(*args: Any, **kwargs: Any) -> None:
+            execution_order.append("return_to_admin_panel")
+
+        mock_return_to_admin_panel.side_effect = recording_return_to_admin_panel
+
+        async def recording_answer_callback_query(*args: Any, **kwargs: Any) -> None:
+            execution_order.append("callback_ack")
+
+        mock_answer_callback_query.side_effect = recording_answer_callback_query
+
         callback = FakeCallback(data="set_role_STANDARD")
         bot = object()
 
+        with Session(self.engine) as session:
+            rows_before = session.execute(select(Invitation)).scalars().all()
+            self.assertEqual(len(rows_before), 0)
+
         await process_invitation_role(callback, state, inviter, bot)
 
-        self.assertEqual(len(captured_payloads), 1)
-        self.assertEqual(len(validated_requests), 1)
-        validated_req = validated_requests[0]
+        with Session(self.engine) as session:
+            rows_after = session.execute(select(Invitation)).scalars().all()
+            self.assertEqual(len(rows_after), 0)
 
-        self.assertEqual(validated_req.requester_identity.account_name, inviter.account_name)
-        self.assertEqual(validated_req.requester_identity.mobile_number, inviter.mobile_number)
-        self.assertEqual(validated_req.requester_identity.telegram_id, inviter.telegram_id)
-        self.assertEqual(validated_req.source_server, SERVER_FOREIGN)
-        self.assertEqual(validated_req.role, UserRole.STANDARD)
-
-        expected_idempotency_key = build_standard_invitation_idempotency_key(
-            requester_identity=InvitationRequesterIdentity(
-                account_name=inviter.account_name,
-                mobile_number=inviter.mobile_number,
-                telegram_id=inviter.telegram_id,
-            ),
-            account_name=target_account_name,
-            mobile_number=target_mobile_number,
-            role=UserRole.STANDARD,
+        self.assertEqual(
+            execution_order,
+            [
+                "state_clear",
+                "forward",
+                "success_message",
+                "return_to_admin_panel",
+                "callback_ack",
+            ],
         )
-        self.assertEqual(validated_req.idempotency_key, expected_idempotency_key)
 
         self.assertTrue(state.cleared)
         self.assertEqual(await state.get_data(), {})
 
-        mock_answer_callback_message.assert_awaited_once()
-        message_text = mock_answer_callback_message.await_args.args[2]
-        self.assertIn(deterministic_bot_link, message_text)
-        self.assertIn(deterministic_web_link, message_text)
+        self.assertEqual(len(captured_payloads), 1)
+        self.assertEqual(captured_payloads[0], expected_payload)
+        mock_forward.assert_awaited_once_with(expected_payload)
 
-        mock_answer_callback_query.assert_awaited_once_with(callback)
+        self.assertEqual(len(validated_requests), 1)
+        validated_req = validated_requests[0]
+        self.assertEqual(validated_req.requester_identity.account_name, inviter.account_name)
+        self.assertEqual(validated_req.requester_identity.mobile_number, inviter.mobile_number)
+        self.assertEqual(validated_req.requester_identity.telegram_id, inviter.telegram_id)
+        self.assertEqual(validated_req.account_name, target_account_name)
+        self.assertEqual(validated_req.mobile_number, target_mobile_number)
+        self.assertEqual(validated_req.source_server, SERVER_FOREIGN)
+        self.assertEqual(validated_req.role, UserRole.STANDARD)
+        self.assertEqual(
+            validated_req.idempotency_key,
+            "standard-invitation:f5ea0a21864f9508b9bfffae012713bcb2b9abfb",
+        )
+
+        mock_answer_callback_message.assert_awaited_once_with(
+            callback,
+            inviter,
+            expected_message_text,
+            parse_mode="Markdown",
+            reply_markup=None,
+        )
         mock_return_to_admin_panel.assert_awaited_once_with(
             callback,
             state,
@@ -190,17 +234,7 @@ class CharacterizeInvitationRoleTests(unittest.IsolatedAsyncioTestCase):
             user=inviter,
             user_role=inviter.role,
         )
-
-        with Session(self.engine) as session:
-            stmt = select(Invitation).where(Invitation.token == expected_token)
-            persisted = session.execute(stmt).scalar_one_or_none()
-            self.assertIsNotNone(persisted)
-            self.assertEqual(persisted.account_name, target_account_name)
-            self.assertEqual(persisted.mobile_number, target_mobile_number)
-            self.assertEqual(persisted.role, UserRole.STANDARD)
-            self.assertEqual(persisted.kind, InvitationKind.STANDARD)
-            self.assertEqual(persisted.created_by_id, inviter.id)
-            self.assertFalse(persisted.is_used)
+        mock_answer_callback_query.assert_awaited_once_with(callback)
 
     @patch("bot.handlers.admin._return_to_admin_panel", new_callable=AsyncMock)
     @patch("bot.handlers.admin.answer_callback_message_via_runtime", new_callable=AsyncMock)
