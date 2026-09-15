@@ -134,7 +134,7 @@ output defect محدود شناسایی می‌شود و از همان سقف re
 
 برای characterization تستی که مسیر `live/real/authoritative` را با Session adapter سفارشی
 اجرا می‌کند، `check` زنجیرهٔ محدود و ایستای فراخوانی‌های دارای `db/session` را از entrypoint
-صریح تا عملیات دیتابیس می‌سازد. `session_context` باید تعریف تمام `path:symbol`های این زنجیره
+صریح تا عملیات دیتابیس می‌سازد. اعلان test-only و بدون نقل‌قول `session_context:` بدنه‌ای پایان‌یافته با سمی‌کولن یا خط جدید، `exact entrypoint` اختیاری و یک نماد کانونی `api|bot|core|scripts/...py:symbol` یا نماد نقطه‌دار دارد؛ اعلان‌های هم‌ریشه deduplicate می‌شوند و ریشه‌های معتبر متمایز پیش از حل مبهم هستند؛ موارد malformed، خارج از پروژه، فاقد adapter یا closure، حل‌نشده، حذف‌شده و بدون نتیجهٔ کوئری پیش از provider با شکست مواجه می‌شوند؛ aliasهای محلی و محدود `async with AsyncSessionLocal() as session` شناسایی می‌شوند؛ و taskهای بدون اعلان صریح heuristic قدیمی را حفظ می‌کنند. همچنین `session_context` باید تعریف تمام `path:symbol`های این زنجیره
 و قرارداد هر `execute/scalar/scalars/get` و API نتیجه مانند `scalar_one` یا `scalars().all()`
 را پیش از تماس با Gemini داشته باشد. gate تمام کمبودهای قابل‌نمایش را یک‌جا گزارش می‌کند؛
 نبود entrypoint/adapter، وابستگی حل‌نشده، حذف hint یا عبور closure از سقف، همگی fail-closed
