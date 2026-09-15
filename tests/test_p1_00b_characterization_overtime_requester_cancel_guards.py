@@ -99,15 +99,15 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
             ) as mock_parser,
             patch(
                 "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
-                fail_session,
+                new=fail_session,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
-                mock_forward,
+                new=mock_forward,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
-                mock_edit,
+                new=mock_edit,
             ),
         ):
             await handle_overtime_requester_cancel(callback, user, bot)
@@ -147,15 +147,15 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
             ) as wrapped_parser,
             patch(
                 "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
-                fail_session,
+                new=fail_session,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
-                mock_forward,
+                new=mock_forward,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
-                mock_edit,
+                new=mock_edit,
             ),
         ):
             await handle_overtime_requester_cancel(callback, user, bot)
@@ -252,47 +252,47 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
                 with (
                     patch(
                         "bot.handlers.offer_overtime_callbacks.parse_overtime_requester_cancel_callback_data",
-                        mock_parser,
+                        new=mock_parser,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
-                        session_factory,
+                        new=session_factory,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.load_overtime_request_by_public_id",
-                        mock_load,
+                        new=mock_load,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks._answer",
-                        mock_answer,
+                        new=mock_answer,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.normalize_server",
-                        mock_normalize_server,
+                        new=mock_normalize_server,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.current_server",
-                        mock_current_server,
+                        new=mock_current_server,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.get_trading_settings_async",
-                        mock_get_settings,
+                        new=mock_get_settings,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.cancel_by_requester",
-                        mock_cancel,
+                        new=mock_cancel,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
-                        mock_forward,
+                        new=mock_forward,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
-                        mock_edit,
+                        new=mock_edit,
                     ),
                     patch(
                         "bot.handlers.offer_overtime_callbacks.edit_owner_overtime_approval_message",
-                        mock_edit_owner,
+                        new=mock_edit_owner,
                     ),
                 ):
                     await handle_overtime_requester_cancel(callback, user, bot)
@@ -432,15 +432,15 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
         with (
             patch(
                 "bot.handlers.offer_overtime_callbacks.parse_overtime_requester_cancel_callback_data",
-                mock_parser,
+                new=mock_parser,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
-                session_factory,
+                new=session_factory,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.load_overtime_request_by_public_id",
-                mock_load,
+                new=mock_load,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.current_server",
@@ -448,27 +448,27 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
-                mock_forward,
+                new=mock_forward,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
-                mock_edit,
+                new=mock_edit,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks._answer",
-                mock_answer,
+                new=mock_answer,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.get_trading_settings_async",
-                mock_get_settings,
+                new=mock_get_settings,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.cancel_by_requester",
-                mock_cancel,
+                new=mock_cancel,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.edit_owner_overtime_approval_message",
-                mock_edit_owner,
+                new=mock_edit_owner,
             ),
         ):
             await handle_overtime_requester_cancel(callback, user, bot)
@@ -675,15 +675,15 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
         with (
             patch(
                 "bot.handlers.offer_overtime_callbacks.parse_overtime_requester_cancel_callback_data",
-                mock_parser,
+                new=mock_parser,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
-                session_factory,
+                new=session_factory,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.load_overtime_request_by_public_id",
-                mock_load,
+                new=mock_load,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.current_server",
@@ -691,31 +691,31 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.get_trading_settings_async",
-                mock_get_settings,
+                new=mock_get_settings,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.datetime",
-                mock_datetime,
+                new=mock_datetime,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.cancel_by_requester",
-                mock_cancel,
+                new=mock_cancel,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
-                mock_edit,
+                new=mock_edit,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks._answer",
-                mock_answer,
+                new=mock_answer,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
-                mock_forward,
+                new=mock_forward,
             ),
             patch(
                 "bot.handlers.offer_overtime_callbacks.edit_owner_overtime_approval_message",
-                mock_edit_owner,
+                new=mock_edit_owner,
             ),
         ):
             await handle_overtime_requester_cancel(callback, user, bot)
