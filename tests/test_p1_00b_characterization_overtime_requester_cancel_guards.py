@@ -1,4 +1,4 @@
-"""Direct characterization tests for overtime requester cancel entry guards.
+"""Direct characterization tests for overtime requester cancel entry guards and success routing.
 
 Stage: P1-00b
 Assignment: WA-P1-00B-FREEZE-20260904-001
@@ -6,17 +6,17 @@ Blocker: P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE
 Seed: BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74
 
 Provenance & Scope:
-This module provides direct characterization for the entry guards and valid-callback
-missing/non-OVERTIME-ledger and requester-mismatch pre-mutation guards of the real
-`handle_overtime_requester_cancel` handler. It does not update registries or
-close the seed, blocker, or Stage. Evidenced exclusions apply: this unit does not
-characterize matched-requester routing, local cancellation, remote
-forwarding, database mutation, message editing, success, origin policy,
-notification audience, or retry behavior.
+This module provides direct characterization for the entry guards, pre-mutation guards,
+and matched-requester success routing (remote-home forwarding and local-home cancellation
+with absent owner) of the real `handle_overtime_requester_cancel` handler. It does not update
+registries or close the seed, blocker, or Stage. Evidenced exclusions apply: this unit
+does not characterize durable database behavior, origin policy, notification audience,
+side-effect retry, blocker closure, or Stage closure.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 import unittest
@@ -32,8 +32,18 @@ install_p1_00_network_fence()
 from bot.handlers.offer_overtime_callbacks import (
     handle_overtime_requester_cancel,
 )
+from bot.overtime_request_status import (
+    empty_inline_keyboard,
+)
+from core.offer_lifecycle import (
+    read_normal_lifetime_minutes,
+)
 from core.offer_overtime_bot_copy import (
+    M15_REQUESTER_STATUS_CANCELLED,
     M33_OWNER_ALREADY_TERMINAL_MESSAGE,
+)
+from core.server_routing import (
+    normalize_server,
 )
 from core.telegram_delivery_overtime_requester_status_contract import (
     parse_overtime_requester_cancel_callback_data,
@@ -327,6 +337,473 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
                 mock_edit.assert_not_called()
                 mock_edit_owner.assert_not_called()
                 bot.assert_not_called()
+
+    async def test_matched_requester_overtime_remote_home_success_scenario(
+        self,
+    ):
+        # Requirement 2: Matched-requester OVERTIME remote-home success.
+        public_id = "req_0123456789abcdef"
+        callback = SimpleNamespace(
+            data=f"otc:{public_id}:cancel"
+        )
+        user = SimpleNamespace(id=71)
+        bot = MagicMock()
+        order: list[str] = []
+
+        unlocked_ledger = SimpleNamespace(
+            request_public_id=public_id,
+            workflow_kind=OfferRequestWorkflow.OVERTIME,
+            requester_user_id=71,
+            request_home_server="iran",
+            request_source_server="foreign",
+        )
+
+        mock_session = MagicMock()
+        mock_session.execute = AsyncMock()
+        mock_session.get = AsyncMock()
+
+        async def tracked_rollback() -> None:
+            order.append("rollback")
+
+        mock_session.rollback = AsyncMock(side_effect=tracked_rollback)
+
+        async def tracked_commit() -> None:
+            order.append("commit")
+
+        mock_session.commit = AsyncMock(side_effect=tracked_commit)
+
+        session_ctx = _MockAsyncSessionContext(mock_session, order)
+        session_factory = MagicMock(return_value=session_ctx)
+
+        def tracked_parse(callback_data: Any) -> str | None:
+            order.append("parse")
+            return parse_overtime_requester_cancel_callback_data(callback_data)
+
+        mock_parser = MagicMock(side_effect=tracked_parse)
+
+        fixtures_by_for_update = {
+            False: unlocked_ledger,
+        }
+
+        async def tracked_load(
+            session: Any, pid: str, *, for_update: bool = False
+        ) -> Any:
+            if pid != public_id:
+                raise AssertionError(f"Unexpected public_id: {pid}")
+            if for_update not in fixtures_by_for_update:
+                raise AssertionError(
+                    f"Unexpected for_update flag: {for_update}; locked reload is forbidden"
+                )
+            order.append("load_unlocked")
+            return fixtures_by_for_update[for_update]
+
+        mock_load = AsyncMock(side_effect=tracked_load)
+
+        receipt = {
+            "request_public_id": public_id,
+            "result_status": "overtime_cancelled_by_requester",
+            "replayed": False,
+        }
+
+        async def tracked_forward(
+            target_server: str, payload: dict[str, Any]
+        ) -> tuple[int, Any]:
+            order.append("forward")
+            return 200, receipt
+
+        mock_forward = AsyncMock(side_effect=tracked_forward)
+
+        async def tracked_edit(*args: Any, **kwargs: Any) -> None:
+            order.append("edit_forwarded")
+
+        mock_edit = AsyncMock(side_effect=tracked_edit)
+
+        async def tracked_answer(
+            cb: Any, text: str, *, alert: bool = False
+        ) -> None:
+            order.append("answer")
+
+        mock_answer = AsyncMock(side_effect=tracked_answer)
+
+        mock_get_settings = AsyncMock()
+        mock_cancel = AsyncMock()
+        mock_edit_owner = AsyncMock()
+
+        with (
+            patch(
+                "bot.handlers.offer_overtime_callbacks.parse_overtime_requester_cancel_callback_data",
+                mock_parser,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
+                session_factory,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.load_overtime_request_by_public_id",
+                mock_load,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.current_server",
+                return_value="foreign",
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
+                mock_forward,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
+                mock_edit,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks._answer",
+                mock_answer,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.get_trading_settings_async",
+                mock_get_settings,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.cancel_by_requester",
+                mock_cancel,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.edit_owner_overtime_approval_message",
+                mock_edit_owner,
+            ),
+        ):
+            await handle_overtime_requester_cancel(callback, user, bot)
+
+        # Assert critical ordering through session exit
+        self.assertEqual(
+            order,
+            [
+                "parse",
+                "session_enter",
+                "load_unlocked",
+                "rollback",
+                "forward",
+                "edit_forwarded",
+                "commit",
+                "answer",
+                "session_exit",
+            ],
+        )
+
+        # Prove the first ledger load is unlocked
+        mock_load.assert_awaited_once_with(
+            mock_session, public_id, for_update=False
+        )
+        self.assertFalse(
+            any(
+                call.kwargs.get("for_update") is True
+                for call in mock_load.await_args_list
+            )
+        )
+
+        # Prove normalized home differs from fixed current server and normalized source equals it
+        self.assertNotEqual(
+            normalize_server(unlocked_ledger.request_home_server, "foreign"),
+            "foreign",
+        )
+        self.assertEqual(
+            normalize_server(unlocked_ledger.request_source_server, "foreign"),
+            "foreign",
+        )
+
+        # Prove rollback occurs before forwarding and both occur once
+        mock_session.rollback.assert_awaited_once_with()
+        self.assertLess(order.index("rollback"), order.index("forward"))
+
+        # Prove forwarded target and payload are exact
+        mock_forward.assert_awaited_once_with(
+            "iran",
+            {
+                "request_public_id": public_id,
+                "requester_user_id": 71,
+                "source_server": "foreign",
+            },
+        )
+
+        # Prove no locked reload, settings read, local cancel, owner lookup, or owner-message edit occurs
+        mock_get_settings.assert_not_called()
+        mock_cancel.assert_not_called()
+        mock_session.get.assert_not_called()
+        mock_edit_owner.assert_not_called()
+        bot.assert_not_called()
+
+        # On sub-400 receipt, prove requester edit arguments
+        mock_edit.assert_awaited_once_with(
+            callback,
+            user,
+            M15_REQUESTER_STATUS_CANCELLED,
+            source_key="ot-cancel-edit-forwarded",
+            reply_markup=empty_inline_keyboard(),
+            session=mock_session,
+            commit=False,
+        )
+        self.assertIs(mock_edit.call_args.args[0], callback)
+        self.assertIs(mock_edit.call_args.args[1], user)
+        self.assertEqual(
+            mock_edit.call_args.args[2], M15_REQUESTER_STATUS_CANCELLED
+        )
+        self.assertEqual(
+            mock_edit.call_args.kwargs["source_key"], "ot-cancel-edit-forwarded"
+        )
+        self.assertEqual(
+            mock_edit.call_args.kwargs["reply_markup"], empty_inline_keyboard()
+        )
+        self.assertIs(mock_edit.call_args.kwargs["session"], mock_session)
+        self.assertIs(mock_edit.call_args.kwargs["commit"], False)
+
+        # Prove session commits once and callback answered once with M15 and alert=False
+        mock_session.commit.assert_awaited_once_with()
+        mock_answer.assert_awaited_once_with(
+            callback, M15_REQUESTER_STATUS_CANCELLED, alert=False
+        )
+
+    async def test_matched_requester_overtime_local_home_success_scenario_with_absent_owner(
+        self,
+    ):
+        # Requirement 3: Matched-requester OVERTIME local-home success with absent owner.
+        public_id = "req_0123456789abcdef"
+        callback = SimpleNamespace(
+            data=f"otc:{public_id}:cancel"
+        )
+        user = SimpleNamespace(id=71)
+        bot = MagicMock()
+        order: list[str] = []
+
+        unlocked_ledger = SimpleNamespace(
+            request_public_id=public_id,
+            workflow_kind=OfferRequestWorkflow.OVERTIME,
+            requester_user_id=71,
+            request_home_server="iran",
+            request_source_server="iran",
+            offer_owner_user_id=None,
+        )
+        locked_ledger = SimpleNamespace(
+            request_public_id=public_id,
+            workflow_kind=OfferRequestWorkflow.OVERTIME,
+            requester_user_id=71,
+            request_home_server="iran",
+            request_source_server="iran",
+            offer_owner_user_id=None,
+        )
+
+        mock_session = MagicMock()
+        mock_session.execute = AsyncMock()
+        mock_session.get = AsyncMock()
+        mock_session.rollback = AsyncMock()
+
+        async def tracked_commit() -> None:
+            order.append("commit")
+
+        mock_session.commit = AsyncMock(side_effect=tracked_commit)
+
+        session_ctx = _MockAsyncSessionContext(mock_session, order)
+        session_factory = MagicMock(return_value=session_ctx)
+
+        def tracked_parse(callback_data: Any) -> str | None:
+            order.append("parse")
+            return parse_overtime_requester_cancel_callback_data(callback_data)
+
+        mock_parser = MagicMock(side_effect=tracked_parse)
+
+        fixtures_by_for_update = {
+            False: unlocked_ledger,
+            True: locked_ledger,
+        }
+
+        async def tracked_load(
+            session: Any, pid: str, *, for_update: bool = False
+        ) -> Any:
+            if pid != public_id:
+                raise AssertionError(f"Unexpected public_id: {pid}")
+            if for_update not in fixtures_by_for_update:
+                raise AssertionError(
+                    f"Unexpected for_update flag: {for_update}"
+                )
+            order.append("load_locked" if for_update else "load_unlocked")
+            return fixtures_by_for_update[for_update]
+
+        mock_load = AsyncMock(side_effect=tracked_load)
+
+        settings_fixture = SimpleNamespace(offer_expiry_minutes=25)
+        expected_normal_lifetime = read_normal_lifetime_minutes(
+            settings_fixture
+        )
+        self.assertEqual(expected_normal_lifetime, 25)
+
+        async def tracked_get_settings() -> Any:
+            order.append("settings_read")
+            return settings_fixture
+
+        mock_get_settings = AsyncMock(side_effect=tracked_get_settings)
+
+        fixed_now = datetime(2026, 9, 15, 12, 0, 0)
+        mock_datetime = MagicMock()
+        mock_datetime.utcnow.return_value = fixed_now
+
+        async def tracked_cancel(
+            session: Any,
+            ledger: Any,
+            *,
+            requester_user_id: int,
+            now: Any,
+            normal_lifetime_minutes: int,
+        ) -> Any:
+            order.append("local_cancel")
+            return ledger
+
+        mock_cancel = AsyncMock(side_effect=tracked_cancel)
+
+        async def tracked_edit(*args: Any, **kwargs: Any) -> None:
+            order.append("edit_local")
+
+        mock_edit = AsyncMock(side_effect=tracked_edit)
+
+        async def tracked_answer(
+            cb: Any, text: str, *, alert: bool = False
+        ) -> None:
+            order.append("answer")
+
+        mock_answer = AsyncMock(side_effect=tracked_answer)
+
+        mock_forward = AsyncMock()
+        mock_edit_owner = AsyncMock()
+
+        with (
+            patch(
+                "bot.handlers.offer_overtime_callbacks.parse_overtime_requester_cancel_callback_data",
+                mock_parser,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
+                session_factory,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.load_overtime_request_by_public_id",
+                mock_load,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.current_server",
+                return_value="iran",
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.get_trading_settings_async",
+                mock_get_settings,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.datetime",
+                mock_datetime,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.cancel_by_requester",
+                mock_cancel,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
+                mock_edit,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks._answer",
+                mock_answer,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
+                mock_forward,
+            ),
+            patch(
+                "bot.handlers.offer_overtime_callbacks.edit_owner_overtime_approval_message",
+                mock_edit_owner,
+            ),
+        ):
+            await handle_overtime_requester_cancel(callback, user, bot)
+
+        # Assert critical ordering through session exit and post-exit answer
+        self.assertEqual(
+            order,
+            [
+                "parse",
+                "session_enter",
+                "load_unlocked",
+                "load_locked",
+                "settings_read",
+                "local_cancel",
+                "edit_local",
+                "commit",
+                "session_exit",
+                "answer",
+            ],
+        )
+
+        # Prove one unlocked load followed by one locked load selected by for_update
+        self.assertEqual(mock_load.await_count, 2)
+        mock_load.assert_has_awaits(
+            [
+                unittest.mock.call(mock_session, public_id, for_update=False),
+                unittest.mock.call(mock_session, public_id, for_update=True),
+            ]
+        )
+        self.assertFalse(mock_load.await_args_list[0].kwargs["for_update"])
+        self.assertTrue(mock_load.await_args_list[1].kwargs["for_update"])
+
+        # Prove one settings read
+        mock_get_settings.assert_awaited_once_with()
+
+        # Prove one cancel_by_requester call with the same locked ledger
+        mock_cancel.assert_awaited_once_with(
+            mock_session,
+            locked_ledger,
+            requester_user_id=71,
+            now=fixed_now,
+            normal_lifetime_minutes=expected_normal_lifetime,
+        )
+        self.assertIs(mock_cancel.call_args.args[1], locked_ledger)
+        self.assertEqual(mock_cancel.call_args.kwargs["requester_user_id"], 71)
+        self.assertEqual(mock_cancel.call_args.kwargs["now"], fixed_now)
+        self.assertEqual(
+            mock_cancel.call_args.kwargs["normal_lifetime_minutes"],
+            expected_normal_lifetime,
+        )
+        mock_datetime.utcnow.assert_called_once_with()
+
+        # Prove no rollback, forwarding, or owner lookup/edit
+        mock_session.rollback.assert_not_called()
+        mock_forward.assert_not_called()
+        mock_session.get.assert_not_called()
+        mock_edit_owner.assert_not_called()
+        bot.assert_not_called()
+
+        # Prove requester edit arguments
+        mock_edit.assert_awaited_once_with(
+            callback,
+            user,
+            M15_REQUESTER_STATUS_CANCELLED,
+            source_key="ot-cancel-edit",
+            reply_markup=empty_inline_keyboard(),
+            session=mock_session,
+            commit=False,
+        )
+        self.assertIs(mock_edit.call_args.args[0], callback)
+        self.assertIs(mock_edit.call_args.args[1], user)
+        self.assertEqual(
+            mock_edit.call_args.args[2], M15_REQUESTER_STATUS_CANCELLED
+        )
+        self.assertEqual(
+            mock_edit.call_args.kwargs["source_key"], "ot-cancel-edit"
+        )
+        self.assertEqual(
+            mock_edit.call_args.kwargs["reply_markup"], empty_inline_keyboard()
+        )
+        self.assertIs(mock_edit.call_args.kwargs["session"], mock_session)
+        self.assertIs(mock_edit.call_args.kwargs["commit"], False)
+
+        # Prove commit once, session exit, and answer once with M15 and alert=False
+        mock_session.commit.assert_awaited_once_with()
+        mock_answer.assert_awaited_once_with(
+            callback, M15_REQUESTER_STATUS_CANCELLED, alert=False
+        )
 
 
 if __name__ == "__main__":
