@@ -1303,6 +1303,194 @@ class OvertimeRequesterCancelGuardsCharacterizationTests(
         # Clean up session
         await session.close()
 
+    async def test_matched_requester_overtime_local_home_locked_reload_terminal_guards(
+        self,
+    ):
+        public_id = "req_0123456789abcdef"
+        cases = (
+            ("locked_missing", None),
+            (
+                "locked_direct_workflow",
+                SimpleNamespace(
+                    request_public_id=public_id,
+                    workflow_kind=OfferRequestWorkflow.DIRECT,
+                    requester_user_id=71,
+                    request_home_server="iran",
+                    request_source_server="iran",
+                ),
+            ),
+        )
+
+        for case_name, locked_fixture in cases:
+            with self.subTest(case=case_name):
+                callback = SimpleNamespace(data=f"otc:{public_id}:cancel")
+                user = SimpleNamespace(id=71)
+                bot = MagicMock()
+                order: list[str] = []
+
+                unlocked_ledger = SimpleNamespace(
+                    request_public_id=public_id,
+                    workflow_kind=OfferRequestWorkflow.OVERTIME,
+                    requester_user_id=71,
+                    request_home_server="iran",
+                    request_source_server="iran",
+                )
+
+                session = AsyncSession()
+
+                def _fail_session_call(*args: Any, **kwargs: Any) -> Any:
+                    raise AssertionError("Unexpected AsyncSession call reached")
+
+                session.execute = AsyncMock(side_effect=_fail_session_call)
+                session.scalar = AsyncMock(side_effect=_fail_session_call)
+                session.scalars = AsyncMock(side_effect=_fail_session_call)
+                session.get = AsyncMock(side_effect=_fail_session_call)
+                session.rollback = AsyncMock(side_effect=_fail_session_call)
+                session.commit = AsyncMock(side_effect=_fail_session_call)
+
+                session_ctx = _MockAsyncSessionContext(session, order)
+                session_factory = MagicMock(return_value=session_ctx)
+
+                def tracked_parse(callback_data: Any) -> str | None:
+                    order.append("parse")
+                    return parse_overtime_requester_cancel_callback_data(
+                        callback_data
+                    )
+
+                mock_parser = MagicMock(side_effect=tracked_parse)
+
+                fixtures_by_for_update = {
+                    False: unlocked_ledger,
+                    True: locked_fixture,
+                }
+
+                async def tracked_load(
+                    s: Any, pid: str, *, for_update: bool = False
+                ) -> Any:
+                    if pid != public_id:
+                        raise AssertionError(f"Unexpected public_id: {pid}")
+                    if for_update not in fixtures_by_for_update:
+                        raise AssertionError(
+                            f"Unexpected for_update flag: {for_update}"
+                        )
+                    order.append("load_locked" if for_update else "load_unlocked")
+                    return fixtures_by_for_update[for_update]
+
+                mock_load = AsyncMock(side_effect=tracked_load)
+
+                async def tracked_answer(
+                    cb: Any, text: str, *, alert: bool = False
+                ) -> None:
+                    order.append("answer")
+
+                mock_answer = AsyncMock(side_effect=tracked_answer)
+
+                mock_get_settings = AsyncMock()
+                mock_cancel = AsyncMock()
+                mock_edit = AsyncMock()
+                mock_edit_owner = AsyncMock()
+                mock_forward = AsyncMock()
+
+                try:
+                    with (
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.parse_overtime_requester_cancel_callback_data",
+                            new=mock_parser,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.AsyncSessionLocal",
+                            new=session_factory,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.load_overtime_request_by_public_id",
+                            new=mock_load,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.current_server",
+                            return_value="iran",
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks._answer",
+                            new=mock_answer,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.get_trading_settings_async",
+                            new=mock_get_settings,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.cancel_by_requester",
+                            new=mock_cancel,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.edit_callback_message_via_runtime",
+                            new=mock_edit,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.edit_owner_overtime_approval_message",
+                            new=mock_edit_owner,
+                        ),
+                        patch(
+                            "bot.handlers.offer_overtime_callbacks.forward_overtime_requester_cancel",
+                            new=mock_forward,
+                        ),
+                    ):
+                        await handle_overtime_requester_cancel(callback, user, bot)
+
+                    self.assertEqual(
+                        order,
+                        [
+                            "parse",
+                            "session_enter",
+                            "load_unlocked",
+                            "load_locked",
+                            "answer",
+                            "session_exit",
+                        ],
+                    )
+                    mock_parser.assert_called_once_with(f"otc:{public_id}:cancel")
+                    session_factory.assert_called_once_with()
+                    self.assertEqual(mock_load.await_count, 2)
+                    mock_load.assert_has_awaits(
+                        [
+                            unittest.mock.call(
+                                session, public_id, for_update=False
+                            ),
+                            unittest.mock.call(
+                                session, public_id, for_update=True
+                            ),
+                        ]
+                    )
+                    self.assertFalse(
+                        mock_load.await_args_list[0].kwargs["for_update"]
+                    )
+                    self.assertTrue(
+                        mock_load.await_args_list[1].kwargs["for_update"]
+                    )
+
+                    if locked_fixture is not None:
+                        self.assertIsNot(unlocked_ledger, locked_fixture)
+
+                    mock_answer.assert_awaited_once_with(
+                        callback, M33_OWNER_ALREADY_TERMINAL_MESSAGE, alert=True
+                    )
+                    self.assertEqual(mock_answer.await_count, 1)
+
+                    mock_get_settings.assert_not_called()
+                    mock_cancel.assert_not_called()
+                    mock_edit.assert_not_called()
+                    mock_edit_owner.assert_not_called()
+                    mock_forward.assert_not_called()
+                    bot.assert_not_called()
+
+                    session.execute.assert_not_called()
+                    session.scalar.assert_not_called()
+                    session.scalars.assert_not_called()
+                    session.get.assert_not_called()
+                    session.rollback.assert_not_called()
+                    session.commit.assert_not_called()
+                finally:
+                    await session.close()
+
 
 if __name__ == "__main__":
     unittest.main()
