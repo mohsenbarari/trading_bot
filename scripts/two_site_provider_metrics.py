@@ -19,11 +19,91 @@ TERMINAL = {"PROPOSAL_READY", "VERIFIED", "CHANGES_REQUIRED", "BLOCKED"}
 TOKEN_KEYS = ("input_tokens", "output_tokens", "total_tokens")
 
 
+SESSION_GATE_KEYS = {"state", "activation_reason", "root_count", "required_symbol_count", "query_operation_count"}
+
+
+def _session_gate_empty(state: str) -> dict[str, object]:
+    return {
+        "state": state,
+        "activation_reason": None,
+        "root_count": None,
+        "required_symbol_count": None,
+        "query_operation_count": None,
+    }
+
+
 def unavailable() -> dict:
     return {"state": "UNAVAILABLE", "first_pass": None,
             "usage": dict.fromkeys(TOKEN_KEYS),
             "phase_seconds": {"provider_reported": None, "outside_provider_unattributed": None},
-            "task_metadata": None}
+            "task_metadata": None,
+            "session_gate": _session_gate_empty("UNAVAILABLE")}
+
+
+def _validate_session_gate(gate: object) -> dict[str, object] | None:
+    if not isinstance(gate, dict):
+        return None
+    if set(gate.keys()) != SESSION_GATE_KEYS:
+        return None
+    state = gate.get("state")
+    reason = gate.get("activation_reason")
+    root_count = gate.get("root_count")
+    req_count = gate.get("required_symbol_count")
+    query_count = gate.get("query_operation_count")
+
+    if type(root_count) is not int or isinstance(root_count, bool):
+        return None
+    if type(req_count) is not int or isinstance(req_count, bool):
+        return None
+    if type(query_count) is not int or isinstance(query_count, bool):
+        return None
+
+    if state == "REQUESTED_AND_PASSED":
+        if reason not in ("EXPLICIT_DECLARATION", "LEGACY_HEURISTIC"):
+            return None
+        if not (0 <= root_count <= 8):
+            return None
+        if not (0 <= req_count <= 48):
+            return None
+        if not (0 <= query_count <= 24):
+            return None
+        return {
+            "state": "REQUESTED_AND_PASSED",
+            "activation_reason": reason,
+            "root_count": root_count,
+            "required_symbol_count": req_count,
+            "query_operation_count": query_count,
+        }
+    if state == "NOT_REQUESTED":
+        if reason != "NOT_REQUESTED":
+            return None
+        if root_count != 0 or req_count != 0 or query_count != 0:
+            return None
+        return {
+            "state": "NOT_REQUESTED",
+            "activation_reason": "NOT_REQUESTED",
+            "root_count": 0,
+            "required_symbol_count": 0,
+            "query_operation_count": 0,
+        }
+    return None
+
+
+def _aggregate_session_gate(attempts: list[tuple[dict, dict | None]]) -> dict[str, object]:
+    if not attempts:
+        return _session_gate_empty("UNKNOWN")
+    first_gate: dict[str, object] | None = None
+    for status, _ in attempts:
+        if "session_gate" not in status:
+            return _session_gate_empty("UNKNOWN")
+        validated = _validate_session_gate(status["session_gate"])
+        if validated is None:
+            return _session_gate_empty("UNKNOWN")
+        if first_gate is None:
+            first_gate = validated
+        elif validated != first_gate:
+            return _session_gate_empty("UNKNOWN")
+    return first_gate if first_gate is not None else _session_gate_empty("UNKNOWN")
 
 
 def _number(value) -> bool:
@@ -361,5 +441,6 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
         "phase_seconds": {"provider_reported": provider_time if time_known else None,
                           "outside_provider_unattributed": cycle_duration - provider_time if time_known else None},
         "task_metadata": task_metadata,
+        "session_gate": _aggregate_session_gate(attempts),
     })
     return result
