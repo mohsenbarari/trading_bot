@@ -106,6 +106,8 @@ PROTECTED = {".git", ".local", ".agents", ".codex", ".cursor", "data", "logs",
 CANONICAL_RESPONSE_KEYS = frozenset({
     "status", "summary", "covered_requirements", "findings", "changes",
 })
+DECORATION_KEYS = frozenset({"toolAction", "toolSummary"})
+MAX_DECORATION_BYTES = 256
 MAX_REPLACEMENTS = 32
 MAX_REPLACEMENT_BYTES = 65536
 MAX_REVIEW_TRANSPORT_BYTES = MAX_CONTEXT
@@ -566,17 +568,44 @@ def _deduplicate_response(text: str) -> dict:
         )
 
     first = docs[0]
+    if not isinstance(first, dict) or set(first.keys()) != CANONICAL_RESPONSE_KEYS:
+        raise RetryableProviderSessionError(
+            "CLI response is not one valid JSON document"
+        )
     first_bytes = json.dumps(
         first, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
     for other in docs[1:]:
-        if not _exact_equal(first, other):
+        if not isinstance(other, dict):
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            )
+        other_keys = set(other.keys())
+        if other_keys == CANONICAL_RESPONSE_KEYS:
+            cleaned = other
+        elif other_keys == (CANONICAL_RESPONSE_KEYS | DECORATION_KEYS):
+            for dec_key in DECORATION_KEYS:
+                val = other[dec_key]
+                if (
+                    not isinstance(val, str)
+                    or not val
+                    or len(val.encode("utf-8")) > MAX_DECORATION_BYTES
+                ):
+                    raise RetryableProviderSessionError(
+                        "CLI response is not one valid JSON document"
+                    )
+            cleaned = {k: v for k, v in other.items() if k in CANONICAL_RESPONSE_KEYS}
+        else:
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            )
+        if not _exact_equal(first, cleaned):
             raise RetryableProviderSessionError(
                 "CLI response is not one valid JSON document"
             )
         if (
             json.dumps(
-                other, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                cleaned, sort_keys=True, separators=(",", ":"), ensure_ascii=False
             ).encode("utf-8")
             != first_bytes
         ):
