@@ -8,12 +8,21 @@ MONITOR = Path("scripts/two_site_autopilot_monitor.sh")
 def test_bash_syntax():
     subprocess.run(["bash", "-n", str(MONITOR)], check=True)
 
+
+def test_monitor_requires_and_recovers_the_provider_broker():
+    src = MONITOR.read_text()
+    assert 'broker_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py' in src
+    assert '&& "$broker_count" -eq 1 && "$state" == "RUNNING"' in src
+    assert 'recovery_reason="provider_broker_missing"' in src
+    assert 'broker=$broker_count' in src
+
 CASES = [
     ("Assignment expired", False, "assignment_expired", "false"),
     ("approval denied", False, "authority_blocked", "false"),
     ("denied escalation", False, "authority_blocked", "false"),
     ("explicit HALT", False, "authority_blocked", "false"),
     ("source/task Antigravity/Gemini approval denied", True, "authority_blocked", "false"),
+    ("DENIED_ESCALATION automatic approval review model was at capacity", False, "none", "true"),
     ("MODEL_OUTPUT_TRUNCATED", False, "none", "true"),
     ("bounded maximum cycle count reached", False, "none", "true"),
 ]

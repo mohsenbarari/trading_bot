@@ -7,6 +7,15 @@ import pytest
 LAUNCHER_SRC = Path(__file__).resolve().parent.parent / "scripts" / "two_site_autopilot_tmux.sh"
 
 
+def test_launcher_starts_broker_before_supervisor_and_stops_both():
+    source = LAUNCHER_SRC.read_text(encoding="utf-8")
+    broker_start = source.index('tmux new-session -d -s "$broker_session"')
+    broker_health = source.index('two_site_provider_broker.py --root "$root" status')
+    supervisor_start = source.index('tmux new-session -d -s "$session"')
+    assert broker_start < broker_health < supervisor_start
+    assert 'tmux kill-session -t "=$broker_session"' in source
+
+
 def init_repo(path: Path, branch: str = "refactor/two-site-architecture") -> Path:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", str(path)], check=True)

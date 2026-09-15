@@ -113,6 +113,7 @@ CONTROL_PATHS = (
     Path("scripts/two_site_cycle_tools.py"),
     Path("scripts/two_site_cycle_metrics.py"),
     Path("scripts/two_site_proposal_runner.py"),
+    Path("scripts/two_site_provider_broker.py"),
     Path("scripts/two_site_assignment_scope.py"),
     Path("scripts/two_site_autopilot_tmux.sh"),
     Path("scripts/two_site_autopilot_monitor.sh"),

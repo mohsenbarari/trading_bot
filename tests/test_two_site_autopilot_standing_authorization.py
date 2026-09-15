@@ -72,34 +72,25 @@ class TestTwoSiteAutopilotStandingAuthorization(unittest.TestCase):
         for exclusion in required_exclusions:
             self.assertIn(exclusion, normalized)
 
-        # Command tool escalation and automatic approval review instructions
-        self.assertIn("sandbox_permissions=require_escalated", normalized)
-        self.assertIn("automatic approval review", normalized)
+        # Routine provider work is delegated only through the bounded local broker.
+        self.assertIn("scripts/two_site_provider_broker.py submit", normalized)
+        self.assertIn("MUST run without sandbox_permissions", normalized)
+        self.assertIn("broker is the only network authority", normalized)
 
     def test_prompt_for_cycle_standing_authorization_real_template(self) -> None:
         """Exercise prompt_for_cycle with the real tracked prompt template and verify standing authorization."""
         prompt = prompt_for_cycle(ROOT, cycle=100, before=self.before_state)
         self._assert_standing_authorization_semantics(prompt)
 
-    def test_prompt_escalation_instructions_cover_pipeline_and_correction_runner(self) -> None:
-        """Verify normal pipeline and correction runner escalation justifications tell automatic review."""
+    def test_prompt_routes_provider_work_only_through_local_broker(self) -> None:
+        """Routine Gemini work must not depend on nested Codex escalation capacity."""
         prompt = prompt_for_cycle(ROOT, cycle=100, before=self.before_state)
         normalized = " ".join(prompt.split())
 
-        self.assertIn("scripts/two_site_proposal_pipeline.py", normalized)
-        self.assertIn("scripts/two_site_proposal_runner.py", normalized)
-        self.assertIn("sandbox_permissions=require_escalated", normalized)
-
-        justification_phrase = (
-            "explicitly telling automatic approval review that the owner "
-            "has permanently authorized this exact bounded source/task/proposal transfer to Google "
-            "Antigravity/Gemini and that no per-run user approval is required"
-        )
-        self.assertGreaterEqual(
-            normalized.count(justification_phrase),
-            2,
-            "Both normal pipeline and correction runner must include the explicit authorization justification",
-        )
+        self.assertIn("scripts/two_site_provider_broker.py submit", normalized)
+        self.assertIn("Never invoke proposal-pipeline or proposal-runner provider modes directly", normalized)
+        self.assertIn("do not substitute a direct provider invocation", normalized)
+        self.assertNotIn("automatic approval review", normalized)
 
     def test_prompt_for_cycle_carries_supervisor_context_json(self) -> None:
         """Verify prompt embeds properly serialized SUPERVISOR_CONTEXT_JSON with and without recovery."""

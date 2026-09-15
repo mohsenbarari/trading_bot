@@ -44,6 +44,7 @@ fi
 /usr/bin/unlink -- "$tmux_probe" 2>/dev/null || true
 
 supervisor_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_codex_autopilot.py --root $integration_root" 2>/dev/null || true)"
+broker_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py --root $integration_root serve" 2>/dev/null || true)"
 
 state="UNKNOWN"
 cycle="-"
@@ -104,7 +105,8 @@ if [[ "$current_main" == "$expected_main" && "$current_origin_main" == "$expecte
 fi
 
 health="DEGRADED"
-if [[ "$tmux_observation" == "present" && "$supervisor_count" -gt 0 && "$state" == "RUNNING" ]]; then
+if [[ "$tmux_observation" == "present" && "$supervisor_count" -gt 0 \
+      && "$broker_count" -eq 1 && "$state" == "RUNNING" ]]; then
   health="HEALTHY"
 elif [[ "$tmux_observation" == "absent" && "$state" == "COMPLETE" ]]; then
   health="COMPLETE"
@@ -164,6 +166,11 @@ if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0
     blockers_lower="${blockers_text,,}"
     if [[ "$blockers_lower" =~ expired|expiry ]]; then
       action="assignment_expired"
+    elif [[ "$blockers_lower" == *"approval review"* \
+          && "$blockers_lower" == *"model"* && "$blockers_lower" == *"capacity"* ]]; then
+      # Legacy nested-escalation blocker: the local provider broker removes this dependency.
+      restart_eligible=true
+      recovery_reason="legacy_nested_approval_capacity"
     elif [[ "$blockers_lower" =~ approval.*denied|denied.*approval|approval.*rejected|rejected.*approval|escalation.*denied|denied.*escalation|escalation.*rejected|rejected.*escalation|halt|external_gate|external.?gate ]]; then
       action="authority_blocked"
     elif [[ ! "$blockers_lower" =~ dirty|ambiguous|protected.?ref|ref.?drift|production|deploy|dns|web.?writer|secret|credential|authority ]] \
@@ -183,6 +190,14 @@ if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0
       fi
     fi
   fi
+fi
+
+if [[ "$restart_eligible" == false && "$tmux_observation" == "present"
+      && "$supervisor_count" -gt 0 && "$broker_count" -eq 0
+      && "$git_clean" == true && "$git_branch" == "refactor/two-site-architecture"
+      && "$protected_refs_ok" == true && ! -e "$state_root/STOP" ]]; then
+  restart_eligible=true
+  recovery_reason="provider_broker_missing"
 fi
 
 if [[ "$restart_eligible" == true ]]; then
@@ -289,7 +304,7 @@ if [[ "$restart_eligible" == true ]]; then
   fi
 fi
 
-report="$timestamp health=$health state=$state cycle=$cycle phase=$phase session=$session_running tmux_observation=$tmux_observation supervisor=$supervisor_count git_branch=$git_branch git_head=$git_head status_head=$short_status_head git_clean=$git_clean protected_refs=$protected_refs_ok action=$action recovery_attempts=$recovery_attempts status_age_seconds=$status_age_seconds"
+report="$timestamp health=$health state=$state cycle=$cycle phase=$phase session=$session_running tmux_observation=$tmux_observation supervisor=$supervisor_count broker=$broker_count git_branch=$git_branch git_head=$git_head status_head=$short_status_head git_clean=$git_clean protected_refs=$protected_refs_ok action=$action recovery_attempts=$recovery_attempts status_age_seconds=$status_age_seconds"
 
 latest_tmp="$(/usr/bin/mktemp "$report_root/.latest.XXXXXX")"
 /usr/bin/printf '%s\n' "$report" >"$latest_tmp"

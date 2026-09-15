@@ -24,6 +24,7 @@ def test_control_paths_added_and_retained_without_duplicates() -> None:
         Path("scripts/two_site_cycle_packet.py"),
         Path("scripts/two_site_autopilot_tmux.sh"),
         Path("scripts/two_site_autopilot_monitor.sh"),
+        Path("scripts/two_site_provider_broker.py"),
         Path("docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md"),
     }
     expected_retained = {

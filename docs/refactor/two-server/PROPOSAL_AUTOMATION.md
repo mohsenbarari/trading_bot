@@ -1,7 +1,9 @@
 # اتوماسیون Codex و Antigravity — قرارداد جاری
 
-به‌روز: ۲۰۲۶-۰۹-۱۳. مسیر توسعهٔ خودکار:
+به‌روز: ۲۰۲۶-۰۹-۱۵. مسیر توسعهٔ خودکار:
 Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
+تماس provider فقط از Broker محلیِ محدود انجام می‌شود؛ Codex یک درخواست فایل‌محور
+محلی می‌گذارد و به مجوز تودرتوی مدل approval-review وابسته نیست.
 مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
@@ -162,21 +164,29 @@ Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ Revi
 
 ## اجرا، review مکانیکی و اصلاح
 
-مسیر عادی دقیقاً یک pipeline برای هر واحد:
+مسیر عادی دقیقاً یک درخواست broker برای هر واحد:
 
 ```bash
-python3 scripts/two_site_proposal_pipeline.py \
+python3 scripts/two_site_provider_broker.py submit \
   --task .local/two-site-refactor/tasks/<fresh-task>.json \
   --run-prefix <unique> --timeout 900
 ```
 
-فرمان باید از اولین تلاش با escalation محدود اجرا شود؛ مالک در ۲۰۲۶-۰۹-۰۹
+این فرمان محلی بدون escalation اجرا می‌شود. Broker از پیش بیرون sandbox در نشست مستقل
+اجرا شده و تنها مجاز به ساخت فرمان ثابت pipeline با همان task، HEAD، Assignment و
+controller_run_id است؛ shell، executable، آرگومان CLI، عملیات Git یا مسیر دلخواه
+نمی‌پذیرد. درخواست و پاسخ اتمیک، محدود و تک‌مصرف‌اند. Broker هم‌زمان فقط یک درخواست
+را اجرا می‌کند و پس از restart درخواست claim‌شدهٔ مبهم را تکرار نمی‌کند، بلکه آن را
+با خطای صریح می‌بندد؛ پاسخ orphan حداکثر پس از ۲۴ ساعت با کار محدود پاک می‌شود.
+نبود Broker مجوز تماس مستقیم با provider نیست.
+
+مالک در ۲۰۲۶-۰۹-۰۹
 ارسال source محدود و غیرمحرمانه، tests، docs، task، proposal، review/findings و
 test evidence به Google Antigravity/Gemini را دائماً و بدون تأیید جداگانه مجاز کرده است.
 مجوز شامل دسترسی خود CLI به وضعیت احراز هویت خودش و listener موقت localhost است.
 Codex نباید credential را بخواند، چاپ کند، کپی کند یا hash کند.
 secret، اطلاعات هویتی/اعتباری، دادهٔ کاربر، دادهٔ عملیاتی/تولید، deploy، DNS،
-Writer، fetch/push و تغییر سرویس نامرتبط خارج دامنه‌اند. رد مجوز دور زده نمی‌شود.
+Writer، fetch/push و تغییر سرویس نامرتبط خارج دامنه‌اند. Broker این مجوز را گسترش نمی‌دهد.
 
 خروجی READY_FOR_CODEX مسیر دقیق Worker، Reviewer و proposal SHA را می‌دهد.
 بدون اسکن شواهد قدیمی، قبل از اعمال:
@@ -201,7 +211,7 @@ snapshot اصلی می‌سازد و correction برای آن path فقط محت
 با SHA همان candidate و `replacements=[]` می‌پذیرد. schema، prompt و کنترل پس از پاسخ
 همگی به همان فهرست متصل‌اند.
 
-رد Reviewer، Codex یا تست با چهار کلید دقیق برمی‌گردد:
+رد Reviewer یا تست داخل pipeline با چهار کلید دقیق برمی‌گردد:
 `reviewer` (gemini یا codex)، `reviewed_proposal_sha256`،
 `findings` و `test_evidence`.
 finding باید محل، ورودی محرک، رفتار واقعی/مورد انتظار و اصلاح لازم را روشن کند.
@@ -212,6 +222,9 @@ tool-attempt، function-call بدفرمت یا پاسخ `SUCCESS` با transport
 است و source را تکرار نمی‌کند. این retry جای correction معنایی نیست. خطای سهمیه/شبکه/auth،
 truncation، scope/security/Git/runtime و پوشش معنایی requirements وارد این مسیر نمی‌شوند.
 correction معنایی همچنان حداکثر دو بار است و رد معادل باید به rescope واقعی منجر شود.
+اگر Codex در گیت نهایی ایراد معنایی پیدا کند، همان واحد با Git تمیز و یافتهٔ دقیق
+BLOCKED/RESCOPE می‌شود؛ Codex runner مستقیم provider اجرا نمی‌کند و واحد بعدی باید
+کوچک‌تر و با context اصلاح‌شده ساخته شود.
 
 حداکثر دو اصلاح متمایز در یک واحد؛ تمام‌شدن بودجه با Git تمیز و بدون commit یعنی
 BLOCKED/RESCOPE INTERNAL_REJECTION و یک واحد کوچک‌تر/کامل‌تر جدید.
@@ -252,6 +265,9 @@ stdout+stderr Gemini حین stream سقف مشترک ۲ مگابایت دارن�
 عبور از سقف یا timeout process group همان اجرا را متوقف می‌کند.
 Runner و Supervisor قفل انحصاری nonblocking مستقل دارند؛ اجرای هم‌زمان دوم مجاز نیست.
 نشست Codex ephemeral است؛ nested Codex reviewer اجرا نمی‌شود.
+Broker نیز قفل server و client مستقل دارد، صف را حداکثر تا ۳۲ ورودی بررسی می‌کند،
+هر سند را با سقف byte و رد symlink/hardlink می‌خواند، خروجی pipeline را هنگام stream
+در ۲ مگابایت متوقف می‌کند و فقط پاسخ همان request/head را به client تحویل می‌دهد.
 
 Supervisor پس از اعتبارسنجی runtime، Git، protected refs، control blobs، registry و Assignment
 فلگ `startup_validation=true` را در context همان چرخه می‌گذارد. Codex این کنترل‌های مکانیکی
@@ -263,9 +279,13 @@ scripts/two_site_autopilot_tmux.sh start
 scripts/two_site_autopilot_tmux.sh status
 ```
 
-tmux گفتگوی باز نمی‌خواهد. STOP در مرز چرخه رعایت می‌شود؛ stop-now برای توقف فوری است.
+راه‌انداز دو نشست دقیق `two-site-provider-broker` و `two-site-autopilot` را ایجاد می‌کند
+و Supervisor را فقط پس از سلامت Broker بالا می‌آورد. tmux گفتگوی باز نمی‌خواهد.
+STOP در مرز چرخه و زمان بیکار بودن Broker رعایت می‌شود؛ stop-now هر دو نشست را متوقف می‌کند.
 راه‌انداز خود تضمین reboot یا دسترسی همیشگی provider نیست. مانیتور نصب‌شدهٔ محلی
-هر ۱۵ دقیقه جدا وضعیت فرایند/شواهد را می‌سنجد و STOP عمدی را نباید دور بزند.
+هر ۱۵ دقیقه جدا وضعیت فرایند/شواهد و دقیقاً یک Broker را می‌سنجد، Broker گم‌شده را
+در وضعیت امن بازمی‌گرداند و STOP عمدی را نباید دور بزند. blocker تاریخیِ ظرفیت
+approval-review پس از این مهاجرت قابل بازیابی است؛ رد واقعی authority همچنان fail-closed است.
 حد اجرای Supervisor: ۲۰۰ چرخه، timeout هر چرخه سه ساعت، retry خطای گذرای بی‌تغییر حداکثر دو بار.
 
 ## مصرف توکن، نگهداری و مرز ادعا

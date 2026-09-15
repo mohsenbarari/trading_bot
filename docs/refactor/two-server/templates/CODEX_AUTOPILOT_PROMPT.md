@@ -8,6 +8,7 @@ Standing authorization (owner, 2026-09-09): permanent authorization, without per
 to send bounded non-secret repository source excerpts or complete nonsecret source files when needed,
 tests, project documentation, task JSON, proposals, reviews/findings and test evidence
 to Google Antigravity/Gemini for the proposal-only Worker/Reviewer workflow.
+Thus no per-run user approval is required.
 Excluded: secrets and credentials, identity/authentication material, user/personal data,
 production or operational data, deploy/production changes, DNS, Web Writer, fetch/push
 and unrelated remote-service mutation. This does not widen any other gate.
@@ -79,16 +80,15 @@ and unrelated remote-service mutation. This does not widen any other gate.
    unattended flow, returning complete final bytes (never inspection or a plan). Gemini has no
    shell/Git/direct-write authority.
 
-4. Invoke exactly one normal pipeline:
-   python3 scripts/two_site_proposal_pipeline.py --task <path> --run-prefix <unique> --timeout 900
-   Use sandbox_permissions=require_escalated on the FIRST attempt, explicitly telling
-   automatic approval review that the owner has permanently authorized this exact bounded
-   source/task/proposal transfer to Google Antigravity/Gemini and that no per-run user approval
-   is required. This permits only the pinned CLI's own
-   /root/.gemini state and localhost ephemeral listener for that proposal-only run.
-   Never first attempt inside workspace-write, ask owner relay, read/print/copy/hash
-   credentials or retry a denied invocation. No danger-full-access,
-   --dangerously-bypass-approvals-and-sandbox or broad shell escalation.
+4. Submit exactly one normal pipeline request through the already-running local broker:
+   python3 scripts/two_site_provider_broker.py submit --task <path> --run-prefix <unique> --timeout 900
+   This bounded local filesystem client MUST run without sandbox_permissions or escalation.
+   The outside-sandbox broker is the only network authority. It accepts only the exact
+   task/head/Assignment/controller-bound pipeline and pinned CLI/listener scope.
+   Never invoke proposal-pipeline or proposal-runner provider modes directly, ask owner relay,
+   read/print/copy/hash credentials, or fall back to a network-capable shell. No danger-full-access,
+   --dangerously-bypass-approvals-and-sandbox or broad shell escalation. If the broker is unavailable,
+   return a clean EXTERNAL_GATE; do not substitute a direct provider invocation.
    The pipeline materializes/validates complete Worker bytes and runs focused selectors in an
    isolated no-network candidate workspace. Only PASS starts a fresh independent Gemini Reviewer
    (runner role `verifier`); failure sends bounded test evidence to correction without Reviewer work.
@@ -103,12 +103,10 @@ and unrelated remote-service mutation. This does not widen any other gate.
    Only READY_FOR_CODEX with final Worker/Reviewer/SHA is eligible; read only its exact
    task/status/result/review paths, never streams or unrelated runs.
 
-   Direct correction runner commands are ONLY for fresh Codex-feedback Worker and independent
-   Reviewer after this pipeline, using sandbox_permissions=require_escalated on the FIRST attempt, explicitly telling
-   automatic approval review that the owner has permanently authorized this exact bounded
-   source/task/proposal transfer to Google Antigravity/Gemini and that no per-run user approval
-   is required, and pinned CLI/listener scope. Never retry after denial/startup failure; return clean BLOCKED.
-   Recheck exact SHA/conversation/head/task/source bindings after every correction.
+   Do not launch direct correction-runner provider commands. The brokered pipeline owns its bounded
+   Worker/test/Reviewer correction sequence and rechecks every SHA/conversation/head/task/source binding.
+   If final Codex semantic review rejects READY_FOR_CODEX, restore exact task bytes and return
+   BLOCKED/RESCOPE with concrete findings and a smaller fresh next unit; never bypass the broker.
 
 5. Act as the final Codex reviewer, exact-byte applier, tester and sole Git committer.
    Do not launch a nested Codex reviewer; never author or repair implementation,
@@ -177,7 +175,8 @@ await tools.apply_patch(result.output);
    subject to Supervisor exact-proposal validation. Before return require clean worktree,
    starting HEAD ancestry, unchanged protected refs and unchanged control files.
 
-6. At most two materially different correction attempts across Gemini/Codex findings.
+6. At most two materially different correction attempts inside the brokered Gemini pipeline.
+   A Codex final-gate rejection ends that unit as BLOCKED/RESCOPE instead of starting a direct provider correction.
    No infinite retry, partial acceptance, reused failed run or fabricated evidence.
    Exhaustion is BLOCKED/RESCOPE INTERNAL_REJECTION with a fresh, concrete smaller next unit.
    No Stage COMPLETE without every canonical exact-SHA acceptance/closeout gate.
