@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "e5562fb465a802bc0abf8b45b2aa8872ef382986",
+  "inspected_head": "ecb84b52edf5a5b4609372ba6f0c60cabff3c66e",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -977,6 +977,68 @@
         "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_unauthenticated_active_state_short_circuit",
         "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_stale_builder_handoff_precedes_quantity_work",
         "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_eligible_valid_persian_numeric_ordering_through_awaiting_lot_type"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py",
+      "sha256": "bc0312987bda29a7a1ceb96b505433c1077d0e67cc4a663a11a8c868ffca25e2",
+      "last_commit": "8e9758bc46aa8d361bf82150b7dc3b48df2d053a",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-SELECTION-L812"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_eligible_regular_commodity_success_ordering"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_show_my_router.py",
+      "sha256": "7c6dcab09236131f94e782441c065cfb6ba9a127b558ff32eab6d234dbbb101a",
+      "last_commit": "3d5a985e7c0dea61911165705726093953332d2b",
+      "seed_ids": [
+        "BOT-TRADE-MESSAGE-TRADE-HISTORY-SHOW-MY-TRADE-HISTORY-L231"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_show_my_router.py::TestTradeHistoryShowMyRouterCharacterization::test_show_my_trade_history_router_unauthenticated_short_circuit",
+        "tests/test_p1_00b_characterization_trade_history_show_my_router.py::TestTradeHistoryShowMyRouterCharacterization::test_show_my_trade_history_router_empty_self_history_success_ordering"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_change_months_router.py",
+      "sha256": "107868bc0215c9acc2489bd7b595852b001d43b297c3b6dda048dd80ab005e80",
+      "last_commit": "a059bb763f57c97b7cf5dd93934a4e184d0cc4ec",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-CHANGE-HISTORY-MONTHS-L253"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_change_months_router.py::TestTradeHistoryChangeMonthsRouterCharacterization::test_change_history_months_router_unauthenticated_short_circuit",
+        "tests/test_p1_00b_characterization_trade_history_change_months_router.py::TestTradeHistoryChangeMonthsRouterCharacterization::test_change_history_months_router_access_denied_short_circuit",
+        "tests/test_p1_00b_characterization_trade_history_change_months_router.py::TestTradeHistoryChangeMonthsRouterCharacterization::test_change_history_months_router_empty_self_history_success_ordering"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_change_months_router_remaining.py",
+      "sha256": "efafe923b7a2d0c214709b5f3abe39633ed6a4c766633f1a3c4af6b7c11d8e40",
+      "last_commit": "4bb275a428b76f2526bf070bbad78f67aaff169d",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-CHANGE-HISTORY-MONTHS-L253"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_change_months_router_remaining.py::TestTradeHistoryChangeMonthsRouterRemainingCharacterization::test_change_history_months_router_nonempty_other_profile_success_rendering",
+        "tests/test_p1_00b_characterization_trade_history_change_months_router_remaining.py::TestTradeHistoryChangeMonthsRouterRemainingCharacterization::test_change_history_months_router_telegram_bad_request_still_answers",
+        "tests/test_p1_00b_characterization_trade_history_change_months_router_remaining.py::TestTradeHistoryChangeMonthsRouterRemainingCharacterization::test_change_history_months_router_history_failure_propagates"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_history_export_excel_router.py",
+      "sha256": "8bc703eaedbe43fb6bb1817b48e6aa7f3af63d9f492c19c2a9273c6eabf19b09",
+      "last_commit": "a56e3c0ab53b86d53501a68ebc46e636ae662d8e",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-EXCEL-L381"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_history_export_excel_router.py::TestTradeHistoryExportExcelRouterCharacterization::test_export_excel_router_unauthenticated_suppresses_all_work",
+        "tests/test_p1_00b_characterization_trade_history_export_excel_router.py::TestTradeHistoryExportExcelRouterCharacterization::test_export_excel_router_progress_precedes_state_and_access_denied_short_circuit",
+        "tests/test_p1_00b_characterization_trade_history_export_excel_router.py::TestTradeHistoryExportExcelRouterCharacterization::test_export_excel_router_empty_history_uses_default_months_and_warns"
       ]
     }
   ],
