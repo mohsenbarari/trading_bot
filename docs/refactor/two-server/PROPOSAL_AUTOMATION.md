@@ -268,6 +268,8 @@ Runner و Supervisor قفل انحصاری nonblocking مستقل دارند؛ �
 Broker نیز قفل server و client مستقل دارد، صف را حداکثر تا ۳۲ ورودی بررسی می‌کند،
 هر سند را با سقف byte و رد symlink/hardlink می‌خواند، خروجی pipeline را هنگام stream
 در ۲ مگابایت متوقف می‌کند و فقط پاسخ همان request/head را به client تحویل می‌دهد.
+سلامت بین PID namespaceها از heartbeat فایل‌محور تازه و مقید به request سنجیده می‌شود،
+نه مشاهدهٔ PID میزبان از داخل sandbox.
 
 Supervisor پس از اعتبارسنجی runtime، Git، protected refs، control blobs، registry و Assignment
 فلگ `startup_validation=true` را در context همان چرخه می‌گذارد. Codex این کنترل‌های مکانیکی

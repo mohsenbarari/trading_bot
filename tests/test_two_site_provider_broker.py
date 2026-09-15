@@ -293,6 +293,47 @@ def test_orphan_response_cleanup_is_bounded_and_retained(tmp_path: Path) -> None
     assert recent.exists()
 
 
+def test_status_uses_fresh_heartbeat_not_cross_namespace_pid_visibility(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], capsys
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    _state_root, status_path, _requests, _claimed, _responses = broker.broker_paths(root)
+    broker.write_json(status_path, {
+        "schema_version": "1.0",
+        "state": "IDLE",
+        "pid": 999_999_999,
+        "updated_at": time.time(),
+    })
+    status_path.chmod(0o600)
+
+    assert broker.status(root) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "IDLE"
+
+
+def test_running_provider_call_refreshes_filesystem_heartbeat(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    root, task, scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    status_path = root / ".local/status.json"
+    writes: list[str] = []
+
+    def fake_write(_path: Path, state: str, **_fields) -> None:
+        writes.append(state)
+
+    def slow_executor(_root, _request, _task, _scope):
+        time.sleep(0.05)
+        return {"ok": True}
+
+    monkeypatch.setattr(broker, "HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(broker, "_write_status", fake_write)
+    result = broker._execute_with_heartbeat(
+        status_path, slow_executor, root, request, task, scope
+    )
+    assert result == {"ok": True}
+    assert writes.count("RUNNING") >= 2
+
+
 def test_exclusive_lock_rejects_second_broker(tmp_path: Path) -> None:
     lock = tmp_path / "broker.lock"
     with broker.exclusive_broker_lock(lock):

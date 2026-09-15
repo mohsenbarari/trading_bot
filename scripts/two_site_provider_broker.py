@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from typing import Callable, Mapping
@@ -85,6 +86,7 @@ MAX_RESPONSE_BYTES = 2_200_000
 MAX_PIPELINE_OUTPUT_BYTES = 2_000_000
 MAX_ERROR_BYTES = 16_000
 STATUS_MAX_AGE_SECONDS = 30
+HEARTBEAT_SECONDS = 10
 QUEUE_SCAN_LIMIT = 32
 POLL_SECONDS = 0.25
 ORPHAN_RESPONSE_RETENTION_SECONDS = 86_400
@@ -398,6 +400,42 @@ def _signal_stop(_signum: int, _frame: object) -> None:
     _STOP = True
 
 
+def _execute_with_heartbeat(
+    status_path: Path,
+    executor: Callable[[Path, dict, Path, AssignmentScope], dict],
+    root: Path,
+    request: dict,
+    task_path: Path,
+    scope: AssignmentScope,
+) -> dict:
+    stopped = threading.Event()
+    heartbeat_errors: list[BaseException] = []
+
+    def heartbeat() -> None:
+        while not stopped.wait(HEARTBEAT_SECONDS):
+            try:
+                _write_status(
+                    status_path, "RUNNING", request_id=request["request_id"],
+                    run_prefix=request["run_prefix"], source_head=request["source_head"],
+                )
+            except BaseException as exc:  # Preserve failure after the provider call returns.
+                heartbeat_errors.append(exc)
+                return
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat, name="provider-broker-heartbeat", daemon=True
+    )
+    heartbeat_thread.start()
+    try:
+        response = executor(root, request, task_path, scope)
+    finally:
+        stopped.set()
+        heartbeat_thread.join(timeout=HEARTBEAT_SECONDS + 1)
+    if heartbeat_errors:
+        raise BrokerError("provider broker heartbeat failed") from heartbeat_errors[0]
+    return response
+
+
 def _queue_names(path: Path) -> list[str]:
     names: list[str] = []
     with os.scandir(path) as entries:
@@ -546,7 +584,9 @@ def serve(
                         run_prefix=validated["run_prefix"],
                         source_head=validated["source_head"],
                     )
-                    response = executor(root, validated, task_path, scope)
+                    response = _execute_with_heartbeat(
+                        status_path, executor, root, validated, task_path, scope
+                    )
                     if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                         raise BrokerError("broker executor returned an invalid response")
                 except Exception as exc:
@@ -606,23 +646,28 @@ def submit(
                 or type(status_value.get("pid")) is not int
                 or not isinstance(status_value.get("updated_at"), (int, float))):
             raise BrokerError("provider broker is not ready")
-        try:
-            os.kill(status_value["pid"], 0)
-        except OSError as exc:
-            raise BrokerError("provider broker process is unavailable") from exc
         if time.time() - status_value["updated_at"] > STATUS_MAX_AGE_SECONDS:
             raise BrokerError("provider broker status is stale")
         request_path = requests / f"{request['request_id']}.json"
         response_path = _response_path(responses, request["request_id"])
         _atomic_new_json(request_path, request, MAX_REQUEST_BYTES)
         deadline = time.monotonic() + _overall_timeout(timeout) + 30
+        last_health_check = 0.0
         while not _published_queue_file(response_path, "broker response"):
             if time.monotonic() >= deadline:
                 raise BrokerError("provider broker response deadline exceeded")
-            try:
-                os.kill(status_value["pid"], 0)
-            except OSError as exc:
-                raise BrokerError("provider broker stopped before responding") from exc
+            if time.monotonic() - last_health_check >= 1:
+                current_status = _read_json_file(
+                    root, status_path, MAX_REQUEST_BYTES, "broker status"
+                )
+                if (current_status.get("state") not in {"IDLE", "RUNNING"}
+                        or current_status.get("pid") != status_value["pid"]
+                        or not isinstance(current_status.get("updated_at"), (int, float))
+                        or time.time() - current_status["updated_at"] > STATUS_MAX_AGE_SECONDS
+                        or (current_status.get("state") == "RUNNING"
+                            and current_status.get("request_id") != request["request_id"])):
+                    raise BrokerError("provider broker heartbeat is unavailable or mismatched")
+                last_health_check = time.monotonic()
             time.sleep(POLL_SECONDS)
         try:
             response = _read_json_file(
@@ -650,10 +695,8 @@ def status(root: Path) -> int:
         if (not isinstance(value, dict) or value.get("state") not in {"IDLE", "RUNNING"}
                 or type(pid) is not int
                 or not isinstance(value.get("updated_at"), (int, float))
-                or (value.get("state") == "IDLE"
-                    and time.time() - value["updated_at"] > STATUS_MAX_AGE_SECONDS)):
+                or time.time() - value["updated_at"] > STATUS_MAX_AGE_SECONDS):
             raise BrokerError("provider broker is not healthy")
-        os.kill(pid, 0)
     except (OSError, ValueError, json.JSONDecodeError, BrokerError) as exc:
         print(json.dumps({"state": "UNAVAILABLE", "reason": str(exc)}))
         return 2
