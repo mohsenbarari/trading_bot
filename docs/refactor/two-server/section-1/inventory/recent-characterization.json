@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "725f39c0b1f8f01eedf2fe4b0e611bd334dd97e2",
+  "inspected_head": "d166ccf6e094777790cd2f22c7cd0c86afddc5af",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -838,6 +838,82 @@
         "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py::TestTradeCreateInferenceSuggestionEditCharacterization::test_unauthenticated_guard_answers_and_aborts_without_message_or_state_access",
         "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py::TestTradeCreateInferenceSuggestionEditCharacterization::test_authenticated_stale_message_alerts_and_aborts_without_edit_or_state_mutation",
         "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py::TestTradeCreateInferenceSuggestionEditCharacterization::test_authenticated_invalid_edit_state_alerts_before_any_mutation_or_edit"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_inference_choice_cancel.py",
+      "sha256": "188a862c4007952e19b7d011686ef958d882b9edded77ea3d85b528472c249c7",
+      "last_commit": "53569e27dc3604b8dc023691577832df7eb5fee2",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-CHOICE-CANCEL-L3432"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_inference_choice_cancel.py::TestTradeCreateInferenceChoiceCancelCharacterization::test_unauthenticated_clears_then_acknowledges_without_edit",
+        "tests/test_p1_00b_characterization_trade_create_inference_choice_cancel.py::TestTradeCreateInferenceChoiceCancelCharacterization::test_authenticated_clears_then_acknowledges_then_edits_exact_cancellation_response",
+        "tests/test_p1_00b_characterization_trade_create_inference_choice_cancel.py::TestTradeCreateInferenceChoiceCancelCharacterization::test_authenticated_edit_failure_propagates_after_clear_and_ack_without_retry"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_text_offer_confirm_wrappers.py",
+      "sha256": "a2b0dd078d07999ec32611776249475cb2acf803546b9e3b50d7fd8104876778",
+      "last_commit": "536ef9ee4177220cdc4b7608c8416aba39448910",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-CONFIRM-L3447",
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-WARNING-CONFIRM-L3470"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_text_offer_confirm_wrappers.py::TestTradeCreateTextOfferConfirmWrappersCharacterization::test_stale_callback_short_circuits_both_wrappers_without_core_delegation",
+        "tests/test_p1_00b_characterization_trade_create_text_offer_confirm_wrappers.py::TestTradeCreateTextOfferConfirmWrappersCharacterization::test_normal_confirm_delegates_exactly_after_stale_guard",
+        "tests/test_p1_00b_characterization_trade_create_text_offer_confirm_wrappers.py::TestTradeCreateTextOfferConfirmWrappersCharacterization::test_warning_confirm_delegates_exactly_with_warning_acknowledged"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_text_offer_cancel.py",
+      "sha256": "4bc82f587b8b4f97c4e4e63f87e90dd41ed4d502925385074cc07e628b3da941",
+      "last_commit": "fe31fd3363b47a9f793cffbfbca4f5bd37ebe0e1",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-CANCEL-L3493"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_text_offer_cancel.py::TestTradeCreateTextOfferCancelCharacterization::test_stale_callback_short_circuits_without_edit_clear_or_acknowledgement",
+        "tests/test_p1_00b_characterization_trade_create_text_offer_cancel.py::TestTradeCreateTextOfferCancelCharacterization::test_current_callback_edits_then_clears_then_acknowledges",
+        "tests/test_p1_00b_characterization_trade_create_text_offer_cancel.py::TestTradeCreateTextOfferCancelCharacterization::test_edit_failure_propagates_before_clear_or_acknowledgement"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_stale_callback_router.py",
+      "sha256": "d8abd36958f21aab1729f6481d73c3e872ac9b85cb82ab2359f8a8c71722b70c",
+      "last_commit": "09459c945ef3d6de6fff017b8735ac535398be76",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3504",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3505",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3506",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3507",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3508",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3509",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3510",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3511",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3512",
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3513",
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3514",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3515",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3516"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_stale_callback_router.py::TestTradeCreateStaleCallbackRouterCharacterization::test_stale_callback_router_unauthenticated_scenario",
+        "tests/test_p1_00b_characterization_trade_create_stale_callback_router.py::TestTradeCreateStaleCallbackRouterCharacterization::test_stale_callback_router_authenticated_scenario"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_message_router.py",
+      "sha256": "4ab0395d860d8c60ce889b0e2ad6e3417a7173693c817d4ba93567f6a39b2fb6",
+      "last_commit": "d166ccf6e094777790cd2f22c7cd0c86afddc5af",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TRADE-BUTTON-L645"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_message_router.py::TestTradeCreateMessageRouterCharacterization::test_trade_button_router_unauthenticated_short_circuit",
+        "tests/test_p1_00b_characterization_trade_create_message_router.py::TestTradeCreateMessageRouterCharacterization::test_trade_button_router_eligible_success_ordering"
       ]
     }
   ],
