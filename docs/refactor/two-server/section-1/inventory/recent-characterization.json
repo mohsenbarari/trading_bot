@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "d6f819a846083217ba5aa315498ac45e161f2f5b",
+  "inspected_head": "725f39c0b1f8f01eedf2fe4b0e611bd334dd97e2",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -781,15 +781,63 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_text_offer.py",
-      "sha256": "1dd266b8461987c38c92a807e9bd30d862bbe51f0f4b41b0886589f607d2e32a",
-      "last_commit": "d6f819a846083217ba5aa315498ac45e161f2f5b",
+      "sha256": "8591bcbb06fb656145c3f3f24ca475e522e3cdeefe5a062b25d623603a22efe5",
+      "last_commit": "ea61d7fc3e919bb1e45b69d55fcfc240527664f3",
       "seed_ids": [
-        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-L3047"
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-L3047",
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-WHILE-CONFIRMATION-PENDING-L3066",
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-FROM-STALE-TRADE-STATE-L3167",
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-UNEXPECTED-TRADE-BUILDER-MESSAGE-L3191"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_idle_delegation_empty_text_normalization",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_unauthenticated_guard",
         "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_non_idle_suppression",
-        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_unauthenticated_guard"
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_idle_delegation_empty_text_normalization",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_unauthenticated_guard_pending_confirmation_and_stale_recovery",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_pending_confirmation_bot_fallback_and_ordering",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_stale_recovery_bot_fallback_logging_and_ordering",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_unexpected_trade_builder_message_unauthenticated_guard",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_unexpected_trade_builder_message_authenticated_ordering_and_guidance"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_inference_choice.py",
+      "sha256": "b86f656e636f27954758f73ffae03fe09bc48a29276a697c0c60a17b4e83f44c",
+      "last_commit": "77cb75e69b4f363f6fd3621e33676571ce2d5c17",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-CHOICE-L3229"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_inference_choice.py::TestTradeCreateInferenceChoiceCharacterization::test_unauthenticated_guard_answers_and_aborts_without_message_or_state_access",
+        "tests/test_p1_00b_characterization_trade_create_inference_choice.py::TestTradeCreateInferenceChoiceCharacterization::test_authenticated_stale_message_alerts_and_aborts_without_preview_or_state_mutation",
+        "tests/test_p1_00b_characterization_trade_create_inference_choice.py::TestTradeCreateInferenceChoiceCharacterization::test_authenticated_unsupported_mode_alerts_and_aborts_without_preview_or_state_mutation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_inference_suggestion_confirm.py",
+      "sha256": "93dfddc3978d8f2dcb7c0137fa68f6dea1a4bf6c2732350dbd0e3a816c5de267",
+      "last_commit": "2e005193a935cfe12d40a128774f9acaa8ad31a2",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-CONFIRM-L3305"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_inference_suggestion_confirm.py::TestTradeCreateInferenceSuggestionConfirmCharacterization::test_unauthenticated_guard_answers_and_aborts_without_message_or_state_access",
+        "tests/test_p1_00b_characterization_trade_create_inference_suggestion_confirm.py::TestTradeCreateInferenceSuggestionConfirmCharacterization::test_authenticated_stale_message_alerts_and_aborts_without_preview_or_state_mutation",
+        "tests/test_p1_00b_characterization_trade_create_inference_suggestion_confirm.py::TestTradeCreateInferenceSuggestionConfirmCharacterization::test_authenticated_empty_candidates_alerts_and_aborts_without_preview_or_state_mutation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py",
+      "sha256": "9c5d531c8be244f7a81582c8fa490d911f8afabf6d0b2f52116ebb28473aeebb",
+      "last_commit": "725f39c0b1f8f01eedf2fe4b0e611bd334dd97e2",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-EDIT-L3360",
+        "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-EDIT-L3364"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py::TestTradeCreateInferenceSuggestionEditCharacterization::test_unauthenticated_guard_answers_and_aborts_without_message_or_state_access",
+        "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py::TestTradeCreateInferenceSuggestionEditCharacterization::test_authenticated_stale_message_alerts_and_aborts_without_edit_or_state_mutation",
+        "tests/test_p1_00b_characterization_trade_create_inference_suggestion_edit.py::TestTradeCreateInferenceSuggestionEditCharacterization::test_authenticated_invalid_edit_state_alerts_before_any_mutation_or_edit"
       ]
     }
   ],
