@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "bca292ca7cd33de0ab30afde37bf3643c3ec404a",
+  "inspected_head": "1659cd9a314a3a15cb6166e1982d0a53fd173431",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1386,6 +1386,67 @@
         "tests/test_p1_00b_characterization_create_owner_customer_internal_input_mismatches.py::CreateOwnerCustomerInternalInputMismatchesCharacterizationTests::test_mismatching_non_empty_account_name_is_rejected_before_requester_or_db_work",
         "tests/test_p1_00b_characterization_create_owner_customer_internal_input_mismatches.py::CreateOwnerCustomerInternalInputMismatchesCharacterizationTests::test_mismatching_idempotency_key_with_matching_account_name_is_rejected_before_requester_or_db_work"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_list_open_user_flags.py",
+      "sha256": "4d08da9000aa1c87b446d041b659dadd5c973d96d2f46f1f714e097d14528749",
+      "last_commit": "2f4f351292e994e347f22785a5c44c5cfeea75be",
+      "seed_ids": [
+        "API-IDENTITY-GET-USER-FLAGS-LIST-OPEN-USER-FLAGS-L83"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_list_open_user_flags.py::P100bListOpenUserFlagsCharacterizationTests::test_super_admin_open_list_preserves_query_and_row_order"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_resolve_user_flag_authority.py",
+      "sha256": "a7a7be023d8b426f765f0c67eb8c71860ea811931c99d61d1572efee5be1d71a",
+      "last_commit": "9138d3589b79ad97ca9741e51f078ddd43d37338",
+      "seed_ids": [
+        "API-IDENTITY-POST-USER-FLAGS-RESOLVE-USER-FLAG-L111"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_resolve_user_flag_authority.py::ResolveUserFlagAuthorityCharacterizationTests::test_middle_manager_forbidden_targets_are_rejected_before_mutation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_resolve_user_flag_success.py",
+      "sha256": "f52617936da85069acabd7cc9dea128960354af32e8afba671f3719d76ef7eb4",
+      "last_commit": "18d5d88f5b979e47c243f9b17aec83bc6e68d8ed",
+      "seed_ids": [
+        "API-IDENTITY-POST-USER-FLAGS-RESOLVE-USER-FLAG-L111"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_resolve_user_flag_success.py::ResolveUserFlagSuccessCharacterizationTests::test_super_admin_resolution_trims_note_commits_and_audits"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_customer_webapp_only_batch.py",
+      "sha256": "ddfd3583dee04830316f47fa9127be30a1ed87593823b78b46a451559bc23e74",
+      "last_commit": "d9b5964e939b0992c9f6d082ea4691f60a06fdce",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-ASK-UNLINK-USER-PANEL-CUSTOMER-L844",
+        "BOT-TG-CALLBACK-QUERY-PANEL-CONFIRM-UNLINK-USER-PANEL-CUSTOMER-L853",
+        "BOT-TG-CALLBACK-QUERY-PANEL-USER-PANEL-CUSTOMER-INVITE-TIER2-WEBAPP-ONLY-L931"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_customer_webapp_only_batch.py::PanelCustomerWebappOnlyBatchCharacterizationTests::test_ask_unlink_reports_webapp_only_without_input_access",
+        "tests/test_p1_00b_characterization_panel_customer_webapp_only_batch.py::PanelCustomerWebappOnlyBatchCharacterizationTests::test_confirm_unlink_reports_webapp_only_without_input_access",
+        "tests/test_p1_00b_characterization_panel_customer_webapp_only_batch.py::PanelCustomerWebappOnlyBatchCharacterizationTests::test_tier2_invite_reports_webapp_only_without_user_access"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_customer_invite_inputs_batch.py",
+      "sha256": "1eb4bca4a5724d7f23a9bb266b51509e4eec0fefc3cf11e9e38de492d7b5eee0",
+      "last_commit": "1659cd9a314a3a15cb6166e1982d0a53fd173431",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-PROCESS-CUSTOMER-INVITE-MANAGEMENT-NAME-L967",
+        "BOT-TG-MESSAGE-PANEL-PROCESS-CUSTOMER-INVITE-MOBILE-L1005"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_customer_invite_inputs_batch.py::PanelCustomerInviteInputsBatchCharacterizationTests::test_management_name_valid_input_advances_to_mobile_state",
+        "tests/test_p1_00b_characterization_panel_customer_invite_inputs_batch.py::PanelCustomerInviteInputsBatchCharacterizationTests::test_mobile_valid_input_advances_to_confirmation_state"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1411,6 +1472,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "Five-unit characterization reconciliation through bca292ca7cd33de0ab30afde37bf3643c3ec404a is complete and units_since_reconciliation is reset to 0; this update does not claim seed, blocker, count, origin-cell, or Stage closure."
+    "These five accepted behavior units are indexed through 1659cd9a314a3a15cb6166e1982d0a53fd173431 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
