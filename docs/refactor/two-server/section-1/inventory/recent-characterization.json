@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "42a91fd417f3193e444744a962738e5963ca1dec",
+  "inspected_head": "20f209080af63ecfcbc1c9074476b27714249ab5",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1512,6 +1512,69 @@
         "tests/test_p1_00b_characterization_start_registration_guidance_batch.py::StartRegistrationGuidanceCharacterizationTests::test_non_contact_direct_registration_guides_contact_button",
         "tests/test_p1_00b_characterization_start_registration_guidance_batch.py::StartRegistrationGuidanceCharacterizationTests::test_confirmation_state_message_guides_action_buttons"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_registration_fsm_unavailable_batch.py",
+      "sha256": "b7c9fe79f8ff0c0aa7ddf781dfa37af9a19ac3fa0e0df4e8b2605b043bf31501",
+      "last_commit": "14a972b7a61baede11243daa0513bafb2a0f678c",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-START-HANDLE-ADDRESS-L1163",
+        "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-REGISTRATION-EDIT-ADDRESS-L1248"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_registration_fsm_unavailable_batch.py::StartRegistrationFSMUnavailableCharacterizationTests::test_handle_address_reports_unavailable_when_fsm_read_fails",
+        "tests/test_p1_00b_characterization_start_registration_fsm_unavailable_batch.py::StartRegistrationFSMUnavailableCharacterizationTests::test_handle_registration_edit_address_alerts_unavailable_when_fsm_read_fails"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_registration_fsm_unavailable_remaining_batch.py",
+      "sha256": "f3c7e4395ace859fd5cccdbda4671fa810d4d92e106d9c49a5b0631e365ffc9e",
+      "last_commit": "eb82abe17dcc3bdde7e036b12c008d21d257e85d",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-START-HANDLE-CONTACT-L1064",
+        "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-REGISTRATION-CONFIRM-L1301"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_registration_fsm_unavailable_remaining_batch.py::StartRegistrationFSMUnavailableRemainingCharacterizationTests::test_handle_contact_reports_unavailable_when_fsm_read_fails",
+        "tests/test_p1_00b_characterization_start_registration_fsm_unavailable_remaining_batch.py::StartRegistrationFSMUnavailableRemainingCharacterizationTests::test_handle_registration_confirm_alerts_unavailable_when_fsm_read_fails"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_channel_join_request_unrelated.py",
+      "sha256": "4278623ecde9d9e950e2a4fbe54f896171e4bc570f72f320d24ff76864e429b9",
+      "last_commit": "e59fab257673ebcba400c6b93eaad9259a7ec6ab",
+      "seed_ids": [
+        "BOT-IDENTITY-CHAT-JOIN-REQUEST-START-HANDLE-CHANNEL-JOIN-REQUEST-L1524"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_channel_join_request_unrelated.py::StartChannelJoinRequestCharacterizationTests::test_unrelated_channel_returns_before_session_or_telegram_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_invalid_selection_batch.py",
+      "sha256": "68f0a5b391149fc18c3c05b0393accb6997ad6c46bacca174afc3d67388eb7da",
+      "last_commit": "67c58a69e1f14e7a4a955439d5e1d617f2539d52",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-SETTLEMENT-TYPE-SELECTION-L743",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-TYPE-SELECTION-L709"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_invalid_selection_batch.py::TradeCreateInvalidSelectionGuardCharacterizationTests::test_settlement_type_selection_invalid_value_alerts_without_state_mutation",
+        "tests/test_p1_00b_characterization_trade_create_invalid_selection_batch.py::TradeCreateInvalidSelectionGuardCharacterizationTests::test_trade_type_selection_invalid_value_alerts_without_state_mutation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_settings_cancel_refresh_batch.py",
+      "sha256": "6d0f1231635e6257d6da0a2c3a1a2248da58cf648d14b754188c142c918ffbb3",
+      "last_commit": "20f209080af63ecfcbc1c9074476b27714249ab5",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-CANCEL-L1370",
+        "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-CANCEL-L1435"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_settings_cancel_refresh_batch.py::PanelSettingsCancelRefreshCharacterizationTests::test_settings_edit_cancel_clears_and_refreshes_admin_settings",
+        "tests/test_p1_00b_characterization_panel_settings_cancel_refresh_batch.py::PanelSettingsCancelRefreshCharacterizationTests::test_settings_reset_cancel_refreshes_admin_settings_without_mutation"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1537,6 +1600,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through 42a91fd417f3193e444744a962738e5963ca1dec and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through 20f209080af63ecfcbc1c9074476b27714249ab5 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
