@@ -13,37 +13,36 @@ Excluded: secrets and credentials, identity/authentication material, user/person
 production or operational data, deploy/production changes, DNS, Web Writer, fetch/push
 and unrelated remote-service mutation. This does not widen any other gate.
 
-1. Orient once. Read AGENTS.md, the MemoryCustodian startup files and current entrypoint
-   .agents/skills/two-site-refactor/SKILL.md; follow PROPOSAL_AUTOMATION.md and the active
-   Stage card/Assignment; narrow execution-order and Stage reading to relevant sections once.
-   Load only routed, task-relevant sources.
-   startup_validation=true means Supervisor already validated runtime/Git/clean HEAD,
-   protected refs/controls, worktree registry, Assignment and Stage. Do not repeat those
-   probes; re-probe after mutation, drift or inconsistent context. Supervisor validates afterward.
-   Read exact paths; no broad plans/logs/run scans or rediscovery. Fresh Git/SHA evidence wins.
-   Preserve user work and protected main/origin/main/candidate refs. No fetch/push, deploy,
-   production, DNS, Web Writer, secrets or paused-gateway activation.
+1. Orient once: read AGENTS.md, routed MemoryCustodian files, current
+   `.agents/skills/two-site-refactor/SKILL.md`, PROPOSAL_AUTOMATION.md and the active
+   Stage/Assignment; load only exact task sources. `startup_validation=true` means Supervisor
+   already checked runtime/Git/clean HEAD, protected refs/controls, worktrees and scope: re-probe
+   only after mutation, drift or inconsistent context. Fresh Git/SHA wins; do not scan broad
+   plans/logs/runs. Preserve user/protected refs; no fetch/push, deploy/production, DNS, Writer,
+   secrets or paused-gateway activation.
 
-2. Use SUPERVISOR_CONTEXT_JSON's validated_previous_cycle_hint to locate the exact
-   previous work and next gap without searching old runs. It is a bounded in-memory,
-   current-HEAD-matched hint, not authority or Stage acceptance. Revalidate the active
-   Stage/Assignment and actual missing coverage; do not repeat a completed scenario.
-   With no valid hint, start from tracked locator
-   docs/refactor/two-server/section-1/inventory/recent-characterization.json; revalidate file
-   SHAs and assertions (this partial index cannot close seeds/cells/blockers; do not reconcile
-   if already covering accepted modules). Keep units_since_reconciliation in next_action across
-   restarts; after 5 accepted behavior units reconcile before more characterization. Reset only
-   after accepted reconciliation; never auto-close.
-   next_action must name exact gap, accepted scenario selectors/commit, remaining scenarios,
-   reconciliation due state and unmet behavior. Keep unresolved origin SUCCESS/policy/notification/retry
-   cells in the shortlist; prefer completing a bounded acceptance condition over peripheral fragments.
-   Test/commit/requirement counts alone are not behavior progress.
-   Supervisor recovery context: after RESCOPE choose a distinct smaller or context-complete internal unit;
-   if recovery.defer_prior_unit is true, choose a dependency-ready gap unlike recovery.deferred_unit
-   (no paraphrase; no alternative means HALT).
+2. Use the current-HEAD-matched `validated_previous_cycle_hint` for the exact prior work/next
+   gap; it is not authority. Revalidate Stage/Assignment and missing coverage; never repeat an
+   accepted scenario. Without it use `section-1/inventory/recent-characterization.json`, then
+   recheck SHA/assertions. That partial index cannot close seeds/cells/blockers. Carry
+   `units_since_reconciliation`; reconcile after 5 accepted behavior units, reset only on its
+   accepted reconciliation, never auto-close. `next_action` names exact gap, accepted
+   selectors/commit, remaining scenarios, reconciliation state and unmet behavior; prioritize
+   bounded acceptance over peripheral counts. After RESCOPE choose a distinct, ready unit; when
+   `defer_prior_unit`, it cannot paraphrase the deferred unit (otherwise HALT).
 
 3. Supply authoritative current definitions for every referenced enum, constant, import,
    signature, model field and dependency. UserRole.BUYER is forbidden unless its authoritative definition proves it exists.
+   For remaining P1-00b seed-handler work, package 2–4 eligible handlers from exactly one
+   source module into one shared hermetic characterization module by default. Use the
+   `P1-00B-BATCH-V1.<family>` scenario key and one requirement per handler exactly as
+   `[HANDLER] source.py:symbol | selector=tests/test_p1_00b_characterization_x.py::Class::test_x | scenario=key`.
+   Its selectors must be exactly those handler selectors. The local builder rejects a batch
+   that has a duplicate handler/scenario, mixed source modules, more/fewer handlers, extra
+   requirements, or selector drift. This packages review transport only: every handler still
+   needs its own live assertion and ledger evidence. Do not batch an origin-matrix cell,
+   custom Session/table setup, persistence/retry path, subprocess/reload path, or any unit
+   whose fixture/lifecycle is not genuinely shared; record that concrete reason and use one unit.
    Prefer one shared flow with 2–3 related scenarios and normally <=6 requirements.
    A custom session/table test gets <=4 and one outcome, or first reuses/builds a bounded helper.
    State scenarios/exclusions explicitly; do not bundle Stages or skip gates.

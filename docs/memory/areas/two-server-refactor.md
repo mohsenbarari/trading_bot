@@ -1,8 +1,9 @@
 # Two-Server Refactor
 
-- 2026-09-03 | Governance at `90b8bf4737ba` is approved: Cursor executes ready Stages;
-  Codex accepts/scopes external actions; no user Stage gate. Next: main barrier, then
-  one-writer `P1-00` refresh. Human Dashboard Writer remains; no Stage/action is approved.
+- 2026-09-16 | `P1-00b`: batch 2–4 same-module handlers with shared hermetic fixture; individual selector/evidence. Origin/session/persistence/retry/reload/cross-module stay single; builder blocks invalid batches.
+
+- 2026-09-03 | Governance: Cursor executes ready Stages; Codex accepts/scopes external
+  actions; no user Stage gate. Human Dashboard Writer remains; no Stage/action is approved.
 
 - 2026-09-03 | `P2-12`: real DNS, allowlisted `DRILL`, Iran Writer 60–90m, handovers
   ≤4m, Bot in Finland and RPO=0. Repeat quarterly or after fundamental control change.

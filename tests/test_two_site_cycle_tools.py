@@ -36,6 +36,82 @@ def task():
             "test_selectors": ["test_new.py"]}
 
 
+def p1_00b_batch_task() -> dict:
+    test_path = "tests/test_p1_00b_characterization_user_flags_batch.py"
+    return {
+        "task_id": "P1-00B-BATCH-USER-FLAGS-001",
+        "goal": "WA-P1-00B-FREEZE-20260904-001: characterize compatible user-flag handlers.",
+        "context_files": ["gap.md"],
+        "allowed_files": [test_path],
+        "requirements": [
+            "[HANDLER] api/routers/user_flags.py:resolve_user_flag | "
+            f"selector={test_path}::UserFlagBatchTests::test_resolve_user_flag_not_found | scenario=not_found",
+            "[HANDLER] api/routers/user_flags.py:list_open_user_flags | "
+            f"selector={test_path}::UserFlagBatchTests::test_list_open_user_flags_authority | scenario=authority",
+        ],
+        "test_selectors": [
+            f"{test_path}::UserFlagBatchTests::test_resolve_user_flag_not_found",
+            f"{test_path}::UserFlagBatchTests::test_list_open_user_flags_authority",
+        ],
+    }
+
+
+def test_p1_00b_batch_contract_accepts_independent_handler_receipts():
+    ct.validate_p1_00b_batch_spec(p1_00b_batch_task(), "P1-00B-BATCH-V1.user-flags")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("mixed_source", "share one source module"),
+        ("duplicate_handler", "repeats a handler scenario"),
+        ("selector_drift", "selectors must exactly match"),
+        ("single_handler", "two to four explicit handler requirements"),
+    ],
+)
+def test_p1_00b_batch_contract_rejects_ambiguous_evidence(mutation, message):
+    value = p1_00b_batch_task()
+    if mutation == "mixed_source":
+        value["requirements"][1] = value["requirements"][1].replace(
+            "api/routers/user_flags.py:list_open_user_flags", "api/routers/users.py:list_users"
+        )
+    elif mutation == "duplicate_handler":
+        value["requirements"][1] = value["requirements"][0]
+        value["test_selectors"][1] = value["test_selectors"][0]
+    elif mutation == "selector_drift":
+        value["test_selectors"][1] = "tests/test_other.py::Other::test_other"
+    else:
+        value["requirements"] = value["requirements"][:1]
+        value["test_selectors"] = value["test_selectors"][:1]
+    with pytest.raises(runner.ProposalError, match=message):
+        ct.validate_p1_00b_batch_spec(value, "P1-00B-BATCH-V1.user-flags")
+
+
+def test_non_batch_p1_00b_task_remains_compatible():
+    value = p1_00b_batch_task()
+    ct.validate_p1_00b_batch_spec(value, "P1-00B-SINGLE-V1.user-flags")
+
+
+def test_p1_00b_batch_builder_and_runtime_recheck_contract(repo):
+    root, _ = repo
+    spec = root / "batch-spec.json"
+    spec.write_text(json.dumps({
+        "task": p1_00b_batch_task(),
+        "gap_reference": "gap.md#p1-00b-user-flags",
+        "snippets": [{"path": "code.py", "symbols": ["f"]}],
+        "scenario_key": "P1-00B-BATCH-V1.user-flags",
+    }))
+    output = root / ".local/two-site-refactor/tasks/p1-00b-batch.json"
+    assert ct.build(root, spec, output)["state"] == "TASK_READY"
+    assert runner.load_task(root, output)[0]["task_id"] == "P1-00B-BATCH-USER-FLAGS-001"
+
+    tampered = json.loads(output.read_text())
+    tampered["requirements"] = tampered["requirements"][:1]
+    output.write_text(json.dumps(tampered))
+    with pytest.raises(runner.ProposalError, match="two to four explicit handler requirements"):
+        runner.load_task(root, output)
+
+
 def built(repo, snippets=None, scenario_key="scenario_a"):
     root, _ = repo
     spec = root / "spec.json"

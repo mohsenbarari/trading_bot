@@ -74,6 +74,13 @@ output اضافه نمی‌شود. `provider_reported` زمان گزارش‌ش�
 
 قرارداد Runner دقیقاً شش کلید دارد:
 `task_id`, `goal`, `context_files`, `allowed_files`, `requirements`, `test_selectors`.
+
+برای فریز P1-00b، `P1-00B-BATCH-V1` تنها قالب مجاز برای بسته‌کردن کارهای مستقل است:
+۲ تا ۴ handler از **یک** ماژول با fixture واقعاً مشترک و hermetic در یک فایل test. هر
+requirement به‌صورت مستقل handler، scenario و selector را ثبت می‌کند و selectorهای task باید
+دقیقاً با همان‌ها برابر باشند؛ پس دریافت یک commit بسته‌ای هرگز شاهد یکپارچه یا Stage closure
+نمی‌سازد. مسیرهای origin/persistence/retry/session/reload/cross-module بسته نمی‌شوند. builder
+پیش از تماس با مدل، قالب ناقص یا بزرگ‌شده را fail-closed رد می‌کند.
 فهرست‌ها یکتا، غیرخالی و حداکثر ۳۲ عضو هستند. شمارهٔ نیازمندی از ۱ مطابق ترتیب فهرست.
 فایل‌های مجازِ موجود کامل فرستاده می‌شوند؛ فایل جدید content/hash اولیهٔ null دارد.
 

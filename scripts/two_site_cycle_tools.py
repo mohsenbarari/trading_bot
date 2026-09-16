@@ -6,6 +6,7 @@ import ast
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 try:
@@ -24,6 +25,70 @@ except ModuleNotFoundError:
     )
 
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
+P1_00B_ASSIGNMENT = "WA-P1-00B-FREEZE-20260904-001"
+P1_00B_BATCH_PREFIX = "P1-00B-BATCH-V1."
+P1_00B_HANDLER_REQUIREMENT = re.compile(
+    r"^\[HANDLER\] "
+    r"(?P<source>(?:api|bot|core|main|models)/[A-Za-z0-9_./-]+\.py):"
+    r"(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)"
+    r" \| selector=(?P<selector>tests/test_p1_00b_characterization_[a-z0-9_]+\.py::"
+    r"[A-Za-z_][A-Za-z0-9_]*::test_[A-Za-z0-9_]+)"
+    r" \| scenario=(?P<scenario>[A-Za-z0-9._-]+)$"
+)
+
+
+def validate_p1_00b_batch_spec(task: object, scenario_key: object) -> None:
+    """Validate the compact P1-00b package shape before model contact.
+
+    The package is deliberately narrow: a shared, hermetic characterization module
+    proves two to four exact handlers from one source module.  It is an efficiency
+    boundary, not a way to aggregate evidence: every handler retains an individual
+    requirement and pytest selector for Worker, Reviewer, Codex, and the ledger.
+    """
+    if not isinstance(task, dict) or not isinstance(scenario_key, str):
+        raise runner.ProposalError("invalid P1-00b batch task")
+    goal = task.get("goal")
+    if not isinstance(goal, str) or P1_00B_ASSIGNMENT not in goal:
+        return
+    if not scenario_key.startswith(P1_00B_BATCH_PREFIX):
+        return
+
+    requirements = task.get("requirements")
+    selectors = task.get("test_selectors")
+    allowed_files = task.get("allowed_files")
+    if not (
+        isinstance(requirements, list)
+        and isinstance(selectors, list)
+        and isinstance(allowed_files, list)
+        and len(allowed_files) == 1
+        and isinstance(allowed_files[0], str)
+        and re.fullmatch(r"tests/test_p1_00b_characterization_[a-z0-9_]+\.py", allowed_files[0])
+    ):
+        raise runner.ProposalError(
+            "P1-00b batch must change exactly one canonical characterization test module"
+        )
+
+    parsed = []
+    for requirement in requirements:
+        if not isinstance(requirement, str):
+            continue
+        match = P1_00B_HANDLER_REQUIREMENT.fullmatch(requirement)
+        if match is not None:
+            parsed.append(match.groupdict())
+    if not 2 <= len(parsed) <= 4 or len(parsed) != len(requirements):
+        raise runner.ProposalError(
+            "P1-00b batch must contain exactly two to four explicit handler requirements"
+        )
+    handler_keys = [(item["source"], item["symbol"], item["scenario"]) for item in parsed]
+    if len(set(handler_keys)) != len(handler_keys):
+        raise runner.ProposalError("P1-00b batch repeats a handler scenario")
+    if len({item["source"] for item in parsed}) != 1:
+        raise runner.ProposalError("P1-00b batch handlers must share one source module")
+    requirement_selectors = [item["selector"] for item in parsed]
+    if selectors != requirement_selectors or len(set(selectors)) != len(selectors):
+        raise runner.ProposalError(
+            "P1-00b batch selectors must exactly match the explicit handler requirements"
+        )
 
 
 def excerpt(root: Path, name: str, symbols: list[str]) -> dict:
@@ -99,6 +164,7 @@ def validate_excerpts(root: Path, task: dict) -> None:
         )
     except Exception as exc:
         raise runner.ProposalError(f"semantic identity validation failed: {exc}") from exc
+    validate_p1_00b_batch_spec(task, identity["scenario_key"])
 
 
 def build(root: Path, spec_path: Path, output: Path) -> dict:
@@ -108,6 +174,7 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
     task = spec["task"]
     if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
         raise runner.ProposalError("invalid base task")
+    validate_p1_00b_batch_spec(task, spec["scenario_key"])
     if not isinstance(spec["snippets"], list) or len(spec["snippets"]) > 32:
         raise runner.ProposalError("invalid snippets")
     snippets = []
