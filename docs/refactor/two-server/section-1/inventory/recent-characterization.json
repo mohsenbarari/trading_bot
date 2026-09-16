@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "e2d41e710ddfcb5e4e8a54c66ae3990a9a0d4b6c",
+  "inspected_head": "7d52d7cf167da34b5df4eff1ca7ef97366eb79cf",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1130,14 +1130,15 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py",
-      "sha256": "f75982060607f3c53ba3fb4e6033253eebf2e4ab0d982a2c4316f2d8fe6df774",
-      "last_commit": "e2d41e710ddfcb5e4e8a54c66ae3990a9a0d4b6c",
+      "sha256": "f0424be9f64dce4db97d1c2028e73580cdb3e18b1f390f371d942df40b17da73",
+      "last_commit": "d893a473cee96531765923b1c39eff26e276b593",
       "seed_ids": [
         "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74"
       ],
       "test_selectors": [
         "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py::OvertimeRequesterCancelTerminalMappingCharacterizationTests::test_overtime_requester_cancel_not_requester_error_maps_to_m33",
-        "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py::OvertimeRequesterCancelTerminalMappingCharacterizationTests::test_overtime_requester_cancel_already_terminal_error_maps_to_m33"
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py::OvertimeRequesterCancelTerminalMappingCharacterizationTests::test_overtime_requester_cancel_already_terminal_error_maps_to_m33",
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_terminal_mapping.py::OvertimeRequesterCancelTerminalMappingCharacterizationTests::test_overtime_requester_cancel_illegal_transition_relays_source_detail"
       ]
     },
     {
@@ -1150,6 +1151,44 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_invitation_role.py::CharacterizeInvitationRoleTests::test_successful_standard_role_forwards_without_local_invitation_row",
         "tests/test_p1_00b_characterization_invitation_role.py::CharacterizeInvitationRoleTests::test_middle_manager_cannot_select_police_role_fail_closed"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_overtime_requester_cancel_persistence.py",
+      "sha256": "673878c27f44fbaa4d992dc988aa6e7d24ec3642e6d293fd0a8766d4dee4ae14",
+      "last_commit": "47cadfe3803287b12d7b434bfd2713d43b200486",
+      "seed_ids": [
+        "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_overtime_requester_cancel_persistence.py::OvertimeRequesterCancelPersistenceCharacterizationTests::test_legal_requester_cancel_persists_terminal_fields_across_sessions"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_webapp_side_effect_retry.py",
+      "sha256": "54b0d79fe0a309470033552d6595ed7205b8aac8006e109d4e4ae99f220edebc",
+      "last_commit": "93d20706ece9d3c0eb475a5b632dadd22dd5d70e",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_webapp_side_effect_retry.py::WebAppSideEffectRetryCharacterizationTests::test_failed_claimed_receipt_retries_once_after_commit"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_tier2_policy_prerequisite.py",
+      "sha256": "09ccda678a990ca2dc14e26b4b1f8d5c08ab5f52ade91e935fe60b0f3ccf6cae",
+      "last_commit": "069f032e26a74b14930aa3ab8c0de609881813cb",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_tier2_policy_prerequisite.py::P100bInternalOfferTier2PolicyPrerequisiteCharacterizationTests::test_real_relation_yields_current_tier2_snapshot_and_commission"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_real_notification_audience.py",
+      "sha256": "478c0eb69fb3a64e45a7ad46de4b6268355eba9ebfd1557e0b88efe3e59267ac",
+      "last_commit": "7d52d7cf167da34b5df4eff1ca7ef97366eb79cf",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_real_notification_audience.py::P100bInternalOfferWebappRealNotificationAudienceCharacterizationTests::test_real_audience_uses_durable_tier2_internal_webapp_context"
       ]
     }
   ],
@@ -1165,15 +1204,17 @@
       "state": "REVALIDATE_REQUIRED",
       "gap": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
       "scenarios": [
-        "unresolved origin SUCCESS",
-        "policy",
-        "notification-audience",
-        "successful live-path side-effect-retry coverage"
+        "unresolved endpoint-level ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
+        "combined-live-path POLICY-SNAPSHOT beyond the real-relation prerequisite",
+        "ORIGIN-INTERNAL__WEBAPP__NOTIFICATION publish/send/delivery beyond real durable audience construction",
+        "combined live-trade SIDE-EFFECT-RETRY beyond delivery-receipt retry",
+        "all other unresolved origin SUCCESS/policy/notification/retry cells"
       ]
     }
   ],
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
-    "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift."
+    "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
+    "Five behavior units were indexed through 7d52d7c, the helper was excluded as non-behavior infrastructure, and no canonical counts/cells/blockers were changed. Durable delivery-receipt retry evidence does not re-enter live trade path and does not close ORIGIN-INTERNAL__WEBAPP__SIDE-EFFECT-RETRY; policy prerequisite and audience construction are partial evidence only, not combined POLICY-SNAPSHOT or publish/send/delivery proof."
   ]
 }
