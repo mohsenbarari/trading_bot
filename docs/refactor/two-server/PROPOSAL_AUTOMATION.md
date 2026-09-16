@@ -310,6 +310,16 @@ uncached و output. reasoning اگر واقعاً موجود باشد زیرمج
 proposalها retain_until هفت‌روزه دارند؛ این تاریخ به‌تنهایی ادعای حذف خودکار نیست.
 شواهد فعال/ایراد باز بدون تعیین تکلیف پاک نمی‌شوند؛ backup دائمی نسازید.
 
+بستهٔ سوم به هر `provider_metrics` یک `rework_taxonomy` چهارکلیدی و کاملاً enum-محور
+می‌افزاید: کامل‌بودن مشاهده، نتیجهٔ آغاز، مسیر rework و نتیجهٔ نهایی. برچسب‌ها فقط از
+role، state پایانی، پیوند SHA-شکلِ correction و topology شناسهٔ run ساخته می‌شوند؛ برای
+نمونه `FIRST_PASS`، `REVIEWER_CHANGES_REQUIRED`، `ATTEMPT_BLOCKED`، `MIXED` و
+`UNCLASSIFIED_REWORK`. بنابراین این طبقه‌بندی علتِ معناییِ یک finding یا شکست را حدس
+نمی‌زند و هیچ finding، error، prompt، command، source یا متن task را وارد ledger نمی‌کند.
+شاهد ناقص نیز فقط `UNKNOWN` است. این بسته هنوز context اضافه نمی‌کند: فقط پس از چند
+مشاهدهٔ کامل و هم‌خانواده با برچسب ساختاری یکسان، طراحی یک context-profile بسیار محدود
+و reviewشدنی مجاز است؛ افزایش عمومی prompt یا تعویض review هرگز راه‌حل تلقی نمی‌شود.
+
 مقایسه باید بر پایهٔ نیازمندی واقعاً پذیرفته‌شده و با احتساب تلاش‌های ناموفق باشد،
 نه فقط تعداد commit یا ساعت. ورودی cached و uncached جدا گزارش شوند.
 baseline تاریخی Sol: ۱۴ چرخهٔ موفق؛ میانگین ورودی 1,521,948، uncached برابر84,471،

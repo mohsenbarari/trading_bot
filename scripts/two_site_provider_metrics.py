@@ -17,6 +17,8 @@ SUFFIX = r"(?:-(?:codex-)?(?:worker|reviewer)-\d+(?:-retry-\d+)?|-codex-correcti
 FINAL = re.compile(r"(.+?)(?:-(?:codex-)?worker-\d+(?:-retry-\d+)?|-codex-correction-\d+-worker)")
 TERMINAL = {"PROPOSAL_READY", "VERIFIED", "CHANGES_REQUIRED", "BLOCKED"}
 TOKEN_KEYS = ("input_tokens", "output_tokens", "total_tokens")
+INITIAL_WORKER_RUN = re.compile(r".+-worker-0(?:-retry-\d+)?$")
+INITIAL_REVIEWER_RUN = re.compile(r".+-reviewer-0$")
 
 
 SESSION_GATE_KEYS = {"state", "activation_reason", "root_count", "required_symbol_count", "query_operation_count"}
@@ -32,12 +34,23 @@ def _session_gate_empty(state: str) -> dict[str, object]:
     }
 
 
+def _rework_taxonomy_empty(state: str) -> dict[str, str]:
+    """Return the fixed, source-free shape for rework classification."""
+    return {
+        "state": state,
+        "initial_outcome": "UNKNOWN",
+        "rework_path": "UNKNOWN",
+        "terminal_outcome": "UNKNOWN",
+    }
+
+
 def unavailable() -> dict:
     return {"state": "UNAVAILABLE", "first_pass": None,
             "usage": dict.fromkeys(TOKEN_KEYS),
             "phase_seconds": {"provider_reported": None, "outside_provider_unattributed": None},
             "task_metadata": None,
-            "session_gate": _session_gate_empty("UNAVAILABLE")}
+            "session_gate": _session_gate_empty("UNAVAILABLE"),
+            "rework_taxonomy": _rework_taxonomy_empty("UNAVAILABLE")}
 
 
 def _validate_session_gate(gate: object) -> dict[str, object] | None:
@@ -188,6 +201,89 @@ def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: st
         return task_sha, meta
     except (OSError, ValueError, TypeError):
         return None
+
+
+def _rework_taxonomy(
+    attempts: list[tuple[dict, dict | None]], *, complete: bool, first_pass: bool | None,
+    verified_chain: bool,
+) -> dict[str, str]:
+    """Classify only structural rework evidence, never provider prose.
+
+    Attempt statuses are already validated before this function receives them. Even
+    so, this deliberately emits only fixed labels derived from role, terminal state,
+    SHA-shaped correction linkage and run topology. It must never become a channel
+    for prompts, sources, findings, errors, commands, or task text.
+    """
+    if not complete or not attempts:
+        return _rework_taxonomy_empty("UNKNOWN")
+
+    statuses = [status for status, _ in attempts]
+    ready_workers = {
+        status["run_id"] for status in statuses
+        if status["role"] == "worker" and status["state"] == "PROPOSAL_READY"
+    }
+    initial_workers = [
+        status for status in statuses
+        if status["role"] == "worker" and INITIAL_WORKER_RUN.fullmatch(status["run_id"])
+    ]
+    initial_reviewers = [
+        status for status in statuses
+        if status["role"] == "verifier" and INITIAL_REVIEWER_RUN.fullmatch(status["run_id"])
+    ]
+    reviewer_changes = any(
+        status["state"] == "CHANGES_REQUIRED"
+        and status.get("input_worker_run_id") in ready_workers
+        for status in statuses if status["role"] == "verifier"
+    )
+    attempt_blocked = any(status["state"] == "BLOCKED" for status in statuses)
+    correction_without_reviewer_change = any(
+        status["role"] == "worker"
+        and status["state"] == "PROPOSAL_READY"
+        and re.fullmatch(r"[a-f0-9]{64}", str(status.get("input_proposal_sha256", "")))
+        for status in statuses
+    ) and not reviewer_changes
+
+    initial_reviewer_change = any(
+        status["state"] == "CHANGES_REQUIRED"
+        and status.get("input_worker_run_id") in ready_workers
+        for status in initial_reviewers
+    )
+    initial_blocked = any(status["state"] == "BLOCKED" for status in initial_workers + initial_reviewers)
+
+    if first_pass is True:
+        initial_outcome = "FIRST_PASS"
+    elif initial_reviewer_change:
+        initial_outcome = "REVIEWER_CHANGES_REQUIRED"
+    elif initial_blocked:
+        initial_outcome = "ATTEMPT_BLOCKED"
+    elif correction_without_reviewer_change:
+        initial_outcome = "POST_REVIEW_CORRECTION"
+    elif first_pass is False:
+        initial_outcome = "UNCLASSIFIED_REWORK"
+    else:
+        initial_outcome = "UNKNOWN"
+
+    triggers = []
+    if reviewer_changes:
+        triggers.append("REVIEWER_CHANGES_REQUIRED")
+    if attempt_blocked:
+        triggers.append("ATTEMPT_BLOCKED")
+    if correction_without_reviewer_change:
+        triggers.append("POST_REVIEW_CORRECTION")
+    if not triggers:
+        rework_path = "NONE" if first_pass is True else "UNCLASSIFIED_REWORK" if first_pass is False else "UNKNOWN"
+    elif len(triggers) == 1:
+        rework_path = triggers[0]
+    else:
+        rework_path = "MIXED"
+
+    terminal_outcome = "VERIFIED" if verified_chain else "ATTEMPT_BLOCKED" if attempt_blocked else "NO_VERIFIED_CHAIN"
+    return {
+        "state": "OBSERVED",
+        "initial_outcome": initial_outcome,
+        "rework_path": rework_path,
+        "terminal_outcome": terminal_outcome,
+    }
 
 
 def provider_metrics(root: Path, task_id: str | None = None, head_before: str = "",
@@ -388,26 +484,27 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
     if provider_time is not None and provider_time > cycle_duration:
         time_known = False
 
+    verified_chain = any(
+        status["role"] == "verifier" and status["state"] == "VERIFIED"
+        and any(
+            worker["role"] == "worker" and worker["state"] == "PROPOSAL_READY"
+            and status.get("input_worker_run_id") == worker["run_id"]
+            for worker, _ in attempts
+        )
+        for status, _ in attempts
+    )
+    if controller_mode and final_worker_id is not None:
+        verified_chain = verified_chain and any(
+            status["role"] == "verifier" and status["state"] == "VERIFIED"
+            and status.get("input_worker_run_id") == final_worker_id
+            for status, _ in attempts
+        )
+
     if not controller_mode:
         first_pass = (len(attempts) == 2 and not corrections
                       and {s["state"] for s, _ in attempts} == {"PROPOSAL_READY", "VERIFIED"}) if complete else None
         state = "OBSERVED_MATCHING_ATTEMPTS" if complete else "PARTIAL"
     else:
-        verified_chain = any(
-            s["role"] == "verifier" and s["state"] == "VERIFIED"
-            and any(
-                w["role"] == "worker" and w["state"] == "PROPOSAL_READY"
-                and s.get("input_worker_run_id") == w["run_id"]
-                for w, _ in attempts
-            )
-            for s, _ in attempts
-        )
-        if final_worker_id is not None:
-            verified_chain = verified_chain and any(
-                s["role"] == "verifier" and s["state"] == "VERIFIED"
-                and s.get("input_worker_run_id") == final_worker_id
-                for s, _ in attempts
-            )
         worker_0 = [s for s, _ in attempts if s["role"] == "worker" and s["run_id"].endswith("worker-0")]
         reviewer_0 = [s for s, _ in attempts if s["role"] == "verifier" and s["run_id"].endswith("reviewer-0")]
         is_initial_pair = (
@@ -442,5 +539,8 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
                           "outside_provider_unattributed": cycle_duration - provider_time if time_known else None},
         "task_metadata": task_metadata,
         "session_gate": _aggregate_session_gate(attempts),
+        "rework_taxonomy": _rework_taxonomy(
+            attempts, complete=complete, first_pass=first_pass, verified_chain=verified_chain,
+        ),
     })
     return result

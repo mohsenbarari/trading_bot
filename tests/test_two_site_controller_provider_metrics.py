@@ -91,6 +91,12 @@ def test_normal_initial_worker_reviewer_pair_first_pass_true(tmp_path):
     assert res_none["usage"] == {"input_tokens": 20, "output_tokens": 8, "total_tokens": 28}
     assert res_none["observed_usage_subtotal"] == res_none["usage"]
     assert res_none["phase_seconds"] == {"provider_reported": 10.0, "outside_provider_unattributed": 40.0}
+    assert res_none["rework_taxonomy"] == {
+        "state": "OBSERVED",
+        "initial_outcome": "FIRST_PASS",
+        "rework_path": "NONE",
+        "terminal_outcome": "VERIFIED",
+    }
     assert set(res_none["task_metadata"].keys()) == {
         "task_id",
         "task_sha256",
@@ -152,6 +158,12 @@ def test_retry_then_truncation_aggregation(tmp_path):
     assert res["first_pass"] is False
     assert res["usage_observed_attempts"] == 3
     assert res["usage"] == {"input_tokens": 30, "output_tokens": 12, "total_tokens": 42}
+    assert res["rework_taxonomy"] == {
+        "state": "OBSERVED",
+        "initial_outcome": "ATTEMPT_BLOCKED",
+        "rework_path": "ATTEMPT_BLOCKED",
+        "terminal_outcome": "VERIFIED",
+    }
 
 
 def test_corrected_verified_chain_first_pass_false(tmp_path):
@@ -185,6 +197,36 @@ def test_corrected_verified_chain_first_pass_false(tmp_path):
     assert res["first_pass"] is False
     assert res["successful_correction_rounds"] == 1
     assert res["attempts"] == 4
+    assert res["rework_taxonomy"] == {
+        "state": "OBSERVED",
+        "initial_outcome": "REVIEWER_CHANGES_REQUIRED",
+        "rework_path": "REVIEWER_CHANGES_REQUIRED",
+        "terminal_outcome": "VERIFIED",
+    }
+
+
+def test_mixed_structural_rework_is_bounded_without_reviewer_text(tmp_path):
+    _create_attempt(tmp_path, "crun-worker-0", role="worker", state="PROPOSAL_READY")
+    _create_attempt(
+        tmp_path, "crun-reviewer-0", role="verifier", state="CHANGES_REQUIRED", input_worker_run_id="crun-worker-0"
+    )
+    _create_attempt(tmp_path, "crun-worker-1", role="worker", state="BLOCKED")
+    _create_attempt(
+        tmp_path, "crun-worker-2", role="worker", state="PROPOSAL_READY", input_proposal_sha256="b" * 64
+    )
+    _create_attempt(
+        tmp_path, "crun-reviewer-2", role="verifier", state="VERIFIED", input_worker_run_id="crun-worker-2"
+    )
+    res = metrics.provider_metrics(
+        tmp_path, task_id="task", head_before=HEAD, final_worker_id="crun-worker-2",
+        controller_run_id=CTRL, cycle_duration=100.0,
+    )
+    assert res["rework_taxonomy"] == {
+        "state": "OBSERVED",
+        "initial_outcome": "REVIEWER_CHANGES_REQUIRED",
+        "rework_path": "MIXED",
+        "terminal_outcome": "VERIFIED",
+    }
 
 
 @pytest.mark.parametrize(
@@ -243,6 +285,12 @@ def test_multiple_task_ids_under_controller_run_is_partial(tmp_path):
     assert res["state"] == "PARTIAL"
     assert res["first_pass"] is None
     assert res["task_metadata"] is None
+    assert res["rework_taxonomy"] == {
+        "state": "UNKNOWN",
+        "initial_outcome": "UNKNOWN",
+        "rework_path": "UNKNOWN",
+        "terminal_outcome": "UNKNOWN",
+    }
 
 
 @pytest.mark.parametrize(
@@ -260,6 +308,12 @@ def test_invalid_parameters_return_unavailable(tmp_path, bad_args):
     kwargs.update(bad_args)
     res = metrics.provider_metrics(tmp_path, **kwargs)
     assert res["state"] == "UNAVAILABLE"
+    assert res["rework_taxonomy"] == {
+        "state": "UNAVAILABLE",
+        "initial_outcome": "UNKNOWN",
+        "rework_path": "UNKNOWN",
+        "terminal_outcome": "UNKNOWN",
+    }
 
 
 @pytest.mark.parametrize(
@@ -476,3 +530,6 @@ def test_sentinel_not_leaked_in_metrics(tmp_path):
     serialized = json.dumps(res)
     assert sentinel not in serialized
     assert res["state"] == "OBSERVED_CONTROLLER_ATTEMPTS"
+    assert set(res["rework_taxonomy"].values()) <= {
+        "OBSERVED", "FIRST_PASS", "NONE", "VERIFIED",
+    }

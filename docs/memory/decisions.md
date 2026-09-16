@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-16 | Package 3 begins with bounded structural rework telemetry, not broader model context: every complete provider chain may classify only fixed labels for initial outcome, rework path and terminal outcome from validated role/state/topology/SHA linkage. Prompts, source, task text, findings, commands and errors remain excluded. No context profile is injected until repeated complete, same-family evidence supports one narrow, reviewable addition.
+
 - 2026-09-15 | A live automation cycle publishes only bounded phase/heartbeat metadata, never prompt or source. The monitor reports observed phase, phase age and heartbeat freshness; stale liveness is report-only and must never by itself terminate or restart a live Supervisor. Existing recovery for a separately missing Broker remains guarded and independent.
 
 - 2026-09-15 | Automation efficiency must preserve final review and all quality gates: a known oversized Codex command event is drained without retaining its body so later completed-turn usage remains observable; other malformed telemetry remains UNKNOWN/fail-closed. Task identity may read non-model source only through the same link-safe reader with a 2 MB cap. A restart reuses only an exact committed `CONTINUE` checkpoint, and normal STOP keeps the Broker available until the Supervisor records `STOPPED` at a cycle boundary.

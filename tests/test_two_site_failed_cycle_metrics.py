@@ -308,6 +308,12 @@ def test_provider_validation_failure_is_nonblocking_and_records_diagnostic(tmp_p
     assert record["provider_metrics"]["state"] == "UNAVAILABLE"
     assert record["provider_metrics"]["first_pass"] is None
     assert record["provider_metrics"]["diagnostic"] == exc_cls.__name__
+    assert record["provider_metrics"]["rework_taxonomy"] == {
+        "state": "UNAVAILABLE",
+        "initial_outcome": "UNKNOWN",
+        "rework_path": "UNKNOWN",
+        "terminal_outcome": "UNKNOWN",
+    }
     assert json.loads((run / "metrics.json").read_text()) == record
 
 

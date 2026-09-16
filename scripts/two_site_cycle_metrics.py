@@ -145,6 +145,23 @@ def _call_provider_metrics(*args, **kwargs) -> dict:
     return provider_metrics(*args, **kwargs)
 
 
+def _unavailable_provider_metrics(diagnostic: str | None = None) -> dict:
+    """Keep failed telemetry structurally honest without retaining exception text."""
+    result = {
+        "state": "UNAVAILABLE",
+        "first_pass": None,
+        "rework_taxonomy": {
+            "state": "UNAVAILABLE",
+            "initial_outcome": "UNKNOWN",
+            "rework_path": "UNKNOWN",
+            "terminal_outcome": "UNKNOWN",
+        },
+    }
+    if diagnostic is not None:
+        result["diagnostic"] = diagnostic
+    return result
+
+
 def _validated_task_metadata(meta: object) -> dict | None:
     if not isinstance(meta, dict):
         return None
@@ -218,7 +235,7 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
 
     record["declared_requirement_count"] = None
     record["focused_selector_count"] = None
-    record["provider_metrics"] = {"state": "UNAVAILABLE", "first_pass": None}
+    record["provider_metrics"] = _unavailable_provider_metrics()
 
     try:
         prov = _call_provider_metrics(
@@ -230,10 +247,7 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
             if trusted_meta is not None:
                 record.update(trusted_meta)
     except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
-        record["provider_metrics"] = {
-            "state": "UNAVAILABLE", "first_pass": None,
-            "diagnostic": type(exc).__name__,
-        }
+        record["provider_metrics"] = _unavailable_provider_metrics(type(exc).__name__)
 
     if record["provider_metrics"].get("state") == "UNAVAILABLE" and valid_worker_id is not None:
         try:
@@ -257,8 +271,7 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                 record["provider_metrics"] = _call_provider_metrics(
                     root, task_id, meta.get("head_before"), valid_worker_id, meta.get("duration_seconds"))
             except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
-                record["provider_metrics"] = {"state": "UNAVAILABLE", "first_pass": None,
-                                              "diagnostic": type(exc).__name__}
+                record["provider_metrics"] = _unavailable_provider_metrics(type(exc).__name__)
             marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
             if marker in task["goal"]:
                 gap = unique_json(task["goal"].split(marker, 1)[1])["gap_reference"]
