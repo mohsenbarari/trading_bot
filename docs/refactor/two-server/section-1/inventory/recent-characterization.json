@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "7d52d7cf167da34b5df4eff1ca7ef97366eb79cf",
+  "inspected_head": "421d86c32f9bebc04f38bda47c6bc83dda78b0a4",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1189,6 +1189,55 @@
       "seed_ids": [],
       "test_selectors": [
         "tests/test_p1_00b_characterization_internal_offer_webapp_real_notification_audience.py::P100bInternalOfferWebappRealNotificationAudienceCharacterizationTests::test_real_audience_uses_durable_tier2_internal_webapp_context"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_notification_intents.py",
+      "sha256": "0a5ea405416ab69c82e3538c8a6c2784af24e46e4ec4bb11f2a6d107dd6d10e5",
+      "last_commit": "6a955995e3b5338a03ff5e92a68d4a82839f8752",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_notification_intents.py::P100bInternalOfferWebappNotificationIntentPersistenceTests::test_real_audience_persists_four_durable_intents_without_delivery"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_notification_publication.py",
+      "sha256": "e6bd0d2a358694be8ab4f5034bd045e8026167fa382f3786de240e50394ab412",
+      "last_commit": "d0718bc17618f21b0dddbf00fd3ef0fce038c464",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_notification_publication.py::P100bInternalOfferWebappNotificationPublicationTests::test_exact_sse_payload_and_web_push_arguments"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_notification_claimed_delivery.py",
+      "sha256": "5362950f52b83ddb19a1ed965df519a489eafbc59b9f713d894f56317a2a5fc5",
+      "last_commit": "9afbc5d27132373ecb27f6908b52e77c0c8a4de7",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_notification_claimed_delivery.py::P100bInternalOfferWebappNotificationClaimedDeliveryTests::test_claimed_internal_receipt_commits_exact_provenance_before_publication"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offer_overtime_preference_cancel.py",
+      "sha256": "dc77bf2ec94c349ad92dbfab6dc3d8288f6fb9bd77af23106030c469c2e9fc7a",
+      "last_commit": "16564ddb6b591751bc0741ae30238e4acc4eb9d5",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CANCEL-OFFER-OVERTIME-PREFERENCE-L265"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offer_overtime_preference_cancel.py::TestOfferOvertimePreferenceCancelCharacterization::test_cancel_offer_overtime_preference_identified_user_success"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offer_overtime_preference_start.py",
+      "sha256": "1bf12cc88f41ef1e272ef602dfc5cea7d51efcc2b0a2a56f3615c137125e21d2",
+      "last_commit": "421d86c32f9bebc04f38bda47c6bc83dda78b0a4",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-START-OFFER-OVERTIME-PREFERENCE-L116"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offer_overtime_preference_start.py::TestOfferOvertimePreferenceStartCharacterization::test_start_offer_overtime_preference_identified_allowed_prompts_value"
       ]
     }
   ],
