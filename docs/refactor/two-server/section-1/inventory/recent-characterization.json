@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "460ee3ffafb0ba8f9d881c3369fcfeb4fca44a7c",
+  "inspected_head": "bca292ca7cd33de0ab30afde37bf3643c3ec404a",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
     "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
     "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
   ],
-  "units_since_reconciliation": 5,
+  "units_since_reconciliation": 0,
   "records": [
     {
       "path": "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py",
@@ -1352,6 +1352,40 @@
         "tests/test_p1_00b_characterization_create_owner_customer_internal_sms_failed_ambiguous.py::CreateOwnerCustomerInternalSMSFailedAmbiguousCharacterizationTests::test_new_owner_customer_sms_failed_returns_false_and_audits_failure",
         "tests/test_p1_00b_characterization_create_owner_customer_internal_sms_failed_ambiguous.py::CreateOwnerCustomerInternalSMSFailedAmbiguousCharacterizationTests::test_new_owner_customer_sms_ambiguous_returns_false_and_audits_ambiguity"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_my_customer_new_invalid_short_code.py",
+      "sha256": "55751c56bd85f891a362f35937a45d28d3699d07516d586e60eb3de62d006067",
+      "last_commit": "460a43b9ea9c405cf12950a6c87a85b63ed2f470",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-MY-CUSTOMER-L415"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_my_customer_new_invalid_short_code.py::CreateMyCustomerNewInvalidShortCodeCharacterizationTests::test_create_my_customer_new_invalid_short_code_raises_409_without_replay_or_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_owner_customer_internal_expired_sweep_commit.py",
+      "sha256": "ed9a1017243e8eeb555556c467eae1a98891d12e189508c03b0db70e496b3240",
+      "last_commit": "ac962662ace63c0a4b989ad44735a4be117317e6",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-OWNER-CUSTOMER-INTERNAL-FROM-BOT-L480"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_expired_sweep_commit.py::CreateOwnerCustomerInternalExpiredSweepCommitCharacterizationTests::test_non_empty_sweep_commits_before_create_and_follows_newly_created_path"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_owner_customer_internal_input_mismatches.py",
+      "sha256": "e3d37d228c886ac0440264486967e7be0ab8f53eee857e80a3971fe07e7400b0",
+      "last_commit": "bca292ca7cd33de0ab30afde37bf3643c3ec404a",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-OWNER-CUSTOMER-INTERNAL-FROM-BOT-L480"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_input_mismatches.py::CreateOwnerCustomerInternalInputMismatchesCharacterizationTests::test_mismatching_non_empty_account_name_is_rejected_before_requester_or_db_work",
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_input_mismatches.py::CreateOwnerCustomerInternalInputMismatchesCharacterizationTests::test_mismatching_idempotency_key_with_matching_account_name_is_rejected_before_requester_or_db_work"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1359,7 +1393,6 @@
       "state": "REVALIDATE_REQUIRED",
       "gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
       "scenarios": [
-        "newly-created invalid-short-code 409",
         "remaining seed-handler assertions"
       ]
     },
@@ -1378,6 +1411,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "This first slice indexes three of the five due units through 460ee3f, keeps units_since_reconciliation=5, and still requires the accepted expired-sweep record at ac962662 and both input-mismatch selectors at bca292c before reset."
+    "Five-unit characterization reconciliation through bca292ca7cd33de0ab30afde37bf3643c3ec404a is complete and units_since_reconciliation is reset to 0; this update does not claim seed, blocker, count, origin-cell, or Stage closure."
   ]
 }
