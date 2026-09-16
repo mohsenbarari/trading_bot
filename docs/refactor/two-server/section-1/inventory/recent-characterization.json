@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "421d86c32f9bebc04f38bda47c6bc83dda78b0a4",
+  "inspected_head": "6b5242edd81b53a82b099c5e04f6e47f3e55de12",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1239,6 +1239,68 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_offer_overtime_preference_start.py::TestOfferOvertimePreferenceStartCharacterization::test_start_offer_overtime_preference_identified_allowed_prompts_value"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offer_overtime_preference_value.py",
+      "sha256": "c884da8074c84983eb39ac4348cbf9b63320283afb1df19b1ce9a98d76f3d39a",
+      "last_commit": "08b1a2118356556004688fe55375ac2c71f8e9ce",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-PROCESS-OFFER-OVERTIME-PREFERENCE-VALUE-L141"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offer_overtime_preference_value.py::TestOfferOvertimePreferenceValueCharacterization::test_process_value_navigation_handoff_true_short_circuits",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_value.py::TestOfferOvertimePreferenceValueCharacterization::test_process_value_access_denied_clears_state_and_emits_reason",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_value.py::TestOfferOvertimePreferenceValueCharacterization::test_process_value_allowed_valid_value_updates_state_and_emits_confirm_prompt"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_guards.py",
+      "sha256": "2ec3490387d4a45bd66f1da4c3869f8a186754409baa788a4e1571006b8de3c3",
+      "last_commit": "2cc1169bbeb5382196c823fa6c28b608944d0ef0",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CONFIRM-OFFER-OVERTIME-PREFERENCE-L191"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_guards.py::TestOfferOvertimePreferenceConfirmGuardsCharacterization::test_confirm_guards_eligibility_denied_clears_state_and_alerts_reason",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_guards.py::TestOfferOvertimePreferenceConfirmGuardsCharacterization::test_confirm_guards_missing_pending_clears_state_and_alerts_incomplete",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_guards.py::TestOfferOvertimePreferenceConfirmGuardsCharacterization::test_confirm_guards_invalid_pending_clears_state_and_alerts_m8"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_persistence_failures.py",
+      "sha256": "293293f85d55683176e87c0f71a86b651af39cb32235ef959072f05f871c7b3b",
+      "last_commit": "d987850e5f2fd34e0fef16ce69a4e9586a008ecf",
+      "seed_ids": [
+        "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CONFIRM-OFFER-OVERTIME-PREFERENCE-L191"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_persistence_failures.py::TestOfferOvertimePreferenceConfirmPersistenceFailures::test_key_aware_session_contract_rejects_unexpected_model_or_identity",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_persistence_failures.py::TestOfferOvertimePreferenceConfirmPersistenceFailures::test_confirm_persistence_missing_db_user_clears_state_and_alerts_m_not_available",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_persistence_failures.py::TestOfferOvertimePreferenceConfirmPersistenceFailures::test_confirm_persistence_not_allowed_error_clears_state_and_alerts_distinct_message",
+        "tests/test_p1_00b_characterization_offer_overtime_preference_confirm_persistence_failures.py::TestOfferOvertimePreferenceConfirmPersistenceFailures::test_confirm_persistence_preference_error_preserves_state_and_alerts_distinct_message"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_notification_real_delivery_publication.py",
+      "sha256": "68545efa96a6c92c5211cf5ed08d898db43308d912967ec62cf4bb8f18d91b14",
+      "last_commit": "393541bab2042df6e9bb3013a91e55b160755ea5",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_notification_real_delivery_publication.py::P100bInternalOfferWebappNotificationRealDeliveryPublicationTests::test_claimed_receipt_runs_real_post_commit_publication_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_unblock_user_from_user_panel.py",
+      "sha256": "20f65fc8bf85fc6f8a700c19d8f3881aad5c216127fbd867a749f961a23d93af",
+      "last_commit": "6b5242edd81b53a82b099c5e04f6e47f3e55de12",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-UNBLOCK-USER-FROM-USER-PANEL-L606"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_unblock_user_from_user_panel.py::CharacterizePanelUnblockUserFromUserPanelTests::test_anonymous_callback_acknowledged_without_services",
+        "tests/test_p1_00b_characterization_panel_unblock_user_from_user_panel.py::CharacterizePanelUnblockUserFromUserPanelTests::test_delegated_account_rejected_before_handler_session",
+        "tests/test_p1_00b_characterization_panel_unblock_user_from_user_panel.py::CharacterizePanelUnblockUserFromUserPanelTests::test_authorized_success_updates_remaining_blocked_list"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1264,6 +1326,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "Five behavior units were indexed through 7d52d7c, the helper was excluded as non-behavior infrastructure, and no canonical counts/cells/blockers were changed. Durable delivery-receipt retry evidence does not re-enter live trade path and does not close ORIGIN-INTERNAL__WEBAPP__SIDE-EFFECT-RETRY; policy prerequisite and audience construction are partial evidence only, not combined POLICY-SNAPSHOT or publish/send/delivery proof."
+    "Five behavior units were indexed through 6b5242edd81b53a82b099c5e04f6e47f3e55de12, overtime/panel evidence remains partial seed evidence, and real claimed-delivery publication remains partial notification evidence that closes none of endpoint SUCCESS, combined POLICY-SNAPSHOT, full NOTIFICATION, or live-trade SIDE-EFFECT-RETRY."
   ]
 }
