@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "6b5242edd81b53a82b099c5e04f6e47f3e55de12",
+  "inspected_head": "ddec802be261b3e636eddf595566bc9dc299b19f",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1301,6 +1301,21 @@
         "tests/test_p1_00b_characterization_panel_unblock_user_from_user_panel.py::CharacterizePanelUnblockUserFromUserPanelTests::test_delegated_account_rejected_before_handler_session",
         "tests/test_p1_00b_characterization_panel_unblock_user_from_user_panel.py::CharacterizePanelUnblockUserFromUserPanelTests::test_authorized_success_updates_remaining_blocked_list"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py",
+      "sha256": "4b86835bf3f84a922e6a45fb97e2b09c67511e6bf6709fc5242591cdbaf629ca",
+      "last_commit": "ddec802be261b3e636eddf595566bc9dc299b19f",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-MY-CUSTOMER-L415"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerAccountantGuardCharacterizationTests::test_create_my_customer_accountant_context_403_precedes_persistence_and_side_effects",
+        "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerCustomerActorGuardCharacterizationTests::test_create_my_customer_customer_actor_403_uses_actor_id_before_mutation_and_side_effects",
+        "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerReusedInvalidShortCodeCharacterizationTests::test_create_my_customer_reused_relation_invalid_short_code_replays_then_409",
+        "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerNewSuccessCharacterizationTests::test_create_my_customer_new_valid_short_code_delivers_audits_and_returns_serialization",
+        "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerReusedSuccessCharacterizationTests::test_create_my_customer_reused_valid_short_code_replays_delivers_audits_and_returns_serialization"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1308,6 +1323,7 @@
       "state": "REVALIDATE_REQUIRED",
       "gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
       "scenarios": [
+        "newly-created invalid-short-code 409",
         "remaining seed-handler assertions"
       ]
     },
@@ -1326,6 +1342,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "Five behavior units were indexed through 6b5242edd81b53a82b099c5e04f6e47f3e55de12, overtime/panel evidence remains partial seed evidence, and real claimed-delivery publication remains partial notification evidence that closes none of endpoint SUCCESS, combined POLICY-SNAPSHOT, full NOTIFICATION, or live-trade SIDE-EFFECT-RETRY."
+    "Five create_my_customer outcomes were indexed through ddec802b, remain partial seed evidence, leave newly-created invalid-short-code 409 and broader seed acceptance unresolved, and change no canonical counts, cells, blockers, or Stage state."
   ]
 }
