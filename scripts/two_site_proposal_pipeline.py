@@ -33,11 +33,13 @@ except ModuleNotFoundError:
 
 try:
     from scripts.two_site_pre_review_receipt import (
+        p1_00_characterization_bootstrap_findings,
         run_candidate_tests,
         validate_test_receipt,
     )
 except ImportError:
     from two_site_pre_review_receipt import (
+        p1_00_characterization_bootstrap_findings,
         run_candidate_tests,
         validate_test_receipt,
     )
@@ -521,6 +523,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         seen_convs: set[str] = set()
         seen_norm_findings: set[str] = set()
         seen_test_signatures: set[str] = set()
+        seen_bootstrap_signatures: set[str] = set()
 
         worker_run_id, worker_dir = run_provider_session(
             root, task_candidate, "worker", f"{run_prefix}-worker-0", timeout,
@@ -540,58 +543,77 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         correction_count = 0
         while True:
             worker_result_path = worker_dir / "result.json"
-            receipt, receipt_path, receipt_sha = persist_pre_review_tests(
-                root, evidence_dir, task, worker_res, current_worker[1],
-                correction_count, state_check, state,
-            )
-
-            if receipt["state"] == "FAILED":
-                sig = test_failure_signature(receipt)
-                if sig in seen_test_signatures:
-                    raise ProposalError(f"repeated test failure signature: {sig}")
-                seen_test_signatures.add(sig)
-                feedback_payload = test_gate_feedback(receipt, current_worker[1])
-            else:
-                reviewer_run_id, reviewer_dir = run_provider_session(
-                    root, task_candidate, "verifier", f"{run_prefix}-reviewer-{correction_count}", timeout,
-                    state_check, proposal=worker_result_path, cli=cli,
-                    test_evidence=receipt_path,
-                )
-                reviewer_res, _st, _sha, _txt = validate_run(
-                    root, reviewer_dir, "verifier", reviewer_run_id, initial_head, task, sources,
-                    seen_convs, prior_worker=current_worker,
-                    expected_test_receipt=receipt, expected_test_evidence_sha=receipt_sha,
-                )
-                state.update(
-                    final_reviewer_run_id=reviewer_run_id,
-                    reviewer_path=(reviewer_dir / "result.json").relative_to(root).as_posix(),
-                    correction_count=correction_count,
-                )
-                check_state(root, initial_head, initial_refs, task_candidate, task, sources)
-
-                if reviewer_res["status"] == "VERIFIED":
-                    if reviewer_res.get("findings"):
-                        raise ProposalError("verified result cannot contain findings")
-                    state["state"] = "READY_FOR_CODEX"
-                    state["blockers"] = []
-                    break
-
-                findings = reviewer_res.get("findings", [])
-                recurring = [f for f in findings if normalize_finding(f) in seen_norm_findings]
-                if recurring:
-                    raise ProposalError(f"recurring normalized findings: {recurring[0]}")
-                for f in findings:
-                    seen_norm_findings.add(normalize_finding(f))
-
+            bootstrap_findings = p1_00_characterization_bootstrap_findings(worker_res)
+            if bootstrap_findings:
+                signature = hashlib.sha256(
+                    json.dumps(bootstrap_findings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                if signature in seen_bootstrap_signatures:
+                    raise ProposalError(f"repeated test bootstrap failure signature: {signature}")
+                seen_bootstrap_signatures.add(signature)
                 feedback_payload = {
-                    "reviewer": "gemini",
+                    "reviewer": "test-gate",
                     "reviewed_proposal_sha256": current_worker[1],
-                    "findings": findings,
+                    "findings": bootstrap_findings,
                     "test_evidence": [
-                        f"receipt_sha256={receipt_sha} proposal_sha256={current_worker[1]} selector_count={len(receipt['selectors'])}"
+                        "gate=P1-00-characterization-bootstrap",
+                        f"proposal_sha256={current_worker[1]}",
+                        f"finding_count={len(bootstrap_findings)}",
                     ],
                 }
                 validate_correction_feedback(json.dumps(feedback_payload), current_worker[1])
+            else:
+                receipt, receipt_path, receipt_sha = persist_pre_review_tests(
+                    root, evidence_dir, task, worker_res, current_worker[1],
+                    correction_count, state_check, state,
+                )
+                if receipt["state"] == "FAILED":
+                    sig = test_failure_signature(receipt)
+                    if sig in seen_test_signatures:
+                        raise ProposalError(f"repeated test failure signature: {sig}")
+                    seen_test_signatures.add(sig)
+                    feedback_payload = test_gate_feedback(receipt, current_worker[1])
+                else:
+                    reviewer_run_id, reviewer_dir = run_provider_session(
+                        root, task_candidate, "verifier", f"{run_prefix}-reviewer-{correction_count}", timeout,
+                        state_check, proposal=worker_result_path, cli=cli,
+                        test_evidence=receipt_path,
+                    )
+                    reviewer_res, _st, _sha, _txt = validate_run(
+                        root, reviewer_dir, "verifier", reviewer_run_id, initial_head, task, sources,
+                        seen_convs, prior_worker=current_worker,
+                        expected_test_receipt=receipt, expected_test_evidence_sha=receipt_sha,
+                    )
+                    state.update(
+                        final_reviewer_run_id=reviewer_run_id,
+                        reviewer_path=(reviewer_dir / "result.json").relative_to(root).as_posix(),
+                        correction_count=correction_count,
+                    )
+                    check_state(root, initial_head, initial_refs, task_candidate, task, sources)
+
+                    if reviewer_res["status"] == "VERIFIED":
+                        if reviewer_res.get("findings"):
+                            raise ProposalError("verified result cannot contain findings")
+                        state["state"] = "READY_FOR_CODEX"
+                        state["blockers"] = []
+                        break
+
+                    findings = reviewer_res.get("findings", [])
+                    recurring = [f for f in findings if normalize_finding(f) in seen_norm_findings]
+                    if recurring:
+                        raise ProposalError(f"recurring normalized findings: {recurring[0]}")
+                    for f in findings:
+                        seen_norm_findings.add(normalize_finding(f))
+
+                    feedback_payload = {
+                        "reviewer": "gemini",
+                        "reviewed_proposal_sha256": current_worker[1],
+                        "findings": findings,
+                        "test_evidence": [
+                            f"receipt_sha256={receipt_sha} proposal_sha256={current_worker[1]} selector_count={len(receipt['selectors'])}"
+                        ],
+                    }
+                    validate_correction_feedback(json.dumps(feedback_payload), current_worker[1])
 
             if correction_count >= 2:
                 raise ProposalError("correction exhaustion: maximum 2 corrections exceeded")

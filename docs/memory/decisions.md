@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-16 | A newly added P1-00 characterization test that imports application code must establish the canonical hermetic bootstrap before candidate tests: `APP_ENV_FILE=config/unit-test.env.example` and the standard network fence precede application imports; direct socket-hook assignments are rejected. A bounded SHA-bound `test-gate` correction returns only those defects to Worker and skips sandbox pytest, Gemini Reviewer, and final Codex review until fixed. This narrows a proven repeated error without weakening any quality gate.
+
 - 2026-09-16 | Provider interruption evidence is distinct from an ambiguous failed session only when one bounded, model/session-bound, tool-free `ERROR` stream says it was interrupted. It receives the existing fresh-session retry budget, retains no provider error prose, and never resumes or applies partial output. Metrics read task snapshots and canonical excerpts only at the runner's existing bounded limits. Patch rendering expands context until each old fragment has one target; otherwise it fails closed.
 
 - 2026-09-16 | Package 3 begins with bounded structural rework telemetry, not broader model context: every complete provider chain may classify only fixed labels for initial outcome, rework path and terminal outcome from validated role/state/topology/SHA linkage. Prompts, source, task text, findings, commands and errors remain excluded. No context profile is injected until repeated complete, same-family evidence supports one narrow, reviewable addition.

@@ -1,6 +1,7 @@
 """Candidate-test receipt module for pre-review sandbox validation."""
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -31,7 +32,11 @@ except ImportError:
         tracked_test_inventory,
     )
 
-__all__ = ["run_candidate_tests", "validate_test_receipt"]
+__all__ = [
+    "p1_00_characterization_bootstrap_findings",
+    "run_candidate_tests",
+    "validate_test_receipt",
+]
 
 MAX_SPECS, MAX_CHANGES, MAX_SELECTORS, MAX_TAIL_BYTES = 32, 32, 200, 8192
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -47,6 +52,169 @@ EXPECTED_RECEIPT_KEYS = frozenset({
     "snapshot_bytes",
     "isolation",
 })
+P1_00_CHARACTERIZATION_TEST = re.compile(
+    r"^tests/test_p1_00b?_characterization_[a-z0-9_]+\.py$"
+)
+NETWORK_FENCE_MODULE = "tests.test_p1_00_characterization_network_isolation"
+NETWORK_FENCE_NAME = "install_p1_00_network_fence"
+APPLICATION_IMPORT_ROOTS = frozenset({
+    "api", "bot", "core", "main", "models", "run_bot", "schemas",
+})
+
+
+def _dotted_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _dotted_name(node.value)
+        return None if prefix is None else f"{prefix}.{node.attr}"
+    return None
+
+
+def _string_literal(node: ast.AST) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _application_import(node: ast.AST) -> bool:
+    if isinstance(node, ast.Import):
+        return any(alias.name.split(".", 1)[0] in APPLICATION_IMPORT_ROOTS for alias in node.names)
+    if isinstance(node, ast.ImportFrom) and node.module:
+        return node.module.split(".", 1)[0] in APPLICATION_IMPORT_ROOTS
+    return False
+
+
+def _app_env_statement(node: ast.AST) -> tuple[bool, bool]:
+    """Return whether a statement sets APP_ENV_FILE and uses the canonical value."""
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+        call = node.value
+        if (
+            _dotted_name(call.func) == "os.environ.setdefault"
+            and len(call.args) >= 2
+            and _string_literal(call.args[0]) == "APP_ENV_FILE"
+        ):
+            return True, _string_literal(call.args[1]) == "config/unit-test.env.example"
+
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if not isinstance(target, ast.Subscript) or _dotted_name(target.value) != "os.environ":
+                continue
+            if _string_literal(target.slice) == "APP_ENV_FILE":
+                return True, _string_literal(node.value) == "config/unit-test.env.example"
+    return False, False
+
+
+def _canonical_fence_import(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.ImportFrom)
+        and node.module == NETWORK_FENCE_MODULE
+        and any(alias.name == NETWORK_FENCE_NAME for alias in node.names)
+    )
+
+
+def _canonical_fence_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and _dotted_name(node.value.func) == NETWORK_FENCE_NAME
+        and not node.value.args
+        and not node.value.keywords
+    )
+
+
+def _manual_socket_hook_assignment(node: ast.AST) -> bool:
+    targets: list[ast.AST] = []
+    if isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+    elif isinstance(node, ast.AugAssign):
+        targets = [node.target]
+    return any(
+        _dotted_name(target) in {
+            "socket.socket.connect",
+            "socket.socket.connect_ex",
+            "socket.create_connection",
+        }
+        for target in targets
+    )
+
+
+def p1_00_characterization_bootstrap_findings(worker_result: Mapping[str, Any]) -> list[str]:
+    """Find deterministic bootstrap defects before sandbox tests or Gemini review.
+
+    This applies only to newly created P1-00 characterization test files that import
+    application code. It keeps a sandbox's inherited environment from masking a
+    non-hermetic committed test, without expanding into unrelated historical tests
+    or replacing semantic review and real tests.
+    """
+    changes = worker_result.get("changes") if isinstance(worker_result, Mapping) else None
+    if not isinstance(changes, list):
+        return []
+
+    findings: list[str] = []
+    for change in changes:
+        if not isinstance(change, Mapping):
+            continue
+        path, content = change.get("path"), change.get("content")
+        if (
+            not isinstance(path, str)
+            or change.get("original_sha256") is not None
+            or not P1_00_CHARACTERIZATION_TEST.fullmatch(path)
+        ):
+            continue
+        if path == "tests/test_p1_00_characterization_network_isolation.py":
+            continue
+        if not isinstance(content, str):
+            continue
+        try:
+            tree = ast.parse(content, filename=path)
+        except SyntaxError:
+            continue  # The existing Python syntax gate owns this diagnostic.
+
+        application_lines = [
+            node.lineno for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom)) and _application_import(node)
+        ]
+        if not application_lines:
+            continue
+        first_application_import = min(application_lines)
+
+        environment_statements = [
+            (node.lineno, canonical)
+            for node in tree.body
+            for present, canonical in [_app_env_statement(node)]
+            if present
+        ]
+        if any(not canonical for _, canonical in environment_statements):
+            findings.append(
+                f"{path}: P1-00 characterization bootstrap uses a noncanonical APP_ENV_FILE value; "
+                "use config/unit-test.env.example before application imports."
+            )
+        elif not any(canonical and line < first_application_import for line, canonical in environment_statements):
+            findings.append(
+                f"{path}: P1-00 characterization bootstrap must set APP_ENV_FILE to "
+                "config/unit-test.env.example before application imports."
+            )
+
+        fence_import_lines = [node.lineno for node in tree.body if _canonical_fence_import(node)]
+        fence_call_lines = [node.lineno for node in tree.body if _canonical_fence_call(node)]
+        if not (
+            fence_import_lines
+            and fence_call_lines
+            and min(fence_import_lines) < min(fence_call_lines) < first_application_import
+        ):
+            findings.append(
+                f"{path}: P1-00 characterization bootstrap must import and call "
+                "install_p1_00_network_fence() before application imports."
+            )
+
+        if any(_manual_socket_hook_assignment(node) for node in ast.walk(tree)):
+            findings.append(
+                f"{path}: P1-00 characterization tests must not assign socket connection hooks; "
+                "reuse install_p1_00_network_fence()."
+            )
+    return findings[:32]
 
 
 def _bound_utf8_tail(text: str, max_bytes: int = MAX_TAIL_BYTES) -> str:

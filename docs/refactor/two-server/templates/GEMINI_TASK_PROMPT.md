@@ -55,6 +55,13 @@ Context precision applies to Worker and Verifier:
   Never leave a mutation of `Model.__table__.indexes` behind: prefer isolated metadata;
   if exact temporary mutation is unavoidable, restore the original objects on every failure
   path and independently assert the original index identities and names afterward.
+- If a newly created allowed file is a `tests/test_p1_00*_characterization_*.py` test
+  that imports application code, make its module bootstrap self-contained: set
+  `APP_ENV_FILE` to `config/unit-test.env.example`, then import and call
+  `tests.test_p1_00_characterization_network_isolation.install_p1_00_network_fence()`
+  before every application import. Do not replace that canonical fence with direct
+  `socket` hook assignments. A deterministic pre-review gate returns this exact defect
+  to Worker before sandbox tests or Reviewer, so correct it in the first proposal.
 - Preserve literal Unicode code points, especially Persian U+200C/U+200D and bidi marks.
   Distinguish a JSON escape, a Python source escape, and the resulting runtime string.
   Keep fixed independent expected values in tests: never compute the expected value

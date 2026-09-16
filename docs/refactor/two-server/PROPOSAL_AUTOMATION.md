@@ -151,6 +151,12 @@ assertion به‌صورت bounded ارسال و برای تشخیص ریشهٔ �
 session/table/patch سفارشی سنگین نیاز دارد، Coordinator آن را حداکثر به چهار requirement و
 یک outcome محدود می‌کند یا ابتدا helper موجود را بازاستفاده می‌کند؛ سقف‌های کیفیت ثابت‌اند.
 
+برای فایل‌های تازهٔ `tests/test_p1_00*_characterization_*.py` که application import دارند،
+گیت قطعیِ پیش از sandbox-test، مقدار `APP_ENV_FILE`، ترتیب bootstrap و استفاده از
+`install_p1_00_network_fence()` را بررسی می‌کند. خطا با feedback محدودِ `test-gate` به Worker
+برمی‌گردد و تا رفع آن نه pytest، نه Reviewer و نه بررسی نهایی Codex اجرا نمی‌شوند. این گیت
+فقط قرارداد پایدار hermetic-test را بررسی می‌کند و جای review معنایی یا تست واقعی را نمی‌گیرد.
+
 اگر محتوای نهایی UTF-8 یک فایل موجود حداقل ۸۱۹۲ بایت است، transport حتماً باید از
 replacement دقیق استفاده کند؛ برای فایل موجود کوچک‌تر نیز replacement مجاز است.
 فایل تازه همیشه با content کامل منتقل می‌شود.

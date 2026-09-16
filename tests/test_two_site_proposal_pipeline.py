@@ -112,7 +112,7 @@ class TestPipeline(unittest.TestCase):
             "run_candidate_tests",
             side_effect=lambda *args, **_kwargs: passed_receipt(args[3]),
         )
-        self.candidate_tests_patcher.start()
+        self.candidate_tests_mock = self.candidate_tests_patcher.start()
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp_dir.name).resolve()
         self.task_path = self.root / "task.json"
@@ -258,6 +258,30 @@ class TestPipeline(unittest.TestCase):
                          ("run-corr-worker-1", w1_sha, w1_st["conversation_id"]))
         self.assertEqual(json.loads((r1_dir / "task.json").read_text())["proposal"], (w1_dir / "result.json").read_text())
         self.assertTrue(r1_st["conversation_id"] not in {w1_st["conversation_id"], w0_st["conversation_id"]})
+
+    def test_bootstrap_gate_corrects_before_tests_or_reviewer(self):
+        runner, calls = make_runner(self.root, [
+            {"content": "# v1\n"},
+            {"content": "# v2\n"},
+            {"status": "VERIFIED"},
+        ])
+        findings = ["tests/test_p1_00b_characterization_example.py: canonical bootstrap required"]
+        with (
+            patch.object(pipeline, "git", side_effect=fake_git),
+            patch.object(pipeline, "runner_run", side_effect=runner),
+            patch.object(pipeline, "p1_00_characterization_bootstrap_findings", side_effect=[findings, []]),
+        ):
+            res = run_pipeline(self.root, self.task_path, "run-bootstrap", 300, None, self.state)
+
+        self.assertEqual(res["state"], "READY_FOR_CODEX")
+        self.assertEqual([call[0] for call in calls], ["worker", "worker", "verifier"])
+        self.assertEqual(self.candidate_tests_mock.call_count, 1)
+        feedback = json.loads((
+            self.root / ".local/two-site-refactor/pipeline/run-bootstrap/feedback-correction-1.json"
+        ).read_text())
+        self.assertEqual(feedback["reviewer"], "test-gate")
+        self.assertEqual(feedback["findings"], findings)
+        self.assertEqual(feedback["test_evidence"][0], "gate=P1-00-characterization-bootstrap")
 
     def test_two_corrections_allowed_and_distinct_findings(self):
         runner, calls = make_runner(self.root, [

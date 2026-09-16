@@ -9,6 +9,7 @@ import pytest
 from scripts.two_site_agent_sandbox import SandboxError
 from scripts.two_site_pre_review_receipt import (
     _bound_utf8_tail,
+    p1_00_characterization_bootstrap_findings,
     run_candidate_tests,
     validate_test_receipt,
 )
@@ -36,6 +37,93 @@ VALID_SANDBOX_RESULT = {
     "snapshot_bytes": 10,
     "isolation": "bwrap",
 }
+
+
+def _p1_characterization_worker(
+    content: str,
+    path: str = "tests/test_p1_00b_characterization_example.py",
+) -> dict:
+    return {"changes": [{"path": path, "original_sha256": None, "content": content}]}
+
+
+def test_p1_00_characterization_bootstrap_accepts_canonical_ordering() -> None:
+    content = """from __future__ import annotations
+import os
+os.environ.setdefault(\"APP_ENV_FILE\", \"config/unit-test.env.example\")
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+install_p1_00_network_fence()
+from api.routers import user_flags
+"""
+    assert p1_00_characterization_bootstrap_findings(_p1_characterization_worker(content)) == []
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (
+            """import os
+os.environ.setdefault(\"APP_ENV_FILE\", \".env.test\")
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+install_p1_00_network_fence()
+from api.routers import user_flags
+""",
+            "noncanonical APP_ENV_FILE",
+        ),
+        (
+            """import os
+os.environ.setdefault(\"APP_ENV_FILE\", \"config/unit-test.env.example\")
+from api.routers import user_flags
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+install_p1_00_network_fence()
+""",
+            "before application imports",
+        ),
+        (
+            """import os
+import socket
+os.environ.setdefault(\"APP_ENV_FILE\", \"config/unit-test.env.example\")
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+install_p1_00_network_fence()
+socket.socket.connect = lambda *_args: None
+from api.routers import user_flags
+""",
+            "must not assign socket connection hooks",
+        ),
+    ],
+)
+def test_p1_00_characterization_bootstrap_reports_exact_deterministic_defect(
+    content: str, expected: str,
+) -> None:
+    findings = p1_00_characterization_bootstrap_findings(_p1_characterization_worker(content))
+    assert len(findings) == 1
+    assert expected in findings[0]
+
+
+def test_bootstrap_gate_does_not_expand_to_unrelated_tests() -> None:
+    findings = p1_00_characterization_bootstrap_findings(
+        _p1_characterization_worker("from api.routers import user_flags\n", "tests/test_unrelated.py")
+    )
+    assert findings == []
+
+
+def test_bootstrap_gate_does_not_retroactively_block_existing_test_files() -> None:
+    worker = _p1_characterization_worker("from api.routers import user_flags\n")
+    worker["changes"][0]["original_sha256"] = "a" * 64
+    assert p1_00_characterization_bootstrap_findings(worker) == []
+
+
+def test_bootstrap_gate_keeps_correction_findings_bounded() -> None:
+    worker = {
+        "changes": [
+            {
+                "path": f"tests/test_p1_00b_characterization_example_{index}.py",
+                "original_sha256": None,
+                "content": "from api.routers import user_flags\n",
+            }
+            for index in range(32)
+        ]
+    }
+    assert len(p1_00_characterization_bootstrap_findings(worker)) == 32
 
 
 @pytest.fixture
