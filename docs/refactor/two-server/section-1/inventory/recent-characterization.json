@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "1659cd9a314a3a15cb6166e1982d0a53fd173431",
+  "inspected_head": "42a91fd417f3193e444744a962738e5963ca1dec",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1447,6 +1447,71 @@
         "tests/test_p1_00b_characterization_panel_customer_invite_inputs_batch.py::PanelCustomerInviteInputsBatchCharacterizationTests::test_management_name_valid_input_advances_to_mobile_state",
         "tests/test_p1_00b_characterization_panel_customer_invite_inputs_batch.py::PanelCustomerInviteInputsBatchCharacterizationTests::test_mobile_valid_input_advances_to_confirmation_state"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_customer_invite_entry_cancel_batch.py",
+      "sha256": "10ea8e64e5f001364b3269ea51533a2886a1f2259097654302d79e8d775a24bd",
+      "last_commit": "c42cc67b4c229e16bfc80fea5b1c44c6f3b87da5",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-START-USER-PANEL-CUSTOMER-INVITE-TIER1-L936",
+        "BOT-TG-CALLBACK-QUERY-PANEL-CANCEL-CUSTOMER-INVITE-TIER1-L1175"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_customer_invite_entry_cancel_batch.py::PanelCustomerInviteEntryCancelBatchCharacterizationTests::test_start_sync_ready_initializes_invite_fsm_and_delivers_prompt",
+        "tests/test_p1_00b_characterization_panel_customer_invite_entry_cancel_batch.py::PanelCustomerInviteEntryCancelBatchCharacterizationTests::test_cancel_clears_invite_fsm_and_delivers_cancellation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_tutorial_ack_wrappers.py",
+      "sha256": "8291b13d4593b0e819a83a28ce9312333496e0be4a2bda2a82a5a4466e2d8705",
+      "last_commit": "811307ff0597d2dc03fc727b9a3a97202285bb2a",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-OFFER-TUTORIAL-ACK-L1606",
+        "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CUSTOMER-TUTORIAL-ACK-L1611"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_tutorial_ack_wrappers.py::StartTutorialAckWrappersCharacterizationTests::test_offer_tutorial_ack_delegates_with_offer_step",
+        "tests/test_p1_00b_characterization_start_tutorial_ack_wrappers.py::StartTutorialAckWrappersCharacterizationTests::test_customer_tutorial_ack_delegates_with_customer_step"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_legacy_respond_terminal_batch.py",
+      "sha256": "00c3580f056719ab16aca4531af13a16ff73de196b0700c54cf69dd064b8f62a",
+      "last_commit": "85af8703984204cfb638000bc1716b1a3114bc97",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CONFIRM-TRADE-L1678",
+        "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CANCEL-RESPOND-L1694"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_legacy_respond_terminal_batch.py::StartLegacyRespondTerminalCharacterizationTests::test_confirm_trade_allowed_user_returns_disabled_terminal_response",
+        "tests/test_p1_00b_characterization_start_legacy_respond_terminal_batch.py::StartLegacyRespondTerminalCharacterizationTests::test_cancel_respond_returns_exact_terminal_response"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py",
+      "sha256": "526aaa9c520a31c024d647c5020c4791f974dc7585f4b6c15d8b78893945b680",
+      "last_commit": "2a84eeb0bf7ea187f3a4df1690917eaafd3f15f3",
+      "seed_ids": [
+        "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+        "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_normalizes_and_advances_to_mobile",
+        "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_normalizes_persian_digits_and_advances_to_role"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_registration_guidance_batch.py",
+      "sha256": "2c185e191d55636219608a59cee89a5cadf79ede63718827cd7493f5778c4d40",
+      "last_commit": "42a91fd417f3193e444744a962738e5963ca1dec",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-START-HANDLE-CONTACT-NON-CONTACT-L1152",
+        "BOT-IDENTITY-MESSAGE-START-HANDLE-REGISTRATION-CONFIRMATION-MESSAGE-L1514"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_registration_guidance_batch.py::StartRegistrationGuidanceCharacterizationTests::test_non_contact_direct_registration_guides_contact_button",
+        "tests/test_p1_00b_characterization_start_registration_guidance_batch.py::StartRegistrationGuidanceCharacterizationTests::test_confirmation_state_message_guides_action_buttons"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1472,6 +1537,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through 1659cd9a314a3a15cb6166e1982d0a53fd173431 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through 42a91fd417f3193e444744a962738e5963ca1dec and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
