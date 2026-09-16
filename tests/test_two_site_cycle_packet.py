@@ -304,6 +304,34 @@ def test_patch_leading_diff_marker_content_roundtrip(repo):
         assert (root / "doc.md").read_text() == doc_new_content
 
 
+def test_patch_expands_repeated_context_until_target_is_unique(repo):
+    root, git = repo
+    repeated = "".join(f"    value_{index} = {index}\n" for index in range(12))
+    original = "def first():\n" + repeated + "\ndef second():\n" + repeated
+    updated = original.replace("    value_7 = 7\n", "    value_7 = 70\n", 1)
+    (root / "repeated.py").write_text(original)
+    git("add", "--", "repeated.py")
+    git("commit", "-m", "add repeated patch fixture")
+    changes = [{
+        "path": "repeated.py",
+        "original_sha256": runner.sha(original.encode("utf-8")),
+        "content": updated,
+    }]
+    output, digest, _, _, _ = make_proposal_chain(
+        repo, worker_changes=changes, allowed_files=["repeated.py"]
+    )
+    patch_text = packet_mod.patch(root, output, "w1", "r1", digest)
+    assert patch_text.count("@@\n") == 1
+    assert "     value_1 = 1\n" in patch_text
+    assert " def second():\n" in patch_text
+
+    apply_patch_bin = shutil.which("apply_patch")
+    if apply_patch_bin:
+        proc = subprocess.run([apply_patch_bin], input=patch_text, cwd=root, capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        assert (root / "repeated.py").read_text() == updated
+
+
 def test_no_filesystem_changes_when_rendering(repo):
     root, git = repo
     output, digest, _, _, _ = make_proposal_chain(repo)

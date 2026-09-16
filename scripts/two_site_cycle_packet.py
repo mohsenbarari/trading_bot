@@ -31,6 +31,51 @@ def split_lf(text: str) -> list[str]:
     return lines
 
 
+def _hunk_old_lines(hunk: list[str]) -> list[str]:
+    """Return the exact old-file fragment represented by one unified-diff hunk."""
+    return [line[1:] for line in hunk[1:] if line.startswith((" ", "-"))]
+
+
+def _fragment_occurrences(lines: list[str], fragment: list[str]) -> int:
+    if not fragment:
+        return 1 if not lines else 0
+    width = len(fragment)
+    return sum(lines[index:index + width] == fragment for index in range(len(lines) - width + 1))
+
+
+def _unique_apply_patch_hunks(old_lines: list[str], new_lines: list[str]) -> list[str]:
+    """Produce apply_patch hunks whose old context has exactly one target.
+
+    The apply_patch format does not retain unified-diff line numbers. Three
+    lines of context can therefore select the wrong repeated block. Expand
+    context geometrically, bounded by the already validated source size, until
+    every hunk's old fragment is unique. If this is impossible, fail closed.
+    """
+    upper = max(3, len(old_lines))
+    context = 3
+    while True:
+        diff_lines = list(difflib.unified_diff(old_lines, new_lines, n=context))
+        raw_hunks = diff_lines[2:]
+        if not raw_hunks:
+            return []
+        hunks: list[list[str]] = []
+        current: list[str] | None = None
+        for line in raw_hunks:
+            if line.startswith("@@"):
+                current = ["@@\n"]
+                hunks.append(current)
+            elif current is None:
+                raise runner.ProposalError("unified diff did not contain a hunk header")
+            else:
+                current.append(line)
+        if all(_fragment_occurrences(old_lines, _hunk_old_lines(hunk)) == 1 for hunk in hunks):
+            return [line for hunk in hunks for line in hunk]
+        if context == upper:
+            break
+        context = min(upper, context * 2)
+    raise runner.ProposalError("patch context is not uniquely applicable")
+
+
 def _prepare_proposal(
     root: Path, task_path: Path, worker: str, reviewer: str, sha: str
 ) -> tuple[dict, dict, dict, dict, list[dict]]:
@@ -256,16 +301,7 @@ def patch(root: Path, task_path: Path, worker: str, reviewer: str, sha: str) -> 
                 )
             old_lines = split_lf(orig_content)
             new_lines = split_lf(new_content)
-            diff_lines = list(difflib.unified_diff(old_lines, new_lines, n=3))
-            if not diff_lines:
-                continue
-            raw_hunks = diff_lines[2:]
-            hunks: list[str] = []
-            for line in raw_hunks:
-                if line.startswith("@@"):
-                    hunks.append("@@\n")
-                else:
-                    hunks.append(line)
+            hunks = _unique_apply_patch_hunks(old_lines, new_lines)
             if not hunks:
                 continue
             patch_lines.append(f"*** Update File: {path}\n")

@@ -281,6 +281,27 @@ class ProposalContracts(unittest.TestCase):
             with self.subTest(events=events), self.assertRaises(runner.ProposalError):
                 self.parse(events)
 
+    def test_interrupted_stream_is_retryable_without_retaining_provider_error(self):
+        events = self.events()
+        events[1]["result"].update(
+            status="ERROR",
+            error="The stream was interrupted. Please continue the task you were working on.",
+            response=None,
+        )
+        raw = "\n".join(json.dumps(event) for event in events)
+        self.assertTrue(runner.is_retryable_interrupted_stream(raw))
+        with self.assertRaisesRegex(
+            runner.RetryableProviderSessionError,
+            "provider stream interrupted before a complete result",
+        ) as ctx:
+            self.parse(events)
+        self.assertNotIn("Please continue", str(ctx.exception))
+
+        events.insert(1, {"event": "step_update", "step_update": {"tool_name": "read_file"}})
+        self.assertFalse(runner.is_retryable_interrupted_stream(
+            "\n".join(json.dumps(event) for event in events)
+        ))
+
     def test_tool_and_subagent_attempts_rejected(self):
         for payload in [{"tool_name": "read_file"}, {"tool_info": {"name": "read_file"}},
                         {"subagent_info": {"id": "child"}}, {"step_type": "tool"},

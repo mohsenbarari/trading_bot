@@ -9,9 +9,9 @@ from pathlib import Path
 import re
 
 try:
-    from scripts.two_site_proposal_runner import bounded_file_text, unique_json
+    from scripts.two_site_proposal_runner import MAX_CONTEXT, bounded_file_text, unique_json
 except ModuleNotFoundError:
-    from two_site_proposal_runner import bounded_file_text, unique_json
+    from two_site_proposal_runner import MAX_CONTEXT, bounded_file_text, unique_json
 
 SUFFIX = r"(?:-(?:codex-)?(?:worker|reviewer)-\d+(?:-retry-\d+)?|-codex-correction-\d+-(?:worker|reviewer))"
 FINAL = re.compile(r"(.+?)(?:-(?:codex-)?worker-\d+(?:-retry-\d+)?|-codex-correction-\d+-worker)")
@@ -19,6 +19,9 @@ TERMINAL = {"PROPOSAL_READY", "VERIFIED", "CHANGES_REQUIRED", "BLOCKED"}
 TOKEN_KEYS = ("input_tokens", "output_tokens", "total_tokens")
 INITIAL_WORKER_RUN = re.compile(r".+-worker-0(?:-retry-\d+)?$")
 INITIAL_REVIEWER_RUN = re.compile(r".+-reviewer-0$")
+TASK_SNAPSHOT_LIMIT = 2 * MAX_CONTEXT
+TASK_GOAL_LIMIT = MAX_CONTEXT
+CANONICAL_EXCERPTS_LIMIT = MAX_CONTEXT
 
 
 SESSION_GATE_KEYS = {"state", "activation_reason", "root_count", "required_symbol_count", "query_operation_count"}
@@ -155,7 +158,7 @@ def _stream_usage(root: Path, path: Path) -> dict | None:
 def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: str) -> tuple[str, dict] | None:
     task_file = path / "task.json"
     try:
-        raw = bounded_file_text(root, task_file, 256_000, "task snapshot")
+        raw = bounded_file_text(root, task_file, TASK_SNAPSHOT_LIMIT, "task snapshot")
         data = unique_json(raw)
         if not isinstance(data, dict):
             return None
@@ -174,13 +177,13 @@ def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: st
         selectors = task_dict.get("test_selectors")
 
         goal = task_dict.get("goal")
-        if not isinstance(goal, str) or len(goal.encode("utf-8")) > 128_000:
+        if not isinstance(goal, str) or len(goal.encode("utf-8")) > TASK_GOAL_LIMIT:
             return None
         marker = "CANONICAL_SOURCE_EXCERPTS_JSON:"
         if goal.count(marker) != 1:
             return None
         payload_str = goal.split(marker, 1)[1].strip()
-        if not payload_str or len(payload_str.encode("utf-8")) > 64_000:
+        if not payload_str or len(payload_str.encode("utf-8")) > CANONICAL_EXCERPTS_LIMIT:
             return None
         payload = unique_json(payload_str)
         if not isinstance(payload, dict):

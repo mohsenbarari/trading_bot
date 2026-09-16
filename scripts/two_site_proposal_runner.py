@@ -777,6 +777,70 @@ def is_retryable_zero_token_stream(raw: str, expected_model: str = MODEL) -> boo
     return True
 
 
+def is_retryable_interrupted_stream(raw: str, expected_model: str = MODEL) -> bool:
+    """Recognize one safe, retryable provider-stream interruption.
+
+    This predicate deliberately returns only a boolean: provider-provided error
+    text is never copied into status, telemetry, or a later prompt. A complete
+    candidate is still required; a partial stream is never resumed or applied.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    try:
+        events = [unique_json(line) for line in raw.splitlines() if line.strip()]
+    except Exception:
+        return False
+    if not events or any(not isinstance(event, dict) for event in events):
+        return False
+    for event in events:
+        kind = event.get("event")
+        if kind in {"init", "result", "step_update"} and not isinstance(event.get(kind), dict):
+            return False
+    init = [event for event in events if event.get("event") == "init"]
+    terminal = [event.get("result") for event in events if event.get("event") == "result"]
+    if len(init) != 1 or len(terminal) != 1:
+        return False
+    init_payload = init[0].get("init")
+    if not isinstance(init_payload, dict) or init_payload.get("model") != expected_model:
+        return False
+    session = init[0].get("conversation_id")
+    envelope = terminal[0]
+    if (not isinstance(session, str) or not session.strip() or not isinstance(envelope, dict)
+            or envelope.get("conversation_id") != session or envelope.get("status") != "ERROR"):
+        return False
+    for event in events:
+        if event.get("conversation_id") not in (None, session):
+            return False
+        if (
+            "tool_name" in event
+            or "tool_info" in event
+            or "subagent_info" in event
+            or event.get("step_type") in {"tool", "subagent"}
+        ):
+            return False
+        if event.get("event") == "step_update":
+            step = event.get("step_update")
+            if not isinstance(step, dict) or step.get("conversation_id") not in (None, session):
+                return False
+            if (
+                "tool_name" in step
+                or "tool_info" in step
+                or "subagent_info" in step
+                or step.get("step_type") in {"tool", "subagent"}
+            ):
+                return False
+    if envelope.get("denied_actions") not in (None, [], ()):
+        return False
+    error = envelope.get("error")
+    if not isinstance(error, str) or len(error.encode("utf-8")) > 4096:
+        return False
+    return bool(re.search(
+        r"\b(?:stream\s+(?:was\s+)?interrupted|interrupted\s+(?:the\s+)?stream)\b",
+        error,
+        re.IGNORECASE,
+    ))
+
+
 def relative_file(root: Path, name: str) -> Path:
     if (not isinstance(name, str) or not name or "\\" in name or "\0" in name
             or any(part in {"", ".", ".."} for part in name.split("/"))):
@@ -2158,6 +2222,10 @@ def _parse_stream(
         raise RetryableProviderSessionError("CLI did not complete one successful session")
     if envelope.get("status") != "SUCCESS":
         error = envelope.get("error")
+        if is_retryable_interrupted_stream(raw, expected_model):
+            raise RetryableProviderSessionError(
+                "provider stream interrupted before a complete result"
+            )
         if (isinstance(error, str)
                 and not re.search(
                     r"auth|quota|rate[\s_-]*limit|time[\s_-]*out|timed[\s_-]*out|deadline|network|connect",
@@ -2452,6 +2520,13 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                     if final_cli_identity != initial_cli_identity:
                         raise ProposalError("CLI identity changed during generation")
                     raise RetryableProviderSessionError("CLI did not complete one successful session")
+                if is_retryable_interrupted_stream(raw_stream, role_model):
+                    final_cli_identity = cli_identity(disposable_cli)
+                    if final_cli_identity != initial_cli_identity:
+                        raise ProposalError("CLI identity changed during generation")
+                    raise RetryableProviderSessionError(
+                        "provider stream interrupted before a complete result"
+                    )
                 raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
             final_cli_identity = cli_identity(disposable_cli)
             if final_cli_identity != initial_cli_identity:

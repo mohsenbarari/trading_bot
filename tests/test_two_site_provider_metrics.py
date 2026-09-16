@@ -118,6 +118,28 @@ def test_limits_legacy_missing_and_impossible_duration(tmp_path):
     assert read(tmp_path)["state"] == "UNAVAILABLE"
 
 
+def test_task_metadata_accepts_runner_valid_snapshot_and_canonical_excerpt_limits(tmp_path):
+    worker, reviewer = pair(tmp_path)
+    canonical = json.dumps({"gap_reference": "GAP-TELEMETRY", "padding": "p" * 87_000})
+    task = {
+        "task_id": "task",
+        "goal": "One bounded task.\nCANONICAL_SOURCE_EXCERPTS_JSON:" + canonical,
+        "requirements": ["a"],
+        "test_selectors": ["test"],
+    }
+    snapshot = {"source_head": HEAD, "task": task, "sources": {"padding": "s" * 180_000}}
+    assert 256_000 < len(json.dumps(snapshot).encode("utf-8")) <= metrics.TASK_SNAPSHOT_LIMIT
+    (worker / "task.json").write_text(json.dumps(snapshot))
+    (reviewer / "task.json").write_text(json.dumps(snapshot))
+    result = read(tmp_path)
+    assert result["state"] == "OBSERVED_MATCHING_ATTEMPTS"
+    assert result["task_metadata"] is not None
+    assert result["task_metadata"]["task_id"] == "task"
+    assert result["task_metadata"]["declared_requirement_count"] == 1
+    assert result["task_metadata"]["focused_selector_count"] == 1
+    assert result["task_metadata"]["gap_reference"] == "GAP-TELEMETRY"
+
+
 @pytest.mark.parametrize("failure", [False, True])
 def test_ledger_binding_counts_and_helper_failure(tmp_path, monkeypatch, failure):
     worker, _ = pair(tmp_path)
