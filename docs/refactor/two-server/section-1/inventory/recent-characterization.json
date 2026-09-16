@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "ddec802be261b3e636eddf595566bc9dc299b19f",
+  "inspected_head": "460ee3ffafb0ba8f9d881c3369fcfeb4fca44a7c",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
     "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
     "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
   ],
-  "units_since_reconciliation": 0,
+  "units_since_reconciliation": 5,
   "records": [
     {
       "path": "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py",
@@ -1316,6 +1316,42 @@
         "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerNewSuccessCharacterizationTests::test_create_my_customer_new_valid_short_code_delivers_audits_and_returns_serialization",
         "tests/test_p1_00b_characterization_create_my_customer_accountant_guard.py::CreateMyCustomerReusedSuccessCharacterizationTests::test_create_my_customer_reused_valid_short_code_replays_delivers_audits_and_returns_serialization"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_owner_customer_internal_owner_policy_denials.py",
+      "sha256": "efd8c4b06dc3f3e7e02c1f38165e30a5e818c0515db22661a8c812633eb76523",
+      "last_commit": "6815fdaa7d2dad811cbea0d2f48071b3bc897684",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-OWNER-CUSTOMER-INTERNAL-FROM-BOT-L480"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_owner_policy_denials.py::CreateOwnerCustomerInternalOwnerPolicyDenialsCharacterizationTests::test_resolved_customer_owner_is_rejected_before_accountant_check",
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_owner_policy_denials.py::CreateOwnerCustomerInternalOwnerPolicyDenialsCharacterizationTests::test_resolved_accountant_owner_is_rejected_after_customer_check"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_owner_customer_internal_authority_validations.py",
+      "sha256": "ee1e662b34b5f7db6765c5c0909b86f3f9e9bacb5c2a1b8b8788e2891fec8e2f",
+      "last_commit": "b962bf5c89071f3409cf18d893e292e01915e4c9",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-OWNER-CUSTOMER-INTERNAL-FROM-BOT-L480"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_authority_validations.py::CreateOwnerCustomerInternalAuthorityValidationsCharacterizationTests::test_non_iran_current_server_is_rejected_before_requester_or_db_work",
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_authority_validations.py::CreateOwnerCustomerInternalAuthorityValidationsCharacterizationTests::test_payload_header_source_mismatch_is_rejected_before_requester_or_db_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_create_owner_customer_internal_sms_failed_ambiguous.py",
+      "sha256": "2bbdf16f64412812bc97c18a89eaa4105777fdc274112d7ab9278fae655dcb77",
+      "last_commit": "460ee3ffafb0ba8f9d881c3369fcfeb4fca44a7c",
+      "seed_ids": [
+        "API-IDENTITY-POST-CUSTOMERS-CREATE-OWNER-CUSTOMER-INTERNAL-FROM-BOT-L480"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_sms_failed_ambiguous.py::CreateOwnerCustomerInternalSMSFailedAmbiguousCharacterizationTests::test_new_owner_customer_sms_failed_returns_false_and_audits_failure",
+        "tests/test_p1_00b_characterization_create_owner_customer_internal_sms_failed_ambiguous.py::CreateOwnerCustomerInternalSMSFailedAmbiguousCharacterizationTests::test_new_owner_customer_sms_ambiguous_returns_false_and_audits_ambiguity"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1342,6 +1378,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "Five create_my_customer outcomes were indexed through ddec802b, remain partial seed evidence, leave newly-created invalid-short-code 409 and broader seed acceptance unresolved, and change no canonical counts, cells, blockers, or Stage state."
+    "This first slice indexes three of the five due units through 460ee3f, keeps units_since_reconciliation=5, and still requires the accepted expired-sweep record at ac962662 and both input-mismatch selectors at bca292c before reset."
   ]
 }
