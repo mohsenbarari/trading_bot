@@ -10,6 +10,10 @@ P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE.
 
 from __future__ import annotations
 
+import os
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+
 from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
 
 install_p1_00_network_fence()
@@ -289,6 +293,212 @@ class TestTradeCreateAcceptPriceFlowCharacterization(unittest.IsolatedAsyncioTes
         mock_answer_incoming.assert_not_called()
         mock_price_prompt.assert_not_called()
         mock_wizard_review.assert_not_called()
+        mock_answer_callback.assert_not_called()
+        mock_validate_lot_sizes.assert_not_called()
+        self.assertEqual(
+            state.mock_calls,
+            [
+                mock.call.get_data(),
+                mock.call.update_data(price=197000),
+            ],
+        )
+
+
+    async def test_accept_suggested_lots_return_to_review_opens_review(self):
+        message_sentinel = object()
+        callback = SimpleNamespace(message=message_sentinel)
+        principal = object()
+        callback_data = AcceptLotsCallback(lots="10_20")
+
+        observed_order: list[str] = []
+
+        async def fake_get_data():
+            observed_order.append("get_data")
+            return {"quantity": 30, "wizard_return_to_review": True}
+
+        def fake_validate_lot_sizes(total, lot_sizes):
+            observed_order.append("validate_lot_sizes")
+            return True, "", [10, 20]
+
+        async def fake_update_data(*args, **kwargs):
+            observed_order.append("update_data")
+            return None
+
+        async def fake_answer_callback(*args, **kwargs):
+            observed_order.append("answer_callback_query_via_runtime")
+            return None
+
+        async def fake_wizard_review(*args, **kwargs):
+            observed_order.append("_show_wizard_review")
+            return None
+
+        state = mock.AsyncMock()
+        state.get_data.side_effect = fake_get_data
+        state.update_data.side_effect = fake_update_data
+
+        with mock.patch(
+            "bot.handlers.trade_create.validate_lot_sizes",
+            side_effect=fake_validate_lot_sizes,
+        ) as mock_validate_lot_sizes, mock.patch(
+            "bot.handlers.trade_create.answer_callback_query_via_runtime",
+            new_callable=mock.AsyncMock,
+            side_effect=fake_answer_callback,
+        ) as mock_answer_callback, mock.patch(
+            "bot.handlers.trade_create._show_wizard_review",
+            new_callable=mock.AsyncMock,
+            side_effect=fake_wizard_review,
+        ) as mock_wizard_review, mock.patch(
+            "bot.handlers.trade_create._show_price_prompt",
+            new_callable=mock.AsyncMock,
+        ) as mock_price_prompt, mock.patch(
+            "bot.handlers.trade_create._show_notes_prompt",
+            new_callable=mock.AsyncMock,
+        ) as mock_notes_prompt, mock.patch(
+            "bot.handlers.trade_create.answer_incoming_message_via_runtime",
+            new_callable=mock.AsyncMock,
+        ) as mock_answer_incoming:
+            result = await handle_accept_suggested_lots(
+                callback,
+                state,
+                principal,
+                callback_data,
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            observed_order,
+            [
+                "get_data",
+                "validate_lot_sizes",
+                "update_data",
+                "answer_callback_query_via_runtime",
+                "_show_wizard_review",
+            ],
+        )
+
+        state.get_data.assert_awaited_once_with()
+        mock_validate_lot_sizes.assert_called_once_with(30, [10, 20])
+        state.update_data.assert_awaited_once_with(lot_sizes=[10, 20])
+        mock_answer_callback.assert_awaited_once_with(callback)
+        mock_wizard_review.assert_awaited_once_with(
+            message_sentinel,
+            state,
+            edit=True,
+            user=principal,
+        )
+
+        mock_price_prompt.assert_not_called()
+        mock_notes_prompt.assert_not_called()
+        mock_answer_incoming.assert_not_called()
+        self.assertEqual(
+            state.mock_calls,
+            [
+                mock.call.get_data(),
+                mock.call.update_data(lot_sizes=[10, 20]),
+            ],
+        )
+
+    async def test_price_input_return_to_review_opens_review(self):
+        message = SimpleNamespace(text="۱۹۷")
+        principal = object()
+        bot_sentinel = object()
+
+        observed_order: list[str] = []
+        recorded_normalize_returns: list[tuple[int | None, str]] = []
+
+        async def fake_handoff(*args, **kwargs):
+            observed_order.append("handoff")
+            return False
+
+        def wrapped_normalize(price: str) -> tuple[int | None, str]:
+            observed_order.append("normalize")
+            ret = normalize_offer_price_input(price)
+            recorded_normalize_returns.append(ret)
+            return ret
+
+        async def fake_get_data():
+            observed_order.append("get_data")
+            return {"wizard_return_to_review": True}
+
+        async def fake_update_data(*args, **kwargs):
+            observed_order.append("update_data")
+            return None
+
+        async def fake_wizard_review(*args, **kwargs):
+            observed_order.append("_show_wizard_review")
+            return None
+
+        state = mock.AsyncMock()
+        state.get_data.side_effect = fake_get_data
+        state.update_data.side_effect = fake_update_data
+
+        with mock.patch(
+            "bot.handlers.trade_create._handoff_stale_wizard_state_to_text_offer",
+            new_callable=mock.AsyncMock,
+            side_effect=fake_handoff,
+        ) as mock_handoff, mock.patch(
+            "bot.handlers.trade_create.normalize_offer_price_input",
+            side_effect=wrapped_normalize,
+        ) as mock_normalize, mock.patch(
+            "bot.handlers.trade_create._show_wizard_review",
+            new_callable=mock.AsyncMock,
+            side_effect=fake_wizard_review,
+        ) as mock_wizard_review, mock.patch(
+            "bot.handlers.trade_create._show_notes_prompt",
+            new_callable=mock.AsyncMock,
+        ) as mock_notes_prompt, mock.patch(
+            "bot.handlers.trade_create._show_price_prompt",
+            new_callable=mock.AsyncMock,
+        ) as mock_price_prompt, mock.patch(
+            "bot.handlers.trade_create.answer_incoming_message_via_runtime",
+            new_callable=mock.AsyncMock,
+        ) as mock_answer_incoming, mock.patch(
+            "bot.handlers.trade_create.answer_callback_query_via_runtime",
+            new_callable=mock.AsyncMock,
+        ) as mock_answer_callback, mock.patch(
+            "bot.handlers.trade_create.validate_lot_sizes",
+        ) as mock_validate_lot_sizes:
+            result = await handle_price_input(
+                message,
+                state,
+                principal,
+                bot_sentinel,
+            )
+
+        self.assertIsNone(result)
+        mock_normalize.assert_called_once_with("197")
+        self.assertEqual(recorded_normalize_returns, [(197000, "")])
+        self.assertEqual(recorded_normalize_returns[0][0], 197000)
+
+        self.assertEqual(
+            observed_order,
+            [
+                "handoff",
+                "normalize",
+                "get_data",
+                "update_data",
+                "_show_wizard_review",
+            ],
+        )
+
+        mock_handoff.assert_awaited_once_with(
+            message,
+            state,
+            principal,
+            bot_sentinel,
+        )
+        state.get_data.assert_awaited_once_with()
+        state.update_data.assert_awaited_once_with(price=197000)
+        mock_wizard_review.assert_awaited_once_with(
+            message,
+            state,
+            edit=False,
+            user=principal,
+        )
+
+        mock_notes_prompt.assert_not_called()
+        mock_price_prompt.assert_not_called()
+        mock_answer_incoming.assert_not_called()
         mock_answer_callback.assert_not_called()
         mock_validate_lot_sizes.assert_not_called()
         self.assertEqual(
