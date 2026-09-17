@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "e70a5cc4a4ca5553d889676b5aec5e2200e34a3c",
+  "inspected_head": "0d9141891441c5dbacbe66b8dcc480418c21fe0d",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1636,6 +1636,67 @@
         "tests/test_p1_00b_characterization_offers_accountant_context_denials_batch.py::OffersAccountantContextDenialsCharacterizationTests::test_my_repeatable_offers_denies_accountant_before_relation_or_query",
         "tests/test_p1_00b_characterization_offers_accountant_context_denials_batch.py::OffersAccountantContextDenialsCharacterizationTests::test_my_offers_denies_accountant_before_query_build"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offers_accountant_mutation_denials_batch.py",
+      "sha256": "5f6c41581e3e309c532df2a3a063c04dc328690f20ba3fc09d9edaee1e48f1c6",
+      "last_commit": "7f4f2142b8421eb54ea422b8f3b272e7451ca738",
+      "seed_ids": [
+        "API-OFFER-DELETE-OFFERS-EXPIRE-OFFER-L3043",
+        "API-OFFER-POST-OFFERS-CANCEL-ALL-ACTIVE-OFFERS-L3146"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offers_accountant_mutation_denials_batch.py::OffersAccountantMutationDenialsCharacterizationTests::test_expire_offer_denies_accountant_before_settings_gate_or_database_access",
+        "tests/test_p1_00b_characterization_offers_accountant_mutation_denials_batch.py::OffersAccountantMutationDenialsCharacterizationTests::test_cancel_all_denies_accountant_before_service_or_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offers_accountant_entry_denials_batch.py",
+      "sha256": "20f36b71f3ff359507fe138b3019f5cc26cb7c8e2a0896e702d895fad7c15bdd",
+      "last_commit": "8c8a3c26f6eaafc8259c24c062c7fd672132f37d",
+      "seed_ids": [
+        "API-OFFER-POST-OFFERS-CREATE-OFFER-L1659",
+        "API-OFFER-GET-OFFERS-GET-ACTIVE-OFFER-PAGE-L2356"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offers_accountant_entry_denials_batch.py::OffersAccountantEntryDenialsCharacterizationTests::test_create_offer_denies_accountant_before_creation_work",
+        "tests/test_p1_00b_characterization_offers_accountant_entry_denials_batch.py::OffersAccountantEntryDenialsCharacterizationTests::test_active_offer_page_denies_accountant_before_query_build"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_offers_active_list_accountant_denied.py",
+      "sha256": "7b22ad7afa525b9d7efdfd21832c96674814a10e2dd8e04098702e7592131a39",
+      "last_commit": "3d62275f364ab4e75073fad7340beed61e1b6630",
+      "seed_ids": [
+        "API-OFFER-GET-OFFERS-GET-ACTIVE-OFFERS-L2309"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_offers_active_list_accountant_denied.py::OffersActiveListAccountantDeniedCharacterizationTests::test_active_offers_denies_accountant_before_query_build"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_customer_relation_lookup_failures_batch.py",
+      "sha256": "8f1a35e4b09893caf100460aa23c78593059d8bdeb951897adc5ec6c0eaf0876",
+      "last_commit": "a0f0a32059333f0108f51ed6c267d7adf132ab67",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-SEARCH-PUBLIC-USERS-L428",
+        "API-IDENTITY-GET-USERS-PUBLIC-LIST-PROJECT-USERS-DIRECTORY-L512"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_customer_relation_lookup_failures_batch.py::UsersPublicCustomerRelationLookupFailuresCharacterizationTests::test_search_public_users_propagates_customer_relation_lookup_failure_before_query",
+        "tests/test_p1_00b_characterization_users_public_customer_relation_lookup_failures_batch.py::UsersPublicCustomerRelationLookupFailuresCharacterizationTests::test_project_users_directory_propagates_customer_relation_lookup_failure_before_authorization"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_read_all_execute_failure.py",
+      "sha256": "9174b2d6c9312f3feb0f13699745b2dbd1264a5d9e7399fe6cb8e2b658a5aefa",
+      "last_commit": "0d9141891441c5dbacbe66b8dcc480418c21fe0d",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_all_execute_failure.py::UsersReadAllExecuteFailureCharacterizationTests::test_read_all_users_propagates_execute_failure_before_relation_context"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1661,6 +1722,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through e70a5cc4a4ca5553d889676b5aec5e2200e34a3c and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through 0d9141891441c5dbacbe66b8dcc480418c21fe0d and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
