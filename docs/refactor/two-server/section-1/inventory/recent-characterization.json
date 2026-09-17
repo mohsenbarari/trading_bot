@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "a91d5f977d3ab1902b6768c461e16988ec4064c3",
+  "inspected_head": "714a397473cff8b9538a19a09f81e554bae1ba6c",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1756,6 +1756,61 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_realtime_websocket_missing_token.py::RealtimeWebsocketMissingTokenCharacterizationTests::test_missing_token_closes_4001_before_auth_access_or_listener"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_auth_reconcile_registration_signature_guard.py",
+      "sha256": "97df79d9db0e6415afa61a1bdc1f3091d9779e0c40a6cf030e4f6857fd2df370",
+      "last_commit": "5d55f2ff3640bce604de7cc39c11a7480b5e3cf7",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-RECONCILE-TELEGRAM-REGISTRATION-INTERNAL-L193"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_auth_reconcile_registration_signature_guard.py::AuthReconcileRegistrationSignatureGuardCharacterizationTests::test_invalid_signature_rejects_before_authority_parsing_db_or_network_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_auth_request_otp_invalid_mobile.py",
+      "sha256": "63a47df04dccdecd0f5b0fcaf1c273650dead86c28cc24ba8ea88a7e3490c004",
+      "last_commit": "901e5931fb8e00aa5606c4ed9a522795005c3bc8",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-REQUEST-OTP-L2454"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_auth_request_otp_invalid_mobile.py::AuthRequestOtpInvalidMobileCharacterizationTests::test_invalid_mobile_rejects_before_db_redis_or_otp_delivery_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_auth_exchange_registration_context_origin_guard.py",
+      "sha256": "b14811c81bff8df106657a8e5f69709a218781ea9c1ac90585ee5e7458da4623",
+      "last_commit": "6435ffb6f8276a72bcd45394e05abe985c1b2cd5",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-EXCHANGE-REGISTRATION-CONTEXT-L1696"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_auth_exchange_registration_context_origin_guard.py::AuthExchangeRegistrationContextOriginGuardCharacterizationTests::test_cross_origin_rejects_before_redis_db_or_context_mutation_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_quick_quantity_unlinked_user_guard.py",
+      "sha256": "5391ca2dbe796e6ecc58916f8c1ebb8691e5bdaa8cc65fe2521c4030e3c44f82",
+      "last_commit": "36cc0f775f8d0bca7a612213bfc3139a2e2073aa",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-QUICK-QUANTITY-L869"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_quick_quantity_unlinked_user_guard.py::TradeCreateQuickQuantityUnlinkedUserGuardCharacterizationTests::test_missing_user_returns_before_callback_data_state_or_delivery_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_commodity_selection_missing.py",
+      "sha256": "7ae5e0a6b8a1a373af9c792c92b89bcb18422399215189a5698d41af73d5c5bb",
+      "last_commit": "714a397473cff8b9538a19a09f81e554bae1ba6c",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-SELECTION-L812"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_missing.py::TradeCreateCommoditySelectionMissingCharacterizationTests::test_missing_commodity_alerts_before_settings_state_or_prompt_work"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1781,6 +1836,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through a91d5f977d3ab1902b6768c461e16988ec4064c3 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through 714a397473cff8b9538a19a09f81e554bae1ba6c and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
