@@ -12,12 +12,16 @@ Characterized scenarios:
 - An eligible linked user selects one existing authoritative pack commodity while
   wizard_return_to_review=False, and the registered callback route stores the pack
   invariant quantity/lot shape, acknowledges once, and opens the price prompt.
+- An eligible linked user with wizard_return_to_review=True selects one existing
+  ordinary non-pack Commodity, and the registered callback route stores the
+  selected commodity, renders the wizard review, then acknowledges the callback
+  while suppressing quantity and price paths.
 
 Exclusions:
 - handle_commodity_page scenarios
 - unauthenticated user branch
 - missing commodity branch
-- wizard_return_to_review branch
+- pack return-to-review branch
 - product changes
 - source changes
 - docs/index reconciliation
@@ -479,6 +483,168 @@ class TestTradeCreateCommoditySelectionRouterCharacterization(
         mock_get_quantity_keyboard.assert_not_called()
         mock_edit_runtime.assert_not_called()
         mock_show_wizard_review.assert_not_called()
+        state.set_state.assert_not_called()
+        state.set_data.assert_not_called()
+        state.clear.assert_not_called()
+        mock_callback_answer.assert_not_called()
+
+    async def test_commodity_selection_router_return_to_review_opens_review_before_ack(
+        self,
+    ) -> None:
+        packed_data = CommodityCallback(id=17).pack()
+        chat = aiogram_types.Chat(id=1001, type="private")
+        message = aiogram_types.Message(
+            message_id=2001,
+            date=datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc),
+            chat=chat,
+        )
+        event = aiogram_types.CallbackQuery(
+            id="cb-auth-commodity-select-return-to-review",
+            from_user=aiogram_types.User(
+                id=54321,
+                is_bot=False,
+                first_name="EligibleUser",
+            ),
+            chat_instance="test_chat_instance_commodity_return_to_review",
+            message=message,
+            data=packed_data,
+        )
+
+        runtime_user = SimpleNamespace(id=54321, first_name="EligibleUser")
+        commodity = Commodity(id=17, name="سکه امامی")
+        trading_settings_fixture = TradingSettings(
+            offer_min_quantity=5,
+            offer_max_quantity=50,
+        )
+
+        order_tracker: list[str] = []
+
+        session = QueryAwareCommoditySession(commodity, order_tracker)
+        session_context = QueryAwareCommoditySessionContext(session, order_tracker)
+
+        async def track_get_trading_settings_async() -> TradingSettings:
+            order_tracker.append("get_trading_settings_async")
+            return trading_settings_fixture
+
+        async def track_get_data() -> dict[str, Any]:
+            order_tracker.append("state.get_data")
+            return {"wizard_return_to_review": True}
+
+        async def track_update_data(**kwargs: Any) -> None:
+            order_tracker.append("state.update_data")
+
+        async def track_show_wizard_review(*args: Any, **kwargs: Any) -> None:
+            order_tracker.append("_show_wizard_review")
+
+        async def track_answer_runtime(*args: Any, **kwargs: Any) -> None:
+            order_tracker.append("answer_callback_query_via_runtime")
+
+        state = SimpleNamespace(
+            get_data=mock.AsyncMock(side_effect=track_get_data),
+            update_data=mock.AsyncMock(side_effect=track_update_data),
+            set_state=mock.AsyncMock(),
+            set_data=mock.AsyncMock(),
+            clear=mock.AsyncMock(),
+        )
+
+        with (
+            mock.patch(
+                "bot.handlers.trade_create.AsyncSessionLocal",
+                return_value=session_context,
+            ),
+            mock.patch(
+                "core.trading_settings.get_trading_settings_async",
+                new=mock.AsyncMock(side_effect=track_get_trading_settings_async),
+            ) as mock_get_trading_settings,
+            mock.patch(
+                "bot.handlers.trade_create._show_wizard_review",
+                new_callable=mock.AsyncMock,
+                side_effect=track_show_wizard_review,
+            ) as mock_show_wizard_review,
+            mock.patch(
+                "bot.handlers.trade_create.answer_callback_query_via_runtime",
+                new_callable=mock.AsyncMock,
+                side_effect=track_answer_runtime,
+            ) as mock_answer_runtime,
+            mock.patch(
+                "bot.handlers.trade_create._show_price_prompt",
+                new_callable=mock.AsyncMock,
+            ) as mock_show_price_prompt,
+            mock.patch(
+                "bot.handlers.trade_create.get_quantity_keyboard",
+            ) as mock_get_quantity_keyboard,
+            mock.patch(
+                "bot.handlers.trade_create.edit_callback_message_via_runtime",
+                new_callable=mock.AsyncMock,
+            ) as mock_edit_runtime,
+            mock.patch.object(
+                aiogram_types.CallbackQuery,
+                "answer",
+                new_callable=mock.AsyncMock,
+            ) as mock_callback_answer,
+        ):
+            result = await trade_create.router.propagate_event(
+                "callback_query",
+                event,
+                state=state,
+                user=runtime_user,
+                raw_state=Trade.awaiting_commodity.state,
+            )
+
+        self.assertIsNone(result)
+
+        expected_order = [
+            "db.enter",
+            "db.execute",
+            "db.exit",
+            "get_trading_settings_async",
+            "state.get_data",
+            "state.update_data",
+            "_show_wizard_review",
+            "answer_callback_query_via_runtime",
+        ]
+        self.assertEqual(order_tracker, expected_order)
+
+        mock_get_trading_settings.assert_awaited_once_with()
+        state.get_data.assert_awaited_once_with()
+
+        state.update_data.assert_awaited_once_with(
+            commodity_id=17,
+            commodity_name="سکه امامی",
+        )
+        self.assertEqual(
+            state.update_data.await_args.kwargs,
+            {"commodity_id": 17, "commodity_name": "سکه امامی"},
+        )
+        self.assertNotIn("quantity", state.update_data.await_args.kwargs)
+        self.assertNotIn("is_wholesale", state.update_data.await_args.kwargs)
+        self.assertNotIn("lot_sizes", state.update_data.await_args.kwargs)
+
+        mock_show_wizard_review.assert_awaited_once_with(
+            message,
+            state,
+            edit=True,
+            user=runtime_user,
+        )
+        self.assertIs(mock_show_wizard_review.await_args.args[0], message)
+        self.assertIs(mock_show_wizard_review.await_args.args[1], state)
+        self.assertEqual(
+            mock_show_wizard_review.await_args.kwargs,
+            {
+                "edit": True,
+                "user": runtime_user,
+            },
+        )
+        self.assertIs(mock_show_wizard_review.await_args.kwargs["user"], runtime_user)
+
+        mock_answer_runtime.assert_awaited_once_with(event)
+        self.assertIs(mock_answer_runtime.await_args.args[0], event)
+        self.assertEqual(len(mock_answer_runtime.await_args.args), 1)
+        self.assertEqual(mock_answer_runtime.await_args.kwargs, {})
+
+        mock_get_quantity_keyboard.assert_not_called()
+        mock_edit_runtime.assert_not_called()
+        mock_show_price_prompt.assert_not_called()
         state.set_state.assert_not_called()
         state.set_data.assert_not_called()
         state.clear.assert_not_called()
