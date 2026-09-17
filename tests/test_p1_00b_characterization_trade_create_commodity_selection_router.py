@@ -21,10 +21,14 @@ Characterized scenarios:
   authoritative pack quantity/lot state, renders the wizard review before
   acknowledging the callback, and suppresses ordinary quantity and pack
   price-prompt paths.
+- An unauthenticated callback query (user=None) reaches the registered
+  Trade.awaiting_commodity router with a valid CommodityCallback, and the
+  handler returns None immediately without accessing callback data id,
+  database session, trading settings, FSM state, commodity helper, prompts,
+  acknowledgement, or delivery work.
 
 Exclusions:
 - handle_commodity_page scenarios
-- unauthenticated user branch
 - missing commodity branch
 - product changes
 - source changes
@@ -821,6 +825,98 @@ class TestTradeCreateCommoditySelectionRouterCharacterization(
         state.set_data.assert_not_called()
         state.clear.assert_not_called()
         mock_callback_answer.assert_not_called()
+
+    async def test_commodity_selection_router_unauthenticated_short_circuits_before_callback_data_session_settings_state_or_delivery(
+        self,
+    ) -> None:
+        packed_data = CommodityCallback(id=17).pack()
+        chat = aiogram_types.Chat(id=1001, type="private")
+        message = aiogram_types.Message(
+            message_id=2001,
+            date=datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc),
+            chat=chat,
+        )
+        event = aiogram_types.CallbackQuery(
+            id="cb-unauth-commodity-select",
+            from_user=aiogram_types.User(
+                id=54321,
+                is_bot=False,
+                first_name="UnauthUser",
+            ),
+            chat_instance="test_chat_instance_unauth",
+            message=message,
+            data=packed_data,
+        )
+
+        state = SimpleNamespace(
+            get_data=mock.AsyncMock(),
+            update_data=mock.AsyncMock(),
+            set_state=mock.AsyncMock(),
+            set_data=mock.AsyncMock(),
+            clear=mock.AsyncMock(),
+        )
+
+        with (
+            mock.patch(
+                "bot.handlers.trade_create.AsyncSessionLocal",
+            ) as mock_session_factory,
+            mock.patch(
+                "core.trading_settings.get_trading_settings_async",
+                new_callable=mock.AsyncMock,
+            ) as mock_get_trading_settings,
+            mock.patch(
+                "bot.handlers.trade_create.is_pack_commodity_name",
+            ) as mock_is_pack_commodity_name,
+            mock.patch(
+                "bot.handlers.trade_create._show_wizard_review",
+                new_callable=mock.AsyncMock,
+            ) as mock_show_wizard_review,
+            mock.patch(
+                "bot.handlers.trade_create._show_price_prompt",
+                new_callable=mock.AsyncMock,
+            ) as mock_show_price_prompt,
+            mock.patch(
+                "bot.handlers.trade_create.get_quantity_keyboard",
+            ) as mock_get_quantity_keyboard,
+            mock.patch(
+                "bot.handlers.trade_create.edit_callback_message_via_runtime",
+                new_callable=mock.AsyncMock,
+            ) as mock_edit_runtime,
+            mock.patch(
+                "bot.handlers.trade_create.answer_callback_query_via_runtime",
+                new_callable=mock.AsyncMock,
+            ) as mock_answer_runtime,
+            mock.patch.object(
+                aiogram_types.CallbackQuery,
+                "answer",
+                new_callable=mock.AsyncMock,
+            ) as mock_callback_answer,
+        ):
+            result = await trade_create.router.propagate_event(
+                "callback_query",
+                event,
+                state=state,
+                user=None,
+                raw_state=Trade.awaiting_commodity.state,
+            )
+
+        self.assertIsNone(result)
+
+        mock_session_factory.assert_not_called()
+        mock_get_trading_settings.assert_not_called()
+        mock_is_pack_commodity_name.assert_not_called()
+        mock_show_wizard_review.assert_not_called()
+        mock_show_price_prompt.assert_not_called()
+        mock_get_quantity_keyboard.assert_not_called()
+        mock_edit_runtime.assert_not_called()
+        mock_answer_runtime.assert_not_called()
+        mock_callback_answer.assert_not_called()
+
+        state.get_data.assert_not_called()
+        state.update_data.assert_not_called()
+        state.set_state.assert_not_called()
+        state.set_data.assert_not_called()
+        state.clear.assert_not_called()
 
 
 if __name__ == "__main__":
