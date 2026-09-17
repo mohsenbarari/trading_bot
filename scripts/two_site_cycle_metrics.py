@@ -22,10 +22,80 @@ MAX_STREAM = 16_000_000
 MAX_LINE = 1_000_000
 MAX_RECORDS = 2000
 MAX_LEDGER = 2_000_000
+CONTROLLER_PHASE_KEYS = (
+    "repository_validation",
+    "task_context",
+    "codex_readiness",
+    "coordinator",
+    "post_coordinator_validation",
+)
+COMMAND_GROUPS = (
+    "startup_orientation",
+    "task_discovery",
+    "source_inspection",
+    "task_preflight",
+    "provider",
+    "candidate_validation",
+    "packet_review",
+    "git_verification",
+    "other",
+)
 _SKIPPABLE_OVERSIZED_EVENT = re.compile(
     rb'"type"\s*:\s*"item\.completed".{0,4096}?"type"\s*:\s*"command_execution"',
     re.DOTALL,
 )
+
+
+def command_group(value: object) -> str:
+    """Classify a command in memory; retain only one fixed aggregate label.
+
+    Command text and command output may contain source or operational details, so
+    neither belongs in durable telemetry.  These groups are intentionally broad:
+    they identify repeated coordination work without becoming a source channel.
+    """
+    if not isinstance(value, str):
+        return "other"
+    lowered = value.lower()
+    if any(token in lowered for token in (
+        "agents.md", "docs/memory/", "two-site-refactor/skill.md",
+        "proposal_automation.md", "master_plan.md", "execution_plan.md",
+    )):
+        return "startup_orientation"
+    if any(token in lowered for token in (
+        "recent-characterization", "scenario-records", "surface-bot",
+        "execution-order", "change_ledger",
+    )):
+        return "task_discovery"
+    if "two_site_cycle_tools.py build" in lowered or "two_site_proposal_runner.py check" in lowered:
+        return "task_preflight"
+    if "two_site_provider_broker.py submit" in lowered:
+        return "provider"
+    if "two_site_cycle_packet.py" in lowered or "two_site_cycle_tools.py review" in lowered:
+        return "packet_review"
+    if "pytest" in lowered or "two_site_pre_review_receipt.py" in lowered:
+        return "candidate_validation"
+    if re.search(r"(?:^|[ /;&|])git(?:[ /;&|]|$)", lowered):
+        return "git_verification"
+    if any(token in lowered for token in ("bot/", "api/", "core/", "models/", "tests/", "src/")):
+        return "source_inspection"
+    return "other"
+
+
+def controller_phase_seconds(meta: object) -> dict[str, float] | None:
+    """Return a complete, source-free controller timing breakdown when observed."""
+    if not isinstance(meta, dict):
+        return None
+    raw = meta.get("controller_phase_seconds")
+    if not isinstance(raw, dict) or set(raw) != set(CONTROLLER_PHASE_KEYS):
+        return None
+    normalized: dict[str, float] = {}
+    for key in CONTROLLER_PHASE_KEYS:
+        value = raw[key]
+        if (type(value) not in (int, float) or isinstance(value, bool)
+                or not math.isfinite(value) or not 0 <= value <= 10**12):
+            return None
+        normalized[key] = round(float(value), 3)
+    return normalized
 
 
 def _drain_oversized_event(stream, first: bytes, total: int) -> tuple[int, bool]:
@@ -63,6 +133,7 @@ def usage_from_stream(root: Path, path: Path) -> dict:
         if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > MAX_STREAM:
             raise ProposalError("unsafe or oversized metrics stream")
         totals = dict.fromkeys(missing, 0)
+        command_groups = dict.fromkeys(COMMAND_GROUPS, 0)
         turns = commands = count = reasoning = skipped_oversized_events = 0
         reasoning_known = True
         while True:
@@ -84,7 +155,10 @@ def usage_from_stream(root: Path, path: Path) -> dict:
             if not isinstance(item, dict):
                 raise ProposalError("invalid metrics event")
             if item.get("type") == "item.completed" and isinstance(item.get("item"), dict):
-                commands += item["item"].get("type") == "command_execution"
+                command = item["item"]
+                if command.get("type") == "command_execution":
+                    commands += 1
+                    command_groups[command_group(command.get("command"))] += 1
             if item.get("type") != "turn.completed":
                 continue
             usage = item.get("usage")
@@ -114,7 +188,8 @@ def usage_from_stream(root: Path, path: Path) -> dict:
     return {"usage_state": "OBSERVED_COMPLETED_TURNS" if turns else "UNKNOWN",
             **(totals if turns else missing), "completed_turns": turns,
             "reasoning_output_tokens": reasoning if turns and reasoning_known else None,
-            "completed_commands": commands, "stream_bytes": count,
+            "completed_commands": commands, "command_groups": command_groups,
+            "stream_bytes": count,
             "skipped_oversized_events": skipped_oversized_events}
 
 
@@ -210,6 +285,9 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
               "state": meta["state"], "head_before": meta.get("head_before"),
               "head_after": meta.get("head_after"), "finished_at": meta.get("finished_at"),
               "duration_seconds": meta.get("duration_seconds"), **usage}
+    phases = controller_phase_seconds(meta)
+    if phases is not None:
+        record["controller_phase_seconds"] = phases
     prompt = bounded_file_text(root, run_dir / "prompt.txt", 200_000, "metrics prompt")
     record["prompt_sha256"] = sha(prompt.encode())
     # IDs and hashes only: no free-form prompts, summaries, source or command output.

@@ -13,23 +13,24 @@ Excluded: secrets and credentials, identity/authentication material, user/person
 production or operational data, deploy/production changes, DNS, Web Writer, fetch/push
 and unrelated remote-service mutation. This does not widen any other gate.
 
-1. Orient once: read AGENTS.md, routed MemoryCustodian files, current
-   `.agents/skills/two-site-refactor/SKILL.md`, PROPOSAL_AUTOMATION.md and the active
-   Stage/Assignment; load only exact task sources. `startup_validation=true` means Supervisor
-   already checked runtime/Git/clean HEAD, protected refs/controls, worktrees and scope: re-probe
-   only after mutation, drift or inconsistent context. Fresh Git/SHA wins; do not scan broad
-   plans/logs/runs. Preserve user/protected refs; no fetch/push, deploy/production, DNS, Writer,
-   secrets or paused-gateway activation.
+1. Fresh cycle (no `validated_previous_cycle_hint`): read AGENTS.md, routed MemoryCustodian files,
+   `.agents/skills/two-site-refactor/SKILL.md`, PROPOSAL_AUTOMATION.md and active Stage/Assignment
+   once, then exact task sources. With a current-HEAD-matched hint, continue from its exact gap:
+   do not reopen startup documents, broad plans, prior runs or logs. Read
+   Stage/inventory and source/test definitions.
+   `startup_validation=true` means Supervisor checked runtime/Git/clean HEAD, refs/controls,
+   worktrees and scope; re-probe only after mutation, drift or inconsistent context. Fresh Git/SHA
+   wins. Preserve user/protected refs; no fetch/push, deploy/production, DNS, Writer, secrets or
+   paused-gateway activation.
 
-2. Use the current-HEAD-matched `validated_previous_cycle_hint` for the exact prior work/next
-   gap; it is not authority. Revalidate Stage/Assignment and missing coverage; never repeat an
-   accepted scenario. Without it use `section-1/inventory/recent-characterization.json`, then
-   recheck SHA/assertions. That partial index cannot close seeds/cells/blockers. Carry
-   `units_since_reconciliation`; reconcile after 5 accepted behavior units, reset only on its
-   accepted reconciliation, never auto-close. `next_action` names exact gap, accepted
-   selectors/commit, remaining scenarios, reconciliation state and unmet behavior; prioritize
-   bounded acceptance over peripheral counts. After RESCOPE choose a distinct, ready unit; when
-   `defer_prior_unit`, it cannot paraphrase the deferred unit (otherwise HALT).
+2. A current-HEAD-matched `validated_previous_cycle_hint` identifies the prior gap, never authority.
+   Revalidate Stage/Assignment and missing coverage; never repeat acceptance. Without it use
+   `section-1/inventory/recent-characterization.json`, then SHA/assertions; it cannot close a
+   seed/cell/blocker. Reconcile after 5 accepted behavior units only. `next_action` names the gap,
+   accepted selectors/commit, remaining scenarios, reconciliation and unmet behavior. After RESCOPE
+   choose a distinct ready unit; `defer_prior_unit` cannot be paraphrased (otherwise HALT).
+   Supervisor recovery context identifies the rejected unit and next action; it never authorizes
+   reuse, skipped gate or repeated scenario. Choose a distinct smaller or context-complete internal unit when rescoping.
 
 3. Supply authoritative current definitions for every referenced enum, constant, import,
    signature, model field and dependency. UserRole.BUYER is forbidden unless its authoritative definition proves it exists.
@@ -59,11 +60,10 @@ and unrelated remote-service mutation. This does not widen any other gate.
    .local/two-site-refactor/tasks/<fresh-id>.json. Spec keys: task (the exact six-key runner contract),
    snippets ([{path, symbols}] or []), gap_reference (tracked doc#gap), and scenario_key (stable
    machine-readable behavior/scenario name).
-   All context_files/allowed_files are actual canonical source paths (never .local, tmp excerpts,
-   .txt, credentials or aliases). Read-only Python dependency snippets contain complete selected
-   definitions, decorators and imports; rechecked locally against full-file SHA, HEAD and ranges.
-   Include dependency closure (provenance, not completeness). Writable files remain full sources;
-   full-context tasks remain supported when excerpts hide behavior.
+   All context_files/allowed_files are canonical source paths (never .local, tmp excerpts, .txt,
+   credentials or aliases). Read-only snippets include complete selected definitions, decorators,
+   imports and local SHA/HEAD/range checks. Include dependency closure; writable files stay full
+   sources and full-context tasks remain valid when excerpts hide behavior.
    The builder marker binds HEAD, gap, excerpts, Stage, symbols, scenario and source SHAs.
    The pipeline validates it and reserves one immutable local attempt per fingerprint before
    provider contact; retry requires material identity change or audited maintenance.

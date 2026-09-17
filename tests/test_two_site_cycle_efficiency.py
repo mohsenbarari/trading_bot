@@ -94,6 +94,63 @@ def test_usage_sums_turns_without_double_counting_reasoning(tmp_path):
     assert "private" not in json.dumps(value)
 
 
+def test_usage_records_only_fixed_command_group_counts(tmp_path):
+    path = tmp_path / "stream.jsonl"
+    commands = [
+        "sed -n '1,100p' AGENTS.md",
+        "rg -n 'gap' docs/refactor/two-server/section-1/inventory/scenario-records.json",
+        "sed -n '1,100p' bot/handlers/trade_create.py",
+        "python3 scripts/two_site_proposal_runner.py check --task task.json",
+        "python3 scripts/two_site_provider_broker.py submit --task task.json --run-prefix run --timeout 900",
+        "pytest -q tests/test_unit.py",
+        "python3 scripts/two_site_cycle_packet.py packet --task task.json --worker w --reviewer r --sha " + "a" * 64,
+        "git status --short",
+        "command with opaque private detail",
+    ]
+    write_stream(path, [
+        *({"type": "item.completed", "item": {"type": "command_execution", "command": value}}
+          for value in commands),
+        turn(),
+    ])
+    value = metrics.usage_from_stream(tmp_path, path)
+    assert value["completed_commands"] == len(commands)
+    assert value["command_groups"] == {
+        "startup_orientation": 1,
+        "task_discovery": 1,
+        "source_inspection": 1,
+        "task_preflight": 1,
+        "provider": 1,
+        "candidate_validation": 1,
+        "packet_review": 1,
+        "git_verification": 1,
+        "other": 1,
+    }
+    assert "opaque" not in json.dumps(value)
+
+
+def test_controller_phase_seconds_requires_a_complete_safe_vector():
+    phase = {key: 1.25 for key in metrics.CONTROLLER_PHASE_KEYS}
+    assert metrics.controller_phase_seconds({"controller_phase_seconds": phase}) == phase
+    assert metrics.controller_phase_seconds({"controller_phase_seconds": {**phase, "extra": 1}}) is None
+    assert metrics.controller_phase_seconds({"controller_phase_seconds": {**phase, "coordinator": -1}}) is None
+    assert metrics.controller_phase_seconds({"controller_phase_seconds": {**phase, "task_context": True}}) is None
+
+
+def test_record_cycle_persists_complete_controller_phase_timing(tmp_path):
+    state = tmp_path / ".local/two-site-refactor/autopilot"
+    run = state / "runs" / "timed"
+    run.mkdir(parents=True)
+    (run / "prompt.txt").write_text("bounded prompt")
+    write_stream(run / "stream.jsonl", [turn()])
+    phases = {key: 1.25 for key in metrics.CONTROLLER_PHASE_KEYS}
+    record = metrics.record_cycle(
+        tmp_path, state, run,
+        {"state": "CONTINUE", "controller_phase_seconds": phases}, "sol", "xhigh",
+    )
+    assert record["controller_phase_seconds"] == phases
+    assert json.loads((state / "metrics.json").read_text())[-1]["controller_phase_seconds"] == phases
+
+
 @pytest.mark.parametrize("value", [turn(-1), turn(10, 11), turn(True), {"type": "turn.completed"}])
 def test_bad_usage_fails_instead_of_partial_totals(tmp_path, value):
     path = tmp_path / "stream.jsonl"

@@ -758,6 +758,11 @@ def codex_command(codex: Path, root: Path, run_dir: Path, prompt: str) -> list[s
     ]
 
 
+def elapsed_seconds(started_at: float) -> float:
+    """Return a non-negative monotonic duration for source-free cycle telemetry."""
+    return round(max(0.0, time.monotonic() - started_at), 3)
+
+
 def run_cycle(
     root: Path,
     codex: Path,
@@ -770,10 +775,20 @@ def run_cycle(
     global _ACTIVE_PROCESS
     heartbeat_stop: threading.Event | None = None
     heartbeat_thread: threading.Thread | None = None
+    phase_seconds: dict[str, float | None] = {
+        "repository_validation": None,
+        "task_context": None,
+        "codex_readiness": None,
+        "coordinator": None,
+        "post_coordinator_validation": None,
+    }
+    validation_started_at = time.monotonic()
     before = validate_repository(root, require_clean=True)
+    phase_seconds["repository_validation"] = elapsed_seconds(validation_started_at)
     scope = before.get("assignment_scope")
     if not isinstance(scope, AssignmentScope):
         raise AutopilotError("invalid or missing startup assignment scope")
+    context_started_at = time.monotonic()
     timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
     if not RUN_ID.fullmatch(run_dir.name) or os.path.isabs(run_dir.name):
@@ -781,8 +796,11 @@ def run_cycle(
     run_dir.mkdir(mode=0o700)
     prompt = prompt_for_cycle(root, cycle, before, recovery=recovery, continuation=continuation)
     (run_dir / "prompt.txt").write_text(prompt)
+    phase_seconds["task_context"] = elapsed_seconds(context_started_at)
+    readiness_started_at = time.monotonic()
     codex = codex.resolve(strict=True)
     identity = codex_identity(codex, run_dir)
+    phase_seconds["codex_readiness"] = elapsed_seconds(readiness_started_at)
     meta = {
         "cycle": cycle,
         "state": "RUNNING",
@@ -800,6 +818,7 @@ def run_cycle(
         },
         "output_limit_bytes": MAX_CODEX_OUTPUT,
         "timeout_seconds": timeout,
+        "controller_phase_seconds": phase_seconds,
     }
     if recovery is not None:
         meta["recovery"] = recovery
@@ -812,7 +831,10 @@ def run_cycle(
     environment["TWO_SITE_ASSIGNMENT_ID"] = scope.assignment_id
     environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
     environment["TWO_SITE_AUTOPILOT_RUN_ID"] = run_dir.name
+    coordinator_started_at: float | None = None
+    post_validation_started_at: float | None = None
     try:
+        coordinator_started_at = time.monotonic()
         with subprocess.Popen(
             command,
             cwd=root,
@@ -845,6 +867,8 @@ def run_cycle(
                 process, b"", run_dir / "stream.jsonl", run_dir / "stderr.txt",
                 timeout, max_output=MAX_CODEX_OUTPUT,
             )
+        phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
+        post_validation_started_at = time.monotonic()
         if process.returncode:
             raise AutopilotError(f"Codex CLI exited with status {process.returncode}")
         if file_sha256(codex) != identity["sha256"]:
@@ -878,6 +902,9 @@ def run_cycle(
             proposal_sha256=result["proposal_sha256"],
         )
         write_json(run_dir / "status.json", meta)
+        phase_seconds["post_coordinator_validation"] = elapsed_seconds(post_validation_started_at)
+        meta["controller_phase_seconds"] = phase_seconds
+        write_json(run_dir / "status.json", meta)
         return run_dir, result
     except BaseException as exc:
         meta.update(
@@ -889,6 +916,24 @@ def run_cycle(
         write_json(run_dir / "status.json", meta)
         raise
     finally:
+        if coordinator_started_at is not None and phase_seconds["coordinator"] is None:
+            phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
+        if (post_validation_started_at is not None
+                and phase_seconds["post_coordinator_validation"] is None):
+            phase_seconds["post_coordinator_validation"] = elapsed_seconds(post_validation_started_at)
+        # A phase may be unavailable only when the cycle failed before that phase.
+        # Metrics accepts only complete timing vectors, so do not publish a partial
+        # breakdown as if it were comparable with successful cycles.
+        if all(value is not None for value in phase_seconds.values()):
+            meta["controller_phase_seconds"] = {
+                key: float(value) for key, value in phase_seconds.items()
+            }
+        else:
+            meta.pop("controller_phase_seconds", None)
+        try:
+            write_json(run_dir / "status.json", meta)
+        except OSError:
+            pass
         if heartbeat_stop is not None:
             heartbeat_stop.set()
         if heartbeat_thread is not None:
