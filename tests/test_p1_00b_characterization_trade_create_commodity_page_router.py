@@ -7,10 +7,12 @@ Exact seed characterized:
 - BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-PAGE-L781
 
 This unit executes actual registered callback-router dispatch for the
-three active-FSM scenarios:
+five active-FSM scenarios:
 1. unauthenticated valid buy-page callback short-circuiting without state or interaction work
 2. eligible user with mismatched trade_type receiving the expired page alert without keyboard or edit work
 3. eligible user with matching buy trade_type and wizard_return_to_review=False receiving the requested page through exact keyboard, edit, and answer ordering
+4. eligible user with matching trade_type='sell' and wizard_return_to_review=False receiving the requested sell page through exact keyboard, edit, and answer ordering
+5. eligible user with matching trade_type='buy' and wizard_return_to_review=True forwarding return_to_review=True to keyboard while preserving exact buy text and edit-before-acknowledgement ordering
 
 This partial characterization unit executes registered router dispatch under live
 aiogram filter rules. These assertions do not close any seed, blocker
@@ -290,6 +292,286 @@ class TestTradeCreateCommodityPageRouterCharacterization(
             "buy",
             page=3,
             return_to_review=False,
+        )
+
+        expected_edit_text = (
+            "📈 **ثبت لفظ جدید**\n\n"
+            "نوع معامله: 🟢 خرید\n\n"
+            "کالای مورد نظر را انتخاب کنید:"
+        )
+        mock_edit_runtime.assert_awaited_once_with(
+            event,
+            runtime_user,
+            expected_edit_text,
+            parse_mode="Markdown",
+            reply_markup=keyboard_sentinel,
+        )
+        self.assertIs(mock_edit_runtime.await_args.args[0], event)
+        self.assertIs(mock_edit_runtime.await_args.args[1], runtime_user)
+        self.assertEqual(mock_edit_runtime.await_args.args[2], expected_edit_text)
+        self.assertEqual(
+            mock_edit_runtime.await_args.kwargs,
+            {
+                "parse_mode": "Markdown",
+                "reply_markup": keyboard_sentinel,
+            },
+        )
+        self.assertIs(
+            mock_edit_runtime.await_args.kwargs["reply_markup"],
+            keyboard_sentinel,
+        )
+
+        mock_answer_runtime.assert_awaited_once_with(event)
+        self.assertIs(mock_answer_runtime.await_args.args[0], event)
+        self.assertEqual(len(mock_answer_runtime.await_args.args), 1)
+        self.assertEqual(mock_answer_runtime.await_args.kwargs, {})
+
+        state.update_data.assert_not_called()
+        state.set_state.assert_not_called()
+        state.set_data.assert_not_called()
+        state.clear.assert_not_called()
+        mock_callback_answer.assert_not_called()
+
+    async def test_commodity_page_router_eligible_valid_sell_page_ordering(
+        self,
+    ):
+        packed_data = PageCallback(trade_type="sell", page=4).pack()
+        chat = aiogram_types.Chat(id=1004, type="private")
+        message = aiogram_types.Message(
+            message_id=2004,
+            date=datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc),
+            chat=chat,
+        )
+        event = aiogram_types.CallbackQuery(
+            id="cb-auth-valid-sell-page",
+            from_user=aiogram_types.User(
+                id=54321,
+                is_bot=False,
+                first_name="EligibleUser",
+            ),
+            chat_instance="test_chat_instance_auth_sell",
+            message=message,
+            data=packed_data,
+        )
+
+        runtime_user = SimpleNamespace(id=54321, first_name="EligibleUser")
+        keyboard_sentinel = aiogram_types.InlineKeyboardMarkup(inline_keyboard=[])
+
+        call_order: list[str] = []
+
+        async def track_get_data():
+            call_order.append("get_data")
+            return {
+                "trade_type": "sell",
+                "wizard_return_to_review": False,
+            }
+
+        async def track_get_commodities_keyboard(*args, **kwargs):
+            call_order.append("get_commodities_keyboard")
+            return keyboard_sentinel
+
+        async def track_edit_runtime(*args, **kwargs):
+            call_order.append("edit_callback_message_via_runtime")
+
+        async def track_answer_runtime(*args, **kwargs):
+            call_order.append("answer_callback_query_via_runtime")
+
+        state = SimpleNamespace(
+            get_data=mock.AsyncMock(side_effect=track_get_data),
+            update_data=mock.AsyncMock(),
+            set_state=mock.AsyncMock(),
+            set_data=mock.AsyncMock(),
+            clear=mock.AsyncMock(),
+        )
+
+        with (
+            mock.patch(
+                "bot.handlers.trade_create.get_commodities_keyboard",
+                new_callable=mock.AsyncMock,
+                side_effect=track_get_commodities_keyboard,
+            ) as mock_get_commodities_keyboard,
+            mock.patch(
+                "bot.handlers.trade_create.edit_callback_message_via_runtime",
+                new_callable=mock.AsyncMock,
+                side_effect=track_edit_runtime,
+            ) as mock_edit_runtime,
+            mock.patch(
+                "bot.handlers.trade_create.answer_callback_query_via_runtime",
+                new_callable=mock.AsyncMock,
+                side_effect=track_answer_runtime,
+            ) as mock_answer_runtime,
+            mock.patch.object(
+                aiogram_types.CallbackQuery,
+                "answer",
+                new_callable=mock.AsyncMock,
+            ) as mock_callback_answer,
+        ):
+            result = await trade_create.router.propagate_event(
+                "callback_query",
+                event,
+                state=state,
+                user=runtime_user,
+                raw_state=Trade.awaiting_commodity.state,
+            )
+
+        self.assertIsNone(result)
+
+        self.assertEqual(
+            call_order,
+            [
+                "get_data",
+                "get_commodities_keyboard",
+                "edit_callback_message_via_runtime",
+                "answer_callback_query_via_runtime",
+            ],
+        )
+
+        state.get_data.assert_awaited_once_with()
+
+        mock_get_commodities_keyboard.assert_awaited_once_with(
+            "sell",
+            page=4,
+            return_to_review=False,
+        )
+
+        expected_edit_text = (
+            "📈 **ثبت لفظ جدید**\n\n"
+            "نوع معامله: 🔴 فروش\n\n"
+            "کالای مورد نظر را انتخاب کنید:"
+        )
+        mock_edit_runtime.assert_awaited_once_with(
+            event,
+            runtime_user,
+            expected_edit_text,
+            parse_mode="Markdown",
+            reply_markup=keyboard_sentinel,
+        )
+        self.assertIs(mock_edit_runtime.await_args.args[0], event)
+        self.assertIs(mock_edit_runtime.await_args.args[1], runtime_user)
+        self.assertEqual(mock_edit_runtime.await_args.args[2], expected_edit_text)
+        self.assertEqual(
+            mock_edit_runtime.await_args.kwargs,
+            {
+                "parse_mode": "Markdown",
+                "reply_markup": keyboard_sentinel,
+            },
+        )
+        self.assertIs(
+            mock_edit_runtime.await_args.kwargs["reply_markup"],
+            keyboard_sentinel,
+        )
+
+        mock_answer_runtime.assert_awaited_once_with(event)
+        self.assertIs(mock_answer_runtime.await_args.args[0], event)
+        self.assertEqual(len(mock_answer_runtime.await_args.args), 1)
+        self.assertEqual(mock_answer_runtime.await_args.kwargs, {})
+
+        state.update_data.assert_not_called()
+        state.set_state.assert_not_called()
+        state.set_data.assert_not_called()
+        state.clear.assert_not_called()
+        mock_callback_answer.assert_not_called()
+
+    async def test_commodity_page_router_return_to_review_pagination_forwards_flag(
+        self,
+    ):
+        packed_data = PageCallback(trade_type="buy", page=2).pack()
+        chat = aiogram_types.Chat(id=1005, type="private")
+        message = aiogram_types.Message(
+            message_id=2005,
+            date=datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc),
+            chat=chat,
+        )
+        event = aiogram_types.CallbackQuery(
+            id="cb-auth-return-review-page",
+            from_user=aiogram_types.User(
+                id=54321,
+                is_bot=False,
+                first_name="EligibleUser",
+            ),
+            chat_instance="test_chat_instance_auth_review",
+            message=message,
+            data=packed_data,
+        )
+
+        runtime_user = SimpleNamespace(id=54321, first_name="EligibleUser")
+        keyboard_sentinel = aiogram_types.InlineKeyboardMarkup(inline_keyboard=[])
+
+        call_order: list[str] = []
+
+        async def track_get_data():
+            call_order.append("get_data")
+            return {
+                "trade_type": "buy",
+                "wizard_return_to_review": True,
+            }
+
+        async def track_get_commodities_keyboard(*args, **kwargs):
+            call_order.append("get_commodities_keyboard")
+            return keyboard_sentinel
+
+        async def track_edit_runtime(*args, **kwargs):
+            call_order.append("edit_callback_message_via_runtime")
+
+        async def track_answer_runtime(*args, **kwargs):
+            call_order.append("answer_callback_query_via_runtime")
+
+        state = SimpleNamespace(
+            get_data=mock.AsyncMock(side_effect=track_get_data),
+            update_data=mock.AsyncMock(),
+            set_state=mock.AsyncMock(),
+            set_data=mock.AsyncMock(),
+            clear=mock.AsyncMock(),
+        )
+
+        with (
+            mock.patch(
+                "bot.handlers.trade_create.get_commodities_keyboard",
+                new_callable=mock.AsyncMock,
+                side_effect=track_get_commodities_keyboard,
+            ) as mock_get_commodities_keyboard,
+            mock.patch(
+                "bot.handlers.trade_create.edit_callback_message_via_runtime",
+                new_callable=mock.AsyncMock,
+                side_effect=track_edit_runtime,
+            ) as mock_edit_runtime,
+            mock.patch(
+                "bot.handlers.trade_create.answer_callback_query_via_runtime",
+                new_callable=mock.AsyncMock,
+                side_effect=track_answer_runtime,
+            ) as mock_answer_runtime,
+            mock.patch.object(
+                aiogram_types.CallbackQuery,
+                "answer",
+                new_callable=mock.AsyncMock,
+            ) as mock_callback_answer,
+        ):
+            result = await trade_create.router.propagate_event(
+                "callback_query",
+                event,
+                state=state,
+                user=runtime_user,
+                raw_state=Trade.awaiting_commodity.state,
+            )
+
+        self.assertIsNone(result)
+
+        self.assertEqual(
+            call_order,
+            [
+                "get_data",
+                "get_commodities_keyboard",
+                "edit_callback_message_via_runtime",
+                "answer_callback_query_via_runtime",
+            ],
+        )
+
+        state.get_data.assert_awaited_once_with()
+
+        mock_get_commodities_keyboard.assert_awaited_once_with(
+            "buy",
+            page=2,
+            return_to_review=True,
         )
 
         expected_edit_text = (
