@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "eb327fbfe5e1ec484ed7839161ada1f9a7e71377",
+  "inspected_head": "5c2b95722ece7b0d22c13ee3c861dfb96a930c92",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1826,6 +1826,81 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_commodity_selection_missing.py::TradeCreateCommoditySelectionMissingCharacterizationTests::test_missing_commodity_alerts_before_settings_state_or_prompt_work"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_admin_settings_access_guards_batch.py",
+      "sha256": "ae073c0b8d6960295b6ab651cbad97e74e561516338e2081b52a688b1dcf520f",
+      "last_commit": "c99e188f4a12f7372a00001056e310f6329d3e35",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-HANDLE-ADMIN-SETTINGS-BUTTON-L1255",
+        "BOT-TG-MESSAGE-PANEL-HANDLE-SETTINGS-NEW-VALUE-L1310",
+        "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-CONFIRM-L1411"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_admin_settings_access_guards_batch.py::PanelAdminSettingsAccessGuardsCharacterizationTests::test_admin_settings_entry_non_super_admin_returns_without_state_or_delivery",
+        "tests/test_p1_00b_characterization_panel_admin_settings_access_guards_batch.py::PanelAdminSettingsAccessGuardsCharacterizationTests::test_settings_new_value_non_super_admin_returns_before_navigation_or_settings_work",
+        "tests/test_p1_00b_characterization_panel_admin_settings_access_guards_batch.py::PanelAdminSettingsAccessGuardsCharacterizationTests::test_settings_reset_confirm_non_super_admin_acknowledges_before_authority_or_save_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_unlinked_user_guards_batch.py",
+      "sha256": "c38fa2ffc0f9c96257915eba32d611ee7a0be7e42ec6840375adfe7ead8cab99",
+      "last_commit": "e2f572981bcb82a845cfd52601661caef9544b05",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-BACK-TO-USER-PANEL-FROM-CUSTOMERS-L1187",
+        "BOT-TG-MESSAGE-PANEL-HANDLE-USER-SETTINGS-BUTTON-L323",
+        "BOT-TG-MESSAGE-PANEL-HANDLE-SIMPLE-SETTINGS-BUTTON-L361",
+        "BOT-TG-MESSAGE-PANEL-SHOW-SUPPORT-CONTACT-L405"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_unlinked_user_guards_batch.py::PanelUnlinkedUserGuardsCharacterizationTests::test_back_from_customers_without_user_acknowledges_without_edit",
+        "tests/test_p1_00b_characterization_panel_unlinked_user_guards_batch.py::PanelUnlinkedUserGuardsCharacterizationTests::test_user_settings_without_user_stops_before_session_or_delivery",
+        "tests/test_p1_00b_characterization_panel_unlinked_user_guards_batch.py::PanelUnlinkedUserGuardsCharacterizationTests::test_simple_settings_without_user_stops_before_delivery",
+        "tests/test_p1_00b_characterization_panel_unlinked_user_guards_batch.py::PanelUnlinkedUserGuardsCharacterizationTests::test_support_contact_without_user_stops_before_session_policy_or_delivery"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_remaining_unlinked_route_guards_batch.py",
+      "sha256": "ba4f1e5b1099a3bfc7f20975ed7b9410ce06e07d7daedf56431aa9b9707518e5",
+      "last_commit": "047199fce7f281fbd31f52cb893bac59fec8a016",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-HANDLE-BACK-TO-MAIN-MENU-L1450",
+        "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L211"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_remaining_unlinked_route_guards_batch.py::PanelRemainingUnlinkedRouteGuardsCharacterizationTests::test_back_to_main_menu_text_route_without_user_stops_before_runtime",
+        "tests/test_p1_00b_characterization_panel_remaining_unlinked_route_guards_batch.py::PanelRemainingUnlinkedRouteGuardsCharacterizationTests::test_user_panel_text_route_without_user_stops_before_policy_session_or_delivery"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_users_unlinked_role_guards_batch.py",
+      "sha256": "71e879c7d72f363d67af3173190524937f072250a819ad1cd4f3f32147dec82c",
+      "last_commit": "0baa6463869291c7a74fa829423bb15f3c37f084",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-EDIT-ROLE-L1078",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-USER-ROLE-L1090"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_users_unlinked_role_guards_batch.py::AdminUsersUnlinkedRoleGuardsCharacterizationTests::test_user_edit_role_without_user_stops_before_parse_or_delivery",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_role_guards_batch.py::AdminUsersUnlinkedRoleGuardsCharacterizationTests::test_set_user_role_without_user_stops_before_parse_session_or_delivery"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_users_unlinked_limit_guards_batch.py",
+      "sha256": "6280ea1110ae62b511cbedf126c415a55f99605b48e4c8c91e7d18da91a85622",
+      "last_commit": "3763571ca14efa903220f42430c040ebfc18ac7b",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-LIMIT-START-L1252",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-TRADES-L1312",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-COMMODITIES-L1336",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-REQUESTS-L1360"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_users_unlinked_limit_guards_batch.py::AdminUsersUnlinkedLimitGuardsCharacterizationTests::test_user_limit_start_without_user_stops_before_parse_session_state_or_delivery",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_limit_guards_batch.py::AdminUsersUnlinkedLimitGuardsCharacterizationTests::test_set_trades_without_user_stops_before_parse_session_state_or_delivery",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_limit_guards_batch.py::AdminUsersUnlinkedLimitGuardsCharacterizationTests::test_set_commodities_without_user_stops_before_parse_session_state_or_delivery",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_limit_guards_batch.py::AdminUsersUnlinkedLimitGuardsCharacterizationTests::test_set_requests_without_user_stops_before_parse_session_state_or_delivery"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1851,6 +1926,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through de64ad0654153183e2de1602a2d63c5795197799 at inspected HEAD eb327fbfe5e1ec484ed7839161ada1f9a7e71377 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five behavior units are indexed through 3763571ca14efa903220f42430c040ebfc18ac7b at inspected HEAD 5c2b95722ece7b0d22c13ee3c861dfb96a930c92; the later HEAD commit is automation-only and counts, origin cells, blockers, coverage, remaining validation, and Stage closure remain unchanged/unassessed."
   ]
 }
