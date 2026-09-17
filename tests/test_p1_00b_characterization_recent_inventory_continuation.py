@@ -5,7 +5,7 @@ import unittest
 
 
 class RecentCharacterizationContinuationContractTests(unittest.TestCase):
-    def test_manifest_indexes_first_two_accepted_units_and_is_sha_bound_to_base_inventory(self):
+    def test_manifest_indexes_five_accepted_units_and_is_sha_bound_to_base_inventory(self):
         repo_root = Path(__file__).resolve().parent.parent
 
         base_inventory_rel_path = "docs/refactor/two-server/section-1/inventory/recent-characterization.json"
@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 5)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -93,6 +93,60 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
             ],
         }
         self.assertEqual(records[1], expected_record_1)
+
+        # Validate record 2 (commit 3dac187dda9afd895c4f3125b072e1fe866d0735)
+        expected_record_2 = {
+            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py",
+            "sha256": "0e33c2d500768c8f0d068b26150a952322df66137eea8455c0718863aff73280",
+            "last_commit": "3dac187dda9afd895c4f3125b072e1fe866d0735",
+            "seed_ids": [
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-START-L408",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-START-L466",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-START-L523",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py::AdminCommoditiesUnlinkedEditDeleteGuardsCharacterizationTests::test_alias_edit_start_unlinked_alerts_before_parsing_state_keyboard_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py::AdminCommoditiesUnlinkedEditDeleteGuardsCharacterizationTests::test_alias_delete_start_unlinked_alerts_before_parsing_state_keyboard_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py::AdminCommoditiesUnlinkedEditDeleteGuardsCharacterizationTests::test_commodity_edit_start_unlinked_alerts_before_parsing_state_keyboard_navigation_or_delivery",
+            ],
+        }
+        self.assertEqual(records[2], expected_record_2)
+
+        # Validate record 3 (commit e202b003313d34a980b4662974aab3ce13da35a1)
+        expected_record_3 = {
+            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py",
+            "sha256": "2385ef114f090da98a6dc55859d2a0806eaa5366e97a11a4689ccbba4cc2d2e1",
+            "last_commit": "e202b003313d34a980b4662974aab3ce13da35a1",
+            "seed_ids": [
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ADD-START-L572",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-CONFIRM-L671",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-CANCEL-FSM-L719",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py::AdminCommoditiesUnlinkedAddDeleteCancelGuardsCharacterizationTests::test_handle_add_start_unlinked_alerts_before_state_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py::AdminCommoditiesUnlinkedAddDeleteCancelGuardsCharacterizationTests::test_handle_delete_confirm_unlinked_alerts_before_payload_state_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py::AdminCommoditiesUnlinkedAddDeleteCancelGuardsCharacterizationTests::test_handle_cancel_fsm_unlinked_alerts_before_state_navigation_or_delivery",
+            ],
+        }
+        self.assertEqual(records[3], expected_record_3)
+
+        # Validate record 4 (commit 86327873a5de16c5c7efd251155166b779425349)
+        expected_record_4 = {
+            "path": "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py",
+            "sha256": "86c0c9035062311f195c8daa2c02a0f552a67872c04f2abdc5d849585a503e98",
+            "last_commit": "86327873a5de16c5c7efd251155166b779425349",
+            "seed_ids": [
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-GROUP-RECIPIENTS-L221",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-SELECTED-RECIPIENTS-L286",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py::AdminBroadcastUnlinkedRecipientSelectionGuardsCharacterizationTests::test_choose_group_recipients_without_user_denies_before_state_keyboard_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py::AdminBroadcastUnlinkedRecipientSelectionGuardsCharacterizationTests::test_finish_group_selection_without_user_denies_before_state_payload_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py::AdminBroadcastUnlinkedRecipientSelectionGuardsCharacterizationTests::test_choose_selected_recipients_without_user_denies_before_state_keyboard_navigation_or_delivery",
+            ],
+        }
+        self.assertEqual(records[4], expected_record_4)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:
