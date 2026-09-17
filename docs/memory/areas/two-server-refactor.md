@@ -1,5 +1,7 @@
 # Two-Server Refactor
 
+- 2026-09-17 | Broker status is atomically replaced with a unique private temporary file. Clients retry only the bounded-reader inode-transition signal; malformed, linked, stale or binding-invalid status remains fail-closed, so an in-flight Provider receipt is not falsely classified as ambiguous.
+
 - 2026-09-17 | Automation records source-free controller phase timings and fixed command-category counts. A current-HEAD continuation reuses its accepted next-action context and skips only unchanged startup-document rereads; task evidence, Worker/Reviewer, semantic review and final checks remain mandatory.
 
 - 2026-09-16 | `P1-00b`: batch 2–4 same-module handlers with shared hermetic fixture; individual selector/evidence. Origin/session/persistence/retry/reload/cross-module stay single; builder blocks invalid batches.

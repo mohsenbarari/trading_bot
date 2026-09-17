@@ -90,6 +90,13 @@ HEARTBEAT_SECONDS = 10
 QUEUE_SCAN_LIMIT = 32
 POLL_SECONDS = 0.25
 ORPHAN_RESPONSE_RETENTION_SECONDS = 86_400
+# ``bounded_file_bytes`` deliberately rejects a pathname whose inode changes
+# while it is being read.  Status publication replaces the inode atomically,
+# so a reader can legitimately observe that protective check in the tiny
+# publish window.  Retry only that identifiable transition; malformed or
+# untrusted status documents remain terminal errors.
+STATUS_READ_RETRY_COUNT = 4
+STATUS_READ_RETRY_SECONDS = 0.05
 _STOP = False
 
 
@@ -164,6 +171,33 @@ def _read_json_file(root: Path, path: Path, limit: int, label: str) -> dict:
     if not isinstance(value, dict):
         raise BrokerError(f"{label} must be a JSON object")
     return value
+
+
+def _is_atomic_read_transition(error: BrokerError) -> bool:
+    """Whether a guarded reader lost only an atomic replace race.
+
+    ``bounded_file_bytes`` binds both the opened descriptor and the final
+    pathname.  It raises ``ProposalError(... changed while it was being
+    read)`` if an atomic publisher wins between those observations.  That is
+    not a malformed document and it is safe to re-read; every other error
+    remains fail-closed.
+    """
+    cause = error.__cause__
+    return isinstance(cause, ProposalError) and str(cause).endswith(
+        " changed while it was being read"
+    )
+
+
+def _read_broker_status(root: Path, status_path: Path) -> dict:
+    """Read one stable broker-status snapshot without weakening validation."""
+    for attempt in range(STATUS_READ_RETRY_COUNT + 1):
+        try:
+            return _read_json_file(root, status_path, MAX_REQUEST_BYTES, "broker status")
+        except BrokerError as exc:
+            if not _is_atomic_read_transition(exc) or attempt >= STATUS_READ_RETRY_COUNT:
+                raise
+            time.sleep(STATUS_READ_RETRY_SECONDS)
+    raise AssertionError("unreachable broker-status retry loop")
 
 
 def _supervisor_stop_acknowledged(root: Path) -> bool:
@@ -409,9 +443,45 @@ def _error_response(request: object, exc: BaseException) -> dict:
 
 
 def _write_status(path: Path, state: str, **fields: object) -> None:
-    write_json(path, {"schema_version": "1.0", "state": state, "pid": os.getpid(),
-                      "updated_at": time.time(), **fields})
-    os.chmod(path, 0o600)
+    # The shared runner helper uses one deterministic ``.tmp`` sibling.  A
+    # broker heartbeat runs concurrently with a bounded client read, so use a
+    # private replacement name here.  Publication is still an atomic
+    # rename and readers reject any snapshot that changes underneath them.
+    value = {
+        "schema_version": "1.0", "state": state, "pid": os.getpid(),
+        "updated_at": time.time(), **fields,
+    }
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(encoded) > MAX_REQUEST_BYTES:
+        raise BrokerError("broker status document exceeds byte limit")
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+             | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        descriptor = os.open(temporary, flags, 0o600)
+        try:
+            view = memoryview(encoded)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise BrokerError("broker status write made no progress")
+                view = view[written:]
+            os.fsync(descriptor)
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, path)
+        directory_flags = (os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                           | getattr(os, "O_CLOEXEC", 0))
+        directory = os.open(path.parent, directory_flags)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _signal_stop(_signum: int, _frame: object) -> None:
@@ -667,7 +737,7 @@ def submit(
     request = make_request(root, task_path, run_prefix, timeout, environment)
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
-        status_value = _read_json_file(root, status_path, MAX_REQUEST_BYTES, "broker status")
+        status_value = _read_broker_status(root, status_path)
         if (status_value.get("state") != "IDLE"
                 or type(status_value.get("pid")) is not int
                 or not isinstance(status_value.get("updated_at"), (int, float))):
@@ -683,9 +753,7 @@ def submit(
             if time.monotonic() >= deadline:
                 raise BrokerError("provider broker response deadline exceeded")
             if time.monotonic() - last_health_check >= 1:
-                current_status = _read_json_file(
-                    root, status_path, MAX_REQUEST_BYTES, "broker status"
-                )
+                current_status = _read_broker_status(root, status_path)
                 if (current_status.get("state") not in {"IDLE", "RUNNING"}
                         or current_status.get("pid") != status_value["pid"]
                         or not isinstance(current_status.get("updated_at"), (int, float))
@@ -716,7 +784,7 @@ def submit(
 def status(root: Path) -> int:
     _state_root, status_path, _requests, _claimed, _responses = broker_paths(root)
     try:
-        value = _read_json_file(root, status_path, MAX_REQUEST_BYTES, "broker status")
+        value = _read_broker_status(root, status_path)
         pid = value.get("pid") if isinstance(value, dict) else None
         if (not isinstance(value, dict) or value.get("state") not in {"IDLE", "RUNNING"}
                 or type(pid) is not int

@@ -310,6 +310,76 @@ def test_status_uses_fresh_heartbeat_not_cross_namespace_pid_visibility(
     assert json.loads(capsys.readouterr().out)["state"] == "IDLE"
 
 
+def test_broker_status_retries_only_an_atomic_snapshot_transition(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    _state_root, status_path, _requests, _claimed, _responses = broker.broker_paths(root)
+    transition = broker.BrokerError("broker status is not one valid JSON document")
+    transition.__cause__ = broker.ProposalError(
+        "broker status changed while it was being read"
+    )
+    valid = {"schema_version": "1.0", "state": "IDLE", "pid": 12, "updated_at": time.time()}
+    sleep = mock.Mock()
+    with mock.patch.object(broker, "_read_json_file", side_effect=[transition, valid]) as read:
+        monkeypatch.setattr(broker.time, "sleep", sleep)
+        assert broker._read_broker_status(root, status_path) == valid
+    assert read.call_count == 2
+    sleep.assert_called_once_with(broker.STATUS_READ_RETRY_SECONDS)
+
+
+def test_broker_status_never_retries_or_accepts_malformed_json(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    _state_root, status_path, _requests, _claimed, _responses = broker.broker_paths(root)
+    malformed = broker.BrokerError("broker status is not one valid JSON document")
+    malformed.__cause__ = json.JSONDecodeError("bad", "{", 1)
+    sleep = mock.Mock()
+    with mock.patch.object(broker, "_read_json_file", side_effect=malformed) as read:
+        monkeypatch.setattr(broker.time, "sleep", sleep)
+        with pytest.raises(broker.BrokerError, match="not one valid JSON"):
+            broker._read_broker_status(root, status_path)
+    assert read.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_status_writer_uses_a_unique_private_atomic_temporary_path(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    _state_root, status_path, _requests, _claimed, _responses = broker.broker_paths(root)
+    names: list[Path] = []
+    original_open = broker.os.open
+
+    def record_open(path, flags, mode=0o777):
+        names.append(Path(path))
+        return original_open(path, flags, mode)
+
+    monkeypatch.setattr(broker.os, "open", record_open)
+    broker._write_status(status_path, "IDLE")
+    assert names
+    temporary = names[0]
+    assert temporary.parent == status_path.parent
+    assert temporary.name.startswith(f".{status_path.name}.")
+    assert temporary.name.endswith(".tmp")
+    assert temporary != status_path.with_suffix(status_path.suffix + ".tmp")
+    assert not temporary.exists()
+    assert broker._read_json_file(root, status_path, broker.MAX_REQUEST_BYTES, "status")["state"] == "IDLE"
+
+
+def test_status_writer_removes_its_private_temp_after_a_failed_write(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    _root, _task, _scope, _environment = broker_repo
+    state_root, status_path, _requests, _claimed, _responses = broker.broker_paths(_root)
+    monkeypatch.setattr(broker.os, "write", lambda _descriptor, _data: 0)
+    with pytest.raises(broker.BrokerError, match="write made no progress"):
+        broker._write_status(status_path, "IDLE")
+    assert not status_path.exists()
+    assert list(state_root.glob(f".{status_path.name}.*.tmp")) == []
+
+
 def test_running_provider_call_refreshes_filesystem_heartbeat(
     broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
 ) -> None:
