@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "0ad6f6a58a6535dcc938a8c76214208959ead59c",
+  "inspected_head": "eb327fbfe5e1ec484ed7839161ada1f9a7e71377",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -673,8 +673,8 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_wizard_edit.py",
-      "sha256": "055fead9feb7c6b30c4ac91c4c8c298e56521c13eece3ef420afaccf06d971d4",
-      "last_commit": "4a20a622c8f384d5f57aeee97d3c615566e8dd4b",
+      "sha256": "d9bb3f2bb52156cbda50eee65a471c9b1fc5a43ae6b95efdd77123403672eb0b",
+      "last_commit": "de64ad0654153183e2de1602a2d63c5795197799",
       "seed_ids": [
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-EDIT-L1236",
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-EDIT-FIELD-L1257"
@@ -682,7 +682,9 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_wizard_edit.py::TradeCreateWizardEditCharacterizationTests::test_unauthenticated_edit_acknowledges_without_state_or_delivery",
         "tests/test_p1_00b_characterization_trade_create_wizard_edit.py::TradeCreateWizardEditCharacterizationTests::test_pack_edit_menu_suppresses_quantity_and_lot_controls",
-        "tests/test_p1_00b_characterization_trade_create_wizard_edit.py::TradeCreateWizardEditCharacterizationTests::test_invalid_edit_field_alerts_without_state_or_delivery"
+        "tests/test_p1_00b_characterization_trade_create_wizard_edit.py::TradeCreateWizardEditCharacterizationTests::test_invalid_edit_field_alerts_without_state_or_delivery",
+        "tests/test_p1_00b_characterization_trade_create_wizard_edit.py::TradeCreateWizardEditCharacterizationTests::test_non_pack_retail_edit_menu_includes_quantity_and_lot_controls",
+        "tests/test_p1_00b_characterization_trade_create_wizard_edit.py::TradeCreateWizardEditCharacterizationTests::test_valid_price_edit_sets_return_flag_and_opens_price_prompt"
       ]
     },
     {
@@ -728,8 +730,8 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_lot_selection.py",
-      "sha256": "6afdcf63b4ef2ff8292e86b11c5527b247f8077d4aebe40d092e1b9b4040ce86",
-      "last_commit": "c806198c26f1dc43bc28146a316994de98230160",
+      "sha256": "d8abbd337e2d8eb13ac1f6a8f4984620554d72aa4af741ceb36da7a50c318896",
+      "last_commit": "98645e50fc97de3d1fc48ccbcf5e991527a736e2",
       "seed_ids": [
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-WHOLESALE-L1001",
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-SPLIT-L1016",
@@ -738,13 +740,14 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handle_lot_sizes_input_authenticated_valid_persian_digits",
         "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handle_lot_type_choice_authenticated",
-        "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handlers_unauthenticated_guard"
+        "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handlers_unauthenticated_guard",
+        "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handle_lot_wholesale_return_to_review_opens_wizard_review"
       ]
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py",
-      "sha256": "1edccbdf90e81049adf88407f15171cb15a9458178eda1b202c0120d080fc959",
-      "last_commit": "689649b4e1ba60599b64eca537211b73e1eadc0b",
+      "sha256": "002172886049cfce567f7d8a44774e75f061eb957b2de5bd6839386bfb74902b",
+      "last_commit": "3b439ed56ea60ff789372f5335ffdf5f755b7a3d",
       "seed_ids": [
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-ACCEPT-SUGGESTED-LOTS-L1089",
         "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-PRICE-INPUT-L1118"
@@ -752,7 +755,9 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_authenticated_accept_suggested_lots_flow",
         "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_authenticated_valid_persian_price_input_flow",
-        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_unauthenticated_guards_combined"
+        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_unauthenticated_guards_combined",
+        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_accept_suggested_lots_return_to_review_opens_review",
+        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_price_input_return_to_review_opens_review"
       ]
     },
     {
@@ -944,28 +949,32 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py",
-      "sha256": "a184178d10450d49be15551f5eade23f4e374e00258ce9062681fdedae071a5b",
-      "last_commit": "fea90f09ed20bdce5604e2eb800f4c7b2803d50b",
+      "sha256": "b1363ea5d3238475f9538af9affd234e7fd5699024ecb819c171ad94d1856bb4",
+      "last_commit": "e6744b53a3b1339fc916a6b921517f7cd782f126",
       "seed_ids": [
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-PAGE-L781"
       ],
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py::TestTradeCreateCommodityPageRouterCharacterization::test_commodity_page_router_unauthenticated_active_state_short_circuit",
         "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py::TestTradeCreateCommodityPageRouterCharacterization::test_commodity_page_router_eligible_stale_trade_type_rejected",
-        "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py::TestTradeCreateCommodityPageRouterCharacterization::test_commodity_page_router_eligible_valid_buy_page_ordering"
+        "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py::TestTradeCreateCommodityPageRouterCharacterization::test_commodity_page_router_eligible_valid_buy_page_ordering",
+        "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py::TestTradeCreateCommodityPageRouterCharacterization::test_commodity_page_router_eligible_valid_sell_page_ordering",
+        "tests/test_p1_00b_characterization_trade_create_commodity_page_router.py::TestTradeCreateCommodityPageRouterCharacterization::test_commodity_page_router_return_to_review_pagination_forwards_flag"
       ]
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py",
-      "sha256": "0ba957606900c48d48ef28aff8665a6811c8c28effc74669a6f0d9422f06099e",
-      "last_commit": "4b6f848f8cd8ee1caa675dfc86312e19336477da",
+      "sha256": "527785c06b94f518614e5263e0e8c85aff03bfcacaafd122a867f4558147265e",
+      "last_commit": "cd98f6460d0281d02eac1b6d43d286aa969371af",
       "seed_ids": [
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-QUICK-QUANTITY-L869"
       ],
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py::TestTradeCreateQuickQuantityRouterCharacterization::test_quick_quantity_router_unauthenticated_active_state_short_circuit",
         "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py::TestTradeCreateQuickQuantityRouterCharacterization::test_quick_quantity_router_invalid_numeric_rejected_before_settings_or_state_work",
-        "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py::TestTradeCreateQuickQuantityRouterCharacterization::test_quick_quantity_router_eligible_valid_numeric_ordering_through_awaiting_lot_type"
+        "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py::TestTradeCreateQuickQuantityRouterCharacterization::test_quick_quantity_router_eligible_valid_numeric_ordering_through_awaiting_lot_type",
+        "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py::TestTradeCreateQuickQuantityRouterCharacterization::test_quick_quantity_router_return_to_review_retail_resets_lot_sizes_and_reopens_lot_size_prompt",
+        "tests/test_p1_00b_characterization_trade_create_quick_quantity_router.py::TestTradeCreateQuickQuantityRouterCharacterization::test_quick_quantity_router_return_to_review_wholesale_reopens_wizard_review"
       ]
     },
     {
@@ -1842,6 +1851,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through 0ad6f6a58a6535dcc938a8c76214208959ead59c and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through de64ad0654153183e2de1602a2d63c5795197799 at inspected HEAD eb327fbfe5e1ec484ed7839161ada1f9a7e71377 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
