@@ -294,6 +294,88 @@ class TestTradeCreateLotSelectionCharacterization(unittest.IsolatedAsyncioTestCa
             ],
         )
 
+    async def test_handle_lot_wholesale_return_to_review_opens_wizard_review(self):
+        principal = object()
+        message = object()
+        callback = mock.Mock(message=message)
+
+        observed_order: list[str] = []
+
+        async def fake_get_data():
+            observed_order.append("get_data")
+            return {"wizard_return_to_review": True}
+
+        async def fake_update_data(*args, **kwargs):
+            observed_order.append("update_data")
+            return None
+
+        async def fake_answer_callback(*args, **kwargs):
+            observed_order.append("answer_callback_query_via_runtime")
+            return None
+
+        async def fake_wizard_review(*args, **kwargs):
+            observed_order.append("_show_wizard_review")
+            return None
+
+        state = mock.AsyncMock()
+        state.get_data.side_effect = fake_get_data
+        state.update_data.side_effect = fake_update_data
+
+        with mock.patch(
+            "bot.handlers.trade_create.answer_callback_query_via_runtime",
+            new_callable=mock.AsyncMock,
+            side_effect=fake_answer_callback,
+        ) as mock_answer_callback, mock.patch(
+            "bot.handlers.trade_create._show_wizard_review",
+            new_callable=mock.AsyncMock,
+            side_effect=fake_wizard_review,
+        ) as mock_wizard_review, mock.patch(
+            "bot.handlers.trade_create._show_price_prompt",
+            new_callable=mock.AsyncMock,
+        ) as mock_price_prompt, mock.patch(
+            "bot.handlers.trade_create._show_lot_sizes_prompt",
+            new_callable=mock.AsyncMock,
+        ) as mock_lot_sizes_prompt:
+            result = await handle_lot_wholesale(callback, state, principal)
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            observed_order,
+            [
+                "get_data",
+                "update_data",
+                "answer_callback_query_via_runtime",
+                "_show_wizard_review",
+            ],
+        )
+
+        state.get_data.assert_awaited_once_with()
+        state.update_data.assert_awaited_once_with(
+            is_wholesale=True, lot_sizes=None
+        )
+        mock_answer_callback.assert_awaited_once_with(callback)
+        mock_wizard_review.assert_awaited_once_with(
+            message, state, edit=True, user=principal
+        )
+
+        self.assertIs(callback.message, message)
+        self.assertIs(mock_answer_callback.await_args.args[0], callback)
+        review_call_args, review_call_kwargs = mock_wizard_review.await_args
+        self.assertIs(review_call_args[0], message)
+        self.assertIs(review_call_args[1], state)
+        self.assertIs(review_call_kwargs["user"], principal)
+
+        mock_price_prompt.assert_not_called()
+        mock_lot_sizes_prompt.assert_not_called()
+
+        self.assertEqual(
+            state.mock_calls,
+            [
+                mock.call.get_data(),
+                mock.call.update_data(is_wholesale=True, lot_sizes=None),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
