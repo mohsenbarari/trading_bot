@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "base_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
+    "sha256": "5a235244378a63ad9da935e5e70c98593d4664f5f36cfcca3a610743aeef33eb",
+    "inspected_head": "5c2b95722ece7b0d22c13ee3c861dfb96a930c92"
+  },
+  "records": []
+}
