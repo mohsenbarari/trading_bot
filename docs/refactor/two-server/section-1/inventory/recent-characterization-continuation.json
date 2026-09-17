@@ -6,5 +6,32 @@
     "sha256": "5a235244378a63ad9da935e5e70c98593d4664f5f36cfcca3a610743aeef33eb",
     "inspected_head": "5c2b95722ece7b0d22c13ee3c861dfb96a930c92"
   },
-  "records": []
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_broadcast_search_again_unlinked_guard.py",
+      "sha256": "e593ed4957839c2feae65d4656bf0b79786390d58da1f2dde35bbac0c043b521",
+      "last_commit": "806a0016ad2845a825f91102b88d30fa8a7be7cd",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-SEARCH-AGAIN-L377"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_broadcast_search_again_unlinked_guard.py::AdminBroadcastSearchAgainUnlinkedGuardCharacterizationTests::test_search_again_without_user_alerts_before_state_keyboard_or_delivery"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py",
+      "sha256": "21b7e771a1d8fb521ef36efd4509ff252da3d4e50a4a981532c9e8c4725b17a3",
+      "last_commit": "845ad843b2d5fcf197bd7715bef3f630f4367287",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-BACK-TO-LIST-L318",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-MANAGE-ALIASES-L333",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-START-L350"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py::AdminCommoditiesUnlinkedEntryGuardsCharacterizationTests::test_back_to_list_unlinked_alerts_before_state_navigation_or_delivery",
+        "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py::AdminCommoditiesUnlinkedEntryGuardsCharacterizationTests::test_manage_aliases_unlinked_alerts_before_parsing_navigation_or_delivery",
+        "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py::AdminCommoditiesUnlinkedEntryGuardsCharacterizationTests::test_alias_add_start_unlinked_alerts_before_parsing_state_keyboard_or_delivery"
+      ]
+    }
+  ]
 }
