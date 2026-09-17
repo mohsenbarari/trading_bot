@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "0d9141891441c5dbacbe66b8dcc480418c21fe0d",
+  "inspected_head": "a91d5f977d3ab1902b6768c461e16988ec4064c3",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -1697,6 +1697,65 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_users_read_all_execute_failure.py::UsersReadAllExecuteFailureCharacterizationTests::test_read_all_users_propagates_execute_failure_before_relation_context"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_start_account_panel_entry_batch.py",
+      "sha256": "0396831881f26fa97403db41bf8c7b5363c62dd0a317d31504d11ebf22624a59",
+      "last_commit": "88463ff1e07e8667d4f31fff0baaa2b882d44709",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-START-HANDLE-START-WITH-TOKEN-L749",
+        "BOT-IDENTITY-MESSAGE-START-HANDLE-START-WITHOUT-TOKEN-L1018"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_account_panel_entry_batch.py::StartAccountPanelEntryCharacterizationTests::test_handle_start_with_token_returns_existing_account_panel_without_clearing_state",
+        "tests/test_p1_00b_characterization_start_account_panel_entry_batch.py::StartAccountPanelEntryCharacterizationTests::test_handle_start_without_token_clears_state_then_returns_existing_account_panel"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_invitations_standard_create_service_boundary_batch.py",
+      "sha256": "5ac249443334aa5c798a3adf9cb1ef8462cb2fdb02de831704515e57f8a7f3ab",
+      "last_commit": "8992ddb70936e3901e39f27c768e75905587d95f",
+      "seed_ids": [
+        "API-IDENTITY-POST-INVITATIONS-CREATE-INVITATION-L320",
+        "API-IDENTITY-POST-INVITATIONS-CREATE-INVITATION-INTERNAL-FROM-BOT-L329"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_invitations_standard_create_service_boundary_batch.py::InvitationsStandardCreateServiceBoundaryCharacterizationTests::test_create_invitation_forwards_standard_role_to_shared_creation_boundary",
+        "tests/test_p1_00b_characterization_invitations_standard_create_service_boundary_batch.py::InvitationsStandardCreateServiceBoundaryCharacterizationTests::test_internal_create_forwards_middle_manager_standard_role_to_shared_creation_boundary"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_customer_invite_confirm_owner_guard.py",
+      "sha256": "d7a691aafc5efb7fae6a92a3b1dba4891a7c4603f3b18b1d7e47c4b7ed4399b2",
+      "last_commit": "8b4929ee73d1ec0507d187f97271235e4529ebf0",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-CONFIRM-CUSTOMER-INVITE-TIER1-L1076"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_customer_invite_confirm_owner_guard.py::PanelCustomerInviteConfirmOwnerGuardCharacterizationTests::test_confirm_owner_mismatch_clears_state_and_stops_before_forwarding"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_expire_offer_internal_signature_guard.py",
+      "sha256": "7ecce862e44f628fff6631c0c5991e3be4f81ae99b2acc1583559f63f34a8310",
+      "last_commit": "93d39d023f1630d8ea010c974b7cf0cc05f8766f",
+      "seed_ids": [
+        "API-OFFER-POST-OFFERS-EXPIRE-OFFER-INTERNAL-L2946"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_expire_offer_internal_signature_guard.py::ExpireOfferInternalSignatureGuardCharacterizationTests::test_invalid_signature_rejects_before_db_receipt_or_expiry_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_realtime_websocket_missing_token.py",
+      "sha256": "5d3081ebe0ad9c4f7da46843f127f74571f34ae7ee8b35967f33b3864f297f91",
+      "last_commit": "a91d5f977d3ab1902b6768c461e16988ec4064c3",
+      "seed_ids": [
+        "API-MSG-WEBSOCKET-REALTIME-WEBSOCKET-ENDPOINT-L370"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_realtime_websocket_missing_token.py::RealtimeWebsocketMissingTokenCharacterizationTests::test_missing_token_closes_4001_before_auth_access_or_listener"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -1722,6 +1781,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through 0d9141891441c5dbacbe66b8dcc480418c21fe0d and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through a91d5f977d3ab1902b6768c461e16988ec4064c3 and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
