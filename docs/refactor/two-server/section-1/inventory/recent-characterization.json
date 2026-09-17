@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "714a397473cff8b9538a19a09f81e554bae1ba6c",
+  "inspected_head": "0ad6f6a58a6535dcc938a8c76214208959ead59c",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -970,26 +970,32 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py",
-      "sha256": "b63cbf12deaa10495692cc04778cc3cdb5ce038a50c8a3784de5dbe41e95adc4",
-      "last_commit": "e5562fb465a802bc0abf8b45b2aa8872ef382986",
+      "sha256": "7b67d2bebe7d36356527d9dad2222d3226051dd16d044a6d919011f02a6c72ed",
+      "last_commit": "06630e2d90b2fc0ef1005f38cda166b1f008d0af",
       "seed_ids": [
         "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-MANUAL-QUANTITY-L929"
       ],
       "test_selectors": [
         "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_unauthenticated_active_state_short_circuit",
         "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_stale_builder_handoff_precedes_quantity_work",
-        "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_eligible_valid_persian_numeric_ordering_through_awaiting_lot_type"
+        "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_eligible_valid_persian_numeric_ordering_through_awaiting_lot_type",
+        "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_return_to_review_retail_resets_lot_sizes_and_reopens_lot_size_prompt",
+        "tests/test_p1_00b_characterization_trade_create_manual_quantity_router.py::TestTradeCreateManualQuantityRouterCharacterization::test_manual_quantity_router_return_to_review_wholesale_reopens_wizard_review"
       ]
     },
     {
       "path": "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py",
-      "sha256": "bc0312987bda29a7a1ceb96b505433c1077d0e67cc4a663a11a8c868ffca25e2",
-      "last_commit": "8e9758bc46aa8d361bf82150b7dc3b48df2d053a",
+      "sha256": "ef011ac29cc84410536f0829bba32a9f204d3386af30f24f88e9dfee4ca70da4",
+      "last_commit": "0ad6f6a58a6535dcc938a8c76214208959ead59c",
       "seed_ids": [
         "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-SELECTION-L812"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_eligible_regular_commodity_success_ordering"
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_eligible_regular_commodity_success_ordering",
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_eligible_pack_commodity_opens_price_prompt",
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_return_to_review_opens_review_before_ack",
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_pack_return_to_review_keeps_pack_shape_and_reviews_before_ack",
+        "tests/test_p1_00b_characterization_trade_create_commodity_selection_router.py::TestTradeCreateCommoditySelectionRouterCharacterization::test_commodity_selection_router_unauthenticated_short_circuits_before_callback_data_session_settings_state_or_delivery"
       ]
     },
     {
@@ -1836,6 +1842,6 @@
   "advisories": [
     "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift.",
-    "These five accepted behavior units are indexed through 714a397473cff8b9538a19a09f81e554bae1ba6c and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
+    "These five accepted behavior units are indexed through 0ad6f6a58a6535dcc938a8c76214208959ead59c and units_since_reconciliation is reset to 0, while seed counts, origin cells, blockers, coverage_status, remaining_validation, and Stage closure remain unassessed or open."
   ]
 }
