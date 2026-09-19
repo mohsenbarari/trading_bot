@@ -73,9 +73,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 189)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 324)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 141)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 194)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 329)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 136)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -149,7 +149,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         for record in base_data.get("records", []):
             prior_recent_ids.extend(record.get("seed_ids", []))
         continuation_records = continuation_data.get("records", [])
-        self.assertEqual(len(continuation_records), 10)
+        self.assertEqual(len(continuation_records), 15)
         for record in continuation_records[:5]:
             prior_recent_ids.extend(record.get("seed_ids", []))
 
@@ -157,27 +157,39 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         prior_checkpoint_set = baseline_seed_set | prior_recent_seed_set
         self.assertEqual(len(prior_checkpoint_set), 312)
 
-        appended_seed_ids = []
-        for record in continuation_records[5:]:
-            appended_seed_ids.extend(record.get("seed_ids", []))
-        self.assertEqual(len(appended_seed_ids), 12)
-        appended_seed_set = set(appended_seed_ids)
-        self.assertEqual(len(appended_seed_set), 12)
-        self.assertTrue(appended_seed_set.issubset(inventory_seed_set))
-        self.assertTrue(appended_seed_set.isdisjoint(prior_checkpoint_set))
+        second_five_seed_ids = []
+        for record in continuation_records[5:10]:
+            second_five_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(len(second_five_seed_ids), 12)
+        second_five_seed_set = set(second_five_seed_ids)
+        self.assertEqual(len(second_five_seed_set), 12)
+        self.assertTrue(second_five_seed_set.issubset(inventory_seed_set))
+        self.assertTrue(second_five_seed_set.isdisjoint(prior_checkpoint_set))
 
-        total_evidenced_set = prior_checkpoint_set | appended_seed_set
-        self.assertEqual(len(total_evidenced_set), 324)
+        prior_324_checkpoint_set = prior_checkpoint_set | second_five_seed_set
+        self.assertEqual(len(prior_324_checkpoint_set), 324)
+
+        third_five_seed_ids = []
+        for record in continuation_records[10:]:
+            third_five_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(len(third_five_seed_ids), 5)
+        third_five_seed_set = set(third_five_seed_ids)
+        self.assertEqual(len(third_five_seed_set), 5)
+        self.assertTrue(third_five_seed_set.issubset(inventory_seed_set))
+        self.assertTrue(third_five_seed_set.isdisjoint(prior_324_checkpoint_set))
+
+        total_evidenced_set = prior_324_checkpoint_set | third_five_seed_set
+        self.assertEqual(len(total_evidenced_set), 329)
 
         remaining_seed_set = inventory_seed_set - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 141)
+        self.assertEqual(len(remaining_seed_set), 136)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
-        flattened_recent_ids = prior_recent_ids + appended_seed_ids
+        flattened_recent_ids = prior_recent_ids + second_five_seed_ids + third_five_seed_ids
         recent_seed_set = set(flattened_recent_ids)
         self.assertTrue(recent_seed_set.issubset(inventory_seed_set))
         new_beyond_baseline = recent_seed_set - baseline_seed_set
-        self.assertEqual(len(new_beyond_baseline), 189)
+        self.assertEqual(len(new_beyond_baseline), 194)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(new_beyond_baseline))
