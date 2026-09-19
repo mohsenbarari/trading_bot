@@ -385,6 +385,68 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_setup_admin_password_no_change_required.py::SetupAdminPasswordNoChangeRequiredCharacterizationTests::test_existing_password_requirement_false_rejects_before_validation_or_mutation"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_auth_deliver_telegram_otp_internal.py",
+      "sha256": "1e2ce816468d5f555bb453cf02010ffac236c71b4080c525d9f396f5c942f58d",
+      "last_commit": "01dfbe69c40a5c34ff6631a63f7885897901a9c8",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-DELIVER-TELEGRAM-OTP-INTERNAL-L297"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_auth_deliver_telegram_otp_internal.py::P100bAuthDeliverTelegramOtpInternalCharacterizationTests::test_deliver_telegram_otp_internal_enabled_sent_success",
+        "tests/test_p1_00b_characterization_auth_deliver_telegram_otp_internal.py::P100bAuthDeliverTelegramOtpInternalCharacterizationTests::test_deliver_telegram_otp_internal_enabled_delivery_failure_propagates"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_session_authority_check.py",
+      "sha256": "f02a5cac72b8f91077eb995f3c2221efd59c6548182896f8b32a4478ab448f6f",
+      "last_commit": "d9a99c9b298f425a4bf98505482f64bad03b8f54",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_session_authority_check.py::InternalSessionAuthorityCheckCharacterizationTests::test_internal_session_authority_check_invalid_signature",
+        "tests/test_p1_00b_characterization_internal_session_authority_check.py::InternalSessionAuthorityCheckCharacterizationTests::test_internal_session_authority_check_valid_signature_missing_user",
+        "tests/test_p1_00b_characterization_internal_session_authority_check.py::InternalSessionAuthorityCheckCharacterizationTests::test_internal_session_authority_check_valid_signature_present_user"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_sessions_logout_all_caller_authorization.py",
+      "sha256": "93f668f8132c4e728731c7e891f5c023bb6692bf58f0dc0f454c7fe277c2cfdc",
+      "last_commit": "b822a59bf00e15e2ef70cb1ba003f09493059de4",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-LOGOUT-ALL-SESSIONS-L1146"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sessions_logout_all_caller_authorization.py::SessionsLogoutAllCallerAuthorizationCharacterizationTests::test_logout_all_sessions_caller_absent_raises_403_and_protects_sinks",
+        "tests/test_p1_00b_characterization_sessions_logout_all_caller_authorization.py::SessionsLogoutAllCallerAuthorizationCharacterizationTests::test_logout_all_sessions_caller_non_primary_raises_403_and_protects_sinks"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_pending_login_requests.py",
+      "sha256": "6bbb85e76b4427675869e940cca1b1f5d1e540c8ac5d605f0db38575e763a4bd",
+      "last_commit": "a4543a63bfe9a5695a702a254ebf54d4fe9cbdbb",
+      "seed_ids": [
+        "API-AUTH-GET-SESSIONS-GET-PENDING-LOGIN-REQUESTS-L1191"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_pending_login_requests.py::CharacterizationPendingLoginRequestsTests::test_get_pending_login_requests_empty_result",
+        "tests/test_p1_00b_characterization_pending_login_requests.py::CharacterizationPendingLoginRequestsTests::test_get_pending_login_requests_populated_result"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_poll_login_request_status.py",
+      "sha256": "efb433fec3a32a3e1be0ecd0772adf00078b77e5930fac8150cf1ae0f903cecc",
+      "last_commit": "2adffdd65aae659c5ef2bb69f830898d7d920ce7",
+      "seed_ids": [
+        "API-AUTH-GET-SESSIONS-POLL-LOGIN-REQUEST-STATUS-L1311"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_missing_request",
+        "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_pending_at_exact_expiration_boundary",
+        "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_pending_expired_minimally_before_fixed_clock"
+      ]
     }
   ]
 }

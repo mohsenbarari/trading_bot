@@ -73,9 +73,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 210)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 345)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 120)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 215)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 350)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 115)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -149,7 +149,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         for record in base_data.get("records", []):
             prior_recent_ids.extend(record.get("seed_ids", []))
         continuation_records = continuation_data.get("records", [])
-        self.assertEqual(len(continuation_records), 31)
+        self.assertEqual(len(continuation_records), 36)
         for record in continuation_records[:5]:
             prior_recent_ids.extend(record.get("seed_ids", []))
 
@@ -225,11 +225,33 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(sixth_slice_seed_set.issubset(inventory_seed_set))
         self.assertTrue(sixth_slice_seed_set.isdisjoint(prior_339_checkpoint_set))
 
-        total_evidenced_set = prior_339_checkpoint_set | sixth_slice_seed_set
-        self.assertEqual(len(total_evidenced_set), 345)
+        prior_345_checkpoint_set = prior_339_checkpoint_set | sixth_slice_seed_set
+        self.assertEqual(len(prior_345_checkpoint_set), 345)
+
+        seventh_slice_records = continuation_records[31:36]
+        self.assertEqual(len(seventh_slice_records), 5)
+        expected_seventh_slice_seed_ids = [
+            "API-AUTH-POST-AUTH-DELIVER-TELEGRAM-OTP-INTERNAL-L297",
+            "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539",
+            "API-AUTH-POST-SESSIONS-LOGOUT-ALL-SESSIONS-L1146",
+            "API-AUTH-GET-SESSIONS-GET-PENDING-LOGIN-REQUESTS-L1191",
+            "API-AUTH-GET-SESSIONS-POLL-LOGIN-REQUEST-STATUS-L1311",
+        ]
+        seventh_slice_seed_ids = []
+        for record in seventh_slice_records:
+            seventh_slice_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(seventh_slice_seed_ids, expected_seventh_slice_seed_ids)
+        self.assertEqual(len(seventh_slice_seed_ids), 5)
+        seventh_slice_seed_set = set(seventh_slice_seed_ids)
+        self.assertEqual(len(seventh_slice_seed_set), 5)
+        self.assertTrue(seventh_slice_seed_set.issubset(inventory_seed_set))
+        self.assertTrue(seventh_slice_seed_set.isdisjoint(prior_345_checkpoint_set))
+
+        total_evidenced_set = prior_345_checkpoint_set | seventh_slice_seed_set
+        self.assertEqual(len(total_evidenced_set), 350)
 
         remaining_seed_set = inventory_seed_set - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 120)
+        self.assertEqual(len(remaining_seed_set), 115)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
         flattened_recent_ids = (
@@ -239,11 +261,12 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             + fourth_five_seed_ids
             + fifth_five_seed_ids
             + sixth_slice_seed_ids
+            + seventh_slice_seed_ids
         )
         recent_seed_set = set(flattened_recent_ids)
         self.assertTrue(recent_seed_set.issubset(inventory_seed_set))
         new_beyond_baseline = recent_seed_set - baseline_seed_set
-        self.assertEqual(len(new_beyond_baseline), 210)
+        self.assertEqual(len(new_beyond_baseline), 215)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(new_beyond_baseline))

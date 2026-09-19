@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 31)
+        self.assertEqual(len(records), 36)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -536,6 +536,83 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         }
         self.assertEqual(records[30], expected_record_30)
 
+        # Validate record 31 (commit 01dfbe69c40a5c34ff6631a63f7885897901a9c8)
+        expected_record_31 = {
+            "path": "tests/test_p1_00b_characterization_auth_deliver_telegram_otp_internal.py",
+            "sha256": "1e2ce816468d5f555bb453cf02010ffac236c71b4080c525d9f396f5c942f58d",
+            "last_commit": "01dfbe69c40a5c34ff6631a63f7885897901a9c8",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-DELIVER-TELEGRAM-OTP-INTERNAL-L297",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_auth_deliver_telegram_otp_internal.py::P100bAuthDeliverTelegramOtpInternalCharacterizationTests::test_deliver_telegram_otp_internal_enabled_sent_success",
+                "tests/test_p1_00b_characterization_auth_deliver_telegram_otp_internal.py::P100bAuthDeliverTelegramOtpInternalCharacterizationTests::test_deliver_telegram_otp_internal_enabled_delivery_failure_propagates",
+            ],
+        }
+        self.assertEqual(records[31], expected_record_31)
+
+        # Validate record 32 (commit d9a99c9b298f425a4bf98505482f64bad03b8f54)
+        expected_record_32 = {
+            "path": "tests/test_p1_00b_characterization_internal_session_authority_check.py",
+            "sha256": "f02a5cac72b8f91077eb995f3c2221efd59c6548182896f8b32a4478ab448f6f",
+            "last_commit": "d9a99c9b298f425a4bf98505482f64bad03b8f54",
+            "seed_ids": [
+                "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_internal_session_authority_check.py::InternalSessionAuthorityCheckCharacterizationTests::test_internal_session_authority_check_invalid_signature",
+                "tests/test_p1_00b_characterization_internal_session_authority_check.py::InternalSessionAuthorityCheckCharacterizationTests::test_internal_session_authority_check_valid_signature_missing_user",
+                "tests/test_p1_00b_characterization_internal_session_authority_check.py::InternalSessionAuthorityCheckCharacterizationTests::test_internal_session_authority_check_valid_signature_present_user",
+            ],
+        }
+        self.assertEqual(records[32], expected_record_32)
+
+        # Validate record 33 (commit b822a59bf00e15e2ef70cb1ba003f09493059de4)
+        expected_record_33 = {
+            "path": "tests/test_p1_00b_characterization_sessions_logout_all_caller_authorization.py",
+            "sha256": "93f668f8132c4e728731c7e891f5c023bb6692bf58f0dc0f454c7fe277c2cfdc",
+            "last_commit": "b822a59bf00e15e2ef70cb1ba003f09493059de4",
+            "seed_ids": [
+                "API-AUTH-POST-SESSIONS-LOGOUT-ALL-SESSIONS-L1146",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_sessions_logout_all_caller_authorization.py::SessionsLogoutAllCallerAuthorizationCharacterizationTests::test_logout_all_sessions_caller_absent_raises_403_and_protects_sinks",
+                "tests/test_p1_00b_characterization_sessions_logout_all_caller_authorization.py::SessionsLogoutAllCallerAuthorizationCharacterizationTests::test_logout_all_sessions_caller_non_primary_raises_403_and_protects_sinks",
+            ],
+        }
+        self.assertEqual(records[33], expected_record_33)
+
+        # Validate record 34 (commit a4543a63bfe9a5695a702a254ebf54d4fe9cbdbb)
+        expected_record_34 = {
+            "path": "tests/test_p1_00b_characterization_pending_login_requests.py",
+            "sha256": "6bbb85e76b4427675869e940cca1b1f5d1e540c8ac5d605f0db38575e763a4bd",
+            "last_commit": "a4543a63bfe9a5695a702a254ebf54d4fe9cbdbb",
+            "seed_ids": [
+                "API-AUTH-GET-SESSIONS-GET-PENDING-LOGIN-REQUESTS-L1191",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_pending_login_requests.py::CharacterizationPendingLoginRequestsTests::test_get_pending_login_requests_empty_result",
+                "tests/test_p1_00b_characterization_pending_login_requests.py::CharacterizationPendingLoginRequestsTests::test_get_pending_login_requests_populated_result",
+            ],
+        }
+        self.assertEqual(records[34], expected_record_34)
+
+        # Validate record 35 (commit 2adffdd65aae659c5ef2bb69f830898d7d920ce7)
+        expected_record_35 = {
+            "path": "tests/test_p1_00b_characterization_poll_login_request_status.py",
+            "sha256": "efb433fec3a32a3e1be0ecd0772adf00078b77e5930fac8150cf1ae0f903cecc",
+            "last_commit": "2adffdd65aae659c5ef2bb69f830898d7d920ce7",
+            "seed_ids": [
+                "API-AUTH-GET-SESSIONS-POLL-LOGIN-REQUEST-STATUS-L1311",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_missing_request",
+                "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_pending_at_exact_expiration_boundary",
+                "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_pending_expired_minimally_before_fixed_clock",
+            ],
+        }
+        self.assertEqual(records[35], expected_record_35)
+
         # Validate six-record slice and six new unique canonical seed IDs
         six_record_slice = records[25:31]
         self.assertEqual(len(six_record_slice), 6)
@@ -553,15 +630,46 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         prior_25_seed_set = set(seed_id for record in records[:25] for seed_id in record["seed_ids"])
         self.assertTrue(set(six_record_seed_ids).isdisjoint(prior_25_seed_set))
 
+        # Validate five-record slice and five new unique canonical seed IDs
+        five_record_slice = records[31:36]
+        self.assertEqual(len(five_record_slice), 5)
+        expected_five_record_seed_ids = [
+            "API-AUTH-POST-AUTH-DELIVER-TELEGRAM-OTP-INTERNAL-L297",
+            "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539",
+            "API-AUTH-POST-SESSIONS-LOGOUT-ALL-SESSIONS-L1146",
+            "API-AUTH-GET-SESSIONS-GET-PENDING-LOGIN-REQUESTS-L1191",
+            "API-AUTH-GET-SESSIONS-POLL-LOGIN-REQUEST-STATUS-L1311",
+        ]
+        five_record_seed_ids = [seed_id for record in five_record_slice for seed_id in record["seed_ids"]]
+        self.assertEqual(five_record_seed_ids, expected_five_record_seed_ids)
+        self.assertEqual(len(set(five_record_seed_ids)), 5)
+        prior_31_seed_set = set(seed_id for record in records[:31] for seed_id in record["seed_ids"])
+        self.assertTrue(set(five_record_seed_ids).isdisjoint(prior_31_seed_set))
+
+        # Validate inventory membership for five-record slice
+        surface_paths = [
+            "docs/refactor/two-server/section-1/inventory/surface-api.json",
+            "docs/refactor/two-server/section-1/inventory/surface-bot.json",
+            "docs/refactor/two-server/section-1/inventory/surface-web.json",
+            "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
+        ]
+        inventory_seed_set = set()
+        for rel_path in surface_paths:
+            surface_file_path = repo_root / rel_path
+            self.assertTrue(surface_file_path.is_file(), f"Surface file not found at {surface_file_path}")
+            surface_data = json.loads(surface_file_path.read_bytes().decode("utf-8"))
+            inventory_seed_set.update(entry["behavior_id"] for entry in surface_data["entries"])
+        self.assertTrue(set(five_record_seed_ids).issubset(inventory_seed_set))
+
         # Validate seed occurrences and distinct seed IDs
         all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
-        self.assertEqual(len(all_seed_ids), 46)
-        self.assertEqual(len(set(all_seed_ids)), 45)
+        self.assertEqual(len(all_seed_ids), 51)
+        self.assertEqual(len(set(all_seed_ids)), 50)
 
         # Validate selector occurrences and distinct selectors
         all_selectors = [selector for record in records for selector in record["test_selectors"]]
-        self.assertEqual(len(all_selectors), 54)
-        self.assertEqual(len(set(all_selectors)), 54)
+        self.assertEqual(len(all_selectors), 66)
+        self.assertEqual(len(set(all_selectors)), 66)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:
