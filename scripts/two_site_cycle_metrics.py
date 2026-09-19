@@ -529,3 +529,106 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
         ledger.pop(0)
     atomic_json(root, ledger_path, ledger, MAX_LEDGER)
     return record
+
+
+def summarize_efficiency_ledger(records: object) -> dict:
+    """Return bounded pure efficiency ledger summary."""
+    if not isinstance(records, list) or len(records) > MAX_RECORDS:
+        raise ProposalError("invalid efficiency ledger records")
+
+    accepted_count = 0
+    duplicate_count = 0
+    non_accepted_count = 0
+    unknown_count = 0
+
+    accepted_lineages: dict[str, dict[str, str]] = {}
+
+    for item in records:
+        if not isinstance(item, dict):
+            unknown_count += 1
+            continue
+        state = item.get("state")
+        if not isinstance(state, str):
+            unknown_count += 1
+            continue
+        if state == "CONTINUE":
+            head_before = item.get("head_before")
+            head_after = item.get("head_after")
+            worker_id = item.get("gemini_worker_run_id")
+            reviewer_id = item.get("gemini_reviewer_run_id")
+            proposal_sha = item.get("proposal_sha256")
+            ident = semantic_identity(item.get("semantic_identity"))
+
+            is_valid_continue = (
+                isinstance(head_before, str)
+                and isinstance(head_after, str)
+                and head_before != head_after
+                and bool(_HEX_40_RE.fullmatch(head_before))
+                and bool(_HEX_40_RE.fullmatch(head_after))
+                and isinstance(worker_id, str)
+                and isinstance(reviewer_id, str)
+                and worker_id != reviewer_id
+                and _is_gemini_worker_run_id(worker_id)
+                and _is_gemini_reviewer_run_id(reviewer_id)
+                and isinstance(proposal_sha, str)
+                and bool(_HEX_64_RE.fullmatch(proposal_sha))
+                and ident is not None
+            )
+
+            if is_valid_continue:
+                assert ident is not None
+                fp = ident["fingerprint"]
+                if fp not in accepted_lineages:
+                    accepted_lineages[fp] = ident
+                    accepted_count += 1
+                else:
+                    duplicate_count += 1
+            else:
+                unknown_count += 1
+        elif state in _TERMINAL_STATES:
+            non_accepted_count += 1
+        else:
+            unknown_count += 1
+
+    lineage_records: dict[str, list[dict]] = {fp: [] for fp in accepted_lineages}
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        ident = semantic_identity(item.get("semantic_identity"))
+        if ident is None:
+            continue
+        fp = ident["fingerprint"]
+        if fp in accepted_lineages and ident == accepted_lineages[fp]:
+            lineage_records[fp].append(item)
+
+    codex_fields = (
+        "input_tokens",
+        "cached_input_tokens",
+        "uncached_input_tokens",
+        "output_tokens",
+    )
+    provider_fields = (
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+    )
+
+    lineages = []
+    for fp in sorted(accepted_lineages.keys()):
+        group = lineage_records[fp]
+        lineages.append({
+            "fingerprint": fp,
+            "record_count": len(group),
+            "codex": _aggregate_observed_usage(group, codex_fields, _codex_observed_usage),
+            "provider": _aggregate_observed_usage(group, provider_fields, _provider_observed_usage),
+        })
+
+    return {
+        "accepted_count": accepted_count,
+        "duplicate_count": duplicate_count,
+        "non_accepted_count": non_accepted_count,
+        "unknown_count": unknown_count,
+        "codex": _aggregate_observed_usage(records, codex_fields, _codex_observed_usage),
+        "provider": _aggregate_observed_usage(records, provider_fields, _provider_observed_usage),
+        "lineages": lineages,
+    }
