@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 5)
+        self.assertEqual(len(records), 10)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -147,6 +147,100 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
             ],
         }
         self.assertEqual(records[4], expected_record_4)
+
+        # Validate record 5 (commit ebde678d2861a08f4d0fab523490887d3efbebde)
+        expected_record_5 = {
+            "path": "tests/test_p1_00b_characterization_blocks_read_status_batch.py",
+            "sha256": "5235e2a30a7c1ffb33fd2a46516b1956fd0904ef4d45309f04b459bf7b94a401",
+            "last_commit": "ebde678d2861a08f4d0fab523490887d3efbebde",
+            "seed_ids": [
+                "API-IDENTITY-GET-BLOCKS-GET-MY-BLOCK-STATUS-L106",
+                "API-IDENTITY-GET-BLOCKS-CHECK-BLOCK-STATUS-L203",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_blocks_read_status_batch.py::BlocksReadStatusCharacterizationTests::test_get_my_block_status_delegates_identity_and_returns_service_payload",
+                "tests/test_p1_00b_characterization_blocks_read_status_batch.py::BlocksReadStatusCharacterizationTests::test_check_block_status_returns_directional_identity_result",
+            ],
+        }
+        self.assertEqual(records[5], expected_record_5)
+
+        # Validate record 6 (commit d83894825c12e076dea335a5603766028bc473fb)
+        expected_record_6 = {
+            "path": "tests/test_p1_00b_characterization_accountants_context_denial_batch.py",
+            "sha256": "3a422136178aa6f5c6c5be198630517d98502e0a52105a335242d1c6be1b2c6a",
+            "last_commit": "d83894825c12e076dea335a5603766028bc473fb",
+            "seed_ids": [
+                "API-IDENTITY-GET-ACCOUNTANTS-LIST-MY-ACCOUNTANT-SESSIONS-L280",
+                "API-IDENTITY-DELETE-ACCOUNTANTS-TERMINATE-MY-ACCOUNTANT-SESSION-L296",
+                "API-IDENTITY-DELETE-ACCOUNTANTS-CANCEL-MY-PENDING-ACCOUNTANT-L338",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_accountants_context_denial_batch.py::AccountantsContextDenialBatchCharacterizationTests::test_list_my_accountant_sessions_accountant_context_denied_before_session_lookup",
+                "tests/test_p1_00b_characterization_accountants_context_denial_batch.py::AccountantsContextDenialBatchCharacterizationTests::test_terminate_my_accountant_session_accountant_context_denied_before_uuid_or_mutation",
+                "tests/test_p1_00b_characterization_accountants_context_denial_batch.py::AccountantsContextDenialBatchCharacterizationTests::test_cancel_my_pending_accountant_accountant_context_denied_before_unlink_or_audit",
+            ],
+        }
+        self.assertEqual(records[6], expected_record_6)
+
+        # Validate record 7 (commit 1a5eb920a837544fe7b9706e26391bc8bcd0d17d)
+        expected_record_7 = {
+            "path": "tests/test_p1_00b_characterization_customers_context_denial_batch.py",
+            "sha256": "2c4914972f2bc5da66a1b23685271048914fef365fa67b01abbda42780e7208f",
+            "last_commit": "1a5eb920a837544fe7b9706e26391bc8bcd0d17d",
+            "seed_ids": [
+                "API-IDENTITY-GET-CUSTOMERS-LIST-MY-CUSTOMER-SESSIONS-L817",
+                "API-IDENTITY-DELETE-CUSTOMERS-TERMINATE-MY-CUSTOMER-SESSION-L833",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_customers_context_denial_batch.py::CustomersContextDenialBatchCharacterizationTests::test_list_my_customer_sessions_accountant_context_denied_before_relation_or_session_lookup",
+                "tests/test_p1_00b_characterization_customers_context_denial_batch.py::CustomersContextDenialBatchCharacterizationTests::test_terminate_my_customer_session_accountant_context_denied_before_uuid_or_mutation",
+            ],
+        }
+        self.assertEqual(records[7], expected_record_7)
+
+        # Validate record 8 (commit 7ec33ad7c7eb860a0232f2b726e537961855f48b)
+        expected_record_8 = {
+            "path": "tests/test_p1_00b_characterization_customers_owner_relations_context_denial_batch.py",
+            "sha256": "76679b786e620e83552111f03fba7c24eaa243d78f095460b40c19d11bb79081",
+            "last_commit": "7ec33ad7c7eb860a0232f2b726e537961855f48b",
+            "seed_ids": [
+                "API-IDENTITY-GET-CUSTOMERS-LIST-MY-CUSTOMERS-L386",
+                "API-IDENTITY-GET-CUSTOMERS-GET-MY-CUSTOMER-RELATION-L624",
+                "API-IDENTITY-GET-CUSTOMERS-GET-MY-CUSTOMER-TRADE-STATS-L708",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_customers_owner_relations_context_denial_batch.py::CustomersOwnerRelationsContextDenialBatchCharacterizationTests::test_list_my_customers_accountant_context_denied_before_relation_or_invitation_lookup",
+                "tests/test_p1_00b_characterization_customers_owner_relations_context_denial_batch.py::CustomersOwnerRelationsContextDenialBatchCharacterizationTests::test_get_my_customer_relation_accountant_context_denied_before_relation_lookup",
+                "tests/test_p1_00b_characterization_customers_owner_relations_context_denial_batch.py::CustomersOwnerRelationsContextDenialBatchCharacterizationTests::test_get_my_customer_trade_stats_accountant_context_denied_before_days_or_relation_lookup",
+            ],
+        }
+        self.assertEqual(records[8], expected_record_8)
+
+        # Validate record 9 (commit 1eeb25f3b7db953eda2898fbc2f81ea0c33196e0)
+        expected_record_9 = {
+            "path": "tests/test_p1_00b_characterization_customers_owner_mutations_context_denial_batch.py",
+            "sha256": "022f9f734d8386c9153e5d7fbd5da0c0d63bff6fd87b98ca1a80224cb1eed0ba",
+            "last_commit": "1eeb25f3b7db953eda2898fbc2f81ea0c33196e0",
+            "seed_ids": [
+                "API-IDENTITY-DELETE-CUSTOMERS-UNLINK-MY-CUSTOMER-L640",
+                "API-IDENTITY-PATCH-CUSTOMERS-UPDATE-MY-CUSTOMER-L674",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_customers_owner_mutations_context_denial_batch.py::CustomersOwnerMutationsContextDenialBatchCharacterizationTests::test_unlink_my_customer_accountant_context_denied_before_relation_mutation",
+                "tests/test_p1_00b_characterization_customers_owner_mutations_context_denial_batch.py::CustomersOwnerMutationsContextDenialBatchCharacterizationTests::test_update_my_customer_accountant_context_denied_before_payload_serialization_or_relation_mutation",
+            ],
+        }
+        self.assertEqual(records[9], expected_record_9)
+
+        # Validate seed occurrences and distinct seed IDs
+        all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
+        self.assertEqual(len(all_seed_ids), 25)
+        self.assertEqual(len(set(all_seed_ids)), 24)
+
+        # Validate selector occurrences and distinct selectors
+        all_selectors = [selector for record in records for selector in record["test_selectors"]]
+        self.assertEqual(len(all_selectors), 25)
+        self.assertEqual(len(set(all_selectors)), 25)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:
