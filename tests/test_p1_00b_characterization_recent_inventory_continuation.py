@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 15)
+        self.assertEqual(len(records), 20)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -304,15 +304,85 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         }
         self.assertEqual(records[14], expected_record_14)
 
+        # Validate record 15 (commit 286c5d5c16da70342ae2a0ee6766d2d894d7f3b1)
+        expected_record_15 = {
+            "path": "tests/test_p1_00b_characterization_update_my_avatar.py",
+            "sha256": "f6b00604206fc5652ac1c23523dc5b9e15f3f29e48fc53e46de6a1317087061b",
+            "last_commit": "286c5d5c16da70342ae2a0ee6766d2d894d7f3b1",
+            "seed_ids": [
+                "API-AUTH-PUT-AUTH-UPDATE-MY-AVATAR-L1356",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_update_my_avatar.py::UpdateMyAvatarCharacterizationTests::test_update_my_avatar_success_preserves_strict_observable_order_and_relations",
+            ],
+        }
+        self.assertEqual(records[15], expected_record_15)
+
+        # Validate record 16 (commit dd776b964806870c341670a8dc0eefeea297aa6b)
+        expected_record_16 = {
+            "path": "tests/test_p1_00b_characterization_update_my_address.py",
+            "sha256": "adf1d457e149957edbe2f22a746cab1b597bf5c3d0a3a2a821751bc31a21b5ec",
+            "last_commit": "dd776b964806870c341670a8dc0eefeea297aa6b",
+            "seed_ids": [
+                "API-AUTH-PUT-AUTH-UPDATE-MY-ADDRESS-L1375",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_update_my_address.py::UpdateMyAddressCharacterizationTests::test_update_my_address_success_strict_order_and_normalization",
+            ],
+        }
+        self.assertEqual(records[16], expected_record_16)
+
+        # Validate record 17 (commit 833a9f598c8ce90fe9ba97fa4dcae189d4e1fd5d)
+        expected_record_17 = {
+            "path": "tests/test_p1_00b_characterization_update_my_offer_overtime_postcommit.py",
+            "sha256": "5e86a6b54fb02582de8daaf2302200b489e6fcc1da5c0b84539e8851b55a2a09",
+            "last_commit": "833a9f598c8ce90fe9ba97fa4dcae189d4e1fd5d",
+            "seed_ids": [
+                "API-AUTH-PUT-AUTH-UPDATE-MY-OFFER-OVERTIME-L1387",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_update_my_offer_overtime_postcommit.py::UpdateMyOfferOvertimePostcommitCharacterizationTests::test_update_my_offer_overtime_telegram_present_success_phase_order_and_response",
+            ],
+        }
+        self.assertEqual(records[17], expected_record_17)
+
+        # Validate record 18 (commit f0d85139903e2190400e8f76927f6005e071f503)
+        expected_record_18 = {
+            "path": "tests/test_p1_00b_characterization_update_offer_overtime_internal_failures.py",
+            "sha256": "5a5d412242d16363dfc12c8526e7b253c0f16c8266060496db306988198ea388",
+            "last_commit": "f0d85139903e2190400e8f76927f6005e071f503",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-UPDATE-OFFER-OVERTIME-INTERNAL-L1433",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_update_offer_overtime_internal_failures.py::TestP100bUpdateOfferOvertimeInternalFailures::test_telegram_id_present_success_executes_complete_order_and_returns_response",
+            ],
+        }
+        self.assertEqual(records[18], expected_record_18)
+
+        # Validate record 19 (commit d888f32afc2405a5e9bb1571ded18750579b7844)
+        expected_record_19 = {
+            "path": "tests/test_p1_00b_characterization_read_registration_context.py",
+            "sha256": "160faad279f50ab5066a25ba0475304db23cf3be125fdddb9e338cdae96a734d",
+            "last_commit": "d888f32afc2405a5e9bb1571ded18750579b7844",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-READ-REGISTRATION-CONTEXT-L1819",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_read_registration_context.py::test_read_registration_context_completed_cookie_response",
+            ],
+        }
+        self.assertEqual(records[19], expected_record_19)
+
         # Validate seed occurrences and distinct seed IDs
         all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
-        self.assertEqual(len(all_seed_ids), 30)
-        self.assertEqual(len(set(all_seed_ids)), 29)
+        self.assertEqual(len(all_seed_ids), 35)
+        self.assertEqual(len(set(all_seed_ids)), 34)
 
         # Validate selector occurrences and distinct selectors
         all_selectors = [selector for record in records for selector in record["test_selectors"]]
-        self.assertEqual(len(all_selectors), 30)
-        self.assertEqual(len(set(all_selectors)), 30)
+        self.assertEqual(len(all_selectors), 35)
+        self.assertEqual(len(set(all_selectors)), 35)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:
