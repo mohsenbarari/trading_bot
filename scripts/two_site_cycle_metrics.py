@@ -270,6 +270,56 @@ def _validated_task_metadata(meta: object) -> dict | None:
     }
 
 
+def semantic_identity(value: object) -> dict[str, str] | None:
+    """Validate and project semantic identity telemetry."""
+    if not isinstance(value, dict):
+        return None
+    if set(value.keys()) != {
+        "stage_id", "scenario_key", "gap_reference", "source_sha256", "fingerprint",
+    }:
+        return None
+    stage_id = value["stage_id"]
+    if not isinstance(stage_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", stage_id):
+        return None
+    scenario_key = value["scenario_key"]
+    if not isinstance(scenario_key, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", scenario_key):
+        return None
+    source_sha = value["source_sha256"]
+    if not isinstance(source_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", source_sha):
+        return None
+    fingerprint = value["fingerprint"]
+    if not isinstance(fingerprint, str) or not re.fullmatch(r"[a-f0-9]{64}", fingerprint):
+        return None
+    gap_ref = value["gap_reference"]
+    if not isinstance(gap_ref, str) or gap_ref != gap_ref.strip():
+        return None
+    try:
+        raw_gap = gap_ref.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    if not (1 <= len(raw_gap) <= 500):
+        return None
+    if any(ord(c) < 32 or ord(c) == 127 or (0x80 <= ord(c) <= 0x9F) or c == "\\" for c in gap_ref):
+        return None
+    if gap_ref.count("#") != 1:
+        return None
+    path_part, anchor = gap_ref.split("#", 1)
+    if not path_part or not anchor:
+        return None
+    if path_part.startswith("/") or bool(re.match(r"^[A-Za-z]:", path_part)):
+        return None
+    segments = path_part.split("/")
+    if any(seg in ("", ".", "..") for seg in segments):
+        return None
+    return {
+        "stage_id": stage_id,
+        "scenario_key": scenario_key,
+        "gap_reference": gap_ref,
+        "source_sha256": source_sha,
+        "fingerprint": fingerprint,
+    }
+
+
 def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                  model: str, effort: str) -> dict:
     """Called under supervisor lock before pruning, on both success and failure."""
@@ -324,6 +374,9 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
             trusted_meta = _validated_task_metadata(prov.get("task_metadata"))
             if trusted_meta is not None:
                 record.update(trusted_meta)
+            identity = semantic_identity(prov.get("semantic_identity"))
+            if identity is not None:
+                record["semantic_identity"] = identity
     except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
         record["provider_metrics"] = _unavailable_provider_metrics(type(exc).__name__)
 
@@ -346,8 +399,13 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                 if isinstance(values, list) and all(isinstance(v, str) for v in values):
                     record[metric_key] = len(values)  # declarations, not accepted behavior count
             try:
-                record["provider_metrics"] = _call_provider_metrics(
+                fallback_prov = _call_provider_metrics(
                     root, task_id, meta.get("head_before"), valid_worker_id, meta.get("duration_seconds"))
+                record["provider_metrics"] = fallback_prov
+                if "semantic_identity" not in record and isinstance(fallback_prov, dict):
+                    fallback_ident = semantic_identity(fallback_prov.get("semantic_identity"))
+                    if fallback_ident is not None:
+                        record["semantic_identity"] = fallback_ident
             except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
                 record["provider_metrics"] = _unavailable_provider_metrics(type(exc).__name__)
             marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
