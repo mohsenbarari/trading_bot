@@ -9,14 +9,47 @@ from pathlib import Path
 import pytest
 
 from scripts import two_site_provider_metrics as metrics
+from scripts.two_site_semantic_task import build_identity
 
 HEAD = "a" * 40
 TOKENS = {"input_tokens": 10, "output_tokens": 4, "total_tokens": 14, "thinking_tokens": 3}
 CTRL = "ctrl-run-1"
 
 
-def _task_payload(task_id: str = "task", head: str = HEAD, gap: str = "docs/ref") -> dict:
-    goal = f"Scope description\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" + json.dumps({"gap_reference": gap})
+def _canonical_identity(
+    stage_id: str = "P1-00b",
+    gap_reference: str = "docs/ref#semantic",
+    scenario_key: str = "ae00_provider_identity_tests",
+    symbol_groups: list[dict] | None = None,
+    source_manifest: dict[str, str] | None = None,
+) -> dict:
+    if symbol_groups is None:
+        symbol_groups = [{"path": "scripts/two_site_provider_metrics.py", "symbols": ["provider_metrics"]}]
+    if source_manifest is None:
+        source_manifest = {"scripts/two_site_provider_metrics.py": "a" * 64}
+    return build_identity(
+        stage_id,
+        gap_reference,
+        scenario_key,
+        symbol_groups,
+        source_manifest,
+    )
+
+
+def _task_payload(
+    task_id: str = "task",
+    head: str = HEAD,
+    gap: str = "docs/ref",
+    semantic_identity: dict | None = None,
+    raw_goal: str | None = None,
+) -> dict:
+    if raw_goal is not None:
+        goal = raw_goal
+    else:
+        excerpt_data: dict[str, object] = {"gap_reference": gap}
+        if semantic_identity is not None:
+            excerpt_data["semantic_identity"] = semantic_identity
+        goal = f"Scope description\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" + json.dumps(excerpt_data)
     return {
         "source_head": head,
         "task": {
@@ -28,9 +61,26 @@ def _task_payload(task_id: str = "task", head: str = HEAD, gap: str = "docs/ref"
     }
 
 
-def _write_task(path: Path, task_id: str = "task", head: str = HEAD, gap: str = "docs/ref") -> Path:
+def _write_task(
+    path: Path,
+    task_id: str = "task",
+    head: str = HEAD,
+    gap: str = "docs/ref",
+    semantic_identity: dict | None = None,
+    raw_goal: str | None = None,
+) -> Path:
     task_file = path / "task.json"
-    task_file.write_text(json.dumps(_task_payload(task_id, head, gap)))
+    task_file.write_text(
+        json.dumps(
+            _task_payload(
+                task_id,
+                head,
+                gap,
+                semantic_identity=semantic_identity,
+                raw_goal=raw_goal,
+            )
+        )
+    )
     return task_file
 
 
@@ -45,6 +95,9 @@ def _create_attempt(
     usage: dict | None = TOKENS,
     duration_seconds: float | None = 5.0,
     with_task: bool = True,
+    gap: str = "docs/ref",
+    semantic_identity: dict | None = None,
+    raw_goal: str | None = None,
     **extra_status,
 ) -> Path:
     path = root / ".local/two-site-refactor/proposals" / name
@@ -62,7 +115,14 @@ def _create_attempt(
     status.update(extra_status)
     (path / "status.json").write_text(json.dumps(status))
     if with_task:
-        _write_task(path, task_id=task_id, head=head)
+        _write_task(
+            path,
+            task_id=task_id,
+            head=head,
+            gap=gap,
+            semantic_identity=semantic_identity,
+            raw_goal=raw_goal,
+        )
     return path
 
 
@@ -97,6 +157,7 @@ def test_normal_initial_worker_reviewer_pair_first_pass_true(tmp_path):
         "rework_path": "NONE",
         "terminal_outcome": "VERIFIED",
     }
+    assert res_none["semantic_identity"] is None
     assert set(res_none["task_metadata"].keys()) == {
         "task_id",
         "task_sha256",
@@ -533,3 +594,286 @@ def test_sentinel_not_leaked_in_metrics(tmp_path):
     assert set(res["rework_taxonomy"].values()) <= {
         "OBSERVED", "FIRST_PASS", "NONE", "VERIFIED",
     }
+
+
+def test_matching_worker_reviewer_pair_projects_semantic_identity(tmp_path):
+    identity = _canonical_identity()
+    gap = "docs/ref#semantic"
+    _create_attempt(
+        tmp_path,
+        "crun-worker-0",
+        role="worker",
+        state="PROPOSAL_READY",
+        gap=gap,
+        semantic_identity=identity,
+    )
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        input_worker_run_id="crun-worker-0",
+        gap=gap,
+        semantic_identity=identity,
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    assert res["state"] == "OBSERVED_CONTROLLER_ATTEMPTS"
+    assert res["first_pass"] is True
+    assert res["attempts"] == 2
+    assert res["worker_attempts"] == 1
+    assert res["reviewer_attempts"] == 1
+    assert res["failed_attempts"] == 0
+    assert set(res["task_metadata"].keys()) == {
+        "task_id",
+        "task_sha256",
+        "declared_requirement_count",
+        "focused_selector_count",
+        "gap_reference",
+    }
+    assert res["task_metadata"]["gap_reference"] == gap
+    assert set(res["semantic_identity"].keys()) == {
+        "fingerprint",
+        "source_sha256",
+        "stage_id",
+        "gap_reference",
+        "scenario_key",
+    }
+    assert res["semantic_identity"] == {
+        "fingerprint": identity["fingerprint"],
+        "source_sha256": identity["source_sha256"],
+        "stage_id": "P1-00b",
+        "gap_reference": gap,
+        "scenario_key": "ae00_provider_identity_tests",
+    }
+
+
+def test_fail_closed_legacy_or_missing_full_identity(tmp_path):
+    _create_attempt(tmp_path, "crun-worker-0", role="worker", state="PROPOSAL_READY")
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        input_worker_run_id="crun-worker-0",
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    assert res["state"] == "OBSERVED_CONTROLLER_ATTEMPTS"
+    assert res["attempts"] == 2
+    assert res["semantic_identity"] is None
+    assert set(res["task_metadata"].keys()) == {
+        "task_id",
+        "task_sha256",
+        "declared_requirement_count",
+        "focused_selector_count",
+        "gap_reference",
+    }
+
+
+@pytest.mark.parametrize(
+    "marker_shape",
+    [
+        "duplicate",
+        "loose_inline",
+        "loose_no_trailing_newline",
+    ],
+)
+def test_fail_closed_loose_or_duplicate_canonical_marker(tmp_path, marker_shape):
+    identity = _canonical_identity()
+    gap = "docs/ref#semantic"
+    payload = json.dumps({"gap_reference": gap, "semantic_identity": identity})
+    if marker_shape == "duplicate":
+        goal = f"Scope\nCANONICAL_SOURCE_EXCERPTS_JSON:\n{payload}\nCANONICAL_SOURCE_EXCERPTS_JSON:\n{payload}"
+    elif marker_shape == "loose_inline":
+        goal = f"Scope CANONICAL_SOURCE_EXCERPTS_JSON: {payload}"
+    else:
+        goal = f"Scope\nCANONICAL_SOURCE_EXCERPTS_JSON:{payload}"
+    _create_attempt(tmp_path, "crun-worker-0", role="worker", state="PROPOSAL_READY", raw_goal=goal)
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        input_worker_run_id="crun-worker-0",
+        raw_goal=goal,
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    expected_state = "PARTIAL" if marker_shape == "duplicate" else "OBSERVED_CONTROLLER_ATTEMPTS"
+    assert res["state"] == expected_state
+    assert res["attempts"] == 2
+    assert res["semantic_identity"] is None
+
+
+def test_fail_closed_mismatched_marker_gap(tmp_path):
+    identity = _canonical_identity(gap_reference="docs/ref#semantic")
+    marker_gap = "docs/ref#other"
+    _create_attempt(
+        tmp_path,
+        "crun-worker-0",
+        role="worker",
+        state="PROPOSAL_READY",
+        gap=marker_gap,
+        semantic_identity=identity,
+    )
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        input_worker_run_id="crun-worker-0",
+        gap=marker_gap,
+        semantic_identity=identity,
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    assert res["state"] == "OBSERVED_CONTROLLER_ATTEMPTS"
+    assert res["attempts"] == 2
+    assert res["semantic_identity"] is None
+    assert res["task_metadata"]["gap_reference"] == marker_gap
+
+
+@pytest.mark.parametrize("tamper_key", ["fingerprint", "source_manifest"])
+def test_fail_closed_tampered_fingerprint_or_manifest(tmp_path, tamper_key):
+    identity = dict(_canonical_identity())
+    if tamper_key == "fingerprint":
+        identity["fingerprint"] = "0" * 64
+    else:
+        identity["source_manifest"] = {"scripts/two_site_provider_metrics.py": "f" * 64}
+    gap = "docs/ref#semantic"
+    _create_attempt(
+        tmp_path,
+        "crun-worker-0",
+        role="worker",
+        state="PROPOSAL_READY",
+        gap=gap,
+        semantic_identity=identity,
+    )
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        input_worker_run_id="crun-worker-0",
+        gap=gap,
+        semantic_identity=identity,
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    assert res["state"] == "OBSERVED_CONTROLLER_ATTEMPTS"
+    assert res["attempts"] == 2
+    assert res["semantic_identity"] is None
+    assert res["task_metadata"]["gap_reference"] == gap
+
+
+def test_fail_closed_conflicting_worker_reviewer_identities(tmp_path):
+    id_worker = _canonical_identity(scenario_key="scenario_worker")
+    id_reviewer = _canonical_identity(scenario_key="scenario_reviewer")
+    gap = "docs/ref#semantic"
+    _create_attempt(
+        tmp_path,
+        "crun-worker-0",
+        role="worker",
+        state="PROPOSAL_READY",
+        gap=gap,
+        semantic_identity=id_worker,
+    )
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        input_worker_run_id="crun-worker-0",
+        gap=gap,
+        semantic_identity=id_reviewer,
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    assert res["state"] == "PARTIAL"
+    assert res["attempts"] == 2
+    assert res["semantic_identity"] is None
+    assert res["task_metadata"] is None
+
+
+def test_fail_closed_unavailable_chain_yields_none_semantic_identity(tmp_path):
+    identity = _canonical_identity()
+    gap = "docs/ref#semantic"
+    _create_attempt(
+        tmp_path,
+        "crun-worker-0",
+        role="worker",
+        state="PROPOSAL_READY",
+        gap=gap,
+        semantic_identity=identity,
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="bad task id!",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+    )
+    assert res["state"] == "UNAVAILABLE"
+    assert res["semantic_identity"] is None
+
+
+def test_fail_closed_genuine_partial_chain_yields_none_semantic_identity(tmp_path):
+    identity = _canonical_identity()
+    gap = "docs/ref#semantic"
+    _create_attempt(
+        tmp_path,
+        "crun-worker-0",
+        role="worker",
+        state="PROPOSAL_READY",
+        gap=gap,
+        semantic_identity=identity,
+    )
+    _create_attempt(
+        tmp_path,
+        "crun-reviewer-0",
+        role="verifier",
+        state="VERIFIED",
+        head="b" * 40,
+        gap=gap,
+        semantic_identity=identity,
+        input_worker_run_id="crun-worker-0",
+    )
+    res = metrics.provider_metrics(
+        tmp_path,
+        task_id="task",
+        head_before=HEAD,
+        controller_run_id=CTRL,
+        cycle_duration=50.0,
+    )
+    assert res["state"] == "PARTIAL"
+    assert res["semantic_identity"] is None
