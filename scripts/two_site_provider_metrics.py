@@ -13,6 +13,14 @@ try:
 except ModuleNotFoundError:
     from two_site_proposal_runner import MAX_CONTEXT, bounded_file_text, unique_json
 
+try:
+    from scripts.two_site_semantic_task import validate_identity
+except ModuleNotFoundError:
+    try:
+        from two_site_semantic_task import validate_identity
+    except ModuleNotFoundError:
+        validate_identity = None
+
 SUFFIX = r"(?:-(?:codex-)?(?:worker|reviewer)-\d+(?:-retry-\d+)?|-codex-correction-\d+-(?:worker|reviewer))"
 FINAL = re.compile(r"(.+?)(?:-(?:codex-)?worker-\d+(?:-retry-\d+)?|-codex-correction-\d+-worker)")
 TERMINAL = {"PROPOSAL_READY", "VERIFIED", "CHANGES_REQUIRED", "BLOCKED"}
@@ -52,6 +60,7 @@ def unavailable() -> dict:
             "usage": dict.fromkeys(TOKEN_KEYS),
             "phase_seconds": {"provider_reported": None, "outside_provider_unattributed": None},
             "task_metadata": None,
+            "semantic_identity": None,
             "session_gate": _session_gate_empty("UNAVAILABLE"),
             "rework_taxonomy": _rework_taxonomy_empty("UNAVAILABLE")}
 
@@ -206,6 +215,65 @@ def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: st
         return None
 
 
+def _extract_semantic_identity(root: Path, path: Path, task_id: str, head_before: str) -> dict[str, str] | None:
+    task_file = path / "task.json"
+    try:
+        raw = bounded_file_text(root, task_file, TASK_SNAPSHOT_LIMIT, "task snapshot")
+        data = unique_json(raw)
+        if not isinstance(data, dict):
+            return None
+        if data.get("source_head") != head_before:
+            return None
+        task_dict = data.get("task") if isinstance(data.get("task"), dict) else data
+        if not isinstance(task_dict, dict):
+            return None
+        if task_dict.get("task_id") != task_id and data.get("task_id") != task_id:
+            return None
+
+        goal = task_dict.get("goal")
+        if not isinstance(goal, str) or len(goal.encode("utf-8")) > TASK_GOAL_LIMIT:
+            return None
+        canonical_marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
+        if goal.count(canonical_marker) != 1 or goal.count("CANONICAL_SOURCE_EXCERPTS_JSON:") != 1:
+            return None
+        payload_str = goal.split(canonical_marker, 1)[1].strip()
+        if not payload_str or len(payload_str.encode("utf-8")) > CANONICAL_EXCERPTS_LIMIT:
+            return None
+        payload = unique_json(payload_str)
+        if not isinstance(payload, dict):
+            return None
+
+        if validate_identity is None or not callable(validate_identity):
+            return None
+        raw_identity = payload.get("semantic_identity")
+        if not isinstance(raw_identity, dict):
+            return None
+        try:
+            validated = validate_identity(raw_identity)
+        except Exception:
+            return None
+        if not validated:
+            return None
+
+        payload_gap_ref = payload.get("gap_reference")
+        val_gap_ref = validated.get("gap_reference") if isinstance(validated, dict) else getattr(validated, "gap_reference", None)
+        if not isinstance(payload_gap_ref, str) or not payload_gap_ref or any(c in payload_gap_ref for c in ("\n", "\r", "\0")):
+            return None
+        if payload_gap_ref != val_gap_ref:
+            return None
+
+        keys = ("fingerprint", "source_sha256", "stage_id", "gap_reference", "scenario_key")
+        projected = {}
+        for k in keys:
+            val = validated.get(k) if isinstance(validated, dict) else getattr(validated, k, None)
+            if not isinstance(val, str) or not val:
+                return None
+            projected[k] = val
+        return projected
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def _rework_taxonomy(
     attempts: list[tuple[dict, dict | None]], *, complete: bool, first_pass: bool | None,
     verified_chain: bool,
@@ -335,6 +403,7 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
 
     attempts, complete = [], True
     task_metadata = None
+    semantic_identity = None
 
     if not controller_mode:
         paths = []
@@ -379,6 +448,14 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
         task_snaps = [_extract_task_metadata(root, path, task_id, head_before) for path in sorted(paths)]
         if task_snaps and all(s is not None for s in task_snaps) and len({s[0] for s in task_snaps}) == 1:
             task_metadata = task_snaps[0][1]
+        if complete and paths:
+            identities = [_extract_semantic_identity(root, path, task_id, head_before) for path in sorted(paths)]
+            if all(ident is not None for ident in identities) and len(identities) > 0 and all(ident == identities[0] for ident in identities):
+                semantic_identity = identities[0]
+            else:
+                semantic_identity = None
+        else:
+            semantic_identity = None
     else:
         matched_entries = []
         seen_names = set()
@@ -468,6 +545,12 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
                 complete = False
             else:
                 task_metadata = task_snaps[0][1]
+            if complete and matched_entries:
+                identities = [_extract_semantic_identity(root, path, effective_task_id, head_before) for path, _ in matched_entries]
+                if all(ident is not None for ident in identities) and len(identities) > 0 and all(ident == identities[0] for ident in identities):
+                    semantic_identity = identities[0]
+                else:
+                    semantic_identity = None
         else:
             task_metadata = None
             if len(task_ids) != 1 or (task_id is not None and (not task_ids or next(iter(task_ids)) != task_id)):
@@ -541,6 +624,7 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
         "phase_seconds": {"provider_reported": provider_time if time_known else None,
                           "outside_provider_unattributed": cycle_duration - provider_time if time_known else None},
         "task_metadata": task_metadata,
+        "semantic_identity": semantic_identity if complete else None,
         "session_gate": _aggregate_session_gate(attempts),
         "rework_taxonomy": _rework_taxonomy(
             attempts, complete=complete, first_pass=first_pass, verified_chain=verified_chain,
