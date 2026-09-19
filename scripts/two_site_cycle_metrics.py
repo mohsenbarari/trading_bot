@@ -44,6 +44,106 @@ _SKIPPABLE_OVERSIZED_EVENT = re.compile(
     rb'"type"\s*:\s*"item\.completed".{0,4096}?"type"\s*:\s*"command_execution"',
     re.DOTALL,
 )
+_TERMINAL_STATES = frozenset({"FAILED", "BLOCKED", "STOP", "ABORTED", "CHANGES_REQUIRED"})
+_HEX_40_RE = re.compile(r"[a-f0-9]{40}")
+_HEX_64_RE = re.compile(r"[a-f0-9]{64}")
+_SAFE_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,80}")
+
+
+def _is_gemini_worker_run_id(value: object) -> bool:
+    if not isinstance(value, str) or not _SAFE_ID_RE.fullmatch(value):
+        return False
+    return "worker" in value and "reviewer" not in value.lower()
+
+
+def _is_gemini_reviewer_run_id(value: object) -> bool:
+    if not isinstance(value, str) or not _SAFE_ID_RE.fullmatch(value):
+        return False
+    return "reviewer" in value and "worker" not in value.lower()
+
+
+def _codex_observed_usage(record: object) -> dict[str, int] | None:
+    if not isinstance(record, dict):
+        return None
+    if record.get("usage_state") != "OBSERVED_COMPLETED_TURNS":
+        return None
+    keys = ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens")
+    extracted: dict[str, int] = {}
+    for key in keys:
+        val = record.get(key)
+        if type(val) is not int or isinstance(val, bool) or val < 0:
+            return None
+        extracted[key] = val
+    if extracted["input_tokens"] != extracted["cached_input_tokens"] + extracted["uncached_input_tokens"]:
+        return None
+    return {
+        "input_tokens": extracted["input_tokens"],
+        "cached_input_tokens": extracted["cached_input_tokens"],
+        "uncached_input_tokens": extracted["uncached_input_tokens"],
+        "output_tokens": extracted["output_tokens"],
+    }
+
+
+def _provider_observed_usage(record: object) -> dict[str, int] | None:
+    if not isinstance(record, dict):
+        return None
+    provider_metrics = record.get("provider_metrics")
+    if not isinstance(provider_metrics, dict):
+        return None
+    usage = provider_metrics.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    if set(usage.keys()) != {"input_tokens", "output_tokens", "total_tokens"}:
+        return None
+    inp = usage["input_tokens"]
+    out = usage["output_tokens"]
+    tot = usage["total_tokens"]
+    for val in (inp, out, tot):
+        if type(val) is not int or isinstance(val, bool) or val < 0:
+            return None
+    if tot != inp + out:
+        return None
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "total_tokens": tot,
+    }
+
+
+def _aggregate_observed_usage(
+    records: list,
+    canonical_fields: tuple[str, ...],
+    extractor: object,
+) -> dict:
+    if not isinstance(records, list) or not isinstance(canonical_fields, tuple):
+        raise TypeError("records must be a list and canonical_fields must be a tuple")
+    if not callable(extractor):
+        raise TypeError("extractor must be callable")
+    subtotals: dict[str, int] = {field: 0 for field in canonical_fields}
+    observed_count = 0
+    unknown_count = 0
+    for record in records:
+        usage = extractor(record)
+        if (
+            isinstance(usage, dict)
+            and all(
+                k in usage
+                and type(usage[k]) is int
+                and not isinstance(usage[k], bool)
+                and usage[k] >= 0
+                for k in canonical_fields
+            )
+        ):
+            observed_count += 1
+            for field in canonical_fields:
+                subtotals[field] += usage[field]
+        else:
+            unknown_count += 1
+    return {
+        "observed_record_count": observed_count,
+        "unknown_record_count": unknown_count,
+        "observed_subtotals": subtotals,
+    }
 
 
 def command_group(value: object) -> str:
