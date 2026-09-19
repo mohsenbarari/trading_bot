@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "inventory": {
+    "expected_seed_count": 465,
+    "paths": [
+      "docs/refactor/two-server/section-1/inventory/surface-api.json",
+      "docs/refactor/two-server/section-1/inventory/surface-bot.json",
+      "docs/refactor/two-server/section-1/inventory/surface-web.json",
+      "docs/refactor/two-server/section-1/inventory/surface-jobs.json"
+    ]
+  },
+  "evidence_sources": {
+    "baseline_path": "docs/refactor/two-server/section-1/inventory/scenario-records.json",
+    "base_path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
+    "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json"
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 177,
+    "evidenced_seed_count": 312,
+    "remaining_seed_count": 153
+  },
+  "coverage_status": "PARTIAL",
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ]
+}
