@@ -372,3 +372,116 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
     assert status["phase"] == "COORDINATOR"
     assert isinstance(status["phase_started_at"], float)
     assert isinstance(status["heartbeat_at"], float)
+
+
+CANONICAL_IDENTITY = {
+    "stage_id": "P1-00b",
+    "scenario_key": "ae00_identity_recorder_tests",
+    "gap_reference": "docs/refactor/two-server/AUTOMATION_EFFICIENCY_PLAN.md#gap-b",
+    "source_sha256": "0123456789abcdef" * 4,
+    "fingerprint": "fedcba9876543210" * 4,
+}
+
+
+def test_semantic_identity_accepts_canonical_identity():
+    projected = metrics.semantic_identity(CANONICAL_IDENTITY)
+    assert projected == CANONICAL_IDENTITY
+    assert projected is not CANONICAL_IDENTITY
+    assert set(projected.keys()) == {
+        "stage_id", "scenario_key", "gap_reference", "source_sha256", "fingerprint",
+    }
+
+
+@pytest.mark.parametrize("patch_data", [
+    {"extra_key": "unexpected"},
+    {"source_sha256": "0123456789ABCDEF" * 4},
+    {"fingerprint": "invalid_hex"},
+    {"gap_reference": "docs//AUTOMATION_EFFICIENCY_PLAN.md#gap-b"},
+    {"gap_reference": "docs/../AUTOMATION_EFFICIENCY_PLAN.md#gap-b"},
+    {"gap_reference": "docs/plan" + chr(127) + ".md#gap-b"},
+    {"gap_reference": "docs/plan" + chr(31) + ".md#gap-b"},
+    {"gap_reference": "/docs/AUTOMATION_EFFICIENCY_PLAN.md#gap-b"},
+    {"gap_reference": "C:/docs/AUTOMATION_EFFICIENCY_PLAN.md#gap-b"},
+    {"gap_reference": "C:" + chr(92) + "docs/AUTOMATION_EFFICIENCY_PLAN.md#gap-b"},
+    {"gap_reference": "docs/AUTOMATION_EFFICIENCY_PLAN.md"},
+    {"gap_reference": "docs/AUTOMATION_EFFICIENCY_PLAN.md#"},
+    {"gap_reference": "docs/" + ("x" * 500) + "#gap-b"},
+])
+def test_semantic_identity_validation_and_rejections(patch_data):
+    assert metrics.semantic_identity({**CANONICAL_IDENTITY, **patch_data}) is None
+
+
+def test_record_cycle_projects_valid_identity_and_drops_invalid(tmp_path, monkeypatch):
+    state = tmp_path / ".local/two-site-refactor/autopilot"
+    run = state / "runs" / "r1"
+    run.mkdir(parents=True)
+    (run / "prompt.txt").write_text("bounded prompt")
+    write_stream(run / "stream.jsonl", [turn()])
+
+    provider_identity = dict(CANONICAL_IDENTITY)
+    monkeypatch.setattr(
+        metrics, "_call_provider_metrics",
+        lambda *args, **kwargs: {"state": "OK", "semantic_identity": provider_identity},
+    )
+
+    record = metrics.record_cycle(
+        tmp_path, state, run, {"state": "CONTINUE"}, "astra", "xhigh",
+    )
+    assert record["semantic_identity"] == CANONICAL_IDENTITY
+    assert record["semantic_identity"] is not provider_identity
+
+    run_invalid = state / "runs" / "r2"
+    run_invalid.mkdir(parents=True)
+    (run_invalid / "prompt.txt").write_text("bounded prompt")
+    write_stream(run_invalid / "stream.jsonl", [turn()])
+
+    monkeypatch.setattr(
+        metrics, "_call_provider_metrics",
+        lambda *args, **kwargs: {
+            "state": "OK",
+            "semantic_identity": {**CANONICAL_IDENTITY, "extra_field": "unexpected"},
+        },
+    )
+
+    record_invalid = metrics.record_cycle(
+        tmp_path, state, run_invalid, {"state": "CONTINUE"}, "astra", "xhigh",
+    )
+    assert "semantic_identity" not in record_invalid
+
+
+def test_record_cycle_fallback_copies_validated_semantic_identity(tmp_path, monkeypatch):
+    state = tmp_path / ".local/two-site-refactor/autopilot"
+    run = state / "runs" / "fallback-run"
+    run.mkdir(parents=True)
+    (run / "prompt.txt").write_text("bounded prompt")
+    write_stream(run / "stream.jsonl", [turn()])
+
+    proposal_dir = tmp_path / ".local/two-site-refactor/proposals/w1"
+    proposal_dir.mkdir(parents=True)
+    task_snapshot = {
+        "source_head": "b" * 40,
+        "task": {
+            "task_id": "fallback-task-1",
+            "goal": "bounded task goal",
+        },
+    }
+    (proposal_dir / "task.json").write_text(json.dumps(task_snapshot))
+
+    fallback_identity = dict(CANONICAL_IDENTITY)
+
+    def fake_provider(root, task_id=None, *args, **kwargs):
+        if task_id is None:
+            return {"state": "UNAVAILABLE"}
+        return {"state": "OK", "semantic_identity": fallback_identity}
+
+    monkeypatch.setattr(metrics, "_call_provider_metrics", fake_provider)
+
+    meta = {
+        "state": "CONTINUE",
+        "head_before": "b" * 40,
+        "gemini_worker_run_id": "w1",
+    }
+    record = metrics.record_cycle(tmp_path, state, run, meta, "astra", "xhigh")
+    assert record["semantic_identity"] == CANONICAL_IDENTITY
+    assert record["semantic_identity"] is not fallback_identity
+    assert record["task_id"] == "fallback-task-1"
