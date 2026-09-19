@@ -256,6 +256,61 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_read_registration_context.py::test_read_registration_context_completed_cookie_response"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_auth_complete_telegram_account_link_internal.py",
+      "sha256": "3dc5b38c93f50b66af007ee02c590489e238f705199050036039dfc2046b99c8",
+      "last_commit": "aa331248751eded912b3bd04e8353f62c85bfb09",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-COMPLETE-TELEGRAM-ACCOUNT-LINK-INTERNAL-L251"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_auth_complete_telegram_account_link_internal.py::P100bAuthCompleteTelegramAccountLinkInternalCharacterizationTests::test_complete_telegram_account_link_internal_enabled_first_terminal_success"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_request_registration_context_otp.py",
+      "sha256": "ca1476bdc6e58705b1ff7697b393e430775c0fb8577c45b3a324929b29d38c6c",
+      "last_commit": "e305b8c9b8a89336a40de0a3e2aacd6b6a1f5cc7",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-REQUEST-REGISTRATION-CONTEXT-OTP-L1838"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_request_registration_context_otp.py::test_request_registration_context_otp_active_otp_reuse_context_ready"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_verify_registration_context_otp.py",
+      "sha256": "227c5d5ce03f4c835987debf45107a6c609bae30f864b67a338a79c1fe6f8613",
+      "last_commit": "b2d5d04ef51fbd72ec6e01ae5f2def2b03d576a1",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-VERIFY-REGISTRATION-CONTEXT-OTP-L1887"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_verify_registration_context_otp.py::test_verify_registration_context_otp_state_guard_invitation_otp_verified_returns_idempotent_200"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_complete_registration_context.py",
+      "sha256": "6bb692ad335d964e27cee10ef36c14b247d4741fdee01b0dd8920bf6baa97458",
+      "last_commit": "44485afa1a867b39524ec71b07953e59577a6a7c",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-COMPLETE-REGISTRATION-CONTEXT-L1952"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_complete_registration_context.py::test_complete_registration_context_completion_marker_idempotence"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_clear_registration_context.py",
+      "sha256": "787f8a89c64bd4b05aed537df42767f509cf509a8a8889259876336ad571e45a",
+      "last_commit": "c8765d44d7f6c5b13d7a6661aa1a026490924a3e",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-CLEAR-REGISTRATION-CONTEXT-L1995"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_clear_registration_context.py::test_clear_registration_context_present_handle_cookie_path"
+      ]
     }
   ]
 }

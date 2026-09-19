@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 20)
+        self.assertEqual(len(records), 25)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -374,15 +374,85 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         }
         self.assertEqual(records[19], expected_record_19)
 
+        # Validate record 20 (commit aa331248751eded912b3bd04e8353f62c85bfb09)
+        expected_record_20 = {
+            "path": "tests/test_p1_00b_characterization_auth_complete_telegram_account_link_internal.py",
+            "sha256": "3dc5b38c93f50b66af007ee02c590489e238f705199050036039dfc2046b99c8",
+            "last_commit": "aa331248751eded912b3bd04e8353f62c85bfb09",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-COMPLETE-TELEGRAM-ACCOUNT-LINK-INTERNAL-L251",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_auth_complete_telegram_account_link_internal.py::P100bAuthCompleteTelegramAccountLinkInternalCharacterizationTests::test_complete_telegram_account_link_internal_enabled_first_terminal_success",
+            ],
+        }
+        self.assertEqual(records[20], expected_record_20)
+
+        # Validate record 21 (commit e305b8c9b8a89336a40de0a3e2aacd6b6a1f5cc7)
+        expected_record_21 = {
+            "path": "tests/test_p1_00b_characterization_request_registration_context_otp.py",
+            "sha256": "ca1476bdc6e58705b1ff7697b393e430775c0fb8577c45b3a324929b29d38c6c",
+            "last_commit": "e305b8c9b8a89336a40de0a3e2aacd6b6a1f5cc7",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-REQUEST-REGISTRATION-CONTEXT-OTP-L1838",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_request_registration_context_otp.py::test_request_registration_context_otp_active_otp_reuse_context_ready",
+            ],
+        }
+        self.assertEqual(records[21], expected_record_21)
+
+        # Validate record 22 (commit b2d5d04ef51fbd72ec6e01ae5f2def2b03d576a1)
+        expected_record_22 = {
+            "path": "tests/test_p1_00b_characterization_verify_registration_context_otp.py",
+            "sha256": "227c5d5ce03f4c835987debf45107a6c609bae30f864b67a338a79c1fe6f8613",
+            "last_commit": "b2d5d04ef51fbd72ec6e01ae5f2def2b03d576a1",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-VERIFY-REGISTRATION-CONTEXT-OTP-L1887",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_verify_registration_context_otp.py::test_verify_registration_context_otp_state_guard_invitation_otp_verified_returns_idempotent_200",
+            ],
+        }
+        self.assertEqual(records[22], expected_record_22)
+
+        # Validate record 23 (commit 44485afa1a867b39524ec71b07953e59577a6a7c)
+        expected_record_23 = {
+            "path": "tests/test_p1_00b_characterization_complete_registration_context.py",
+            "sha256": "6bb692ad335d964e27cee10ef36c14b247d4741fdee01b0dd8920bf6baa97458",
+            "last_commit": "44485afa1a867b39524ec71b07953e59577a6a7c",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-COMPLETE-REGISTRATION-CONTEXT-L1952",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_complete_registration_context.py::test_complete_registration_context_completion_marker_idempotence",
+            ],
+        }
+        self.assertEqual(records[23], expected_record_23)
+
+        # Validate record 24 (commit c8765d44d7f6c5b13d7a6661aa1a026490924a3e)
+        expected_record_24 = {
+            "path": "tests/test_p1_00b_characterization_clear_registration_context.py",
+            "sha256": "787f8a89c64bd4b05aed537df42767f509cf509a8a8889259876336ad571e45a",
+            "last_commit": "c8765d44d7f6c5b13d7a6661aa1a026490924a3e",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-CLEAR-REGISTRATION-CONTEXT-L1995",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_clear_registration_context.py::test_clear_registration_context_present_handle_cookie_path",
+            ],
+        }
+        self.assertEqual(records[24], expected_record_24)
+
         # Validate seed occurrences and distinct seed IDs
         all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
-        self.assertEqual(len(all_seed_ids), 35)
-        self.assertEqual(len(set(all_seed_ids)), 34)
+        self.assertEqual(len(all_seed_ids), 40)
+        self.assertEqual(len(set(all_seed_ids)), 39)
 
         # Validate selector occurrences and distinct selectors
         all_selectors = [selector for record in records for selector in record["test_selectors"]]
-        self.assertEqual(len(all_selectors), 35)
-        self.assertEqual(len(set(all_selectors)), 35)
+        self.assertEqual(len(all_selectors), 40)
+        self.assertEqual(len(set(all_selectors)), 40)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:
