@@ -485,3 +485,348 @@ def test_record_cycle_fallback_copies_validated_semantic_identity(tmp_path, monk
     assert record["semantic_identity"] == CANONICAL_IDENTITY
     assert record["semantic_identity"] is not fallback_identity
     assert record["task_id"] == "fallback-task-1"
+
+
+def make_ledger_record(**overrides):
+    rec = {
+        "state": "CONTINUE",
+        "head_before": "1" * 40,
+        "head_after": "2" * 40,
+        "gemini_worker_run_id": "gemini-worker-1",
+        "gemini_reviewer_run_id": "gemini-reviewer-1",
+        "proposal_sha256": "a" * 64,
+        "semantic_identity": dict(CANONICAL_IDENTITY),
+    }
+    rec.update(overrides)
+    return rec
+
+
+def test_summarize_efficiency_ledger_input_validation():
+    for invalid in (None, "not-a-list", 123, {"records": []}):
+        with pytest.raises(metrics.ProposalError):
+            metrics.summarize_efficiency_ledger(invalid)
+    oversized = [make_ledger_record()] * (metrics.MAX_RECORDS + 1)
+    with pytest.raises(metrics.ProposalError):
+        metrics.summarize_efficiency_ledger(oversized)
+
+
+@pytest.mark.parametrize(
+    ("records", "expected_counts"),
+    [
+        (
+            [make_ledger_record()],
+            {"accepted_count": 1, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 0},
+        ),
+        (
+            [make_ledger_record(), make_ledger_record()],
+            {"accepted_count": 1, "duplicate_count": 1, "non_accepted_count": 0, "unknown_count": 0},
+        ),
+        (
+            [{"state": "FAILED"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 1, "unknown_count": 0},
+        ),
+        (
+            [{"state": "BLOCKED"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 1, "unknown_count": 0},
+        ),
+        (
+            [{"state": "STOP"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 1, "unknown_count": 0},
+        ),
+        (
+            [{"state": "ABORTED"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 1, "unknown_count": 0},
+        ),
+        (
+            [{"state": "CHANGES_REQUIRED"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 1, "unknown_count": 0},
+        ),
+        (
+            [{"state": "CONTINUE"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(proposal_sha256=None)],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [{"state": "UNKNOWN"}],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            ["not-a-dict-record"],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(head_before="A" * 40)],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(head_after="B" * 40)],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(proposal_sha256="A" * 64)],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(head_after="1" * 40)],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(gemini_reviewer_run_id="gemini-worker-1")],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(gemini_worker_run_id="gemini-reviewer-1")],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(gemini_worker_run_id="gemini-role-1")],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(gemini_reviewer_run_id="gemini-role-1")],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(semantic_identity=None)],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(semantic_identity={"invalid": "identity"})],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+        (
+            [make_ledger_record(semantic_identity={**CANONICAL_IDENTITY, "source_sha256": "A" * 64})],
+            {"accepted_count": 0, "duplicate_count": 0, "non_accepted_count": 0, "unknown_count": 1},
+        ),
+    ],
+)
+def test_summarize_efficiency_ledger_classification_table(records, expected_counts):
+    result = metrics.summarize_efficiency_ledger(records)
+    for key, expected_val in expected_counts.items():
+        assert result[key] == expected_val
+
+
+def test_summarize_efficiency_ledger_lineage_and_public_boundary():
+    codex_turn = {
+        "usage_state": "OBSERVED_COMPLETED_TURNS",
+        "input_tokens": 100,
+        "cached_input_tokens": 70,
+        "uncached_input_tokens": 30,
+        "output_tokens": 10,
+    }
+    provider_usage = {
+        "provider_metrics": {
+            "usage": {
+                "input_tokens": 50,
+                "output_tokens": 20,
+                "total_tokens": 70,
+            }
+        }
+    }
+    raw_sentinel = "RAW_SENTINEL_ERROR_SECRET_12345"
+    raw_worker_id = "gemini-worker-isolated-test-id"
+    raw_reviewer_id = "gemini-reviewer-isolated-test-id"
+
+    rec_accepted = make_ledger_record(
+        gemini_worker_run_id=raw_worker_id,
+        gemini_reviewer_run_id=raw_reviewer_id,
+        semantic_identity=dict(CANONICAL_IDENTITY),
+        error_field=raw_sentinel,
+        **codex_turn,
+        **provider_usage,
+    )
+
+    rec_terminal = {
+        "state": "FAILED",
+        "semantic_identity": dict(CANONICAL_IDENTITY),
+        "error": raw_sentinel,
+        **codex_turn,
+        **provider_usage,
+    }
+
+    rec_unknown = {
+        "state": "UNKNOWN",
+        "semantic_identity": dict(CANONICAL_IDENTITY),
+        "diagnostic": raw_sentinel,
+        **codex_turn,
+        **provider_usage,
+    }
+
+    diff_identity = dict(CANONICAL_IDENTITY)
+    diff_identity["scenario_key"] = "ae00_different_scenario_key"
+    assert diff_identity["fingerprint"] == CANONICAL_IDENTITY["fingerprint"]
+    assert metrics.semantic_identity(diff_identity) is not None
+
+    rec_diff_ident = make_ledger_record(
+        semantic_identity=diff_identity,
+        **codex_turn,
+        **provider_usage,
+    )
+
+    second_ident = dict(CANONICAL_IDENTITY)
+    second_ident["scenario_key"] = "ae00_second_scenario"
+    second_ident["fingerprint"] = "0" * 64
+    rec_second = make_ledger_record(
+        head_before="3" * 40,
+        head_after="4" * 40,
+        proposal_sha256="b" * 64,
+        semantic_identity=second_ident,
+        **codex_turn,
+        **provider_usage,
+    )
+
+    records = [
+        rec_accepted,
+        rec_terminal,
+        rec_unknown,
+        rec_diff_ident,
+        rec_second,
+    ]
+    summary = metrics.summarize_efficiency_ledger(records)
+
+    assert summary["accepted_count"] == 2
+    assert summary["duplicate_count"] == 1
+    assert summary["non_accepted_count"] == 1
+    assert summary["unknown_count"] == 1
+
+    fps = [lineage["fingerprint"] for lineage in summary["lineages"]]
+    assert fps == ["0" * 64, CANONICAL_IDENTITY["fingerprint"]]
+
+    primary_lineage = summary["lineages"][1]
+    assert primary_lineage["fingerprint"] == CANONICAL_IDENTITY["fingerprint"]
+    assert primary_lineage["record_count"] == 3
+    assert primary_lineage["codex"]["observed_record_count"] == 3
+    assert primary_lineage["codex"]["observed_subtotals"]["input_tokens"] == 300
+    assert primary_lineage["provider"]["observed_record_count"] == 3
+    assert primary_lineage["provider"]["observed_subtotals"]["total_tokens"] == 210
+
+    for lineage in summary["lineages"]:
+        assert set(lineage.keys()) == {"fingerprint", "record_count", "codex", "provider"}
+
+    summary_text = json.dumps(summary)
+    for forbidden in (
+        raw_sentinel,
+        raw_worker_id,
+        raw_reviewer_id,
+        "gap_reference",
+        "source_sha256",
+        "stage_id",
+        "scenario_key",
+        "gemini_worker_run_id",
+        "gemini_reviewer_run_id",
+    ):
+        assert forbidden not in summary_text
+
+
+def test_summarize_efficiency_ledger_usage_arithmetic_and_anomalies():
+    valid_codex = {
+        "usage_state": "OBSERVED_COMPLETED_TURNS",
+        "input_tokens": 100,
+        "cached_input_tokens": 60,
+        "uncached_input_tokens": 40,
+        "output_tokens": 25,
+    }
+    valid_provider = {
+        "provider_metrics": {
+            "usage": {
+                "input_tokens": 300,
+                "output_tokens": 75,
+                "total_tokens": 375,
+            }
+        }
+    }
+
+    base_summary = metrics.summarize_efficiency_ledger([{**valid_codex, **valid_provider}])
+    assert base_summary["codex"]["observed_record_count"] == 1
+    assert base_summary["codex"]["unknown_record_count"] == 0
+    assert set(base_summary["codex"]["observed_subtotals"].keys()) == {
+        "input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens",
+    }
+    assert base_summary["codex"]["observed_subtotals"] == {
+        "input_tokens": 100,
+        "cached_input_tokens": 60,
+        "uncached_input_tokens": 40,
+        "output_tokens": 25,
+    }
+    assert base_summary["provider"]["observed_record_count"] == 1
+    assert base_summary["provider"]["unknown_record_count"] == 0
+    assert set(base_summary["provider"]["observed_subtotals"].keys()) == {
+        "input_tokens", "output_tokens", "total_tokens",
+    }
+    assert base_summary["provider"]["observed_subtotals"] == {
+        "input_tokens": 300,
+        "output_tokens": 75,
+        "total_tokens": 375,
+    }
+
+    codex_anomalies = [
+        {"usage_state": "UNKNOWN", "input_tokens": 100, "cached_input_tokens": 60, "uncached_input_tokens": 40, "output_tokens": 25},
+        {"input_tokens": 100, "cached_input_tokens": 60, "uncached_input_tokens": 40, "output_tokens": 25},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": 100, "cached_input_tokens": 60, "uncached_input_tokens": 40},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": 100, "cached_input_tokens": 60, "uncached_input_tokens": 50, "output_tokens": 25},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": True, "cached_input_tokens": 0, "uncached_input_tokens": 1, "output_tokens": 0},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": 1, "cached_input_tokens": True, "uncached_input_tokens": 0, "output_tokens": 0},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": 1, "cached_input_tokens": 1, "uncached_input_tokens": False, "output_tokens": 0},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": 1, "cached_input_tokens": 1, "uncached_input_tokens": 0, "output_tokens": True},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "input_tokens": -1, "cached_input_tokens": 0, "uncached_input_tokens": -1, "output_tokens": 0},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "usage": {"input_tokens": 100, "cached_input_tokens": 60, "uncached_input_tokens": 40, "output_tokens": 25}},
+        {"usage_state": "OBSERVED_COMPLETED_TURNS", "observed_usage_subtotal": {"input_tokens": 100, "cached_input_tokens": 60, "uncached_input_tokens": 40, "output_tokens": 25}},
+    ]
+
+    for bad in codex_anomalies:
+        res = metrics.summarize_efficiency_ledger([bad])
+        assert res["codex"]["observed_record_count"] == 0
+        assert res["codex"]["unknown_record_count"] == 1
+        assert res["codex"]["observed_subtotals"] == {
+            "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "uncached_input_tokens": 0,
+            "output_tokens": 0,
+        }
+
+    provider_anomalies = [
+        {},
+        {"provider_metrics": None},
+        {"provider_metrics": {}},
+        {"provider_metrics": {"usage": None}},
+        {"provider_metrics": {"usage": {"input_tokens": 300, "output_tokens": 75}}},
+        {"provider_metrics": {"usage": {"input_tokens": 300, "output_tokens": 75, "total_tokens": 375, "extra": 1}}},
+        {"provider_metrics": {"usage": {"input_tokens": 300, "output_tokens": 100, "total_tokens": 375}}},
+        {"provider_metrics": {"usage": {"input_tokens": True, "output_tokens": 0, "total_tokens": 1}}},
+        {"provider_metrics": {"usage": {"input_tokens": 1, "output_tokens": False, "total_tokens": 1}}},
+        {"provider_metrics": {"usage": {"input_tokens": 1, "output_tokens": 0, "total_tokens": True}}},
+        {"provider_metrics": {"usage": {"input_tokens": -1, "output_tokens": 1, "total_tokens": 0}}},
+        {"usage": {"input_tokens": 300, "output_tokens": 75, "total_tokens": 375}},
+        {"provider_metrics": {"observed_usage_subtotal": {"input_tokens": 300, "output_tokens": 75, "total_tokens": 375}}},
+    ]
+
+    for bad in provider_anomalies:
+        res = metrics.summarize_efficiency_ledger([bad])
+        assert res["provider"]["observed_record_count"] == 0
+        assert res["provider"]["unknown_record_count"] == 1
+        assert res["provider"]["observed_subtotals"] == {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    combined_records = [{**valid_codex, **valid_provider}] + codex_anomalies + provider_anomalies
+    comb_summary = metrics.summarize_efficiency_ledger(combined_records)
+    assert comb_summary["codex"]["observed_record_count"] == 1
+    assert comb_summary["codex"]["unknown_record_count"] == len(codex_anomalies) + len(provider_anomalies)
+    assert comb_summary["codex"]["observed_subtotals"] == {
+        "input_tokens": 100,
+        "cached_input_tokens": 60,
+        "uncached_input_tokens": 40,
+        "output_tokens": 25,
+    }
+    assert comb_summary["provider"]["observed_record_count"] == 1
+    assert comb_summary["provider"]["unknown_record_count"] == len(codex_anomalies) + len(provider_anomalies)
+    assert comb_summary["provider"]["observed_subtotals"] == {
+        "input_tokens": 300,
+        "output_tokens": 75,
+        "total_tokens": 375,
+    }
