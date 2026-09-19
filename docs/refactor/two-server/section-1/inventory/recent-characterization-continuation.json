@@ -8,71 +8,74 @@
   },
   "records": [
     {
-      "path": "tests/test_p1_00b_characterization_trade_create_quick_quantity_manual_prompt.py",
-      "sha256": "4881ab2a911ef47aaa177de3ce34ed0c9f93ebc11c1ed201f446b115f2f882c1",
-      "last_commit": "057cdbfb949f702dba8abdedcd1b90b1ab757291",
+      "path": "tests/test_p1_00b_characterization_blocks_accountant_entry_denials_batch.py",
+      "sha256": "12a17b5187bae1525a719121d86fe214cb48d29b5566e99a93c452421f821bb5",
+      "last_commit": "40c251e10d010f13711c3a70aa85cfa13fc08616",
       "seed_ids": [
-        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-QUICK-QUANTITY-L869"
+        "API-IDENTITY-GET-BLOCKS-GET-MY-BLOCKED-USERS-L122",
+        "API-IDENTITY-POST-BLOCKS-BLOCK-A-USER-L135",
+        "API-IDENTITY-DELETE-BLOCKS-UNBLOCK-A-USER-L173",
+        "API-IDENTITY-GET-BLOCKS-SEARCH-USERS-L223"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_trade_create_quick_quantity_manual_prompt.py::TradeCreateQuickQuantityManualPromptCharacterizationTests::test_manual_value_acknowledges_then_delivers_exact_prompt_without_state_or_settings"
+        "tests/test_p1_00b_characterization_blocks_accountant_entry_denials_batch.py::BlocksAccountantEntryDenialsCharacterizationTests::test_blocked_users_denies_accountant_before_service_or_database_work",
+        "tests/test_p1_00b_characterization_blocks_accountant_entry_denials_batch.py::BlocksAccountantEntryDenialsCharacterizationTests::test_block_user_denies_accountant_before_target_lookup_or_mutation",
+        "tests/test_p1_00b_characterization_blocks_accountant_entry_denials_batch.py::BlocksAccountantEntryDenialsCharacterizationTests::test_unblock_user_denies_accountant_before_mutation",
+        "tests/test_p1_00b_characterization_blocks_accountant_entry_denials_batch.py::BlocksAccountantEntryDenialsCharacterizationTests::test_search_users_denies_accountant_before_search"
       ]
     },
     {
-      "path": "tests/test_p1_00b_characterization_admin_users_unlinked_cancel_delete_guards_batch.py",
-      "sha256": "d88b7698c030b79a1dff8dc85f7dc1443e951412737950a18e30a8f24ec2eb5a",
-      "last_commit": "5091f773f4e7f6981d4477352af5e86864e6113d",
+      "path": "tests/test_p1_00b_characterization_accountants_customer_actor_guards_batch.py",
+      "sha256": "4f0b242e893edbbb62833d8444244e11c4b4aff6c8660a89d4405e9602453ff6",
+      "last_commit": "bea41649bc19859d9109911ea49e52ad70aefd61",
       "seed_ids": [
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SEARCH-CANCEL-L657",
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186",
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-CONFIRM-L1203",
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CANCEL-L1563"
+        "API-IDENTITY-GET-ACCOUNTANTS-LIST-MY-ACCOUNTANTS-L167",
+        "API-IDENTITY-GET-ACCOUNTANTS-GET-MY-ACCOUNTANT-L199",
+        "API-IDENTITY-POST-ACCOUNTANTS-CREATE-MY-ACCOUNTANT-L227",
+        "API-IDENTITY-PATCH-ACCOUNTANTS-UPDATE-MY-ACCOUNTANT-L367"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_admin_users_unlinked_cancel_delete_guards_batch.py::AdminUsersUnlinkedCancelDeleteGuardsCharacterizationTests::test_user_search_cancel_without_user_stops_before_state_navigation_or_delivery",
-        "tests/test_p1_00b_characterization_admin_users_unlinked_cancel_delete_guards_batch.py::AdminUsersUnlinkedCancelDeleteGuardsCharacterizationTests::test_user_delete_request_without_user_stops_before_parse_session_redirect_or_delivery",
-        "tests/test_p1_00b_characterization_admin_users_unlinked_cancel_delete_guards_batch.py::AdminUsersUnlinkedCancelDeleteGuardsCharacterizationTests::test_user_delete_confirm_without_user_stops_before_parse_session_state_navigation_or_delivery",
-        "tests/test_p1_00b_characterization_admin_users_unlinked_cancel_delete_guards_batch.py::AdminUsersUnlinkedCancelDeleteGuardsCharacterizationTests::test_limit_cancel_without_user_stops_before_parse_session_state_or_delivery"
+        "tests/test_p1_00b_characterization_accountants_customer_actor_guards_batch.py::AccountantsCustomerActorGuardsCharacterizationTests::test_list_my_accountants_denies_customer_actor_before_reads",
+        "tests/test_p1_00b_characterization_accountants_customer_actor_guards_batch.py::AccountantsCustomerActorGuardsCharacterizationTests::test_get_my_accountant_denies_customer_actor_before_relation_lookup",
+        "tests/test_p1_00b_characterization_accountants_customer_actor_guards_batch.py::AccountantsCustomerActorGuardsCharacterizationTests::test_create_my_accountant_denies_customer_actor_before_payload_or_creation",
+        "tests/test_p1_00b_characterization_accountants_customer_actor_guards_batch.py::AccountantsCustomerActorGuardsCharacterizationTests::test_update_my_accountant_denies_customer_actor_before_payload_or_update"
       ]
     },
     {
-      "path": "tests/test_p1_00b_characterization_admin_broadcast_unlinked_navigation_guards_batch.py",
-      "sha256": "a72017109eb3527a89ed9f95c017016f291ee392f696960496e903d7551b4764",
-      "last_commit": "36716ce745034211472bce5e162c6dffdd163564",
+      "path": "tests/test_p1_00b_characterization_origin_internal_telegram_tier2_real_session_guard.py",
+      "sha256": "82881bf0e1f393187fc39fdb9b45bce99da10634626c1f69ef6bfa9f245b7e83",
+      "last_commit": "bd66914a21cd0b195e3de8f840a825e963eeb0b1",
       "seed_ids": [
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-GROUP-RECIPIENTS-L221",
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270",
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-SELECTED-RECIPIENTS-L286",
-        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-SEARCH-AGAIN-L377"
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_admin_broadcast_unlinked_navigation_guards_batch.py::AdminBroadcastUnlinkedNavigationGuardsCharacterizationTests::test_choose_group_recipients_without_user_denies_before_state_keyboard_or_delivery",
-        "tests/test_p1_00b_characterization_admin_broadcast_unlinked_navigation_guards_batch.py::AdminBroadcastUnlinkedNavigationGuardsCharacterizationTests::test_finish_group_selection_without_user_denies_before_state_navigation_or_delivery",
-        "tests/test_p1_00b_characterization_admin_broadcast_unlinked_navigation_guards_batch.py::AdminBroadcastUnlinkedNavigationGuardsCharacterizationTests::test_choose_selected_recipients_without_user_denies_before_state_keyboard_or_delivery",
-        "tests/test_p1_00b_characterization_admin_broadcast_unlinked_navigation_guards_batch.py::AdminBroadcastUnlinkedNavigationGuardsCharacterizationTests::test_search_again_without_user_denies_before_state_navigation_or_delivery"
+        "tests/test_p1_00b_characterization_origin_internal_telegram_tier2_real_session_guard.py::P100bOriginInternalTelegramTier2RealSessionGuardCharacterizationTests::test_internal_offer_telegram_tier2_denied_before_offer_lookup_with_real_async_session"
       ]
     },
     {
-      "path": "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py",
-      "sha256": "9feeb5b30020fbcef13353f916448894b5aa72b658f2b91f327b5306078f2976",
-      "last_commit": "7faf50b9c13a4cc65779c32936375464e79c7cb4",
+      "path": "tests/test_p1_00b_characterization_origin_internal_telegram_admin_double_click.py",
+      "sha256": "0fdfb74f3ca0cc648d28a9cc180e922d0e4aeecc75f8482419abb259b2c93371",
+      "last_commit": "1bd64068310ac3bed27ff3c06038f881e255dd84",
       "seed_ids": [
-        "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46"
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py::PublisherChannelPublicTradeCallbackCharacterizationTests::test_public_trade_callback_forwards_public_identity_and_contention_flags",
-        "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py::PublisherChannelPublicTradeCallbackCharacterizationTests::test_public_trade_callback_forwards_default_contention_flags"
+        "tests/test_p1_00b_characterization_origin_internal_telegram_admin_double_click.py::P100bOriginInternalTelegramAdminDoubleClickCharacterizationTests::test_internal_offer_telegram_super_admin_double_click_persists_once_with_policy_snapshot"
       ]
     },
     {
-      "path": "tests/test_p1_00b_characterization_notification_send_test_push_unconfigured.py",
-      "sha256": "46e835da03a563aafdb3d52521e59618f421faa138728ee6e63bfa0bd73c95f5",
-      "last_commit": "bfaed8196419e6701da124bfd6acc677f6b1d245",
+      "path": "tests/test_p1_00b_characterization_admin_users_unlinked_navigation_guards_batch.py",
+      "sha256": "2c36dde5235517ea28007c308d00b4c2328f4a680e8a2542c4b369db27592dee",
+      "last_commit": "5d239e7f5af3b4836e253b27e8eeffcb70f08439",
       "seed_ids": [
-        "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201"
+        "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-MENU-L489",
+        "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-LIST-COMMAND-L512",
+        "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-BACK-TO-ADMIN-L602"
       ],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_notification_send_test_push_unconfigured.py::NotificationSendTestPushUnconfiguredCharacterizationTests::test_unconfigured_push_fails_before_payload_delivery_or_database_work"
+        "tests/test_p1_00b_characterization_admin_users_unlinked_navigation_guards_batch.py::AdminUsersUnlinkedNavigationGuardsCharacterizationTests::test_users_menu_without_user_stops_before_delivery_or_state",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_navigation_guards_batch.py::AdminUsersUnlinkedNavigationGuardsCharacterizationTests::test_users_list_command_without_user_stops_before_state_runtime_or_render",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_navigation_guards_batch.py::AdminUsersUnlinkedNavigationGuardsCharacterizationTests::test_back_to_admin_without_user_stops_before_state_runtime_or_delivery"
       ]
     }
   ]
