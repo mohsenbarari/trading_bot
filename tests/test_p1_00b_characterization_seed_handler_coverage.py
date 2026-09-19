@@ -73,9 +73,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 204)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 339)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 126)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 210)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 345)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 120)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -149,7 +149,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         for record in base_data.get("records", []):
             prior_recent_ids.extend(record.get("seed_ids", []))
         continuation_records = continuation_data.get("records", [])
-        self.assertEqual(len(continuation_records), 25)
+        self.assertEqual(len(continuation_records), 31)
         for record in continuation_records[:5]:
             prior_recent_ids.extend(record.get("seed_ids", []))
 
@@ -202,11 +202,34 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(fifth_five_seed_set.issubset(inventory_seed_set))
         self.assertTrue(fifth_five_seed_set.isdisjoint(prior_334_checkpoint_set))
 
-        total_evidenced_set = prior_334_checkpoint_set | fifth_five_seed_set
-        self.assertEqual(len(total_evidenced_set), 339)
+        prior_339_checkpoint_set = prior_334_checkpoint_set | fifth_five_seed_set
+        self.assertEqual(len(prior_339_checkpoint_set), 339)
+
+        sixth_slice_records = continuation_records[25:31]
+        self.assertEqual(len(sixth_slice_records), 6)
+        expected_new_seed_ids = [
+            "API-AUTH-POST-AUTH-REFRESH-ACCESS-TOKEN-L2011",
+            "API-AUTH-POST-AUTH-DEV-LOGIN-L2080",
+            "API-AUTH-POST-AUTH-RESEND-OTP-SMS-L2612",
+            "API-AUTH-POST-AUTH-VERIFY-OTP-L2695",
+            "API-AUTH-POST-AUTH-WEBAPP-LOGIN-L2899",
+            "API-AUTH-POST-AUTH-SETUP-ADMIN-PASSWORD-L2915",
+        ]
+        sixth_slice_seed_ids = []
+        for record in sixth_slice_records:
+            sixth_slice_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(sixth_slice_seed_ids, expected_new_seed_ids)
+        self.assertEqual(len(sixth_slice_seed_ids), 6)
+        sixth_slice_seed_set = set(sixth_slice_seed_ids)
+        self.assertEqual(len(sixth_slice_seed_set), 6)
+        self.assertTrue(sixth_slice_seed_set.issubset(inventory_seed_set))
+        self.assertTrue(sixth_slice_seed_set.isdisjoint(prior_339_checkpoint_set))
+
+        total_evidenced_set = prior_339_checkpoint_set | sixth_slice_seed_set
+        self.assertEqual(len(total_evidenced_set), 345)
 
         remaining_seed_set = inventory_seed_set - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 126)
+        self.assertEqual(len(remaining_seed_set), 120)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
         flattened_recent_ids = (
@@ -215,11 +238,12 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             + third_five_seed_ids
             + fourth_five_seed_ids
             + fifth_five_seed_ids
+            + sixth_slice_seed_ids
         )
         recent_seed_set = set(flattened_recent_ids)
         self.assertTrue(recent_seed_set.issubset(inventory_seed_set))
         new_beyond_baseline = recent_seed_set - baseline_seed_set
-        self.assertEqual(len(new_beyond_baseline), 204)
+        self.assertEqual(len(new_beyond_baseline), 210)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(new_beyond_baseline))

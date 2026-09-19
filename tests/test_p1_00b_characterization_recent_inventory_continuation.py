@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 25)
+        self.assertEqual(len(records), 31)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -444,15 +444,124 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         }
         self.assertEqual(records[24], expected_record_24)
 
+        # Validate record 25 (commit 611d88b2052958e4514b0cda675fb8eceda9e186)
+        expected_record_25 = {
+            "path": "tests/test_p1_00b_characterization_refresh_access_token_server_id.py",
+            "sha256": "e2cb8862eb1411c6b7e95985ae65cdf9c9d5e988e16ea800d78b4b74b9a896aa",
+            "last_commit": "611d88b2052958e4514b0cda675fb8eceda9e186",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-REFRESH-ACCESS-TOKEN-L2011",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_refresh_access_token_server_id.py::TestP100bCharacterizationRefreshAccessTokenServerId::test_server_id_precedence_truthy_session_wins_over_truthy_user",
+                "tests/test_p1_00b_characterization_refresh_access_token_server_id.py::TestP100bCharacterizationRefreshAccessTokenServerId::test_server_id_precedence_absent_session_uses_truthy_user",
+                "tests/test_p1_00b_characterization_refresh_access_token_server_id.py::TestP100bCharacterizationRefreshAccessTokenServerId::test_server_id_precedence_both_absent_uses_authoritative_server_foreign",
+            ],
+        }
+        self.assertEqual(records[25], expected_record_25)
+
+        # Validate record 26 (commit 5a9a75ffac17113e54b789643bb94542b4fc155b)
+        expected_record_26 = {
+            "path": "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py",
+            "sha256": "c16fab24b8c238228b73a3ced6a11eeb530e905a5c16873a8b3efdb2279ad9aa",
+            "last_commit": "5a9a75ffac17113e54b789643bb94542b4fc155b",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-DEV-LOGIN-L2080",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py::P100bDevLoginRemoteKeyGateCharacterizationTests::test_dev_login_remote_valid_key_existing_user_success",
+                "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py::P100bDevLoginRemoteKeyGateCharacterizationTests::test_dev_login_remote_missing_key_rejected_before_downstream_work",
+                "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py::P100bDevLoginRemoteKeyGateCharacterizationTests::test_dev_login_remote_invalid_key_rejected_before_downstream_work",
+            ],
+        }
+        self.assertEqual(records[26], expected_record_26)
+
+        # Validate record 27 (commit b18eb5bcf0cb925830999d41551cd7536b47befe)
+        expected_record_27 = {
+            "path": "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py",
+            "sha256": "320144e113f7f87b716a171f7df6233a208cdf1a838a94566df2850877e43936",
+            "last_commit": "b18eb5bcf0cb925830999d41551cd7536b47befe",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-RESEND-OTP-SMS-L2612",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py::TestAuthResendOtpSmsStructuredState::test_resend_otp_sms_structured_state_accepted",
+                "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py::TestAuthResendOtpSmsStructuredState::test_resend_otp_sms_structured_state_delivery_failed",
+                "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py::TestAuthResendOtpSmsStructuredState::test_resend_otp_sms_structured_state_delivery_ambiguous",
+            ],
+        }
+        self.assertEqual(records[27], expected_record_27)
+
+        # Validate record 28 (commit 95baac0101d09076cbcf148b1fc8f5897f61b224)
+        expected_record_28 = {
+            "path": "tests/test_p1_00b_characterization_verify_otp_structured_state.py",
+            "sha256": "049f4a9e7baabbef0c9bf1d1d71329bbe26b8600935cb34786ac21e2000ee9c6",
+            "last_commit": "95baac0101d09076cbcf148b1fc8f5897f61b224",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-VERIFY-OTP-L2695",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_verify_otp_structured_state.py::TestVerifyOtpStructuredStateCharacterization::test_verify_otp_active_standard_user_success_path",
+                "tests/test_p1_00b_characterization_verify_otp_structured_state.py::TestVerifyOtpStructuredStateCharacterization::test_verify_otp_atomic_consume_loss_rejection",
+            ],
+        }
+        self.assertEqual(records[28], expected_record_28)
+
+        # Validate record 29 (commit 2f4dff1c3264ebf63444931bafd5d1de96471074)
+        expected_record_29 = {
+            "path": "tests/test_p1_00b_characterization_webapp_login_retirement.py",
+            "sha256": "cf6ced52b4d0f5f4bf004615f9e14bb9381f7b7a33fcb5ab5659510b069276d1",
+            "last_commit": "2f4dff1c3264ebf63444931bafd5d1de96471074",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-WEBAPP-LOGIN-L2899",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_webapp_login_retirement.py::WebAppLoginRetirementCharacterizationTests::test_webapp_login_rejects_deliberately_malformed_init_data_before_dependencies",
+                "tests/test_p1_00b_characterization_webapp_login_retirement.py::WebAppLoginRetirementCharacterizationTests::test_webapp_login_rejects_realistic_valid_shaped_init_data_before_dependencies",
+            ],
+        }
+        self.assertEqual(records[29], expected_record_29)
+
+        # Validate record 30 (commit aba9412eaa85cf884a6de94f78f358c06d4de4d9)
+        expected_record_30 = {
+            "path": "tests/test_p1_00b_characterization_setup_admin_password_no_change_required.py",
+            "sha256": "2f454c46e85348a4168f470de85126a1d084bda1e6250cae08dc12f922ecc0a9",
+            "last_commit": "aba9412eaa85cf884a6de94f78f358c06d4de4d9",
+            "seed_ids": [
+                "API-AUTH-POST-AUTH-SETUP-ADMIN-PASSWORD-L2915",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_setup_admin_password_no_change_required.py::SetupAdminPasswordNoChangeRequiredCharacterizationTests::test_existing_password_requirement_false_rejects_before_validation_or_mutation",
+            ],
+        }
+        self.assertEqual(records[30], expected_record_30)
+
+        # Validate six-record slice and six new unique canonical seed IDs
+        six_record_slice = records[25:31]
+        self.assertEqual(len(six_record_slice), 6)
+        expected_six_record_seed_ids = [
+            "API-AUTH-POST-AUTH-REFRESH-ACCESS-TOKEN-L2011",
+            "API-AUTH-POST-AUTH-DEV-LOGIN-L2080",
+            "API-AUTH-POST-AUTH-RESEND-OTP-SMS-L2612",
+            "API-AUTH-POST-AUTH-VERIFY-OTP-L2695",
+            "API-AUTH-POST-AUTH-WEBAPP-LOGIN-L2899",
+            "API-AUTH-POST-AUTH-SETUP-ADMIN-PASSWORD-L2915",
+        ]
+        six_record_seed_ids = [seed_id for record in six_record_slice for seed_id in record["seed_ids"]]
+        self.assertEqual(six_record_seed_ids, expected_six_record_seed_ids)
+        self.assertEqual(len(set(six_record_seed_ids)), 6)
+        prior_25_seed_set = set(seed_id for record in records[:25] for seed_id in record["seed_ids"])
+        self.assertTrue(set(six_record_seed_ids).isdisjoint(prior_25_seed_set))
+
         # Validate seed occurrences and distinct seed IDs
         all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
-        self.assertEqual(len(all_seed_ids), 40)
-        self.assertEqual(len(set(all_seed_ids)), 39)
+        self.assertEqual(len(all_seed_ids), 46)
+        self.assertEqual(len(set(all_seed_ids)), 45)
 
         # Validate selector occurrences and distinct selectors
         all_selectors = [selector for record in records for selector in record["test_selectors"]]
-        self.assertEqual(len(all_selectors), 40)
-        self.assertEqual(len(set(all_selectors)), 40)
+        self.assertEqual(len(all_selectors), 54)
+        self.assertEqual(len(set(all_selectors)), 54)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:

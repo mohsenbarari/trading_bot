@@ -311,6 +311,80 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_clear_registration_context.py::test_clear_registration_context_present_handle_cookie_path"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_refresh_access_token_server_id.py",
+      "sha256": "e2cb8862eb1411c6b7e95985ae65cdf9c9d5e988e16ea800d78b4b74b9a896aa",
+      "last_commit": "611d88b2052958e4514b0cda675fb8eceda9e186",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-REFRESH-ACCESS-TOKEN-L2011"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_refresh_access_token_server_id.py::TestP100bCharacterizationRefreshAccessTokenServerId::test_server_id_precedence_truthy_session_wins_over_truthy_user",
+        "tests/test_p1_00b_characterization_refresh_access_token_server_id.py::TestP100bCharacterizationRefreshAccessTokenServerId::test_server_id_precedence_absent_session_uses_truthy_user",
+        "tests/test_p1_00b_characterization_refresh_access_token_server_id.py::TestP100bCharacterizationRefreshAccessTokenServerId::test_server_id_precedence_both_absent_uses_authoritative_server_foreign"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py",
+      "sha256": "c16fab24b8c238228b73a3ced6a11eeb530e905a5c16873a8b3efdb2279ad9aa",
+      "last_commit": "5a9a75ffac17113e54b789643bb94542b4fc155b",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-DEV-LOGIN-L2080"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py::P100bDevLoginRemoteKeyGateCharacterizationTests::test_dev_login_remote_valid_key_existing_user_success",
+        "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py::P100bDevLoginRemoteKeyGateCharacterizationTests::test_dev_login_remote_missing_key_rejected_before_downstream_work",
+        "tests/test_p1_00b_characterization_dev_login_remote_key_gate.py::P100bDevLoginRemoteKeyGateCharacterizationTests::test_dev_login_remote_invalid_key_rejected_before_downstream_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py",
+      "sha256": "320144e113f7f87b716a171f7df6233a208cdf1a838a94566df2850877e43936",
+      "last_commit": "b18eb5bcf0cb925830999d41551cd7536b47befe",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-RESEND-OTP-SMS-L2612"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py::TestAuthResendOtpSmsStructuredState::test_resend_otp_sms_structured_state_accepted",
+        "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py::TestAuthResendOtpSmsStructuredState::test_resend_otp_sms_structured_state_delivery_failed",
+        "tests/test_p1_00b_characterization_auth_resend_otp_sms_structured_state.py::TestAuthResendOtpSmsStructuredState::test_resend_otp_sms_structured_state_delivery_ambiguous"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_verify_otp_structured_state.py",
+      "sha256": "049f4a9e7baabbef0c9bf1d1d71329bbe26b8600935cb34786ac21e2000ee9c6",
+      "last_commit": "95baac0101d09076cbcf148b1fc8f5897f61b224",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-VERIFY-OTP-L2695"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_verify_otp_structured_state.py::TestVerifyOtpStructuredStateCharacterization::test_verify_otp_active_standard_user_success_path",
+        "tests/test_p1_00b_characterization_verify_otp_structured_state.py::TestVerifyOtpStructuredStateCharacterization::test_verify_otp_atomic_consume_loss_rejection"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_webapp_login_retirement.py",
+      "sha256": "cf6ced52b4d0f5f4bf004615f9e14bb9381f7b7a33fcb5ab5659510b069276d1",
+      "last_commit": "2f4dff1c3264ebf63444931bafd5d1de96471074",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-WEBAPP-LOGIN-L2899"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_webapp_login_retirement.py::WebAppLoginRetirementCharacterizationTests::test_webapp_login_rejects_deliberately_malformed_init_data_before_dependencies",
+        "tests/test_p1_00b_characterization_webapp_login_retirement.py::WebAppLoginRetirementCharacterizationTests::test_webapp_login_rejects_realistic_valid_shaped_init_data_before_dependencies"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_setup_admin_password_no_change_required.py",
+      "sha256": "2f454c46e85348a4168f470de85126a1d084bda1e6250cae08dc12f922ecc0a9",
+      "last_commit": "aba9412eaa85cf884a6de94f78f358c06d4de4d9",
+      "seed_ids": [
+        "API-AUTH-POST-AUTH-SETUP-ADMIN-PASSWORD-L2915"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_setup_admin_password_no_change_required.py::SetupAdminPasswordNoChangeRequiredCharacterizationTests::test_existing_password_requirement_false_rejects_before_validation_or_mutation"
+      ]
     }
   ]
 }
