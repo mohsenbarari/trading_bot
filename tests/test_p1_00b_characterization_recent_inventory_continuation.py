@@ -62,88 +62,86 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
             self.assertIsInstance(record, dict)
             self.assertEqual(set(record.keys()), expected_record_keys)
 
-        # Validate record 0 (commit 806a0016ad2845a825f91102b88d30fa8a7be7cd)
+        # Validate record 0 (commit 69e67edb99dd073ac617e05e06bc69c22bd115df)
         expected_record_0 = {
-            "path": "tests/test_p1_00b_characterization_admin_broadcast_search_again_unlinked_guard.py",
-            "sha256": "e593ed4957839c2feae65d4656bf0b79786390d58da1f2dde35bbac0c043b521",
-            "last_commit": "806a0016ad2845a825f91102b88d30fa8a7be7cd",
+            "path": "tests/test_p1_00b_characterization_admin_broadcast_unlinked_selection_mutation_guards_batch.py",
+            "sha256": "1537d2fd92f15d7ee023af3fd6d5ffbd7d1a113ff06326577c2754a64d6a703b",
+            "last_commit": "69e67edb99dd073ac617e05e06bc69c22bd115df",
             "seed_ids": [
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-SEARCH-AGAIN-L377",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-GROUP-RECIPIENT-L240",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395",
             ],
             "test_selectors": [
-                "tests/test_p1_00b_characterization_admin_broadcast_search_again_unlinked_guard.py::AdminBroadcastSearchAgainUnlinkedGuardCharacterizationTests::test_search_again_without_user_alerts_before_state_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_selection_mutation_guards_batch.py::AdminBroadcastUnlinkedSelectionMutationGuardsCharacterizationTests::test_toggle_group_recipient_without_user_denies_before_payload_state_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_selection_mutation_guards_batch.py::AdminBroadcastUnlinkedSelectionMutationGuardsCharacterizationTests::test_toggle_selected_user_without_user_denies_before_payload_state_session_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_selection_mutation_guards_batch.py::AdminBroadcastUnlinkedSelectionMutationGuardsCharacterizationTests::test_finish_selected_recipients_without_user_denies_before_state_navigation_or_delivery",
             ],
         }
         self.assertEqual(records[0], expected_record_0)
 
-        # Validate record 1 (commit 845ad843b2d5fcf197bd7715bef3f630f4367287)
+        # Validate record 1 (commit 8f2c11a69848cb60718e0ac2f0a301b9e52ddee1)
         expected_record_1 = {
-            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py",
-            "sha256": "21b7e771a1d8fb521ef36efd4509ff252da3d4e50a4a981532c9e8c4725b17a3",
-            "last_commit": "845ad843b2d5fcf197bd7715bef3f630f4367287",
+            "path": "tests/test_p1_00b_characterization_admin_broadcast_process_selected_recipient_search_unlinked_guard.py",
+            "sha256": "da35839509d8ddcb6a6adca44534234e65ea825c41dd3a08373403e7be0b3e95",
+            "last_commit": "8f2c11a69848cb60718e0ac2f0a301b9e52ddee1",
             "seed_ids": [
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-BACK-TO-LIST-L318",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-MANAGE-ALIASES-L333",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-START-L350",
+                "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308",
             ],
             "test_selectors": [
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py::AdminCommoditiesUnlinkedEntryGuardsCharacterizationTests::test_back_to_list_unlinked_alerts_before_state_navigation_or_delivery",
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py::AdminCommoditiesUnlinkedEntryGuardsCharacterizationTests::test_manage_aliases_unlinked_alerts_before_parsing_navigation_or_delivery",
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_entry_guards.py::AdminCommoditiesUnlinkedEntryGuardsCharacterizationTests::test_alias_add_start_unlinked_alerts_before_parsing_state_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_process_selected_recipient_search_unlinked_guard.py::AdminBroadcastProcessSelectedRecipientSearchUnlinkedGuardCharacterizationTests::test_process_selected_recipient_search_without_user_returns_before_message_state_session_or_delivery",
             ],
         }
         self.assertEqual(records[1], expected_record_1)
 
-        # Validate record 2 (commit 3dac187dda9afd895c4f3125b072e1fe866d0735)
+        # Validate record 2 (commit 6d73e01d1a83009503d21b4eb04e7008e1b89830)
         expected_record_2 = {
-            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py",
-            "sha256": "0e33c2d500768c8f0d068b26150a952322df66137eea8455c0718863aff73280",
-            "last_commit": "3dac187dda9afd895c4f3125b072e1fe866d0735",
+            "path": "tests/test_p1_00b_characterization_admin_broadcast_message_unlinked_guards_batch.py",
+            "sha256": "93932aef03399991c781c4b16493dcedf6c435200d744eb4ce57c74dcb4a81be",
+            "last_commit": "6d73e01d1a83009503d21b4eb04e7008e1b89830",
             "seed_ids": [
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-START-L408",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-START-L466",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-START-L523",
+                "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-START-TELEGRAM-ADMIN-BROADCAST-L179",
+                "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-BROADCAST-MESSAGE-TEXT-L411",
             ],
             "test_selectors": [
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py::AdminCommoditiesUnlinkedEditDeleteGuardsCharacterizationTests::test_alias_edit_start_unlinked_alerts_before_parsing_state_keyboard_navigation_or_delivery",
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py::AdminCommoditiesUnlinkedEditDeleteGuardsCharacterizationTests::test_alias_delete_start_unlinked_alerts_before_parsing_state_keyboard_navigation_or_delivery",
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_edit_delete_guards.py::AdminCommoditiesUnlinkedEditDeleteGuardsCharacterizationTests::test_commodity_edit_start_unlinked_alerts_before_parsing_state_keyboard_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_message_unlinked_guards_batch.py::AdminBroadcastMessageUnlinkedGuardsCharacterizationTests::test_start_telegram_admin_broadcast_without_user_returns_before_message_state_keyboard_or_delivery",
+                "tests/test_p1_00b_characterization_admin_broadcast_message_unlinked_guards_batch.py::AdminBroadcastMessageUnlinkedGuardsCharacterizationTests::test_process_broadcast_message_text_without_user_returns_before_message_state_validation_session_or_delivery",
             ],
         }
         self.assertEqual(records[2], expected_record_2)
 
-        # Validate record 3 (commit e202b003313d34a980b4662974aab3ce13da35a1)
+        # Validate record 3 (commit 1d2b8ce0a8637e4317658bdfabbe387cf256b5f1)
         expected_record_3 = {
-            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py",
-            "sha256": "2385ef114f090da98a6dc55859d2a0806eaa5366e97a11a4689ccbba4cc2d2e1",
-            "last_commit": "e202b003313d34a980b4662974aab3ce13da35a1",
+            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_message_guards_batch.py",
+            "sha256": "71e64805ae7331aded23c4bb4af9d8ed97dd167a6a31f60b8f3520b87a92cd19",
+            "last_commit": "1d2b8ce0a8637e4317658bdfabbe387cf256b5f1",
             "seed_ids": [
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ADD-START-L572",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-CONFIRM-L671",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-CANCEL-FSM-L719",
+                "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-NAME-L365",
+                "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-NAME-L429",
+                "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-NAME-L537",
+                "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-NAME-L583",
             ],
             "test_selectors": [
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py::AdminCommoditiesUnlinkedAddDeleteCancelGuardsCharacterizationTests::test_handle_add_start_unlinked_alerts_before_state_keyboard_or_delivery",
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py::AdminCommoditiesUnlinkedAddDeleteCancelGuardsCharacterizationTests::test_handle_delete_confirm_unlinked_alerts_before_payload_state_keyboard_or_delivery",
-                "tests/test_p1_00b_characterization_admin_commodities_unlinked_add_delete_cancel_guards.py::AdminCommoditiesUnlinkedAddDeleteCancelGuardsCharacterizationTests::test_handle_cancel_fsm_unlinked_alerts_before_state_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_message_guards_batch.py::AdminCommoditiesUnlinkedMessageGuardsCharacterizationTests::test_alias_add_name_without_user_stops_before_message_state_http_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_message_guards_batch.py::AdminCommoditiesUnlinkedMessageGuardsCharacterizationTests::test_alias_edit_name_without_user_stops_before_message_state_http_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_message_guards_batch.py::AdminCommoditiesUnlinkedMessageGuardsCharacterizationTests::test_commodity_edit_name_without_user_stops_before_message_state_http_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_message_guards_batch.py::AdminCommoditiesUnlinkedMessageGuardsCharacterizationTests::test_add_name_without_user_stops_before_message_state_http_or_delivery",
             ],
         }
         self.assertEqual(records[3], expected_record_3)
 
-        # Validate record 4 (commit 86327873a5de16c5c7efd251155166b779425349)
+        # Validate record 4 (commit 79b577b1a7f9978da1ecdeaccc93284d37cddfa4)
         expected_record_4 = {
-            "path": "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py",
-            "sha256": "86c0c9035062311f195c8daa2c02a0f552a67872c04f2abdc5d849585a503e98",
-            "last_commit": "86327873a5de16c5c7efd251155166b779425349",
+            "path": "tests/test_p1_00b_characterization_admin_commodities_unlinked_manage_create_guards_batch.py",
+            "sha256": "ce7b87f0194cc748dadc0c9314facefe505cb0bc9d843d7b6903281fa23522d5",
+            "last_commit": "79b577b1a7f9978da1ecdeaccc93284d37cddfa4",
             "seed_ids": [
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-GROUP-RECIPIENTS-L221",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270",
-                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-SELECTED-RECIPIENTS-L286",
+                "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-MANAGE-COMMODITIES-L305",
+                "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-ALIASES-AND-CREATE-L622",
             ],
             "test_selectors": [
-                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py::AdminBroadcastUnlinkedRecipientSelectionGuardsCharacterizationTests::test_choose_group_recipients_without_user_denies_before_state_keyboard_navigation_or_delivery",
-                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py::AdminBroadcastUnlinkedRecipientSelectionGuardsCharacterizationTests::test_finish_group_selection_without_user_denies_before_state_payload_navigation_or_delivery",
-                "tests/test_p1_00b_characterization_admin_broadcast_unlinked_recipient_selection_guards_batch.py::AdminBroadcastUnlinkedRecipientSelectionGuardsCharacterizationTests::test_choose_selected_recipients_without_user_denies_before_state_keyboard_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_manage_create_guards_batch.py::AdminCommoditiesUnlinkedManageCreateGuardsCharacterizationTests::test_manage_commodities_without_user_stops_before_message_state_navigation_or_delivery",
+                "tests/test_p1_00b_characterization_admin_commodities_unlinked_manage_create_guards_batch.py::AdminCommoditiesUnlinkedManageCreateGuardsCharacterizationTests::test_add_aliases_and_create_without_user_stops_before_message_state_http_or_delivery",
             ],
         }
         self.assertEqual(records[4], expected_record_4)
