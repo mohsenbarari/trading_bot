@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 36)
+        self.assertEqual(len(records), 41)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -613,6 +613,80 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         }
         self.assertEqual(records[35], expected_record_35)
 
+        # Validate record 36 (commit 21f848985c266ca4163c66cd607822a09c2a1e5d)
+        expected_record_36 = {
+            "path": "tests/test_p1_00b_characterization_main_public_config_seed.py",
+            "sha256": "956ce1daaa898dd8ba7af41fed12cd8d954a734a3c10a9ef55657aead8d77405",
+            "last_commit": "21f848985c266ca4163c66cd607822a09c2a1e5d",
+            "seed_ids": [
+                "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_main_public_config_seed.py::MainPublicConfigSeedCharacterizationTests::test_get_public_config_returns_exact_public_settings_without_side_effects",
+            ],
+        }
+        self.assertEqual(records[36], expected_record_36)
+
+        # Validate record 37 (commit 96ecb285adf818ccfe676c5620c1c83221528482)
+        expected_record_37 = {
+            "path": "tests/test_p1_00b_characterization_main_root_inprocess_branches.py",
+            "sha256": "5303dc6bc37f0807202d821cfa5993f90d4efd9d8288ab31296306dc1fa33733",
+            "last_commit": "96ecb285adf818ccfe676c5620c1c83221528482",
+            "seed_ids": [
+                "API-OPS-GET-MAIN-ROOT-L614",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_main_root_inprocess_branches.py::MainRootInProcessBranchesCharacterizationTests::test_root_freezes_present_and_absent_static_dir_branches_in_process",
+            ],
+        }
+        self.assertEqual(records[37], expected_record_37)
+
+        # Validate record 38 (commit 40d6235e96d76e4594406927b2abce190613ef8f)
+        expected_record_38 = {
+            "path": "tests/test_p1_00b_characterization_send_typing_signal_success.py",
+            "sha256": "8fe48437ad5eb24c9d5d4636e6ba73ccf42a82d43043883924e6c7bd00f93e4c",
+            "last_commit": "40d6235e96d76e4594406927b2abce190613ef8f",
+            "seed_ids": [
+                "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_send_typing_signal_success.py::SendTypingSignalSuccessCharacterizationTests::test_send_typing_signal_success_preserves_permission_name_and_publication_contract",
+            ],
+        }
+        self.assertEqual(records[38], expected_record_38)
+
+        # Validate record 39 (commit c5262fa5b5b5fda48f97973646e2a751ff34b23b)
+        expected_record_39 = {
+            "path": "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py",
+            "sha256": "03a94fd239571f5985feef90ae9df7b3a84b35124c214254a6c1818dc61cf432",
+            "last_commit": "c5262fa5b5b5fda48f97973646e2a751ff34b23b",
+            "seed_ids": [
+                "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+                "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py::InvitationPublicEntryGuardsCharacterizationTests::test_lookup_invitation_rejects_noncanonical_short_code_before_reads",
+                "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py::InvitationPublicEntryGuardsCharacterizationTests::test_validate_invitation_retires_raw_bearer_without_reads",
+            ],
+        }
+        self.assertEqual(records[39], expected_record_39)
+
+        # Validate record 40 (commit 5c1d1cfd240285484bcc067dc08c413114651748)
+        expected_record_40 = {
+            "path": "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py",
+            "sha256": "c3a99a09681783dd035c8b67bf7c313b3970d77ac6d898ee0a86a2623ffd25cd",
+            "last_commit": "5c1d1cfd240285484bcc067dc08c413114651748",
+            "seed_ids": [
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+                "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_user_block_settings_without_user_stops_before_parse_session_or_delivery",
+                "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_admin_set_max_block_without_user_stops_before_parse_session_or_delivery",
+            ],
+        }
+        self.assertEqual(records[40], expected_record_40)
+
         # Validate six-record slice and six new unique canonical seed IDs
         six_record_slice = records[25:31]
         self.assertEqual(len(six_record_slice), 6)
@@ -661,15 +735,93 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
             inventory_seed_set.update(entry["behavior_id"] for entry in surface_data["entries"])
         self.assertTrue(set(five_record_seed_ids).issubset(inventory_seed_set))
 
+        # Validate appended eighth five-record slice (records 36 through 40)
+        eighth_record_slice = records[36:41]
+        self.assertEqual(len(eighth_record_slice), 5)
+        expected_eighth_slice_seed_ids = [
+            "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531",
+            "API-OPS-GET-MAIN-ROOT-L614",
+            "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+            "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+            "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
+        ]
+        eighth_slice_seed_ids = [seed_id for record in eighth_record_slice for seed_id in record["seed_ids"]]
+        self.assertEqual(eighth_slice_seed_ids, expected_eighth_slice_seed_ids)
+        self.assertEqual(len(eighth_slice_seed_ids), 7)
+        self.assertEqual(len(set(eighth_slice_seed_ids)), 7)
+        self.assertTrue(set(eighth_slice_seed_ids).issubset(inventory_seed_set))
+
+        expected_eighth_slice_selectors = [
+            "tests/test_p1_00b_characterization_main_public_config_seed.py::MainPublicConfigSeedCharacterizationTests::test_get_public_config_returns_exact_public_settings_without_side_effects",
+            "tests/test_p1_00b_characterization_main_root_inprocess_branches.py::MainRootInProcessBranchesCharacterizationTests::test_root_freezes_present_and_absent_static_dir_branches_in_process",
+            "tests/test_p1_00b_characterization_send_typing_signal_success.py::SendTypingSignalSuccessCharacterizationTests::test_send_typing_signal_success_preserves_permission_name_and_publication_contract",
+            "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py::InvitationPublicEntryGuardsCharacterizationTests::test_lookup_invitation_rejects_noncanonical_short_code_before_reads",
+            "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py::InvitationPublicEntryGuardsCharacterizationTests::test_validate_invitation_retires_raw_bearer_without_reads",
+            "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_user_block_settings_without_user_stops_before_parse_session_or_delivery",
+            "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_admin_set_max_block_without_user_stops_before_parse_session_or_delivery",
+        ]
+        eighth_slice_selectors = [selector for record in eighth_record_slice for selector in record["test_selectors"]]
+        self.assertEqual(eighth_slice_selectors, expected_eighth_slice_selectors)
+        self.assertEqual(len(eighth_slice_selectors), 7)
+        self.assertEqual(len(set(eighth_slice_selectors)), 7)
+
+        # Validate five-new versus two-baseline-overlap distinction
+        scenario_records_path = repo_root / "docs/refactor/two-server/section-1/inventory/scenario-records.json"
+        self.assertTrue(scenario_records_path.is_file(), f"Scenario records file not found at {scenario_records_path}")
+        scenario_data = json.loads(scenario_records_path.read_bytes().decode("utf-8"))
+        blocker_items = scenario_data.get("blocker_registry", {}).get("items", [])
+        blocker = next(
+            (
+                item
+                for item in blocker_items
+                if item.get("id") == "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"
+                or item.get("blocker_id") == "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"
+            ),
+            None,
+        )
+        self.assertIsNotNone(blocker, "Blocker P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE not found in blocker_registry.items")
+        reason = blocker["reason"]
+        start_delim = "Evidenced seeds are "
+        end_delim = ". Sibling family"
+        self.assertIn(start_delim, reason)
+        self.assertIn(end_delim, reason)
+        start_idx = reason.index(start_delim) + len(start_delim)
+        end_idx = reason.index(end_delim, start_idx)
+        raw_seeds_str = reason[start_idx:end_idx]
+        baseline_seed_ids = [s.strip() for s in raw_seeds_str.split(",") if s.strip()]
+        baseline_seed_set = set(baseline_seed_ids)
+        self.assertEqual(len(baseline_seed_set), 135)
+
+        prior_36_seed_set = set(seed_id for record in records[:36] for seed_id in record["seed_ids"])
+        new_five_seed_ids = [
+            "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531",
+            "API-OPS-GET-MAIN-ROOT-L614",
+            "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+            "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+            "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437",
+        ]
+        baseline_overlap_seed_ids = [
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
+        ]
+        self.assertEqual(set(new_five_seed_ids) | set(baseline_overlap_seed_ids), set(eighth_slice_seed_ids))
+        self.assertTrue(set(new_five_seed_ids).isdisjoint(set(baseline_overlap_seed_ids)))
+        self.assertTrue(set(new_five_seed_ids).isdisjoint(prior_36_seed_set))
+        self.assertTrue(set(new_five_seed_ids).isdisjoint(baseline_seed_set))
+        self.assertTrue(set(baseline_overlap_seed_ids).isdisjoint(prior_36_seed_set))
+        self.assertTrue(set(baseline_overlap_seed_ids).issubset(baseline_seed_set))
+
         # Validate seed occurrences and distinct seed IDs
         all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
-        self.assertEqual(len(all_seed_ids), 51)
-        self.assertEqual(len(set(all_seed_ids)), 50)
+        self.assertEqual(len(all_seed_ids), 58)
+        self.assertEqual(len(set(all_seed_ids)), 57)
 
         # Validate selector occurrences and distinct selectors
         all_selectors = [selector for record in records for selector in record["test_selectors"]]
-        self.assertEqual(len(all_selectors), 66)
-        self.assertEqual(len(set(all_selectors)), 66)
+        self.assertEqual(len(all_selectors), 73)
+        self.assertEqual(len(set(all_selectors)), 73)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:

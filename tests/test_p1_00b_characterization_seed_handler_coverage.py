@@ -73,9 +73,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 215)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 350)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 115)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 220)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 355)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 110)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -149,7 +149,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         for record in base_data.get("records", []):
             prior_recent_ids.extend(record.get("seed_ids", []))
         continuation_records = continuation_data.get("records", [])
-        self.assertEqual(len(continuation_records), 36)
+        self.assertEqual(len(continuation_records), 41)
         for record in continuation_records[:5]:
             prior_recent_ids.extend(record.get("seed_ids", []))
 
@@ -247,11 +247,60 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(seventh_slice_seed_set.issubset(inventory_seed_set))
         self.assertTrue(seventh_slice_seed_set.isdisjoint(prior_345_checkpoint_set))
 
-        total_evidenced_set = prior_345_checkpoint_set | seventh_slice_seed_set
-        self.assertEqual(len(total_evidenced_set), 350)
+        prior_350_checkpoint_set = prior_345_checkpoint_set | seventh_slice_seed_set
+        self.assertEqual(len(prior_350_checkpoint_set), 350)
+
+        eighth_slice_records = continuation_records[36:41]
+        self.assertEqual(len(eighth_slice_records), 5)
+        expected_eighth_slice_seed_ids = [
+            "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531",
+            "API-OPS-GET-MAIN-ROOT-L614",
+            "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+            "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+            "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
+        ]
+        eighth_slice_seed_ids = []
+        for record in eighth_slice_records:
+            eighth_slice_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(eighth_slice_seed_ids, expected_eighth_slice_seed_ids)
+        self.assertEqual(len(eighth_slice_seed_ids), 7)
+        eighth_slice_seed_set = set(eighth_slice_seed_ids)
+        self.assertEqual(len(eighth_slice_seed_set), 7)
+        self.assertTrue(eighth_slice_seed_set.issubset(inventory_seed_set))
+
+        expected_eighth_slice_new_seed_ids = [
+            "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531",
+            "API-OPS-GET-MAIN-ROOT-L614",
+            "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+            "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+            "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437",
+        ]
+        expected_eighth_slice_baseline_seed_ids = [
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
+        ]
+        eighth_slice_new_set = set(expected_eighth_slice_new_seed_ids)
+        eighth_slice_baseline_set = set(expected_eighth_slice_baseline_seed_ids)
+        self.assertEqual(eighth_slice_new_set | eighth_slice_baseline_set, eighth_slice_seed_set)
+        self.assertTrue(eighth_slice_new_set.isdisjoint(eighth_slice_baseline_set))
+
+        # Prove five new IDs are canonical inventory members absent from all prior evidence
+        self.assertTrue(eighth_slice_new_set.issubset(inventory_seed_set))
+        self.assertTrue(eighth_slice_new_set.isdisjoint(prior_350_checkpoint_set))
+        self.assertTrue(eighth_slice_new_set.isdisjoint(baseline_seed_set))
+
+        # Prove two block-settings IDs are canonical baseline members that do not increase unique coverage
+        self.assertTrue(eighth_slice_baseline_set.issubset(inventory_seed_set))
+        self.assertTrue(eighth_slice_baseline_set.issubset(baseline_seed_set))
+        self.assertTrue(eighth_slice_baseline_set.issubset(prior_350_checkpoint_set))
+
+        total_evidenced_set = prior_350_checkpoint_set | eighth_slice_seed_set
+        self.assertEqual(len(total_evidenced_set), 355)
 
         remaining_seed_set = inventory_seed_set - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 115)
+        self.assertEqual(len(remaining_seed_set), 110)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
         flattened_recent_ids = (
@@ -262,11 +311,12 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             + fifth_five_seed_ids
             + sixth_slice_seed_ids
             + seventh_slice_seed_ids
+            + eighth_slice_seed_ids
         )
         recent_seed_set = set(flattened_recent_ids)
         self.assertTrue(recent_seed_set.issubset(inventory_seed_set))
         new_beyond_baseline = recent_seed_set - baseline_seed_set
-        self.assertEqual(len(new_beyond_baseline), 215)
+        self.assertEqual(len(new_beyond_baseline), 220)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(new_beyond_baseline))

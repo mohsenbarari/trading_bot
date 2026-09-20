@@ -447,6 +447,65 @@
         "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_pending_at_exact_expiration_boundary",
         "tests/test_p1_00b_characterization_poll_login_request_status.py::PollLoginRequestStatusContractCharacterizationTests::test_poll_login_request_status_pending_expired_minimally_before_fixed_clock"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_main_public_config_seed.py",
+      "sha256": "956ce1daaa898dd8ba7af41fed12cd8d954a734a3c10a9ef55657aead8d77405",
+      "last_commit": "21f848985c266ca4163c66cd607822a09c2a1e5d",
+      "seed_ids": [
+        "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_main_public_config_seed.py::MainPublicConfigSeedCharacterizationTests::test_get_public_config_returns_exact_public_settings_without_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_main_root_inprocess_branches.py",
+      "sha256": "5303dc6bc37f0807202d821cfa5993f90d4efd9d8288ab31296306dc1fa33733",
+      "last_commit": "96ecb285adf818ccfe676c5620c1c83221528482",
+      "seed_ids": [
+        "API-OPS-GET-MAIN-ROOT-L614"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_main_root_inprocess_branches.py::MainRootInProcessBranchesCharacterizationTests::test_root_freezes_present_and_absent_static_dir_branches_in_process"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_send_typing_signal_success.py",
+      "sha256": "8fe48437ad5eb24c9d5d4636e6ba73ccf42a82d43043883924e6c7bd00f93e4c",
+      "last_commit": "40d6235e96d76e4594406927b2abce190613ef8f",
+      "seed_ids": [
+        "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_send_typing_signal_success.py::SendTypingSignalSuccessCharacterizationTests::test_send_typing_signal_success_preserves_permission_name_and_publication_contract"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py",
+      "sha256": "03a94fd239571f5985feef90ae9df7b3a84b35124c214254a6c1818dc61cf432",
+      "last_commit": "c5262fa5b5b5fda48f97973646e2a751ff34b23b",
+      "seed_ids": [
+        "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+        "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py::InvitationPublicEntryGuardsCharacterizationTests::test_lookup_invitation_rejects_noncanonical_short_code_before_reads",
+        "tests/test_p1_00b_characterization_invitation_public_entry_guards_batch.py::InvitationPublicEntryGuardsCharacterizationTests::test_validate_invitation_retires_raw_bearer_without_reads"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py",
+      "sha256": "c3a99a09681783dd035c8b67bf7c313b3970d77ac6d898ee0a86a2623ffd25cd",
+      "last_commit": "5c1d1cfd240285484bcc067dc08c413114651748",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_user_block_settings_without_user_stops_before_parse_session_or_delivery",
+        "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_admin_set_max_block_without_user_stops_before_parse_session_or_delivery"
+      ]
     }
   ]
 }
