@@ -10,10 +10,12 @@ import unittest
 
 from scripts.two_site_proposal_runner import (
     check,
+    load_task,
     MAX_CONTEXT,
     ProposalError,
     _TASK_BOUNDARY_CODES,
     _TaskBoundaryError,
+    unique_json,
 )
 
 RUNNER_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/two_site_proposal_runner.py"
@@ -266,6 +268,64 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
 
         with self.assertRaises(ProposalError):
             _TaskBoundaryError(valid_code, "a" * 257)
+
+    def test_load_task_invalid_json_boundary_errors_and_unique_json_isolation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve(strict=True)
+            for var in (
+                "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED",
+                "TWO_SITE_ASSIGNMENT_ID",
+                "TWO_SITE_ASSIGNMENT_SHA256",
+            ):
+                os.environ.pop(var, None)
+
+            task_file, task = self._create_fixture_project(root)
+
+            task_file.write_bytes(b"\x80\x81\xff\xfe")
+            with self.assertRaises(_TaskBoundaryError) as ctx_utf8:
+                load_task(root, task_file)
+            self.assertEqual(ctx_utf8.exception.code, "TASK_SCHEMA_INVALID")
+            self.assertIsNone(ctx_utf8.exception.path)
+            self.assertIsInstance(ctx_utf8.exception, ProposalError)
+
+            with self.assertRaises(_TaskBoundaryError) as ctx_check_utf8:
+                check(root, task_file)
+            self.assertEqual(ctx_check_utf8.exception.code, "TASK_SCHEMA_INVALID")
+
+            task_file.write_text('{"task_id": "TASK-001", "goal": ', encoding="utf-8")
+            with self.assertRaises(_TaskBoundaryError) as ctx_malformed:
+                load_task(root, task_file)
+            self.assertEqual(ctx_malformed.exception.code, "TASK_SCHEMA_INVALID")
+            self.assertIsNone(ctx_malformed.exception.path)
+            self.assertIsInstance(ctx_malformed.exception, ProposalError)
+
+            with self.assertRaises(_TaskBoundaryError) as ctx_check_malformed:
+                check(root, task_file)
+            self.assertEqual(ctx_check_malformed.exception.code, "TASK_SCHEMA_INVALID")
+
+            valid_task_copy = dict(task)
+            dup_key_json = json.dumps(valid_task_copy)[:-1] + ', "task_id": "DUPLICATE-ID"}'
+            task_file.write_text(dup_key_json, encoding="utf-8")
+            with self.assertRaises(_TaskBoundaryError) as ctx_dup:
+                load_task(root, task_file)
+            self.assertEqual(ctx_dup.exception.code, "TASK_SCHEMA_INVALID")
+            self.assertIsNone(ctx_dup.exception.path)
+            self.assertIsInstance(ctx_dup.exception, ProposalError)
+
+            with self.assertRaises(_TaskBoundaryError) as ctx_check_dup:
+                check(root, task_file)
+            self.assertEqual(ctx_check_dup.exception.code, "TASK_SCHEMA_INVALID")
+
+            with self.assertRaises(ProposalError) as ctx_generic:
+                unique_json('{"dup": 1, "dup": 2}')
+            self.assertEqual(type(ctx_generic.exception), ProposalError)
+            self.assertNotIsInstance(ctx_generic.exception, _TaskBoundaryError)
+            self.assertEqual(str(ctx_generic.exception), "duplicate JSON key")
+
+            task_file.write_text(json.dumps(task), encoding="utf-8")
+            res = check(root, task_file)
+            self.assertEqual(res["state"], "TASK_READY")
+            self.assertEqual(res["task_id"], task["task_id"])
 
 
 if __name__ == "__main__":

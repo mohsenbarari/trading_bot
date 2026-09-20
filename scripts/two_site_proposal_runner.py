@@ -1008,9 +1008,31 @@ def validate_assignment_scope(root: Path, task: dict) -> None:
         raise ProposalError("assignment scope validation failed") from exc
 
 
+class _DuplicateTaskKeyError(Exception):
+    pass
+
+
+def _task_unique_pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise _DuplicateTaskKeyError()
+        result[key] = value
+    return result
+
+
 def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
     raw = bounded_file_bytes(root, task_path, MAX_CONTEXT, "task")
-    task = unique_json(raw.decode())
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _TaskBoundaryError("TASK_SCHEMA_INVALID") from exc
+    try:
+        task = json.loads(text, object_pairs_hook=_task_unique_pairs)
+    except json.JSONDecodeError as exc:
+        raise _TaskBoundaryError("TASK_SCHEMA_INVALID") from exc
+    except _DuplicateTaskKeyError as exc:
+        raise _TaskBoundaryError("TASK_SCHEMA_INVALID") from exc
     required = {"task_id", "goal", "context_files", "allowed_files", "requirements", "test_selectors"}
     if not isinstance(task, dict) or set(task) != required:
         raise ProposalError("task keys must match the documented contract")
