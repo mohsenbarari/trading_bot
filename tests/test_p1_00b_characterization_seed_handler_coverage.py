@@ -149,7 +149,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         for record in base_data.get("records", []):
             prior_recent_ids.extend(record.get("seed_ids", []))
         continuation_records = continuation_data.get("records", [])
-        self.assertEqual(len(continuation_records), 46)
+        self.assertEqual(len(continuation_records), 51)
         for record in continuation_records[:5]:
             prior_recent_ids.extend(record.get("seed_ids", []))
 
@@ -315,7 +315,26 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(ninth_slice_seed_set.isdisjoint(prior_355_checkpoint_set))
         self.assertTrue(ninth_slice_seed_set.isdisjoint(baseline_seed_set))
 
-        total_evidenced_set = prior_355_checkpoint_set | ninth_slice_seed_set
+        prior_356_checkpoint_set = prior_355_checkpoint_set | ninth_slice_seed_set
+        self.assertEqual(len(prior_356_checkpoint_set), 356)
+
+        tenth_slice_records = continuation_records[46:51]
+        self.assertEqual(len(tenth_slice_records), 5)
+        expected_tenth_slice_seed_id = "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+        tenth_slice_seed_ids = []
+        for record in tenth_slice_records:
+            tenth_slice_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(tenth_slice_seed_ids, [expected_tenth_slice_seed_id] * 5)
+        self.assertEqual(len(tenth_slice_seed_ids), 5)
+        tenth_slice_seed_set = set(tenth_slice_seed_ids)
+        self.assertEqual(len(tenth_slice_seed_set), 1)
+
+        # Prove tenth slice's sole seed is already contained in the prior 356-evidenced checkpoint and does not double count
+        self.assertTrue(tenth_slice_seed_set.issubset(inventory_seed_set))
+        self.assertTrue(tenth_slice_seed_set.issubset(prior_356_checkpoint_set))
+        self.assertTrue(tenth_slice_seed_set.isdisjoint(baseline_seed_set))
+
+        total_evidenced_set = prior_356_checkpoint_set | tenth_slice_seed_set
         self.assertEqual(len(total_evidenced_set), 356)
 
         remaining_seed_set = inventory_seed_set - total_evidenced_set
@@ -332,6 +351,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             + seventh_slice_seed_ids
             + eighth_slice_seed_ids
             + ninth_slice_seed_ids
+            + tenth_slice_seed_ids
         )
         recent_seed_set = set(flattened_recent_ids)
         self.assertTrue(recent_seed_set.issubset(inventory_seed_set))

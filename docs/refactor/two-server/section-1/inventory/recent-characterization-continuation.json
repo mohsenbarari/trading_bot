@@ -561,6 +561,61 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer_denied.py::UsersPublicReadCustomerAccountantViewerDeniedCharacterizationTests::test_customer_target_is_hidden_from_accountant_viewer_for_different_owner_without_session_work"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_ordinary_success.py",
+      "sha256": "0334c9dd6f82c7151ae243c2a4b1d8afde86e5893ccc657d2642aa06750fcf3b",
+      "last_commit": "5fca2f6941404750c54e4b30597049fe3a2b338e",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_ordinary_success.py::UsersPublicReadOrdinarySuccessCharacterizationTests::test_ordinary_target_falls_back_to_single_get_and_returns_contact_projection"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_ordinary_not_found.py",
+      "sha256": "36c4f451236e67740d2a7089cdd8c1285cfb72b7d37a35c96f704af4aa75f863",
+      "last_commit": "1a61f45b689484fa82050bd80d6b98f8b84dd0d2",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_ordinary_not_found.py::UsersPublicReadOrdinaryNotFoundCharacterizationTests::test_ordinary_missing_or_deleted_target_falls_back_to_single_get_and_raises_exact_404"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_customer_not_found.py",
+      "sha256": "be44ef24600cf8ad5025f326863967f048e8e7435b15520eec8bdd82322dd7ef",
+      "last_commit": "11bc470d94d198e0427d41b485775af6a499b6b3",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_customer_not_found.py::UsersPublicReadCustomerNotFoundCharacterizationTests::test_customer_relation_missing_or_deleted_customer_raises_exact_404_before_viewer_accountant_or_session_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_accountant_owner_fallback.py",
+      "sha256": "d615f6a8aba05fbc57391b90b23b97ea2c77146edc6c7e24cdd858c7a48f8c1d",
+      "last_commit": "b7cf78bec744efd0f35d6c0403d3a4be6b2d4d56",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_accountant_owner_fallback.py::UsersPublicReadAccountantOwnerFallbackCharacterizationTests::test_missing_or_deleted_accountant_owner_falls_through_to_requested_user_contact_projection"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_accountant_owner_terminal_not_found.py",
+      "sha256": "c7efebf7195da1afd4b68b36a60903e5faec110b284cf229cead37b2cb606d76",
+      "last_commit": "1e4f8ee368131a7f5a9e4c66cdf3f4a4541d5c21",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_accountant_owner_terminal_not_found.py::UsersPublicReadAccountantOwnerTerminalNotFoundCharacterizationTests::test_accountant_owner_and_requested_user_missing_or_deleted_raises_exact_terminal_404"
+      ]
     }
   ]
 }
