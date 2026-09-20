@@ -113,6 +113,13 @@ class AssignmentFact:
         object.__setattr__(self, "path", clean_path)
 
 
+def _task_path_outside_scope_fact(path: str) -> AssignmentFact:
+    try:
+        return AssignmentFact(TASK_PATH_OUTSIDE_SCOPE, path)
+    except (ValueError, TypeError):
+        return AssignmentFact(TASK_PATH_OUTSIDE_SCOPE, None)
+
+
 class AssignmentScopeError(Exception):
     """Raised when assignment scope loading or validation fails."""
 
