@@ -169,6 +169,82 @@ class ProposalError(ValueError):
     pass
 
 
+_MAX_BOUNDARY_PATH_BYTES = 256
+_TASK_BOUNDARY_CODES = frozenset({
+    "TASK_FILE_NOT_FOUND",
+    "TASK_FILE_HARDLINKED",
+    "TASK_FILE_SYMLINK",
+    "TASK_FILE_OUTSIDE_ROOT",
+    "TASK_FILE_NOT_REGULAR",
+    "TASK_BUDGET_EXCEEDED",
+    "TASK_CREDENTIAL_DETECTED",
+    "TASK_SCHEMA_INVALID",
+    "TASK_PATH_OUTSIDE_SCOPE",
+    "TASK_ASSIGNMENT_TOKEN_MISSING",
+    "ASSIGNMENT_EXPIRED",
+    "ASSIGNMENT_CONTRACT_INVALID",
+})
+
+
+class _Fact(dict):
+    def __call__(self) -> dict[str, str | None]:
+        return dict(self)
+
+
+class _TaskBoundaryError(ProposalError):
+    CODES = _TASK_BOUNDARY_CODES
+    _CODES = _TASK_BOUNDARY_CODES
+
+    def __init__(
+        self,
+        code: str,
+        path: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if args or kwargs:
+            raise ProposalError("extra metadata not permitted")
+        if not isinstance(code, str) or type(code) is not str:
+            raise ProposalError("code must be a string")
+        if code not in _TASK_BOUNDARY_CODES:
+            raise ProposalError(f"unknown task boundary code: {code!r}")
+        if path is not None:
+            if not isinstance(path, str) or type(path) is not str:
+                raise ProposalError("path must be a string or None")
+            if len(path.encode("utf-8")) > _MAX_BOUNDARY_PATH_BYTES:
+                raise ProposalError("path exceeds maximum byte length")
+            if "\0" in path:
+                raise ProposalError("path must not contain NUL bytes")
+            if "\\" in path:
+                raise ProposalError("path must not contain backslashes")
+            if path.startswith("/") or PurePosixPath(path).is_absolute() or (len(path) >= 2 and path[1] == ":" and path[0].isalpha()):
+                raise ProposalError("path must be relative")
+            parts = path.split("/")
+            if any(part in {"", ".", ".."} for part in parts):
+                raise ProposalError("path must not contain empty or dot segments")
+            if SECRET.search(path):
+                raise ProposalError("path must not contain credential-like text")
+        self._code = code
+        self._path = path
+        msg = f"task boundary rejection [{code}]" if path is None else f"task boundary rejection [{code}]: {path}"
+        super().__init__(msg)
+
+    @property
+    def code(self) -> str:
+        return self._code
+
+    @property
+    def path(self) -> str | None:
+        return self._path
+
+    @property
+    def fact(self) -> _Fact:
+        return _Fact({"code": self._code, "path": self._path})
+
+    def to_fact(self) -> dict[str, str | None]:
+        return {"code": self._code, "path": self._path}
+
+
 class RetryableProviderSessionError(ProposalError):
     pass
 

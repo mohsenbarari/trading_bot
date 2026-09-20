@@ -8,13 +8,42 @@ import sys
 import tempfile
 import unittest
 
-from scripts.two_site_proposal_runner import check, MAX_CONTEXT, ProposalError
+from scripts.two_site_proposal_runner import (
+    check,
+    MAX_CONTEXT,
+    ProposalError,
+    _TASK_BOUNDARY_CODES,
+    _TaskBoundaryError,
+)
 
 RUNNER_SCRIPT = Path(__file__).resolve().parents[1] / "scripts/two_site_proposal_runner.py"
 
 
 class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._saved_scope_env = {
+            var: os.environ.pop(var, None)
+            for var in (
+                "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED",
+                "TWO_SITE_ASSIGNMENT_ID",
+                "TWO_SITE_ASSIGNMENT_SHA256",
+            )
+        }
+
+    def tearDown(self) -> None:
+        for var, val in self._saved_scope_env.items():
+            if val is not None:
+                os.environ[var] = val
+            else:
+                os.environ.pop(var, None)
+
     def _create_fixture_project(self, root: Path, task_override: dict | None = None) -> tuple[Path, dict]:
+        for var in (
+            "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED",
+            "TWO_SITE_ASSIGNMENT_ID",
+            "TWO_SITE_ASSIGNMENT_SHA256",
+        ):
+            os.environ.pop(var, None)
         source_path = root / "example.py"
         source_content = "# Clean example source without secrets\nprint('ready')\n"
         source_path.write_text(source_content, encoding="utf-8")
@@ -148,6 +177,95 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 2, msg=f"Expected argparse failure for role {role} missing --run-id")
                 self.assertIn("--run-id", proc.stderr)
+
+    def test_finite_boundary_contract_every_reviewed_code(self) -> None:
+        self.assertTrue(len(_TASK_BOUNDARY_CODES) >= 8)
+        for code in sorted(_TASK_BOUNDARY_CODES):
+            err = _TaskBoundaryError(code)
+            self.assertIsInstance(err, ProposalError)
+            self.assertIsInstance(err, _TaskBoundaryError)
+            self.assertEqual(err.code, code)
+            self.assertIsNone(err.path)
+            self.assertEqual(err.fact, {"code": code, "path": None})
+            self.assertEqual(err.fact(), {"code": code, "path": None})
+            self.assertEqual(err.to_fact(), {"code": code, "path": None})
+            self.assertEqual(set(err.fact.keys()), {"code", "path"})
+            self.assertIn(code, str(err))
+
+            err_with_path = _TaskBoundaryError(code, "example.py")
+            self.assertIsInstance(err_with_path, ProposalError)
+            self.assertEqual(err_with_path.code, code)
+            self.assertEqual(err_with_path.path, "example.py")
+            self.assertEqual(err_with_path.fact, {"code": code, "path": "example.py"})
+            self.assertEqual(err_with_path.fact(), {"code": code, "path": "example.py"})
+            self.assertEqual(set(err_with_path.fact.keys()), {"code", "path"})
+            self.assertIn(code, str(err_with_path))
+            self.assertIn("example.py", str(err_with_path))
+
+    def test_finite_boundary_contract_deterministic_canonical_fact_sanitization(self) -> None:
+        err = _TaskBoundaryError("TASK_FILE_NOT_FOUND", "pkg/module.py")
+        fact = err.fact
+        self.assertEqual(fact, {"code": "TASK_FILE_NOT_FOUND", "path": "pkg/module.py"})
+        self.assertEqual(set(fact.keys()), {"code", "path"})
+        for forbidden in ("source", "prompt", "command", "traceback", "/"):
+            self.assertNotIn(forbidden, fact)
+        self.assertFalse(str(err).startswith("/"))
+
+    def test_finite_boundary_contract_invalid_code_and_metadata_rejection(self) -> None:
+        valid_code = next(iter(_TASK_BOUNDARY_CODES))
+
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(None)  # type: ignore[arg-type]
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(12345)  # type: ignore[arg-type]
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError("NOT_A_REVIEWED_CODE")
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError("")
+
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, {"metadata": "dict"})  # type: ignore[arg-type]
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "example.py", "extra_arg")
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "example.py", extra="metadata")
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, metadata={"extra": "field"})
+
+    def test_finite_boundary_contract_invalid_path_rejection(self) -> None:
+        valid_code = next(iter(_TASK_BOUNDARY_CODES))
+
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "/root/example.py")
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "/etc/passwd")
+
+        for bad_path in (
+            "../escape.py",
+            "dir/../escape.py",
+            "./example.py",
+            "dir/./example.py",
+            ".",
+            "..",
+            "",
+            "dir//file.py",
+            "dir/",
+        ):
+            with self.assertRaises(ProposalError, msg=f"Should reject bad path: {bad_path!r}"):
+                _TaskBoundaryError(valid_code, bad_path)
+
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "dir\\file.py")
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "dir/file\0.py")
+
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "sk-" + "A" * 30)
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "ghp_" + "B" * 30)
+
+        with self.assertRaises(ProposalError):
+            _TaskBoundaryError(valid_code, "a" * 257)
 
 
 if __name__ == "__main__":
