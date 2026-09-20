@@ -14,7 +14,8 @@
   "evidence_sources": {
     "baseline_path": "docs/refactor/two-server/section-1/inventory/scenario-records.json",
     "base_path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
-    "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json"
+    "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json",
+    "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,

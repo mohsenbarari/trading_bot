@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json",
+    "sha256": "6756471cd3126794f0d7f9e4fb0995e5e395fa599cf137577d6f4e59a6a67e3c",
+    "last_commit": "2852e5a8f0a4aca4758103e9eae57ec4eaca9107"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_ordinary_customer_allowed.py",
+      "sha256": "d25e93e15330c2f3626e5f1b9220b6348c16c587fc6fa08b69c561a8aa21b176",
+      "last_commit": "12a9bf73db78cbe6d883b0436578f06c37067fbb",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_ordinary_customer_allowed.py::UsersPublicReadOrdinaryCustomerAllowedCharacterizationTests::test_active_customer_viewer_allowed_ordinary_target_returns_contact_with_exact_lookup_order"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_ordinary_customer_denied.py",
+      "sha256": "8428bb8c2cfb853a5bc20b78b15e48917fcb5338c3f367aa9333f32ab984bdd0",
+      "last_commit": "ae3658ba3d5009999ea94e1a54e2deb11ce891fa",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_ordinary_customer_denied.py::UsersPublicReadOrdinaryCustomerDeniedCharacterizationTests::test_active_customer_viewer_disallowed_ordinary_target_raises_exact_404_with_exact_lookup_order"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_accountant_customer_allowed.py",
+      "sha256": "085f75263720538d6cd8b4d82b56c813559a6e465de6323965ed886e0647e5be",
+      "last_commit": "4901c6929b42fa002d28640ab61b206400e61e60",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_accountant_customer_allowed.py::UsersPublicReadAccountantCustomerAllowedCharacterizationTests::test_active_customer_viewer_allowed_accountant_target_returns_owner_contact_with_exact_lookup_order"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_accountant_customer_denied.py",
+      "sha256": "528a04b1b2eff501148a44122293108158354237aed0c8e7b77e284a46c94582",
+      "last_commit": "009f858346b788fd8d0d19f59a0bd6345d0db8c6",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_accountant_customer_denied.py::UsersPublicReadAccountantCustomerDeniedCharacterizationTests::test_active_customer_viewer_disallowed_accountant_target_raises_exact_404_with_exact_lookup_order"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_customer_short_circuits_batch.py",
+      "sha256": "a5d41f07d810b6f0ec68406e1152e022b02560e8ddc77a6b33d397bb8409da3e",
+      "last_commit": "521b2b3d7d537a730f08915009aabd959c7b790e",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-SEARCH-PUBLIC-USERS-L428",
+        "API-IDENTITY-GET-USERS-PUBLIC-LIST-PROJECT-USERS-DIRECTORY-L512"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_customer_short_circuits_batch.py::UsersPublicCustomerShortCircuitsCharacterizationTests::test_search_public_users_active_customer_without_allowed_targets_returns_empty_before_query_execution",
+        "tests/test_p1_00b_characterization_users_public_customer_short_circuits_batch.py::UsersPublicCustomerShortCircuitsCharacterizationTests::test_list_project_users_directory_active_customer_raises_exact_403_before_accountant_lookup_or_query"
+      ]
+    }
+  ]
+}
