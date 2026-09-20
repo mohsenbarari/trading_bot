@@ -183,6 +183,8 @@ _TASK_BOUNDARY_CODES = frozenset({
     "TASK_ASSIGNMENT_TOKEN_MISSING",
     "ASSIGNMENT_EXPIRED",
     "ASSIGNMENT_CONTRACT_INVALID",
+    "TASK_FILE_UNREADABLE",
+    "TASK_FILE_CHANGED_DURING_READ",
 })
 _TASK_BOUNDARY_DESCRIPTIONS = {
     "TASK_FILE_NOT_FOUND": "file not found",
@@ -191,6 +193,8 @@ _TASK_BOUNDARY_DESCRIPTIONS = {
     "TASK_FILE_OUTSIDE_ROOT": "is outside the project root",
     "TASK_FILE_NOT_REGULAR": "is not a regular file",
     "TASK_BUDGET_EXCEEDED": "exceeds the safe context budget",
+    "TASK_FILE_UNREADABLE": "is unreadable",
+    "TASK_FILE_CHANGED_DURING_READ": "changed while it was being read",
 }
 
 
@@ -411,9 +415,20 @@ def bounded_file_bytes(
     try:
         descriptor = os.open(candidate, flags)
     except OSError as exc:
+        if failure_callback is not None:
+            if isinstance(exc, FileNotFoundError):
+                raise failure_callback("TASK_FILE_NOT_FOUND", safe_path)
+            raise failure_callback("TASK_FILE_UNREADABLE", safe_path)
         raise ProposalError(f"cannot safely open {label}") from exc
     try:
-        before = os.fstat(descriptor)
+        try:
+            before = os.fstat(descriptor)
+        except OSError as exc:
+            if failure_callback is not None:
+                if isinstance(exc, FileNotFoundError):
+                    raise failure_callback("TASK_FILE_NOT_FOUND", safe_path)
+                raise failure_callback("TASK_FILE_UNREADABLE", safe_path)
+            raise
         if not stat.S_ISREG(before.st_mode):
             if failure_callback is not None:
                 raise failure_callback("TASK_FILE_NOT_REGULAR", safe_path)
@@ -428,19 +443,39 @@ def bounded_file_bytes(
             if failure_callback is not None:
                 raise failure_callback("TASK_BUDGET_EXCEEDED", safe_path)
             raise ProposalError(f"{label} exceeds the safe context budget")
-        with os.fdopen(descriptor, "rb", closefd=False) as source:
-            data = source.read(limit + 1)
+        try:
+            with os.fdopen(descriptor, "rb", closefd=False) as source:
+                data = source.read(limit + 1)
+        except OSError as exc:
+            if failure_callback is not None:
+                if isinstance(exc, FileNotFoundError):
+                    raise failure_callback("TASK_FILE_NOT_FOUND", safe_path)
+                raise failure_callback("TASK_FILE_UNREADABLE", safe_path)
+            raise
         if len(data) > limit:
+            if failure_callback is not None:
+                raise failure_callback("TASK_BUDGET_EXCEEDED", safe_path)
             raise ProposalError(f"{label} exceeds the safe context budget")
-        after = os.fstat(descriptor)
+        try:
+            after = os.fstat(descriptor)
+        except OSError as exc:
+            if failure_callback is not None:
+                if isinstance(exc, FileNotFoundError):
+                    raise failure_callback("TASK_FILE_NOT_FOUND", safe_path)
+                raise failure_callback("TASK_FILE_UNREADABLE", safe_path)
+            raise
         try:
             named = os.stat(candidate, follow_symlinks=False)
             final_resolved = candidate.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
+            if failure_callback is not None:
+                raise failure_callback("TASK_FILE_CHANGED_DURING_READ", safe_path)
             raise ProposalError(f"{label} changed while it was being read") from exc
         if (file_fingerprint(before) != file_fingerprint(after)
                 or file_fingerprint(after) != file_fingerprint(named)
                 or final_resolved != candidate):
+            if failure_callback is not None:
+                raise failure_callback("TASK_FILE_CHANGED_DURING_READ", safe_path)
             raise ProposalError(f"{label} changed while it was being read")
         return data
     finally:
