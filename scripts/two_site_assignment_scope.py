@@ -706,7 +706,7 @@ def _validate_stage_in_execution_order(exec_order_data: Any, stage_id: str) -> N
         )
 
 
-def load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> AssignmentScope:
+def _load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> AssignmentScope:
     if not integration_root:
         raise AssignmentScopeError("integration_root cannot be empty")
     integration_root_str = str(integration_root)
@@ -831,7 +831,10 @@ def load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> A
     utc_dt = expires_dt.astimezone(datetime.timezone.utc)
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     if utc_dt <= now_utc:
-        raise AssignmentScopeError("Assignment has expired")
+        raise AssignmentScopeError(
+            "Assignment has expired",
+            AssignmentFact(ASSIGNMENT_EXPIRED),
+        )
 
     iso_z = utc_dt.isoformat()
     if iso_z.endswith("+00:00"):
@@ -905,86 +908,116 @@ def load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> A
     )
 
 
+def load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> AssignmentScope:
+    try:
+        return _load_active_assignment_scope(integration_root)
+    except AssignmentScopeError as exc:
+        if exc.fact is None:
+            exc._fact = AssignmentFact(ASSIGNMENT_CONTRACT_INVALID, None)
+        raise
+
+
 def load_expected_assignment_scope(
     integration_root: Union[str, os.PathLike],
     expected_assignment_id: str,
     expected_sha256: str,
 ) -> AssignmentScope:
-    if not isinstance(expected_assignment_id, str):
-        raise AssignmentScopeError("expected_assignment_id must be a string")
-    expected_id = _validate_assignment_id(expected_assignment_id)
+    try:
+        if not isinstance(expected_assignment_id, str):
+            raise AssignmentScopeError("expected_assignment_id must be a string")
+        expected_id = _validate_assignment_id(expected_assignment_id)
 
-    if (
-        not isinstance(expected_sha256, str)
-        or len(expected_sha256) != 64
-        or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
-    ):
-        raise AssignmentScopeError("expected_sha256 must be a lowercase 64-hex digest")
+        if (
+            not isinstance(expected_sha256, str)
+            or len(expected_sha256) != 64
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+        ):
+            raise AssignmentScopeError("expected_sha256 must be a lowercase 64-hex digest")
 
-    scope = load_active_assignment_scope(integration_root)
+        scope = load_active_assignment_scope(integration_root)
 
-    if scope.assignment_id != expected_id:
-        raise AssignmentScopeError("Active assignment ID does not match expected assignment ID")
+        if scope.assignment_id != expected_id:
+            raise AssignmentScopeError("Active assignment ID does not match expected assignment ID")
 
-    if scope.sha256 != expected_sha256:
-        raise AssignmentScopeError("Active assignment sha256 digest does not match expected digest")
+        if scope.sha256 != expected_sha256:
+            raise AssignmentScopeError("Active assignment sha256 digest does not match expected digest")
 
-    return scope
+        return scope
+    except AssignmentScopeError as exc:
+        if exc.fact is None:
+            exc._fact = AssignmentFact(ASSIGNMENT_CONTRACT_INVALID, None)
+        raise
 
 
 def validate_task_scope(scope: AssignmentScope, task: Any) -> None:
-    if not isinstance(scope, AssignmentScope):
-        raise AssignmentScopeError("scope must be an AssignmentScope instance")
+    try:
+        if not isinstance(scope, AssignmentScope):
+            raise AssignmentScopeError("scope must be an AssignmentScope instance")
 
-    if isinstance(task, dict):
-        allowed_files = task.get("allowed_files")
-        goal = task.get("goal")
-    elif hasattr(task, "allowed_files") and hasattr(task, "goal"):
-        allowed_files = getattr(task, "allowed_files")
-        goal = getattr(task, "goal")
-    else:
-        raise AssignmentScopeError("task must be a dict or expose 'allowed_files' and 'goal'")
+        if isinstance(task, dict):
+            allowed_files = task.get("allowed_files")
+            goal = task.get("goal")
+        elif hasattr(task, "allowed_files") and hasattr(task, "goal"):
+            allowed_files = getattr(task, "allowed_files")
+            goal = getattr(task, "goal")
+        else:
+            raise AssignmentScopeError("task must be a dict or expose 'allowed_files' and 'goal'")
 
-    if not isinstance(allowed_files, (list, tuple)):
-        raise AssignmentScopeError("task.allowed_files must be a list or tuple")
-    if len(allowed_files) == 0:
-        raise AssignmentScopeError("task.allowed_files cannot be empty")
-    if len(allowed_files) > MAX_PATH_PATTERNS:
-        raise AssignmentScopeError("task.allowed_files exceeds maximum pattern count")
-    if len(allowed_files) != len(set(allowed_files)):
-        raise AssignmentScopeError("task.allowed_files contains duplicate paths")
+        if not isinstance(allowed_files, (list, tuple)):
+            raise AssignmentScopeError("task.allowed_files must be a list or tuple")
+        if len(allowed_files) == 0:
+            raise AssignmentScopeError("task.allowed_files cannot be empty")
+        if len(allowed_files) > MAX_PATH_PATTERNS:
+            raise AssignmentScopeError("task.allowed_files exceeds maximum pattern count")
+        if len(allowed_files) != len(set(allowed_files)):
+            raise AssignmentScopeError("task.allowed_files contains duplicate paths")
 
-    for f in allowed_files:
-        clean_f = _validate_path_or_pattern(f, is_pattern=False)
-        if not _is_path_in_scope(clean_f, scope.allowed_paths, scope.forbidden_paths):
-            raise AssignmentScopeError("Task allowed_file is outside assignment scope")
+        for f in allowed_files:
+            clean_f = _validate_path_or_pattern(f, is_pattern=False)
+            if not _is_path_in_scope(clean_f, scope.allowed_paths, scope.forbidden_paths):
+                raise AssignmentScopeError(
+                    "Task allowed_file is outside assignment scope",
+                    _task_path_outside_scope_fact(clean_f),
+                )
 
-    if not isinstance(goal, str):
-        raise AssignmentScopeError("task.goal must be a string")
-    if not goal.strip():
-        raise AssignmentScopeError("task.goal cannot be empty")
+        if not isinstance(goal, str):
+            raise AssignmentScopeError("task.goal must be a string")
+        if not goal.strip():
+            raise AssignmentScopeError("task.goal cannot be empty")
 
-    token_pattern = re.compile(
-        r"(?<![A-Za-z0-9_-])" + re.escape(scope.assignment_id) + r"(?![A-Za-z0-9_-])"
-    )
-    if not token_pattern.search(goal):
-        raise AssignmentScopeError("task.goal does not contain assignment ID as a bounded token")
+        token_pattern = re.compile(
+            r"(?<![A-Za-z0-9_-])" + re.escape(scope.assignment_id) + r"(?![A-Za-z0-9_-])"
+        )
+        if not token_pattern.search(goal):
+            raise AssignmentScopeError(
+                "task.goal does not contain assignment ID as a bounded token",
+                AssignmentFact(TASK_ASSIGNMENT_TOKEN_MISSING),
+            )
+    except AssignmentScopeError as exc:
+        if exc.fact is None:
+            exc._fact = AssignmentFact(ASSIGNMENT_CONTRACT_INVALID, None)
+        raise
 
 
 def validate_changed_paths(scope: AssignmentScope, paths: Any) -> None:
-    if not isinstance(scope, AssignmentScope):
-        raise AssignmentScopeError("scope must be an AssignmentScope instance")
+    try:
+        if not isinstance(scope, AssignmentScope):
+            raise AssignmentScopeError("scope must be an AssignmentScope instance")
 
-    if not isinstance(paths, (list, tuple)):
-        raise AssignmentScopeError("paths must be a list or tuple")
-    if len(paths) == 0:
-        raise AssignmentScopeError("paths cannot be empty")
-    if len(paths) > MAX_PATH_PATTERNS:
-        raise AssignmentScopeError("paths exceeds maximum path count")
-    if len(paths) != len(set(paths)):
-        raise AssignmentScopeError("paths contains duplicate paths")
+        if not isinstance(paths, (list, tuple)):
+            raise AssignmentScopeError("paths must be a list or tuple")
+        if len(paths) == 0:
+            raise AssignmentScopeError("paths cannot be empty")
+        if len(paths) > MAX_PATH_PATTERNS:
+            raise AssignmentScopeError("paths exceeds maximum path count")
+        if len(paths) != len(set(paths)):
+            raise AssignmentScopeError("paths contains duplicate paths")
 
-    for p in paths:
-        clean_p = _validate_path_or_pattern(p, is_pattern=False)
-        if not _is_path_in_scope(clean_p, scope.allowed_paths, scope.forbidden_paths):
-            raise AssignmentScopeError("Changed path is outside assignment scope")
+        for p in paths:
+            clean_p = _validate_path_or_pattern(p, is_pattern=False)
+            if not _is_path_in_scope(clean_p, scope.allowed_paths, scope.forbidden_paths):
+                raise AssignmentScopeError("Changed path is outside assignment scope")
+    except AssignmentScopeError as exc:
+        if exc.fact is None:
+            exc._fact = AssignmentFact(ASSIGNMENT_CONTRACT_INVALID, None)
+        raise
