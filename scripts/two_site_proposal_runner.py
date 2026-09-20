@@ -349,7 +349,13 @@ def file_fingerprint(value: os.stat_result) -> tuple[int, int, int, int, int, in
     )
 
 
-def bounded_file_bytes(root: Path, path: Path, limit: int, label: str) -> bytes:
+def bounded_file_bytes(
+    root: Path,
+    path: Path,
+    limit: int,
+    label: str,
+    failure_callback=None,
+) -> bytes:
     """Read one project file without following links or allocating past limit + 1."""
     if limit < 0:
         raise ProposalError("file byte limit cannot be negative")
@@ -357,12 +363,32 @@ def bounded_file_bytes(root: Path, path: Path, limit: int, label: str) -> bytes:
     candidate = path if path.is_absolute() else root / path
     candidate = Path(os.path.abspath(candidate))
     if not candidate.is_relative_to(root):
+        if failure_callback is not None:
+            raise failure_callback("TASK_FILE_OUTSIDE_ROOT", None)
         raise ProposalError(f"{label} is outside the project root")
+    safe_path: str | None = None
+    if candidate != root:
+        rel_str = candidate.relative_to(root).as_posix()
+        if (
+            len(rel_str.encode("utf-8")) <= _MAX_BOUNDARY_PATH_BYTES
+            and "\0" not in rel_str
+            and "\\" not in rel_str
+            and not any(part in {"", ".", ".."} for part in rel_str.split("/"))
+            and not SECRET.search(rel_str)
+        ):
+            safe_path = rel_str
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
+        if failure_callback is not None:
+            if candidate.is_symlink():
+                raise failure_callback("TASK_FILE_SYMLINK", safe_path)
+            if isinstance(exc, FileNotFoundError):
+                raise failure_callback("TASK_FILE_NOT_FOUND", safe_path)
         raise ProposalError(f"cannot safely resolve {label}") from exc
     if resolved != candidate:
+        if failure_callback is not None:
+            raise failure_callback("TASK_FILE_SYMLINK", safe_path)
         raise ProposalError(f"{label} is a symlink or path escape")
 
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -373,12 +399,18 @@ def bounded_file_bytes(root: Path, path: Path, limit: int, label: str) -> bytes:
     try:
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode):
+            if failure_callback is not None:
+                raise failure_callback("TASK_FILE_NOT_REGULAR", safe_path)
             raise ProposalError(f"{label} is not a regular file")
         # A hardlink can make bytes outside the project reachable through an
         # apparently safe in-project pathname. Proposal inputs must be unique.
         if before.st_nlink != 1:
+            if failure_callback is not None:
+                raise failure_callback("TASK_FILE_HARDLINKED", safe_path)
             raise ProposalError(f"{label} is hardlinked and cannot be trusted")
         if before.st_size > limit:
+            if failure_callback is not None:
+                raise failure_callback("TASK_BUDGET_EXCEEDED", safe_path)
             raise ProposalError(f"{label} exceeds the safe context budget")
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             data = source.read(limit + 1)
