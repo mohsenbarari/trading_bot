@@ -19,6 +19,12 @@ import yaml
 __all__ = [
     "AssignmentScopeError",
     "AssignmentScope",
+    "AssignmentFact",
+    "ASSIGNMENT_FACT_CODES",
+    "TASK_PATH_OUTSIDE_SCOPE",
+    "TASK_ASSIGNMENT_TOKEN_MISSING",
+    "ASSIGNMENT_EXPIRED",
+    "ASSIGNMENT_CONTRACT_INVALID",
     "load_active_assignment_scope",
     "load_expected_assignment_scope",
     "validate_task_scope",
@@ -30,9 +36,124 @@ MAX_GIT_OUTPUT_BYTES = 4096
 MAX_PATH_PATTERNS = 256
 GIT_EXECUTABLE = "/usr/bin/git"
 
+TASK_PATH_OUTSIDE_SCOPE = "TASK_PATH_OUTSIDE_SCOPE"
+TASK_ASSIGNMENT_TOKEN_MISSING = "TASK_ASSIGNMENT_TOKEN_MISSING"
+ASSIGNMENT_EXPIRED = "ASSIGNMENT_EXPIRED"
+ASSIGNMENT_CONTRACT_INVALID = "ASSIGNMENT_CONTRACT_INVALID"
+
+ASSIGNMENT_FACT_CODES = frozenset({
+    TASK_PATH_OUTSIDE_SCOPE,
+    TASK_ASSIGNMENT_TOKEN_MISSING,
+    ASSIGNMENT_EXPIRED,
+    ASSIGNMENT_CONTRACT_INVALID,
+})
+
+
+def _validate_fact_path(p: Optional[str]) -> Optional[str]:
+    if p is None:
+        return None
+    if not isinstance(p, str) or type(p) is not str:
+        raise TypeError("Fact path must be an exact string or None")
+    if not p:
+        raise ValueError("Fact path cannot be empty")
+    if p != p.strip():
+        raise ValueError("Leading or trailing whitespace rejected in fact path")
+    try:
+        encoded = p.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Fact path must be valid UTF-8") from exc
+    if len(encoded) > 1024 or len(p) > 1024:
+        raise ValueError("Fact path exceeds length limit")
+    if "\0" in p or any(ord(c) < 32 or ord(c) == 127 for c in p):
+        raise ValueError("Control characters or NUL rejected in fact path")
+    if "\\" in p:
+        raise ValueError("Backslashes rejected in fact path")
+    if p.startswith("/"):
+        raise ValueError("Absolute paths rejected in fact path")
+    if os.path.splitdrive(p)[0] or re.match(r"^[a-zA-Z]:", p):
+        raise ValueError("Drive prefixes rejected in fact path")
+    if "@" in p:
+        raise ValueError("Credential-like '@' rejected in fact path")
+    if re.search(
+        r"(?i)(?:password|passwd|secret|token|bearer|credential|api[_-]?key|private[_-]?key)",
+        p,
+    ):
+        raise ValueError("Credential-like content rejected in fact path")
+    parts = p.split("/")
+    for part in parts:
+        if part == "":
+            raise ValueError("Empty path segment rejected in fact path")
+        if part == ".":
+            raise ValueError("Dot '.' segment rejected in fact path")
+        if part == "..":
+            raise ValueError("Dot-dot '..' traversal segment rejected in fact path")
+        if part.lower() == ".git":
+            raise ValueError("'.git' segment rejected in fact path")
+        if part.startswith("-"):
+            raise ValueError("Leading dash in path segment rejected in fact path")
+    if any(c in p for c in "*?[]"):
+        raise ValueError("Wildcard characters rejected in fact path")
+    return p
+
+
+@dataclass(frozen=True)
+class AssignmentFact:
+    code: str
+    path: Optional[str] = None
+
+    def __init__(self, code: str, path: Optional[str] = None) -> None:
+        if type(self) is not AssignmentFact:
+            raise TypeError("AssignmentFact cannot be subclassed")
+        if not isinstance(code, str) or type(code) is not str:
+            raise TypeError("Fact code must be an exact string")
+        if code not in ASSIGNMENT_FACT_CODES:
+            raise ValueError(f"Unknown assignment fact code: {code!r}")
+        clean_path = _validate_fact_path(path)
+        object.__setattr__(self, "code", code)
+        object.__setattr__(self, "path", clean_path)
+
 
 class AssignmentScopeError(Exception):
     """Raised when assignment scope loading or validation fails."""
+
+    def __init__(
+        self,
+        message: str = "",
+        fact: Optional[AssignmentFact] = None,
+        *extra: Any,
+    ) -> None:
+        if extra:
+            super().__init__(message, fact, *extra)
+        elif message:
+            super().__init__(message)
+        else:
+            super().__init__()
+        if fact is not None:
+            if type(fact) is not AssignmentFact:
+                raise TypeError("fact must be an exact AssignmentFact instance")
+            self._fact: Optional[AssignmentFact] = fact
+        else:
+            self._fact = None
+
+    @property
+    def fact(self) -> Optional[AssignmentFact]:
+        return self._fact
+
+    @property
+    def code(self) -> Optional[str]:
+        return self._fact.code if self._fact is not None else None
+
+    @property
+    def path(self) -> Optional[str]:
+        return self._fact.path if self._fact is not None else None
+
+    @property
+    def fact_code(self) -> Optional[str]:
+        return self._fact.code if self._fact is not None else None
+
+    @property
+    def fact_path(self) -> Optional[str]:
+        return self._fact.path if self._fact is not None else None
 
 
 @dataclass(frozen=True)
