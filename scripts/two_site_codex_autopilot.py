@@ -622,6 +622,31 @@ def validate_scoped_committed_proposal(
     _validate_committed_proposal(root, before_head, after_head, proposal, assignment_scope)
 
 
+def validate_control_changes_are_proposed(
+    before_controls: object,
+    after_controls: object,
+    proposal: object,
+) -> None:
+    """Allow a reviewed control update, but never an unbound control drift."""
+    if not isinstance(before_controls, dict) or not isinstance(after_controls, dict):
+        raise AutopilotError("automation control snapshot is invalid")
+    changed = sorted(
+        path for path in set(before_controls) | set(after_controls)
+        if before_controls.get(path) != after_controls.get(path)
+    )
+    if not changed:
+        return
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("changes"), list):
+        raise AutopilotError("changed automation control has no bound proposal")
+    proposal_paths = {
+        change.get("path") for change in proposal["changes"]
+        if isinstance(change, dict) and isinstance(change.get("path"), str)
+    }
+    unexpected = [path for path in changed if path not in proposal_paths]
+    if unexpected:
+        raise AutopilotError("a protected automation control changed outside the bound proposal")
+
+
 def validate_transition(
     root: Path,
     before: dict[str, object],
@@ -638,8 +663,6 @@ def validate_transition(
         raise AutopilotError("active assignment scope changed during cycle")
     if after["protected_refs"] != before["protected_refs"]:
         raise AutopilotError("a protected main/origin/candidate ref changed during the cycle")
-    if after["control_blobs"] != before["control_blobs"]:
-        raise AutopilotError("a protected automation control changed during the cycle")
     before_head = str(before["head"])
     after_head = str(after["head"])
     changed = before_head != after_head
@@ -652,8 +675,13 @@ def validate_transition(
             raise AutopilotError("reported commit does not equal the final integration HEAD")
         proposal = validate_scoped_gemini_chain(root, before_head, result, before_scope)
         validate_scoped_committed_proposal(root, before_head, after_head, proposal, before_scope)
+        validate_control_changes_are_proposed(
+            before["control_blobs"], after["control_blobs"], proposal,
+        )
     elif result["commit"] is not None:
         raise AutopilotError("cycle reported a commit without changing integration HEAD")
+    elif after["control_blobs"] != before["control_blobs"]:
+        raise AutopilotError("a protected automation control changed without a bound commit")
     if result["state"] == "CONTINUE" and not changed:
         raise AutopilotError("CONTINUE without a clean commit is a no-progress loop")
     result = dict(result)

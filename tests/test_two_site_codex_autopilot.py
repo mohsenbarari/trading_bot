@@ -355,9 +355,20 @@ class AutopilotContracts(unittest.TestCase):
                 autopilot.validate_transition(self.root, before, self.result())
 
         changed_control = dict(after, control_blobs={"runner": "4" * 40})
-        with patch.object(autopilot, "validate_repository", return_value=changed_control):
+        with patch.object(autopilot, "validate_repository", return_value=changed_control), \
+                patch.object(autopilot, "git", return_value=""), \
+                patch.object(autopilot, "validate_scoped_gemini_chain", return_value=proposal), \
+                patch.object(autopilot, "validate_scoped_committed_proposal"):
             with self.assertRaisesRegex(autopilot.AutopilotError, "control"):
                 autopilot.validate_transition(self.root, before, self.result())
+
+        control_proposal = {"changes": [{"path": "runner"}]}
+        with patch.object(autopilot, "validate_repository", return_value=changed_control), \
+                patch.object(autopilot, "git", return_value=""), \
+                patch.object(autopilot, "validate_scoped_gemini_chain", return_value=control_proposal), \
+                patch.object(autopilot, "validate_scoped_committed_proposal"):
+            checked = autopilot.validate_transition(self.root, before, self.result())
+        self.assertTrue(checked["head_changed"])
 
         mutated_scope = autopilot.AssignmentScope(
             assignment_id=before["assignment_scope"].assignment_id,
