@@ -95,8 +95,9 @@ AE01-10B بدون تغییر محصول، CLI، Provider، deploy یا schemaه�
 
 1. **AE01-20A1a — قرارداد typed داخلی:** نخست enum/codeهای متناهی و constructor داخلی، metadata canonical/sanitized و سقف‌های آن را می‌سازد. این واحد reader مشترک را تغییر نمی‌دهد و هیچ call site یا helper عمومی ندارد.
 2. **AE01-20A1b.1 — JSON فقط-task:** فقط decode UTF-8، JSON بدشکل و duplicate-key در task از branchهای صریح خود به `TASK_SCHEMA_INVALID` typed می‌شوند؛ `unique_json` عمومی و هر reader/path call site تغییری نمی‌کند و catch عمومی ممنوع است.
-3. **AE01-20A1b.2 — مسیر و safe-read فقط-task:** فقط پس از پذیرش A1b.1، مسیر، link/hardlink، read و budget در مسیر `load_task()` با opt-in محدود به typed facts متصل می‌شوند. رفتار عمومیِ `check()` و `load_task()` عیناً باقی می‌ماند و non-task artifactها هرگز task input نیستند.
-4. **AE01-20A2 — گزارش عمومی aggregation:** فقط بر پایهٔ factهای typedِ پذیرفته‌شده، helper فقط‌خواندنیِ bounded برای task امن نقص‌های مستقل readiness را در نتیجه‌ای پایدار برمی‌گرداند. هر fatal fact بلافاصله یک `TASK_BLOCKED` یگانه است و خواندن بعدی را متوقف می‌کند.
+3. **AE01-20A1b.2a — مسیر فقط-task:** فقط validation مسیر task/context و symlink/path-escape در `load_task()`، با hook opt-in که default مشترک آن تغییر نمی‌کند، به typed facts متصل می‌شوند.
+4. **AE01-20A1b.2b — safe-read و budget فقط-task:** فقط پس از پذیرش مسیر، link/hardlink، regular/open/read/race و per-file/aggregate budget در مسیر `load_task()` با fact typed متصل می‌شوند. non-task artifactها هرگز task input نیستند.
+5. **AE01-20A2 — گزارش عمومی aggregation:** فقط بر پایهٔ factهای typedِ پذیرفته‌شده، helper فقط‌خواندنیِ bounded برای task امن نقص‌های مستقل readiness را در نتیجه‌ای پایدار برمی‌گرداند. هر fatal fact بلافاصله یک `TASK_BLOCKED` یگانه است و خواندن بعدی را متوقف می‌کند.
 
 مسیر پیشنهادی، دقیقاً دو فاز دارد:
 
@@ -112,7 +113,7 @@ AE01-10B بدون تغییر محصول، CLI، Provider، deploy یا schemaه�
 3. task سالم با تمام model/session closure و بودجهٔ مجاز، همان `TASK_READY` قطعی را بازمی‌گرداند و خروجی آن با اجرای تکراری یکسان است.
 4. testهای synthetic repository باید متغیرهای scope زنده را صریحاً پاک کنند یا fixture scope معتبر بسازند؛ نباید نتیجهٔ test به assignment واقعیِ Supervisor نشت کند.
 
-فایل‌های نخستین واحد فقط `scripts/two_site_proposal_runner.py` و `tests/test_two_site_proposal_task_preflight.py` هستند. چون runner بزرگ است، Worker فقط replacementهای دقیق و محدود می‌فرستد. ابتدا AE01-20A1a باید contract متناهی و metadata امن را بدون تغییر reader مشترک یا call site اثبات کند. سپس AE01-20A1b.1 فقط JSON بدشکل/UTF-8/duplicate-key را با branchهای صریح typed می‌کند؛ A1b.2 جداگانه traversal/noncanonical path، link/hardlink، read ناامن و budget breach را فقط در مسیر task متصل می‌کند. سپس AE01-20A2 سناریوهای aggregation بالا را اجرا می‌کند. آغاز AE01-20B (جایگزینی کنترل‌کنندهٔ پراکنده با helper جدید) تنها پس از review، تست و پذیرش هر چهار واحد مجاز است.
+فایل‌های نخستین واحد فقط `scripts/two_site_proposal_runner.py` و `tests/test_two_site_proposal_task_preflight.py` هستند. چون runner بزرگ است، Worker فقط replacementهای دقیق و محدود می‌فرستد. ابتدا AE01-20A1a باید contract متناهی و metadata امن را بدون تغییر reader مشترک یا call site اثبات کند. سپس AE01-20A1b.1 فقط JSON بدشکل/UTF-8/duplicate-key را با branchهای صریح typed می‌کند؛ A1b.2a traversal/noncanonical path و path-escape را جداگانه و A1b.2b link/hardlink، read ناامن و budget breach را فقط در مسیر task متصل می‌کند. سپس AE01-20A2 سناریوهای aggregation بالا را اجرا می‌کند. آغاز AE01-20B (جایگزینی کنترل‌کنندهٔ پراکنده با helper جدید) تنها پس از review، تست و پذیرش هر پنج واحد مجاز است.
 
 ---
 
