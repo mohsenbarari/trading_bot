@@ -1179,7 +1179,7 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
             raise ProposalError("credential-like content excluded from model input")
         sources[name] = {"sha256": sha(content), "content": content.decode()}
     if len(json.dumps({"task": task, "sources": sources}).encode()) > MAX_CONTEXT:
-        raise ProposalError("split the task: supplied context exceeds budget")
+        raise _task_path_error("TASK_BUDGET_EXCEEDED")
     return task, sources
 
 

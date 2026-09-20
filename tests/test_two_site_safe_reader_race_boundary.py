@@ -1,4 +1,5 @@
 import io
+import json
 os = __import__("os")
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +10,7 @@ for _key in list(os.environ):
         del os.environ[_key]
 
 from scripts.two_site_proposal_runner import (
+    MAX_CONTEXT,
     ProposalError,
     _TaskBoundaryError,
     bounded_file_bytes,
@@ -179,3 +181,37 @@ def test_load_task_unreadable_context_file(tmp_path: Path) -> None:
             load_task(root, Path("task.json"))
         assert exc_info.value.code == "TASK_FILE_UNREADABLE"
         assert exc_info.value.path == "ctx.py"
+
+
+def test_load_task_aggregate_budget_boundary(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+    task = {
+        "task_id": "T1",
+        "goal": "G",
+        "context_files": ["ctx.py"],
+        "allowed_files": ["ctx.py"],
+        "requirements": ["R1"],
+        "test_selectors": ["T1"],
+    }
+    task_file = root / "task.json"
+    task_file.write_text(json.dumps(task))
+    ctx_file = root / "ctx.py"
+    ctx_file.write_text("")
+
+    loaded_task, loaded_sources = load_task(root, Path("task.json"))
+    base_len = len(json.dumps({"task": loaded_task, "sources": loaded_sources}).encode("utf-8"))
+    assert base_len < MAX_CONTEXT
+
+    pad = MAX_CONTEXT - base_len
+    ctx_file.write_text("a" * pad)
+    accepted_task, accepted_sources = load_task(root, Path("task.json"))
+    accepted_len = len(json.dumps({"task": accepted_task, "sources": accepted_sources}).encode("utf-8"))
+    assert accepted_len == MAX_CONTEXT
+    assert accepted_task["task_id"] == "T1"
+
+    ctx_file.write_text("a" * (pad + 1))
+    with pytest.raises(_TaskBoundaryError) as exc_info:
+        load_task(root, Path("task.json"))
+    assert exc_info.value.code == "TASK_BUDGET_EXCEEDED"
+    assert exc_info.value.path is None
+    assert exc_info.value.to_fact() == {"code": "TASK_BUDGET_EXCEEDED", "path": None}
