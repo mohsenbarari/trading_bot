@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-20 | Temporary emergency Iran standby is independent of the two-site refactor: stage the exact running production image/revision, frontend, encrypted runtime environment, database, uploads and runtime data via Object Storage only. Keep bot/sync worker and background jobs off, but leave web/API serving-ready; emergency cutover is only the human DNS A-record change. DNS and writer changes remain human-controlled.
+
 - 2026-09-03 | Codex owns two-site acceptance and external-action receipts; user Stage approval is removed, but human Web Writer action remains. Cursor uses one Coordinator, one writer by default, at most two with Codex pairing, and serial integration.
 
 - 2026-09-03 | Refactor Section 3 is approved and closed. Cursor executes `MKT-0..MKT-13` in dependency order from audited baseline through storage, capture, parse, projection, two-site sync, models, retention, backfill and Full Matrix. Activation waits for Section 4; done requires no High/Critical gaps, no behavior drift and proven restore/rebuild/parity. Resource limits and adaptive thresholds remain evidence-derived gates.
