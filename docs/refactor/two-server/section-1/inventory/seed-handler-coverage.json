@@ -15,13 +15,14 @@
     "baseline_path": "docs/refactor/two-server/section-1/inventory/scenario-records.json",
     "base_path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
     "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json",
-    "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json"
+    "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json",
+    "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 221,
-    "evidenced_seed_count": 356,
-    "remaining_seed_count": 109
+    "reconciled_new_seed_count": 225,
+    "evidenced_seed_count": 360,
+    "remaining_seed_count": 105
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [

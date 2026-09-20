@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json",
+    "sha256": "77227a80651a3cfc911450cbfcb6cce37f94ac035796739263dc77dbeb8c7e03",
+    "last_commit": "3de519e1351ebda576eafa4c27649acbb2d03f37"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_list_pending_invitations_real_async_session.py",
+      "sha256": "4cedea553a1791aeff7ef55d802ce23da2bc45579fa77e596f89d99c41948ce2",
+      "last_commit": "ef38ffda3e1f8750e6b95e1a8ab378bb34792a49",
+      "seed_ids": [
+        "API-IDENTITY-GET-INVITATIONS-LIST-PENDING-INVITATIONS-L266"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_list_pending_invitations_real_async_session.py::ListPendingInvitationsRealAsyncSessionCharacterizationTests::test_owned_active_standard_invitation_returns_sanitized_sms_projection_with_real_async_session"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_delete_pending_invitation_real_async_session.py",
+      "sha256": "efc48fbf2ca0469153a51a81cb0be3233c5c1a88df9ee7f2c56111e35288b580",
+      "last_commit": "a0162194a65ded95984b8203b550b42aee3c9496",
+      "seed_ids": [
+        "API-IDENTITY-DELETE-INVITATIONS-DELETE-PENDING-INVITATION-L294"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_delete_pending_invitation_real_async_session.py::DeletePendingInvitationRealAsyncSessionCharacterizationTests::test_owned_active_standard_invitation_revokes_releases_and_commits_with_real_async_session"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_disable_push_subscription_real_async_session.py",
+      "sha256": "97828742810d76ea08ad47dcc33f0cc2752ad9f8418bd8cdf3a0531f93c7e719",
+      "last_commit": "6d18fab30be925c151cc49e1b637fa616706a6af",
+      "seed_ids": [
+        "API-NOTIFY-DELETE-NOTIFICATIONS-DISABLE-PUSH-SUBSCRIPTION-L178"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_disable_push_subscription_real_async_session.py::NotificationDisablePushSubscriptionRealAsyncSessionCharacterizationTests::test_owned_enabled_subscription_disables_and_persists_with_real_async_session"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_upsert_push_subscription_real_async_session.py",
+      "sha256": "15bed5729db30897903e6378900cf22dd3a91f720044b9739b35457a2db7948e",
+      "last_commit": "8b94b8eec4ae70368b47240ed4d72f6d2dfae9bc",
+      "seed_ids": [
+        "API-NOTIFY-POST-NOTIFICATIONS-UPSERT-PUSH-SUBSCRIPTION-L138"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_upsert_push_subscription_real_async_session.py::NotificationUpsertPushSubscriptionRealAsyncSessionCharacterizationTests::test_configured_new_subscription_creates_and_persists_with_real_async_session"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py",
+      "sha256": "b308c8647b507c0813f43a2a357af5cdb3662261a6971eae9d994fa406aeef50",
+      "last_commit": "d35d50291bb9265567cacaf223f0ce7f692c14f2",
+      "seed_ids": [
+        "API-ADMIN-GET-ADMIN-MESSAGES-GET-CURRENT-MARKET-MESSAGE-L180",
+        "API-ADMIN-GET-ADMIN-MESSAGES-GET-MARKET-MESSAGE-HISTORY-L194",
+        "API-ADMIN-DELETE-ADMIN-MESSAGES-CLEAR-CURRENT-MARKET-MESSAGE-L235"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py::AdminMessagesCurrentHistoryClearCharacterizationTests::test_get_current_market_message_valid_cache_hit_returns_exact_payload_without_downstream_work",
+        "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py::AdminMessagesCurrentHistoryClearCharacterizationTests::test_get_market_message_history_explicit_limit_preserves_order_and_serializes_exactly",
+        "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py::AdminMessagesCurrentHistoryClearCharacterizationTests::test_clear_current_market_message_missing_current_clears_cache_and_publishes_in_order"
+      ]
+    }
+  ]
+}
