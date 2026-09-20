@@ -8,11 +8,15 @@ import sys
 import tempfile
 import unittest
 
+from unittest.mock import patch
+
 from scripts.two_site_proposal_runner import (
+    bounded_file_bytes,
     check,
     load_task,
     MAX_CONTEXT,
     ProposalError,
+    relative_file,
     _TASK_BOUNDARY_CODES,
     _TaskBoundaryError,
     unique_json,
@@ -326,6 +330,104 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             res = check(root, task_file)
             self.assertEqual(res["state"], "TASK_READY")
             self.assertEqual(res["task_id"], task["task_id"])
+
+    def test_load_task_and_check_typed_path_boundary_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve(strict=True)
+
+            # Traversal path -> TASK_PATH_OUTSIDE_SCOPE, path=None
+            task_file, _ = self._create_fixture_project(root, {"context_files": ["../outside.py"]})
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                load_task(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+            self.assertIsNone(ctx.exception.path)
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                check(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+            self.assertIsNone(ctx.exception.path)
+
+            # Noncanonical path -> TASK_PATH_OUTSIDE_SCOPE, path=None
+            task_file, _ = self._create_fixture_project(root, {"context_files": ["./example.py"]})
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                load_task(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+            self.assertIsNone(ctx.exception.path)
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                check(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+            self.assertIsNone(ctx.exception.path)
+
+            # Disallowed path -> TASK_PATH_OUTSIDE_SCOPE, path="example.txt"
+            (root / "example.txt").write_text("disallowed\n", encoding="utf-8")
+            task_file, _ = self._create_fixture_project(root, {"context_files": ["example.txt"]})
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                load_task(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+            self.assertEqual(ctx.exception.path, "example.txt")
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                check(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+            self.assertEqual(ctx.exception.path, "example.txt")
+
+            # Resolver symlink / path escape -> TASK_FILE_SYMLINK, path="symlink.py"
+            symlink_file = root / "symlink.py"
+            symlink_file.symlink_to(root / "example.py")
+            task_file, _ = self._create_fixture_project(root, {"context_files": ["symlink.py"]})
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                load_task(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_FILE_SYMLINK")
+            self.assertEqual(ctx.exception.path, "symlink.py")
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                check(root, task_file)
+            self.assertEqual(ctx.exception.code, "TASK_FILE_SYMLINK")
+            self.assertEqual(ctx.exception.path, "symlink.py")
+
+    def test_direct_default_relative_file_remains_untyped_proposal_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve(strict=True)
+
+            for bad_path in ("../outside.py", "./example.py", "dir/../file.py", "", "dir\\file.py"):
+                with self.assertRaises(ProposalError) as ctx:
+                    relative_file(root, bad_path)
+                self.assertEqual(type(ctx.exception), ProposalError)
+                self.assertNotIsInstance(ctx.exception, _TaskBoundaryError)
+                self.assertEqual(str(ctx.exception), "noncanonical file path")
+
+            for bad_path in ("disallowed.txt", ".git/config", "secret.env"):
+                with self.assertRaises(ProposalError) as ctx:
+                    relative_file(root, bad_path)
+                self.assertEqual(type(ctx.exception), ProposalError)
+                self.assertNotIsInstance(ctx.exception, _TaskBoundaryError)
+                self.assertEqual(str(ctx.exception), "file outside source/document scope")
+
+            target_file = root / "target.py"
+            target_file.write_text("x = 1\n", encoding="utf-8")
+            symlink_file = root / "symlink.py"
+            symlink_file.symlink_to(target_file)
+            with self.assertRaises(ProposalError) as ctx:
+                relative_file(root, "symlink.py")
+            self.assertEqual(type(ctx.exception), ProposalError)
+            self.assertNotIsInstance(ctx.exception, _TaskBoundaryError)
+            self.assertEqual(str(ctx.exception), "symlink or path escape")
+
+    def test_task_invalid_first_path_prevents_later_source_opening(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve(strict=True)
+            task_file, _ = self._create_fixture_project(
+                root,
+                task_override={"context_files": ["../outside.py", "example.py"]},
+            )
+
+            with patch(
+                "scripts.two_site_proposal_runner.bounded_file_bytes",
+                side_effect=bounded_file_bytes,
+            ) as mock_read:
+                with self.assertRaises(_TaskBoundaryError) as ctx:
+                    load_task(root, task_file)
+                self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
+                self.assertIsNone(ctx.exception.path)
+                self.assertEqual(mock_read.call_count, 1)
+                self.assertEqual(mock_read.call_args_list[0][0][1], task_file)
 
 
 if __name__ == "__main__":

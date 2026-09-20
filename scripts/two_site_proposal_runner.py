@@ -917,18 +917,24 @@ def is_retryable_interrupted_stream(raw: str, expected_model: str = MODEL) -> bo
     ))
 
 
-def relative_file(root: Path, name: str) -> Path:
+def relative_file(root: Path, name: str, failure_factory=None) -> Path:
     if (not isinstance(name, str) or not name or "\\" in name or "\0" in name
             or any(part in {"", ".", ".."} for part in name.split("/"))):
+        if failure_factory is not None:
+            raise failure_factory("TASK_PATH_OUTSIDE_SCOPE", name)
         raise ProposalError("noncanonical file path")
     path = PurePosixPath(name)
     if (path.is_absolute() or any(part in PROTECTED for part in path.parts)
             or any(part.startswith(".env") and not part.endswith(".example") for part in path.parts)
             or (path.suffix.lower() not in {".py", ".md", ".json", ".yaml", ".yml", ".ts", ".vue", ".css", ".example"}
                 and name not in ALLOWED_SHELL_SCRIPTS)):
+        if failure_factory is not None:
+            raise failure_factory("TASK_PATH_OUTSIDE_SCOPE", name)
         raise ProposalError("file outside source/document scope")
     target = root / name
     if target.resolve() != target or not target.is_relative_to(root):
+        if failure_factory is not None:
+            raise failure_factory("TASK_FILE_SYMLINK", name)
         raise ProposalError("symlink or path escape")
     return target
 
@@ -1056,9 +1062,26 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
         except ModuleNotFoundError:
             from two_site_cycle_tools import validate_excerpts
         validate_excerpts(root, task)
+    def _task_path_error(code: str, path_name: str) -> _TaskBoundaryError:
+        safe_path = None
+        if (
+            isinstance(path_name, str)
+            and type(path_name) is str
+            and len(path_name.encode("utf-8")) <= _MAX_BOUNDARY_PATH_BYTES
+            and "\0" not in path_name
+            and "\\" not in path_name
+            and not path_name.startswith("/")
+            and not PurePosixPath(path_name).is_absolute()
+            and not (len(path_name) >= 2 and path_name[1] == ":" and path_name[0].isalpha())
+            and not any(part in {"", ".", ".."} for part in path_name.split("/"))
+            and not SECRET.search(path_name)
+        ):
+            safe_path = path_name
+        return _TaskBoundaryError(code, safe_path)
+
     sources = {}
     for name in dict.fromkeys(task["context_files"] + task["allowed_files"]):
-        target = relative_file(root, name)
+        target = relative_file(root, name, failure_factory=_task_path_error)
         if not target.exists():
             if name in task["context_files"]:
                 raise ProposalError("required context file is missing: " + name)
