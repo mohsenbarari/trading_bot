@@ -55,7 +55,7 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         # Validate records schema and length
         records = continuation_data["records"]
         self.assertIsInstance(records, list)
-        self.assertEqual(len(records), 41)
+        self.assertEqual(len(records), 46)
 
         expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
         for record in records:
@@ -687,6 +687,76 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         }
         self.assertEqual(records[40], expected_record_40)
 
+        # Validate record 41 (commit 95658900012ef8d9ffc1c8f3600f5849c8d761e6)
+        expected_record_41 = {
+            "path": "tests/test_p1_00b_characterization_users_public_read_self_short_circuit.py",
+            "sha256": "0527a1e48a3fdedc90be0431fb956b5f2adda898111e7816d8de82d642efdaa7",
+            "last_commit": "95658900012ef8d9ffc1c8f3600f5849c8d761e6",
+            "seed_ids": [
+                "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_users_public_read_self_short_circuit.py::UsersPublicReadSelfShortCircuitCharacterizationTests::test_self_request_returns_contact_projection_before_relation_or_session_work",
+            ],
+        }
+        self.assertEqual(records[41], expected_record_41)
+
+        # Validate record 42 (commit 05dccf3d3d96e707a6052c8c7cc52a34cf88ce5a)
+        expected_record_42 = {
+            "path": "tests/test_p1_00b_characterization_users_public_read_accountant_owner.py",
+            "sha256": "a1ac8dd4e4b7dd7919afba032920f99c42b44e3586fb1d6c7d6a75d38ba26238",
+            "last_commit": "05dccf3d3d96e707a6052c8c7cc52a34cf88ce5a",
+            "seed_ids": [
+                "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_users_public_read_accountant_owner.py::UsersPublicReadAccountantOwnerCharacterizationTests::test_accountant_target_resolves_owner_contact_after_viewer_access_check_without_session_work",
+            ],
+        }
+        self.assertEqual(records[42], expected_record_42)
+
+        # Validate record 43 (commit 6fb66037561fec50e5cb7a52bf5505c62ebcbdc4)
+        expected_record_43 = {
+            "path": "tests/test_p1_00b_characterization_users_public_read_customer_owner.py",
+            "sha256": "9e1c680bfe9088cd2f0563cb4cbe25a029c759ef149a7190c104a36673e26555",
+            "last_commit": "6fb66037561fec50e5cb7a52bf5505c62ebcbdc4",
+            "seed_ids": [
+                "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_users_public_read_customer_owner.py::UsersPublicReadCustomerOwnerCharacterizationTests::test_customer_target_returns_customer_contact_for_owner_without_viewer_accountant_or_session_work",
+            ],
+        }
+        self.assertEqual(records[43], expected_record_43)
+
+        # Validate record 44 (commit 3d15a738492d6ba91f8cce6a4abdeece9d4ceb97)
+        expected_record_44 = {
+            "path": "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer.py",
+            "sha256": "7551f778cb06a2c119aa0aab698cd7f128f79d32fda58805e9a8edaf8ef48b75",
+            "last_commit": "3d15a738492d6ba91f8cce6a4abdeece9d4ceb97",
+            "seed_ids": [
+                "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer.py::UsersPublicReadCustomerAccountantViewerCharacterizationTests::test_customer_target_returns_contact_for_matching_owner_accountant_viewer_without_session_work",
+            ],
+        }
+        self.assertEqual(records[44], expected_record_44)
+
+        # Validate record 45 (commit 3fbfda9e209feba8dc1d0e09d4e319fb43853a86)
+        expected_record_45 = {
+            "path": "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer_denied.py",
+            "sha256": "9679141a03e285ca80e2108e5c36be52261601fb6bcd6bd999c9f935be30afd5",
+            "last_commit": "3fbfda9e209feba8dc1d0e09d4e319fb43853a86",
+            "seed_ids": [
+                "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548",
+            ],
+            "test_selectors": [
+                "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer_denied.py::UsersPublicReadCustomerAccountantViewerDeniedCharacterizationTests::test_customer_target_is_hidden_from_accountant_viewer_for_different_owner_without_session_work",
+            ],
+        }
+        self.assertEqual(records[45], expected_record_45)
+
         # Validate six-record slice and six new unique canonical seed IDs
         six_record_slice = records[25:31]
         self.assertEqual(len(six_record_slice), 6)
@@ -813,15 +883,41 @@ class RecentCharacterizationContinuationContractTests(unittest.TestCase):
         self.assertTrue(set(baseline_overlap_seed_ids).isdisjoint(prior_36_seed_set))
         self.assertTrue(set(baseline_overlap_seed_ids).issubset(baseline_seed_set))
 
+        # Validate appended ninth five-record slice (records 41 through 45)
+        ninth_record_slice = records[41:46]
+        self.assertEqual(len(ninth_record_slice), 5)
+        expected_ninth_slice_seed_id = "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+        ninth_slice_seed_ids = [seed_id for record in ninth_record_slice for seed_id in record["seed_ids"]]
+        self.assertEqual(ninth_slice_seed_ids, [expected_ninth_slice_seed_id] * 5)
+        self.assertEqual(len(ninth_slice_seed_ids), 5)
+        self.assertEqual(len(set(ninth_slice_seed_ids)), 1)
+        self.assertTrue(set(ninth_slice_seed_ids).issubset(inventory_seed_set))
+
+        expected_ninth_slice_selectors = [
+            "tests/test_p1_00b_characterization_users_public_read_self_short_circuit.py::UsersPublicReadSelfShortCircuitCharacterizationTests::test_self_request_returns_contact_projection_before_relation_or_session_work",
+            "tests/test_p1_00b_characterization_users_public_read_accountant_owner.py::UsersPublicReadAccountantOwnerCharacterizationTests::test_accountant_target_resolves_owner_contact_after_viewer_access_check_without_session_work",
+            "tests/test_p1_00b_characterization_users_public_read_customer_owner.py::UsersPublicReadCustomerOwnerCharacterizationTests::test_customer_target_returns_customer_contact_for_owner_without_viewer_accountant_or_session_work",
+            "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer.py::UsersPublicReadCustomerAccountantViewerCharacterizationTests::test_customer_target_returns_contact_for_matching_owner_accountant_viewer_without_session_work",
+            "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer_denied.py::UsersPublicReadCustomerAccountantViewerDeniedCharacterizationTests::test_customer_target_is_hidden_from_accountant_viewer_for_different_owner_without_session_work",
+        ]
+        ninth_slice_selectors = [selector for record in ninth_record_slice for selector in record["test_selectors"]]
+        self.assertEqual(ninth_slice_selectors, expected_ninth_slice_selectors)
+        self.assertEqual(len(ninth_slice_selectors), 5)
+        self.assertEqual(len(set(ninth_slice_selectors)), 5)
+
+        prior_41_seed_set = set(seed_id for record in records[:41] for seed_id in record["seed_ids"])
+        self.assertTrue(set(ninth_slice_seed_ids).isdisjoint(prior_41_seed_set))
+        self.assertTrue(set(ninth_slice_seed_ids).isdisjoint(baseline_seed_set))
+
         # Validate seed occurrences and distinct seed IDs
         all_seed_ids = [seed_id for record in records for seed_id in record["seed_ids"]]
-        self.assertEqual(len(all_seed_ids), 58)
-        self.assertEqual(len(set(all_seed_ids)), 57)
+        self.assertEqual(len(all_seed_ids), 63)
+        self.assertEqual(len(set(all_seed_ids)), 58)
 
         # Validate selector occurrences and distinct selectors
         all_selectors = [selector for record in records for selector in record["test_selectors"]]
-        self.assertEqual(len(all_selectors), 73)
-        self.assertEqual(len(set(all_selectors)), 73)
+        self.assertEqual(len(all_selectors), 78)
+        self.assertEqual(len(set(all_selectors)), 78)
 
         # Verify that each recorded SHA-256 equals current bytes of its referenced file
         for record in records:

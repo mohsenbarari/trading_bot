@@ -506,6 +506,61 @@
         "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_user_block_settings_without_user_stops_before_parse_session_or_delivery",
         "tests/test_p1_00b_characterization_admin_users_unlinked_block_settings_guards_batch.py::AdminUsersUnlinkedBlockSettingsGuardsCharacterizationTests::test_admin_set_max_block_without_user_stops_before_parse_session_or_delivery"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_self_short_circuit.py",
+      "sha256": "0527a1e48a3fdedc90be0431fb956b5f2adda898111e7816d8de82d642efdaa7",
+      "last_commit": "95658900012ef8d9ffc1c8f3600f5849c8d761e6",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_self_short_circuit.py::UsersPublicReadSelfShortCircuitCharacterizationTests::test_self_request_returns_contact_projection_before_relation_or_session_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_accountant_owner.py",
+      "sha256": "a1ac8dd4e4b7dd7919afba032920f99c42b44e3586fb1d6c7d6a75d38ba26238",
+      "last_commit": "05dccf3d3d96e707a6052c8c7cc52a34cf88ce5a",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_accountant_owner.py::UsersPublicReadAccountantOwnerCharacterizationTests::test_accountant_target_resolves_owner_contact_after_viewer_access_check_without_session_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_customer_owner.py",
+      "sha256": "9e1c680bfe9088cd2f0563cb4cbe25a029c759ef149a7190c104a36673e26555",
+      "last_commit": "6fb66037561fec50e5cb7a52bf5505c62ebcbdc4",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_customer_owner.py::UsersPublicReadCustomerOwnerCharacterizationTests::test_customer_target_returns_customer_contact_for_owner_without_viewer_accountant_or_session_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer.py",
+      "sha256": "7551f778cb06a2c119aa0aab698cd7f128f79d32fda58805e9a8edaf8ef48b75",
+      "last_commit": "3d15a738492d6ba91f8cce6a4abdeece9d4ceb97",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer.py::UsersPublicReadCustomerAccountantViewerCharacterizationTests::test_customer_target_returns_contact_for_matching_owner_accountant_viewer_without_session_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer_denied.py",
+      "sha256": "9679141a03e285ca80e2108e5c36be52261601fb6bcd6bd999c9f935be30afd5",
+      "last_commit": "3fbfda9e209feba8dc1d0e09d4e319fb43853a86",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_public_read_customer_accountant_viewer_denied.py::UsersPublicReadCustomerAccountantViewerDeniedCharacterizationTests::test_customer_target_is_hidden_from_accountant_viewer_for_different_owner_without_session_work"
+      ]
     }
   ]
 }

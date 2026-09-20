@@ -73,9 +73,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 220)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 355)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 110)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 221)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 356)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 109)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -149,7 +149,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         for record in base_data.get("records", []):
             prior_recent_ids.extend(record.get("seed_ids", []))
         continuation_records = continuation_data.get("records", [])
-        self.assertEqual(len(continuation_records), 41)
+        self.assertEqual(len(continuation_records), 46)
         for record in continuation_records[:5]:
             prior_recent_ids.extend(record.get("seed_ids", []))
 
@@ -296,11 +296,30 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(eighth_slice_baseline_set.issubset(baseline_seed_set))
         self.assertTrue(eighth_slice_baseline_set.issubset(prior_350_checkpoint_set))
 
-        total_evidenced_set = prior_350_checkpoint_set | eighth_slice_seed_set
-        self.assertEqual(len(total_evidenced_set), 355)
+        prior_355_checkpoint_set = prior_350_checkpoint_set | eighth_slice_seed_set
+        self.assertEqual(len(prior_355_checkpoint_set), 355)
+
+        ninth_slice_records = continuation_records[41:46]
+        self.assertEqual(len(ninth_slice_records), 5)
+        expected_ninth_slice_seed_id = "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548"
+        ninth_slice_seed_ids = []
+        for record in ninth_slice_records:
+            ninth_slice_seed_ids.extend(record.get("seed_ids", []))
+        self.assertEqual(ninth_slice_seed_ids, [expected_ninth_slice_seed_id] * 5)
+        self.assertEqual(len(ninth_slice_seed_ids), 5)
+        ninth_slice_seed_set = set(ninth_slice_seed_ids)
+        self.assertEqual(len(ninth_slice_seed_set), 1)
+
+        # Prove ninth slice's sole canonical seed is an inventory member disjoint from both baseline and prior evidence
+        self.assertTrue(ninth_slice_seed_set.issubset(inventory_seed_set))
+        self.assertTrue(ninth_slice_seed_set.isdisjoint(prior_355_checkpoint_set))
+        self.assertTrue(ninth_slice_seed_set.isdisjoint(baseline_seed_set))
+
+        total_evidenced_set = prior_355_checkpoint_set | ninth_slice_seed_set
+        self.assertEqual(len(total_evidenced_set), 356)
 
         remaining_seed_set = inventory_seed_set - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 110)
+        self.assertEqual(len(remaining_seed_set), 109)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
         flattened_recent_ids = (
@@ -312,11 +331,12 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             + sixth_slice_seed_ids
             + seventh_slice_seed_ids
             + eighth_slice_seed_ids
+            + ninth_slice_seed_ids
         )
         recent_seed_set = set(flattened_recent_ids)
         self.assertTrue(recent_seed_set.issubset(inventory_seed_set))
         new_beyond_baseline = recent_seed_set - baseline_seed_set
-        self.assertEqual(len(new_beyond_baseline), 220)
+        self.assertEqual(len(new_beyond_baseline), 221)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(new_beyond_baseline))
