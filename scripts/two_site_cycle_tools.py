@@ -333,6 +333,165 @@ def _prior_worker(root: Path, snapshot: dict, worker_dir: Path) -> tuple:
     return prior_id, digest, snapshot["proposal"], prior["conversation_id"]
 
 
+_CANONICAL_ROOT = "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+_CANONICAL_BLOCKERS = {
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+}
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> dict:
+    """Classify current canonical P1-00b evidence, bound to the current HEAD."""
+    root = Path(root).resolve(strict=True)
+    loaded: dict[str, tuple[dict, str]] = {}
+    total = 0
+    try:
+        head = runner.git(root, "rev-parse", "HEAD")
+        if not _HEX40.fullmatch(head):
+            raise runner.ProposalError("HEAD is not a full lowercase commit SHA")
+
+        def git_blob(commit: str, path: str) -> bytes:
+            if not _HEX40.fullmatch(commit) or ":" in path:
+                raise runner.ProposalError("unsafe Git blob reference")
+            return subprocess.check_output(
+                ["/usr/bin/git", "--no-replace-objects", "-C", str(root), "show", f"{commit}:{path}"],
+                stderr=subprocess.DEVNULL,
+                timeout=20,
+            )
+
+        def load(path: str) -> tuple[dict, str]:
+            nonlocal total
+            if path in loaded:
+                return loaded[path]
+            runner.git(root, "ls-files", "--error-unmatch", "--", path)
+            data = runner.bounded_file_bytes(root, runner.relative_file(root, path), 2_000_000, path)
+            total += len(data)
+            if total > 8_000_000:
+                raise runner.ProposalError("canonical aggregate exceeds 8,000,000 bytes")
+            if runner.sha(data) != runner.sha(git_blob(head, path)):
+                raise runner.ProposalError(f"live canonical bytes differ from HEAD: {path}")
+            doc = runner.unique_json(data.decode("utf-8"))
+            if not isinstance(doc, dict):
+                raise runner.ProposalError(f"canonical document is not an object: {path}")
+            loaded[path] = (doc, runner.sha(data))
+            return loaded[path]
+
+        manifest, _ = load(_CANONICAL_ROOT)
+        if manifest.get("schema_version") != 1 or manifest.get("stage") != "P1-00b":
+            raise runner.ProposalError("invalid canonical manifest schema or stage")
+        inventory = manifest.get("inventory")
+        sources = manifest.get("evidence_sources")
+        counts = manifest.get("counts")
+        if not isinstance(inventory, dict) or not isinstance(sources, dict) or not isinstance(counts, dict):
+            raise runner.ProposalError("canonical manifest sections missing")
+        expected = inventory.get("expected_seed_count")
+        surfaces = inventory.get("paths")
+        source_keys = {"baseline_path", "base_path", "continuation_path", "continuation_2_path", "continuation_3_path"}
+        if type(expected) is not int or not isinstance(surfaces, list) or len(surfaces) != 4 or set(sources) != source_keys:
+            raise runner.ProposalError("canonical manifest inventory or sources invalid")
+        values = [counts.get(key) for key in ("baseline_evidenced_seed_count", "reconciled_new_seed_count", "evidenced_seed_count", "remaining_seed_count")]
+        if any(type(value) is not int or value < 0 for value in values) or values[0] + values[1] != values[2] or values[2] + values[3] != expected:
+            raise runner.ProposalError("canonical manifest counts invalid")
+        blockers = manifest.get("canonical_blockers")
+        if not isinstance(blockers, list) or not _CANONICAL_BLOCKERS.issubset(blockers):
+            raise runner.ProposalError("canonical manifest blockers invalid")
+
+        ids: list[str] = []
+        known: set[str] = set()
+        for path in surfaces:
+            if not isinstance(path, str):
+                raise runner.ProposalError("surface path invalid")
+            surface, _ = load(path)
+            if surface.get("schema_version") != "two-server-refactor.surface-behavior-inventory.v1" or not isinstance(surface.get("entries"), list):
+                raise runner.ProposalError(f"surface schema invalid: {path}")
+            for entry in surface["entries"]:
+                bid = entry.get("behavior_id") if isinstance(entry, dict) else None
+                if not isinstance(bid, str) or not bid or bid in known:
+                    raise runner.ProposalError("surface behavior identifiers invalid")
+                known.add(bid)
+                ids.append(bid)
+        if len(ids) != expected:
+            raise runner.ProposalError("surface count does not match expected seed count")
+
+        scenario, _ = load(sources["baseline_path"])
+        mapping = scenario.get("seed_mapping")
+        registry = scenario.get("blocker_registry")
+        expected_sources = ["inventory/surface-api.json", "inventory/surface-bot.json", "inventory/surface-web.json", "inventory/surface-jobs.json"]
+        if scenario.get("schema_version") != "two-server-refactor.scenario-records.v2" or not isinstance(mapping, dict) or mapping.get("expected_seed_count") != expected or mapping.get("source_inventories") != expected_sources:
+            raise runner.ProposalError("scenario seed mapping invalid")
+        section_one = Path("docs/refactor/two-server/section-1")
+        if [(section_one / value).as_posix() for value in expected_sources] != surfaces:
+            raise runner.ProposalError("scenario source inventories do not match manifest")
+        items = registry.get("items") if isinstance(registry, dict) else None
+        status_by_blocker = {item.get("blocker_id"): item for item in items if isinstance(item, dict)} if isinstance(items, list) else {}
+        if any(status_by_blocker.get(key, {}).get("disposition") != "BLOCKED_EXPLICIT" or status_by_blocker.get(key, {}).get("status") != "BLOCKED_EXPLICIT" for key in _CANONICAL_BLOCKERS):
+            raise runner.ProposalError("scenario blockers invalid")
+
+        def ancestor(commit: object) -> bool:
+            if not isinstance(commit, str) or not _HEX40.fullmatch(commit):
+                return False
+            try:
+                runner.git(root, "merge-base", "--is-ancestor", commit, head)
+                return True
+            except subprocess.CalledProcessError:
+                return False
+
+        base, base_sha = load(sources["base_path"])
+        if base.get("schema_version") != 1 or base.get("stage") != "P1-00b" or not ancestor(base.get("inspected_head")) or not isinstance(base.get("records"), list):
+            raise runner.ProposalError("base characterization invalid")
+        c1, c1_sha = load(sources["continuation_path"])
+        c1_base = c1.get("base_inventory")
+        if c1.get("schema_version") != 1 or c1.get("stage") != "P1-00b" or not isinstance(c1.get("records"), list) or not isinstance(c1_base, dict) or c1_base.get("path") != sources["base_path"] or c1_base.get("sha256") != base_sha or not ancestor(c1_base.get("inspected_head")):
+            raise runner.ProposalError("continuation 1 invalid")
+
+        continuations = [(sources["continuation_2_path"], sources["continuation_path"], c1_sha), (sources["continuation_3_path"], sources["continuation_2_path"], None)]
+        docs = [base, c1]
+        for index, (path, predecessor, predecessor_sha) in enumerate(continuations, start=2):
+            current, current_sha = load(path)
+            if predecessor_sha is None:
+                predecessor_sha = load(predecessor)[1]
+            link = current.get("predecessor_inventory")
+            actual_touch = runner.git(root, "log", "-1", "--format=%H", head, "--", predecessor)
+            if current.get("schema_version") != 1 or current.get("stage") != "P1-00b" or not isinstance(current.get("records"), list) or not isinstance(link, dict) or link.get("path") != predecessor or link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or runner.sha(git_blob(actual_touch, predecessor)) != predecessor_sha:
+                raise runner.ProposalError(f"continuation {index} invalid")
+            docs.append(current)
+
+        proven: set[str] = set()
+        unknown: set[str] = set()
+        for doc in docs:
+            for record in doc["records"]:
+                seed_ids = record.get("seed_ids") if isinstance(record, dict) else None
+                if not isinstance(seed_ids, list) or any(not isinstance(seed, str) or seed not in known for seed in seed_ids):
+                    raise runner.ProposalError("record seed IDs invalid")
+                # Origin-matrix records may deliberately have no seed binding.
+                # They remain canonical context, but cannot prove or weaken one.
+                if not seed_ids:
+                    continue
+                # Scenario lookup is the normal path.  Avoid re-proving unrelated
+                # records while preserving the full-inventory audit when no target
+                # behavior is requested.
+                if behavior_id is not None and behavior_id not in seed_ids:
+                    continue
+                valid = isinstance(record.get("path"), str) and isinstance(record.get("sha256"), str) and _HEX64.fullmatch(record["sha256"]) and isinstance(record.get("last_commit"), str) and _HEX40.fullmatch(record["last_commit"]) and isinstance(record.get("test_selectors"), list) and record["test_selectors"] and all(isinstance(selector, str) and selector for selector in record["test_selectors"])
+                try:
+                    path = record["path"]
+                    runner.git(root, "ls-files", "--error-unmatch", "--", path)
+                    valid = bool(valid) and record["sha256"] == runner.sha(git_blob(head, path)) and record["last_commit"] == runner.git(root, "log", "-1", "--format=%H", head, "--", path) and ancestor(record["last_commit"])
+                except (KeyError, subprocess.CalledProcessError, runner.ProposalError):
+                    valid = False
+                (proven if valid else unknown).update(seed_ids)
+        covered_ids = ids if behavior_id is None else [behavior_id] if behavior_id in known else []
+        coverage = {bid: "PROVEN_FOR_REQUESTED_SCENARIO" if bid in proven else "UNKNOWN" if bid in unknown else "PARTIAL_OR_SEED_ONLY" for bid in covered_ids}
+        result = {"status": "VALID", "expected_seed_count": expected, "seed_count": len(ids), "coverage": coverage}
+        if behavior_id is not None:
+            result["requested_coverage"] = coverage.get(behavior_id, "NO_MATCHING_EVIDENCE")
+        return result
+    except (ValueError, OSError, UnicodeError, json.JSONDecodeError, subprocess.SubprocessError, runner.ProposalError) as exc:
+        return {"status": "INVENTORY_INCONSISTENT", "reason": str(exc)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=runner.ROOT)
