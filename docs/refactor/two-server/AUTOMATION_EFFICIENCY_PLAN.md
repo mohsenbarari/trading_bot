@@ -7,6 +7,8 @@
 - مرجع حاکم فعلی: [PROPOSAL_AUTOMATION.md](PROPOSAL_AUTOMATION.md). این سند مجوز اجرای خودکار مراحل جدید یا جایگزین قرارداد فعلی نیست. در قدم بعد، تغییر قرارداد فقط همراه پیاده‌سازی، تست و پذیرش متناظر انجام می‌شود.
 - این شماره‌گذاری مستقل از «بستهٔ سوم» بهینه‌سازی‌های قبلی است؛ آن بسته و telemetry موجود حذف یا از نو ساخته نمی‌شوند.
 
+- 2026-09-20: AE01-00 documentation/scope is under final acceptance, exact evidence—not HEAD alone—resolved the capacity-interrupted P1 receipt, and AE01-10 is next after this documentation commit. No AE01 code package is implemented; plan details in [AE01_IMPLEMENTATION_PLAN.md](AE01_IMPLEMENTATION_PLAN.md).
+
 ## ۱. هدف و تصمیم اصلی
 
 تعریف موفقیت مالک: **کار پذیرفته‌شدهٔ بیشتر با مصرف و زمان برابر یا کمتر، یا همان کار با مصرف و زمان کمتر؛ با حفظ کیفیت یا بهبود آن.**
