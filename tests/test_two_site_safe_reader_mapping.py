@@ -1,7 +1,9 @@
+import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 _SCOPE_VARS = (
     "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED",
@@ -13,10 +15,28 @@ for _var in _SCOPE_VARS:
     os.environ.pop(_var, None)
 
 from scripts.two_site_proposal_runner import (
+    MAX_CONTEXT,
     ProposalError,
     _TaskBoundaryError,
     bounded_file_bytes,
+    check,
+    load_task,
 )
+
+
+def _make_task(
+    context_files: list[str] | None = None,
+    allowed_files: list[str] | None = None,
+) -> dict:
+    ctx = context_files or ["ctx.py"]
+    return {
+        "task_id": "test-task",
+        "goal": "Hermetic test goal",
+        "context_files": ctx,
+        "allowed_files": allowed_files or ctx,
+        "requirements": ["R1"],
+        "test_selectors": ["tests/test_two_site_safe_reader_mapping.py"],
+    }
 
 
 class TestTwoSiteSafeReaderMapping(unittest.TestCase):
@@ -148,6 +168,127 @@ class TestTwoSiteSafeReaderMapping(unittest.TestCase):
         self.assertNotIsInstance(ctx_budget.exception, _TaskBoundaryError)
         self.assertEqual(type(ctx_budget.exception), ProposalError)
         self.assertEqual(str(ctx_budget.exception), "target_budget exceeds the safe context budget")
+
+    def test_task_file_facts(self) -> None:
+        missing = self.root / "missing.json"
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, missing)
+        self.assertEqual(ctx.exception.code, "TASK_FILE_NOT_FOUND")
+        self.assertEqual(ctx.exception.path, "missing.json")
+
+        real = self.root / "real.json"
+        real.write_text(json.dumps(_make_task()))
+        sym = self.root / "sym.json"
+        sym.symlink_to(real)
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, sym)
+        self.assertEqual(ctx.exception.code, "TASK_FILE_SYMLINK")
+        self.assertEqual(ctx.exception.path, "sym.json")
+
+        d = self.root / "d.json"
+        d.mkdir()
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, d)
+        self.assertEqual(ctx.exception.code, "TASK_FILE_NOT_REGULAR")
+        self.assertEqual(ctx.exception.path, "d.json")
+
+        hl = self.root / "hl.json"
+        os.link(real, hl)
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, hl)
+        self.assertEqual(ctx.exception.code, "TASK_FILE_HARDLINKED")
+        self.assertEqual(ctx.exception.path, "hl.json")
+
+        over = self.root / "over.json"
+        over.write_bytes(b" " * (MAX_CONTEXT + 1))
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, over)
+        self.assertEqual(ctx.exception.code, "TASK_BUDGET_EXCEEDED")
+        self.assertEqual(ctx.exception.path, "over.json")
+
+    def test_context_file_facts(self) -> None:
+        def _task(name: str) -> Path:
+            p = self.root / f"task_{name}.json"
+            p.write_text(json.dumps(_make_task([name])))
+            return p
+
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, _task("missing_ctx.py"))
+        self.assertEqual(ctx.exception.code, "TASK_FILE_NOT_FOUND")
+        self.assertEqual(ctx.exception.path, "missing_ctx.py")
+
+        real = self.root / "real_ctx.py"
+        real.write_text("# ctx\n")
+        sym = self.root / "sym_ctx.py"
+        sym.symlink_to(real)
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, _task("sym_ctx.py"))
+        self.assertEqual(ctx.exception.code, "TASK_FILE_SYMLINK")
+        self.assertEqual(ctx.exception.path, "sym_ctx.py")
+
+        d = self.root / "dir_ctx.py"
+        d.mkdir()
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, _task("dir_ctx.py"))
+        self.assertEqual(ctx.exception.code, "TASK_FILE_NOT_REGULAR")
+        self.assertEqual(ctx.exception.path, "dir_ctx.py")
+
+        hl = self.root / "hl_ctx.py"
+        os.link(real, hl)
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, _task("hl_ctx.py"))
+        self.assertEqual(ctx.exception.code, "TASK_FILE_HARDLINKED")
+        self.assertEqual(ctx.exception.path, "hl_ctx.py")
+
+        over = self.root / "over_ctx.py"
+        over.write_bytes(b"#" * (MAX_CONTEXT + 1))
+        with self.assertRaises(_TaskBoundaryError) as ctx:
+            load_task(self.root, _task("over_ctx.py"))
+        self.assertEqual(ctx.exception.code, "TASK_BUDGET_EXCEEDED")
+        self.assertEqual(ctx.exception.path, "over_ctx.py")
+
+    def test_fatal_first_context_prevents_later_read(self) -> None:
+        orig = self.root / "first_orig.py"
+        orig.write_text("# first\n")
+        hl = self.root / "first_hl.py"
+        os.link(orig, hl)
+        (self.root / "second.py").write_text("# second\n")
+
+        task_path = self.root / "task_multi.json"
+        task_path.write_text(json.dumps(_make_task(["first_hl.py", "second.py"])))
+
+        labels: list[str] = []
+        orig_reader = bounded_file_bytes
+
+        def spy(root, path, limit, label, failure_callback=None):
+            labels.append(label)
+            return orig_reader(root, path, limit, label, failure_callback=failure_callback)
+
+        with patch("scripts.two_site_proposal_runner.bounded_file_bytes", side_effect=spy):
+            with self.assertRaises(_TaskBoundaryError) as ctx:
+                load_task(self.root, task_path)
+            self.assertEqual(ctx.exception.code, "TASK_FILE_HARDLINKED")
+            self.assertEqual(ctx.exception.path, "first_hl.py")
+
+        self.assertIn("context file first_hl.py", labels)
+        self.assertNotIn("context file second.py", labels)
+
+    def test_allowed_only_missing_and_check_task_ready(self) -> None:
+        (self.root / "ctx.py").write_text("# ctx\n")
+        task_data = _make_task(["ctx.py"], ["ctx.py", "allowed_missing.py"])
+        task_path = self.root / "task.json"
+        task_path.write_text(json.dumps(task_data))
+
+        task, sources = load_task(self.root, task_path)
+        self.assertIn("allowed_missing.py", sources)
+        self.assertIsNone(sources["allowed_missing.py"]["sha256"])
+        self.assertIsNone(sources["allowed_missing.py"]["content"])
+        self.assertIsNotNone(sources["ctx.py"]["sha256"])
+        self.assertIsNotNone(sources["ctx.py"]["content"])
+
+        readiness = check(self.root, task_path)
+        self.assertEqual(readiness["state"], "TASK_READY")
+        self.assertEqual(readiness["task_id"], task_data["task_id"])
 
 
 if __name__ == "__main__":

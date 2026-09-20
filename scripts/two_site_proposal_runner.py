@@ -184,6 +184,14 @@ _TASK_BOUNDARY_CODES = frozenset({
     "ASSIGNMENT_EXPIRED",
     "ASSIGNMENT_CONTRACT_INVALID",
 })
+_TASK_BOUNDARY_DESCRIPTIONS = {
+    "TASK_FILE_NOT_FOUND": "file not found",
+    "TASK_FILE_HARDLINKED": "is hardlinked and cannot be trusted",
+    "TASK_FILE_SYMLINK": "is a symlink or path escape",
+    "TASK_FILE_OUTSIDE_ROOT": "is outside the project root",
+    "TASK_FILE_NOT_REGULAR": "is not a regular file",
+    "TASK_BUDGET_EXCEEDED": "exceeds the safe context budget",
+}
 
 
 class _Fact(dict):
@@ -226,7 +234,15 @@ class _TaskBoundaryError(ProposalError):
                 raise ProposalError("path must not contain credential-like text")
         self._code = code
         self._path = path
-        msg = f"task boundary rejection [{code}]" if path is None else f"task boundary rejection [{code}]: {path}"
+        desc = _TASK_BOUNDARY_DESCRIPTIONS.get(code)
+        if desc and path:
+            msg = f"task boundary rejection [{code}]: {path} {desc}"
+        elif desc:
+            msg = f"task boundary rejection [{code}]: {desc}"
+        elif path:
+            msg = f"task boundary rejection [{code}]: {path}"
+        else:
+            msg = f"task boundary rejection [{code}]"
         super().__init__(msg)
 
     @property
@@ -1060,7 +1076,26 @@ def _task_unique_pairs(items):
 
 
 def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
-    raw = bounded_file_bytes(root, task_path, MAX_CONTEXT, "task")
+    def _task_path_error(code: str, path_name: str | None = None) -> _TaskBoundaryError:
+        safe_path = None
+        if (
+            isinstance(path_name, str)
+            and type(path_name) is str
+            and len(path_name.encode("utf-8")) <= _MAX_BOUNDARY_PATH_BYTES
+            and "\0" not in path_name
+            and "\\" not in path_name
+            and not path_name.startswith("/")
+            and not PurePosixPath(path_name).is_absolute()
+            and not (len(path_name) >= 2 and path_name[1] == ":" and path_name[0].isalpha())
+            and not any(part in {"", ".", ".."} for part in path_name.split("/"))
+            and not SECRET.search(path_name)
+        ):
+            safe_path = path_name
+        return _TaskBoundaryError(code, safe_path)
+
+    raw = bounded_file_bytes(
+        root, task_path, MAX_CONTEXT, "task", failure_callback=_task_path_error
+    )
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -1094,32 +1129,17 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
         except ModuleNotFoundError:
             from two_site_cycle_tools import validate_excerpts
         validate_excerpts(root, task)
-    def _task_path_error(code: str, path_name: str) -> _TaskBoundaryError:
-        safe_path = None
-        if (
-            isinstance(path_name, str)
-            and type(path_name) is str
-            and len(path_name.encode("utf-8")) <= _MAX_BOUNDARY_PATH_BYTES
-            and "\0" not in path_name
-            and "\\" not in path_name
-            and not path_name.startswith("/")
-            and not PurePosixPath(path_name).is_absolute()
-            and not (len(path_name) >= 2 and path_name[1] == ":" and path_name[0].isalpha())
-            and not any(part in {"", ".", ".."} for part in path_name.split("/"))
-            and not SECRET.search(path_name)
-        ):
-            safe_path = path_name
-        return _TaskBoundaryError(code, safe_path)
-
     sources = {}
     for name in dict.fromkeys(task["context_files"] + task["allowed_files"]):
         target = relative_file(root, name, failure_factory=_task_path_error)
         if not target.exists():
             if name in task["context_files"]:
-                raise ProposalError("required context file is missing: " + name)
+                raise _task_path_error("TASK_FILE_NOT_FOUND", name)
             sources[name] = {"sha256": None, "content": None}
             continue
-        content = bounded_file_bytes(root, target, MAX_CONTEXT, "context file " + name)
+        content = bounded_file_bytes(
+            root, target, MAX_CONTEXT, "context file " + name, failure_callback=_task_path_error
+        )
         if SECRET.search(content.decode()):
             raise ProposalError("credential-like content excluded from model input")
         sources[name] = {"sha256": sha(content), "content": content.decode()}
