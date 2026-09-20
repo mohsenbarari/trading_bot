@@ -1,6 +1,6 @@
 # Automation Efficiency
 
-- 2026-09-20 | AE01-00 now defines executable contracts. Read-only AE01-10A is committed at `314042ef` with a real-worktree baseline; AE01-10B must add the remaining four-state matrix before AE01-20. A read-only/no-op check is never a Worker implementation or acceptance receipt. F1: AE01-40 fixes its route at validated startup; rollback waits for a safe boundary and resolved ambiguity. F2: UNKNOWN/null telemetry blocks efficiency claims but not separately proven technical acceptance; it is never zero/success.
+- 2026-09-20 | AE01-10 is accepted: read-only foundation `314042ef`, four-state matrix `b8f01d43`. AE01-20A is next: after a hard safe-read boundary, aggregate independent readiness issues deterministically without Provider contact; unsafe paths fail closed immediately. A read-only/no-op check is never a Worker implementation or acceptance receipt. F1: AE01-40 fixes its route at validated startup; rollback waits for a safe boundary and resolved ambiguity. F2: UNKNOWN/null telemetry blocks efficiency claims but not separately proven technical acceptance; it is never zero/success.
 - 2026-09-19 | `AE-20260919` is PLANNED, NOT IMPLEMENTED. Owner requested a precise
   remembered plan for the next step, not runtime changes in this turn. Full plan:
   `docs/refactor/two-server/AUTOMATION_EFFICIENCY_PLAN.md`. Load its relevant package

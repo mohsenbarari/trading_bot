@@ -1,7 +1,7 @@
 # پلن اجرایی بستهٔ AE-01: آماده‌سازی یک‌مرحله‌ای و Context درست
 
 - شناسه سند: `AE01-PLAN-20260920`؛ تاریخ: `2026-09-20 UTC`.
-- وضعیت سند: `AE01-00` آمادهٔ ثبت نهایی است. پایهٔ محدود و فقط‌خواندنی `AE01-10A` در commit `314042ef9c0f230f14fce92720ced0224cf9ce23` وجود دارد، اما کل `AE01-10` تا زمان تکمیل ماتریس چهارحالته و پذیرش مستقل، `IN_PROGRESS` است؛ `AE01-20` تا `AE01-50` کاملاً پیاده‌سازی‌نشده (`UNIMPLEMENTED`) هستند.
+- وضعیت سند: `AE01-00` و `AE01-10` پذیرفته شده‌اند. پایهٔ فقط‌خواندنی AE01-10A در `314042ef9c0f230f14fce92720ced0224cf9ce23` و ماتریس پذیرش AE01-10B در `b8f01d438d6901fc7ac4436bb4c80024764ad834` ثبت شده‌اند؛ `AE01-20` واحد بعدی و `AE01-30` تا `AE01-50` کاملاً پیاده‌سازی‌نشده (`UNIMPLEMENTED`) هستند.
 - انتساب حاکم: `WA-P1-00B-AE01-20260920-001`؛ استیج `P1-00b` همچنان باز باقی می‌ماند (`P1-00b stays open`).
 - تفکیک وضعیت اجرایی: پایه‌های سنجش و معیارهای `AE-00` پیش‌تر تکمیل شده‌اند؛ کار فعلی `AE01-00` صرفاً تصویب محدوده و اسناد است؛ هیچ کد محصولی، تغییر ابزار خودکارسازی، جهش Git یا اقدام زمان اجرا در این گام اعمال نمی‌شود.
 - مرجع معماری: [AUTOMATION_EFFICIENCY_PLAN.md](AUTOMATION_EFFICIENCY_PLAN.md) و [PROPOSAL_AUTOMATION.md](PROPOSAL_AUTOMATION.md).
@@ -63,16 +63,16 @@ flowchart LR
 
 `AE01-10A` در commit یادشده فقط baseline واقعیِ حالت اول را اثبات می‌کند: ۴۶۵ seed مورد انتظار و واقعی، و یک رفتار بات با پوشش `PROVEN_FOR_REQUESTED_SCENARIO`. این پایه نه پذیرش کامل AE01-10 است و نه مجوز شروع AE01-20.
 
-### ۵-۲. کار بعدی و محدود AE01-10B (ماتریس پذیرش)
+### ۵-۲. AE01-10B پذیرفته‌شده (ماتریس پذیرش)
 
-تنها کار بعدی AE01-10، تکمیل test matrix آفلاین برای سه حالت باقی‌مانده و حالت inconsistency است؛ بدون تغییر محصول، CLI، Provider، deploy یا schemaهای canonical واقعی. fixture باید یک repository موقت حداقلی با commit واقعی بسازد و مجموعهٔ کامل اسناد canonicalِ موردنیاز (manifest، چهار surface، scenario baseline، base و سه continuation) را با schema صحیح تولید کند؛ fixture حق استفاده از دادهٔ عملیاتی یا network ندارد. سناریوهای لازم:
+AE01-10B بدون تغییر محصول، CLI، Provider، deploy یا schemaهای canonical واقعی پذیرفته شد. fixture یک repository موقت حداقلی با commit واقعی و مجموعهٔ کامل اسناد canonicalِ موردنیاز (manifest، چهار surface، scenario baseline، base و سه continuation) ساخت و سناریوهای زیر را اثبات کرد:
 
 1. seed شناخته‌شده بدون record → `PARTIAL_OR_SEED_ONLY`.
 2. شناسهٔ خارج از inventory → `NO_MATCHING_EVIDENCE`.
 3. seed شناخته‌شده با hash/lineage ناسازگار → `UNKNOWN`، بدون تبدیل آن به partial یا proven.
 4. manifest، schema یا شمارش ناسازگار → `INVENTORY_INCONSISTENT`؛ دلیل ممکن است کوتاه باشد، اما payload تشخیصی نامحدود مجاز نیست.
 
-پذیرش AE01-10 فقط وقتی برقرار است که baseline واقعی و چهار سناریوی بالا با network fence استاندارد و `APP_ENV_FILE=config/unit-test.env.example` سبز باشند، task/HEAD binding برقرار بماند، و Worker/Reviewer/Codex زنجیرهٔ معتبر داشته باشند. پس از آن، artifact تحویل به AE01-20 شامل نام test selectorها، commit، receiptهای review و فهرست ثابت failure classهاست؛ نه متن پرامپت، سورس یا stream Provider.
+پذیرش AE01-10 اکنون برقرار است: baseline واقعی و چهار سناریوی بالا با network fence استاندارد و `APP_ENV_FILE=config/unit-test.env.example` سبز شدند؛ task/HEAD binding و زنجیرهٔ مستقل Worker/Reviewer/Codex نیز معتبر است. artifact تحویل به AE01-20 شامل selector `tests/test_two_site_canonical_evidence_inspect.py`، commit AE01-10B و receiptهای مقید است؛ نه متن پرامپت، سورس یا stream Provider.
 
 ### ۵-۳. معیارهای کمی بسته‌های بعدی
 
@@ -87,6 +87,28 @@ flowchart LR
 
 برای AE01-50، قبل از اجرا cohort، پنجرهٔ زمانی، واحد رفتاری پذیرفته‌شده و حداقل coverage اندازه‌گیری باید در task ثبت شوند. نبود هرکدام، اجرای پایلوت را مسدود می‌کند؛ نه اینکه با شمارش commit یا صفر فرض‌کردن token جایگزین شود.
 
+## ۶. مشخصات اجرایی AE01-20 (پیش‌بررسی قطعی یک‌مرحله‌ای)
+
+### ۶-۱. مسئلهٔ دقیق و مرز AE01-20A
+
+`check()` فعلی در `scripts/two_site_proposal_runner.py` کنترل‌های مفیدی دارد، اما در نخستین `ProposalError` متوقف می‌شود. AE01-20A باید یک helper فقط‌خواندنی و بدون Provider بسازد که برای task امن، تمام نقص‌های مستقلِ قابل‌نمایش را در یک نتیجهٔ پایدار برگرداند. این helper جای `check()`، `load_task()`، scope gate، session/model gate یا quality review را نمی‌گیرد و هنوز هیچ تماس Provider یا جهش Git انجام نمی‌دهد.
+
+مسیر پیشنهادی، دقیقاً دو فاز دارد:
+
+1. **فاز حصار (fatal boundary):** خواندن task، JSON، مسیرها، link/hardlink و حجم طبق کنترل‌های موجود. نخستین نقص امنیتی/ساختاری که ادامهٔ خواندن را ناامن می‌کند، نتیجهٔ fail-closed یگانه می‌دهد و خواندن فایل‌های بعدی متوقف می‌شود.
+2. **فاز جمع‌آوری (safe aggregate):** فقط پس از عبور کامل فاز حصار، helper از همان task/sources snapshot برای جمع‌آوری نقص‌های مستقلِ assignment binding، requirements/selectors، context مفقود، مدل ماندگار، session closure و budget استفاده می‌کند. ترتیب خطاها ثابت و بر پایهٔ code، سپس مسیر canonical است؛ هیچ exception یا متن نامحدود Provider در نتیجه قرار نمی‌گیرد.
+
+خروجی عمومی AE01-20A یک dict محدود و نسخه‌دار است: `state` فقط `TASK_READY` یا `TASK_BLOCKED`، همراه با `task_id` در صورت خواندن معتبر، و `issues` حداکثر ۱۶ آیتم `{code, path?, detail}`. `detail` کوتاه، قطعی و فاقد source/prompt/secret است. وجود حتی یک issue مانع تماس Provider است. `TASK_READY` باید همان معنای readiness امروز را داشته باشد؛ AE01-20 حق آسان‌ترکردن یا حذف‌کردن هیچ gate را ندارد.
+
+### ۶-۲. سناریوهای اجباری و پذیرش AE01-20A
+
+1. taskی که assignment معتبر ندارد و هم‌زمان model context و session context لازم را ندارد، پس از فاز حصار یک `TASK_BLOCKED` با هر سه code پایدار می‌گیرد؛ Provider trap اثبات می‌کند هیچ تماس خارجی رخ نداده است.
+2. task با مسیر traversal، symlink/hardlink، JSON نامعتبر یا حجم بیش از سقف، در فاز حصار fail-closed می‌شود؛ helper حق اسکن/خواندن context بعدی برای ساختن فهرست بلندتر ندارد.
+3. task سالم با تمام model/session closure و بودجهٔ مجاز، همان `TASK_READY` قطعی را بازمی‌گرداند و خروجی آن با اجرای تکراری یکسان است.
+4. testهای synthetic repository باید متغیرهای scope زنده را صریحاً پاک کنند یا fixture scope معتبر بسازند؛ نباید نتیجهٔ test به assignment واقعیِ Supervisor نشت کند.
+
+فایل‌های نخستین واحد فقط `scripts/two_site_proposal_runner.py` و `tests/test_two_site_proposal_task_preflight.py` هستند. چون runner بزرگ است، Worker فقط replacementهای دقیق و محدود می‌فرستد. آغاز AE01-20B (جایگزینی کنترل‌کنندهٔ پراکنده با helper جدید) تنها پس از review، تست و پذیرش AE01-20A مجاز است.
+
 ---
 
 ### بستهٔ AE01-00: مستندسازی، تعیین دامنه و تثبیت لنگرهای بایت‌محور (Current Work)
@@ -99,8 +121,8 @@ flowchart LR
 
 ---
 
-### بستهٔ AE01-10: موتور طبقه‌بندی شواهد و سناریوها (In Progress)
-- **وضعیت**: `AE01-10A` محدود و فقط‌خواندنی commit شده است؛ `AE01-10B` (ماتریس چهارحالته، review معتبر و پذیرش نهایی) باقی مانده است.
+### بستهٔ AE01-10: موتور طبقه‌بندی شواهد و سناریوها (Accepted)
+- **وضعیت**: AE01-10A و AE01-10B با baseline واقعی، ماتریس چهارحالته و زنجیرهٔ review معتبر پذیرفته شده‌اند.
 - **نتیجهٔ محدود (Outcome)**: پیاده‌سازی طبقه‌بندی صریح و ساختاریافتهٔ وضعیت سناریوها در helperهای آماده‌سازی، شامل دقیقاً چهار حالت مجزا:
   1. `PROVEN_FOR_REQUESTED_SCENARIO`: سناریو همراه با شواهد کامل و معتبر در سورس و تست اثبات شده است.
   2. `PARTIAL_OR_SEED_ONLY`: سناریو فقط پوشش جزئی دارد یا صرفاً seed اولیه موجود است.
