@@ -767,6 +767,125 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
                 hint = persisted_continuation(root, state_root, current_head)
                 self.assertIsNone(hint)
 
+    def test_persisted_committed_continue_checkpoint_reused_only_at_current_head(self):
+        persisted_continuation = autopilot_module.persisted_continuation
+        prompt_for_cycle = autopilot_module.prompt_for_cycle
+        current_head = VALID_COMMIT
+        stale_head = "2" * 40
+
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        before_repo = {
+            "head": current_head,
+            "assignment_scope": scope,
+            "protected_refs": {
+                "refs/heads/main": "1" * 40,
+                "refs/remotes/origin/main": "2" * 40,
+                "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+            },
+        }
+
+        expected_hint = {
+            "head_after": current_head,
+            "commit": current_head,
+            "summary": "Completed step 1 and committed changes.",
+            "next_action": "Proceed with step 2.",
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+
+        valid_status = {
+            "state": "CONTINUE",
+            "head_changed": True,
+            "head_after": current_head,
+            "commit": current_head,
+            "blockers": [],
+            "summary": "Completed step 1 and committed changes.",
+            "next_action": "Proceed with step 2.",
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+
+        stale_status = {
+            "state": "CONTINUE",
+            "head_changed": True,
+            "head_after": stale_head,
+            "commit": stale_head,
+            "blockers": [],
+            "summary": "Completed step 1 on prior head.",
+            "next_action": "Proceed with step 2.",
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            state_root = root / ".local/two-site-refactor/autopilot"
+            state_root.mkdir(parents=True, exist_ok=True)
+            status_path = state_root / "status.json"
+
+            prompt_path = root / autopilot_module.PROMPT_REL
+            prompt_path.parent.mkdir(parents=True, exist_ok=True)
+            prompt_path.write_text("AUTOPILOT PROMPT TEMPLATE", encoding="utf-8")
+
+            status_path.write_text(json.dumps(valid_status, indent=2), encoding="utf-8")
+            recovered_candidate = persisted_continuation(root, state_root, current_head)
+            self.assertIsNotNone(recovered_candidate)
+
+            prompt_text = prompt_for_cycle(
+                root, 1, before_repo, continuation=recovered_candidate
+            )
+            _, context_json = prompt_text.split("\n\nSUPERVISOR_CONTEXT_JSON:\n", 1)
+            context = json.loads(context_json)
+            self.assertEqual(context.get("validated_previous_cycle_hint"), expected_hint)
+            self.assertEqual(
+                set(context["validated_previous_cycle_hint"]),
+                {
+                    "head_after",
+                    "commit",
+                    "summary",
+                    "next_action",
+                    "gemini_worker_run_id",
+                    "gemini_reviewer_run_id",
+                    "proposal_sha256",
+                },
+            )
+
+            status_path.write_text(json.dumps(stale_status, indent=2), encoding="utf-8")
+            stale_candidate = persisted_continuation(root, state_root, current_head)
+            self.assertIsNone(stale_candidate)
+
+            stale_prompt_text = prompt_for_cycle(
+                root, 1, before_repo, continuation=stale_candidate
+            )
+            _, stale_context_json = stale_prompt_text.split(
+                "\n\nSUPERVISOR_CONTEXT_JSON:\n", 1
+            )
+            stale_context = json.loads(stale_context_json)
+            self.assertNotIn("validated_previous_cycle_hint", stale_context)
+
+            status_path.write_text("{ malformed json", encoding="utf-8")
+            malformed_candidate = persisted_continuation(root, state_root, current_head)
+            self.assertIsNone(malformed_candidate)
+
+            malformed_prompt_text = prompt_for_cycle(
+                root, 1, before_repo, continuation=malformed_candidate
+            )
+            _, malformed_context_json = malformed_prompt_text.split(
+                "\n\nSUPERVISOR_CONTEXT_JSON:\n", 1
+            )
+            malformed_context = json.loads(malformed_context_json)
+            self.assertNotIn("validated_previous_cycle_hint", malformed_context)
+
 
 if __name__ == "__main__":
     unittest.main()
