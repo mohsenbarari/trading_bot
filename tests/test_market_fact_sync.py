@@ -2,7 +2,10 @@ import json
 import unittest
 from pathlib import Path
 
-from core.market_intelligence.market_fact_sync import load_next_batch
+from core.market_intelligence.market_fact_sync import (
+    ESTIMATOR_PRIORITY_STREAMS,
+    load_next_batch,
+)
 
 
 FIXTURE = (
@@ -50,7 +53,7 @@ class _Connection:
 
 
 class MarketFactSyncSchedulingTests(unittest.TestCase):
-    def test_independent_streams_are_scheduled_by_least_recent_acknowledgement(self):
+    def test_estimator_streams_precede_fair_scheduling_of_other_streams(self):
         envelope = json.loads(FIXTURE.read_text(encoding="utf-8"))["items"][0]["fact"]
         connection = _Connection(envelope)
 
@@ -63,8 +66,13 @@ class MarketFactSyncSchedulingTests(unittest.TestCase):
         self.assertEqual(batch.stream_id, envelope["stream_id"])
         head_selection = connection.cursor_instance.executions[0][0]
         self.assertIn("c.updated_at_utc AS last_acknowledged_at_utc", head_selection)
+        self.assertEqual(
+            ESTIMATOR_PRIORITY_STREAMS,
+            ("market.fact.coin.group.1", "market.fact.coin.group.2"),
+        )
         self.assertIn(
-            "ORDER BY last_acknowledged_at_utc ASC NULLS FIRST,",
+            "ORDER BY CASE WHEN stream_id IN ('market.fact.coin.group.1',",
             head_selection,
         )
+        self.assertIn("last_acknowledged_at_utc ASC NULLS FIRST,", head_selection)
         self.assertEqual(connection.rollbacks, 1)

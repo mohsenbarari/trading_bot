@@ -43,6 +43,14 @@ OUTBOX_ENVELOPE_RETENTION = timedelta(days=7)
 OUTBOX_COMPACTION_INTERVAL_SECONDS = 300.0
 OUTBOX_COMPACTION_BATCH_SIZE = 10_000
 
+# The two coin-group streams are direct estimator inputs.  They retain their
+# own causal sequence, but must not wait behind a noisy reference stream that
+# simply has an older acknowledgement watermark.
+ESTIMATOR_PRIORITY_STREAMS = (
+    "market.fact.coin.group.1",
+    "market.fact.coin.group.2",
+)
+
 
 class MarketFactSyncError(RuntimeError):
     """An operator-safe sync failure without envelope contents."""
@@ -103,9 +111,10 @@ def load_next_batch(
 ) -> MarketFactBatchV1 | None:
     """Load a contiguous stream head without starving independent streams.
 
-    Delivery order is strict within a stream.  Across streams, choose the one
-    least recently acknowledged so a high-volume historical source cannot
-    delay live, independent estimator inputs behind its backlog.
+    Delivery order is strict within a stream.  Eligible coin-group heads are
+    chosen first because they are direct estimator inputs; the other streams
+    are scheduled by least-recent acknowledgement so one historical source
+    cannot starve another.
     """
 
     with connection.cursor() as cursor:
@@ -128,7 +137,10 @@ def load_next_batch(
             WHERE dead_lettered_at_utc IS NULL
               AND next_attempt_at_utc <= clock_timestamp()
               AND delivery_sequence=checkpoint+1
-            ORDER BY last_acknowledged_at_utc ASC NULLS FIRST,
+            ORDER BY CASE WHEN stream_id IN ('market.fact.coin.group.1',
+                                             'market.fact.coin.group.2')
+                          THEN 0 ELSE 1 END,
+                     last_acknowledged_at_utc ASC NULLS FIRST,
                      created_at_utc ASC,
                      stream_id ASC
             LIMIT 1
