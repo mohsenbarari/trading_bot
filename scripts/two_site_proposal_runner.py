@@ -265,6 +265,69 @@ class _TaskBoundaryError(ProposalError):
         return {"code": self._code, "path": self._path}
 
 
+_READINESS_ISSUE_DETAILS = {
+    "TASK_FILE_NOT_FOUND": "file not found",
+    "TASK_FILE_HARDLINKED": "is hardlinked and cannot be trusted",
+    "TASK_FILE_SYMLINK": "is a symlink or path escape",
+    "TASK_FILE_OUTSIDE_ROOT": "is outside the project root",
+    "TASK_FILE_NOT_REGULAR": "is not a regular file",
+    "TASK_BUDGET_EXCEEDED": "exceeds the safe context budget",
+    "TASK_CREDENTIAL_DETECTED": "credential-like content detected",
+    "TASK_SCHEMA_INVALID": "task schema is invalid",
+    "TASK_PATH_OUTSIDE_SCOPE": "task path is outside assignment scope",
+    "TASK_ASSIGNMENT_TOKEN_MISSING": "task assignment token is missing",
+    "ASSIGNMENT_EXPIRED": "assignment has expired",
+    "ASSIGNMENT_CONTRACT_INVALID": "assignment contract is invalid",
+    "TASK_FILE_UNREADABLE": "is unreadable",
+    "TASK_FILE_CHANGED_DURING_READ": "changed while it was being read",
+}
+
+
+def _readiness_issue(
+    code: str,
+    path: str | None = None,
+    *args: object,
+    **kwargs: object,
+) -> dict[str, str]:
+    if args or kwargs:
+        raise ProposalError("extra metadata not permitted")
+    err = _TaskBoundaryError(code, path)
+    detail = _READINESS_ISSUE_DETAILS[err.code]
+    if err.path is None:
+        return {"code": err.code, "detail": detail}
+    return {"code": err.code, "path": err.path, "detail": detail}
+
+
+def _normalize_readiness_issues(
+    facts: list[dict[str, object]],
+    *args: object,
+    **kwargs: object,
+) -> list[dict[str, str]]:
+    if args or kwargs:
+        raise ProposalError("extra metadata not permitted")
+    if not isinstance(facts, list) or type(facts) is not list:
+        raise ProposalError("facts must be a list")
+    canonical_by_key: dict[tuple[str, str | None], dict[str, str]] = {}
+    for item in facts:
+        if not isinstance(item, dict) or type(item) is not dict:
+            raise ProposalError("fact must be an exact dict")
+        if set(item.keys()) != {"code", "path"}:
+            raise ProposalError("fact keys must be exactly 'code' and 'path'")
+        issue = _readiness_issue(item["code"], item["path"])
+        key = (issue["code"], issue.get("path"))
+        if key not in canonical_by_key:
+            canonical_by_key[key] = issue
+    sorted_issues = sorted(
+        canonical_by_key.values(),
+        key=lambda issue: (
+            issue["code"],
+            0 if issue.get("path") is None else 1,
+            issue.get("path") or "",
+        ),
+    )
+    return [dict(issue) for issue in sorted_issues[:16]]
+
+
 class RetryableProviderSessionError(ProposalError):
     pass
 
