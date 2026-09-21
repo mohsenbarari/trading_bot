@@ -16,7 +16,9 @@ import time
 OLD = "fb95bbdece703a09eb6ca3d6b9e2fccf04abbe3b"
 NEW = "c9be832aef3792f369ae11e8fca95bcd7c42821f"
 OLD_IMAGE = "sha256:f5762ed500ad0c0656394e46fc98e73801d483576fba09eb40251c5f20579b9f"
-NEW_IMAGE = "sha256:7311f562ff577febeb5684af8e7d8039d5a13123c6e344fe63ed3a3a175d38dc"
+# Docker load preserves the portable image content but the target daemon assigns
+# this host-local config ID; PORTABLE below binds the transferable content.
+NEW_IMAGE = "sha256:fd5c0d2a4d563184d15443a6e3749ab5be1ac7558bbffac766d4778a0f8d427d"
 PORTABLE = "f21129d556b2c504312505bc23448c1318035a2f05c9d9e518e18a07eb203bf0"
 PARENT_RELEASE = "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
 ROLE = "market-fact-sync-worker"
@@ -170,7 +172,7 @@ def read_health():
     return json.loads((STATE / "health.json").read_text())
 
 
-def live_probe(*, release, image, prior_mounts, started_at, minimum_acknowledged):
+def live_probe(*, release, image, prior_mounts, started_at):
     container = inspect(CONTAINER)
     require(
         container["State"]["Running"]
@@ -196,7 +198,10 @@ def live_probe(*, release, image, prior_mounts, started_at, minimum_acknowledged
         "sender_contract_drift",
     )
     require(health.get("dead_letter_count") == 0, "sender_delivery_blocked")
-    require(int(health.get("acknowledged") or 0) > minimum_acknowledged, "ack_progress_missing")
+    # This counter belongs to the current worker process and restarts at zero.
+    # A positive value proves that the newly started process has received an
+    # ACK; comparing it with the prior process's cumulative value is invalid.
+    require(int(health.get("acknowledged") or 0) > 0, "ack_progress_missing")
     require(container["HostConfig"]["RestartPolicy"]["Name"] == "unless-stopped", "restart_policy_drift")
     return {
         "container_id": container["Id"],
@@ -220,14 +225,74 @@ def wait_live(**kwargs):
     raise RuntimeError(f"sender_health_timeout:{last}")
 
 
+def finalize_interrupted_handoff():
+    """Close only a journal left after a verified new worker is already live."""
+
+    require(JOURNAL.is_file(), "resume_journal_missing")
+    safe_file(JOURNAL, 0)
+    record = json.loads(JOURNAL.read_text())
+    require(
+        record.get("status") == "OWNER_QUIESCED"
+        and record.get("old_release") == OLD
+        and record.get("new_release") == NEW
+        and record.get("old_image") == OLD_IMAGE
+        and record.get("new_image") == NEW_IMAGE,
+        "resume_journal_invalid",
+    )
+    created = datetime.fromisoformat(record["created_at_utc"].replace("Z", "+00:00"))
+    prior_mounts = [tuple(item) for item in record.get("mounts") or []]
+    require(prior_mounts, "resume_mounts_missing")
+    first = live_probe(
+        release=NEW,
+        image=NEW_IMAGE,
+        prior_mounts=prior_mounts,
+        started_at=created.timestamp(),
+    )
+    time.sleep(5)
+    second = live_probe(
+        release=NEW,
+        image=NEW_IMAGE,
+        prior_mounts=prior_mounts,
+        started_at=created.timestamp(),
+    )
+    require(
+        int(second["acknowledged"]) > int(first["acknowledged"]),
+        "resume_ack_progress_missing",
+    )
+    require(
+        json.loads(json.dumps(bystanders())) == record.get("bystanders"),
+        "resume_unrelated_container_changed",
+    )
+    with held(PARENT_LOCK, 0):
+        parent = json.loads(PARENT_LOCK.read_text())
+        require(
+            parent.get("schema") == "market_pipeline_maintenance_lock/1.0"
+            and parent.get("environment") == "production"
+            and parent.get("host_role") == "web"
+            and parent.get("release_sha") == PARENT_RELEASE,
+            "resume_parent_binding_drift",
+        )
+        record["status"] = "APPLIED_LIVE"
+        record["completed_at_utc"] = utc()
+        record["live_probe"] = second
+        record["resumed_after_ack_counter_validation_fix"] = True
+        atomic_json(JOURNAL, record)
+    print(json.dumps({"status": record["status"], "live_probe": second}))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--finalize", action="store_true")
     args = parser.parse_args()
+    require(not (args.apply and args.finalize), "handoff_action_conflict")
     require(os.geteuid() == 0, "root_required")
     require(OPS.resolve() == OPS, "operations_path_invalid")
     OPS.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(OPS, 0o700)
+    if args.finalize:
+        finalize_interrupted_handoff()
+        return
     require(not JOURNAL.exists(), "journal_exists_no_blind_repeat")
     require(PRIOR_OVERRIDE.is_file(), "prior_override_missing")
     safe_file(PRIOR_OVERRIDE, 0)
@@ -310,7 +375,6 @@ def main():
                 image=NEW_IMAGE,
                 prior_mounts=prior_mounts,
                 started_at=started,
-                minimum_acknowledged=minimum_acknowledged,
             )
             require(bystanders() == untouched, "unrelated_container_changed")
             require(PARENT_LOCK.read_bytes() == parent_bytes, "parent_lock_changed")
@@ -332,7 +396,6 @@ def main():
                     image=OLD_IMAGE,
                     prior_mounts=prior_mounts,
                     started_at=started,
-                    minimum_acknowledged=minimum_acknowledged,
                 )
                 record["status"] = "ROLLED_BACK_LIVE"
                 atomic_json(JOURNAL, record)
