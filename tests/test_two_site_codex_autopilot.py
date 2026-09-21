@@ -164,7 +164,6 @@ class AutopilotContracts(unittest.TestCase):
                 blockers=["Gate."], gemini_worker_run_id="worker-001",
                 gemini_reviewer_run_id="reviewer-001", proposal_sha256="c" * 64,
             ),
-            self.result(state="BLOCKED", disposition="HALT", commit="b" * 40, next_action=None, blockers=["Gate."]),
             self.result(
                 state="BLOCKED", disposition="HALT", commit=None, next_action=None,
                 blockers=["Gate."], gemini_worker_run_id="worker-001",
@@ -174,6 +173,13 @@ class AutopilotContracts(unittest.TestCase):
         for result in invalid:
             with self.subTest(result=result), self.assertRaises(autopilot.AutopilotError):
                 autopilot.validate_result(result)
+        with self.assertRaisesRegex(
+            autopilot.AutopilotError,
+            "HALT requires null commit and Gemini acceptance evidence",
+        ):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="HALT", commit="b" * 40, next_action=None, blockers=["Gate."],
+            ))
 
     def test_disposition_contracts_and_rescope_safety(self):
         self.assertEqual(self.result()["disposition"], "NONE")

@@ -443,6 +443,46 @@ def recover_committed_advisory_result(
     return normalized, advisories
 
 
+def _is_committed_halt_receipt(result: object) -> bool:
+    if not isinstance(result, dict) or set(result) != RESULT_KEYS:
+        return False
+    if result.get("schema_version") != "1.0":
+        return False
+    if result.get("state") != "BLOCKED":
+        return False
+    if result.get("disposition") != "HALT" or result.get("category") != "EXTERNAL_GATE":
+        return False
+    summary = result.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        return False
+    commit = result.get("commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return False
+    next_action = result.get("next_action")
+    if next_action is not None and not (isinstance(next_action, str) and next_action.strip()):
+        return False
+    blockers = result.get("blockers")
+    if (
+        not isinstance(blockers, list)
+        or not (1 <= len(blockers) <= 20)
+        or any(not isinstance(item, str) or not item.strip() for item in blockers)
+    ):
+        return False
+    worker_run_id = result.get("gemini_worker_run_id")
+    reviewer_run_id = result.get("gemini_reviewer_run_id")
+    proposal_sha256 = result.get("proposal_sha256")
+    if (
+        not isinstance(worker_run_id, str)
+        or not PROPOSAL_RUN_ID.fullmatch(worker_run_id)
+        or not isinstance(reviewer_run_id, str)
+        or not PROPOSAL_RUN_ID.fullmatch(reviewer_run_id)
+        or not isinstance(proposal_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", proposal_sha256)
+    ):
+        return False
+    return True
+
+
 def proposal_run_dir(root: Path, run_id: str) -> Path:
     if not PROPOSAL_RUN_ID.fullmatch(run_id):
         raise AutopilotError("proposal evidence run ID is invalid")
@@ -661,8 +701,12 @@ def validate_transition(
         or before_scope != after_scope
     ):
         raise AutopilotError("active assignment scope changed during cycle")
-    if after["protected_refs"] != before["protected_refs"]:
+    ref_drift = after["protected_refs"] != before["protected_refs"]
+    committed_halt = _is_committed_halt_receipt(result)
+    if ref_drift and not committed_halt:
         raise AutopilotError("a protected main/origin/candidate ref changed during the cycle")
+    if committed_halt and not ref_drift:
+        raise AutopilotError("committed HALT requires an actual protected ref change")
     before_head = str(before["head"])
     after_head = str(after["head"])
     changed = before_head != after_head
@@ -911,9 +955,16 @@ def run_cycle(
             validated_receipt = validate_result(raw_result)
             advisories: list[str] = []
         except AutopilotError as exc:
-            if str(exc) != "non-blocked state cannot report blockers":
+            if str(exc) == "non-blocked state cannot report blockers":
+                validated_receipt, advisories = recover_committed_advisory_result(raw_result, exc)
+            elif (
+                str(exc) == "HALT requires null commit and Gemini acceptance evidence"
+                and _is_committed_halt_receipt(raw_result)
+            ):
+                validated_receipt = raw_result
+                advisories = []
+            else:
                 raise
-            validated_receipt, advisories = recover_committed_advisory_result(raw_result, exc)
         result = validate_transition(root, before, validated_receipt)
         result["advisories"] = advisories
         meta.update(

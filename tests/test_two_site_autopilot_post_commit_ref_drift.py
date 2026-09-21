@@ -552,6 +552,90 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
         mock_git.assert_not_called()
         mock_validate_scoped_gemini_chain.assert_not_called()
 
+    def test_committed_halt_with_verified_commit_and_actual_protected_ref_drift_is_accepted(self):
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        before_head = "5" * 40
+        after_head = "6" * 40
+        before_protected_refs = {
+            "refs/heads/main": "1" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+        after_protected_refs = {
+            "refs/heads/main": "4" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+        before_control_blobs = {"automation.json": "blob-control-hash"}
+        after_control_blobs = {"automation.json": "blob-control-hash"}
+
+        expected_blockers = ["External verification gate pending."]
+        halt_receipt = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "External gate halt encountered during cycle.",
+            "commit": after_head,
+            "next_action": None,
+            "blockers": expected_blockers,
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+        self.assertEqual(set(halt_receipt), RESULT_KEYS)
+
+        before_repo = {
+            "head": before_head,
+            "assignment_scope": scope,
+            "protected_refs": before_protected_refs,
+            "control_blobs": before_control_blobs,
+        }
+        after_repo = {
+            "head": after_head,
+            "assignment_scope": scope,
+            "protected_refs": after_protected_refs,
+            "control_blobs": after_control_blobs,
+        }
+
+        mock_proposal = {"changes": [{"path": "change.py", "content": "NEW\n"}]}
+        fake_root = Path("/fake/repo/root")
+
+        with patch.object(autopilot_module, "validate_repository", return_value=after_repo), \
+                patch.object(autopilot_module, "git", return_value="") as mock_git, \
+                patch.object(autopilot_module, "validate_scoped_gemini_chain", return_value=mock_proposal) as mock_gemini_chain, \
+                patch.object(autopilot_module, "validate_scoped_committed_proposal") as mock_committed_proposal, \
+                patch.object(autopilot_module, "validate_control_changes_are_proposed") as mock_control_changes:
+            transition = validate_transition(fake_root, before_repo, halt_receipt)
+
+        mock_git.assert_called_once_with(fake_root, "merge-base", "--is-ancestor", before_head, after_head)
+        mock_gemini_chain.assert_called_once_with(fake_root, before_head, halt_receipt, scope)
+        mock_committed_proposal.assert_called_once_with(fake_root, before_head, after_head, mock_proposal, scope)
+        mock_control_changes.assert_called_once_with(before_control_blobs, after_control_blobs, mock_proposal)
+
+        self.assertEqual(transition["head_before"], before_head)
+        self.assertEqual(transition["head_after"], after_head)
+        self.assertIs(transition["head_changed"], True)
+        self.assertEqual(transition["state"], "BLOCKED")
+        self.assertEqual(transition["disposition"], "HALT")
+        self.assertEqual(transition["category"], "EXTERNAL_GATE")
+        self.assertEqual(transition["commit"], after_head)
+        self.assertEqual(transition["blockers"], expected_blockers)
+        self.assertIsNone(transition["next_action"])
+        self.assertEqual(transition["gemini_worker_run_id"], VALID_WORKER_RUN_ID)
+        self.assertEqual(transition["gemini_reviewer_run_id"], VALID_REVIEWER_RUN_ID)
+        self.assertEqual(transition["proposal_sha256"], VALID_PROPOSAL_SHA256)
+
+        hint = autopilot_module.continuation_hint(transition, after_head)
+        self.assertIsNone(hint)
+
 
 if __name__ == "__main__":
     unittest.main()
