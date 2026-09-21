@@ -21,7 +21,9 @@ import time
 OLD_RELEASE = "c9be832aef3792f369ae11e8fca95bcd7c42821f"
 NEW_RELEASE = "0bb15ea978b5ab87b281403f5432bed6caaddd7e"
 OLD_IMAGE = "sha256:fd5c0d2a4d563184d15443a6e3749ab5be1ac7558bbffac766d4778a0f8d427d"
-NEW_IMAGE = "sha256:a0e1f63746684c36d28d66651718778c1cb6715e59670408928a10a44e3726b6"
+# Docker load retains the signed OCI labels and rootfs but this daemon assigns
+# its own local config ID.  The immutable metadata is verified before use.
+NEW_IMAGE = "sha256:f063568469d81b249e3b5be775172d4bf289a39aa92ca1b710dd2a6fe67e1bb0"
 PARENT_RELEASE = "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
 PROJECT = "market-private-pipeline-primary"
 ROLE = "market-fact-sync-worker"
