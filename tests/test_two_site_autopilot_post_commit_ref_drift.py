@@ -1088,6 +1088,73 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
                 state_root, "STOPPED", cycle=1
             )
 
+    def test_write_supervisor_state_atomically_replaces_prior_status(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            state_root = Path(tmp_dir).resolve()
+            status_path = state_root / "status.json"
+            tmp_status_path = state_root / "status.json.tmp"
+
+            t1 = 1700000000.0
+            t2 = 1700000050.0
+
+            first_sentinel_key = "first_write_sentinel_key"
+            first_sentinel_val = "first_write_sentinel_value_abcdefghijklmnopqrstuvwxyz_0123456789"
+            first_summary = "A" * 500
+
+            with patch.object(autopilot_module.time, "time", side_effect=[t1, t2]):
+                autopilot_module.write_supervisor_state(
+                    state_root,
+                    "CONTINUE",
+                    announce=False,
+                    cycle=1,
+                    summary=first_summary,
+                    sentinel_field=first_sentinel_key,
+                    sentinel_payload=first_sentinel_val,
+                )
+
+                self.assertTrue(status_path.is_file())
+                self.assertFalse(tmp_status_path.exists())
+                first_raw_bytes = status_path.read_bytes()
+
+                expected_final_payload = {
+                    "state": "BLOCKED",
+                    "updated_at": t2,
+                    "disposition": "HALT",
+                }
+
+                autopilot_module.write_supervisor_state(
+                    state_root,
+                    "BLOCKED",
+                    announce=False,
+                    disposition="HALT",
+                )
+
+            self.assertFalse(tmp_status_path.exists())
+            self.assertTrue(status_path.is_file())
+
+            final_raw_bytes = status_path.read_bytes()
+            self.assertLess(len(final_raw_bytes), len(first_raw_bytes))
+
+            final_raw_text = final_raw_bytes.decode("utf-8")
+            self.assertTrue(final_raw_text.endswith("\n"))
+
+            expected_raw_bytes = (
+                json.dumps(expected_final_payload, ensure_ascii=False, indent=2) + "\n"
+            ).encode("utf-8")
+            self.assertEqual(final_raw_bytes, expected_raw_bytes)
+
+            final_payload = json.loads(final_raw_text)
+            self.assertEqual(final_payload, expected_final_payload)
+
+            self.assertNotIn(first_sentinel_key, final_payload)
+            self.assertNotIn("sentinel_field", final_payload)
+            self.assertNotIn("sentinel_payload", final_payload)
+            self.assertNotIn("summary", final_payload)
+            self.assertNotIn("cycle", final_payload)
+            self.assertNotIn(first_sentinel_key, final_raw_text)
+            self.assertNotIn(first_sentinel_val, final_raw_text)
+            self.assertNotIn(first_summary, final_raw_text)
+
 
 if __name__ == "__main__":
     unittest.main()
