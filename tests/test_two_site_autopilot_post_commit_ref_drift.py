@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -635,6 +636,60 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
 
         hint = autopilot_module.continuation_hint(transition, after_head)
         self.assertIsNone(hint)
+
+    def test_run_loop_publishes_committed_halt_transition_metadata(self):
+        before_head = "5" * 40
+        after_head = "6" * 40
+        expected_blockers = ["External verification gate pending."]
+        transition_result = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "Committed halt waiting for external gate.",
+            "commit": after_head,
+            "next_action": None,
+            "blockers": expected_blockers,
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+            "head_before": before_head,
+            "head_after": after_head,
+            "head_changed": True,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            state_root = root / ".local/two-site-refactor/autopilot"
+            fake_codex = root / "fake_codex"
+            fake_run_dir = state_root / "runs" / "cycle-0001-20260921T180000Z-12345"
+
+            with patch.object(autopilot_module, "git", return_value=before_head), \
+                    patch.object(autopilot_module, "ref_snapshot", return_value={}), \
+                    patch.object(autopilot_module, "run_cycle", return_value=(fake_run_dir, transition_result)) as mock_run_cycle, \
+                    patch.object(autopilot_module, "prune_runs") as mock_prune_runs, \
+                    patch.object(autopilot_module, "write_supervisor_state") as mock_write_supervisor_state:
+                ret = autopilot_module.run_loop(root, fake_codex, max_cycles=10, timeout=300, once=False)
+
+        self.assertEqual(ret, 2)
+        mock_run_cycle.assert_called_once()
+        mock_prune_runs.assert_called_once_with(state_root)
+
+        self.assertEqual(mock_write_supervisor_state.call_count, 2)
+        final_args, final_kwargs = mock_write_supervisor_state.call_args
+        self.assertEqual(final_args, (state_root, "BLOCKED"))
+        self.assertEqual(final_kwargs["cycle"], 1)
+        self.assertEqual(final_kwargs["evidence"], str(fake_run_dir))
+        self.assertEqual(final_kwargs["head"], after_head)
+        self.assertEqual(final_kwargs["head_after"], after_head)
+        self.assertIs(final_kwargs["head_changed"], True)
+        self.assertEqual(final_kwargs["commit"], after_head)
+        self.assertEqual(final_kwargs["summary"], transition_result["summary"])
+        self.assertIsNone(final_kwargs["next_action"])
+        self.assertEqual(final_kwargs["blockers"], expected_blockers)
+        self.assertEqual(final_kwargs["gemini_worker_run_id"], VALID_WORKER_RUN_ID)
+        self.assertEqual(final_kwargs["gemini_reviewer_run_id"], VALID_REVIEWER_RUN_ID)
+        self.assertEqual(final_kwargs["proposal_sha256"], VALID_PROPOSAL_SHA256)
 
 
 if __name__ == "__main__":
