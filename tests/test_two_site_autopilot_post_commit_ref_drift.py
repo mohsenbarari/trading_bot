@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 try:
+    from scripts import two_site_codex_autopilot as autopilot_module
+    from scripts.two_site_assignment_scope import AssignmentScope
     from scripts.two_site_codex_autopilot import (
         AutopilotError,
         RESULT_KEYS,
         recover_committed_advisory_result,
         validate_result,
+        validate_transition,
     )
 except ModuleNotFoundError:
+    import two_site_codex_autopilot as autopilot_module  # type: ignore[no-redef]
+    from two_site_assignment_scope import AssignmentScope  # type: ignore[no-redef]
     from two_site_codex_autopilot import (  # type: ignore[no-redef]
         AutopilotError,
         RESULT_KEYS,
         recover_committed_advisory_result,
         validate_result,
+        validate_transition,
     )
 
 VALID_COMMIT = "1" * 40
@@ -95,6 +103,67 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
 
         self.assertEqual(str(exc_info.exception), "recovery only applies to CONTINUE state")
         self.assertEqual(halt_receipt, original_copy)
+
+    def test_unchanged_head_null_commit_blocked_receipt_rejects_exact_protected_ref_drift(self):
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        integration_head = "5" * 40
+        control_blobs = {"automation.json": "blob-control-hash"}
+        before_protected_refs = {
+            "refs/heads/main": "1" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+        after_protected_refs = {
+            "refs/heads/main": "4" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+
+        blocked_receipt = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "External gate halt encountered during cycle.",
+            "commit": None,
+            "next_action": None,
+            "blockers": ["External verification gate pending."],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+        }
+
+        self.assertEqual(validate_result(blocked_receipt), blocked_receipt)
+        self.assertIsNone(blocked_receipt["commit"])
+
+        before_repo = {
+            "head": integration_head,
+            "assignment_scope": scope,
+            "protected_refs": before_protected_refs,
+            "control_blobs": control_blobs,
+        }
+        after_repo = {
+            "head": integration_head,
+            "assignment_scope": scope,
+            "protected_refs": after_protected_refs,
+            "control_blobs": control_blobs,
+        }
+
+        with patch.object(autopilot_module, "validate_repository", return_value=after_repo):
+            with self.assertRaises(AutopilotError) as exc_info:
+                validate_transition(Path("/fake/repo/root"), before_repo, blocked_receipt)
+
+        self.assertEqual(
+            str(exc_info.exception),
+            "a protected main/origin/candidate ref changed during the cycle",
+        )
 
 
 if __name__ == "__main__":
