@@ -222,6 +222,70 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             "a protected automation control changed without a bound commit",
         )
 
+    def test_unchanged_head_null_commit_blocked_receipt_rejects_exact_assignment_scope_drift(self):
+        scope_before = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        scope_after = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="d" * 64,
+        )
+        integration_head = "5" * 40
+        protected_refs = {
+            "refs/heads/main": "1" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+        control_blobs = {"automation.json": "blob-control-hash"}
+
+        blocked_receipt = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "External gate halt encountered during cycle.",
+            "commit": None,
+            "next_action": None,
+            "blockers": ["External verification gate pending."],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+        }
+
+        self.assertEqual(validate_result(blocked_receipt), blocked_receipt)
+        self.assertIsNone(blocked_receipt["commit"])
+
+        before_repo = {
+            "head": integration_head,
+            "assignment_scope": scope_before,
+            "protected_refs": protected_refs,
+            "control_blobs": control_blobs,
+        }
+        after_repo = {
+            "head": integration_head,
+            "assignment_scope": scope_after,
+            "protected_refs": protected_refs,
+            "control_blobs": control_blobs,
+        }
+
+        with patch.object(autopilot_module, "validate_repository", return_value=after_repo):
+            with self.assertRaises(AutopilotError) as exc_info:
+                validate_transition(Path("/fake/repo/root"), before_repo, blocked_receipt)
+
+        self.assertEqual(
+            str(exc_info.exception),
+            "active assignment scope changed during cycle",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
