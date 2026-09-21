@@ -886,6 +886,141 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             malformed_context = json.loads(malformed_context_json)
             self.assertNotIn("validated_previous_cycle_hint", malformed_context)
 
+    def test_run_loop_consumes_persisted_continuation_once_and_rejects_invalid_checkpoints(self):
+        current_head = VALID_COMMIT
+        stale_head = "2" * 40
+
+        valid_status = {
+            "state": "CONTINUE",
+            "head_changed": True,
+            "head_after": current_head,
+            "commit": current_head,
+            "blockers": [],
+            "summary": "Completed step 1 and committed changes.",
+            "next_action": "Proceed with step 2.",
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+
+        stale_status = {
+            "state": "CONTINUE",
+            "head_changed": True,
+            "head_after": stale_head,
+            "commit": stale_head,
+            "blockers": [],
+            "summary": "Completed step 1 on prior head.",
+            "next_action": "Proceed with step 2.",
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+
+        terminal_blocked_result = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "External gate halt encountered during cycle.",
+            "commit": None,
+            "next_action": None,
+            "blockers": ["External verification gate pending."],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+            "head_before": current_head,
+            "head_after": current_head,
+            "head_changed": False,
+        }
+
+        def fake_git(_root, *args):
+            if args == ("status", "--porcelain=v1", "--untracked-files=all"):
+                return ""
+            return current_head
+
+        # Case 1: valid persisted CONTINUE checkpoint is consumed on cycle 1,
+        # cleared across retry after RuntimeError, and omitted on cycle 2.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            state_root = root / ".local/two-site-refactor/autopilot"
+            state_root.mkdir(parents=True, exist_ok=True)
+            status_path = state_root / "status.json"
+            status_path.write_text(json.dumps(valid_status, indent=2), encoding="utf-8")
+            fake_codex = root / "fake_codex"
+            fake_run_dir = state_root / "runs" / "cycle-0001-20260921T180000Z-12345"
+
+            expected_candidate = autopilot_module.persisted_continuation(
+                root, state_root, current_head
+            )
+            self.assertIsNotNone(expected_candidate)
+            expected_hint = autopilot_module.continuation_hint(
+                expected_candidate, current_head
+            )
+            self.assertIsNotNone(expected_hint)
+
+            with patch.object(autopilot_module, "git", side_effect=fake_git), \
+                    patch.object(autopilot_module, "ref_snapshot", return_value={}), \
+                    patch.object(autopilot_module, "run_cycle", side_effect=[
+                        RuntimeError("transient worker crash"),
+                        (fake_run_dir, terminal_blocked_result),
+                    ]) as mock_run_cycle, \
+                    patch.object(autopilot_module, "prune_runs"), \
+                    patch.object(autopilot_module, "write_supervisor_state"), \
+                    patch.object(autopilot_module.time, "sleep") as mock_sleep:
+                ret = autopilot_module.run_loop(
+                    root, fake_codex, max_cycles=10, timeout=300, once=False
+                )
+
+            self.assertEqual(ret, 2)
+            self.assertEqual(mock_run_cycle.call_count, 2)
+
+            first_call_args, first_call_kwargs = mock_run_cycle.call_args_list[0]
+            second_call_args, second_call_kwargs = mock_run_cycle.call_args_list[1]
+
+            self.assertIn("continuation", first_call_kwargs)
+            self.assertEqual(first_call_kwargs["continuation"], expected_candidate)
+            self.assertEqual(
+                autopilot_module.continuation_hint(first_call_kwargs["continuation"], current_head),
+                expected_hint,
+            )
+            self.assertEqual(
+                {k: first_call_kwargs["continuation"][k] for k in expected_hint},
+                expected_hint,
+            )
+            self.assertNotIn("continuation", second_call_kwargs)
+            mock_sleep.assert_called_once_with(15)
+
+        # Cases 2 & 3: stale-HEAD and malformed-JSON statuses are rejected
+        # and never provide a continuation argument to run_cycle.
+        for invalid_status_content in (
+            json.dumps(stale_status, indent=2),
+            "{ malformed json",
+        ):
+            with tempfile.TemporaryDirectory() as sub_tmp_dir:
+                sub_root = Path(sub_tmp_dir).resolve()
+                sub_state_root = sub_root / ".local/two-site-refactor/autopilot"
+                sub_state_root.mkdir(parents=True, exist_ok=True)
+                sub_status_path = sub_state_root / "status.json"
+                sub_status_path.write_text(invalid_status_content, encoding="utf-8")
+                sub_codex = sub_root / "fake_codex"
+                sub_run_dir = sub_state_root / "runs" / "cycle-0001-20260921T180000Z-12345"
+
+                with patch.object(autopilot_module, "git", side_effect=fake_git), \
+                        patch.object(autopilot_module, "ref_snapshot", return_value={}), \
+                        patch.object(autopilot_module, "run_cycle", return_value=(sub_run_dir, terminal_blocked_result)) as mock_sub_run_cycle, \
+                        patch.object(autopilot_module, "prune_runs"), \
+                        patch.object(autopilot_module, "write_supervisor_state"), \
+                        patch.object(autopilot_module.time, "sleep") as mock_sub_sleep:
+                    sub_ret = autopilot_module.run_loop(
+                        sub_root, sub_codex, max_cycles=10, timeout=300, once=False
+                    )
+
+                self.assertEqual(sub_ret, 2)
+                mock_sub_run_cycle.assert_called_once()
+                _, sub_kwargs = mock_sub_run_cycle.call_args
+                self.assertNotIn("continuation", sub_kwargs)
+                mock_sub_sleep.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
