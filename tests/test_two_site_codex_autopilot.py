@@ -1055,6 +1055,89 @@ class AutopilotContracts(unittest.TestCase):
         published_states = [call.args[1] for call in publish.call_args_list]
         self.assertEqual(published_states, ["RUNNING", "RESCOPE"])
 
+    def test_run_cycle_stops_heartbeat_and_joins_before_normal_return(self):
+        test_case = self
+        captured_threads = []
+        events = []
+        caller_observed_return = False
+
+        class FakeHeartbeatThread:
+            def __init__(self, target=None, args=(), **kwargs):
+                self.target = target
+                self.args = args
+                self.name = kwargs.get("name")
+                self.daemon = kwargs.get("daemon")
+                self.stop_event = args[0] if args else None
+                self.join_called = 0
+                captured_threads.append(self)
+
+            def start(self):
+                pass
+
+            def join(self, timeout=None):
+                self.join_called += 1
+                test_case.assertFalse(caller_observed_return)
+                events.append(("join_start", bool(self.stop_event and self.stop_event.is_set())))
+                events.append("join_done")
+
+        class FakeProcess:
+            pid = 12345
+            returncode = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        codex = self.root / "codex"
+        codex.write_text("")
+        state_root = self.root / "state"
+        (state_root / "runs").mkdir(parents=True)
+
+        before = {
+            "head": "a" * 40,
+            "protected_refs": {},
+            "assignment_scope": self.assignment_scope(),
+        }
+        raw_receipt = self.result()
+        expected_result = dict(raw_receipt, head_before="a" * 40, head_after="b" * 40, head_changed=True)
+
+        def fake_capture(_proc, _stdin, stream_path, _stderr, _timeout, max_output=None):
+            autopilot.write_json(stream_path.parent / "result.json", raw_receipt)
+
+        with patch.object(autopilot, "validate_repository", return_value=before), \
+                patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
+                patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
+                patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
+                patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
+                patch.object(autopilot, "write_supervisor_state"), \
+                patch.object(autopilot.threading, "Thread", side_effect=FakeHeartbeatThread), \
+                patch.object(autopilot, "capture_bounded_process", side_effect=fake_capture), \
+                patch.object(autopilot, "file_sha256", return_value="s" * 64), \
+                patch.object(autopilot, "codex_runtime_identity", return_value={}), \
+                patch.object(autopilot, "validate_transition", return_value=expected_result):
+            run_dir, result = autopilot.run_cycle(self.root, codex, state_root, 1, 30)
+            caller_observed_return = True
+            events.append("caller_returned")
+
+        self.assertEqual(len(captured_threads), 1)
+        thread = captured_threads[0]
+        self.assertIs(thread.target, autopilot._heartbeat_running_cycle)
+        self.assertEqual(thread.name, "two-site-supervisor-heartbeat")
+        self.assertTrue(thread.daemon)
+        self.assertIsInstance(thread.stop_event, autopilot.threading.Event)
+        self.assertTrue(thread.stop_event.is_set())
+        self.assertEqual(thread.join_called, 1)
+        self.assertEqual(
+            events,
+            [("join_start", True), "join_done", "caller_returned"],
+        )
+        self.assertTrue(caller_observed_return)
+        self.assertIsNone(autopilot._ACTIVE_PROCESS)
+        self.assertEqual(result["state"], "CONTINUE")
+        self.assertTrue(run_dir.is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
