@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -690,6 +691,81 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
         self.assertEqual(final_kwargs["gemini_worker_run_id"], VALID_WORKER_RUN_ID)
         self.assertEqual(final_kwargs["gemini_reviewer_run_id"], VALID_REVIEWER_RUN_ID)
         self.assertEqual(final_kwargs["proposal_sha256"], VALID_PROPOSAL_SHA256)
+
+    def test_persisted_blocked_terminal_statuses_are_never_continuation_hints(self):
+        persisted_continuation = autopilot_module.persisted_continuation
+        current_head = VALID_COMMIT
+
+        committed_halt_status = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "Committed halt waiting for external gate.",
+            "head": current_head,
+            "head_before": "4" * 40,
+            "head_after": current_head,
+            "head_changed": True,
+            "commit": current_head,
+            "next_action": None,
+            "blockers": ["External verification gate pending."],
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+        null_commit_halt_status = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "External gate halt encountered during cycle.",
+            "head": current_head,
+            "head_before": current_head,
+            "head_after": current_head,
+            "head_changed": False,
+            "commit": None,
+            "next_action": None,
+            "blockers": ["External verification gate pending."],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+        }
+        null_commit_rescope_status = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "RESCOPE",
+            "category": "INTERNAL_REJECTION",
+            "summary": "Internal rejection requiring assignment scope adjustment.",
+            "head": current_head,
+            "head_before": current_head,
+            "head_after": current_head,
+            "head_changed": False,
+            "commit": None,
+            "next_action": "Rescope assignment boundaries and retry.",
+            "blockers": ["Scope too broad for single cycle."],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            state_root = root / ".local/two-site-refactor/autopilot"
+            state_root.mkdir(parents=True, exist_ok=True)
+            status_path = state_root / "status.json"
+
+            for status_payload in (
+                committed_halt_status,
+                null_commit_halt_status,
+                null_commit_rescope_status,
+            ):
+                status_path.write_text(
+                    json.dumps(status_payload, indent=2), encoding="utf-8"
+                )
+                self.assertEqual(status_payload.get("head"), current_head)
+                self.assertEqual(status_payload.get("head_after"), current_head)
+                hint = persisted_continuation(root, state_root, current_head)
+                self.assertIsNone(hint)
 
 
 if __name__ == "__main__":
