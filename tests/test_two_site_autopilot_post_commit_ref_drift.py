@@ -1155,6 +1155,99 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             self.assertNotIn(first_sentinel_val, final_raw_text)
             self.assertNotIn(first_summary, final_raw_text)
 
+    def test_write_supervisor_state_replace_failure_preserves_prior_status_and_recovers_stale_temp(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            state_root = Path(tmp_dir).resolve()
+            status_path = state_root / "status.json"
+            tmp_status_path = state_root / "status.json.tmp"
+
+            t1 = 1700000100.0
+            t2 = 1700000200.0
+            t3 = 1700000300.0
+
+            prior_payload = {
+                "state": "CONTINUE",
+                "updated_at": t1,
+                "cycle": 1,
+                "prior_only_marker": "prior_sentinel_abc",
+                "summary": "Prior cycle completed successfully.",
+            }
+
+            with patch.object(autopilot_module.time, "time", side_effect=[t1, t2, t3]):
+                autopilot_module.write_supervisor_state(
+                    state_root,
+                    "CONTINUE",
+                    announce=False,
+                    cycle=1,
+                    prior_only_marker="prior_sentinel_abc",
+                    summary="Prior cycle completed successfully.",
+                )
+
+                self.assertTrue(status_path.is_file())
+                self.assertFalse(tmp_status_path.exists())
+                prior_raw_bytes = status_path.read_bytes()
+                prior_parsed_json = json.loads(status_path.read_text(encoding="utf-8"))
+                self.assertEqual(prior_parsed_json, prior_payload)
+
+                with patch.object(Path, "replace", side_effect=OSError("simulated atomic replace failure")):
+                    with self.assertRaises(OSError) as exc_info:
+                        autopilot_module.write_supervisor_state(
+                            state_root,
+                            "BLOCKED",
+                            announce=False,
+                            failed_only_marker="failed_sentinel_xyz",
+                            summary="Failed attempt to block.",
+                        )
+                self.assertEqual(str(exc_info.exception), "simulated atomic replace failure")
+
+                self.assertTrue(status_path.is_file())
+                self.assertEqual(status_path.read_bytes(), prior_raw_bytes)
+                current_status_parsed = json.loads(status_path.read_text(encoding="utf-8"))
+                self.assertEqual(current_status_parsed, prior_parsed_json)
+
+                self.assertTrue(tmp_status_path.is_file())
+                stale_tmp_bytes = tmp_status_path.read_bytes()
+                stale_tmp_parsed = json.loads(stale_tmp_bytes.decode("utf-8"))
+                self.assertEqual(stale_tmp_parsed.get("failed_only_marker"), "failed_sentinel_xyz")
+                self.assertEqual(stale_tmp_parsed.get("updated_at"), t2)
+
+                expected_new_payload = {
+                    "state": "STOPPED",
+                    "updated_at": t3,
+                    "recovered_cycle": 2,
+                    "final_marker": "final_sentinel_123",
+                }
+
+                autopilot_module.write_supervisor_state(
+                    state_root,
+                    "STOPPED",
+                    announce=False,
+                    recovered_cycle=2,
+                    final_marker="final_sentinel_123",
+                )
+
+            self.assertFalse(tmp_status_path.exists())
+            self.assertTrue(status_path.is_file())
+
+            final_raw_bytes = status_path.read_bytes()
+            final_raw_text = final_raw_bytes.decode("utf-8")
+            self.assertTrue(final_raw_text.endswith("\n"))
+
+            expected_new_bytes = (
+                json.dumps(expected_new_payload, ensure_ascii=False, indent=2) + "\n"
+            ).encode("utf-8")
+            self.assertEqual(final_raw_bytes, expected_new_bytes)
+
+            final_parsed_json = json.loads(final_raw_text)
+            self.assertEqual(final_parsed_json, expected_new_payload)
+
+            self.assertNotIn("prior_only_marker", final_parsed_json)
+            self.assertNotIn("cycle", final_parsed_json)
+            self.assertNotIn("failed_only_marker", final_parsed_json)
+            self.assertNotIn("summary", final_parsed_json)
+            self.assertNotIn("prior_sentinel_abc", final_raw_text)
+            self.assertNotIn("failed_sentinel_xyz", final_raw_text)
+
 
 if __name__ == "__main__":
     unittest.main()
