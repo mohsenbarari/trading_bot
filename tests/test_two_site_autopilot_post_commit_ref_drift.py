@@ -1021,6 +1021,73 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
                 self.assertNotIn("continuation", sub_kwargs)
                 mock_sub_sleep.assert_not_called()
 
+    def test_run_loop_preexisting_stop_prevents_persisted_continuation_consumption(self):
+        current_head = VALID_COMMIT
+        valid_status = {
+            "state": "CONTINUE",
+            "head_changed": True,
+            "head_after": current_head,
+            "commit": current_head,
+            "blockers": [],
+            "summary": "Completed step 1 and committed changes.",
+            "next_action": "Proceed with step 2.",
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            state_root = root / ".local/two-site-refactor/autopilot"
+            state_root.mkdir(parents=True, exist_ok=True)
+            status_path = state_root / "status.json"
+            status_path.write_text(json.dumps(valid_status, indent=2), encoding="utf-8")
+            fake_codex = root / "fake_codex"
+
+            recoverable_candidate = autopilot_module.persisted_continuation(
+                root, state_root, current_head
+            )
+            self.assertIsNotNone(recoverable_candidate)
+            self.assertEqual(
+                autopilot_module.continuation_hint(recoverable_candidate, current_head),
+                {
+                    "head_after": current_head,
+                    "commit": current_head,
+                    "summary": "Completed step 1 and committed changes.",
+                    "next_action": "Proceed with step 2.",
+                    "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+                    "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+                    "proposal_sha256": VALID_PROPOSAL_SHA256,
+                },
+            )
+
+            stop_path = state_root / "STOP"
+            stop_path.write_text("STOP\n", encoding="utf-8")
+            self.assertTrue(stop_path.exists())
+
+            with patch.object(autopilot_module, "git") as mock_git, \
+                    patch.object(autopilot_module, "ref_snapshot") as mock_ref_snapshot, \
+                    patch.object(autopilot_module, "persisted_continuation") as mock_persisted_continuation, \
+                    patch.object(autopilot_module, "run_cycle") as mock_run_cycle, \
+                    patch.object(autopilot_module, "prune_runs") as mock_prune_runs, \
+                    patch.object(autopilot_module, "write_supervisor_state") as mock_write_supervisor_state, \
+                    patch.object(autopilot_module.time, "sleep") as mock_sleep:
+                ret = autopilot_module.run_loop(
+                    root, fake_codex, max_cycles=10, timeout=300, once=False
+                )
+
+            self.assertEqual(ret, 0)
+            mock_run_cycle.assert_not_called()
+            mock_persisted_continuation.assert_not_called()
+            mock_git.assert_not_called()
+            mock_ref_snapshot.assert_not_called()
+            mock_prune_runs.assert_not_called()
+            mock_sleep.assert_not_called()
+
+            mock_write_supervisor_state.assert_called_once_with(
+                state_root, "STOPPED", cycle=1
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
