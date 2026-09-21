@@ -483,6 +483,75 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
         self.assertEqual(blocked_receipt["next_action"], expected_next_action)
         self.assertEqual(transition["next_action"], expected_next_action)
 
+    def test_changed_head_null_commit_blocked_receipt_rejects_protected_ref_drift_before_commit_chain_processing(self):
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        before_head = "5" * 40
+        after_head = "6" * 40
+        control_blobs = {"automation.json": "blob-control-hash"}
+        before_protected_refs = {
+            "refs/heads/main": "1" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+        after_protected_refs = {
+            "refs/heads/main": "4" * 40,
+            "refs/remotes/origin/main": "2" * 40,
+            "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+        }
+
+        blocked_receipt = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "HALT",
+            "category": "EXTERNAL_GATE",
+            "summary": "External gate halt encountered during cycle.",
+            "commit": None,
+            "next_action": None,
+            "blockers": ["External verification gate pending."],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+        }
+
+        self.assertEqual(validate_result(blocked_receipt), blocked_receipt)
+        self.assertIsNone(blocked_receipt["commit"])
+        self.assertIsNone(blocked_receipt["gemini_worker_run_id"])
+        self.assertIsNone(blocked_receipt["gemini_reviewer_run_id"])
+        self.assertIsNone(blocked_receipt["proposal_sha256"])
+
+        before_repo = {
+            "head": before_head,
+            "assignment_scope": scope,
+            "protected_refs": before_protected_refs,
+            "control_blobs": control_blobs,
+        }
+        after_repo = {
+            "head": after_head,
+            "assignment_scope": scope,
+            "protected_refs": after_protected_refs,
+            "control_blobs": control_blobs,
+        }
+
+        with patch.object(autopilot_module, "validate_repository", return_value=after_repo), \
+                patch.object(autopilot_module, "git") as mock_git, \
+                patch.object(autopilot_module, "validate_scoped_gemini_chain") as mock_validate_scoped_gemini_chain:
+            with self.assertRaises(AutopilotError) as exc_info:
+                validate_transition(Path("/fake/repo/root"), before_repo, blocked_receipt)
+
+        self.assertEqual(
+            str(exc_info.exception),
+            "a protected main/origin/candidate ref changed during the cycle",
+        )
+        mock_git.assert_not_called()
+        mock_validate_scoped_gemini_chain.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
