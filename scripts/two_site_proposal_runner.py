@@ -1110,6 +1110,90 @@ def _task_unique_pairs(items):
     return result
 
 
+def _is_tracked_test(root: Path, file_path: str) -> bool:
+    target = root / file_path
+    if not target.is_file():
+        return False
+    try:
+        resolved = target.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    if resolved != target:
+        return False
+    try:
+        out = git(root, "ls-files", "--", file_path)
+        return out.strip() == file_path
+    except Exception:
+        return False
+
+
+def validate_test_specification(
+    root: Path,
+    spec: str,
+    allowed_files: list[str] | set[str] | tuple[str, ...],
+) -> None:
+    if not isinstance(spec, str) or not spec.strip() or spec != spec.strip():
+        raise ProposalError(f"invalid test specification: {spec!r}")
+    if len(spec.encode("utf-8")) > 512:
+        raise ProposalError("test specification exceeds length limit")
+    if any(ch.isspace() for ch in spec):
+        raise ProposalError(f"test specification contains whitespace or options: {spec[:120]!r}")
+    if "\\" in spec or "\0" in spec:
+        raise ProposalError(f"test specification contains invalid characters: {spec[:120]!r}")
+
+    parts = spec.split("::")
+    file_path = parts[0]
+    node_parts = parts[1:]
+
+    if len(parts) > 1:
+        if any(not part or not part.isidentifier() for part in node_parts):
+            raise ProposalError(f"invalid test specification node parts: {spec[:120]!r}")
+
+    if file_path.startswith("/") or file_path.startswith("./") or file_path.endswith("/"):
+        raise ProposalError(f"noncanonical test specification path: {spec[:120]!r}")
+
+    segments = file_path.split("/")
+    if any(not seg or seg in {"", ".", ".."} for seg in segments):
+        raise ProposalError(f"noncanonical test specification path: {spec[:120]!r}")
+    if segments[0] != "tests":
+        raise ProposalError(f"test specification must be under tests/: {spec[:120]!r}")
+    if not file_path.endswith(".py"):
+        raise ProposalError(f"test specification must end with .py: {spec[:120]!r}")
+
+    filename = segments[-1]
+    if not filename.startswith("test_"):
+        raise ProposalError(f"test file name must start with test_: {spec[:120]!r}")
+    stem = filename[:-3]
+    if not stem.isidentifier():
+        raise ProposalError(f"test file name must be a valid Python identifier: {spec[:120]!r}")
+
+    for seg in segments[1:-1]:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", seg):
+            raise ProposalError(f"invalid directory in test specification: {spec[:120]!r}")
+
+    allowed_set = set(allowed_files)
+    if file_path in allowed_set:
+        return
+    if not _is_tracked_test(root, file_path):
+        raise ProposalError(
+            f"test specification does not resolve to tracked test or allowed overlay: {spec[:120]!r}"
+        )
+
+
+def validate_task_test_selectors(root: Path, task: dict) -> None:
+    goal = task.get("goal", "")
+    if not isinstance(goal, str) or "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" not in goal:
+        return
+    selectors = task.get("test_selectors", [])
+    if not isinstance(selectors, list):
+        raise ProposalError("task test_selectors must be a list")
+    allowed_files = task.get("allowed_files", [])
+    if not isinstance(allowed_files, list):
+        allowed_files = []
+    for spec in selectors:
+        validate_test_specification(root, spec, allowed_files)
+
+
 def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
     def _task_path_error(code: str, path_name: str | None = None) -> _TaskBoundaryError:
         safe_path = None
@@ -1164,6 +1248,7 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
         except ModuleNotFoundError:
             from two_site_cycle_tools import validate_excerpts
         validate_excerpts(root, task)
+        validate_task_test_selectors(root, task)
     sources = {}
     for name in dict.fromkeys(task["context_files"] + task["allowed_files"]):
         target = relative_file(root, name, failure_factory=_task_path_error)
