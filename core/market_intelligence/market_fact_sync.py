@@ -101,7 +101,12 @@ def load_next_batch(
     max_items: int = MAX_BATCH_ITEMS,
     max_document_bytes: int = MAX_BATCH_DOCUMENT_BYTES,
 ) -> MarketFactBatchV1 | None:
-    """Load one stream head without skipping an unavailable earlier item."""
+    """Load a contiguous stream head without starving independent streams.
+
+    Delivery order is strict within a stream.  Across streams, choose the one
+    least recently acknowledged so a high-volume historical source cannot
+    delay live, independent estimator inputs behind its backlog.
+    """
 
     with connection.cursor() as cursor:
         cursor.execute(
@@ -110,6 +115,7 @@ def load_next_batch(
                 SELECT DISTINCT ON (o.stream_id)
                        o.stream_id,o.delivery_sequence,o.created_at_utc,
                        o.next_attempt_at_utc,o.dead_lettered_at_utc,
+                       c.updated_at_utc AS last_acknowledged_at_utc,
                        COALESCE(c.highest_contiguous_sequence,0) AS checkpoint
                 FROM market_data.market_fact_outbox o
                 LEFT JOIN market_data.market_fact_delivery_checkpoints c
@@ -122,7 +128,9 @@ def load_next_batch(
             WHERE dead_lettered_at_utc IS NULL
               AND next_attempt_at_utc <= clock_timestamp()
               AND delivery_sequence=checkpoint+1
-            ORDER BY created_at_utc,stream_id
+            ORDER BY last_acknowledged_at_utc ASC NULLS FIRST,
+                     created_at_utc ASC,
+                     stream_id ASC
             LIMIT 1
             """
         )
