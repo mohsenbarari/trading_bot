@@ -2317,7 +2317,15 @@ def normalize_result(
     return normalized_result
 
 
-def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
+def validate_result(
+    result: dict,
+    task: dict,
+    sources: dict,
+    role: str,
+    enforce_raw_transport: bool = True,
+) -> dict:
+    if type(enforce_raw_transport) is not bool:
+        raise ProposalError("enforce_raw_transport must be a boolean")
     if not isinstance(result, dict) or set(result) != set(schema(role)["required"]):
         raise ProposalError("incomplete response contract")
     statuses = schema(role)["properties"]["status"]["enum"]
@@ -2347,7 +2355,7 @@ def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
     max_new_test = out_contract.get("max_new_test_file_utf8_bytes", 24000)
     new_test_files = set(out_contract.get("new_test_files", []))
 
-    if role == "worker" and test_only:
+    if role == "worker" and test_only and enforce_raw_transport:
         raw_transport_bytes = len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
         if raw_transport_bytes > max_transport:
             raise ProposalError("test-only raw transport exceeds budget")
@@ -2644,6 +2652,7 @@ def _parse_stream(
     # With --json-schema the documented machine payload is structured_output.
     # CLI 1.1.27 may also append its submission object to free-text response.
     # Never scrape that text or fall back when a supplied structured value is bad.
+    enforce_raw_transport = True
     if "structured_output" in envelope:
         result = envelope["structured_output"]
     else:
@@ -2656,13 +2665,27 @@ def _parse_stream(
                 raise RetryableProviderSessionError(
                     "CLI response is not one valid JSON document"
                 ) from exc
-            result = _deduplicate_response(envelope["response"])
+            if role == "worker":
+                result, first_span = _deduplicate_response_with_first_document_span(
+                    envelope["response"]
+                )
+                notes = task_preparation_notes(task, sources)
+                out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
+                if out_contract.get("test_only_task"):
+                    max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
+                    if len(first_span) > max_transport:
+                        raise ProposalError("test-only raw transport exceeds budget")
+                enforce_raw_transport = False
+            else:
+                result = _deduplicate_response(envelope["response"])
     try:
         result = normalize_result(
             result, task, sources, role, strict_transport=True,
             force_full_paths=force_full_paths,
         )
-        result = validate_result(result, task, sources, role)
+        result = validate_result(
+            result, task, sources, role, enforce_raw_transport=enforce_raw_transport
+        )
     except ProposalError as exc:
         if role == "worker" and _provider_output_is_retryable(exc):
             raise RetryableProviderOutputError(
