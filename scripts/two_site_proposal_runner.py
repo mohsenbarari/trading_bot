@@ -2425,7 +2425,9 @@ def load_prior_worker(
             or not isinstance(worker_status.get("conversation_id"), str)
             or not worker_status["conversation_id"].strip()):
         raise ProposalError("proposal is not bound to one completed worker run")
-    candidate = validate_result(unique_json(proposal_text), task, sources, "worker")
+    candidate = validate_result(
+        unique_json(proposal_text), task, sources, "worker", enforce_raw_transport=False
+    )
     if candidate["status"] != "PROPOSAL_READY":
         raise ProposalError("review/correction requires a complete worker proposal")
     return candidate, worker_status, proposal_sha256
@@ -2677,6 +2679,14 @@ def _parse_stream(
             raise RetryableProviderSessionError("CLI result has no response text")
         try:
             result = unique_json(envelope["response"])
+            if role == "worker":
+                notes = task_preparation_notes(task, sources)
+                out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
+                if out_contract.get("test_only_task"):
+                    max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
+                    if len(envelope["response"].encode("utf-8")) > max_transport:
+                        raise ProposalError("test-only raw transport exceeds budget")
+                enforce_raw_transport = False
         except json.JSONDecodeError as exc:
             if not exc.msg.startswith("Extra data"):
                 raise RetryableProviderSessionError(
@@ -2966,7 +2976,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                             "provider returned unusable correction delta"
                         ) from exc
                     raise
-                rebased = validate_result(rebased, task, sources, role)
+                rebased = validate_result(
+                    rebased, task, sources, role, enforce_raw_transport=False
+                )
                 if len(serialize_json(rebased)) > MAX_CONTEXT:
                     raise ProposalError("canonical proposal exceeds the safe context budget")
                 write_json(out / "delta-result.json", delta_result)
