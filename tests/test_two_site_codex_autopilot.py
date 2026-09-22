@@ -1138,6 +1138,172 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(result["state"], "CONTINUE")
         self.assertTrue(run_dir.is_dir())
 
+    def test_run_cycle_preserves_primary_baseexception_when_heartbeat_join_raises(self):
+        test_case = self
+        captured_threads = []
+        events = []
+
+        class DedicatedPrimaryBaseException(BaseException):
+            pass
+
+        class DedicatedHeartbeatJoinBaseException(BaseException):
+            pass
+
+        primary_error = DedicatedPrimaryBaseException("primary base exception failure")
+        join_error = DedicatedHeartbeatJoinBaseException("heartbeat join cleanup failure")
+
+        class FakeHeartbeatThread:
+            def __init__(self, target=None, args=(), **kwargs):
+                self.target = target
+                self.args = args
+                self.name = kwargs.get("name")
+                self.daemon = kwargs.get("daemon")
+                self.stop_event = args[0] if args else None
+                self.join_called = 0
+                captured_threads.append(self)
+
+            def start(self):
+                pass
+
+            def join(self, timeout=None):
+                self.join_called += 1
+                stop_set_before_join = bool(self.stop_event and self.stop_event.is_set())
+                events.append(("join_start", stop_set_before_join))
+                test_case.assertTrue(stop_set_before_join)
+                test_case.assertIsNotNone(autopilot._ACTIVE_PROCESS)
+                raise join_error
+
+        class FakeProcess:
+            pid = 12345
+            returncode = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        codex = self.root / "codex"
+        codex.write_text("")
+        state_root = self.root / "state"
+        (state_root / "runs").mkdir(parents=True)
+
+        before = {
+            "head": "a" * 40,
+            "protected_refs": {},
+            "assignment_scope": self.assignment_scope(),
+        }
+
+        def fake_capture(_proc, _stdin, _stream_path, _stderr, _timeout, max_output=None):
+            raise primary_error
+
+        with patch.object(autopilot, "validate_repository", return_value=before), \
+                patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
+                patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
+                patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
+                patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
+                patch.object(autopilot, "write_supervisor_state"), \
+                patch.object(autopilot.threading, "Thread", side_effect=FakeHeartbeatThread), \
+                patch.object(autopilot, "capture_bounded_process", side_effect=fake_capture):
+            with self.assertRaises(BaseException) as ctx:
+                autopilot.run_cycle(self.root, codex, state_root, 1, 30)
+
+        self.assertIs(ctx.exception, primary_error)
+        self.assertEqual(len(captured_threads), 1)
+        thread = captured_threads[0]
+        self.assertEqual(thread.join_called, 1)
+        self.assertTrue(thread.stop_event.is_set())
+        self.assertEqual(events, [("join_start", True)])
+        self.assertIsNone(autopilot._ACTIVE_PROCESS)
+
+        runs = list((state_root / "runs").iterdir())
+        self.assertEqual(len(runs), 1)
+        status_path = runs[0] / "status.json"
+        self.assertTrue(status_path.is_file())
+        status = json.loads(status_path.read_text())
+        self.assertEqual(status["state"], "FAILED")
+        self.assertIn("DedicatedPrimaryBaseException", status["error"])
+        self.assertIn("primary base exception failure", status["error"])
+
+    def test_run_cycle_propagates_heartbeat_join_failure_without_primary_exception(self):
+        test_case = self
+        captured_threads = []
+        events = []
+
+        class DedicatedHeartbeatJoinBaseException(BaseException):
+            pass
+
+        join_error = DedicatedHeartbeatJoinBaseException("heartbeat join cleanup failure without primary")
+
+        class FakeHeartbeatThread:
+            def __init__(self, target=None, args=(), **kwargs):
+                self.target = target
+                self.args = args
+                self.name = kwargs.get("name")
+                self.daemon = kwargs.get("daemon")
+                self.stop_event = args[0] if args else None
+                self.join_called = 0
+                captured_threads.append(self)
+
+            def start(self):
+                pass
+
+            def join(self, timeout=None):
+                self.join_called += 1
+                stop_set_before_join = bool(self.stop_event and self.stop_event.is_set())
+                events.append(("join_start", stop_set_before_join))
+                test_case.assertTrue(stop_set_before_join)
+                test_case.assertIsNotNone(autopilot._ACTIVE_PROCESS)
+                raise join_error
+
+        class FakeProcess:
+            pid = 12345
+            returncode = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        codex = self.root / "codex"
+        codex.write_text("")
+        state_root = self.root / "state"
+        (state_root / "runs").mkdir(parents=True)
+
+        before = {
+            "head": "a" * 40,
+            "protected_refs": {},
+            "assignment_scope": self.assignment_scope(),
+        }
+        raw_receipt = self.result()
+        expected_result = dict(raw_receipt, head_before="a" * 40, head_after="b" * 40, head_changed=True)
+
+        def fake_capture(_proc, _stdin, stream_path, _stderr, _timeout, max_output=None):
+            autopilot.write_json(stream_path.parent / "result.json", raw_receipt)
+
+        with patch.object(autopilot, "validate_repository", return_value=before), \
+                patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
+                patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
+                patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
+                patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
+                patch.object(autopilot, "write_supervisor_state"), \
+                patch.object(autopilot.threading, "Thread", side_effect=FakeHeartbeatThread), \
+                patch.object(autopilot, "capture_bounded_process", side_effect=fake_capture), \
+                patch.object(autopilot, "file_sha256", return_value="s" * 64), \
+                patch.object(autopilot, "codex_runtime_identity", return_value={}), \
+                patch.object(autopilot, "validate_transition", return_value=expected_result):
+            with self.assertRaises(BaseException) as ctx:
+                autopilot.run_cycle(self.root, codex, state_root, 1, 30)
+
+        self.assertIs(ctx.exception, join_error)
+        self.assertEqual(len(captured_threads), 1)
+        thread = captured_threads[0]
+        self.assertEqual(thread.join_called, 1)
+        self.assertTrue(thread.stop_event.is_set())
+        self.assertEqual(events, [("join_start", True)])
+        self.assertIsNone(autopilot._ACTIVE_PROCESS)
+
 
 if __name__ == "__main__":
     unittest.main()

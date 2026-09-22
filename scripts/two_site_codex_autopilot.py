@@ -847,6 +847,7 @@ def run_cycle(
     global _ACTIVE_PROCESS
     heartbeat_stop: threading.Event | None = None
     heartbeat_thread: threading.Thread | None = None
+    primary_exception: BaseException | None = None
     phase_seconds: dict[str, float | None] = {
         "repository_validation": None,
         "task_context": None,
@@ -986,6 +987,7 @@ def run_cycle(
         write_json(run_dir / "status.json", meta)
         return run_dir, result
     except BaseException as exc:
+        primary_exception = exc
         meta.update(
             state="FAILED",
             error=type(exc).__name__ + ": " + str(exc),
@@ -1015,23 +1017,28 @@ def run_cycle(
             pass
         if heartbeat_stop is not None:
             heartbeat_stop.set()
-        if heartbeat_thread is not None:
-            heartbeat_thread.join()
-        _ACTIVE_PROCESS = None
-        # Telemetry must neither authorize nor block a valid transition. Persist
-        # before run pruning, including failed/interrupted attempts.
         try:
+            if heartbeat_thread is not None:
+                heartbeat_thread.join()
+        except BaseException:
+            if primary_exception is None:
+                raise
+        finally:
+            _ACTIVE_PROCESS = None
+            # Telemetry must neither authorize nor block a valid transition. Persist
+            # before run pruning, including failed/interrupted attempts.
             try:
-                from scripts.two_site_cycle_metrics import record_cycle
-            except ModuleNotFoundError:
-                from two_site_cycle_metrics import record_cycle
-            record_cycle(root, state_root, run_dir, meta, MODEL, REASONING)
-        except Exception as exc:
-            meta["metrics_error"] = type(exc).__name__
-            try:
-                write_json(run_dir / "status.json", meta)
-            except OSError:
-                pass
+                try:
+                    from scripts.two_site_cycle_metrics import record_cycle
+                except ModuleNotFoundError:
+                    from two_site_cycle_metrics import record_cycle
+                record_cycle(root, state_root, run_dir, meta, MODEL, REASONING)
+            except Exception as exc:
+                meta["metrics_error"] = type(exc).__name__
+                try:
+                    write_json(run_dir / "status.json", meta)
+                except OSError:
+                    pass
 
 
 def prune_runs(state_root: Path, keep: int = KEEP_RUNS) -> list[str]:
