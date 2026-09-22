@@ -10,6 +10,7 @@ import re
 import subprocess
 
 if __package__:
+    from scripts.two_site_agent_sandbox import SandboxError, _git_read
     import scripts.two_site_proposal_runner as runner
     from scripts.two_site_semantic_task_builder import (
         build_task_identity,
@@ -18,6 +19,7 @@ if __package__:
     from scripts.two_site_source_excerpts import extract_bundle
     from scripts.two_site_task_preflight import prepare_task
 else:
+    from two_site_agent_sandbox import SandboxError, _git_read
     import two_site_proposal_runner as runner
     from two_site_semantic_task_builder import (
         build_task_identity,
@@ -322,42 +324,99 @@ _CANONICAL_BLOCKERS = {
 }
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+CANONICAL_READ_LIMIT_BYTES = 2_000_000
+CANONICAL_TOTAL_BUDGET_BYTES = 8_000_000
+_BLOB_FAILED = object()
 
 
 def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> dict:
     """Classify current canonical P1-00b evidence, bound to the current HEAD."""
     root = Path(root).resolve(strict=True)
     loaded: dict[str, tuple[dict, str]] = {}
-    total = 0
+    blob_digests: dict[tuple[str, str], str | object] = {}
+    consumed_bytes = 0
     try:
         head = runner.git(root, "rev-parse", "HEAD")
         if not _HEX40.fullmatch(head):
             raise runner.ProposalError("HEAD is not a full lowercase commit SHA")
 
-        def git_blob(commit: str, path: str) -> bytes:
-            if not _HEX40.fullmatch(commit) or ":" in path:
-                raise runner.ProposalError("unsafe Git blob reference")
-            return subprocess.check_output(
-                ["/usr/bin/git", "--no-replace-objects", "-C", str(root), "show", f"{commit}:{path}"],
-                stderr=subprocess.DEVNULL,
-                timeout=20,
-            )
+        def _validate_commit(commit: object) -> str:
+            if not isinstance(commit, str) or not _HEX40.fullmatch(commit):
+                raise runner.ProposalError("unsafe Git commit reference")
+            return commit
+
+        def _validate_safe_path(path: object) -> str:
+            if (
+                not isinstance(path, str)
+                or not path
+                or "\x00" in path
+                or "\\" in path
+                or ":" in path
+                or path.startswith("/")
+            ):
+                raise runner.ProposalError("unsafe source path")
+            runner.relative_file(root, path)
+            return path
+
+        def git_blob_digest(commit: str, path: str) -> str:
+            nonlocal consumed_bytes
+            _validate_commit(commit)
+            _validate_safe_path(path)
+            cache_key = (commit, path)
+            if cache_key in blob_digests:
+                cached = blob_digests[cache_key]
+                if cached is _BLOB_FAILED:
+                    raise runner.ProposalError("bounded Git blob read failed")
+                return cached  # type: ignore[return-value]
+
+            remaining = CANONICAL_TOTAL_BUDGET_BYTES - consumed_bytes
+            if remaining <= 0:
+                raise runner.ProposalError("canonical content budget exhausted")
+            current_limit = min(CANONICAL_READ_LIMIT_BYTES, remaining)
+
+            try:
+                blob_bytes = _git_read(
+                    root,
+                    ("show", f"{commit}:{path}"),
+                    output_limit=current_limit,
+                )
+            except (SandboxError, OSError, subprocess.SubprocessError) as exc:
+                consumed_bytes += current_limit
+                blob_digests[cache_key] = _BLOB_FAILED
+                raise runner.ProposalError("bounded Git blob read failed") from exc
+
+            consumed_bytes += len(blob_bytes)
+            digest = runner.sha(blob_bytes)
+            blob_digests[cache_key] = digest
+            return digest
 
         def load(path: str) -> tuple[dict, str]:
-            nonlocal total
+            nonlocal consumed_bytes
+            _validate_safe_path(path)
             if path in loaded:
                 return loaded[path]
             runner.git(root, "ls-files", "--error-unmatch", "--", path)
-            data = runner.bounded_file_bytes(root, runner.relative_file(root, path), 2_000_000, path)
-            total += len(data)
-            if total > 8_000_000:
-                raise runner.ProposalError("canonical aggregate exceeds 8,000,000 bytes")
-            if runner.sha(data) != runner.sha(git_blob(head, path)):
+            rel_path = runner.relative_file(root, path)
+
+            remaining = CANONICAL_TOTAL_BUDGET_BYTES - consumed_bytes
+            if remaining <= 0:
+                raise runner.ProposalError("canonical content budget exhausted")
+            current_limit = min(CANONICAL_READ_LIMIT_BYTES, remaining)
+
+            try:
+                data = runner.bounded_file_bytes(root, rel_path, current_limit, path)
+            except (runner.ProposalError, OSError) as exc:
+                consumed_bytes += current_limit
+                raise runner.ProposalError("canonical file read failed") from exc
+
+            consumed_bytes += len(data)
+            data_sha = runner.sha(data)
+            if data_sha != git_blob_digest(head, path):
                 raise runner.ProposalError(f"live canonical bytes differ from HEAD: {path}")
             doc = runner.unique_json(data.decode("utf-8"))
             if not isinstance(doc, dict):
                 raise runner.ProposalError(f"canonical document is not an object: {path}")
-            loaded[path] = (doc, runner.sha(data))
+            loaded[path] = (doc, data_sha)
             return loaded[path]
 
         manifest, _ = load(_CANONICAL_ROOT)
@@ -436,7 +495,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 predecessor_sha = load(predecessor)[1]
             link = current.get("predecessor_inventory")
             actual_touch = runner.git(root, "log", "-1", "--format=%H", head, "--", predecessor)
-            if current.get("schema_version") != 1 or current.get("stage") != "P1-00b" or not isinstance(current.get("records"), list) or not isinstance(link, dict) or link.get("path") != predecessor or link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or runner.sha(git_blob(actual_touch, predecessor)) != predecessor_sha:
+            if current.get("schema_version") != 1 or current.get("stage") != "P1-00b" or not isinstance(current.get("records"), list) or not isinstance(link, dict) or link.get("path") != predecessor or link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or git_blob_digest(actual_touch, predecessor) != predecessor_sha:
                 raise runner.ProposalError(f"continuation {index} invalid")
             docs.append(current)
 
@@ -460,7 +519,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 try:
                     path = record["path"]
                     runner.git(root, "ls-files", "--error-unmatch", "--", path)
-                    valid = bool(valid) and record["sha256"] == runner.sha(git_blob(head, path)) and record["last_commit"] == runner.git(root, "log", "-1", "--format=%H", head, "--", path) and ancestor(record["last_commit"])
+                    valid = bool(valid) and record["sha256"] == git_blob_digest(head, path) and record["last_commit"] == runner.git(root, "log", "-1", "--format=%H", head, "--", path) and ancestor(record["last_commit"])
                 except (KeyError, subprocess.CalledProcessError, runner.ProposalError):
                     valid = False
                 (proven if valid else unknown).update(seed_ids)
