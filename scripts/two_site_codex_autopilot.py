@@ -30,6 +30,7 @@ try:
         file_sha256,
         file_fingerprint,
         git,
+        serialize_json,
         terminate_process,
         unique_json,
         validate_runtime_contract,
@@ -48,6 +49,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         file_sha256,
         file_fingerprint,
         git,
+        serialize_json,
         terminate_process,
         unique_json,
         validate_runtime_contract,
@@ -107,6 +109,44 @@ RESULT_KEYS = {
     "schema_version", "state", "disposition", "category", "summary", "commit", "next_action",
     "blockers", "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256",
 }
+MAX_ACCEPTED_CHECKPOINT_BYTES = 16 * 1024
+ACCEPTED_CHECKPOINT_SCHEMA_VERSION = 1
+ACCEPTED_RECEIPT_EXTRA_KEYS = ("head_before", "head_after", "head_changed")
+ACCEPTED_RECEIPT_KEYS = frozenset(RESULT_KEYS | set(ACCEPTED_RECEIPT_EXTRA_KEYS))
+REPOSITORY_FACT_KEYS = frozenset({
+    "head", "status", "protected_refs", "control_blobs", "assignment_scope",
+})
+ACCEPTED_RESULT_KEYS_ORDER = (
+    "schema_version",
+    "state",
+    "disposition",
+    "category",
+    "summary",
+    "commit",
+    "next_action",
+    "blockers",
+    "gemini_worker_run_id",
+    "gemini_reviewer_run_id",
+    "proposal_sha256",
+    "head_before",
+    "head_after",
+    "head_changed",
+)
+ACCEPTED_REPOSITORY_KEYS_ORDER = (
+    "head",
+    "status",
+    "protected_refs",
+    "control_blobs",
+    "assignment_scope",
+)
+ASSIGNMENT_SCOPE_KEYS_ORDER = (
+    "assignment_id",
+    "stage_id",
+    "sha256",
+    "expires_at",
+    "allowed_paths",
+    "forbidden_paths",
+)
 PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
 CONTROL_PATHS = (
@@ -393,6 +433,124 @@ def validate_result(result: object) -> dict:
     if result["disposition"] == "RESCOPE" and result["next_action"] is None:
         raise AutopilotError("RESCOPE requires a concrete next action")
     return result
+
+
+def validate_accepted_repository(repository: object) -> dict[str, object]:
+    """Validate and normalize repository facts for an accepted checkpoint."""
+    if isinstance(repository, Path):
+        raise AutopilotError("repository facts cannot be a Path")
+    if not isinstance(repository, dict) or set(repository) != REPOSITORY_FACT_KEYS:
+        raise AutopilotError("repository facts do not match the exact canonical shape")
+    head = repository.get("head")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise AutopilotError("repository head must be a lowercase 40-hex SHA")
+    if repository.get("status") != "":
+        raise AutopilotError("repository status must be the empty clean-tree string")
+    protected_refs = repository.get("protected_refs")
+    if not isinstance(protected_refs, dict) or set(protected_refs) != set(PROTECTED_REFS):
+        raise AutopilotError("protected_refs must contain every and only PROTECTED_REFS key")
+    for ref_name, ref_sha in protected_refs.items():
+        if not isinstance(ref_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", ref_sha):
+            raise AutopilotError(f"protected ref {ref_name} identity must be a lowercase 40-hex SHA")
+    control_blobs = repository.get("control_blobs")
+    expected_controls = {p.as_posix() for p in CONTROL_PATHS}
+    if not isinstance(control_blobs, dict) or set(control_blobs) != expected_controls:
+        raise AutopilotError("control_blobs must contain every and only CONTROL_PATHS key")
+    for path_key, blob_sha in control_blobs.items():
+        if not isinstance(blob_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", blob_sha):
+            raise AutopilotError(f"control blob {path_key} identity must be a lowercase 40-hex SHA")
+    scope = repository.get("assignment_scope")
+    if not isinstance(scope, AssignmentScope):
+        raise AutopilotError("assignment_scope must be an AssignmentScope dataclass instance")
+    scope_data = assignment_scope_context(scope)
+    if set(scope_data) != set(ASSIGNMENT_SCOPE_KEYS_ORDER):
+        raise AutopilotError("assignment_scope must materialize with its complete six-key identity")
+    for str_key in ("assignment_id", "stage_id", "sha256", "expires_at"):
+        val = scope_data.get(str_key)
+        if not isinstance(val, str) or not val.strip():
+            raise AutopilotError(f"assignment_scope {str_key} must be a non-empty string")
+    for list_key in ("allowed_paths", "forbidden_paths"):
+        val = scope_data.get(list_key)
+        if not isinstance(val, list) or any(not isinstance(p, str) for p in val):
+            raise AutopilotError(f"assignment_scope {list_key} must be a list of strings")
+
+    normalized_scope = {key: scope_data[key] for key in ASSIGNMENT_SCOPE_KEYS_ORDER}
+    normalized_protected_refs = {ref: protected_refs[ref] for ref in sorted(PROTECTED_REFS)}
+    normalized_control_blobs = {path: control_blobs[path] for path in sorted(expected_controls)}
+
+    return {
+        "head": head,
+        "status": "",
+        "protected_refs": normalized_protected_refs,
+        "control_blobs": normalized_control_blobs,
+        "assignment_scope": normalized_scope,
+    }
+
+
+def validate_accepted_receipt(result: object, repo_head: str) -> dict[str, object]:
+    """Validate and normalize a CONTINUE transition receipt for an accepted checkpoint."""
+    if isinstance(result, Path):
+        raise AutopilotError("receipt cannot be a Path")
+    if not isinstance(result, dict) or set(result) != ACCEPTED_RECEIPT_KEYS:
+        raise AutopilotError("receipt keys must exactly match RESULT_KEYS plus head_before, head_after, and head_changed")
+    projection = {k: result[k] for k in RESULT_KEYS}
+    validate_result(projection)
+    if result.get("state") != "CONTINUE":
+        raise AutopilotError("receipt state must be CONTINUE")
+    if result.get("disposition") != "NONE":
+        raise AutopilotError("receipt disposition must be NONE")
+    if result.get("category") != "NONE":
+        raise AutopilotError("receipt category must be NONE")
+    if result.get("blockers") != []:
+        raise AutopilotError("receipt blockers must be empty list")
+    if result.get("head_changed") is not True:
+        raise AutopilotError("receipt head_changed must be True")
+    head_before = result.get("head_before")
+    head_after = result.get("head_after")
+    if not isinstance(head_before, str) or not re.fullmatch(r"[0-9a-f]{40}", head_before):
+        raise AutopilotError("head_before must be a lowercase 40-hex SHA")
+    if not isinstance(head_after, str) or not re.fullmatch(r"[0-9a-f]{40}", head_after):
+        raise AutopilotError("head_after must be a lowercase 40-hex SHA")
+    if head_before == head_after:
+        raise AutopilotError("head_before and head_after must be distinct lowercase 40-hex SHAs")
+    commit = result.get("commit")
+    if commit != head_after:
+        raise AutopilotError("commit must equal head_after")
+    if head_after != repo_head:
+        raise AutopilotError("commit and head_after must equal repository head")
+
+    return {k: result[k] for k in ACCEPTED_RESULT_KEYS_ORDER}
+
+
+def validate_accepted_checkpoint(
+    result: object,
+    repository: object,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Validate both the CONTINUE receipt and repository facts, returning normalized mappings."""
+    if isinstance(result, Path) or isinstance(repository, Path):
+        raise AutopilotError("checkpoint arguments cannot be Path instances")
+    normalized_repo = validate_accepted_repository(repository)
+    normalized_result = validate_accepted_receipt(result, str(normalized_repo["head"]))
+    return normalized_result, normalized_repo
+
+
+def serialize_accepted_checkpoint(
+    result: object,
+    repository: object,
+) -> bytes:
+    """Construct and serialize a canonical accepted checkpoint envelope into deterministic UTF-8 bytes."""
+    normalized_result, normalized_repo = validate_accepted_checkpoint(result, repository)
+    envelope = {
+        "schema_version": ACCEPTED_CHECKPOINT_SCHEMA_VERSION,
+        "result": normalized_result,
+        "repository": normalized_repo,
+    }
+    encoded = serialize_json(envelope)
+    if len(encoded) > MAX_ACCEPTED_CHECKPOINT_BYTES:
+        raise AutopilotError(
+            f"serialized accepted checkpoint exceeds {MAX_ACCEPTED_CHECKPOINT_BYTES} bytes ({len(encoded)} bytes)"
+        )
+    return encoded
 
 
 def recover_committed_advisory_result(
