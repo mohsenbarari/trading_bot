@@ -1,6 +1,7 @@
 """Focused regression suite for safe Antigravity finish-submission classification."""
 from __future__ import annotations
 
+import copy
 import json
 import unittest
 
@@ -32,6 +33,14 @@ def _valid_result(**overrides) -> dict:
     }
     res.update(overrides)
     return res
+
+
+def _wire_result(canonical: dict) -> dict:
+    wire = copy.deepcopy(canonical)
+    for change in wire.get("changes", []):
+        if isinstance(change, dict) and "replacements" not in change:
+            change["replacements"] = []
+    return wire
 
 
 def _build_tool_info(*, name="finish", parameters=_OMIT, extra=None) -> dict:
@@ -85,7 +94,7 @@ def _build_stream(step_events=(), *, session=SESSION, structured_output=_OMIT, r
     if structured_output is not _OMIT:
         res_dict["structured_output"] = structured_output
     elif response is _OMIT:
-        res_dict["structured_output"] = _valid_result()
+        res_dict["structured_output"] = _wire_result(_valid_result())
     if response is not _OMIT:
         res_dict["response"] = response
     result_ev = {"event": "result", "result": res_dict}
@@ -212,17 +221,18 @@ class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
         canonical = _valid_result(
             changes=[{"path": "test_new.py", "original_sha256": None, "content": "assert 1 == 1\n# full\n"}]
         )
+        wire = _wire_result(canonical)
         shortened_params = _valid_params(
             changes=[{"path": "test_new.py", "original_sha256": None, "content": "short"}]
         )
         event = self._valid_step_event(params=shortened_params)
-        raw = _build_stream([event], structured_output=canonical)
+        raw = _build_stream([event], structured_output=wire)
         result, envelope = self._parse(raw)
 
         self.assertEqual(result, canonical)
         self.assertEqual(result["changes"][0]["content"], "assert 1 == 1\n# full\n")
         self.assertNotEqual(result["changes"][0]["content"], "short")
-        self.assertEqual(envelope["structured_output"], canonical)
+        self.assertEqual(envelope["structured_output"], wire)
 
     def test_rejection_of_invalid_conversation_id_at_envelope_and_nested_locations(self):
         invalid_cids = [None, "", False, 123, "different-session"]
@@ -320,11 +330,13 @@ class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
         ev2 = _build_lifecycle_event(1, "ERROR", error=_valid_tool_error("policy denied"), duration_seconds=0.04)
         ev3 = _build_lifecycle_event(2, "ACTIVE", duration_seconds=0.02)
         canonical = _valid_result()
-        raw = _build_stream([ev1, ev2, ev3], structured_output=canonical)
+        wire = _wire_result(canonical)
+        raw = _build_stream([ev1, ev2, ev3], structured_output=wire)
         result, envelope = self._parse(raw)
         self.assertEqual(result, canonical)
         self.assertEqual(envelope["status"], "SUCCESS")
         self.assertEqual(envelope["conversation_id"], SESSION)
+        self.assertEqual(envelope["structured_output"], wire)
 
     def test_lifecycle_three_failed_submissions_followed_by_success(self):
         events = []
@@ -332,11 +344,13 @@ class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
             events.append(_build_lifecycle_event(idx, "ACTIVE", duration_seconds=0.01 * idx))
             events.append(_build_lifecycle_event(idx, "ERROR", error=_valid_tool_error(f"failed attempt {idx}"), duration_seconds=0.05 * idx))
         canonical = _valid_result()
-        raw = _build_stream(events, structured_output=canonical)
+        wire = _wire_result(canonical)
+        raw = _build_stream(events, structured_output=wire)
         result, envelope = self._parse(raw)
         self.assertEqual(result, canonical)
         self.assertEqual(envelope["status"], "SUCCESS")
         self.assertEqual(envelope["conversation_id"], SESSION)
+        self.assertEqual(envelope["structured_output"], wire)
 
     def test_lifecycle_terminal_truncation_remains_non_retryable(self):
         ev = _build_lifecycle_event(1, "ACTIVE", duration_seconds=0.02)
@@ -355,18 +369,19 @@ class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
         canonical = _valid_result(
             changes=[{"path": "test_new.py", "original_sha256": None, "content": "assert 1 == 1\n# full\n"}]
         )
+        wire = _wire_result(canonical)
         shortened_params = _valid_params(
             changes=[{"path": "test_new.py", "original_sha256": None, "content": "short"}]
         )
         ev1 = _build_lifecycle_event(1, "ACTIVE", parameters=shortened_params, duration_seconds=0.01)
         ev2 = _build_lifecycle_event(1, "ERROR", parameters=shortened_params, error=_valid_tool_error(), duration_seconds=0.05)
         ev3 = _build_lifecycle_event(2, "ACTIVE", parameters=shortened_params, duration_seconds=0.02)
-        raw = _build_stream([ev1, ev2, ev3], structured_output=canonical)
+        raw = _build_stream([ev1, ev2, ev3], structured_output=wire)
         result, envelope = self._parse(raw)
         self.assertEqual(result, canonical)
         self.assertEqual(result["changes"][0]["content"], "assert 1 == 1\n# full\n")
         self.assertNotEqual(result["changes"][0]["content"], "short")
-        self.assertEqual(envelope["structured_output"], canonical)
+        self.assertEqual(envelope["structured_output"], wire)
 
     def test_table_driven_lifecycle_rejections(self):
         valid_params = _valid_params()
@@ -515,6 +530,34 @@ class TestTwoSiteProposalRunnerFinish(unittest.TestCase):
             with self.subTest(case=name):
                 with self.assertRaises(runner.RetryableProviderSessionError):
                     self._parse(_build_stream(stream_events))
+
+    def test_default_raw_terminal_has_four_keys_and_preserves_malformed_input(self):
+        raw = _build_stream()
+        result, envelope = self._parse(raw)
+        self.assertEqual(result, _valid_result())
+        self.assertEqual(len(result["changes"][0]), 3)
+        self.assertEqual(set(result["changes"][0].keys()), {"path", "original_sha256", "content"})
+        self.assertEqual(len(envelope["structured_output"]["changes"][0]), 4)
+        self.assertEqual(
+            set(envelope["structured_output"]["changes"][0].keys()),
+            {"path", "original_sha256", "content", "replacements"},
+        )
+        params = _valid_params()
+        self.assertEqual(len(params["changes"][0]), 3)
+        self.assertEqual(set(params["changes"][0].keys()), {"path", "original_sha256", "content"})
+
+        malformed = {
+            "status": "PROPOSAL_READY",
+            "summary": "Malformed payload.",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [{"path": "test_new.py", "original_sha256": None, "invalid_key": True}],
+        }
+        malformed_raw = _build_stream(structured_output=malformed)
+        self.assertIn('"invalid_key": true', malformed_raw)
+        with self.assertRaisesRegex(runner.ProposalError, "provider returned unusable proposal transport") as ctx:
+            self._parse(malformed_raw)
+        self.assertIn("invalid change shape", str(ctx.exception.__cause__))
 
 
 if __name__ == "__main__":
