@@ -2293,7 +2293,7 @@ def normalize_result(
         if change["original_sha256"] != sources[name]["sha256"]:
             raise ProposalError("proposal is based on different source bytes")
 
-        if strict_transport and (change_mode != "legacy" or name in forced):
+        if strict_transport:
             try:
                 validate_change_mode(
                     change, sources[name], MAX_REPLACEMENTS,
