@@ -243,17 +243,18 @@ def test_parse_stream_no_bypass_and_strict_live_rejection():
     assert envelope["status"] == "SUCCESS"
 
 
-def test_parse_stream_legacy_three_key_compatibility():
+def test_parse_stream_canonical_four_key_transport():
     task = make_task()
     sources = make_sources()
-    legacy_prop = make_proposal([{
+    prop = make_proposal([{
         "path": "file_new.py",
         "original_sha256": None,
-        "content": "print('legacy stream content')\n",
+        "content": "print('canonical stream content')\n",
+        "replacements": [],
     }])
-    result, envelope = parse_stream(make_stream(legacy_prop), task, sources, "worker")
+    result, envelope = parse_stream(make_stream(prop), task, sources, "worker")
     assert result["changes"][0]["path"] == "file_new.py"
-    assert result["changes"][0]["content"] == "print('legacy stream content')\n"
+    assert result["changes"][0]["content"] == "print('canonical stream content')\n"
     assert envelope["status"] == "SUCCESS"
 
 

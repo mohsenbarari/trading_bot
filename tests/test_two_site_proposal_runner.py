@@ -47,13 +47,20 @@ class ProposalContracts(unittest.TestCase):
                          "content": "assert 1 == 1\n"}],
         }
 
+    def raw_result(self):
+        raw = deepcopy(self.result())
+        for change in raw["changes"]:
+            change["replacements"] = []
+        return raw
+
     def events(self, result=None):
+        payload = self.raw_result() if result is None else result
         return [
             {"event": "init", "conversation_id": "session-one",
              "init": {"model": runner.MODEL}},
             {"event": "result", "result": {
                 "status": "SUCCESS", "conversation_id": "session-one",
-                "response": json.dumps(result or self.result()),
+                "response": json.dumps(payload),
             }},
         ]
 
@@ -248,9 +255,45 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(result, self.result())
         self.assertEqual(envelope["conversation_id"], "session-one")
 
+    def test_raw_fixture_four_key_independence_and_negative_input_preservation(self):
+        canonical_result = self.result()
+        for change in canonical_result["changes"]:
+            self.assertEqual(set(change.keys()), {"path", "original_sha256", "content"})
+            self.assertNotIn("replacements", change)
+
+        raw = self.raw_result()
+        for change in raw["changes"]:
+            self.assertEqual(set(change.keys()), {"path", "original_sha256", "content", "replacements"})
+            self.assertEqual(change["replacements"], [])
+
+        raw["changes"][0]["content"] = "mutated content\n"
+        raw["changes"][0]["replacements"].append({"old": "x", "new": "y"})
+        raw["extra_field"] = "unexpected"
+
+        after_mutation = self.result()
+        self.assertEqual(after_mutation, canonical_result)
+        self.assertEqual(after_mutation["changes"][0]["content"], "assert 1 == 1\n")
+        self.assertNotIn("replacements", after_mutation["changes"][0])
+        self.assertNotIn("extra_field", after_mutation)
+
+        empty_events = self.events({})
+        empty_response = empty_events[1]["result"]["response"]
+        self.assertEqual(empty_response, "{}")
+        self.assertNotEqual(json.loads(empty_response), self.result())
+        with self.assertRaises(runner.ProposalError):
+            self.parse(empty_events)
+
+        malformed = {"status": "PROPOSAL_READY", "changes": "not-a-list"}
+        malformed_events = self.events(malformed)
+        malformed_response = malformed_events[1]["result"]["response"]
+        self.assertEqual(json.loads(malformed_response), malformed)
+        self.assertNotEqual(json.loads(malformed_response), self.result())
+        with self.assertRaises(runner.ProposalError):
+            self.parse(malformed_events)
+
     def test_structured_output_is_the_canonical_schema_payload(self):
         events = self.events()
-        events[1]["result"]["structured_output"] = self.result()
+        events[1]["result"]["structured_output"] = self.raw_result()
         events[1]["result"]["response"] += '\n{"toolAction":"Submitting proposal"}'
         result, _ = self.parse(events)
         self.assertEqual(result, self.result())
@@ -1281,7 +1324,7 @@ class ProposalContracts(unittest.TestCase):
 
     def test_parse_stream_canonical_result_budget_boundary(self):
         events = self.events()
-        events[1]["result"]["structured_output"] = self.result()
+        events[1]["result"]["structured_output"] = self.raw_result()
         stream = "\n".join(json.dumps(e) for e in events)
         result = runner.validate_result(
             runner.normalize_result(events[1]["result"]["structured_output"], self.task, self.sources, "worker"),
