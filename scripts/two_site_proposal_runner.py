@@ -2806,6 +2806,11 @@ def serialize_json(value: dict) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def _validate_task_snapshot_budget(material: dict) -> None:
+    if len(serialize_json(material)) > 2 * MAX_CONTEXT:
+        raise ProposalError("task snapshot exceeds context budget")
+
+
 def build_review_transport(
     candidate: dict,
     sources: dict,
@@ -2924,6 +2929,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
                 prompt_material["pre_review_test_evidence"] = normalized_receipt
                 material["test_evidence"] = normalized_receipt
+    _validate_task_snapshot_budget(material)
     prompt_material = dict(prompt_material)
     prompt_material["preparation_notes"] = prep_notes
     prompt = bounded_file_text(
