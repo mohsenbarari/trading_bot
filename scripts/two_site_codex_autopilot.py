@@ -111,6 +111,8 @@ RESULT_KEYS = {
 }
 MAX_ACCEPTED_CHECKPOINT_BYTES = 16 * 1024
 ACCEPTED_CHECKPOINT_SCHEMA_VERSION = 1
+_ACCEPTED_CHECKPOINT_FILENAME = "accepted_checkpoint.json"
+ACCEPTED_CHECKPOINT_FILENAME = _ACCEPTED_CHECKPOINT_FILENAME
 ACCEPTED_RECEIPT_EXTRA_KEYS = ("head_before", "head_after", "head_changed")
 ACCEPTED_RECEIPT_KEYS = frozenset(RESULT_KEYS | set(ACCEPTED_RECEIPT_EXTRA_KEYS))
 REPOSITORY_FACT_KEYS = frozenset({
@@ -551,6 +553,46 @@ def serialize_accepted_checkpoint(
             f"serialized accepted checkpoint exceeds {MAX_ACCEPTED_CHECKPOINT_BYTES} bytes ({len(encoded)} bytes)"
         )
     return encoded
+
+
+def _persist_accepted_checkpoint(
+    state_root: Path,
+    result: object,
+    repository: object,
+) -> None:
+    """Atomically persist canonical accepted checkpoint bytes under state_root."""
+    payload = serialize_accepted_checkpoint(result, repository)
+    state_path = Path(state_root)
+    canonical_path = state_path / _ACCEPTED_CHECKPOINT_FILENAME
+
+    fd, temp_str = tempfile.mkstemp(
+        dir=state_path,
+        prefix=".accepted_checkpoint-",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_str)
+    fd_closed = False
+    replaced = False
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            fd_closed = True
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, canonical_path)
+        replaced = True
+    finally:
+        if not fd_closed:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if not replaced:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def recover_committed_advisory_result(

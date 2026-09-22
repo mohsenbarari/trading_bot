@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import stat
+import tempfile
 import unittest
+from unittest.mock import patch
 
 os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
 
 from scripts.two_site_assignment_scope import AssignmentScope
 from scripts.two_site_codex_autopilot import (
+    _ACCEPTED_CHECKPOINT_FILENAME,
+    ACCEPTED_CHECKPOINT_FILENAME,
     ACCEPTED_CHECKPOINT_SCHEMA_VERSION,
     ACCEPTED_RECEIPT_KEYS,
     CONTROL_PATHS,
@@ -16,6 +21,7 @@ from scripts.two_site_codex_autopilot import (
     PROTECTED_REFS,
     REPOSITORY_FACT_KEYS,
     AutopilotError,
+    _persist_accepted_checkpoint,
     serialize_accepted_checkpoint,
     validate_accepted_checkpoint,
 )
@@ -267,3 +273,97 @@ class AcceptedCheckpointSerializerValidatorTests(unittest.TestCase):
         )
         with self.assertRaises(AutopilotError):
             serialize_accepted_checkpoint(unicode_multibyte_receipt, canonical_repo)
+
+
+class AcceptedCheckpointAtomicPersistenceTests(unittest.TestCase):
+    def test_atomically_persists_exact_private_checkpoint_without_touching_status(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-persistence-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            status_path = state_root / "status.json"
+
+            prior_bytes = b'{"prior": "checkpoint", "stale": true}\n'
+            checkpoint_path.write_bytes(prior_bytes)
+            os.chmod(checkpoint_path, 0o644)
+
+            sentinel_status_bytes = b'{"state": "SENTINEL", "cycle": 42, "persisted": false}\n'
+            status_path.write_bytes(sentinel_status_bytes)
+            os.chmod(status_path, 0o600)
+
+            head = "a" * 40
+            head_before = "b" * 40
+            result = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+
+            expected_bytes = serialize_accepted_checkpoint(result, repository)
+
+            _persist_accepted_checkpoint(state_root, result, repository)
+
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertFalse(checkpoint_path.is_symlink())
+            persisted_bytes = checkpoint_path.read_bytes()
+            self.assertEqual(persisted_bytes, expected_bytes)
+            self.assertNotEqual(persisted_bytes, prior_bytes)
+
+            mode = stat.S_IMODE(checkpoint_path.stat().st_mode)
+            self.assertEqual(mode, 0o600)
+
+            self.assertEqual(status_path.read_bytes(), sentinel_status_bytes)
+
+            children = {p.name for p in state_root.iterdir()}
+            self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME, "status.json"})
+            self.assertFalse(any(p.name.endswith(".tmp") for p in state_root.iterdir()))
+            self.assertFalse(any(p.name.startswith(".accepted_checkpoint-") for p in state_root.iterdir()))
+
+    def test_serializer_failure_preserves_existing_checkpoint_without_temp_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-serializer-fail-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+
+            existing_bytes = b'{"canonical": "prior_state", "intact": true}\n'
+            checkpoint_path.write_bytes(existing_bytes)
+            os.chmod(checkpoint_path, 0o600)
+            initial_stat = checkpoint_path.stat()
+
+            invalid_result = {"invalid_key": "not_a_valid_receipt"}
+            valid_repo = _make_repository(head="a" * 40)
+
+            with self.assertRaises(AutopilotError):
+                _persist_accepted_checkpoint(state_root, invalid_result, valid_repo)
+
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertEqual(checkpoint_path.read_bytes(), existing_bytes)
+            self.assertEqual(stat.S_IMODE(checkpoint_path.stat().st_mode), 0o600)
+            self.assertEqual(checkpoint_path.stat().st_mtime_ns, initial_stat.st_mtime_ns)
+
+            children = {p.name for p in state_root.iterdir()}
+            self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME})
+
+    def test_replace_failure_preserves_existing_checkpoint_and_cleans_temp_artifact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-replace-fail-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+
+            existing_bytes = b'{"canonical": "prior_checkpoint_data"}\n'
+            checkpoint_path.write_bytes(existing_bytes)
+            os.chmod(checkpoint_path, 0o600)
+            initial_stat = checkpoint_path.stat()
+
+            head = "a" * 40
+            head_before = "b" * 40
+            result = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+
+            with patch.object(os, "replace", side_effect=OSError("simulated replace failure")):
+                with self.assertRaises(OSError) as cm:
+                    _persist_accepted_checkpoint(state_root, result, repository)
+                self.assertIn("simulated replace failure", str(cm.exception))
+
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertEqual(checkpoint_path.read_bytes(), existing_bytes)
+            self.assertEqual(stat.S_IMODE(checkpoint_path.stat().st_mode), 0o600)
+            self.assertEqual(checkpoint_path.stat().st_mtime_ns, initial_stat.st_mtime_ns)
+
+            children = {p.name for p in state_root.iterdir()}
+            self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME})
+            self.assertFalse(any(p.name.startswith(".accepted_checkpoint-") for p in state_root.iterdir()))
