@@ -2116,7 +2116,13 @@ def enrich_repository_dependency_context(
 
 def check(root: Path, task_path: Path) -> dict:
     root = root.resolve(strict=True)
-    task, sources = load_task(root, task_path)
+    try:
+        task, sources = load_task(root, task_path)
+    except _TaskBoundaryError as exc:
+        return {
+            "state": "TASK_BLOCKED",
+            "issues": _normalize_readiness_issues([exc.to_fact()]),
+        }
     notes = enrich_repository_dependency_context(
         root, task, sources, task_preparation_notes(task, sources)
     )
