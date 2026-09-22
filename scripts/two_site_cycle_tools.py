@@ -15,6 +15,7 @@ if __package__:
         build_task_identity,
         validate_task_identity,
     )
+    from scripts.two_site_source_excerpts import extract_bundle
     from scripts.two_site_task_preflight import prepare_task
 else:
     import two_site_proposal_runner as runner
@@ -22,6 +23,7 @@ else:
         build_task_identity,
         validate_task_identity,
     )
+    from two_site_source_excerpts import extract_bundle
     from two_site_task_preflight import prepare_task
 
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
@@ -93,36 +95,8 @@ def validate_p1_00b_batch_spec(task: object, scenario_key: object) -> None:
 
 def excerpt(root: Path, name: str, symbols: list[str]) -> dict:
     """Complete top-level definitions plus imports; dependency closure is reviewer-owned."""
-    path = runner.relative_file(root, name)
-    if (path.suffix != ".py" or not isinstance(symbols, list) or not 1 <= len(symbols) <= 32
-            or any(not isinstance(x, str) or not x.isidentifier() for x in symbols)
-            or len(set(symbols)) != len(symbols)):
-        raise runner.ProposalError("excerpt needs unique Python top-level symbol names")
-    runner.git(root, "ls-files", "--error-unmatch", "--", name)
-    data = runner.bounded_file_bytes(root, path, runner.MAX_CONTEXT, "excerpt source")
-    text = data.decode()
-    if runner.SECRET.search(text):
-        raise runner.ProposalError("credential-like excerpt source")
-    tree = ast.parse(text)
-    lines = text.splitlines(keepends=True)
-    selected = []
-    found = set()
-    for node in tree.body:
-        names = {node.name} if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else set()
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = {child.id for target in targets for child in ast.walk(target)
-                     if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store)}
-        wanted = names & set(symbols)
-        if not wanted and not isinstance(node, (ast.Import, ast.ImportFrom)):
-            continue
-        found.update(wanted)
-        start = min([node.lineno] + [x.lineno for x in getattr(node, "decorator_list", [])])
-        end = node.end_lineno
-        selected.append({"start": start, "end": end, "text": "".join(lines[start - 1:end])})
-    if found != set(symbols):
-        raise runner.ProposalError("missing top-level excerpt symbols: " + ",".join(sorted(set(symbols) - found)))
-    return {"path": name, "sha256": runner.sha(data), "symbols": symbols, "ranges": selected}
+    records, _ = extract_bundle(root, [{"path": name, "symbols": symbols}])
+    return records[0]
 
 
 def validate_excerpts(root: Path, task: dict) -> None:
@@ -143,12 +117,15 @@ def validate_excerpts(root: Path, task: dict) -> None:
     runner.relative_file(root, gap_path)
     runner.git(root, "ls-files", "--error-unmatch", "--", gap_path)
     seen = set(task["allowed_files"] + task["context_files"])
+    requests = []
     for item in package["excerpts"]:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str) or item["path"] in seen:
             raise runner.ProposalError("duplicate or writable excerpt source")
-        if item != excerpt(root, item["path"], item.get("symbols")):
-            raise runner.ProposalError("excerpt provenance mismatch")
+        requests.append({"path": item["path"], "symbols": item.get("symbols")})
         seen.add(item["path"])
+    regenerated, _ = extract_bundle(root, requests)
+    if regenerated != package["excerpts"]:
+        raise runner.ProposalError("excerpt provenance mismatch")
     identity = package.get("semantic_identity")
     if not isinstance(identity, dict) or not isinstance(identity.get("scenario_key"), str):
         raise runner.ProposalError("invalid semantic identity package")
@@ -177,11 +154,10 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
     validate_p1_00b_batch_spec(task, spec["scenario_key"])
     if not isinstance(spec["snippets"], list) or len(spec["snippets"]) > 32:
         raise runner.ProposalError("invalid snippets")
-    snippets = []
     for item in spec["snippets"]:
         if not isinstance(item, dict) or set(item) != {"path", "symbols"}:
             raise runner.ProposalError("snippet needs path and symbols")
-        snippets.append(excerpt(root, item["path"], item["symbols"]))
+    snippets, report = extract_bundle(root, spec["snippets"])
     try:
         identity = build_task_identity(
             root,
@@ -215,7 +191,8 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         result.update(task_path=str(output), gap_reference=package["gap_reference"],
                       excerpt_count=len(snippets),
                       semantic_task_fingerprint=identity["fingerprint"],
-                      sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.")
+                      sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.",
+                      context_budget=report)
         return result
     output.unlink(missing_ok=True)
     if type(result) is dict and result.get("state") == "TASK_BLOCKED":
