@@ -72,6 +72,22 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         validate_changed_paths,
         validate_task_scope,
     )
+try:
+    from scripts.two_site_preparation_contract import (
+        PreparationConfigError,
+        PreparationStartup,
+        assert_same_startup,
+    )
+except ModuleNotFoundError:  # Direct `python scripts/...` execution.
+    from two_site_preparation_contract import (  # type: ignore[no-redef]
+        PreparationConfigError,
+        PreparationStartup,
+        assert_same_startup,
+    )
+try:
+    from scripts.two_site_provider_broker import BrokerError, _atomic_new_json
+except ModuleNotFoundError:  # Direct `python scripts/...` execution.
+    from two_site_provider_broker import BrokerError, _atomic_new_json  # type: ignore[no-redef]
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,6 +175,7 @@ CONTROL_PATHS = (
     Path("scripts/two_site_proposal_runner.py"),
     Path("scripts/two_site_provider_broker.py"),
     Path("scripts/two_site_assignment_scope.py"),
+    Path("scripts/two_site_preparation_contract.py"),
     Path("scripts/two_site_autopilot_tmux.sh"),
     Path("scripts/two_site_autopilot_monitor.sh"),
     GEMINI_RUNTIME_CONTRACT_REL,
@@ -1127,12 +1144,48 @@ def persisted_continuation(root: Path, state_root: Path, current_head: object) -
     return candidate if continuation_hint(candidate, current_head) is not None else None
 
 
+def _validate_startup_file(
+    root: Path,
+    startup_file: Path,
+    expected_startup: PreparationStartup,
+    expected_bytes: bytes,
+) -> None:
+    try:
+        st = startup_file.stat(follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or os.path.islink(startup_file):
+            raise AutopilotError("preparation startup file is unsafe or linked")
+        if startup_file.resolve() != startup_file:
+            raise AutopilotError("preparation startup path is not canonical")
+        if st.st_size > 4096:
+            raise AutopilotError("preparation startup file exceeds limit")
+        raw_text = bounded_file_text(root, startup_file, 4096, "preparation startup snapshot")
+        raw_bytes = raw_text.encode("utf-8")
+    except AutopilotError:
+        raise
+    except (ProposalError, OSError, UnicodeError) as exc:
+        raise AutopilotError("preparation startup file verification failed") from exc
+
+    if len(raw_bytes) > 4096:
+        raise AutopilotError("preparation startup file exceeds limit")
+    if raw_bytes != expected_bytes:
+        raise AutopilotError("preparation startup file content drifted")
+    try:
+        parsed = unique_json(raw_text)
+        observed = PreparationStartup.from_mapping(parsed)
+        assert_same_startup(expected_startup, observed)
+    except (PreparationConfigError, ValueError, ProposalError) as exc:
+        raise AutopilotError("preparation startup identity drifted") from exc
+    if observed.fingerprint != expected_startup.fingerprint:
+        raise AutopilotError("preparation startup fingerprint drifted")
+
+
 def prompt_for_cycle(
     root: Path,
     cycle: int,
     before: dict[str, object],
     recovery: dict[str, object] | None = None,
     continuation: dict | None = None,
+    preparation_startup: PreparationStartup | None = None,
 ) -> str:
     if "assignment_scope" not in before:
         raise AutopilotError("missing assignment scope in repository state")
@@ -1147,6 +1200,11 @@ def prompt_for_cycle(
         "assignment_scope": scope_data,
         "startup_validation": True,
     }
+    if preparation_startup is not None:
+        if type(preparation_startup) is not PreparationStartup:
+            raise AutopilotError("invalid preparation startup")
+        context["preparation_startup"] = preparation_startup.to_mapping()
+        context["preparation_startup_sha256"] = preparation_startup.fingerprint
     if recovery is not None:
         context["recovery"] = recovery
     hint = continuation_hint(continuation, before["head"])
@@ -1208,7 +1266,34 @@ def run_cycle(
     if not RUN_ID.fullmatch(run_dir.name) or os.path.isabs(run_dir.name):
         raise AutopilotError(f"invalid cycle run ID: {run_dir.name}")
     run_dir.mkdir(mode=0o700)
-    prompt = prompt_for_cycle(root, cycle, before, recovery=recovery, continuation=continuation)
+    resolved_root = root.resolve(strict=True)
+    resolved_run_dir = run_dir.resolve()
+    if (
+        resolved_run_dir != run_dir
+        or not run_dir.is_dir()
+    ):
+        raise AutopilotError("unsafe run directory")
+    try:
+        resolved_run_dir.relative_to(resolved_root)
+    except ValueError:
+        raise AutopilotError("run directory outside canonical root")
+    startup = PreparationStartup(1, "one_shot", run_dir.name, str(before["head"]), scope.sha256)
+    if run_dir.name != startup.cycle_id:
+        raise AutopilotError("run directory does not match startup cycle ID")
+    startup_bytes = json.dumps(
+        startup.to_mapping(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("ascii")
+    startup_file = run_dir / "preparation-startup.json"
+    if os.path.lexists(startup_file):
+        raise AutopilotError("preparation startup target already exists")
+    try:
+        _atomic_new_json(startup_file, startup.to_mapping(), 4096)
+    except BrokerError as exc:
+        raise AutopilotError(f"cannot publish preparation startup: {exc}") from exc
+    prompt = prompt_for_cycle(
+        root, cycle, before, recovery=recovery, continuation=continuation,
+        preparation_startup=startup,
+    )
     (run_dir / "prompt.txt").write_text(prompt)
     phase_seconds["task_context"] = elapsed_seconds(context_started_at)
     readiness_started_at = time.monotonic()
@@ -1230,6 +1315,8 @@ def run_cycle(
             "stage_id": scope.stage_id,
             "sha256": scope.sha256,
         },
+        "preparation_startup": startup.to_mapping(),
+        "preparation_startup_sha256": startup.fingerprint,
         "output_limit_bytes": MAX_CODEX_OUTPUT,
         "timeout_seconds": timeout,
         "controller_phase_seconds": phase_seconds,
@@ -1245,6 +1332,7 @@ def run_cycle(
     environment["TWO_SITE_ASSIGNMENT_ID"] = scope.assignment_id
     environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
     environment["TWO_SITE_AUTOPILOT_RUN_ID"] = run_dir.name
+    environment["TWO_SITE_PREPARATION_STARTUP_SHA256"] = startup.fingerprint
     coordinator_started_at: float | None = None
     post_validation_started_at: float | None = None
     try:
@@ -1289,6 +1377,7 @@ def run_cycle(
             raise AutopilotError("Codex CLI identity changed during the cycle")
         if codex_runtime_identity(codex) != identity["runtime"]:
             raise AutopilotError("Codex runtime changed during the cycle")
+        _validate_startup_file(root, startup_file, startup, startup_bytes)
         result_path = run_dir / "result.json"
         raw_result = unique_json(
             bounded_file_text(root, result_path, MAX_RESULT_BYTES, "Codex cycle result")
