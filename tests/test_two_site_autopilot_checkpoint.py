@@ -24,6 +24,7 @@ from scripts.two_site_codex_autopilot import (
     _accepted_checkpoint_matches_repository,
     _load_accepted_checkpoint,
     _persist_accepted_checkpoint,
+    publish_accepted_checkpoint,
     serialize_accepted_checkpoint,
     validate_accepted_checkpoint,
 )
@@ -810,3 +811,121 @@ class AcceptedCheckpointRepositoryBindingValidationTests(unittest.TestCase):
                 self.assertFalse(_accepted_checkpoint_matches_repository(invalid_cp, canonical_repo))
                 self.assertEqual(canonical_repo, repo_snapshot)
                 self.assertIs(canonical_repo["assignment_scope"], repo_snapshot["assignment_scope"])
+
+
+class AcceptedCheckpointPublicationBoundaryTests(unittest.TestCase):
+    def test_publishes_matching_committed_continue_without_touching_live_status(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-publish-checkpoint-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            status_path = state_root / "status.json"
+
+            prior_checkpoint_bytes = b'{"prior": "checkpoint", "stale": true}\n'
+            checkpoint_path.write_bytes(prior_checkpoint_bytes)
+            os.chmod(checkpoint_path, 0o600)
+
+            sentinel_status_bytes = b'{"state": "RUNNING", "cycle": 12, "active": true}\n'
+            status_path.write_bytes(sentinel_status_bytes)
+            os.chmod(status_path, 0o600)
+            initial_status_stat = status_path.stat()
+
+            head = "a" * 40
+            head_before = "b" * 40
+            result = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+
+            expected_bytes = serialize_accepted_checkpoint(result, repository)
+
+            outcome = publish_accepted_checkpoint(state_root, result, repository)
+            self.assertIsNone(outcome)
+
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertFalse(checkpoint_path.is_symlink())
+            persisted_bytes = checkpoint_path.read_bytes()
+            self.assertEqual(persisted_bytes, expected_bytes)
+            self.assertNotEqual(persisted_bytes, prior_checkpoint_bytes)
+
+            mode = stat.S_IMODE(checkpoint_path.stat().st_mode)
+            self.assertEqual(mode, 0o600)
+
+            self.assertEqual(status_path.read_bytes(), sentinel_status_bytes)
+            self.assertEqual(status_path.stat().st_mtime_ns, initial_status_stat.st_mtime_ns)
+
+            loaded = _load_accepted_checkpoint(state_root)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded, json.loads(expected_bytes.decode("utf-8")))
+
+            children = {p.name for p in state_root.iterdir()}
+            self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME, "status.json"})
+            self.assertFalse(any(p.name.startswith(".accepted_checkpoint-") for p in state_root.iterdir()))
+
+    def test_rejects_invalid_receipt_or_repository_mismatch_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-publish-reject-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            status_path = state_root / "status.json"
+
+            pre_existing_checkpoint_bytes = b'{"canonical": "pre_existing_checkpoint"}\n'
+            checkpoint_path.write_bytes(pre_existing_checkpoint_bytes)
+            os.chmod(checkpoint_path, 0o600)
+            initial_cp_stat = checkpoint_path.stat()
+
+            pre_existing_status_bytes = b'{"state": "RUNNING", "cycle": 3}\n'
+            status_path.write_bytes(pre_existing_status_bytes)
+            os.chmod(status_path, 0o600)
+            initial_status_stat = status_path.stat()
+
+            head = "a" * 40
+            head_before = "b" * 40
+            canonical_result = _make_continue_receipt(head_after=head, head_before=head_before)
+            canonical_repo = _make_repository(head=head)
+
+            # 1. Non-CONTINUE receipt (COMPLETE)
+            complete_receipt = dict(canonical_result, state="COMPLETE")
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(state_root, complete_receipt, canonical_repo)
+
+            # 2. Non-CONTINUE receipt (BLOCKED)
+            blocked_receipt = dict(
+                canonical_result,
+                state="BLOCKED",
+                disposition="HALT",
+                category="EXTERNAL_GATE",
+                blockers=["external gate"],
+            )
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(state_root, blocked_receipt, canonical_repo)
+
+            # 3. Repository-head mismatch
+            mismatched_repo = _make_repository(head="f" * 40)
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(state_root, canonical_result, mismatched_repo)
+
+            # 4. Receipt commit mismatch
+            commit_mismatch_receipt = dict(canonical_result, commit="9" * 40)
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(state_root, commit_mismatch_receipt, canonical_repo)
+
+            # 5. Invalid receipt shape
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(state_root, {"bad": "receipt"}, canonical_repo)
+
+            # 6. Dirty repository
+            dirty_repo = dict(canonical_repo, status=" M scripts/two_site_codex_autopilot.py")
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(state_root, canonical_result, dirty_repo)
+
+            # 7. Non-Path state_root
+            with self.assertRaises(AutopilotError):
+                publish_accepted_checkpoint(str(state_root), canonical_result, canonical_repo)
+
+            # Verify that through all rejections, pre-existing bytes and metadata remained untouched
+            self.assertEqual(checkpoint_path.read_bytes(), pre_existing_checkpoint_bytes)
+            self.assertEqual(status_path.read_bytes(), pre_existing_status_bytes)
+            self.assertEqual(checkpoint_path.stat().st_mtime_ns, initial_cp_stat.st_mtime_ns)
+            self.assertEqual(status_path.stat().st_mtime_ns, initial_status_stat.st_mtime_ns)
+
+            # Verify no temporary artifacts were left
+            children = {p.name for p in state_root.iterdir()}
+            self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME, "status.json"})
+            self.assertFalse(any(p.name.startswith(".accepted_checkpoint-") for p in state_root.iterdir()))

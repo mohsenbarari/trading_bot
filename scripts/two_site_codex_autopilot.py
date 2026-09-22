@@ -595,6 +595,18 @@ def _persist_accepted_checkpoint(
                 pass
 
 
+def publish_accepted_checkpoint(
+    state_root: Path,
+    result: object,
+    repository: object,
+) -> None:
+    """Revalidate and atomically persist an accepted checkpoint for a committed CONTINUE cycle."""
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+    validate_accepted_checkpoint(result, repository)
+    _persist_accepted_checkpoint(state_root, result, repository)
+
+
 def _validate_persisted_repository(repository: object) -> dict[str, object]:
     """Validate and normalize persisted repository facts from an accepted checkpoint."""
     if isinstance(repository, Path):
