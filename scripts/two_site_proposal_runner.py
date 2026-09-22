@@ -230,6 +230,8 @@ class _TaskBoundaryError(ProposalError):
         self._code = code
         self._path = path
         desc = _TASK_BOUNDARY_DESCRIPTIONS.get(code)
+        if not desc and code == "TASK_CREDENTIAL_DETECTED":
+            desc = "credential-like content detected"
         if desc and path:
             msg = f"task boundary rejection [{code}]: {path} {desc}"
         elif desc:
@@ -1341,20 +1343,20 @@ def _load_task_snapshot(
         raise _TaskBoundaryError("TASK_SCHEMA_INVALID") from exc
     required = {"task_id", "goal", "context_files", "allowed_files", "requirements", "test_selectors"}
     if not isinstance(task, dict) or set(task) != required:
-        raise ProposalError("task keys must match the documented contract")
+        raise _TaskBoundaryError("TASK_SCHEMA_INVALID")
     if (not isinstance(task["task_id"], str)
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", task["task_id"])):
-        raise ProposalError("invalid task ID")
+        raise _TaskBoundaryError("TASK_SCHEMA_INVALID")
     if not isinstance(task["goal"], str) or not task["goal"].strip():
-        raise ProposalError("task goal is missing")
+        raise _TaskBoundaryError("TASK_SCHEMA_INVALID")
     for key in ("context_files", "allowed_files", "requirements", "test_selectors"):
         values = task[key]
         if (not isinstance(values, list) or not values or len(values) > 32
                 or any(not isinstance(x, str) or not x.strip() for x in values)
                 or len(set(values)) != len(values)):
-            raise ProposalError("task lists must contain unique bounded nonempty strings")
+            raise _TaskBoundaryError("TASK_SCHEMA_INVALID")
     if SECRET.search(json.dumps(task, ensure_ascii=False)):
-        raise ProposalError("credential-like content excluded from model input")
+        raise _TaskBoundaryError("TASK_CREDENTIAL_DETECTED")
     if assignment_facts is None:
         validate_assignment_scope(root, task)
     else:
