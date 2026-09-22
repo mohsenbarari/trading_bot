@@ -2655,6 +2655,17 @@ def _parse_stream(
     enforce_raw_transport = True
     if "structured_output" in envelope:
         result = envelope["structured_output"]
+        if role == "worker":
+            notes = task_preparation_notes(task, sources)
+            out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
+            if out_contract.get("test_only_task"):
+                max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
+                raw_transport_bytes = len(
+                    json.dumps(result, ensure_ascii=False).encode("utf-8")
+                )
+                if raw_transport_bytes > max_transport:
+                    raise ProposalError("test-only raw transport exceeds budget")
+            enforce_raw_transport = False
     else:
         if not isinstance(envelope.get("response"), str):
             raise RetryableProviderSessionError("CLI result has no response text")
