@@ -1,40 +1,8 @@
 # Automation Efficiency
 
-- 2026-09-20 | AE01-10 is accepted: read-only foundation `314042ef`, four-state matrix `b8f01d43`. AE01-20A is next: after a hard safe-read boundary, aggregate independent readiness issues deterministically without Provider contact; unsafe paths fail closed immediately. A read-only/no-op check is never a Worker implementation or acceptance receipt. F1: AE01-40 fixes its route at validated startup; rollback waits for a safe boundary and resolved ambiguity. F2: UNKNOWN/null telemetry blocks efficiency claims but not separately proven technical acceptance; it is never zero/success.
-- 2026-09-20 | AE01-20A public aggregation proposal was rejected by final Codex review despite a Gemini `VERIFIED`: it classified fatal inputs by matching `ProposalError` prose and partially duplicated readiness, so `TASK_READY` parity with `check()` was not provable. No bytes were applied. A later A1 proposal was also rejected: it widened task classification into the shared reader and allowed arbitrary/unbounded metadata. Required order is now A1a finite internal code/metadata contract with no reader or call-site change, A1b task-only typed-boundary wiring that preserves public `load_task()`/`check()` behavior, then A2 bounded public aggregation solely from those facts; never parse exception text as an API.
-- 2026-09-20 | After accepted A1a commit `1efbfa0c`, Supervisor incorrectly marked the cycle BLOCKED because a reviewed, scoped update to `two_site_proposal_runner.py` differed from its blanket control-blob snapshot. Preserve the control snapshot, but permit a changed control only after exact Gemini-chain, assignment-scope and committed-byte validation proves that path is in the bound proposal. Any unbound control drift and any control change without a bound commit remain blockers.
-- 2026-09-20 | A1b broad task-only wiring was rejected before application: `load_task()` used a generic `except Exception` around normalization, which could suppress unexpected failures. Split it: A1b.1 adds only explicit UTF-8/malformed-JSON/duplicate-key task decoding; A1b.2 later handles path/read/link/budget. No bytes were applied for rejected A1b.
-- 2026-09-20 | A1b.1 was accepted at `e3036508`: explicit task-only UTF-8, JSON and duplicate-key typing, with generic `unique_json` unchanged. Focused/regression evidence was 60/60 only when live assignment variables were removed for synthetic roots. The inherited-live-variable baseline reproduces 50 unrelated setup failures on clean HEAD; never treat that run as proposal evidence or repeat it instead of the explicitly isolated selector command.
-- 2026-09-19 | `AE-20260919` is PLANNED, NOT IMPLEMENTED. Owner requested a precise
-  remembered plan for the next step, not runtime changes in this turn. Full plan:
-  `docs/refactor/two-server/AUTOMATION_EFFICIENCY_PLAN.md`. Load its relevant package
-  before implementation; it does not expand the current P1 assignment or supersede
-  `PROPOSAL_AUTOMATION.md` by itself.
-- Success means more accepted behavior per token/time, with quality preserved or
-  improved. Count semantic behavior, not commits or claimed requirements; include
-  failed attempts/corrections/reconciliation. Missing usage is unknown, not zero.
-  Compare same model/effort, family, risk, batch size and warm/cold startup. Track
-  Codex uncached/cached/output separately, Gemini where observed, active/elapsed
-  time, first-pass rate, repeats, review escapes and data coverage.
-- Evidence through `cycle-0001-20260919T081117Z-2174794`: 19 successful cycles spent
-  about 15% of elapsed cycle time in Provider. Remaining time is not all waste.
-  That cycle had four builds, three preflight failures and redundant discovery.
-  Independent Codex review previously caught an assertion Gemini missed.
-- Order: AE-00 fair baseline; AE-01 deterministic schema-aware task/context prep;
-  AE-02 durable accepted checkpoint separate from live status; AE-03 typed quota/
-  recovery waits; AE-04 bounded evidence continuation; AE-05 one-ahead read-only
-  preparation; AE-06 conditional decision on two isolated Workers. Reuse existing
-  helpers/batching/telemetry; no new model-driven Supervisor. Two Workers are not
-  authorized merely by recording this plan and current HEAD-bound locks cannot
-  simply be removed.
-- Preserve fresh Gemini review, final Codex semantic review, hermetic tests,
-  source/task/HEAD bindings, protected refs, semantic reservations and failure
-  budgets. Resolve in-flight ambiguity before checkpoint reuse; never auto-expire
-  reservations or invent acceptance from Git HEAD. Explicit STOP wins recovery.
-- Next: refresh live state/disk, drain at a cycle boundary, establish scoped
-  maintenance task, implement AE-00 then AE-01 with offline tests and independent
-  review; small commits, restart normal development between packages. Pilot only
-  necessary real work; do not rerun Providers to manufacture a baseline.
-- Keep main/production untouched. Roll back specific reviewed changes at a safe
-  boundary, preserving evidence. AE-05/06 require measured net benefit; do not
-  introduce parallel complexity if coordination remains the bottleneck.
+- Active status & verified checkpoint: see [AE01_ACCEPTED_CHECKPOINT_20260922.md](../../refactor/two-server/AE01_ACCEPTED_CHECKPOINT_20260922.md). Authoritative designs remain [AE01_IMPLEMENTATION_PLAN.md](../../refactor/two-server/AE01_IMPLEMENTATION_PLAN.md) and overall staged order in [AUTOMATION_EFFICIENCY_PLAN.md](../../refactor/two-server/AUTOMATION_EFFICIENCY_PLAN.md) (AE-00 baseline -> AE-01 task/context -> AE-02 checkpoint -> AE-03 quota/wait -> AE-04 evidence -> AE-05 prep -> AE-06 dual worker). AE05/AE06 require measured net benefit. Architecture background: [PROPOSAL_AUTOMATION.md](../../refactor/two-server/PROPOSAL_AUTOMATION.md).
+- Efficiency metric: quality-preserving accepted semantic work per token and active/elapsed time, counting failed attempts, corrections, and reconciliations. Missing usage is unknown, never zero. Matched comparison only: identical model/effort, family, risk profile, batch size, and warmth. Track Codex uncached/cached/output tokens separately, plus Gemini where observed, first-pass rates, repeats, and review escapes.
+- Core process invariants: fresh Gemini Worker/Reviewer -> final Codex semantic review and git commit; hermetic tests; explicit source/task/HEAD bindings; protected refs, semantic reservations, and failure budgets. Explicit STOP wins. Never invent acceptance from Git HEAD; no auto-expiry of reservations; no new model Supervisor or parallel writers; main/production and DNS untouched.
+- Implementation & review gates: no no-op acceptance, no exception-text parsing, no broad Exception swallowing, no unsafe shared reader expansion. Only bound, reviewed, committed control changes permitted. Test scope must be strictly isolated from live environment variables. Baseline-first verification required; respect raw vs canonical limits (implemented canonical <= 160000 bytes, prompt <= 320000 bytes).
+- F1 (Governance): execution route fixed at validated startup for the entire cycle; rollback only at a safe cycle boundary after resolving ambiguous in-flight results.
+- F2 (Telemetry): UNKNOWN or null telemetry blocks token/time savings claims, but does not block independently verified technical acceptance. Missing telemetry is never treated as zero or success. Real pilot only; never manufacture baselines.
