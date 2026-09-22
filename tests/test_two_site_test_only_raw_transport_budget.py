@@ -158,6 +158,26 @@ def test_legacy_deduplicate_contract_remains_unchanged():
         raise AssertionError("expected RetryableProviderSessionError was not raised")
 
 
+def _make_successful_stream(response: str, session_id: str) -> str:
+    return (
+        json.dumps({
+            "event": "init",
+            "conversation_id": session_id,
+            "init": {"model": MODEL},
+        })
+        + "\n"
+        + json.dumps({
+            "event": "result",
+            "result": {
+                "conversation_id": session_id,
+                "status": "SUCCESS",
+                "response": response,
+            },
+        })
+        + "\n"
+    )
+
+
 def test_duplicate_worker_rejects_oversized_first_document_before_normalization():
     task = {
         "task_id": "test-task-reject-oversized",
@@ -220,23 +240,7 @@ def test_duplicate_worker_rejects_oversized_first_document_before_normalization(
     multi_response = f"{raw_first_document}\n{second_document}"
 
     session_id = "test-session-reject"
-    raw_stream = (
-        json.dumps({
-            "event": "init",
-            "conversation_id": session_id,
-            "init": {"model": MODEL},
-        })
-        + "\n"
-        + json.dumps({
-            "event": "result",
-            "result": {
-                "conversation_id": session_id,
-                "status": "SUCCESS",
-                "response": multi_response,
-            },
-        })
-        + "\n"
-    )
+    raw_stream = _make_successful_stream(multi_response, session_id)
 
     try:
         _parse_stream(raw_stream, task, sources, "worker", expected_model=MODEL)
@@ -294,23 +298,7 @@ def test_duplicate_worker_accepts_compact_replacement_before_normalization():
     multi_response = f"{raw_first_document}\n{second_document}"
 
     session_id = "test-session-accept"
-    raw_stream = (
-        json.dumps({
-            "event": "init",
-            "conversation_id": session_id,
-            "init": {"model": MODEL},
-        })
-        + "\n"
-        + json.dumps({
-            "event": "result",
-            "result": {
-                "conversation_id": session_id,
-                "status": "SUCCESS",
-                "response": multi_response,
-            },
-        })
-        + "\n"
-    )
+    raw_stream = _make_successful_stream(multi_response, session_id)
 
     result, envelope = _parse_stream(raw_stream, task, sources, "worker", expected_model=MODEL)
 
