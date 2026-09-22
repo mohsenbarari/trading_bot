@@ -72,3 +72,26 @@ def _collect_session_readiness_facts(
         )
     )
     return unique_facts
+
+
+_SESSION_ISSUE_DETAILS: dict[str, str] = {
+    "SESSION_ADAPTER_MISSING": "session adapter is missing",
+    "SESSION_ENTRYPOINT_MISSING": "session entrypoint is missing",
+    "SESSION_CONTEXT_INVALID": "session context is invalid",
+    "SESSION_CONTEXT_LIMIT_EXCEEDED": "session context limit exceeded",
+    "SESSION_CONTEXT_MISSING": "session context is missing",
+    "SESSION_QUERY_CONTRACT_MISSING": "session query contract is missing",
+}
+
+
+def _collect_session_readiness_issues(
+    dependency_context: object,
+) -> list[dict[str, str]]:
+    raw_facts = _collect_session_readiness_facts(dependency_context)
+    issues: list[dict[str, str]] = []
+    for fact in raw_facts:
+        code = fact.get("code") if isinstance(fact, dict) else None
+        if not isinstance(code, str) or code not in _SESSION_ISSUE_DETAILS:
+            raise ProposalError("unknown session readiness code")
+        issues.append({"code": code, "detail": _SESSION_ISSUE_DETAILS[code]})
+    return issues

@@ -4,8 +4,13 @@ import copy
 from unittest import mock
 
 import pytest
+import json
+
 from scripts.two_site_proposal_runner import ProposalError, validate_task_readiness
-from scripts.two_site_readiness_facts import _collect_session_readiness_facts
+from scripts.two_site_readiness_facts import (
+    _collect_session_readiness_facts,
+    _collect_session_readiness_issues,
+)
 
 
 class StrSubclass(str):
@@ -302,3 +307,223 @@ def test_model_fields_do_not_interfere():
     assert facts_with_issue == [{"code": "SESSION_ADAPTER_MISSING", "path": None}]
     assert set(facts_with_issue[0].keys()) == {"code", "path"}
     assert facts_with_issue[0]["path"] is None
+
+
+@pytest.mark.parametrize(
+    "overrides,expected_code,expected_detail",
+    [
+        (
+            {"adapter_symbols": []},
+            "SESSION_ADAPTER_MISSING",
+            "session adapter is missing",
+        ),
+        (
+            {"root_symbols": []},
+            "SESSION_ENTRYPOINT_MISSING",
+            "session entrypoint is missing",
+        ),
+        (
+            {"omitted_required_symbol_count": -1},
+            "SESSION_CONTEXT_INVALID",
+            "session context is invalid",
+        ),
+        (
+            {"omitted_required_symbol_count": 1},
+            "SESSION_CONTEXT_LIMIT_EXCEEDED",
+            "session context limit exceeded",
+        ),
+        (
+            {"unresolved_symbols": ["app.missing:symbol"]},
+            "SESSION_CONTEXT_MISSING",
+            "session context is missing",
+        ),
+        (
+            {"query_operations": []},
+            "SESSION_QUERY_CONTRACT_MISSING",
+            "session query contract is missing",
+        ),
+    ],
+)
+def test_collect_session_issues_each_known_code(overrides, expected_code, expected_detail):
+    dep = {"session_context": _valid_session_context(**overrides)}
+    issues = _collect_session_readiness_issues(dep)
+    assert issues == [{"code": expected_code, "detail": expected_detail}]
+
+
+def test_collect_session_issues_all_independent_five_defects():
+    dep_invalid = {
+        "session_context": {
+            "requested": True,
+            "adapter_symbols": [],
+            "root_symbols": None,
+            "omitted_required_symbol_count": -1,
+            "unresolved_symbols": ["unres_sym"],
+            "missing_symbols": ["miss_sym"],
+            "query_operations": [],
+        }
+    }
+    expected_invalid = [
+        {"code": "SESSION_ADAPTER_MISSING", "detail": "session adapter is missing"},
+        {"code": "SESSION_CONTEXT_INVALID", "detail": "session context is invalid"},
+        {"code": "SESSION_CONTEXT_MISSING", "detail": "session context is missing"},
+        {"code": "SESSION_ENTRYPOINT_MISSING", "detail": "session entrypoint is missing"},
+        {"code": "SESSION_QUERY_CONTRACT_MISSING", "detail": "session query contract is missing"},
+    ]
+    assert _collect_session_readiness_issues(dep_invalid) == expected_invalid
+
+    dep_limit = {
+        "session_context": {
+            "requested": True,
+            "adapter_symbols": [],
+            "root_symbols": None,
+            "omitted_required_symbol_count": 3,
+            "unresolved_symbols": ["unres_sym"],
+            "missing_symbols": ["miss_sym"],
+            "query_operations": [],
+        }
+    }
+    expected_limit = [
+        {"code": "SESSION_ADAPTER_MISSING", "detail": "session adapter is missing"},
+        {"code": "SESSION_CONTEXT_LIMIT_EXCEEDED", "detail": "session context limit exceeded"},
+        {"code": "SESSION_CONTEXT_MISSING", "detail": "session context is missing"},
+        {"code": "SESSION_ENTRYPOINT_MISSING", "detail": "session entrypoint is missing"},
+        {"code": "SESSION_QUERY_CONTRACT_MISSING", "detail": "session query contract is missing"},
+    ]
+    assert _collect_session_readiness_issues(dep_limit) == expected_limit
+
+
+@pytest.mark.parametrize(
+    "dep_ctx",
+    [
+        None,
+        {},
+        {"session_context": None},
+        {"session_context": {"requested": False}},
+        {"session_context": {"requested": None}},
+        {"session_context": {"requested": 0}},
+        {"session_context": {"requested": ""}},
+        {"session_context": _valid_session_context()},
+    ],
+)
+def test_collect_session_issues_ready_returns_empty(dep_ctx):
+    assert _collect_session_readiness_issues(dep_ctx) == []
+
+
+@pytest.mark.parametrize(
+    "bad_dep,err_match",
+    [
+        ("not_a_dict", "invalid dependency context"),
+        (123, "invalid dependency context"),
+        ([1, 2], "invalid dependency context"),
+        (DictSubclass({"session_context": None}), "invalid dependency context"),
+        ({"session_context": "not_a_dict"}, "invalid session context"),
+        ({"session_context": 123}, "invalid session context"),
+        ({"session_context": [1, 2]}, "invalid session context"),
+        ({"session_context": DictSubclass({"requested": True})}, "invalid session context"),
+        (
+            {"session_context": _valid_session_context(unresolved_symbols="not_list")},
+            "unresolved_symbols must be a list",
+        ),
+        (
+            {"session_context": _valid_session_context(missing_symbols="not_list")},
+            "missing_symbols must be a list",
+        ),
+    ],
+)
+def test_collect_session_issues_malformed_rejection(bad_dep, err_match):
+    with pytest.raises(ProposalError, match=err_match):
+        _collect_session_readiness_issues(bad_dep)
+
+
+def test_collect_session_issues_calls_raw_collector_exactly_once():
+    dep = {"session_context": _valid_session_context(adapter_symbols=[])}
+    with mock.patch(
+        "scripts.two_site_readiness_facts._collect_session_readiness_facts",
+        wraps=_collect_session_readiness_facts,
+    ) as mock_raw:
+        res = _collect_session_readiness_issues(dep)
+        mock_raw.assert_called_once_with(dep)
+        assert res == [{"code": "SESSION_ADAPTER_MISSING", "detail": "session adapter is missing"}]
+
+
+def test_collect_session_issues_fresh_records_and_input_equality():
+    dep = {
+        "session_context": _valid_session_context(
+            adapter_symbols=[],
+            query_operations=[],
+        )
+    }
+    dep_before = copy.deepcopy(dep)
+    first = _collect_session_readiness_issues(dep)
+    assert dep == dep_before
+
+    first.append({"code": "MUTATED", "detail": "mutated"})
+    first[0]["code"] = "TAMPERED"
+    first[0]["detail"] = "tampered"
+
+    second = _collect_session_readiness_issues(dep)
+    assert dep == dep_before
+    assert first is not second
+    assert all(r1 is not r2 for r1 in first for r2 in second)
+    assert second == [
+        {"code": "SESSION_ADAPTER_MISSING", "detail": "session adapter is missing"},
+        {"code": "SESSION_QUERY_CONTRACT_MISSING", "detail": "session query contract is missing"},
+    ]
+
+
+def test_collect_session_issues_io_traps():
+    dep = {
+        "session_context": _valid_session_context(
+            adapter_symbols=[],
+            root_symbols=[],
+        )
+    }
+
+    def _trap(*args, **kwargs):
+        raise AssertionError("collector must not perform I/O or network")
+
+    with (
+        mock.patch("builtins.open", side_effect=_trap),
+        mock.patch("subprocess.Popen", side_effect=_trap),
+        mock.patch("socket.socket", side_effect=_trap),
+    ):
+        issues = _collect_session_readiness_issues(dep)
+
+    assert issues == [
+        {"code": "SESSION_ADAPTER_MISSING", "detail": "session adapter is missing"},
+        {"code": "SESSION_ENTRYPOINT_MISSING", "detail": "session entrypoint is missing"},
+    ]
+
+
+def test_collect_session_issues_unknown_code_fail_closed():
+    dep = {"session_context": _valid_session_context()}
+    unknown_fact = {"code": "UNKNOWN_EXPLOIT_CODE_INJECTED", "path": None}
+    with mock.patch(
+        "scripts.two_site_readiness_facts._collect_session_readiness_facts",
+        return_value=[unknown_fact],
+    ):
+        with pytest.raises(ProposalError, match="unknown session readiness code") as exc_info:
+            _collect_session_readiness_issues(dep)
+        assert "UNKNOWN_EXPLOIT_CODE_INJECTED" not in str(exc_info.value)
+
+
+def test_collect_session_issues_payload_bounded_and_no_attacker_symbols():
+    attacker_symbol = "malicious_payload_" + "A" * 500
+    dep = {
+        "session_context": _valid_session_context(
+            adapter_symbols=[],
+            root_symbols=[],
+            unresolved_symbols=[attacker_symbol],
+            query_operations=[],
+        )
+    }
+    issues = _collect_session_readiness_issues(dep)
+    assert len(issues) <= 6
+    for item in issues:
+        assert set(item.keys()) == {"code", "detail"}
+        assert attacker_symbol not in item["code"]
+        assert attacker_symbol not in item["detail"]
+        assert "path" not in item
+
+    serialized = json.dumps(issues)
+    assert len(serialized.encode("utf-8")) < 16 * 1024
