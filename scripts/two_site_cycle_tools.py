@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import math
 import os
 from pathlib import Path
 import re
 import subprocess
+import time
 
 if __package__:
     from scripts.two_site_agent_sandbox import SandboxError, _git_read
@@ -15,6 +17,11 @@ if __package__:
         error_report,
         format_inventory,
         valid_request,
+    )
+    from scripts.two_site_preparation_io import (
+        emit_preparation_telemetry,
+        load_preparation_startup,
+        verify_preparation_startup,
     )
     import scripts.two_site_proposal_runner as runner
     from scripts.two_site_semantic_task_builder import (
@@ -29,6 +36,11 @@ else:
         error_report,
         format_inventory,
         valid_request,
+    )
+    from two_site_preparation_io import (
+        emit_preparation_telemetry,
+        load_preparation_startup,
+        verify_preparation_startup,
     )
     import two_site_proposal_runner as runner
     from two_site_semantic_task_builder import (
@@ -157,59 +169,124 @@ def validate_excerpts(root: Path, task: dict) -> None:
 
 
 def build(root: Path, spec_path: Path, output: Path) -> dict:
-    spec = runner.unique_json(runner.bounded_file_text(root, spec_path, runner.MAX_CONTEXT, "task spec"))
-    if not isinstance(spec, dict) or set(spec) != {"task", "snippets", "gap_reference", "scenario_key"}:
-        raise runner.ProposalError("spec needs task, snippets, gap_reference and scenario_key")
-    task = spec["task"]
-    if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
-        raise runner.ProposalError("invalid base task")
-    validate_p1_00b_batch_spec(task, spec["scenario_key"])
-    if not isinstance(spec["snippets"], list) or len(spec["snippets"]) > 32:
-        raise runner.ProposalError("invalid snippets")
-    for item in spec["snippets"]:
-        if not isinstance(item, dict) or set(item) != {"path", "symbols"}:
-            raise runner.ProposalError("snippet needs path and symbols")
-    snippets, report = extract_bundle(root, spec["snippets"])
+    t_start = None
     try:
-        identity = build_task_identity(
-            root,
-            spec["gap_reference"],
-            spec["scenario_key"],
-            task.get("context_files", []),
-            task.get("allowed_files", []),
-            snippets,
-        )
-    except Exception as exc:
-        raise runner.ProposalError(f"failed to build semantic identity: {exc}") from exc
-    package = {"head": runner.git(root, "rev-parse", "HEAD"),
-               "gap_reference": spec["gap_reference"], "excerpts": snippets,
-               "semantic_identity": identity}
-    task = {**task, "goal": task["goal"] + MARKER + json.dumps(package, ensure_ascii=False)}
-    payload = (json.dumps(task, ensure_ascii=False, indent=2) + "\n").encode()
-    expected_parent = root / ".local/two-site-refactor/tasks"
-    if (output.parent != expected_parent or output.resolve() != output
-            or output.suffix != ".json" or len(payload) > runner.MAX_CONTEXT):
-        raise runner.ProposalError("output must be a fresh bounded ignored task JSON")
-    expected_parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(output, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        t_start = time.monotonic()
+    except Exception:
+        pass
+
+    startup = load_preparation_startup(root)
+
+    build_raised = True
+    payload_len = None
+    result = None
     try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(payload)
-        result = prepare_task(root, output)
-    except BaseException:
-        output.unlink(missing_ok=True)  # Only the task just created by this invocation.
-        raise
-    if type(result) is dict and result.get("state") == "TASK_READY":
-        result.update(task_path=str(output), gap_reference=package["gap_reference"],
-                      excerpt_count=len(snippets),
-                      semantic_task_fingerprint=identity["fingerprint"],
-                      sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.",
-                      context_budget=report)
-        return result
-    output.unlink(missing_ok=True)
-    if type(result) is dict and result.get("state") == "TASK_BLOCKED":
-        return result
-    return {"schema_version": 1, "state": "TASK_BLOCKED", "issues": []}
+        spec = runner.unique_json(runner.bounded_file_text(root, spec_path, runner.MAX_CONTEXT, "task spec"))
+        if not isinstance(spec, dict) or set(spec) != {"task", "snippets", "gap_reference", "scenario_key"}:
+            raise runner.ProposalError("spec needs task, snippets, gap_reference and scenario_key")
+        task = spec["task"]
+        if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
+            raise runner.ProposalError("invalid base task")
+        validate_p1_00b_batch_spec(task, spec["scenario_key"])
+        if not isinstance(spec["snippets"], list) or len(spec["snippets"]) > 32:
+            raise runner.ProposalError("invalid snippets")
+        for item in spec["snippets"]:
+            if not isinstance(item, dict) or set(item) != {"path", "symbols"}:
+                raise runner.ProposalError("snippet needs path and symbols")
+        snippets, report = extract_bundle(root, spec["snippets"])
+        try:
+            identity = build_task_identity(
+                root,
+                spec["gap_reference"],
+                spec["scenario_key"],
+                task.get("context_files", []),
+                task.get("allowed_files", []),
+                snippets,
+            )
+        except Exception as exc:
+            raise runner.ProposalError(f"failed to build semantic identity: {exc}") from exc
+        package = {"head": runner.git(root, "rev-parse", "HEAD"),
+                   "gap_reference": spec["gap_reference"], "excerpts": snippets,
+                   "semantic_identity": identity}
+        task = {**task, "goal": task["goal"] + MARKER + json.dumps(package, ensure_ascii=False)}
+        payload = (json.dumps(task, ensure_ascii=False, indent=2) + "\n").encode()
+        payload_len = len(payload)
+        expected_parent = root / ".local/two-site-refactor/tasks"
+        if (output.parent != expected_parent or output.resolve() != output
+                or output.suffix != ".json" or len(payload) > runner.MAX_CONTEXT):
+            raise runner.ProposalError("output must be a fresh bounded ignored task JSON")
+        expected_parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(output, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(payload)
+            if startup is None or startup.route == "one_shot":
+                result = prepare_task(root, output)
+            elif startup.route == "legacy":
+                result = runner.check(root, output)
+            else:
+                raise runner.ProposalError(f"unsupported preparation route: {startup.route}")
+            verify_preparation_startup(root, startup)
+        except BaseException:
+            output.unlink(missing_ok=True)  # Only the task just created by this invocation.
+            raise
+        if type(result) is dict and result.get("state") == "TASK_READY":
+            result.update(task_path=str(output), gap_reference=package["gap_reference"],
+                          excerpt_count=len(snippets),
+                          semantic_task_fingerprint=identity["fingerprint"],
+                          sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.",
+                          context_budget=report)
+            build_raised = False
+            return result
+        output.unlink(missing_ok=True)
+        build_raised = False
+        if type(result) is dict and result.get("state") == "TASK_BLOCKED":
+            return result
+        return {"schema_version": 1, "state": "TASK_BLOCKED", "issues": []}
+    finally:
+        if startup is not None:
+            try:
+                t_end = None
+                try:
+                    t_end = time.monotonic()
+                except Exception:
+                    pass
+                elapsed_seconds = None
+                if t_start is not None and t_end is not None:
+                    delta = t_end - t_start
+                    if isinstance(delta, (int, float)) and math.isfinite(delta) and delta >= 0:
+                        elapsed_seconds = delta
+
+                if build_raised:
+                    tel_outcome = "ERROR"
+                    tel_sfc = None
+                    tel_issues = None
+                elif type(result) is dict and result.get("state") == "TASK_READY":
+                    tel_outcome = "TASK_READY"
+                    raw_sfc = result.get("source_file_count")
+                    tel_sfc = raw_sfc if type(raw_sfc) is int and not isinstance(raw_sfc, bool) else None
+                    tel_issues = 0
+                elif type(result) is dict and result.get("state") == "TASK_BLOCKED":
+                    tel_outcome = "TASK_BLOCKED"
+                    tel_sfc = None
+                    raw_issues = result.get("issues")
+                    tel_issues = len(raw_issues) if type(raw_issues) is list else None
+                else:
+                    tel_outcome = "UNKNOWN"
+                    tel_sfc = None
+                    tel_issues = None
+
+                emit_preparation_telemetry(
+                    startup,
+                    outcome=tel_outcome,
+                    elapsed_seconds=elapsed_seconds,
+                    source_file_count=tel_sfc,
+                    source_bytes=None,
+                    task_bytes=payload_len,
+                    issue_count=tel_issues,
+                )
+            except Exception:
+                pass
 
 
 def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
