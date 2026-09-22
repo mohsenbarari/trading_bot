@@ -32,12 +32,14 @@ except ImportError:
 
 try:
     from scripts.two_site_assignment_scope import (
+        AssignmentFact,
         AssignmentScopeError,
         load_expected_assignment_scope,
         validate_task_scope,
     )
 except ImportError:
     from two_site_assignment_scope import (
+        AssignmentFact,
         AssignmentScopeError,
         load_expected_assignment_scope,
         validate_task_scope,
@@ -1294,7 +1296,19 @@ def validate_task_test_selectors(root: Path, task: dict) -> None:
         validate_test_specification(root, spec, allowed_files)
 
 
-def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
+def _load_task_snapshot(
+    root: Path,
+    task_path: Path,
+    *,
+    assignment_facts: list[dict[str, str | None]] | None = None,
+) -> tuple[dict, dict]:
+    if assignment_facts is not None and (
+        not isinstance(assignment_facts, list)
+        or type(assignment_facts) is not list
+        or len(assignment_facts) != 0
+    ):
+        raise ProposalError("assignment_facts must be None or an empty list")
+
     def _task_path_error(code: str, path_name: str | None = None) -> _TaskBoundaryError:
         safe_path = None
         if (
@@ -1341,7 +1355,21 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
             raise ProposalError("task lists must contain unique bounded nonempty strings")
     if SECRET.search(json.dumps(task, ensure_ascii=False)):
         raise ProposalError("credential-like content excluded from model input")
-    validate_assignment_scope(root, task)
+    if assignment_facts is None:
+        validate_assignment_scope(root, task)
+    else:
+        try:
+            validate_assignment_scope(root, task)
+        except ProposalError as exc:
+            cause = exc.__cause__
+            if (
+                isinstance(cause, AssignmentScopeError)
+                and isinstance(getattr(cause, "fact", None), AssignmentFact)
+                and getattr(cause, "fact").code == "TASK_ASSIGNMENT_TOKEN_MISSING"
+            ):
+                assignment_facts.append({"code": "TASK_ASSIGNMENT_TOKEN_MISSING", "path": None})
+            else:
+                raise
     if "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" in task["goal"]:
         try:
             from scripts.two_site_cycle_tools import validate_excerpts
@@ -1366,6 +1394,10 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
     if len(json.dumps({"task": task, "sources": sources}).encode()) > MAX_CONTEXT:
         raise _task_path_error("TASK_BUDGET_EXCEEDED")
     return task, sources
+
+
+def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
+    return _load_task_snapshot(root, task_path)
 
 
 def validate_task_readiness(
