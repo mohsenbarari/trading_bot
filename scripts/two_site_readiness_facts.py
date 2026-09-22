@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from scripts.two_site_proposal_runner import ProposalError
+if __package__:
+    from scripts.two_site_proposal_runner import ProposalError
+else:
+    from two_site_proposal_runner import ProposalError
 
 
 def _collect_session_readiness_facts(

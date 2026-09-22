@@ -4,11 +4,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.two_site_assignment_scope import AssignmentFact, AssignmentScopeError
-import scripts.two_site_proposal_runner as runner
-from scripts.two_site_readiness_facts import _collect_session_readiness_issues
+if __package__:
+    from scripts.two_site_assignment_scope import AssignmentFact, AssignmentScopeError
+    import scripts.two_site_proposal_runner as runner
+    from scripts.two_site_readiness_facts import _collect_session_readiness_issues
+else:
+    from two_site_assignment_scope import AssignmentFact, AssignmentScopeError
+    import two_site_proposal_runner as runner
+    from two_site_readiness_facts import _collect_session_readiness_issues
 
-__all__ = ["preflight_task"]
+__all__ = ["preflight_task", "prepare_task"]
 
 _MAX_PAYLOAD_BYTES = 16384
 
@@ -32,8 +37,10 @@ def _format_result(
     return result
 
 
-def preflight_task(root: Path, task_path: Path) -> dict:
-    """Execute bounded read-only preflight readiness checks for a task."""
+def _inspect_task(
+    root: Path,
+    task_path: Path,
+) -> tuple[dict, dict | None]:
     resolved_root = root.resolve(strict=True)
     assignment_facts: list[dict[str, str | None]] = []
 
@@ -45,7 +52,7 @@ def preflight_task(root: Path, task_path: Path) -> dict:
         )
     except runner._TaskBoundaryError as exc:
         issues = runner._normalize_readiness_issues([exc.to_fact()])
-        return _format_result("TASK_BLOCKED", issues=issues)
+        return _format_result("TASK_BLOCKED", issues=issues), None
     except runner.ProposalError as exc:
         cause = exc.__cause__
         if (
@@ -62,7 +69,7 @@ def preflight_task(root: Path, task_path: Path) -> dict:
                 except (runner.ProposalError, runner._TaskBoundaryError):
                     issue = None
             if issue is not None:
-                return _format_result("TASK_BLOCKED", issues=[issue])
+                return _format_result("TASK_BLOCKED", issues=[issue]), None
         raise exc
 
     notes = runner.task_preparation_notes(task, sources)
@@ -95,15 +102,41 @@ def preflight_task(root: Path, task_path: Path) -> dict:
     final_issues = [dict(item) for item in sorted_issues[:16]]
 
     if final_issues:
-        return _format_result(
-            "TASK_BLOCKED",
-            task_id=task.get("task_id"),
-            issues=final_issues,
+        return (
+            _format_result(
+                "TASK_BLOCKED",
+                task_id=task.get("task_id"),
+                issues=final_issues,
+            ),
+            None,
         )
 
     runner.validate_task_readiness(enriched)
-    return _format_result(
+    snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
+    ready_details = {
+        "state": "TASK_READY",
+        "task_id": task["task_id"],
+        "source_file_count": len(sources),
+        "byte_count": len(snapshot),
+        "preparation_notes": enriched,
+    }
+    report = _format_result(
         "TASK_READY",
         task_id=task.get("task_id"),
         issues=[],
     )
+    return report, ready_details
+
+
+def preflight_task(root: Path, task_path: Path) -> dict:
+    """Execute bounded read-only preflight readiness checks for a task."""
+    report, _ = _inspect_task(root, task_path)
+    return report
+
+
+def prepare_task(root: Path, task_path: Path) -> dict:
+    """Prepare a task returning legacy ready dict or public diagnostic report."""
+    report, ready_details = _inspect_task(root, task_path)
+    if ready_details is not None:
+        return ready_details
+    return report
