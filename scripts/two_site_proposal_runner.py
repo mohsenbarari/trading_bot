@@ -3142,7 +3142,7 @@ def main() -> int:
                 raise ProposalError("check mode does not accept run-id, feedback, proposal, cli, or test-evidence arguments")
             payload = check(args.root, args.task)
             print(json.dumps(payload))
-            return 0
+            return 0 if isinstance(payload, dict) and payload.get("state") == "TASK_READY" else 1
         out = run_standalone(
             args.root,
             args.task,
