@@ -756,24 +756,28 @@ def _exact_equal(a: object, b: object) -> bool:
     return a == b
 
 
-def _deduplicate_response(text: str) -> dict:
+def _deduplicate_response_with_first_document_span(text: str) -> tuple[dict, bytes]:
     decoder = json.JSONDecoder(object_pairs_hook=_unique_pairs)
     idx = 0
     n = len(text)
     while idx < n and text[idx].isspace():
         idx += 1
     docs = []
+    first_span = b""
     while idx < n:
         if len(docs) >= 4:
             raise RetryableProviderSessionError(
                 "CLI response is not one valid JSON document"
             )
+        start = idx
         try:
             doc, end = decoder.raw_decode(text, idx)
         except (json.JSONDecodeError, ProposalError) as exc:
             raise RetryableProviderSessionError(
                 "CLI response is not one valid JSON document"
             ) from exc
+        if not docs:
+            first_span = text[start:end].encode("utf-8")
         docs.append(doc)
         idx = end
         if idx < n:
@@ -834,6 +838,11 @@ def _deduplicate_response(text: str) -> dict:
             raise RetryableProviderSessionError(
                 "CLI response is not one valid JSON document"
             )
+    return first, first_span
+
+
+def _deduplicate_response(text: str) -> dict:
+    first, _ = _deduplicate_response_with_first_document_span(text)
     return first
 
 
