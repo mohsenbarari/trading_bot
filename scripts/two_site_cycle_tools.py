@@ -11,6 +11,11 @@ import subprocess
 
 if __package__:
     from scripts.two_site_agent_sandbox import SandboxError, _git_read
+    from scripts.two_site_inventory_display import (
+        error_report,
+        format_inventory,
+        valid_request,
+    )
     import scripts.two_site_proposal_runner as runner
     from scripts.two_site_semantic_task_builder import (
         build_task_identity,
@@ -20,6 +25,11 @@ if __package__:
     from scripts.two_site_task_preflight import prepare_task
 else:
     from two_site_agent_sandbox import SandboxError, _git_read
+    from two_site_inventory_display import (
+        error_report,
+        format_inventory,
+        valid_request,
+    )
     import two_site_proposal_runner as runner
     from two_site_semantic_task_builder import (
         build_task_identity,
@@ -533,6 +543,30 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         return {"status": "INVENTORY_INCONSISTENT", "reason": str(exc)}
 
 
+def inventory_view(
+    root: Path | str,
+    behavior_id: str | None = None,
+    *,
+    offset: int = 0,
+    limit: int = 64,
+) -> dict:
+    """Bounded, validated presentation view over canonical inventory evidence."""
+    if not valid_request(behavior_id, offset, limit):
+        return error_report("invalid request parameters")
+    try:
+        resolved_root = Path(root).resolve(strict=True)
+    except (ValueError, OSError, RuntimeError):
+        return error_report("invalid repository root")
+    try:
+        raw = inspect_canonical_evidence(resolved_root, behavior_id)
+    except Exception:
+        return error_report("classifier execution failed")
+    try:
+        return format_inventory(raw, behavior_id, offset=offset, limit=limit)
+    except Exception:
+        return error_report("inventory formatting failed")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=runner.ROOT)
@@ -546,7 +580,17 @@ def main() -> int:
     reviewer.add_argument("--reviewer", required=True)
     reviewer.add_argument("--sha", required=True)
     reviewer.add_argument("--applied", action="store_true")
+    inv = sub.add_parser("inventory")
+    inv.add_argument("--behavior-id", default=None)
+    inv.add_argument("--offset", type=int, default=0)
+    inv.add_argument("--limit", type=int, default=64)
     args = parser.parse_args()
+    if args.command == "inventory":
+        result = inventory_view(
+            args.root, args.behavior_id, offset=args.offset, limit=args.limit
+        )
+        print(json.dumps(result))
+        return 0 if (type(result) is dict and result.get("status") == "VALID") else 1
     root = args.root.resolve(strict=True)
     try:
         if args.command == "build":
