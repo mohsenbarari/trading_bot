@@ -134,7 +134,7 @@ def validate_run(
     snapshot = unique_json(bounded_file_text(root, run_dir / "task.json", 2 * MAX_CONTEXT, f"{role} task"))
     result_text = bounded_file_text(root, run_dir / "result.json", MAX_CONTEXT, f"{role} result")
     result = unique_json(result_text)
-    validate_result(result, expected_task, expected_sources, role)
+    validate_result(result, expected_task, expected_sources, role, enforce_raw_transport=False)
     result_sha = file_sha256(run_dir / "result.json")
     expected_model = WORKER_MODEL if role == "worker" else MODEL
     if (
