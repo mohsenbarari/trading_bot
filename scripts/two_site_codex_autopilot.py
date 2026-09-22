@@ -700,6 +700,30 @@ def _load_accepted_checkpoint(state_root: Path) -> dict[str, object] | None:
         return None
 
 
+def _accepted_checkpoint_matches_repository(
+    checkpoint: object,
+    repository: object,
+) -> bool:
+    """Compare an accepted checkpoint envelope against live repository facts.
+
+    Fail-closed, side-effect-free comparator returning True only when the
+    checkpoint envelope is valid and normalized repository facts match exactly.
+    """
+    try:
+        if not isinstance(checkpoint, dict) or set(checkpoint) != {"schema_version", "result", "repository"}:
+            return False
+        schema_version = checkpoint.get("schema_version")
+        if type(schema_version) is not int or schema_version != ACCEPTED_CHECKPOINT_SCHEMA_VERSION:
+            return False
+        persisted_repo = _validate_persisted_repository(checkpoint.get("repository"))
+        repo_head = str(persisted_repo["head"])
+        validate_accepted_receipt(checkpoint.get("result"), repo_head)
+        current_repo = validate_accepted_repository(repository)
+        return persisted_repo == current_repo
+    except Exception:
+        return False
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,

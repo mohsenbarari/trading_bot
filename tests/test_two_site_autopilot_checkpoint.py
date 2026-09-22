@@ -21,6 +21,7 @@ from scripts.two_site_codex_autopilot import (
     PROTECTED_REFS,
     REPOSITORY_FACT_KEYS,
     AutopilotError,
+    _accepted_checkpoint_matches_repository,
     _load_accepted_checkpoint,
     _persist_accepted_checkpoint,
     serialize_accepted_checkpoint,
@@ -532,3 +533,280 @@ class AcceptedCheckpointAtomicReadValidationTests(unittest.TestCase):
             self.assertEqual(checkpoint_path.stat().st_ino, target_path.stat().st_ino)
             self.assertEqual(checkpoint_path.read_bytes(), canonical_bytes)
             self.assertEqual(target_path.read_bytes(), canonical_bytes)
+
+
+class AcceptedCheckpointRepositoryBindingValidationTests(unittest.TestCase):
+    def test_matches_exact_current_repository_facts_without_io_or_mutation(self) -> None:
+        head = "a" * 40
+        head_before = "b" * 40
+        receipt = _make_continue_receipt(head_after=head, head_before=head_before)
+        repo_for_checkpoint = _make_repository(head=head)
+
+        raw_bytes = serialize_accepted_checkpoint(receipt, repo_for_checkpoint)
+        checkpoint = json.loads(raw_bytes.decode("utf-8"))
+
+        current_repo = _make_repository(head=head)
+        checkpoint_before = json.loads(json.dumps(checkpoint))
+        repo_before = {
+            "head": current_repo["head"],
+            "status": current_repo["status"],
+            "protected_refs": dict(current_repo["protected_refs"]),
+            "control_blobs": dict(current_repo["control_blobs"]),
+            "assignment_scope": current_repo["assignment_scope"],
+        }
+
+        io_fail = AssertionError("unexpected I/O attempt")
+        with (
+            patch("scripts.two_site_codex_autopilot.validate_repository", side_effect=io_fail),
+            patch("scripts.two_site_codex_autopilot._load_accepted_checkpoint", side_effect=io_fail),
+            patch("scripts.two_site_codex_autopilot.git", side_effect=io_fail),
+            patch("scripts.two_site_codex_autopilot.bounded_file_text", side_effect=io_fail),
+            patch("scripts.two_site_codex_autopilot.load_active_assignment_scope", side_effect=io_fail),
+            patch("scripts.two_site_codex_autopilot.ref_snapshot", side_effect=io_fail),
+        ):
+            matched = _accepted_checkpoint_matches_repository(checkpoint, current_repo)
+
+        self.assertTrue(matched)
+        self.assertEqual(checkpoint, checkpoint_before)
+        self.assertEqual(current_repo, repo_before)
+        self.assertIs(current_repo["assignment_scope"], repo_before["assignment_scope"])
+
+    def test_rejects_head_protected_ref_and_control_blob_drift(self) -> None:
+        head = "a" * 40
+        head_before = "b" * 40
+        receipt = _make_continue_receipt(head_after=head, head_before=head_before)
+        canonical_repo = _make_repository(head=head)
+        checkpoint = json.loads(serialize_accepted_checkpoint(receipt, canonical_repo).decode("utf-8"))
+
+        self.assertTrue(_accepted_checkpoint_matches_repository(checkpoint, canonical_repo))
+
+        with self.subTest(drift="head"):
+            drift_head_repo = dict(canonical_repo, head="f" * 40)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, drift_head_repo))
+
+        with self.subTest(drift="protected_ref"):
+            drift_refs = dict(canonical_repo["protected_refs"])
+            drift_refs[PROTECTED_REFS[0]] = "1" * 40
+            drift_ref_repo = dict(canonical_repo, protected_refs=drift_refs)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, drift_ref_repo))
+
+        with self.subTest(drift="control_blob"):
+            drift_controls = dict(canonical_repo["control_blobs"])
+            drift_controls[CONTROL_PATHS[0].as_posix()] = "2" * 40
+            drift_ctrl_repo = dict(canonical_repo, control_blobs=drift_controls)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, drift_ctrl_repo))
+
+        self.assertTrue(_accepted_checkpoint_matches_repository(checkpoint, canonical_repo))
+
+        for missing_key in REPOSITORY_FACT_KEYS:
+            with self.subTest(missing_repo_key=missing_key):
+                incomplete_repo = dict(canonical_repo)
+                del incomplete_repo[missing_key]
+                self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, incomplete_repo))
+
+        with self.subTest(malformed="extra_key"):
+            extra_repo = dict(canonical_repo, extra_key="unexpected")
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, extra_repo))
+
+        with self.subTest(malformed="dirty_status"):
+            dirty_repo = dict(canonical_repo, status=" M scripts/two_site_codex_autopilot.py")
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, dirty_repo))
+
+        with self.subTest(malformed="invalid_head_hex"):
+            bad_hex_repo = dict(canonical_repo, head="g" * 40)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, bad_hex_repo))
+
+        with self.subTest(malformed="invalid_head_len"):
+            bad_len_repo = dict(canonical_repo, head="a" * 39)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, bad_len_repo))
+
+        with self.subTest(malformed="missing_protected_ref"):
+            missing_ref = dict(canonical_repo["protected_refs"])
+            del missing_ref[PROTECTED_REFS[0]]
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, dict(canonical_repo, protected_refs=missing_ref)))
+
+        with self.subTest(malformed="extra_protected_ref"):
+            extra_ref = dict(canonical_repo["protected_refs"], unexpected_ref="3" * 40)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, dict(canonical_repo, protected_refs=extra_ref)))
+
+        with self.subTest(malformed="missing_control_blob"):
+            missing_ctrl = dict(canonical_repo["control_blobs"])
+            del missing_ctrl[CONTROL_PATHS[0].as_posix()]
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, dict(canonical_repo, control_blobs=missing_ctrl)))
+
+        with self.subTest(malformed="extra_control_blob"):
+            extra_ctrl = dict(canonical_repo["control_blobs"], extra_path="4" * 40)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, dict(canonical_repo, control_blobs=extra_ctrl)))
+
+        with self.subTest(malformed="non_dict_repo"):
+            for non_dict in ("not_a_dict", 123, None, Path("scripts/two_site_codex_autopilot.py")):
+                self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, non_dict))
+
+        with self.subTest(malformed="dict_assignment_scope"):
+            scope_dict = {
+                "assignment_id": "WA-P1-00B-AE02-DURABLE-CHECKPOINT-20260922-059",
+                "stage_id": "P1-00b",
+                "sha256": "f" * 64,
+                "expires_at": "2026-09-23T00:00:00Z",
+                "allowed_paths": ["scripts/two_site_codex_autopilot.py"],
+                "forbidden_paths": ["config/secrets.env"],
+            }
+            dict_scope_repo = dict(canonical_repo, assignment_scope=scope_dict)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, dict_scope_repo))
+
+    def test_rejects_assignment_identity_and_scope_drift(self) -> None:
+        head = "a" * 40
+        head_before = "b" * 40
+        receipt = _make_continue_receipt(head_after=head, head_before=head_before)
+        canonical_repo = _make_repository(head=head)
+        base_scope = canonical_repo["assignment_scope"]
+        assert isinstance(base_scope, AssignmentScope)
+
+        raw_bytes = serialize_accepted_checkpoint(receipt, canonical_repo)
+        checkpoint = json.loads(raw_bytes.decode("utf-8"))
+
+        independent_scope = AssignmentScope(
+            assignment_id=base_scope.assignment_id,
+            stage_id=base_scope.stage_id,
+            allowed_paths=list(base_scope.allowed_paths),
+            forbidden_paths=list(base_scope.forbidden_paths),
+            expires_at=base_scope.expires_at,
+            sha256=base_scope.sha256,
+        )
+        self.assertIsNot(independent_scope, base_scope)
+        self.assertTrue(
+            _accepted_checkpoint_matches_repository(
+                checkpoint,
+                dict(canonical_repo, assignment_scope=independent_scope),
+            )
+        )
+
+        variations = {
+            "assignment_id": AssignmentScope(
+                assignment_id="WA-DIFFERENT-ID-20260922-999",
+                stage_id=base_scope.stage_id,
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=base_scope.forbidden_paths,
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            ),
+            "stage_id": AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id="P1-01",
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=base_scope.forbidden_paths,
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            ),
+            "sha256": AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=base_scope.forbidden_paths,
+                expires_at=base_scope.expires_at,
+                sha256="0" * 64,
+            ),
+            "expires_at": AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=base_scope.forbidden_paths,
+                expires_at="2026-09-24T12:00:00Z",
+                sha256=base_scope.sha256,
+            ),
+            "allowed_paths": AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=("scripts/different.py",),
+                forbidden_paths=base_scope.forbidden_paths,
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            ),
+            "forbidden_paths": AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=("config/other_secret.env",),
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            ),
+        }
+
+        for field_name, drifted_scope in variations.items():
+            with self.subTest(drift_field=field_name):
+                drifted_repo = dict(canonical_repo, assignment_scope=drifted_scope)
+                self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, drifted_repo))
+
+        with self.subTest(order="allowed_paths_reversed"):
+            reversed_allowed_scope = AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=tuple(reversed(base_scope.allowed_paths)),
+                forbidden_paths=base_scope.forbidden_paths,
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            )
+            self.assertNotEqual(reversed_allowed_scope.allowed_paths, base_scope.allowed_paths)
+            reversed_repo = dict(canonical_repo, assignment_scope=reversed_allowed_scope)
+            self.assertFalse(_accepted_checkpoint_matches_repository(checkpoint, reversed_repo))
+
+        with self.subTest(order="forbidden_paths_reversed"):
+            two_forbidden_scope = AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=("config/secrets1.env", "config/secrets2.env"),
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            )
+            two_forbidden_repo = dict(canonical_repo, assignment_scope=two_forbidden_scope)
+            two_forbidden_checkpoint = json.loads(
+                serialize_accepted_checkpoint(receipt, two_forbidden_repo).decode("utf-8")
+            )
+            reversed_forbidden_scope = AssignmentScope(
+                assignment_id=base_scope.assignment_id,
+                stage_id=base_scope.stage_id,
+                allowed_paths=base_scope.allowed_paths,
+                forbidden_paths=("config/secrets2.env", "config/secrets1.env"),
+                expires_at=base_scope.expires_at,
+                sha256=base_scope.sha256,
+            )
+            reversed_forbidden_repo = dict(canonical_repo, assignment_scope=reversed_forbidden_scope)
+            self.assertFalse(
+                _accepted_checkpoint_matches_repository(
+                    two_forbidden_checkpoint, reversed_forbidden_repo
+                )
+            )
+
+        invalid_checkpoints = [
+            ("none", None),
+            ("string", "checkpoint"),
+            ("number", 42),
+            ("path", Path("accepted_checkpoint.json")),
+            ("missing_schema_version", {"result": checkpoint["result"], "repository": checkpoint["repository"]}),
+            ("missing_result", {"schema_version": 1, "repository": checkpoint["repository"]}),
+            ("missing_repository", {"schema_version": 1, "result": checkpoint["result"]}),
+            ("extra_key", dict(checkpoint, unexpected="key")),
+            ("schema_version_int_99", dict(checkpoint, schema_version=99)),
+            ("schema_version_bool", dict(checkpoint, schema_version=True)),
+            ("schema_version_str", dict(checkpoint, schema_version="1")),
+            ("dirty_checkpoint_repo", dict(checkpoint, repository=dict(checkpoint["repository"], status=" M foo.py"))),
+            ("bad_checkpoint_result_state", dict(checkpoint, result=dict(checkpoint["result"], state="COMPLETE"))),
+            ("bad_checkpoint_result_head_changed", dict(checkpoint, result=dict(checkpoint["result"], head_changed=False))),
+            ("bad_checkpoint_result_commit_mismatch", dict(checkpoint, result=dict(checkpoint["result"], commit="0" * 40))),
+            ("checkpoint_repo_scope_is_class", dict(checkpoint, repository=dict(checkpoint["repository"], assignment_scope=base_scope))),
+        ]
+
+        repo_snapshot = {
+            "head": canonical_repo["head"],
+            "status": canonical_repo["status"],
+            "protected_refs": dict(canonical_repo["protected_refs"]),
+            "control_blobs": dict(canonical_repo["control_blobs"]),
+            "assignment_scope": canonical_repo["assignment_scope"],
+        }
+
+        for label, invalid_cp in invalid_checkpoints:
+            with self.subTest(invalid_checkpoint=label):
+                self.assertFalse(_accepted_checkpoint_matches_repository(invalid_cp, canonical_repo))
+                self.assertEqual(canonical_repo, repo_snapshot)
+                self.assertIs(canonical_repo["assignment_scope"], repo_snapshot["assignment_scope"])
