@@ -280,7 +280,61 @@ _READINESS_ISSUE_DETAILS = {
     "ASSIGNMENT_CONTRACT_INVALID": "assignment contract is invalid",
     "TASK_FILE_UNREADABLE": "is unreadable",
     "TASK_FILE_CHANGED_DURING_READ": "changed while it was being read",
+    "MODEL_CONTEXT_INVALID": "model context is invalid",
+    "MODEL_CONTEXT_LIMIT_EXCEEDED": "model context limit exceeded",
+    "MODEL_CONTEXT_MISSING": "model context is missing",
 }
+_MODEL_CONTEXT_CODES = frozenset({
+    "MODEL_CONTEXT_INVALID",
+    "MODEL_CONTEXT_LIMIT_EXCEEDED",
+    "MODEL_CONTEXT_MISSING",
+})
+
+
+def _collect_model_readiness_facts(
+    dependency_context: object,
+) -> list[dict[str, str | None]]:
+    if dependency_context is None:
+        return []
+    if not isinstance(dependency_context, dict) or type(dependency_context) is not dict:
+        raise ProposalError("invalid dependency context")
+    if not dependency_context.get("persistence_contract_requested"):
+        return []
+
+    raw_facts: list[dict[str, str | None]] = []
+
+    omitted = dependency_context.get("omitted_model_path_count", 0)
+    if type(omitted) is not int or isinstance(omitted, bool) or omitted < 0:
+        raw_facts.append({"code": "MODEL_CONTEXT_INVALID", "path": None})
+    elif omitted > 0:
+        raw_facts.append({"code": "MODEL_CONTEXT_LIMIT_EXCEEDED", "path": None})
+
+    missing = dependency_context.get("missing_full_model_paths", [])
+    if not isinstance(missing, list) or type(missing) is not list:
+        raise ProposalError("missing_full_model_paths must be a list")
+
+    for item in missing:
+        if not isinstance(item, str) or type(item) is not str:
+            continue
+        _TaskBoundaryError("TASK_FILE_NOT_FOUND", item)
+        raw_facts.append({"code": "MODEL_CONTEXT_MISSING", "path": item})
+
+    seen: set[tuple[str, str | None]] = set()
+    unique_facts: list[dict[str, str | None]] = []
+    for fact in raw_facts:
+        key = (fact["code"], fact["path"])
+        if key not in seen:
+            seen.add(key)
+            unique_facts.append({"code": fact["code"], "path": fact["path"]})
+
+    unique_facts.sort(
+        key=lambda item: (
+            item["code"],
+            0 if item["path"] is None else 1,
+            item["path"] or "",
+        )
+    )
+    return unique_facts
 
 
 def _readiness_issue(
@@ -291,11 +345,22 @@ def _readiness_issue(
 ) -> dict[str, str]:
     if args or kwargs:
         raise ProposalError("extra metadata not permitted")
-    err = _TaskBoundaryError(code, path)
-    detail = _READINESS_ISSUE_DETAILS[err.code]
-    if err.path is None:
-        return {"code": err.code, "detail": detail}
-    return {"code": err.code, "path": err.path, "detail": detail}
+    if not isinstance(code, str) or type(code) is not str:
+        raise ProposalError("code must be a string")
+    if code in _TASK_BOUNDARY_CODES:
+        err = _TaskBoundaryError(code, path)
+        detail = _READINESS_ISSUE_DETAILS[err.code]
+        if err.path is None:
+            return {"code": err.code, "detail": detail}
+        return {"code": err.code, "path": err.path, "detail": detail}
+    if code in _MODEL_CONTEXT_CODES:
+        if path is not None:
+            _TaskBoundaryError("TASK_FILE_NOT_FOUND", path)
+        detail = _READINESS_ISSUE_DETAILS[code]
+        if path is None:
+            return {"code": code, "detail": detail}
+        return {"code": code, "path": path, "detail": detail}
+    raise ProposalError(f"unknown task boundary code: {code!r}")
 
 
 def _normalize_readiness_issues(
