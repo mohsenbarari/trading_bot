@@ -21,6 +21,7 @@ from scripts.two_site_codex_autopilot import (
     PROTECTED_REFS,
     REPOSITORY_FACT_KEYS,
     AutopilotError,
+    _load_accepted_checkpoint,
     _persist_accepted_checkpoint,
     serialize_accepted_checkpoint,
     validate_accepted_checkpoint,
@@ -367,3 +368,167 @@ class AcceptedCheckpointAtomicPersistenceTests(unittest.TestCase):
             children = {p.name for p in state_root.iterdir()}
             self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME})
             self.assertFalse(any(p.name.startswith(".accepted_checkpoint-") for p in state_root.iterdir()))
+
+
+class AcceptedCheckpointAtomicReadValidationTests(unittest.TestCase):
+    def test_loads_exact_canonical_checkpoint_envelope_without_touching_status(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-load-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            status_path = state_root / "status.json"
+
+            sentinel_status_bytes = b'{"state": "SENTINEL", "cycle": 99, "untouched": true}\n'
+            status_path.write_bytes(sentinel_status_bytes)
+            os.chmod(status_path, 0o600)
+
+            head = "a" * 40
+            head_before = "b" * 40
+            result = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+
+            canonical_bytes = serialize_accepted_checkpoint(result, repository)
+            checkpoint_path.write_bytes(canonical_bytes)
+            os.chmod(checkpoint_path, 0o600)
+
+            loaded = _load_accepted_checkpoint(state_root)
+
+            self.assertIsNotNone(loaded)
+            self.assertIsInstance(loaded, dict)
+            self.assertEqual(set(loaded.keys()), {"schema_version", "result", "repository"})
+            self.assertEqual(loaded["schema_version"], ACCEPTED_CHECKPOINT_SCHEMA_VERSION)
+
+            expected_parsed = json.loads(canonical_bytes.decode("utf-8"))
+            self.assertEqual(loaded, expected_parsed)
+            self.assertEqual(checkpoint_path.read_bytes(), canonical_bytes)
+            self.assertEqual(status_path.read_bytes(), sentinel_status_bytes)
+
+    def test_rejects_malformed_oversized_and_unknown_schema_checkpoints(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-reject-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+
+            # Case 0: Missing file
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+
+            # Case 1: Malformed JSON
+            malformed_bytes = b'{"schema_version": 1, "unclosed": '
+            checkpoint_path.write_bytes(malformed_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), malformed_bytes)
+
+            # Case 2: Duplicate keys
+            duplicate_key_bytes = b'{"schema_version": 1, "schema_version": 1, "result": {}, "repository": {}}\n'
+            checkpoint_path.write_bytes(duplicate_key_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), duplicate_key_bytes)
+
+            # Case 3: Invalid UTF-8
+            invalid_utf8_bytes = b'{"schema_version": 1, "bad": \xff\xfe}\n'
+            checkpoint_path.write_bytes(invalid_utf8_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), invalid_utf8_bytes)
+
+            # Case 4: MAX_ACCEPTED_CHECKPOINT_BYTES + 1 bytes
+            prefix = b'{"schema_version": 1, "pad": "'
+            suffix = b'"}\n'
+            needed_pad = MAX_ACCEPTED_CHECKPOINT_BYTES + 1 - len(prefix) - len(suffix)
+            oversized_bytes = prefix + (b"x" * needed_pad) + suffix
+            self.assertEqual(len(oversized_bytes), MAX_ACCEPTED_CHECKPOINT_BYTES + 1)
+            checkpoint_path.write_bytes(oversized_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), oversized_bytes)
+
+            # Canonical baseline for schema and semantic variants
+            head = "a" * 40
+            head_before = "b" * 40
+            result = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+            canonical_bytes = serialize_accepted_checkpoint(result, repository)
+            canonical_envelope = json.loads(canonical_bytes.decode("utf-8"))
+
+            # Case 5: Unknown schema version
+            unknown_schema = dict(canonical_envelope, schema_version=99)
+            unknown_schema_bytes = (json.dumps(unknown_schema, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            checkpoint_path.write_bytes(unknown_schema_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), unknown_schema_bytes)
+
+            # Bool schema version (should not pass as int 1)
+            bool_schema = dict(canonical_envelope, schema_version=True)
+            bool_schema_bytes = (json.dumps(bool_schema, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            checkpoint_path.write_bytes(bool_schema_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), bool_schema_bytes)
+
+            # Case 6a: Byte-noncanonical envelope (extra trailing newline)
+            byte_noncanonical = canonical_bytes + b"\n"
+            checkpoint_path.write_bytes(byte_noncanonical)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), byte_noncanonical)
+
+            # Case 6b: Byte-noncanonical key ordering
+            key_reordered = {
+                "repository": canonical_envelope["repository"],
+                "result": canonical_envelope["result"],
+                "schema_version": canonical_envelope["schema_version"],
+            }
+            reordered_bytes = (json.dumps(key_reordered, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            checkpoint_path.write_bytes(reordered_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), reordered_bytes)
+
+            # Case 6c: Semantically noncanonical (head_changed is False)
+            semantically_bad_envelope = json.loads(canonical_bytes.decode("utf-8"))
+            semantically_bad_envelope["result"]["head_changed"] = False
+            semantic_bad_bytes = (json.dumps(semantically_bad_envelope, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            checkpoint_path.write_bytes(semantic_bad_bytes)
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+            self.assertEqual(checkpoint_path.read_bytes(), semantic_bad_bytes)
+
+    def test_rejects_symlink_and_hardlink_checkpoints_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-links-") as temp_dir:
+            state_root = Path(temp_dir)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+
+            target_dir = state_root / "targets"
+            target_dir.mkdir(mode=0o700)
+            target_path = target_dir / "valid_target.json"
+
+            head = "a" * 40
+            head_before = "b" * 40
+            result = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+            canonical_bytes = serialize_accepted_checkpoint(result, repository)
+
+            target_path.write_bytes(canonical_bytes)
+            os.chmod(target_path, 0o600)
+
+            # Symlink rejection
+            os.symlink(target_path, checkpoint_path)
+            self.assertTrue(checkpoint_path.is_symlink())
+            self.assertEqual(os.readlink(checkpoint_path), str(target_path))
+
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+
+            self.assertTrue(checkpoint_path.is_symlink())
+            self.assertEqual(os.readlink(checkpoint_path), str(target_path))
+            self.assertEqual(checkpoint_path.read_bytes(), canonical_bytes)
+            self.assertEqual(target_path.read_bytes(), canonical_bytes)
+
+            checkpoint_path.unlink()
+
+            # Hardlink rejection
+            os.link(target_path, checkpoint_path)
+            self.assertFalse(checkpoint_path.is_symlink())
+            self.assertEqual(checkpoint_path.stat().st_nlink, 2)
+            self.assertEqual(target_path.stat().st_nlink, 2)
+            self.assertEqual(checkpoint_path.stat().st_ino, target_path.stat().st_ino)
+
+            self.assertIsNone(_load_accepted_checkpoint(state_root))
+
+            self.assertFalse(checkpoint_path.is_symlink())
+            self.assertEqual(checkpoint_path.stat().st_nlink, 2)
+            self.assertEqual(target_path.stat().st_nlink, 2)
+            self.assertEqual(checkpoint_path.stat().st_ino, target_path.stat().st_ino)
+            self.assertEqual(checkpoint_path.read_bytes(), canonical_bytes)
+            self.assertEqual(target_path.read_bytes(), canonical_bytes)

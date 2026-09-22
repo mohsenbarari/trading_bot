@@ -595,6 +595,111 @@ def _persist_accepted_checkpoint(
                 pass
 
 
+def _validate_persisted_repository(repository: object) -> dict[str, object]:
+    """Validate and normalize persisted repository facts from an accepted checkpoint."""
+    if isinstance(repository, Path):
+        raise AutopilotError("repository facts cannot be a Path")
+    if not isinstance(repository, dict) or set(repository) != REPOSITORY_FACT_KEYS:
+        raise AutopilotError("repository facts do not match the exact canonical shape")
+    head = repository.get("head")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise AutopilotError("repository head must be a lowercase 40-hex SHA")
+    if repository.get("status") != "":
+        raise AutopilotError("repository status must be the empty clean-tree string")
+    protected_refs = repository.get("protected_refs")
+    if not isinstance(protected_refs, dict) or set(protected_refs) != set(PROTECTED_REFS):
+        raise AutopilotError("protected_refs must contain every and only PROTECTED_REFS key")
+    for ref_name, ref_sha in protected_refs.items():
+        if not isinstance(ref_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", ref_sha):
+            raise AutopilotError(f"protected ref {ref_name} identity must be a lowercase 40-hex SHA")
+    control_blobs = repository.get("control_blobs")
+    expected_controls = {p.as_posix() for p in CONTROL_PATHS}
+    if not isinstance(control_blobs, dict) or set(control_blobs) != expected_controls:
+        raise AutopilotError("control_blobs must contain every and only CONTROL_PATHS key")
+    for path_key, blob_sha in control_blobs.items():
+        if not isinstance(blob_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", blob_sha):
+            raise AutopilotError(f"control blob {path_key} identity must be a lowercase 40-hex SHA")
+    scope = repository.get("assignment_scope")
+    if not isinstance(scope, dict) or isinstance(scope, AssignmentScope):
+        raise AutopilotError("assignment_scope must be a serialized mapping, not AssignmentScope")
+    if set(scope) != set(ASSIGNMENT_SCOPE_KEYS_ORDER):
+        raise AutopilotError("assignment_scope must contain every and only ASSIGNMENT_SCOPE_KEYS_ORDER key")
+    for str_key in ("assignment_id", "stage_id", "sha256", "expires_at"):
+        val = scope.get(str_key)
+        if not isinstance(val, str) or not val.strip():
+            raise AutopilotError(f"assignment_scope {str_key} must be a non-empty string")
+    for list_key in ("allowed_paths", "forbidden_paths"):
+        val = scope.get(list_key)
+        if not isinstance(val, list) or any(not isinstance(p, str) for p in val):
+            raise AutopilotError(f"assignment_scope {list_key} must be a list of strings")
+
+    normalized_scope = {key: scope[key] for key in ASSIGNMENT_SCOPE_KEYS_ORDER}
+    normalized_protected_refs = {ref: protected_refs[ref] for ref in sorted(PROTECTED_REFS)}
+    normalized_control_blobs = {path: control_blobs[path] for path in sorted(expected_controls)}
+
+    return {
+        "head": head,
+        "status": "",
+        "protected_refs": normalized_protected_refs,
+        "control_blobs": normalized_control_blobs,
+        "assignment_scope": normalized_scope,
+    }
+
+
+def _load_accepted_checkpoint(state_root: Path) -> dict[str, object] | None:
+    """Read and validate the canonical accepted checkpoint under state_root.
+
+    Fails closed by returning None on any missing, malformed, oversized, linked,
+    or schema-mismatched file.
+    """
+    try:
+        state_path = Path(state_root)
+        resolved_root = state_path.resolve(strict=True)
+        canonical_path = resolved_root / _ACCEPTED_CHECKPOINT_FILENAME
+
+        if canonical_path.parent != resolved_root or canonical_path.name != _ACCEPTED_CHECKPOINT_FILENAME:
+            return None
+
+        st = canonical_path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            return None
+
+        raw_text = bounded_file_text(
+            resolved_root,
+            canonical_path,
+            MAX_ACCEPTED_CHECKPOINT_BYTES,
+            "accepted checkpoint",
+        )
+        raw_bytes = raw_text.encode("utf-8")
+        if len(raw_bytes) > MAX_ACCEPTED_CHECKPOINT_BYTES:
+            return None
+
+        parsed = unique_json(raw_text)
+        if not isinstance(parsed, dict) or set(parsed) != {"schema_version", "result", "repository"}:
+            return None
+
+        schema_version = parsed["schema_version"]
+        if type(schema_version) is not int or schema_version != ACCEPTED_CHECKPOINT_SCHEMA_VERSION:
+            return None
+
+        normalized_repo = _validate_persisted_repository(parsed["repository"])
+        repo_head = str(normalized_repo["head"])
+        normalized_result = validate_accepted_receipt(parsed["result"], repo_head)
+
+        envelope = {
+            "schema_version": ACCEPTED_CHECKPOINT_SCHEMA_VERSION,
+            "result": normalized_result,
+            "repository": normalized_repo,
+        }
+        canonical_bytes = serialize_json(envelope)
+        if canonical_bytes != raw_bytes:
+            return None
+
+        return envelope
+    except Exception:
+        return None
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,
