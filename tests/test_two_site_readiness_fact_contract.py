@@ -1,3 +1,8 @@
+import copy
+import socket
+import subprocess
+from unittest import mock
+
 import pytest
 from scripts.two_site_proposal_runner import (
     ProposalError,
@@ -62,18 +67,69 @@ def test_collect_facts_order_dedup_and_purity():
         "missing_full_model_paths": ["models/b.py", 123, "models/a.py", "models/b.py"],
         "session_context": {"requested": True, "root_symbols": ["api:run"]},
     }
-    first = _collect_model_readiness_facts(ctx)
+    ctx_before = copy.deepcopy(ctx)
     expected = [
         {"code": "MODEL_CONTEXT_MISSING", "path": "models/a.py"},
         {"code": "MODEL_CONTEXT_MISSING", "path": "models/b.py"},
     ]
+
+    def _trap(*args, **kwargs):
+        raise AssertionError("collector must not perform I/O or network")
+
+    with (
+        mock.patch("builtins.open", side_effect=_trap),
+        mock.patch("subprocess.Popen", side_effect=_trap),
+        mock.patch("socket.socket", side_effect=_trap),
+    ):
+        first = _collect_model_readiness_facts(ctx)
+
     assert first == expected
+    assert ctx == ctx_before
+
     first.append({"code": "MUTATED", "path": None})
-    second = _collect_model_readiness_facts(ctx)
+    first[0]["code"] = "MUTATED_RECORD"
+
+    with (
+        mock.patch("builtins.open", side_effect=_trap),
+        mock.patch("subprocess.Popen", side_effect=_trap),
+        mock.patch("socket.socket", side_effect=_trap),
+    ):
+        second = _collect_model_readiness_facts(ctx)
+
     assert second == expected
     assert first is not second
+    assert all(r1 is not r2 for r1 in first for r2 in second)
     assert "MUTATED" not in [f["code"] for f in second]
     assert "missing_full_model_paths" in ctx
+    assert ctx == ctx_before
+
+    ctx_permuted = {
+        "persistence_contract_requested": True,
+        "missing_full_model_paths": ["models/a.py", "models/b.py", 123, "models/a.py"],
+        "session_context": {"requested": True, "root_symbols": ["api:run"]},
+    }
+    assert _collect_model_readiness_facts(ctx_permuted) == expected
+
+    ctx_invalid_and_missing = {
+        "persistence_contract_requested": True,
+        "omitted_model_path_count": -1,
+        "missing_full_model_paths": ["models/b.py", "models/a.py"],
+    }
+    facts_3 = _collect_model_readiness_facts(ctx_invalid_and_missing)
+    assert len(facts_3) == 3
+    assert facts_3 == [
+        {"code": "MODEL_CONTEXT_INVALID", "path": None},
+        {"code": "MODEL_CONTEXT_MISSING", "path": "models/a.py"},
+        {"code": "MODEL_CONTEXT_MISSING", "path": "models/b.py"},
+    ]
+
+    ctx_no_persistence = {
+        "persistence_contract_requested": False,
+        "session_context": {"requested": True, "sentinel": "ignored"},
+        "missing_full_model_paths": ["models/a.py", "models/b.py"],
+        "omitted_model_path_count": -1,
+    }
+    assert _collect_model_readiness_facts(ctx_no_persistence) == []
 
 
 @pytest.mark.parametrize(
