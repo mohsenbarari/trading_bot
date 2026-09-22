@@ -69,6 +69,24 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
         task_file.write_text(json.dumps(task), encoding="utf-8")
         return task_file, task
 
+    def _assert_blocked_payload(
+        self,
+        payload: object,
+        code: str,
+        path: str | None,
+        detail: str,
+    ) -> None:
+        self.assertIsInstance(payload, dict)
+        self.assertEqual(set(payload.keys()), {"state", "issues"})
+        self.assertEqual(payload["state"], "TASK_BLOCKED")
+        self.assertIsInstance(payload["issues"], list)
+        self.assertEqual(len(payload["issues"]), 1)
+        expected_issue: dict[str, str] = {"code": code, "detail": detail}
+        if path is not None:
+            expected_issue = {"code": code, "path": path, "detail": detail}
+        self.assertEqual(payload["issues"][0], expected_issue)
+        self.assertEqual(payload, {"state": "TASK_BLOCKED", "issues": [expected_issue]})
+
     def test_check_mode_success_and_byte_count(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve(strict=True)
@@ -103,9 +121,13 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             hardlinked_task = root / "task_hardlink.json"
             os.link(task_file, hardlinked_task)
 
-            with self.assertRaises(ProposalError) as ctx:
-                check(root, hardlinked_task)
-            self.assertIn("hardlinked", str(ctx.exception))
+            res = check(root, hardlinked_task)
+            self._assert_blocked_payload(
+                res,
+                "TASK_FILE_HARDLINKED",
+                "task_hardlink.json",
+                "is hardlinked and cannot be trusted",
+            )
 
             proc = subprocess.run(
                 [sys.executable, str(RUNNER_SCRIPT), "check", "--task", str(hardlinked_task), "--root", str(root)],
@@ -114,8 +136,8 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             data = json.loads(proc.stdout)
-            self.assertEqual(data["state"], "BLOCKED")
-            self.assertIn("hardlinked", data["reason"])
+            self.assertEqual(data, res)
+            self.assertNotIn("print('ready')", proc.stdout)
 
             proposals_dir = root / ".local/two-site-refactor/proposals"
             self.assertFalse(proposals_dir.exists())
@@ -131,9 +153,13 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
                 "allowed_files": ["big_file.py"],
             })
 
-            with self.assertRaises(ProposalError) as ctx:
-                check(root, task_file)
-            self.assertIn("budget", str(ctx.exception))
+            res = check(root, task_file)
+            self._assert_blocked_payload(
+                res,
+                "TASK_BUDGET_EXCEEDED",
+                "big_file.py",
+                "exceeds the safe context budget",
+            )
 
             proc = subprocess.run(
                 [sys.executable, str(RUNNER_SCRIPT), "check", "--task", str(task_file), "--root", str(root)],
@@ -142,8 +168,9 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 1)
             data = json.loads(proc.stdout)
-            self.assertEqual(data["state"], "BLOCKED")
-            self.assertIn("budget", data["reason"])
+            self.assertEqual(data, res)
+            self.assertNotIn("# padding", proc.stdout)
+            self.assertNotIn("print('ready')", proc.stdout)
 
             proposals_dir = root / ".local/two-site-refactor/proposals"
             self.assertFalse(proposals_dir.exists())
@@ -292,9 +319,8 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             self.assertIsNone(ctx_utf8.exception.path)
             self.assertIsInstance(ctx_utf8.exception, ProposalError)
 
-            with self.assertRaises(_TaskBoundaryError) as ctx_check_utf8:
-                check(root, task_file)
-            self.assertEqual(ctx_check_utf8.exception.code, "TASK_SCHEMA_INVALID")
+            res_utf8 = check(root, task_file)
+            self._assert_blocked_payload(res_utf8, "TASK_SCHEMA_INVALID", None, "task schema is invalid")
 
             task_file.write_text('{"task_id": "TASK-001", "goal": ', encoding="utf-8")
             with self.assertRaises(_TaskBoundaryError) as ctx_malformed:
@@ -303,9 +329,8 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             self.assertIsNone(ctx_malformed.exception.path)
             self.assertIsInstance(ctx_malformed.exception, ProposalError)
 
-            with self.assertRaises(_TaskBoundaryError) as ctx_check_malformed:
-                check(root, task_file)
-            self.assertEqual(ctx_check_malformed.exception.code, "TASK_SCHEMA_INVALID")
+            res_malformed = check(root, task_file)
+            self._assert_blocked_payload(res_malformed, "TASK_SCHEMA_INVALID", None, "task schema is invalid")
 
             valid_task_copy = dict(task)
             dup_key_json = json.dumps(valid_task_copy)[:-1] + ', "task_id": "DUPLICATE-ID"}'
@@ -316,9 +341,8 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
             self.assertIsNone(ctx_dup.exception.path)
             self.assertIsInstance(ctx_dup.exception, ProposalError)
 
-            with self.assertRaises(_TaskBoundaryError) as ctx_check_dup:
-                check(root, task_file)
-            self.assertEqual(ctx_check_dup.exception.code, "TASK_SCHEMA_INVALID")
+            res_dup = check(root, task_file)
+            self._assert_blocked_payload(res_dup, "TASK_SCHEMA_INVALID", None, "task schema is invalid")
 
             with self.assertRaises(ProposalError) as ctx_generic:
                 unique_json('{"dup": 1, "dup": 2}')
@@ -341,10 +365,13 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
                 load_task(root, task_file)
             self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
             self.assertIsNone(ctx.exception.path)
-            with self.assertRaises(_TaskBoundaryError) as ctx:
-                check(root, task_file)
-            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
-            self.assertIsNone(ctx.exception.path)
+            res_traversal = check(root, task_file)
+            self._assert_blocked_payload(
+                res_traversal,
+                "TASK_PATH_OUTSIDE_SCOPE",
+                None,
+                "task path is outside assignment scope",
+            )
 
             # Noncanonical path -> TASK_PATH_OUTSIDE_SCOPE, path=None
             task_file, _ = self._create_fixture_project(root, {"context_files": ["./example.py"]})
@@ -352,10 +379,13 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
                 load_task(root, task_file)
             self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
             self.assertIsNone(ctx.exception.path)
-            with self.assertRaises(_TaskBoundaryError) as ctx:
-                check(root, task_file)
-            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
-            self.assertIsNone(ctx.exception.path)
+            res_noncanonical = check(root, task_file)
+            self._assert_blocked_payload(
+                res_noncanonical,
+                "TASK_PATH_OUTSIDE_SCOPE",
+                None,
+                "task path is outside assignment scope",
+            )
 
             # Disallowed path -> TASK_PATH_OUTSIDE_SCOPE, path="example.txt"
             (root / "example.txt").write_text("disallowed\n", encoding="utf-8")
@@ -364,10 +394,13 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
                 load_task(root, task_file)
             self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
             self.assertEqual(ctx.exception.path, "example.txt")
-            with self.assertRaises(_TaskBoundaryError) as ctx:
-                check(root, task_file)
-            self.assertEqual(ctx.exception.code, "TASK_PATH_OUTSIDE_SCOPE")
-            self.assertEqual(ctx.exception.path, "example.txt")
+            res_disallowed = check(root, task_file)
+            self._assert_blocked_payload(
+                res_disallowed,
+                "TASK_PATH_OUTSIDE_SCOPE",
+                "example.txt",
+                "task path is outside assignment scope",
+            )
 
             # Resolver symlink / path escape -> TASK_FILE_SYMLINK, path="symlink.py"
             symlink_file = root / "symlink.py"
@@ -377,10 +410,13 @@ class TwoSiteProposalTaskPreflightTests(unittest.TestCase):
                 load_task(root, task_file)
             self.assertEqual(ctx.exception.code, "TASK_FILE_SYMLINK")
             self.assertEqual(ctx.exception.path, "symlink.py")
-            with self.assertRaises(_TaskBoundaryError) as ctx:
-                check(root, task_file)
-            self.assertEqual(ctx.exception.code, "TASK_FILE_SYMLINK")
-            self.assertEqual(ctx.exception.path, "symlink.py")
+            res_symlink = check(root, task_file)
+            self._assert_blocked_payload(
+                res_symlink,
+                "TASK_FILE_SYMLINK",
+                "symlink.py",
+                "is a symlink or path escape",
+            )
 
     def test_direct_default_relative_file_remains_untyped_proposal_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
