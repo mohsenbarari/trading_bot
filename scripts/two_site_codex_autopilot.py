@@ -877,7 +877,7 @@ def _validate_gemini_chain(
         except AssignmentScopeError:
             raise AutopilotError("assignment scope validation failed") from None
     worker_result = validate_proposal_result(
-        unique_json(worker_result_text), task, sources, "worker"
+        unique_json(worker_result_text), task, sources, "worker", enforce_raw_transport=False
     )
     if assignment_scope is not None:
         try:
@@ -887,7 +887,7 @@ def _validate_gemini_chain(
             )
         except AssignmentScopeError:
             raise AutopilotError("assignment scope validation failed") from None
-    validate_proposal_result(reviewer_result, task, sources, "verifier")
+    validate_proposal_result(reviewer_result, task, sources, "verifier", enforce_raw_transport=False)
     proposal_sha256 = file_sha256(worker_result_path)
     if (worker_snapshot.get("source_head") != source_head
             or reviewer_snapshot.get("source_head") != source_head

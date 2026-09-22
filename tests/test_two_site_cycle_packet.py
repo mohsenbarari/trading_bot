@@ -83,7 +83,9 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / "gap.md").write_text("# Gap A\nCharacterize method f.\n")
     (tmp_path / "code.py").write_text(INITIAL_CODE)
     (tmp_path / "doc.md").write_text("start\n--- old divider\nend\n")
-    git("add", "--", ".gitignore", "gap.md", "code.py", "doc.md")
+    (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tests/test_packet_fixture.py").write_text("def test_fixture():\n    assert True\n")
+    git("add", "--", ".gitignore", "gap.md", "code.py", "doc.md", "tests/test_packet_fixture.py")
     git("commit", "-m", "offline fixture")
     return tmp_path, git
 
@@ -104,7 +106,7 @@ def make_proposal_chain(
         "context_files": ["gap.md"],
         "allowed_files": all_allowed,
         "requirements": ["1. Characterize method f"],
-        "test_selectors": ["test_new.py"],
+        "test_selectors": ["tests/test_packet_fixture.py"],
     }
     spec.write_text(
         json.dumps({
