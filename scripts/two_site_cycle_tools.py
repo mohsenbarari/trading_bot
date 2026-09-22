@@ -9,20 +9,20 @@ from pathlib import Path
 import re
 import subprocess
 
-try:
-    from scripts import two_site_proposal_runner as runner
-except ModuleNotFoundError:
-    import two_site_proposal_runner as runner
-try:
+if __package__:
+    import scripts.two_site_proposal_runner as runner
     from scripts.two_site_semantic_task_builder import (
         build_task_identity,
         validate_task_identity,
     )
-except ModuleNotFoundError:
+    from scripts.two_site_task_preflight import prepare_task
+else:
+    import two_site_proposal_runner as runner
     from two_site_semantic_task_builder import (
         build_task_identity,
         validate_task_identity,
     )
+    from two_site_task_preflight import prepare_task
 
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
 P1_00B_ASSIGNMENT = "WA-P1-00B-FREEZE-20260904-001"
@@ -207,15 +207,20 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(payload)
-        result = runner.check(root, output)
+        result = prepare_task(root, output)
     except BaseException:
         output.unlink(missing_ok=True)  # Only the task just created by this invocation.
         raise
-    result.update(task_path=str(output), gap_reference=package["gap_reference"],
-                  excerpt_count=len(snippets),
-                  semantic_task_fingerprint=identity["fingerprint"],
-                  sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.")
-    return result
+    if type(result) is dict and result.get("state") == "TASK_READY":
+        result.update(task_path=str(output), gap_reference=package["gap_reference"],
+                      excerpt_count=len(snippets),
+                      semantic_task_fingerprint=identity["fingerprint"],
+                      sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.")
+        return result
+    output.unlink(missing_ok=True)
+    if type(result) is dict and result.get("state") == "TASK_BLOCKED":
+        return result
+    return {"schema_version": 1, "state": "TASK_BLOCKED", "issues": []}
 
 
 def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
@@ -510,8 +515,11 @@ def main() -> int:
     try:
         if args.command == "build":
             result = build(root, root / args.spec, root / args.output)
-        else:
-            result = review(root, root / args.task, args.worker, args.reviewer, args.sha, args.applied)
+            print(json.dumps(result))
+            if type(result) is dict and result.get("state") == "TASK_READY":
+                return 0
+            return 1
+        result = review(root, root / args.task, args.worker, args.reviewer, args.sha, args.applied)
         print(json.dumps(result))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError, KeyError, TypeError) as exc:
