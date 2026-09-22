@@ -25,6 +25,7 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / ".gitignore").write_text(".local/\n")
     (tmp_path / "gap.md").write_text("# Gap A\nCharacterize method f.\n")
     (tmp_path / "code.py").write_text("import os\nLIMIT = 2\n@staticmethod\ndef f(x):\n    return x + LIMIT\n\ndef unrelated():\n    return 1\n")
+    (tmp_path / "tests").mkdir()
     git("add", "--", ".gitignore", "gap.md", "code.py")
     git("commit", "-m", "offline fixture")
     return tmp_path, git
@@ -32,8 +33,8 @@ def repo(tmp_path, monkeypatch):
 
 def task():
     return {"task_id": "GAP-A-001", "goal": "Test method f.", "context_files": ["gap.md"],
-            "allowed_files": ["test_new.py"], "requirements": ["1. Characterize method f"],
-            "test_selectors": ["test_new.py"]}
+            "allowed_files": ["tests/test_new.py"], "requirements": ["1. Characterize method f"],
+            "test_selectors": ["tests/test_new.py"]}
 
 
 def p1_00b_batch_task() -> dict:
@@ -237,7 +238,7 @@ def chain(repo):
     worker.mkdir(parents=True)
     reviewer.mkdir()
     result = {"status": "PROPOSAL_READY", "summary": "test added", "covered_requirements": [1],
-              "findings": [], "changes": [{"path": "test_new.py", "original_sha256": None,
+              "findings": [], "changes": [{"path": "tests/test_new.py", "original_sha256": None,
                                              "content": "def test_new():\n    assert True\n"}]}
     snapshot = {"source_head": head, "task": task_value, "sources": sources}
     runner.write_json(worker / "result.json", result)
@@ -259,7 +260,7 @@ def test_review_never_claims_tests_or_semantic_acceptance(repo):
     receipt = ct.review(root, output, "w1", "r1", digest)
     assert receipt["state"] == "BINDINGS_VALID"
     assert receipt["tests"] == "NOT_RUN"
-    (root / "test_new.py").write_text(result["changes"][0]["content"])
+    (root / "tests/test_new.py").write_text(result["changes"][0]["content"])
     receipt = ct.review(root, output, "w1", "r1", digest, True)
     assert receipt["state"] == "BYTES_VALID"
     assert receipt["semantic_review"] == "REQUIRED_BY_CODEX"
@@ -271,7 +272,7 @@ def test_review_rejects_wrong_bindings_and_dirty_bytes(repo, mutation):
     output, digest, result, reviewer = chain(repo)
     applied = mutation in {"bytes", "mode", "extra", "hardlink", "source"}
     if applied:
-        path = root / "test_new.py"
+        path = root / "tests/test_new.py"
         path.write_text(result["changes"][0]["content"])
         if mutation == "bytes": path.write_text("different\n")
         if mutation == "mode": path.chmod(0o755)
@@ -335,8 +336,8 @@ def test_review_rejects_pre_apply_dirty_tree(repo):
 def test_review_rejects_staged_changes_in_post_apply(repo):
     root, git = repo
     output, digest, result, _ = chain(repo)
-    (root / "test_new.py").write_text(result["changes"][0]["content"])
-    git("add", "--", "test_new.py")
+    (root / "tests/test_new.py").write_text(result["changes"][0]["content"])
+    git("add", "--", "tests/test_new.py")
     with pytest.raises(runner.ProposalError, match="post-apply check must precede staging"):
         ct.review(root, output, "w1", "r1", digest, applied=True)
 
@@ -362,7 +363,7 @@ def make_receipt(proposal_sha, state="PASSED", returncode=0):
     return {
         "state": state,
         "proposal_sha256": proposal_sha,
-        "selectors": ["tests/test_two_site_cycle_tools.py"],
+        "selectors": ["tests/test_new.py"],
         "unsupported_specs": [],
         "returncode": returncode,
         "stdout_tail": "all tests passed\n",
@@ -379,7 +380,7 @@ def test_review_legacy_chain_without_test_evidence_passes(repo):
     receipt = ct.review(root, output, "w1", "r1", digest)
     assert receipt["state"] == "BINDINGS_VALID"
     assert receipt["tests"] == "NOT_RUN"
-    (root / "test_new.py").write_text(result["changes"][0]["content"])
+    (root / "tests/test_new.py").write_text(result["changes"][0]["content"])
     applied = ct.review(root, output, "w1", "r1", digest, applied=True)
     assert applied["state"] == "BYTES_VALID"
 
@@ -402,7 +403,7 @@ def test_review_accepts_sha_bound_passed_test_evidence(repo):
     assert receipt["state"] == "BINDINGS_VALID"
     assert receipt["tests"] == "NOT_RUN"
 
-    (root / "test_new.py").write_text(result["changes"][0]["content"])
+    (root / "tests/test_new.py").write_text(result["changes"][0]["content"])
     applied = ct.review(root, output, "w1", "r1", digest, applied=True)
     assert applied["state"] == "BYTES_VALID"
 
