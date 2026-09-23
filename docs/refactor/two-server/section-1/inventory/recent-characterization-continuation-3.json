@@ -191,6 +191,19 @@
         "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py::TradesOvertimeDecisionAccountantDenialBatchCharacterizationTests::test_reject_overtime_request_denies_accountant_before_locked_lookup_or_mutation",
         "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py::TradesOvertimeDecisionAccountantDenialBatchCharacterizationTests::test_cancel_overtime_request_denies_accountant_before_lookup_or_forwarding"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_block_manage_start_search.py",
+      "sha256": "1f74961ffadaba6b9f68981742a671bc8ba584873a8ba3f99cde5f114f6e3109",
+      "last_commit": "2cf9b8efd553bb8895dc664410975abd605e0b2b",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_delegated_rejection_short_circuits",
+        "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_authorized_flow"
+      ]
     }
   ]
 }

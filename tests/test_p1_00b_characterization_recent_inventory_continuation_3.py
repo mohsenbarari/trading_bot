@@ -57,7 +57,7 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertEqual(live_predecessor_sha256, predecessor["sha256"])
 
         records = manifest["records"]
-        self.assertEqual(len(records), 15)
+        self.assertEqual(len(records), 16)
 
         expected_records = [
             {
@@ -245,6 +245,19 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
                     "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py::TradesOvertimeDecisionAccountantDenialBatchCharacterizationTests::test_cancel_overtime_request_denies_accountant_before_lookup_or_forwarding",
                 ],
             },
+            {
+                "path": "tests/test_p1_00b_characterization_block_manage_start_search.py",
+                "sha256": "1f74961ffadaba6b9f68981742a671bc8ba584873a8ba3f99cde5f114f6e3109",
+                "last_commit": "2cf9b8efd553bb8895dc664410975abd605e0b2b",
+                "seed_ids": [
+                    "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_unauthenticated_ack_only",
+                    "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_delegated_rejection_short_circuits",
+                    "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_authorized_flow",
+                ],
+            },
         ]
 
         expected_record_keys = {
@@ -273,12 +286,12 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             all_seed_ids.extend(rec["seed_ids"])
             all_selectors.extend(rec["test_selectors"])
 
-        self.assertEqual(len(records), 15)
-        self.assertEqual(len(all_seed_ids), 21)
-        self.assertEqual(len(all_selectors), 29)
+        self.assertEqual(len(records), 16)
+        self.assertEqual(len(all_seed_ids), 22)
+        self.assertEqual(len(all_selectors), 32)
 
         unique_seed_ids = set(all_seed_ids)
-        self.assertEqual(len(unique_seed_ids), 21)
+        self.assertEqual(len(unique_seed_ids), 22)
 
         expected_surface_paths = [
             "docs/refactor/two-server/section-1/inventory/surface-api.json",
@@ -357,9 +370,10 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             "API-REQUEST-GET-TRADES-GET-OVERTIME-REQUEST-L4958",
             "API-REQUEST-POST-TRADES-REJECT-OVERTIME-REQUEST-L5091",
             "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
+            "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
         }
         self.assertEqual(new_ids, expected_new_ids)
-        self.assertEqual(len(new_ids), 18)
+        self.assertEqual(len(new_ids), 19)
 
         already_evidenced_ids = unique_seed_ids & prior_evidenced_union
         expected_baseline_ids = {
@@ -371,9 +385,9 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertTrue(expected_baseline_ids.issubset(baseline_seed_set))
 
         total_evidenced_set = prior_evidenced_union | unique_seed_ids
-        self.assertEqual(len(total_evidenced_set), 374)
+        self.assertEqual(len(total_evidenced_set), 375)
         remaining_seed_set = source_inventory_ids - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 91)
+        self.assertEqual(len(remaining_seed_set), 90)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
 
