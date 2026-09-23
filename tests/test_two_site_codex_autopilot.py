@@ -123,6 +123,17 @@ class AutopilotContracts(unittest.TestCase):
             sha256="a" * 64,
         )
 
+    def clean_repository_facts(self, head="a" * 40):
+        return {
+            "head": head,
+            "status": "",
+            "protected_refs": {ref: "2" * 40 for ref in autopilot.PROTECTED_REFS},
+            "control_blobs": {p.as_posix(): "3" * 40 for p in autopilot.CONTROL_PATHS},
+            "assignment_scope": self.assignment_scope(),
+        }
+
+    repository_facts = clean_repository_facts
+
     def test_result_contract_is_exact_and_state_consistent(self):
         self.assertEqual(autopilot.validate_result(self.result()), self.result())
         blocked = self.result(
@@ -915,8 +926,10 @@ class AutopilotContracts(unittest.TestCase):
                 return self.root / "run_001", rescope_result
             return self.root / "run_002", commit_result
 
-        with patch.object(autopilot, "git", side_effect=["a" * 40, "a" * 40, "b" * 40]), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        repo_facts = self.clean_repository_facts()
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", side_effect=["a" * 40, "a" * 40, "b" * 40]), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
                 patch.object(autopilot, "prune_runs"):
@@ -947,8 +960,10 @@ class AutopilotContracts(unittest.TestCase):
             cycle_runs.append((cycle, recovery))
             return self.root / f"run_{cycle:03d}", rescope_result
 
-        with patch.object(autopilot, "git", return_value="a" * 40), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        repo_facts = self.clean_repository_facts()
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
                 patch.object(autopilot, "prune_runs"):
@@ -993,8 +1008,10 @@ class AutopilotContracts(unittest.TestCase):
                 return self.root / "run_2", commit_result
             return self.root / f"run_{cycle}", rescope_result
 
-        with patch.object(autopilot, "git", return_value="a" * 40), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        repo_facts = self.clean_repository_facts()
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state"), \
                 patch.object(autopilot, "prune_runs"):
@@ -1043,8 +1060,10 @@ class AutopilotContracts(unittest.TestCase):
             run_calls.append(cycle)
             return self.root / "run_001", rescope_result
 
-        with patch.object(autopilot, "git", return_value="a" * 40), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        repo_facts = self.clean_repository_facts()
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
                 patch.object(autopilot, "prune_runs"):
