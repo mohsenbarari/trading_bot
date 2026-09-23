@@ -31,6 +31,7 @@ from scripts.two_site_codex_autopilot import (
     serialize_accepted_checkpoint,
     validate_repository,
     validate_accepted_checkpoint,
+    write_json,
 )
 
 
@@ -1475,3 +1476,155 @@ class PostValidationCheckpointPublicationCallTests(unittest.TestCase):
                 status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
                 self.assertEqual(status_data["state"], "FAILED")
                 self.assertIn("assignment_scope changed before checkpoint publication", status_data["error"])
+
+    def test_publication_failure_after_accepted_transition_keeps_prior_checkpoint_stale(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-cp-pub-fail-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+
+            head_before = "b" * 40
+            head_after = "a" * 40
+            before_repo = _make_repository(head=head_before)
+            final_repo = _make_repository(head=head_after)
+
+            prior_receipt = _make_continue_receipt(head_after=head_before, head_before="0" * 40)
+            publish_accepted_checkpoint(state_root, prior_receipt, before_repo)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            prior_checkpoint_bytes = checkpoint_path.read_bytes()
+
+            continue_receipt = _make_continue_receipt(head_after=head_after, head_before=head_before)
+            codex_result = {k: continue_receipt[k] for k in RESULT_KEYS}
+            call_events: list[tuple] = []
+
+            def failing_publish(st_root: Path, res: dict, rep: dict) -> None:
+                raise AutopilotError("simulated publish failure before real publication")
+
+            with self.assertRaises(AutopilotError) as cm:
+                self._execute_run_cycle(
+                    root,
+                    codex,
+                    state_root,
+                    codex_result=codex_result,
+                    transition_result=continue_receipt,
+                    repo_snapshots=[before_repo, final_repo],
+                    call_events=call_events,
+                    on_publish=failing_publish,
+                )
+
+            self.assertIn("simulated publish failure before real publication", str(cm.exception))
+
+            call_names = [e[0] for e in call_events]
+            self.assertEqual(
+                call_names,
+                [
+                    "validate_repository",
+                    "validate_transition",
+                    "validate_repository",
+                    "publish_accepted_checkpoint",
+                ],
+            )
+            self.assertEqual(call_events[0], ("validate_repository", root, True))
+            self.assertEqual(call_events[2], ("validate_repository", root, True))
+            self.assertEqual(call_events[3][0], "publish_accepted_checkpoint")
+            self.assertEqual(call_events[3][1], state_root)
+            self.assertIs(call_events[3][2], continue_receipt)
+            self.assertIs(call_events[3][3], final_repo)
+            self.assertEqual(call_names.count("publish_accepted_checkpoint"), 1)
+
+            runs = list((state_root / "runs").iterdir())
+            self.assertEqual(len(runs), 1)
+            status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "FAILED")
+            self.assertIn("simulated publish failure before real publication", status_data["error"])
+
+            self.assertEqual(checkpoint_path.read_bytes(), prior_checkpoint_bytes)
+
+            with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=final_repo) as mock_validate:
+                continuation = persisted_continuation(root, state_root, head_after)
+
+            mock_validate.assert_called_once_with(root)
+            self.assertIsNone(continuation)
+            self.assertEqual(checkpoint_path.read_bytes(), prior_checkpoint_bytes)
+
+    def test_status_write_failure_after_publication_preserves_recoverable_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-cp-status-write-fail-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+
+            head_before = "b" * 40
+            head_after = "a" * 40
+            before_repo = _make_repository(head=head_before)
+            final_repo = _make_repository(head=head_after)
+            continue_receipt = _make_continue_receipt(head_after=head_after, head_before=head_before)
+            expected_checkpoint_bytes = serialize_accepted_checkpoint(dict(continue_receipt), final_repo)
+            codex_result = {k: continue_receipt[k] for k in RESULT_KEYS}
+            call_events: list[tuple] = []
+
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            injected = False
+
+            def fake_write_json(path, data, *args, **kwargs):
+                nonlocal injected
+                if not injected and checkpoint_path.exists() and Path(path).name == "status.json":
+                    injected = True
+                    raise OSError("injected status write failure")
+                return write_json(path, data, *args, **kwargs)
+
+            with patch("scripts.two_site_codex_autopilot.write_json", side_effect=fake_write_json):
+                with self.assertRaises(OSError) as cm:
+                    self._execute_run_cycle(
+                        root,
+                        codex,
+                        state_root,
+                        codex_result=codex_result,
+                        transition_result=continue_receipt,
+                        repo_snapshots=[before_repo, final_repo],
+                        call_events=call_events,
+                        on_publish=publish_accepted_checkpoint,
+                    )
+
+            self.assertIn("injected status write failure", str(cm.exception))
+            self.assertTrue(injected)
+
+            runs = list((state_root / "runs").iterdir())
+            self.assertEqual(len(runs), 1)
+            status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "FAILED")
+            self.assertIn("injected status write failure", status_data["error"])
+
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertFalse(checkpoint_path.is_symlink())
+            self.assertEqual(stat.S_IMODE(checkpoint_path.stat().st_mode), 0o600)
+            self.assertEqual(checkpoint_path.read_bytes(), expected_checkpoint_bytes)
+
+            with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=final_repo) as mock_validate:
+                recovered = persisted_continuation(root, state_root, head_after)
+
+            mock_validate.assert_called_once_with(root)
+            self.assertIsNotNone(recovered)
+            self.assertIsInstance(recovered, dict)
+            self.assertEqual(recovered["commit"], head_after)
+            self.assertEqual(recovered["head_after"], head_after)
+            self.assertEqual(recovered["state"], "CONTINUE")
+            self.assertEqual(recovered["summary"], continue_receipt["summary"])
+            self.assertEqual(recovered["next_action"], continue_receipt["next_action"])
+            self.assertEqual(recovered["gemini_worker_run_id"], continue_receipt["gemini_worker_run_id"])
+            self.assertEqual(recovered["gemini_reviewer_run_id"], continue_receipt["gemini_reviewer_run_id"])
+            self.assertEqual(recovered["proposal_sha256"], continue_receipt["proposal_sha256"])
+
+            call_names = [e[0] for e in call_events]
+            self.assertEqual(
+                call_names,
+                [
+                    "validate_repository",
+                    "validate_transition",
+                    "validate_repository",
+                    "publish_accepted_checkpoint",
+                ],
+            )
+            self.assertEqual(call_events[0], ("validate_repository", root, True))
+            self.assertEqual(call_events[2], ("validate_repository", root, True))
+            self.assertEqual(call_events[3][0], "publish_accepted_checkpoint")
+            self.assertEqual(call_events[3][1], state_root)
+            self.assertIs(call_events[3][2], continue_receipt)
+            self.assertIs(call_events[3][3], final_repo)
