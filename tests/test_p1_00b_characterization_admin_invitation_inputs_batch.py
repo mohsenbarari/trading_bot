@@ -17,11 +17,14 @@ from tests.test_p1_00_characterization_network_isolation import (
 
 install_p1_00_network_fence()
 
+import bot.handlers.admin as admin_handlers
 from bot.handlers.admin import (
     process_invitation_account_name,
     process_invitation_mobile,
 )
+from bot.keyboards import get_invitable_roles_for_admin
 from bot.states import InvitationCreation
+from core.enums import UserRole
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeDecision,
     TelegramDeliveryRuntimeMode,
@@ -258,6 +261,137 @@ class AdminInvitationInputsCharacterizationTests(unittest.IsolatedAsyncioTestCas
                 InvitationCreation.awaiting_mobile_number,
             )
             self.assertNotIn("mobile_number", stored_data)
+
+    async def test_account_name_valid_queue_suppresses_stale_delete_and_advances(
+        self,
+    ) -> None:
+        raw_account_input = "   VALID   ACCOUNT_NAME   "
+        expected_canonical_name = "valid account_name"
+        previous_prompt_id = 7001
+        expected_prompt_id = 9001
+        expected_prompt_text = (
+            f"✅ نام کاربری `{expected_canonical_name}` ثبت شد.\n"
+            "حالا **شماره موبایل** کاربر را وارد کنید (مثال: 09123456789):"
+        )
+
+        message, state = _make_shared_invitation_fixture(
+            raw_account_input,
+            initial_data={"last_prompt_message_id": previous_prompt_id},
+        )
+        await state.set_state(InvitationCreation.awaiting_account_name)
+
+        with (
+            patch(
+                "bot.handlers.admin.configured_telegram_delivery_runtime",
+                return_value=TelegramDeliveryRuntimeDecision(
+                    mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                    legacy_workers_enabled=False,
+                    queue_worker_enabled=True,
+                ),
+            ),
+            _invitation_collaborators_harness(
+                prompt_message_id=expected_prompt_id,
+            ) as (
+                mock_answer,
+                sentinel_cancel_kb,
+                _,
+            ),
+        ):
+            await process_invitation_account_name(message, state)
+
+            message.bot.delete_message.assert_not_awaited()
+            mock_answer.assert_awaited_once_with(
+                message,
+                None,
+                expected_prompt_text,
+                reply_markup=sentinel_cancel_kb,
+                parse_mode="Markdown",
+            )
+            stored_data = await state.get_data()
+            self.assertEqual(
+                stored_data.get("account_name"),
+                expected_canonical_name,
+            )
+            self.assertIs(
+                await state.get_state(),
+                InvitationCreation.awaiting_mobile_number,
+            )
+            self.assertEqual(
+                stored_data.get("last_prompt_message_id"),
+                expected_prompt_id,
+            )
+
+    async def test_mobile_valid_queue_suppresses_stale_delete_and_advances(
+        self,
+    ) -> None:
+        persian_mobile_input = "۰۹۱۲۳۴۵۶۷۸۹"
+        expected_ascii_mobile = "09123456789"
+        inviter_role_value = UserRole.SUPER_ADMIN.value
+        previous_prompt_id = 7002
+        expected_prompt_id = 9002
+        expected_prompt_text = (
+            f"✅ شماره موبایل `{expected_ascii_mobile}` ثبت شد.\n"
+            "لطفاً **نقش (سطح دسترسی)** کاربر را انتخاب کنید:"
+        )
+        expected_invitable_roles = get_invitable_roles_for_admin(UserRole.SUPER_ADMIN)
+
+        message, state = _make_shared_invitation_fixture(
+            persian_mobile_input,
+            initial_data={
+                "last_prompt_message_id": previous_prompt_id,
+                "inviter_role": inviter_role_value,
+            },
+        )
+        await state.set_state(InvitationCreation.awaiting_mobile_number)
+
+        with (
+            patch(
+                "bot.handlers.admin.configured_telegram_delivery_runtime",
+                return_value=TelegramDeliveryRuntimeDecision(
+                    mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                    legacy_workers_enabled=False,
+                    queue_worker_enabled=True,
+                ),
+            ),
+            patch(
+                "bot.handlers.admin.get_invitable_roles_for_admin",
+                wraps=get_invitable_roles_for_admin,
+            ) as mock_get_invitable_roles,
+            _invitation_collaborators_harness(
+                prompt_message_id=expected_prompt_id,
+            ) as (
+                mock_answer,
+                _,
+                sentinel_role_kb,
+            ),
+        ):
+            await process_invitation_mobile(message, state)
+
+            message.bot.delete_message.assert_not_awaited()
+            mock_get_invitable_roles.assert_called_once_with(UserRole.SUPER_ADMIN)
+            admin_handlers.get_role_selection_keyboard.assert_called_once_with(
+                expected_invitable_roles,
+            )
+            mock_answer.assert_awaited_once_with(
+                message,
+                None,
+                expected_prompt_text,
+                reply_markup=sentinel_role_kb,
+                parse_mode="Markdown",
+            )
+            stored_data = await state.get_data()
+            self.assertEqual(
+                stored_data.get("mobile_number"),
+                expected_ascii_mobile,
+            )
+            self.assertIs(
+                await state.get_state(),
+                InvitationCreation.awaiting_role,
+            )
+            self.assertEqual(
+                stored_data.get("last_prompt_message_id"),
+                expected_prompt_id,
+            )
 
 
 if __name__ == "__main__":
