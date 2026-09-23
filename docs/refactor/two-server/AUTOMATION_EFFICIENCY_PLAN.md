@@ -1,13 +1,14 @@
 # پلن اجرایی بهینه‌سازی چرخهٔ توسعه
 
 - شناسه: `AE-20260919`؛ تاریخ بررسی: `2026-09-19 UTC`.
-- وضعیت: `PLANNED_NOT_IMPLEMENTED`؛ درخواست فعلی فقط تحلیل و ثبت پلن است.
+- وضعیت هنگام نگارش: `PLANNED_NOT_IMPLEMENTED`. وضعیت جاری: AE01 از نظر فنی پذیرفته شده، اتصال checkpoint در AE02 با کامیت `801ee23a` پذیرفته شده، اما پذیرش کامل AE02 و اثر مصرف/سرعت هنوز باز است.
 - محل اجرا: شاخهٔ `refactor/two-site-architecture`؛ بدون تغییر `main`، محیط عملیاتی، DNS یا Writer.
 - مبنای کد هنگام ثبت: `3a459e38`؛ شواهد تحلیلی زیر مربوط به پنجرهٔ مشخص‌شده‌اند، نه تمام تاریخ پروژه.
 - مرجع حاکم فعلی: [PROPOSAL_AUTOMATION.md](PROPOSAL_AUTOMATION.md). این سند مجوز اجرای خودکار مراحل جدید یا جایگزین قرارداد فعلی نیست. در قدم بعد، تغییر قرارداد فقط همراه پیاده‌سازی، تست و پذیرش متناظر انجام می‌شود.
 - این شماره‌گذاری مستقل از «بستهٔ سوم» بهینه‌سازی‌های قبلی است؛ آن بسته و telemetry موجود حذف یا از نو ساخته نمی‌شوند.
 
 - 2026-09-20: AE01-00 documentation/scope is under final acceptance, exact evidence—not HEAD alone—resolved the capacity-interrupted P1 receipt, and AE01-10 is next after this documentation commit. No AE01 code package is implemented; plan details in [AE01_IMPLEMENTATION_PLAN.md](AE01_IMPLEMENTATION_PLAN.md).
+- 2026-09-23: آزمون زندهٔ CLI پین‌شدهٔ `0.153.4` با حساب فعلی، `gpt-6-sol/xhigh` را با HTTP 400 رد کرد؛ تنظیم عملیاتی به `gpt-5.6-sol/xhigh` که آزمون زندهٔ خواندنی را گذراند برگشت. `--check` به‌تنهایی اثبات دسترسی مدل نیست؛ تغییر مدل فقط پس از smoke کوتاه و یک‌باره مجاز است، نه probe در هر چرخه.
 
 ## ۱. هدف و تصمیم اصلی
 
