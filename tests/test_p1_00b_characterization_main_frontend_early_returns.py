@@ -6,6 +6,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+os.environ.setdefault(
+    "APP_ENV_FILE",
+    str((_REPO_ROOT / "config" / "unit-test.env.example").resolve()),
+)
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+
+install_p1_00_network_fence()
+
 CHILD_RUNNER_SCRIPT = r"""
 import asyncio
 import json
@@ -17,6 +26,16 @@ dist_dir = cwd / "mini_app_dist"
 index_html = dist_dir / "index.html"
 assert dist_dir.is_dir(), f"Expected {dist_dir} to be a directory"
 assert index_html.is_file(), f"Expected {index_html} to exist before importing main"
+
+# Install canonical P1-00 network fence before any application import
+from tests.test_p1_00_characterization_network_isolation import (
+    _FENCE,
+    install_p1_00_network_fence,
+)
+
+install_p1_00_network_fence()
+before_denied_connects = len(_FENCE["denied_connects"])
+before_live_redis_constructs = len(_FENCE["live_redis_constructs"])
 
 # Requirement 1 & 2: Import main in fresh interpreter where mini_app_dist exists
 import main
@@ -121,11 +140,27 @@ async def execute_characterization_contract():
         f"Expected no operations on static_dir during probe calls, got {sentinel.operations}"
     )
 
+    current_denied_connects = len(_FENCE["denied_connects"])
+    current_live_redis_constructs = len(_FENCE["live_redis_constructs"])
+    assert current_denied_connects == before_denied_connects, (
+        f"Unexpected denied connect attempts during main import / serve_frontend: "
+        f"before={before_denied_connects}, current={current_denied_connects}"
+    )
+    assert current_live_redis_constructs == before_live_redis_constructs, (
+        f"Unexpected live Redis construction during main import / serve_frontend: "
+        f"before={before_live_redis_constructs}, current={current_live_redis_constructs}"
+    )
+
+    denied_connects_delta = current_denied_connects - before_denied_connects
+    live_redis_constructs_delta = current_live_redis_constructs - before_live_redis_constructs
+
     return {
         "status": "ok",
         "api_cases_count": len(api_results),
         "probe_cases_count": len(probe_results),
         "static_dir_operations": len(sentinel.operations),
+        "denied_connects_delta": denied_connects_delta,
+        "live_redis_constructs_delta": live_redis_constructs_delta,
     }
 
 try:
@@ -143,10 +178,7 @@ class TestP100bCharacterizationMainFrontendEarlyReturns(unittest.TestCase):
 
         child_env = dict(os.environ)
         child_env["PYTHONPATH"] = f"{repo_root}:{child_env.get('PYTHONPATH', '')}".rstrip(":")
-        if "APP_ENV_FILE" in child_env:
-            app_env_path = Path(child_env["APP_ENV_FILE"])
-            if not app_env_path.is_absolute():
-                child_env["APP_ENV_FILE"] = str((repo_root / app_env_path).resolve())
+        child_env["APP_ENV_FILE"] = str((repo_root / "config" / "unit-test.env.example").resolve())
 
         with tempfile.TemporaryDirectory(prefix="p1_00b_main_frontend_") as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -191,6 +223,8 @@ class TestP100bCharacterizationMainFrontendEarlyReturns(unittest.TestCase):
             self.assertEqual(report.get("api_cases_count"), 2)
             self.assertEqual(report.get("probe_cases_count"), 5)
             self.assertEqual(report.get("static_dir_operations"), 0)
+            self.assertEqual(report.get("denied_connects_delta"), 0)
+            self.assertEqual(report.get("live_redis_constructs_delta"), 0)
 
 
 if __name__ == "__main__":
