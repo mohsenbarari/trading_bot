@@ -14,7 +14,7 @@ install_p1_00_network_fence()
 
 
 class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
-    def test_manifest_indexes_five_units_and_is_sha_bound_to_second_continuation(self):
+    def test_manifest_indexes_six_units_and_is_sha_bound_to_second_continuation(self):
         repo_root = Path(__file__).resolve().parent.parent
 
         manifest_rel_path = "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json"
@@ -57,7 +57,7 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertEqual(live_predecessor_sha256, predecessor["sha256"])
 
         records = manifest["records"]
-        self.assertEqual(len(records), 5)
+        self.assertEqual(len(records), 6)
 
         expected_records = [
             {
@@ -119,6 +119,19 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
                     "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py::AdminMessagesCurrentHistoryClearCharacterizationTests::test_clear_current_market_message_missing_current_clears_cache_and_publishes_in_order",
                 ],
             },
+            {
+                "path": "tests/test_p1_00b_characterization_chat_activity_success_batch.py",
+                "sha256": "13e2125a230f5b1195c01e39b350537cf33bdf49158fa95e1ecc87c71a95e9e3",
+                "last_commit": "2a7996d625e7e5e7cfd89d2ac2df192c6a61a58c",
+                "seed_ids": [
+                    "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
+                    "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_direct_activity_signal_authorized_publishes_exact_event",
+                    "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_room_activity_signal_active_group_publishes_exact_event",
+                ],
+            },
         ]
 
         expected_record_keys = {
@@ -147,12 +160,12 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             all_seed_ids.extend(rec["seed_ids"])
             all_selectors.extend(rec["test_selectors"])
 
-        self.assertEqual(len(records), 5)
-        self.assertEqual(len(all_seed_ids), 7)
-        self.assertEqual(len(all_selectors), 7)
+        self.assertEqual(len(records), 6)
+        self.assertEqual(len(all_seed_ids), 9)
+        self.assertEqual(len(all_selectors), 9)
 
         unique_seed_ids = set(all_seed_ids)
-        self.assertEqual(len(unique_seed_ids), 7)
+        self.assertEqual(len(unique_seed_ids), 9)
 
         surface_api_path = repo_root / "docs/refactor/two-server/section-1/inventory/surface-api.json"
         self.assertTrue(surface_api_path.is_file(), f"Surface API inventory not found at {surface_api_path}")
@@ -207,9 +220,11 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             "API-IDENTITY-DELETE-INVITATIONS-DELETE-PENDING-INVITATION-L294",
             "API-NOTIFY-DELETE-NOTIFICATIONS-DISABLE-PUSH-SUBSCRIPTION-L178",
             "API-NOTIFY-POST-NOTIFICATIONS-UPSERT-PUSH-SUBSCRIPTION-L138",
+            "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
+            "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
         }
         self.assertEqual(new_ids, expected_new_ids)
-        self.assertEqual(len(new_ids), 4)
+        self.assertEqual(len(new_ids), 6)
 
         already_evidenced_ids = unique_seed_ids & prior_evidenced_union
         expected_baseline_ids = {

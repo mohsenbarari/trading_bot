@@ -65,6 +65,19 @@
         "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py::AdminMessagesCurrentHistoryClearCharacterizationTests::test_get_market_message_history_explicit_limit_preserves_order_and_serializes_exactly",
         "tests/test_p1_00b_characterization_admin_messages_current_history_clear_batch.py::AdminMessagesCurrentHistoryClearCharacterizationTests::test_clear_current_market_message_missing_current_clears_cache_and_publishes_in_order"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_activity_success_batch.py",
+      "sha256": "13e2125a230f5b1195c01e39b350537cf33bdf49158fa95e1ecc87c71a95e9e3",
+      "last_commit": "2a7996d625e7e5e7cfd89d2ac2df192c6a61a58c",
+      "seed_ids": [
+        "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
+        "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_direct_activity_signal_authorized_publishes_exact_event",
+        "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_room_activity_signal_active_group_publishes_exact_event"
+      ]
     }
   ]
 }
