@@ -57,7 +57,7 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertEqual(live_predecessor_sha256, predecessor["sha256"])
 
         records = manifest["records"]
-        self.assertEqual(len(records), 12)
+        self.assertEqual(len(records), 15)
 
         expected_records = [
             {
@@ -206,6 +206,45 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
                     "tests/test_p1_00b_characterization_realtime_sse_results.py::TestP100bCharacterizationRealtimeSseResults::test_sse_stream_identity_mismatch_uses_current_user_and_freezes_response_headers",
                 ],
             },
+            {
+                "path": "tests/test_p1_00b_characterization_main_frontend_early_returns.py",
+                "sha256": "b448162a4316222a64657212d9439adf83f470de8493f370ff55a0c89da99e64",
+                "last_commit": "bc2c60b4269cf81c78e38634302b6cdfd5b74dcb",
+                "seed_ids": [
+                    "API-OPS-GET-MAIN-SERVE-FRONTEND-L587",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_main_frontend_early_returns.py::TestP100bCharacterizationMainFrontendEarlyReturns::test_main_serve_frontend_early_returns_in_child_process",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_trades_overtime_accountant_denial_batch.py",
+                "sha256": "f8c51f0eb4ff9400f9bb9ce037f10fd1e39ee30d4ce3587e1742e8ffdbd8c256",
+                "last_commit": "259bb7c4822cf8d3a3403d29b8dfabb0e9a2d354",
+                "seed_ids": [
+                    "API-REQUEST-GET-TRADES-GET-PENDING-OWNER-OVERTIME-REQUESTS-L4891",
+                    "API-REQUEST-GET-TRADES-GET-PENDING-REQUESTER-OVERTIME-REQUESTS-L4927",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_trades_overtime_accountant_denial_batch.py::TradesOvertimeAccountantDenialBatchCharacterizationTests::test_pending_owner_denies_accountant_before_home_lookup_or_serialization",
+                    "tests/test_p1_00b_characterization_trades_overtime_accountant_denial_batch.py::TradesOvertimeAccountantDenialBatchCharacterizationTests::test_pending_requester_denies_accountant_before_source_lookup_or_serialization",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py",
+                "sha256": "74d6424612be2dc4f471e511f01ded2948bcdc9b0b542fc0ebdd72bd12df6b1d",
+                "last_commit": "85e314f92eef3cef5ef5cd863d21d68a166adb7d",
+                "seed_ids": [
+                    "API-REQUEST-GET-TRADES-GET-OVERTIME-REQUEST-L4958",
+                    "API-REQUEST-POST-TRADES-REJECT-OVERTIME-REQUEST-L5091",
+                    "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py::TradesOvertimeDecisionAccountantDenialBatchCharacterizationTests::test_get_overtime_request_denies_accountant_before_lookup_or_serialization",
+                    "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py::TradesOvertimeDecisionAccountantDenialBatchCharacterizationTests::test_reject_overtime_request_denies_accountant_before_locked_lookup_or_mutation",
+                    "tests/test_p1_00b_characterization_trades_overtime_decision_accountant_denial_batch.py::TradesOvertimeDecisionAccountantDenialBatchCharacterizationTests::test_cancel_overtime_request_denies_accountant_before_lookup_or_forwarding",
+                ],
+            },
         ]
 
         expected_record_keys = {
@@ -234,12 +273,12 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             all_seed_ids.extend(rec["seed_ids"])
             all_selectors.extend(rec["test_selectors"])
 
-        self.assertEqual(len(records), 12)
-        self.assertEqual(len(all_seed_ids), 15)
-        self.assertEqual(len(all_selectors), 23)
+        self.assertEqual(len(records), 15)
+        self.assertEqual(len(all_seed_ids), 21)
+        self.assertEqual(len(all_selectors), 29)
 
         unique_seed_ids = set(all_seed_ids)
-        self.assertEqual(len(unique_seed_ids), 15)
+        self.assertEqual(len(unique_seed_ids), 21)
 
         expected_surface_paths = [
             "docs/refactor/two-server/section-1/inventory/surface-api.json",
@@ -312,9 +351,15 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
             "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
             "API-MSG-GET-REALTIME-SSE-STREAM-L575",
+            "API-OPS-GET-MAIN-SERVE-FRONTEND-L587",
+            "API-REQUEST-GET-TRADES-GET-PENDING-OWNER-OVERTIME-REQUESTS-L4891",
+            "API-REQUEST-GET-TRADES-GET-PENDING-REQUESTER-OVERTIME-REQUESTS-L4927",
+            "API-REQUEST-GET-TRADES-GET-OVERTIME-REQUEST-L4958",
+            "API-REQUEST-POST-TRADES-REJECT-OVERTIME-REQUEST-L5091",
+            "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
         }
         self.assertEqual(new_ids, expected_new_ids)
-        self.assertEqual(len(new_ids), 12)
+        self.assertEqual(len(new_ids), 18)
 
         already_evidenced_ids = unique_seed_ids & prior_evidenced_union
         expected_baseline_ids = {
@@ -326,9 +371,9 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertTrue(expected_baseline_ids.issubset(baseline_seed_set))
 
         total_evidenced_set = prior_evidenced_union | unique_seed_ids
-        self.assertEqual(len(total_evidenced_set), 368)
+        self.assertEqual(len(total_evidenced_set), 374)
         remaining_seed_set = source_inventory_ids - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 97)
+        self.assertEqual(len(remaining_seed_set), 91)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
 
