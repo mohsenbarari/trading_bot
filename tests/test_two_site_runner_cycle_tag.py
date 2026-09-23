@@ -379,3 +379,27 @@ def test_retry_preserves_controller_run_id(monkeypatch, tmp_path):
     attempt2_status = json.loads((out / "status.json").read_text(encoding="utf-8"))
     assert attempt2_status["state"] == "PROPOSAL_READY"
     assert attempt2_status.get("controller_run_id") == VALID_CYCLE_TAG
+
+
+def test_maintenance_provenance_is_distinct_from_supervisor_cycle() -> None:
+    from scripts import two_site_proposal_runner as runner
+
+    maintenance = "maint-20260923T120000Z-1234567890abcdef"
+    assert runner.controller_run_id_from_environment(
+        {runner.MAINTENANCE_RUN_ID_ENV: maintenance}
+    ) == maintenance
+    assert runner.controller_run_id_from_environment(
+        {runner.AUTOPILOT_RUN_ID_ENV: VALID_CYCLE_TAG}
+    ) == VALID_CYCLE_TAG
+    assert runner.controller_run_id_from_environment({}) is None
+    with pytest.raises(ProposalError, match="ambiguous"):
+        runner.controller_run_id_from_environment({
+            runner.AUTOPILOT_RUN_ID_ENV: VALID_CYCLE_TAG,
+            runner.MAINTENANCE_RUN_ID_ENV: maintenance,
+        })
+    with pytest.raises(ProposalError, match="invalid maintenance"):
+        runner.controller_run_id_from_environment({
+            runner.MAINTENANCE_RUN_ID_ENV: "cycle-0001-20260923T120000Z-1",
+        })
+    with pytest.raises(ProposalError, match="canonical format"):
+        runner.validate_autopilot_run_id(maintenance)

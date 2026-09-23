@@ -9,7 +9,7 @@ Git operations, or paths outside the integration task directory.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import json
@@ -80,7 +80,12 @@ REQUEST_ID_RE = re.compile(r"[0-9a-f]{32}")
 RUN_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,60}")
 HEAD_RE = re.compile(r"[0-9a-f]{40}")
 SHA_RE = re.compile(r"[0-9a-f]{64}")
-CONTROLLER_RUN_RE = re.compile(r"cycle-[0-9]{4}-[0-9]{8}T[0-9]{6}Z-[0-9]+")
+CYCLE_RUN_RE = re.compile(r"cycle-[0-9]{4,8}-[0-9]{8}T[0-9]{6}Z-[0-9]{1,10}")
+MAINTENANCE_RUN_RE = re.compile(r"maint-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}")
+CONTROLLER_RUN_RE = re.compile(
+    r"(?:cycle-[0-9]{4,8}-[0-9]{8}T[0-9]{6}Z-[0-9]{1,10}"
+    r"|maint-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16})"
+)
 MAX_REQUEST_BYTES = 64_000
 MAX_RESPONSE_BYTES = 2_200_000
 MAX_PIPELINE_OUTPUT_BYTES = 2_000_000
@@ -90,6 +95,8 @@ HEARTBEAT_SECONDS = 10
 QUEUE_SCAN_LIMIT = 32
 POLL_SECONDS = 0.25
 ORPHAN_RESPONSE_RETENTION_SECONDS = 86_400
+MAINTENANCE_RECORD_RETENTION_SECONDS = 10 * 86_400
+MAX_MAINTENANCE_RECORD_BYTES = 4096
 # ``bounded_file_bytes`` deliberately rejects a pathname whose inode changes
 # while it is being read.  Status publication replaces the inode atomically,
 # so a reader can legitimately observe that protective check in the tiny
@@ -253,6 +260,92 @@ def _atomic_new_json(path: Path, value: Mapping[str, object], limit: int) -> Non
         temporary.unlink(missing_ok=True)
 
 
+def _maintenance_record_directory(root: Path) -> Path:
+    state_root, _status, _requests, _claimed, _responses = broker_paths(root)
+    return _trusted_directory(state_root / "maintenance-runs", "maintenance record directory")
+
+
+def _require_maintenance_stopped(root: Path) -> None:
+    """A maintenance request is never permission to wake a stopped Supervisor."""
+    state_root = root / ".local/two-site-refactor/autopilot"
+    if os.path.lexists(state_root / "STOP"):
+        raise BrokerError("maintenance requires an explicitly cleared STOP")
+    status = _read_json_file(
+        root, state_root / "status.json", MAX_REQUEST_BYTES, "supervisor status"
+    )
+    if (
+        status.get("state") != "STOPPED"
+        or type(status.get("cycle")) is not int
+        or status["cycle"] < 1
+    ):
+        raise BrokerError("maintenance requires a stopped Supervisor")
+
+
+@contextmanager
+def _exclusive_maintenance_supervisor_lock(root: Path):
+    state_root = _trusted_directory(
+        root / ".local/two-site-refactor/autopilot", "autopilot state directory"
+    )
+    with exclusive_broker_lock(state_root / "autopilot.lock"):
+        yield
+
+
+def _maintenance_record_path(root: Path, run_id: str) -> Path:
+    if not MAINTENANCE_RUN_RE.fullmatch(run_id):
+        raise BrokerError("maintenance run ID is invalid")
+    return _maintenance_record_directory(root) / f"{run_id}.json"
+
+
+def _publish_maintenance_record(root: Path, request: dict) -> None:
+    path = _maintenance_record_path(root, request["controller_run_id"])
+    _atomic_new_json(
+        path, {"schema_version": "1.0", "request": request},
+        MAX_MAINTENANCE_RECORD_BYTES,
+    )
+
+
+def _validate_maintenance_record(root: Path, request: dict) -> None:
+    _require_maintenance_stopped(root)
+    record = _read_json_file(
+        root, _maintenance_record_path(root, request["controller_run_id"]),
+        MAX_MAINTENANCE_RECORD_BYTES, "maintenance record",
+    )
+    if (
+        set(record) != {"schema_version", "request"}
+        or record["schema_version"] != "1.0"
+        or record["request"] != request
+    ):
+        raise BrokerError("maintenance record binding mismatch")
+
+
+def _prune_maintenance_records(root: Path, *, now: float | None = None) -> int:
+    """Bounded removal of only our own aged, regular maintenance records."""
+    directory = _maintenance_record_directory(root)
+    cutoff = (time.time() if now is None else now) - MAINTENANCE_RECORD_RETENTION_SECONDS
+    removed = 0
+    inspected = 0
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            inspected += 1
+            if inspected > 1024:
+                raise BrokerError("maintenance record directory exceeds scan limit")
+            if not entry.name.endswith(".json"):
+                continue
+            run_id = entry.name[:-5]
+            if not MAINTENANCE_RUN_RE.fullmatch(run_id):
+                continue
+            info = entry.stat(follow_symlinks=False)
+            if (
+                stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                and info.st_uid == os.geteuid()
+                and info.st_size <= MAX_MAINTENANCE_RECORD_BYTES
+                and info.st_mtime < cutoff
+            ):
+                Path(entry.path).unlink()
+                removed += 1
+    return removed
+
+
 def _task_relative_path(raw: object) -> Path:
     if not isinstance(raw, str) or not raw or raw != raw.strip() or "\\" in raw:
         raise BrokerError("broker task path is invalid")
@@ -284,6 +377,8 @@ def make_request(
     run_prefix: str,
     timeout: int,
     environment: Mapping[str, str],
+    *,
+    maintenance: bool = False,
 ) -> dict:
     root = canonical_root(root)
     try:
@@ -293,8 +388,25 @@ def make_request(
     task_rel = _task_relative_path(raw_task)
     if not RUN_PREFIX_RE.fullmatch(run_prefix) or not 10 <= timeout <= 900:
         raise BrokerError("broker run-prefix or timeout is invalid")
-    controller_run_id = environment.get("TWO_SITE_AUTOPILOT_RUN_ID", "")
-    if not CONTROLLER_RUN_RE.fullmatch(controller_run_id):
+    if maintenance:
+        if "TWO_SITE_AUTOPILOT_RUN_ID" in environment:
+            raise BrokerError("ambiguous controller run ID environment")
+        controller_run_id = environment.get("TWO_SITE_MAINTENANCE_RUN_ID", "")
+        valid_id = (
+            isinstance(controller_run_id, str)
+            and MAINTENANCE_RUN_RE.fullmatch(controller_run_id)
+        )
+    else:
+        if "TWO_SITE_MAINTENANCE_RUN_ID" in environment:
+            if "TWO_SITE_AUTOPILOT_RUN_ID" in environment:
+                raise BrokerError("ambiguous controller run ID environment")
+            raise BrokerError("normal broker submit rejects maintenance run ID")
+        controller_run_id = environment.get("TWO_SITE_AUTOPILOT_RUN_ID", "")
+        valid_id = (
+            isinstance(controller_run_id, str)
+            and CYCLE_RUN_RE.fullmatch(controller_run_id)
+        )
+    if not valid_id:
         raise BrokerError("broker requires a canonical controller run ID")
     assignment_id, assignment_sha = _assignment_from_environment(environment)
     task_bytes = bounded_file_bytes(root, root / task_rel, MAX_CONTEXT, "broker task")
@@ -362,6 +474,8 @@ def validate_request(
         validate_task_scope(scope, task)
     except AssignmentScopeError as exc:
         raise BrokerError("broker assignment validation failed") from exc
+    if MAINTENANCE_RUN_RE.fullmatch(request["controller_run_id"]):
+        _validate_maintenance_record(root, request)
     return dict(request), task_path, scope
 
 
@@ -381,14 +495,21 @@ def execute_pipeline(root: Path, request: dict, task_path: Path, scope: Assignme
         "--timeout", str(request["timeout"]),
     ]
     environment = os.environ.copy()
+    environment.pop("TWO_SITE_AUTOPILOT_RUN_ID", None)
+    environment.pop("TWO_SITE_MAINTENANCE_RUN_ID", None)
     environment.update({
         "APP_ENV_FILE": "config/unit-test.env.example",
         "PYTHONDONTWRITEBYTECODE": "1",
         "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED": "1",
         "TWO_SITE_ASSIGNMENT_ID": scope.assignment_id,
         "TWO_SITE_ASSIGNMENT_SHA256": scope.sha256,
-        "TWO_SITE_AUTOPILOT_RUN_ID": request["controller_run_id"],
     })
+    provenance_variable = (
+        "TWO_SITE_MAINTENANCE_RUN_ID"
+        if MAINTENANCE_RUN_RE.fullmatch(request["controller_run_id"])
+        else "TWO_SITE_AUTOPILOT_RUN_ID"
+    )
+    environment[provenance_variable] = request["controller_run_id"]
     with tempfile.TemporaryDirectory(prefix="request-", dir=state_root) as temporary:
         temporary_path = Path(temporary)
         with subprocess.Popen(
@@ -672,19 +793,25 @@ def serve(
                     )
                     if request.get("request_id") != claimed_path.stem:
                         raise BrokerError("broker request filename binding is invalid")
-                    validated, task_path, scope = validate_request(
-                        root, request, scope_loader=scope_loader
+                    maintenance = (
+                        isinstance(request.get("controller_run_id"), str)
+                        and MAINTENANCE_RUN_RE.fullmatch(request["controller_run_id"])
                     )
-                    _write_status(
-                        status_path, "RUNNING", request_id=validated["request_id"],
-                        run_prefix=validated["run_prefix"],
-                        source_head=validated["source_head"],
-                    )
-                    response = _execute_with_heartbeat(
-                        status_path, executor, root, validated, task_path, scope
-                    )
-                    if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
-                        raise BrokerError("broker executor returned an invalid response")
+                    lock = _exclusive_maintenance_supervisor_lock(root) if maintenance else nullcontext()
+                    with lock:
+                        validated, task_path, scope = validate_request(
+                            root, request, scope_loader=scope_loader
+                        )
+                        _write_status(
+                            status_path, "RUNNING", request_id=validated["request_id"],
+                            run_prefix=validated["run_prefix"],
+                            source_head=validated["source_head"],
+                        )
+                        response = _execute_with_heartbeat(
+                            status_path, executor, root, validated, task_path, scope
+                        )
+                        if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
+                            raise BrokerError("broker executor returned an invalid response")
                 except Exception as exc:
                     response = _error_response(request, exc)
                 request_id = claimed_path.stem
@@ -727,14 +854,7 @@ def validate_response(request: dict, response: object) -> dict:
     return response
 
 
-def submit(
-    root: Path,
-    task_path: Path,
-    run_prefix: str,
-    timeout: int,
-    environment: Mapping[str, str] = os.environ,
-) -> int:
-    request = make_request(root, task_path, run_prefix, timeout, environment)
+def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
         status_value = _read_broker_status(root, status_path)
@@ -744,6 +864,17 @@ def submit(
             raise BrokerError("provider broker is not ready")
         if time.time() - status_value["updated_at"] > STATUS_MAX_AGE_SECONDS:
             raise BrokerError("provider broker status is stale")
+        if maintenance:
+            with _exclusive_maintenance_supervisor_lock(root):
+                _require_maintenance_stopped(root)
+                scope = load_active_assignment_scope(root)
+                if (request["assignment_id"] != scope.assignment_id
+                        or request["assignment_sha256"] != scope.sha256):
+                    raise BrokerError("broker assignment binding mismatch")
+                task, _sources = load_task(root, root / request["task_path"])
+                validate_task_scope(scope, task)
+                _prune_maintenance_records(root)
+                _publish_maintenance_record(root, request)
         request_path = requests / f"{request['request_id']}.json"
         response_path = _response_path(responses, request["request_id"])
         _atomic_new_json(request_path, request, MAX_REQUEST_BYTES)
@@ -781,6 +912,37 @@ def submit(
     return validated["exit_code"]
 
 
+def submit(
+    root: Path,
+    task_path: Path,
+    run_prefix: str,
+    timeout: int,
+    environment: Mapping[str, str] = os.environ,
+) -> int:
+    request = make_request(root, task_path, run_prefix, timeout, environment)
+    return _submit_request(root, request, timeout, maintenance=False)
+
+
+def submit_maintenance(root: Path, task_path: Path, run_prefix: str, timeout: int) -> int:
+    """Create a distinct, auditable controller identity inside the trusted client."""
+    root = canonical_root(root)
+    scope = load_active_assignment_scope(root)
+    run_id = (
+        f"maint-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-"
+        f"{uuid.uuid4().hex[:16]}"
+    )
+    environment = {
+        "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED": "1",
+        "TWO_SITE_ASSIGNMENT_ID": scope.assignment_id,
+        "TWO_SITE_ASSIGNMENT_SHA256": scope.sha256,
+        "TWO_SITE_MAINTENANCE_RUN_ID": run_id,
+    }
+    request = make_request(
+        root, task_path, run_prefix, timeout, environment, maintenance=True
+    )
+    return _submit_request(root, request, timeout, maintenance=True)
+
+
 def status(root: Path) -> int:
     _state_root, status_path, _requests, _claimed, _responses = broker_paths(root)
     try:
@@ -808,6 +970,10 @@ def main() -> int:
     submit_parser.add_argument("--task", type=Path, required=True)
     submit_parser.add_argument("--run-prefix", required=True)
     submit_parser.add_argument("--timeout", type=int, default=300)
+    maintenance_parser = subparsers.add_parser("submit-maintenance")
+    maintenance_parser.add_argument("--task", type=Path, required=True)
+    maintenance_parser.add_argument("--run-prefix", required=True)
+    maintenance_parser.add_argument("--timeout", type=int, default=300)
     subparsers.add_parser("status")
     args = parser.parse_args()
     root = canonical_root(args.root)
@@ -816,6 +982,8 @@ def main() -> int:
             return serve(root)
         if args.command == "submit":
             return submit(root, args.task, args.run_prefix, args.timeout)
+        if args.command == "submit-maintenance":
+            return submit_maintenance(root, args.task, args.run_prefix, args.timeout)
         return status(root)
     except (BrokerError, ProposalError, AssignmentScopeError, OSError, subprocess.SubprocessError) as exc:
         print(json.dumps({"state": "BROKER_ERROR", "reason": str(exc)}), file=sys.stderr)

@@ -437,3 +437,152 @@ def test_exclusive_lock_rejects_second_broker(tmp_path: Path) -> None:
         with pytest.raises(broker.BrokerError, match="already owns"):
             with broker.exclusive_broker_lock(lock):
                 pass
+
+
+def _stopped_supervisor(root: Path) -> Path:
+    state_root = root / ".local/two-site-refactor/autopilot"
+    state_root.mkdir(parents=True, exist_ok=True)
+    broker.write_json(state_root / "status.json", {"state": "STOPPED", "cycle": 1})
+    return state_root
+
+
+def test_maintenance_round_trip_generates_bound_identity_and_holds_supervisor_lock(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch, capsys
+) -> None:
+    root, task, scope, _environment = broker_repo
+    state_root = _stopped_supervisor(root)
+    monkeypatch.setattr(broker, "load_active_assignment_scope", lambda _root: scope)
+    # A stale caller cycle tag must never leak into a maintenance submission.
+    monkeypatch.setenv("TWO_SITE_AUTOPILOT_RUN_ID", "cycle-0001-20990101T000000Z-123")
+    observed: list[str] = []
+
+    def fake_executor(_root, request, _task_path, _scope):
+        run_id = request["controller_run_id"]
+        assert broker.MAINTENANCE_RUN_RE.fullmatch(run_id)
+        assert broker._read_json_file(
+            root, broker._maintenance_record_path(root, run_id),
+            broker.MAX_MAINTENANCE_RECORD_BYTES, "maintenance record",
+        ) == {"schema_version": "1.0", "request": request}
+        with pytest.raises(broker.BrokerError, match="already owns"):
+            with broker.exclusive_broker_lock(state_root / "autopilot.lock"):
+                pass
+        observed.append(run_id)
+        return {
+            "schema_version": "1.0", "request_id": request["request_id"],
+            "run_prefix": request["run_prefix"], "source_head": request["source_head"],
+            "state": "COMPLETED", "exit_code": 0, "stdout": "maintenance-ok\n",
+            "stderr": "", "finished_at": time.time(),
+        }
+
+    thread = threading.Thread(
+        target=broker.serve,
+        kwargs={
+            "root": root, "once": True, "executor": fake_executor,
+            "scope_loader": lambda _root: scope, "install_signal_handlers": False,
+        },
+        daemon=True,
+    )
+    thread.start()
+    _state, broker_status, _requests, _claimed, _responses = broker.broker_paths(root)
+    deadline = time.time() + 5
+    while not broker_status.exists() and time.time() < deadline:
+        time.sleep(0.01)
+    assert broker.submit_maintenance(root, task, "maintenance-test", 30) == 0
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert len(observed) == 1
+    assert capsys.readouterr().out == "maintenance-ok\n"
+
+
+def test_maintenance_record_is_required_and_bound_to_exact_request(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, scope, environment = broker_repo
+    state_root = _stopped_supervisor(root)
+    maintenance_environment = dict(environment)
+    maintenance_environment.pop("TWO_SITE_AUTOPILOT_RUN_ID")
+    maintenance_environment["TWO_SITE_MAINTENANCE_RUN_ID"] = (
+        "maint-20990101T000000Z-1234567890abcdef"
+    )
+    request = broker.make_request(
+        root, task, "maintenance-test", 30, maintenance_environment,
+        maintenance=True,
+    )
+    with pytest.raises(broker.ProposalError, match="maintenance record"):
+        broker.validate_request(root, request, scope_loader=lambda _root: scope)
+    broker._publish_maintenance_record(root, request)
+    assert broker.validate_request(root, request, scope_loader=lambda _root: scope)[0] == request
+    modified = dict(request, run_prefix="different")
+    with pytest.raises(broker.BrokerError, match="record binding mismatch"):
+        broker.validate_request(root, modified, scope_loader=lambda _root: scope)
+    (state_root / "STOP").touch()
+    with pytest.raises(broker.BrokerError, match="cleared STOP"):
+        broker.validate_request(root, request, scope_loader=lambda _root: scope)
+    (state_root / "STOP").unlink()
+    broker.write_json(state_root / "status.json", {"state": "RUNNING", "cycle": 1})
+    with pytest.raises(broker.BrokerError, match="stopped Supervisor"):
+        broker.validate_request(root, request, scope_loader=lambda _root: scope)
+
+
+def test_normal_submit_cannot_claim_maintenance_or_ambiguous_provenance(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, environment = broker_repo
+    maintenance = dict(environment)
+    maintenance.pop("TWO_SITE_AUTOPILOT_RUN_ID")
+    maintenance["TWO_SITE_MAINTENANCE_RUN_ID"] = "maint-20990101T000000Z-1234567890abcdef"
+    with pytest.raises(broker.BrokerError, match="rejects maintenance"):
+        broker.make_request(root, task, "ordinary", 30, maintenance)
+    both = dict(environment, TWO_SITE_MAINTENANCE_RUN_ID=maintenance["TWO_SITE_MAINTENANCE_RUN_ID"])
+    with pytest.raises(broker.BrokerError, match="ambiguous"):
+        broker.make_request(root, task, "ordinary", 30, both)
+    with pytest.raises(broker.BrokerError, match="ambiguous"):
+        broker.make_request(root, task, "maintenance", 30, both, maintenance=True)
+
+
+def test_maintenance_pipeline_uses_only_distinct_provenance_environment(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]], monkeypatch
+) -> None:
+    root, task, scope, environment = broker_repo
+    maintenance = dict(environment)
+    maintenance.pop("TWO_SITE_AUTOPILOT_RUN_ID")
+    maintenance["TWO_SITE_MAINTENANCE_RUN_ID"] = "maint-20990101T000000Z-1234567890abcdef"
+    request = broker.make_request(
+        root, task, "maintenance-test", 30, maintenance, maintenance=True
+    )
+    monkeypatch.setenv("TWO_SITE_AUTOPILOT_RUN_ID", environment["TWO_SITE_AUTOPILOT_RUN_ID"])
+    process = mock.MagicMock()
+    process.returncode = 0
+    process.__enter__.return_value = process
+    process.__exit__.return_value = False
+
+    def fake_capture(_process, _stdin, stdout_path, stderr_path, _timeout, max_output):
+        stdout_path.write_text("ok\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+
+    with mock.patch.object(broker.subprocess, "Popen", return_value=process) as popen, \
+            mock.patch.object(broker, "capture_bounded_process", side_effect=fake_capture):
+        assert broker.execute_pipeline(root, request, task, scope)["exit_code"] == 0
+    child_environment = popen.call_args.kwargs["env"]
+    assert child_environment["TWO_SITE_MAINTENANCE_RUN_ID"] == request["controller_run_id"]
+    assert "TWO_SITE_AUTOPILOT_RUN_ID" not in child_environment
+
+
+def test_maintenance_record_pruning_preserves_recent_and_unowned_files(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]]
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    directory = broker._maintenance_record_directory(root)
+    old = directory / "maint-20200101T000000Z-1234567890abcdef.json"
+    recent = directory / "maint-20990101T000000Z-1234567890abcdef.json"
+    unrelated = directory / "unrelated.json"
+    for path in (old, recent, unrelated):
+        path.write_text("{}", encoding="utf-8")
+    now = time.time()
+    aged = now - broker.MAINTENANCE_RECORD_RETENTION_SECONDS - 1
+    os.utime(old, (aged, aged))
+    os.utime(unrelated, (aged, aged))
+    assert broker._prune_maintenance_records(root, now=now) == 1
+    assert not old.exists()
+    assert recent.exists()
+    assert unrelated.exists()

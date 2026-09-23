@@ -23,7 +23,7 @@ import stat
 import subprocess
 import tempfile
 import time
-from typing import Iterator
+from typing import Iterator, Mapping
 
 try:
     from scripts.two_site_cli_artifact import prepare_disposable_cli
@@ -129,9 +129,13 @@ MAX_REPLACEMENTS = 32
 MAX_REPLACEMENT_BYTES = 65536
 MAX_REVIEW_TRANSPORT_BYTES = MAX_CONTEXT
 AUTOPILOT_RUN_ID_ENV = "TWO_SITE_AUTOPILOT_RUN_ID"
+MAINTENANCE_RUN_ID_ENV = "TWO_SITE_MAINTENANCE_RUN_ID"
 MAX_AUTOPILOT_RUN_ID_LENGTH = 64
 AUTOPILOT_RUN_ID_REGEX = re.compile(
     r"^cycle-[0-9]{4,8}-[0-9]{8}T[0-9]{6}Z-[0-9]{1,10}\Z"
+)
+MAINTENANCE_RUN_ID_REGEX = re.compile(
+    r"^maint-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}\Z"
 )
 MAX_SESSION_FLOW_SYMBOLS = 48
 MAX_SESSION_FLOW_MISSING = 16
@@ -180,6 +184,24 @@ def validate_autopilot_run_id(raw: str | None) -> str | None:
     if SECRET.search(raw):
         raise ProposalError("invalid autopilot run ID: credential-like content")
     return raw
+
+
+def controller_run_id_from_environment(environment: Mapping[str, str]) -> str | None:
+    """Keep maintenance provenance distinct from real Supervisor cycle IDs."""
+    cycle = environment.get(AUTOPILOT_RUN_ID_ENV)
+    maintenance = environment.get(MAINTENANCE_RUN_ID_ENV)
+    if AUTOPILOT_RUN_ID_ENV in environment and MAINTENANCE_RUN_ID_ENV in environment:
+        raise ProposalError("ambiguous controller run ID environment")
+    if maintenance is None:
+        return validate_autopilot_run_id(cycle)
+    if (
+        not isinstance(maintenance, str)
+        or len(maintenance) > MAX_AUTOPILOT_RUN_ID_LENGTH
+        or not MAINTENANCE_RUN_ID_REGEX.fullmatch(maintenance)
+        or SECRET.search(maintenance)
+    ):
+        raise ProposalError("invalid maintenance run ID")
+    return maintenance
 
 
 class ProposalError(ValueError):
@@ -2845,7 +2867,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("invalid run ID or timeout")
     if role not in {"worker", "verifier"}:
         raise ProposalError("invalid proposal role")
-    autopilot_run_id = validate_autopilot_run_id(os.environ.get(AUTOPILOT_RUN_ID_ENV))
+    autopilot_run_id = controller_run_id_from_environment(os.environ)
     # Contract/document drift must be rejected before task materialization and
     # before the Gemini CLI can consume a token or create a run artifact.
     validate_runtime_contract(root)
@@ -3078,7 +3100,7 @@ def run_standalone(
     cli: Path | None = None,
     test_evidence: Path | None = None,
 ) -> Path:
-    validate_autopilot_run_id(os.environ.get(AUTOPILOT_RUN_ID_ENV))
+    controller_run_id_from_environment(os.environ)
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (
         base_run_id,

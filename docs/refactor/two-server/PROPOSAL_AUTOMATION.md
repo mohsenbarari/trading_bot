@@ -193,6 +193,29 @@ controller_run_id است؛ shell، executable، آرگومان CLI، عملیا�
 با خطای صریح می‌بندد؛ پاسخ orphan حداکثر پس از ۲۴ ساعت با کار محدود پاک می‌شود.
 نبود Broker مجوز تماس مستقیم با provider نیست.
 
+برای نگهداریِ موردیِ تأییدشده، مسیر جداگانهٔ `submit-maintenance` وجود دارد؛
+این مسیر چرخهٔ Supervisor را جعل نمی‌کند. نخست باید چرخهٔ جاری در مرز امن drain
+شده، وضعیت Supervisor واقعاً `STOPPED`، قفلش آزاد، و assignment موقتِ محدود و
+معتبر فعال باشد. نشانگر `STOP` فقط بعد از تأیید این وضعیت برای همان عملیات
+صریحاً برداشته می‌شود؛ Broker در نشست مستقل اجرا می‌شود، نه با `tmux.sh start`
+که Supervisor را هم راه می‌اندازد. سپس:
+
+```bash
+python3 scripts/two_site_provider_broker.py submit-maintenance \
+  --task .local/two-site-refactor/tasks/<maintenance-task>.json \
+  --run-prefix <unique> --timeout 900
+```
+
+شناسهٔ `maint-...` را خود Broker ایجاد و در یک رکورد تغییرناپذیر به request،
+task SHA، HEAD و assignment وصل می‌کند. Broker پیش و هنگام اجرای pipeline
+`STOPPED` و قفل انحصاری Supervisor را کنترل می‌کند؛ درخواست بی‌رکورد یا دارای
+binding ناسازگار رد می‌شود. Runner این شناسه را فقط از
+`TWO_SITE_MAINTENANCE_RUN_ID` می‌گیرد؛ `cycle-...` همچنان فقط متعلق به Supervisor
+است. رکورد نگهداری فقط metadata محدود دارد و پس از ۱۰ روز با پاکسازی محدود
+حذف می‌شود. پایان کار: بازبینی معنایی Codex، آزمون، commit دقیق، بازگرداندن
+assignment اصلی و راه‌اندازی عادی؛ این مسیر مجوز دورزدن review یا تغییر
+production نیست.
+
 مالک در ۲۰۲۶-۰۹-۰۹
 ارسال source محدود و غیرمحرمانه، tests، docs، task، proposal، review/findings و
 test evidence به Google Antigravity/Gemini را دائماً و بدون تأیید جداگانه مجاز کرده است.
