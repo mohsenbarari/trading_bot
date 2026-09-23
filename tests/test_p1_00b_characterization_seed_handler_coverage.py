@@ -87,9 +87,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 231)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 366)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 99)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 233)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 368)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 97)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -444,15 +444,15 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         )
 
         continuation_3_records = continuation_3_data.get("records", [])
-        self.assertEqual(len(continuation_3_records), 10)
+        self.assertEqual(len(continuation_3_records), 12)
 
         continuation_3_seed_ids = []
         continuation_3_selectors = []
         for record in continuation_3_records:
             continuation_3_seed_ids.extend(record.get("seed_ids", []))
             continuation_3_selectors.extend(record.get("test_selectors", []))
-        self.assertEqual(len(continuation_3_seed_ids), 13)
-        self.assertEqual(len(continuation_3_selectors), 18)
+        self.assertEqual(len(continuation_3_seed_ids), 15)
+        self.assertEqual(len(continuation_3_selectors), 23)
 
         expected_continuation_3_unique_seed_ids = {
             "API-IDENTITY-GET-INVITATIONS-LIST-PENDING-INVITATIONS-L266",
@@ -468,10 +468,12 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133",
             "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
             "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
+            "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
+            "API-MSG-GET-REALTIME-SSE-STREAM-L575",
         }
         continuation_3_seed_set = set(continuation_3_seed_ids)
         self.assertEqual(continuation_3_seed_set, expected_continuation_3_unique_seed_ids)
-        self.assertEqual(len(continuation_3_seed_set), 13)
+        self.assertEqual(len(continuation_3_seed_set), 15)
         self.assertTrue(continuation_3_seed_set.issubset(inventory_seed_set))
 
         continuation_3_new_seed_ids = {
@@ -485,6 +487,8 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133",
             "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
             "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
+            "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
+            "API-MSG-GET-REALTIME-SSE-STREAM-L575",
         }
         continuation_3_baseline_seed_ids = {
             "API-ADMIN-GET-ADMIN-MESSAGES-GET-CURRENT-MARKET-MESSAGE-L180",
@@ -492,7 +496,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-ADMIN-DELETE-ADMIN-MESSAGES-CLEAR-CURRENT-MARKET-MESSAGE-L235",
         }
         self.assertEqual(continuation_3_seed_set - prior_356_evidenced_set, continuation_3_new_seed_ids)
-        self.assertEqual(len(continuation_3_seed_set - prior_356_evidenced_set), 10)
+        self.assertEqual(len(continuation_3_seed_set - prior_356_evidenced_set), 12)
         self.assertTrue(continuation_3_baseline_seed_ids.issubset(baseline_seed_set))
         self.assertTrue(continuation_3_baseline_seed_ids.issubset(prior_356_evidenced_set))
 
@@ -500,13 +504,13 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         all_recent_seed_set = set(all_flattened_recent_ids)
         self.assertTrue(all_recent_seed_set.issubset(inventory_seed_set))
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
-        self.assertEqual(len(reconciled_new_beyond_baseline), 231)
+        self.assertEqual(len(reconciled_new_beyond_baseline), 233)
 
         final_evidenced_set = prior_356_evidenced_set | continuation_3_seed_set
-        self.assertEqual(len(final_evidenced_set), 366)
+        self.assertEqual(len(final_evidenced_set), 368)
 
         remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 99)
+        self.assertEqual(len(remaining_seed_set), 97)
         self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))

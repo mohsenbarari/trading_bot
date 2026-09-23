@@ -57,7 +57,7 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertEqual(live_predecessor_sha256, predecessor["sha256"])
 
         records = manifest["records"]
-        self.assertEqual(len(records), 10)
+        self.assertEqual(len(records), 12)
 
         expected_records = [
             {
@@ -181,6 +181,31 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
                     "tests/test_p1_00b_characterization_chat_get_file_success.py::ChatGetFileSuccessCharacterizationTests::test_get_chat_file_authorized_existing_path_returns_exact_file_response",
                 ],
             },
+            {
+                "path": "tests/test_p1_00b_characterization_notification_send_test_push_unconfigured.py",
+                "sha256": "6968dbf3cd66fb9a765a7ff897dc6b73b592d59db78c5787c2af6d41f9aa445c",
+                "last_commit": "d16f83269a7018840f56efb196c2a1b521bd4c3e",
+                "seed_ids": [
+                    "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_notification_send_test_push_unconfigured.py::NotificationSendTestPushUnconfiguredCharacterizationTests::test_unconfigured_push_fails_before_payload_delivery_or_database_work",
+                    "tests/test_p1_00b_characterization_notification_send_test_push_unconfigured.py::NotificationSendTestPushUnconfiguredCharacterizationTests::test_unconfigured_push_fails_with_live_unconfigured_status",
+                    "tests/test_p1_00b_characterization_notification_send_test_push_unconfigured.py::NotificationSendTestPushUnconfiguredCharacterizationTests::test_configured_push_builds_exact_payload_and_forwards_delivery_result",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_realtime_sse_results.py",
+                "sha256": "a9fc1bc37496648b9f872615a1b3ad10edd8626831b2697f54f95da09816bd17",
+                "last_commit": "3ed83fd9eeb43f6d890b2770fc6b74a0e12ffd72",
+                "seed_ids": [
+                    "API-MSG-GET-REALTIME-SSE-STREAM-L575",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_realtime_sse_results.py::TestP100bCharacterizationRealtimeSseResults::test_sse_stream_invalid_token_raises_http_401_and_skips_generator",
+                    "tests/test_p1_00b_characterization_realtime_sse_results.py::TestP100bCharacterizationRealtimeSseResults::test_sse_stream_identity_mismatch_uses_current_user_and_freezes_response_headers",
+                ],
+            },
         ]
 
         expected_record_keys = {
@@ -209,12 +234,12 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             all_seed_ids.extend(rec["seed_ids"])
             all_selectors.extend(rec["test_selectors"])
 
-        self.assertEqual(len(records), 10)
-        self.assertEqual(len(all_seed_ids), 13)
-        self.assertEqual(len(all_selectors), 18)
+        self.assertEqual(len(records), 12)
+        self.assertEqual(len(all_seed_ids), 15)
+        self.assertEqual(len(all_selectors), 23)
 
         unique_seed_ids = set(all_seed_ids)
-        self.assertEqual(len(unique_seed_ids), 13)
+        self.assertEqual(len(unique_seed_ids), 15)
 
         expected_surface_paths = [
             "docs/refactor/two-server/section-1/inventory/surface-api.json",
@@ -285,9 +310,11 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133",
             "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
             "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
+            "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
+            "API-MSG-GET-REALTIME-SSE-STREAM-L575",
         }
         self.assertEqual(new_ids, expected_new_ids)
-        self.assertEqual(len(new_ids), 10)
+        self.assertEqual(len(new_ids), 12)
 
         already_evidenced_ids = unique_seed_ids & prior_evidenced_union
         expected_baseline_ids = {
@@ -299,9 +326,9 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertTrue(expected_baseline_ids.issubset(baseline_seed_set))
 
         total_evidenced_set = prior_evidenced_union | unique_seed_ids
-        self.assertEqual(len(total_evidenced_set), 366)
+        self.assertEqual(len(total_evidenced_set), 368)
         remaining_seed_set = source_inventory_ids - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 99)
+        self.assertEqual(len(remaining_seed_set), 97)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
 
