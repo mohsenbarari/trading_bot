@@ -1,6 +1,20 @@
+"""Stage P1-00b characterization tests for realtime SSE stream endpoint.
+
+Assignment: WA-P1-00B-FREEZE-20260904-001
+Seed identity: API-MSG-GET-REALTIME-SSE-STREAM-L575
+Gap reference: docs/refactor/two-server/section-1/inventory/scenario-records.json#P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE
+"""
+
+import os
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+
+install_p1_00_network_fence()
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -43,7 +57,11 @@ class TestP100bCharacterizationRealtimeSseResults(unittest.IsolatedAsyncioTestCa
         request = SimpleNamespace()
         current_user = SimpleNamespace(id=current_user_id)
 
+        advanced = False
+
         async def stream():
+            nonlocal advanced
+            advanced = True
             if False:
                 yield ""
 
@@ -74,6 +92,10 @@ class TestP100bCharacterizationRealtimeSseResults(unittest.IsolatedAsyncioTestCa
             self.assertEqual(response.headers["Cache-Control"], "no-cache")
             self.assertEqual(response.headers["Connection"], "keep-alive")
             self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+
+            self.assertIs(response.body_iterator, sentinel_stream)
+            self.assertFalse(advanced)
+            self.assertIsNotNone(sentinel_stream.ag_frame)
 
 
 if __name__ == "__main__":
