@@ -258,7 +258,7 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
             "version": "codex-cli 0.153.0",
             "sha256": "fake-codex-sha",
             "runtime": {},
-            "model": "gpt-5.6-sol",
+            "model": "gpt-6-sol",
             "reasoning": "xhigh",
         }
 

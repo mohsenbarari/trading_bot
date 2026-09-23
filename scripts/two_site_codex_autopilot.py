@@ -92,13 +92,13 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
-MODEL = "gpt-5.6-sol"
+MODEL = "gpt-6-sol"
 REASONING = "xhigh"
-EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.153.4"
-EXPECTED_CODEX_CLI_SHA256 = "56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da"
+EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.156.1"
+EXPECTED_CODEX_CLI_SHA256 = "0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f"
 CODEX_RUNTIME_FILES = {
-    "codex-code-mode-host": "3e85d67471825f73d02ff5f7e047ca1f6ca8caa3f59e4c6e8d9ca6ca7302cb45",
-    "codex-package.json": "43f8735a93a7947c6dc082c550d2ff2d795fccfd1c7eb27c93aa91cbead1e3f4",
+    "codex-code-mode-host": "45ba654b0e145406f3316be4729b886980ce811aa2e3b6ed4e033dd41ab524f1",
+    "codex-package.json": "6cf97f0c8999775e81c038429a31f28c406e077ecdbece52a9700e244bd2458f",
     "codex-path/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
     "codex-resources/bwrap": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
     "codex-resources/zsh/bin/zsh": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
@@ -1767,7 +1767,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     if args.codex is None:
-        args.codex = args.root.resolve() / ".local/tools/codex-0.153.4-56ef98ab4032d317.pin"
+        args.codex = args.root.resolve() / ".local/tools/codex-0.156.1-0b2e9301d6100ddd/codex"
     if not 1 <= args.max_cycles <= DEFAULT_MAX_CYCLES or not 300 <= args.timeout <= 14_400:
         raise SystemExit("invalid max-cycles or timeout")
     for handled in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):

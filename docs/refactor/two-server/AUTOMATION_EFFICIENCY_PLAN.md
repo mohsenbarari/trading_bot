@@ -9,6 +9,7 @@
 
 - 2026-09-20: AE01-00 documentation/scope is under final acceptance, exact evidence—not HEAD alone—resolved the capacity-interrupted P1 receipt, and AE01-10 is next after this documentation commit. No AE01 code package is implemented; plan details in [AE01_IMPLEMENTATION_PLAN.md](AE01_IMPLEMENTATION_PLAN.md).
 - 2026-09-23: آزمون زندهٔ CLI پین‌شدهٔ `0.153.4` با حساب فعلی، `gpt-6-sol/xhigh` را با HTTP 400 رد کرد؛ تنظیم عملیاتی به `gpt-5.6-sol/xhigh` که آزمون زندهٔ خواندنی را گذراند برگشت. `--check` به‌تنهایی اثبات دسترسی مدل نیست؛ تغییر مدل فقط پس از smoke کوتاه و یک‌باره مجاز است، نه probe در هر چرخه.
+- 2026-09-23: آزمون همسان با همان ورود ChatGPT در CLI پایدار `0.156.1` برای `gpt-6-sol/xhigh` و code-mode موفق شد. پس نسبت‌دادن HTTP 400 نسخهٔ قبلی به فقدان دسترسی حساب نادرست بود؛ تفاوت مشاهده‌شده نسخهٔ CLI است. پین جدید مستقل از افزونه و قابل rollback است؛ اثر مصرف/سرعت همچنان باید با واحدهای هم‌خانواده سنجیده شود.
 
 ## ۱. هدف و تصمیم اصلی
 

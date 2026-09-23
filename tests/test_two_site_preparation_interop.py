@@ -97,7 +97,7 @@ def interop_fixture(repo, monkeypatch):
         "path": str(codex),
         "version": ap.EXPECTED_CODEX_CLI_VERSION,
         "sha256": "4" * 64,
-        "model": "gpt-5.6-sol",
+        "model": "gpt-6-sol",
         "reasoning": "xhigh",
         "runtime": {},
     }

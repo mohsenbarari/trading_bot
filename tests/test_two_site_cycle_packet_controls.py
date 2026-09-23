@@ -138,7 +138,7 @@ def test_monitor_codex_pgrep_regex_filtering() -> None:
     # 1. Pinned executable matching integration_root
     pinned_cmd = (
         f"/root/trading-bot/trading_bot/.local/two-site-refactor/integration/.local/tools/"
-        f"codex-0.153.4-56ef98ab4032d317.pin exec --model gpt-6-astra "
+        f"codex-0.156.1-0b2e9301d6100ddd/codex exec --model gpt-6-astra "
         f'--config model_reasoning_effort="xhigh" --cd {integration_root} --approve-for-me --ephemeral'
     )
     assert matches(pinned_cmd), "Must match pinned codex exec with matching integration_root"
@@ -153,7 +153,7 @@ def test_monitor_codex_pgrep_regex_filtering() -> None:
     # 3. Different root
     diff_root_pinned = (
         f"/root/trading-bot/trading_bot/.local/two-site-refactor/integration/.local/tools/"
-        f"codex-0.153.4-56ef98ab4032d317.pin exec --model gpt-6-astra --cd /other/path/to/repo"
+        f"codex-0.156.1-0b2e9301d6100ddd/codex exec --model gpt-6-astra --cd /other/path/to/repo"
     )
     assert not matches(diff_root_pinned), "Must not match pinned codex with different root"
 
