@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import time
@@ -30,7 +31,7 @@ class _HaltCycle(Exception):
 def _setup_mock_repo(tmp_path: Path):
     root = tmp_path / "repo"
     root.mkdir()
-    state_root = tmp_path / "state"
+    state_root = root / "state"
     state_root.mkdir()
     (state_root / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     codex = tmp_path / "codex"
@@ -134,7 +135,15 @@ def test_supervisor_cycle_tag_absence_from_prompt_text(tmp_path: Path):
     prompt_content = prompt_file.read_text(encoding="utf-8")
 
     assert "TWO_SITE_AUTOPILOT_RUN_ID" not in prompt_content
-    assert run_dir.name not in prompt_content
+    assert "SUPERVISOR_CONTEXT_JSON" in prompt_content
+    assert prompt_content.count("SUPERVISOR_CONTEXT_JSON") == 1
+    idx = prompt_content.index("SUPERVISOR_CONTEXT_JSON")
+    start_brace = prompt_content.find("{", idx)
+    assert start_brace != -1
+    context_data, _ = json.JSONDecoder().raw_decode(prompt_content, idx=start_brace)
+    prep_startup = context_data.get("preparation_startup", context_data)
+    assert prep_startup["cycle_id"] == run_dir.name
+    assert prompt_content.count(run_dir.name) == 1
 
 
 def test_supervisor_cycle_tag_local_rejection_negative_cycle(tmp_path: Path):

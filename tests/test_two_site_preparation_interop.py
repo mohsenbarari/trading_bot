@@ -145,6 +145,25 @@ def test_supervisor_to_consumer_interop_success(interop_fixture, monkeypatch) ->
     transition_calls: list[dict[str, Any]] = ctx["transition_calls"]
 
     consumer_called = [False]
+    raw_result = _make_raw_result()
+    orig_before = ap.validate_repository(root)
+    after = _make_before(head=raw_result["commit"], scope=real_scope)
+    after.update({
+        "head": raw_result["commit"],
+        "status": "",
+        "protected_refs": orig_before["protected_refs"],
+        "control_blobs": {
+            (p.as_posix() if hasattr(p, "as_posix") else str(p)): "0" * 40
+            for p in ap.CONTROL_PATHS
+        },
+        "assignment_scope": real_scope,
+    })
+    repo_snapshots = [orig_before, after]
+    monkeypatch.setattr(
+        ap,
+        "validate_repository",
+        lambda r, require_clean=True: repo_snapshots.pop(0) if repo_snapshots else after,
+    )
 
     def fake_capture(
         process: _FakePopen,
@@ -190,7 +209,7 @@ def test_supervisor_to_consumer_interop_success(interop_fixture, monkeypatch) ->
         assert "ROUTE" not in env
         assert "TWO_SITE_PREPARATION_ROUTE" not in env
 
-        (run_dir / "result.json").write_text(json.dumps(_make_raw_result()))
+        (run_dir / "result.json").write_text(json.dumps(raw_result))
 
     monkeypatch.setattr(ap, "capture_bounded_process", fake_capture)
 

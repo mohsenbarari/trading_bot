@@ -1097,16 +1097,23 @@ class AutopilotContracts(unittest.TestCase):
 
         before = {
             "head": "a" * 40,
-            "protected_refs": {},
+            "protected_refs": {ref: "2" * 40 for ref in autopilot.PROTECTED_REFS},
             "assignment_scope": self.assignment_scope(),
         }
         raw_receipt = self.result()
         expected_result = dict(raw_receipt, head_before="a" * 40, head_after="b" * 40, head_changed=True)
+        final_repo = {
+            "head": expected_result["commit"],
+            "status": "",
+            "protected_refs": {ref: "2" * 40 for ref in autopilot.PROTECTED_REFS},
+            "control_blobs": {p.as_posix(): "3" * 40 for p in autopilot.CONTROL_PATHS},
+            "assignment_scope": self.assignment_scope(),
+        }
 
         def fake_capture(_proc, _stdin, stream_path, _stderr, _timeout, max_output=None):
             autopilot.write_json(stream_path.parent / "result.json", raw_receipt)
 
-        with patch.object(autopilot, "validate_repository", return_value=before), \
+        with patch.object(autopilot, "validate_repository", side_effect=[before, final_repo]), \
                 patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
                 patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
                 patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
@@ -1273,16 +1280,23 @@ class AutopilotContracts(unittest.TestCase):
 
         before = {
             "head": "a" * 40,
-            "protected_refs": {},
+            "protected_refs": {ref: "2" * 40 for ref in autopilot.PROTECTED_REFS},
             "assignment_scope": self.assignment_scope(),
         }
         raw_receipt = self.result()
         expected_result = dict(raw_receipt, head_before="a" * 40, head_after="b" * 40, head_changed=True)
+        final_repo = {
+            "head": expected_result["commit"],
+            "status": "",
+            "protected_refs": {ref: "2" * 40 for ref in autopilot.PROTECTED_REFS},
+            "control_blobs": {p.as_posix(): "3" * 40 for p in autopilot.CONTROL_PATHS},
+            "assignment_scope": self.assignment_scope(),
+        }
 
         def fake_capture(_proc, _stdin, stream_path, _stderr, _timeout, max_output=None):
             autopilot.write_json(stream_path.parent / "result.json", raw_receipt)
 
-        with patch.object(autopilot, "validate_repository", return_value=before), \
+        with patch.object(autopilot, "validate_repository", side_effect=[before, final_repo]), \
                 patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
                 patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
                 patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \

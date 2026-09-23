@@ -1123,28 +1123,18 @@ def persisted_continuation(root: Path, state_root: Path, current_head: object) -
     ignored on any malformed, incomplete, stale, or non-CONTINUE state so a restart
     cannot turn a historical summary into permission to skip current inspection.
     """
-    status_path = state_root / "status.json"
-    try:
-        state = unique_json(bounded_file_text(
-            root, status_path, MAX_RESULT_BYTES, "persisted supervisor status"
-        ))
-    except (OSError, ValueError, UnicodeError):
+    checkpoint = _load_accepted_checkpoint(state_root)
+    if checkpoint is None:
         return None
-    if not isinstance(state, dict):
+    repository = validate_repository(root)
+    if not _accepted_checkpoint_matches_repository(checkpoint, repository):
         return None
-    candidate = {
-        "state": state.get("state"),
-        "head_changed": state.get("head_changed"),
-        "head_after": state.get("head_after"),
-        "commit": state.get("commit"),
-        "blockers": state.get("blockers"),
-        "summary": state.get("summary"),
-        "next_action": state.get("next_action"),
-        "gemini_worker_run_id": state.get("gemini_worker_run_id"),
-        "gemini_reviewer_run_id": state.get("gemini_reviewer_run_id"),
-        "proposal_sha256": state.get("proposal_sha256"),
-    }
-    return candidate if continuation_hint(candidate, current_head) is not None else None
+    result = checkpoint.get("result")
+    if not isinstance(result, dict):
+        return None
+    if continuation_hint(result, current_head) is None:
+        return None
+    return result
 
 
 def _validate_startup_file(
@@ -1412,6 +1402,13 @@ def run_cycle(
             else:
                 raise
         result = validate_transition(root, before, validated_receipt)
+        if result["state"] == "CONTINUE":
+            final_repository = validate_repository(root, require_clean=True)
+            if final_repository["protected_refs"] != before["protected_refs"]:
+                raise AutopilotError("protected_refs changed before checkpoint publication")
+            if final_repository["assignment_scope"] != before["assignment_scope"]:
+                raise AutopilotError("assignment_scope changed before checkpoint publication")
+            publish_accepted_checkpoint(state_root, result, final_repository)
         result["advisories"] = advisories
         meta.update(
             state=result["state"],

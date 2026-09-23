@@ -22,12 +22,33 @@ def synthetic_scope():
     )
 
 
-def success(head="a" * 40):
-    return {"state": "CONTINUE", "head_changed": True, "head_after": head,
-            "head_before": "b" * 40, "commit": head, "blockers": [],
-            "summary": "Accepted one boundary", "next_action": "Read tracked stage card gap B",
-            "gemini_worker_run_id": "w1", "gemini_reviewer_run_id": "r1",
-            "proposal_sha256": "f" * 64}
+def canonical_repo(head="a" * 40):
+    return {
+        "head": head,
+        "status": "",
+        "protected_refs": {ref: "0" * 40 for ref in ap.PROTECTED_REFS},
+        "control_blobs": {p.as_posix(): "0" * 40 for p in ap.CONTROL_PATHS},
+        "assignment_scope": synthetic_scope(),
+    }
+
+
+def success(head="a" * 40, head_before="b" * 40):
+    return {
+        "schema_version": "1.0",
+        "state": "CONTINUE",
+        "disposition": "NONE",
+        "category": "NONE",
+        "head_changed": True,
+        "head_after": head,
+        "head_before": head_before,
+        "commit": head,
+        "blockers": [],
+        "summary": "Accepted one boundary",
+        "next_action": "Read tracked stage card gap B",
+        "gemini_worker_run_id": "w1",
+        "gemini_reviewer_run_id": "r1",
+        "proposal_sha256": "f" * 64,
+    }
 
 
 def test_hint_is_small_head_bound_and_separate_from_recovery():
@@ -208,54 +229,119 @@ def test_large_non_command_record_is_not_silently_accepted(tmp_path, monkeypatch
 def test_persisted_continuation_requires_exact_accepted_checkpoint(tmp_path):
     state = tmp_path / ".local/two-site-refactor/autopilot"
     state.mkdir(parents=True)
-    accepted = success("a" * 40)
-    state_value = {
-        "state": accepted["state"],
-        "head_changed": accepted["head_changed"],
-        "head_after": accepted["head_after"],
-        "commit": accepted["commit"],
-        "blockers": accepted["blockers"],
-        "summary": accepted["summary"],
-        "next_action": accepted["next_action"],
-        "gemini_worker_run_id": accepted["gemini_worker_run_id"],
-        "gemini_reviewer_run_id": accepted["gemini_reviewer_run_id"],
-        "proposal_sha256": accepted["proposal_sha256"],
-    }
-    (state / "status.json").write_text(json.dumps(state_value))
-    hint = ap.persisted_continuation(tmp_path, state, "a" * 40)
-    assert hint is not None
-    assert hint["commit"] == "a" * 40
-    assert ap.persisted_continuation(tmp_path, state, "b" * 40) is None
-    state_value.pop("proposal_sha256")
-    (state / "status.json").write_text(json.dumps(state_value))
-    assert ap.persisted_continuation(tmp_path, state, "a" * 40) is None
+    repo = canonical_repo("a" * 40)
+    accepted = success("a" * 40, "b" * 40)
+
+    # Live status.json alone cannot supply a hint without accepted_checkpoint.json
+    (state / "status.json").write_text(json.dumps(accepted))
+    with patch.object(ap, "validate_repository", return_value=repo):
+        assert ap.persisted_continuation(tmp_path, state, "a" * 40) is None
+
+    # Canonical accepted checkpoint with full repository identity succeeds
+    ap.publish_accepted_checkpoint(state, accepted, repo)
+    checkpoint_file = state / ap.ACCEPTED_CHECKPOINT_FILENAME
+    assert checkpoint_file.is_file()
+
+    with patch.object(ap, "validate_repository", return_value=repo):
+        hint = ap.persisted_continuation(tmp_path, state, "a" * 40)
+        assert hint is not None
+        assert hint["commit"] == "a" * 40
+        assert hint["next_action"] == accepted["next_action"]
+        assert hint["proposal_sha256"] == accepted["proposal_sha256"]
+
+        # Stale checkpoint (current_head mismatch) fails closed
+        assert ap.persisted_continuation(tmp_path, state, "b" * 40) is None
+
+    # Live repository identity drift fails closed
+    drift_cases = [
+        ("head", {**repo, "head": "c" * 40}),
+        ("status", {**repo, "status": " M dirty"}),
+        ("protected_refs", {**repo, "protected_refs": {**repo["protected_refs"], ap.PROTECTED_REFS[0]: "1" * 40}}),
+        ("control_blobs", {**repo, "control_blobs": {**repo["control_blobs"], ap.CONTROL_PATHS[0].as_posix(): "1" * 40}}),
+        (
+            "assignment_scope",
+            {
+                **repo,
+                "assignment_scope": ap.AssignmentScope(
+                    assignment_id="WA-P1-DRIFT-001",
+                    stage_id="stage-drift",
+                    allowed_paths=("tests/*",),
+                    forbidden_paths=(".git/*",),
+                    expires_at="2030-01-01T00:00:00Z",
+                    sha256="1" * 64,
+                ),
+            },
+        ),
+    ]
+    for _drift_name, drifted_repo in drift_cases:
+        with patch.object(ap, "validate_repository", return_value=drifted_repo):
+            assert ap.persisted_continuation(tmp_path, state, "a" * 40) is None
+
+    # Malformed checkpoint files fail closed
+    canonical_bytes = ap.serialize_accepted_checkpoint(accepted, repo)
+    parsed_checkpoint = json.loads(canonical_bytes)
+
+    malformed_payloads = [
+        b"not json",
+        b"",
+        json.dumps({**parsed_checkpoint, "schema_version": 2}).encode("utf-8"),
+        json.dumps({**parsed_checkpoint, "extra": "field"}).encode("utf-8"),
+        json.dumps({k: v for k, v in parsed_checkpoint.items() if k != "repository"}).encode("utf-8"),
+        canonical_bytes + b" ",
+    ]
+    with patch.object(ap, "validate_repository", return_value=repo):
+        for payload in malformed_payloads:
+            checkpoint_file.write_bytes(payload)
+            assert ap.persisted_continuation(tmp_path, state, "a" * 40) is None
 
 
 def test_loop_reuses_only_persisted_accepted_continuation(tmp_path):
     state = tmp_path / ".local/two-site-refactor/autopilot"
     state.mkdir(parents=True)
-    accepted = success("a" * 40)
-    (state / "status.json").write_text(json.dumps({
-        "state": accepted["state"], "head_changed": accepted["head_changed"],
-        "head_after": accepted["head_after"], "commit": accepted["commit"],
-        "blockers": accepted["blockers"], "summary": accepted["summary"],
-        "next_action": accepted["next_action"],
-        "gemini_worker_run_id": accepted["gemini_worker_run_id"],
-        "gemini_reviewer_run_id": accepted["gemini_reviewer_run_id"],
-        "proposal_sha256": accepted["proposal_sha256"],
-    }))
+    repo = canonical_repo("a" * 40)
+    accepted = success("a" * 40, "b" * 40)
+    ap.publish_accepted_checkpoint(state, accepted, repo)
+
     calls = []
+    checkpoint_during_cycle = None
 
-    def cycle(root, codex, s_root, cycle, timeout, recovery=None, **kwargs):
+    def cycle(root, codex, s_root, cycle_num, timeout, recovery=None, **kwargs):
+        nonlocal checkpoint_during_cycle
         calls.append(kwargs)
-        return s_root / "runs" / "fake", success("c" * 40)
+        status_data = json.loads((s_root / "status.json").read_text())
+        assert status_data["state"] == "RUNNING"
+        checkpoint_during_cycle = ap.persisted_continuation(root, s_root, "a" * 40)
+        if cycle_num == 1:
+            return s_root / "runs" / "cycle-0001", success("c" * 40, "a" * 40)
+        complete_result = dict(success("c" * 40, "a" * 40))
+        complete_result.update(
+            state="COMPLETE", next_action=None, commit=None, head_changed=False, head_before="c" * 40,
+        )
+        return s_root / "runs" / "cycle-0002", complete_result
 
-    with patch.object(ap, "git", side_effect=lambda *a: "" if "status" in a else "a" * 40), \
-         patch.object(ap, "ref_snapshot", return_value={}), \
+    current_heads = ["a" * 40, "c" * 40, "c" * 40]
+
+    def fake_git(*args):
+        if "status" in args:
+            return ""
+        if "rev-parse" in args:
+            return current_heads.pop(0) if current_heads else "c" * 40
+        return ""
+
+    with patch.object(ap, "git", side_effect=fake_git), \
+         patch.object(ap, "validate_repository", return_value=repo), \
+         patch.object(ap, "ref_snapshot", return_value={ref: "0" * 40 for ref in ap.PROTECTED_REFS}), \
          patch.object(ap, "run_cycle", side_effect=cycle), \
          patch.object(ap, "prune_runs", return_value=[]):
-        assert ap.run_loop(tmp_path, Path("codex"), 1, 10, True) == 2
+        exit_code = ap.run_loop(tmp_path, Path("codex"), 2, 10, False)
+
+    assert exit_code == 0
+    assert len(calls) == 2
     assert calls[0]["continuation"]["commit"] == "a" * 40
+    assert calls[1]["continuation"]["commit"] == "c" * 40
+    assert checkpoint_during_cycle is not None
+    assert checkpoint_during_cycle["commit"] == "a" * 40
+    assert (state / ap.ACCEPTED_CHECKPOINT_FILENAME).is_file()
 
 
 def test_heartbeat_is_source_free_best_effort_and_silent(tmp_path):
@@ -341,14 +427,15 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
     process.returncode = 0
     process.pid = 123
     process.__enter__.return_value = process
+    repo = canonical_repo("a" * 40)
+    receipt = success("a" * 40, "b" * 40)
+
     def capture(_process, _input, output, *args, **kwargs):
         if capture_fails:
             raise ap.AutopilotError("original provider failure")
-        (output.parent / "result.json").write_text(json.dumps(success()))
-    with patch.object(
-        ap, "validate_repository",
-        return_value={"head": "a" * 40, "protected_refs": {}, "assignment_scope": synthetic_scope()},
-    ), \
+        (output.parent / "result.json").write_text(json.dumps(receipt))
+
+    with patch.object(ap, "validate_repository", return_value=repo), \
          patch.object(ap, "prompt_for_cycle", return_value="bounded prompt"), \
          patch.object(ap, "codex_identity", return_value={"sha256": "pin", "runtime": {}}), \
          patch.object(ap, "codex_runtime_identity", return_value={}), \
@@ -356,7 +443,7 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
          patch.object(ap.subprocess, "Popen", return_value=process), \
          patch.object(ap, "capture_bounded_process", side_effect=capture), \
          patch.object(ap, "validate_result", side_effect=lambda value: value), \
-         patch.object(ap, "validate_transition", return_value=success()), \
+         patch.object(ap, "validate_transition", return_value=receipt), \
          patch.object(metrics, "record_cycle", side_effect=RuntimeError("telemetry offline")) as recorder:
         if capture_fails:
             with pytest.raises(ap.AutopilotError, match="original provider failure"):
@@ -364,6 +451,12 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
         else:
             _, result = ap.run_cycle(tmp_path, codex, state, 1, 10)
             assert result["state"] == "CONTINUE"
+            assert result["commit"] == "a" * 40
+            assert (state / ap.ACCEPTED_CHECKPOINT_FILENAME).is_file()
+            checkpoint = json.loads((state / ap.ACCEPTED_CHECKPOINT_FILENAME).read_text())
+            assert checkpoint["schema_version"] == 1
+            assert checkpoint["result"]["commit"] == "a" * 40
+            assert checkpoint["repository"]["head"] == "a" * 40
     recorder.assert_called_once()
     saved = list((state / "runs").iterdir())[0] / "status.json"
     status = json.loads(saved.read_text())

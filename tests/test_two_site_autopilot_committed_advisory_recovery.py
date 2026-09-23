@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 
 try:
     from scripts.two_site_codex_autopilot import (
+        CONTROL_PATHS,
+        PROTECTED_REFS,
         AssignmentScope,
         AutopilotError,
         RESULT_KEYS,
@@ -21,6 +23,8 @@ try:
     )
 except ModuleNotFoundError:
     from two_site_codex_autopilot import (  # type: ignore[no-redef]
+        CONTROL_PATHS,
+        PROTECTED_REFS,
         AssignmentScope,
         AutopilotError,
         RESULT_KEYS,
@@ -226,8 +230,11 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
         before = {
             "head": "0" * 40,
             "status": "",
-            "protected_refs": {},
-            "control_blobs": {},
+            "protected_refs": {ref: "0" * 40 for ref in PROTECTED_REFS},
+            "control_blobs": {
+                (p.as_posix() if hasattr(p, "as_posix") else str(p)): "0" * 40
+                for p in CONTROL_PATHS
+            },
             "assignment_scope": AssignmentScope(
                 assignment_id="WA-TEST-SCOPE-001",
                 stage_id="P1-TEST",
@@ -237,6 +244,15 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
                 sha256="0" * 64,
             ),
         }
+        after = copy.deepcopy(before)
+        after["head"] = result_payload.get("commit") or before["head"]
+        repo_snapshots = [before, after]
+
+        def fake_validate_repository(_root, require_clean=True):
+            if repo_snapshots:
+                return repo_snapshots.pop(0)
+            return after
+
         identity = {
             "path": str(self.codex),
             "version": "codex-cli 0.153.0",
@@ -272,7 +288,7 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
             transition_mock = MagicMock(side_effect=transition_effect)
 
         patches = [
-            patch(f"{MODULE}.validate_repository", return_value=before),
+            patch(f"{MODULE}.validate_repository", side_effect=fake_validate_repository),
             patch(f"{MODULE}.codex_identity", return_value=identity),
             patch(f"{MODULE}.file_sha256", return_value="fake-codex-sha"),
             patch(f"{MODULE}.subprocess.Popen", return_value=mock_process),

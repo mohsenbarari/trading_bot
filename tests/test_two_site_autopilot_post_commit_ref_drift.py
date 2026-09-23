@@ -781,13 +781,15 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             expires_at="2026-09-22T00:00:00Z",
             sha256="c" * 64,
         )
-        before_repo = {
+        canonical_repo = {
             "head": current_head,
+            "status": "",
             "assignment_scope": scope,
             "protected_refs": {
-                "refs/heads/main": "1" * 40,
-                "refs/remotes/origin/main": "2" * 40,
-                "refs/heads/candidate/wa-ir-standby-v1": "3" * 40,
+                ref: "1" * 40 for ref in autopilot_module.PROTECTED_REFS
+            },
+            "control_blobs": {
+                p.as_posix(): "b" * 40 for p in autopilot_module.CONTROL_PATHS
             },
         }
 
@@ -801,31 +803,26 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             "proposal_sha256": VALID_PROPOSAL_SHA256,
         }
 
-        valid_status = {
+        valid_receipt = {
+            "schema_version": "1.0",
             "state": "CONTINUE",
-            "head_changed": True,
-            "head_after": current_head,
-            "commit": current_head,
-            "blockers": [],
+            "disposition": "NONE",
+            "category": "NONE",
             "summary": "Completed step 1 and committed changes.",
+            "commit": current_head,
             "next_action": "Proceed with step 2.",
-            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
-            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
-            "proposal_sha256": VALID_PROPOSAL_SHA256,
-        }
-
-        stale_status = {
-            "state": "CONTINUE",
-            "head_changed": True,
-            "head_after": stale_head,
-            "commit": stale_head,
             "blockers": [],
-            "summary": "Completed step 1 on prior head.",
-            "next_action": "Proceed with step 2.",
             "gemini_worker_run_id": VALID_WORKER_RUN_ID,
             "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
             "proposal_sha256": VALID_PROPOSAL_SHA256,
+            "head_before": "4" * 40,
+            "head_after": current_head,
+            "head_changed": True,
         }
+        self.assertEqual(
+            set(valid_receipt),
+            set(RESULT_KEYS) | {"head_before", "head_after", "head_changed"},
+        )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir).resolve()
@@ -837,12 +834,43 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             prompt_path.parent.mkdir(parents=True, exist_ok=True)
             prompt_path.write_text("AUTOPILOT PROMPT TEMPLATE", encoding="utf-8")
 
-            status_path.write_text(json.dumps(valid_status, indent=2), encoding="utf-8")
-            recovered_candidate = persisted_continuation(root, state_root, current_head)
+            # Persist valid canonical checkpoint
+            autopilot_module._persist_accepted_checkpoint(
+                state_root, valid_receipt, canonical_repo
+            )
+
+            # Conflicting status.json must not erase canonical checkpoint continuation
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "state": "BLOCKED",
+                        "disposition": "HALT",
+                        "category": "EXTERNAL_GATE",
+                        "summary": "Conflicting status in supervisor state.",
+                        "blockers": ["Gate failure"],
+                        "commit": None,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(
+                autopilot_module, "validate_repository", return_value=canonical_repo
+            ):
+                recovered_candidate = persisted_continuation(root, state_root, current_head)
             self.assertIsNotNone(recovered_candidate)
 
+            # Malformed status.json also must not erase canonical checkpoint continuation
+            status_path.write_text("{ malformed json in status", encoding="utf-8")
+            with patch.object(
+                autopilot_module, "validate_repository", return_value=canonical_repo
+            ):
+                recovered_candidate_after_malformed_status = persisted_continuation(root, state_root, current_head)
+            self.assertIsNotNone(recovered_candidate_after_malformed_status)
+
             prompt_text = prompt_for_cycle(
-                root, 1, before_repo, continuation=recovered_candidate
+                root, 1, canonical_repo, continuation=recovered_candidate
             )
             _, context_json = prompt_text.split("\n\nSUPERVISOR_CONTEXT_JSON:\n", 1)
             context = json.loads(context_json)
@@ -860,12 +888,27 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
                 },
             )
 
-            status_path.write_text(json.dumps(stale_status, indent=2), encoding="utf-8")
-            stale_candidate = persisted_continuation(root, state_root, current_head)
+            # Stale checkpoint must not yield a hint
+            stale_repo = dict(canonical_repo, head=stale_head)
+            stale_receipt = dict(
+                valid_receipt,
+                commit=stale_head,
+                head_before="4" * 40,
+                head_after=stale_head,
+                summary="Completed step 1 on prior head.",
+            )
+            autopilot_module._persist_accepted_checkpoint(
+                state_root, stale_receipt, stale_repo
+            )
+
+            with patch.object(
+                autopilot_module, "validate_repository", return_value=canonical_repo
+            ):
+                stale_candidate = persisted_continuation(root, state_root, current_head)
             self.assertIsNone(stale_candidate)
 
             stale_prompt_text = prompt_for_cycle(
-                root, 1, before_repo, continuation=stale_candidate
+                root, 1, canonical_repo, continuation=stale_candidate
             )
             _, stale_context_json = stale_prompt_text.split(
                 "\n\nSUPERVISOR_CONTEXT_JSON:\n", 1
@@ -873,12 +916,18 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             stale_context = json.loads(stale_context_json)
             self.assertNotIn("validated_previous_cycle_hint", stale_context)
 
-            status_path.write_text("{ malformed json", encoding="utf-8")
-            malformed_candidate = persisted_continuation(root, state_root, current_head)
+            # Malformed checkpoint must not yield a hint
+            checkpoint_path = state_root / "accepted_checkpoint.json"
+            checkpoint_path.write_text("{ malformed checkpoint json", encoding="utf-8")
+
+            with patch.object(
+                autopilot_module, "validate_repository", return_value=canonical_repo
+            ):
+                malformed_candidate = persisted_continuation(root, state_root, current_head)
             self.assertIsNone(malformed_candidate)
 
             malformed_prompt_text = prompt_for_cycle(
-                root, 1, before_repo, continuation=malformed_candidate
+                root, 1, canonical_repo, continuation=malformed_candidate
             )
             _, malformed_context_json = malformed_prompt_text.split(
                 "\n\nSUPERVISOR_CONTEXT_JSON:\n", 1
@@ -890,26 +939,49 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
         current_head = VALID_COMMIT
         stale_head = "2" * 40
 
-        valid_status = {
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        canonical_repo = {
+            "head": current_head,
+            "status": "",
+            "assignment_scope": scope,
+            "protected_refs": {
+                ref: "1" * 40 for ref in autopilot_module.PROTECTED_REFS
+            },
+            "control_blobs": {
+                p.as_posix(): "b" * 40 for p in autopilot_module.CONTROL_PATHS
+            },
+        }
+        valid_receipt = {
+            "schema_version": "1.0",
+            "state": "CONTINUE",
+            "disposition": "NONE",
+            "category": "NONE",
+            "summary": "Completed step 1 and committed changes.",
+            "commit": current_head,
+            "next_action": "Proceed with step 2.",
+            "blockers": [],
+            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
+            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
+            "proposal_sha256": VALID_PROPOSAL_SHA256,
+            "head_before": "4" * 40,
+            "head_after": current_head,
+            "head_changed": True,
+        }
+
+        status_advertising_continue = {
             "state": "CONTINUE",
             "head_changed": True,
             "head_after": current_head,
             "commit": current_head,
             "blockers": [],
-            "summary": "Completed step 1 and committed changes.",
-            "next_action": "Proceed with step 2.",
-            "gemini_worker_run_id": VALID_WORKER_RUN_ID,
-            "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
-            "proposal_sha256": VALID_PROPOSAL_SHA256,
-        }
-
-        stale_status = {
-            "state": "CONTINUE",
-            "head_changed": True,
-            "head_after": stale_head,
-            "commit": stale_head,
-            "blockers": [],
-            "summary": "Completed step 1 on prior head.",
+            "summary": "Status claims continue.",
             "next_action": "Proceed with step 2.",
             "gemini_worker_run_id": VALID_WORKER_RUN_ID,
             "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
@@ -944,14 +1016,18 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             root = Path(tmp_dir).resolve()
             state_root = root / ".local/two-site-refactor/autopilot"
             state_root.mkdir(parents=True, exist_ok=True)
-            status_path = state_root / "status.json"
-            status_path.write_text(json.dumps(valid_status, indent=2), encoding="utf-8")
+            autopilot_module._persist_accepted_checkpoint(
+                state_root, valid_receipt, canonical_repo
+            )
             fake_codex = root / "fake_codex"
             fake_run_dir = state_root / "runs" / "cycle-0001-20260921T180000Z-12345"
 
-            expected_candidate = autopilot_module.persisted_continuation(
-                root, state_root, current_head
-            )
+            with patch.object(
+                autopilot_module, "validate_repository", return_value=canonical_repo
+            ):
+                expected_candidate = autopilot_module.persisted_continuation(
+                    root, state_root, current_head
+                )
             self.assertIsNotNone(expected_candidate)
             expected_hint = autopilot_module.continuation_hint(
                 expected_candidate, current_head
@@ -959,6 +1035,7 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             self.assertIsNotNone(expected_hint)
 
             with patch.object(autopilot_module, "git", side_effect=fake_git), \
+                    patch.object(autopilot_module, "validate_repository", return_value=canonical_repo), \
                     patch.object(autopilot_module, "ref_snapshot", return_value={}), \
                     patch.object(autopilot_module, "run_cycle", side_effect=[
                         RuntimeError("transient worker crash"),
@@ -990,22 +1067,45 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             self.assertNotIn("continuation", second_call_kwargs)
             mock_sleep.assert_called_once_with(15)
 
-        # Cases 2 & 3: stale-HEAD and malformed-JSON statuses are rejected
-        # and never provide a continuation argument to run_cycle.
-        for invalid_status_content in (
-            json.dumps(stale_status, indent=2),
-            "{ malformed json",
+        # Cases 2, 3 & 4: missing, stale-HEAD, and malformed-JSON checkpoints are rejected
+        # and never provide a continuation argument to run_cycle even if status.json advertises CONTINUE.
+        for invalid_case, setup_checkpoint in (
+            ("missing", lambda _sr: None),
+            (
+                "stale",
+                lambda sr: autopilot_module._persist_accepted_checkpoint(
+                    sr,
+                    dict(
+                        valid_receipt,
+                        commit=stale_head,
+                        head_before="4" * 40,
+                        head_after=stale_head,
+                        summary="Stale commit on prior head.",
+                    ),
+                    dict(canonical_repo, head=stale_head),
+                ),
+            ),
+            (
+                "malformed",
+                lambda sr: (sr / "accepted_checkpoint.json").write_text(
+                    "{ malformed checkpoint json", encoding="utf-8"
+                ),
+            ),
         ):
             with tempfile.TemporaryDirectory() as sub_tmp_dir:
                 sub_root = Path(sub_tmp_dir).resolve()
                 sub_state_root = sub_root / ".local/two-site-refactor/autopilot"
                 sub_state_root.mkdir(parents=True, exist_ok=True)
                 sub_status_path = sub_state_root / "status.json"
-                sub_status_path.write_text(invalid_status_content, encoding="utf-8")
+                sub_status_path.write_text(
+                    json.dumps(status_advertising_continue, indent=2), encoding="utf-8"
+                )
+                setup_checkpoint(sub_state_root)
                 sub_codex = sub_root / "fake_codex"
                 sub_run_dir = sub_state_root / "runs" / "cycle-0001-20260921T180000Z-12345"
 
                 with patch.object(autopilot_module, "git", side_effect=fake_git), \
+                        patch.object(autopilot_module, "validate_repository", return_value=canonical_repo), \
                         patch.object(autopilot_module, "ref_snapshot", return_value={}), \
                         patch.object(autopilot_module, "run_cycle", return_value=(sub_run_dir, terminal_blocked_result)) as mock_sub_run_cycle, \
                         patch.object(autopilot_module, "prune_runs"), \
@@ -1023,30 +1123,58 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
 
     def test_run_loop_preexisting_stop_prevents_persisted_continuation_consumption(self):
         current_head = VALID_COMMIT
-        valid_status = {
+
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        canonical_repo = {
+            "head": current_head,
+            "status": "",
+            "assignment_scope": scope,
+            "protected_refs": {
+                ref: "1" * 40 for ref in autopilot_module.PROTECTED_REFS
+            },
+            "control_blobs": {
+                p.as_posix(): "b" * 40 for p in autopilot_module.CONTROL_PATHS
+            },
+        }
+        valid_receipt = {
+            "schema_version": "1.0",
             "state": "CONTINUE",
-            "head_changed": True,
-            "head_after": current_head,
-            "commit": current_head,
-            "blockers": [],
+            "disposition": "NONE",
+            "category": "NONE",
             "summary": "Completed step 1 and committed changes.",
+            "commit": current_head,
             "next_action": "Proceed with step 2.",
+            "blockers": [],
             "gemini_worker_run_id": VALID_WORKER_RUN_ID,
             "gemini_reviewer_run_id": VALID_REVIEWER_RUN_ID,
             "proposal_sha256": VALID_PROPOSAL_SHA256,
+            "head_before": "4" * 40,
+            "head_after": current_head,
+            "head_changed": True,
         }
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir).resolve()
             state_root = root / ".local/two-site-refactor/autopilot"
             state_root.mkdir(parents=True, exist_ok=True)
-            status_path = state_root / "status.json"
-            status_path.write_text(json.dumps(valid_status, indent=2), encoding="utf-8")
+            autopilot_module._persist_accepted_checkpoint(
+                state_root, valid_receipt, canonical_repo
+            )
             fake_codex = root / "fake_codex"
 
-            recoverable_candidate = autopilot_module.persisted_continuation(
-                root, state_root, current_head
-            )
+            with patch.object(
+                autopilot_module, "validate_repository", return_value=canonical_repo
+            ):
+                recoverable_candidate = autopilot_module.persisted_continuation(
+                    root, state_root, current_head
+                )
             self.assertIsNotNone(recoverable_candidate)
             self.assertEqual(
                 autopilot_module.continuation_hint(recoverable_candidate, current_head),

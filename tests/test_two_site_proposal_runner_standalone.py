@@ -127,7 +127,7 @@ def test_main_routing_check_arguments_and_pipeline_delegation(tmp_path: Path, mo
 
     # Check routes only through check
     monkeypatch.setattr(sys, "argv", ["runner.py", "check", "--task", str(task_file), "--root", str(tmp_path)])
-    with mock.patch.object(runner, "check", return_value={"ok": True}) as mock_check, \
+    with mock.patch.object(runner, "check", return_value={"state": "TASK_READY"}) as mock_check, \
          mock.patch.object(runner, "run_standalone") as mock_standalone:
         assert runner.main() == 0
         mock_check.assert_called_once_with(tmp_path, task_file)

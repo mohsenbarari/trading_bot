@@ -6,7 +6,7 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
 
@@ -20,12 +20,16 @@ from scripts.two_site_codex_autopilot import (
     MAX_ACCEPTED_CHECKPOINT_BYTES,
     PROTECTED_REFS,
     REPOSITORY_FACT_KEYS,
+    RESULT_KEYS,
     AutopilotError,
     _accepted_checkpoint_matches_repository,
     _load_accepted_checkpoint,
     _persist_accepted_checkpoint,
+    persisted_continuation,
+    run_cycle,
     publish_accepted_checkpoint,
     serialize_accepted_checkpoint,
+    validate_repository,
     validate_accepted_checkpoint,
 )
 
@@ -813,6 +817,175 @@ class AcceptedCheckpointRepositoryBindingValidationTests(unittest.TestCase):
                 self.assertIs(canonical_repo["assignment_scope"], repo_snapshot["assignment_scope"])
 
 
+class AcceptedCheckpointPersistedContinuationMigrationTests(unittest.TestCase):
+    def test_recovers_only_repository_bound_checkpoint_and_ignores_status_json(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-rec-") as temp_dir:
+            state_root = Path(temp_dir)
+            root = Path("/mock/repo/root")
+            head = "a" * 40
+            head_before = "b" * 40
+            receipt = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+
+            _persist_accepted_checkpoint(state_root, receipt, repository)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            initial_checkpoint_bytes = checkpoint_path.read_bytes()
+
+            status_path = state_root / "status.json"
+            conflicting_status_bytes = b'{"state": "FAILED", "conflicting": true, malformed json\n'
+            status_path.write_bytes(conflicting_status_bytes)
+            os.chmod(status_path, 0o600)
+
+            live_repo = {
+                "head": repository["head"],
+                "status": repository["status"],
+                "protected_refs": dict(repository["protected_refs"]),
+                "control_blobs": dict(repository["control_blobs"]),
+                "assignment_scope": repository["assignment_scope"],
+            }
+
+            with (
+                patch("scripts.two_site_codex_autopilot.validate_repository", return_value=live_repo) as mock_validate,
+                patch(
+                    "scripts.two_site_codex_autopilot._accepted_checkpoint_matches_repository",
+                    wraps=_accepted_checkpoint_matches_repository,
+                ) as mock_comparator,
+            ):
+                recovered = persisted_continuation(root, state_root, head)
+
+            mock_validate.assert_called_once_with(root)
+            mock_comparator.assert_called_once()
+            called_cp, called_repo = mock_comparator.call_args[0]
+            self.assertEqual(called_repo, live_repo)
+            self.assertTrue(_accepted_checkpoint_matches_repository(called_cp, called_repo))
+
+            self.assertIsNotNone(recovered)
+            self.assertIsInstance(recovered, dict)
+            self.assertEqual(recovered["commit"], head)
+            self.assertEqual(recovered["head_after"], head)
+            self.assertEqual(recovered["state"], "CONTINUE")
+            self.assertEqual(recovered["summary"], receipt["summary"])
+            self.assertEqual(recovered["next_action"], receipt["next_action"])
+            self.assertEqual(recovered["gemini_worker_run_id"], receipt["gemini_worker_run_id"])
+            self.assertEqual(recovered["gemini_reviewer_run_id"], receipt["gemini_reviewer_run_id"])
+            self.assertEqual(recovered["proposal_sha256"], receipt["proposal_sha256"])
+
+            self.assertEqual(checkpoint_path.read_bytes(), initial_checkpoint_bytes)
+            self.assertEqual(status_path.read_bytes(), conflicting_status_bytes)
+
+    def test_missing_malformed_and_stale_checkpoints_never_fall_back_to_valid_status(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-no-fallback-") as temp_dir:
+            state_root = Path(temp_dir)
+            root = Path("/mock/repo/root")
+            head = "a" * 40
+            current_head = head
+
+            status_path = state_root / "status.json"
+            valid_status_dict = {
+                "state": "CONTINUE",
+                "head_changed": True,
+                "head_after": current_head,
+                "commit": current_head,
+                "blockers": [],
+                "summary": "Valid status continuation hint",
+                "next_action": "Valid next action",
+                "gemini_worker_run_id": "worker-cycle-0001",
+                "gemini_reviewer_run_id": "reviewer-cycle-0001",
+                "proposal_sha256": "c" * 64,
+            }
+            valid_status_bytes = (json.dumps(valid_status_dict, indent=2) + "\n").encode("utf-8")
+            status_path.write_bytes(valid_status_bytes)
+            os.chmod(status_path, 0o600)
+
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+
+            # Case 1: Missing accepted checkpoint
+            checkpoint_path.unlink(missing_ok=True)
+            self.assertFalse(checkpoint_path.exists())
+            self.assertIsNone(persisted_continuation(root, state_root, current_head))
+            self.assertFalse(checkpoint_path.exists())
+            self.assertEqual(status_path.read_bytes(), valid_status_bytes)
+
+            # Case 2: Malformed / noncanonical accepted checkpoint
+            malformed_checkpoint_bytes = b'{"schema_version": 1, "result": "malformed"\n'
+            checkpoint_path.write_bytes(malformed_checkpoint_bytes)
+            os.chmod(checkpoint_path, 0o600)
+            self.assertIsNone(persisted_continuation(root, state_root, current_head))
+            self.assertEqual(checkpoint_path.read_bytes(), malformed_checkpoint_bytes)
+            self.assertEqual(status_path.read_bytes(), valid_status_bytes)
+
+            # Case 3: Canonical checkpoint whose accepted HEAD is stale relative to current_head
+            stale_head = "b" * 40
+            stale_receipt = _make_continue_receipt(head_after=stale_head, head_before="c" * 40)
+            stale_repo = _make_repository(head=stale_head)
+            _persist_accepted_checkpoint(state_root, stale_receipt, stale_repo)
+            stale_checkpoint_bytes = checkpoint_path.read_bytes()
+
+            with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=stale_repo):
+                self.assertIsNone(persisted_continuation(root, state_root, current_head))
+            self.assertEqual(checkpoint_path.read_bytes(), stale_checkpoint_bytes)
+            self.assertEqual(status_path.read_bytes(), valid_status_bytes)
+
+    def test_repository_binding_mismatch_is_rejected_and_repository_gate_errors_propagate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-checkpoint-mismatch-") as temp_dir:
+            state_root = Path(temp_dir)
+            root = Path("/mock/repo/root")
+            head = "a" * 40
+            head_before = "b" * 40
+            receipt = _make_continue_receipt(head_after=head, head_before=head_before)
+            repository = _make_repository(head=head)
+
+            _persist_accepted_checkpoint(state_root, receipt, repository)
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            initial_checkpoint_bytes = checkpoint_path.read_bytes()
+
+            # Subcase A: Changed live binding fact returns None through comparator
+            drifted_protected_refs = dict(repository["protected_refs"])
+            drifted_protected_refs[PROTECTED_REFS[0]] = "9" * 40
+            drifted_repo = {
+                "head": repository["head"],
+                "status": repository["status"],
+                "protected_refs": drifted_protected_refs,
+                "control_blobs": dict(repository["control_blobs"]),
+                "assignment_scope": repository["assignment_scope"],
+            }
+            drifted_repo_before = {
+                "head": drifted_repo["head"],
+                "status": drifted_repo["status"],
+                "protected_refs": dict(drifted_repo["protected_refs"]),
+                "control_blobs": dict(drifted_repo["control_blobs"]),
+                "assignment_scope": drifted_repo["assignment_scope"],
+            }
+
+            with (
+                patch("scripts.two_site_codex_autopilot.validate_repository", return_value=drifted_repo) as mock_validate,
+                patch(
+                    "scripts.two_site_codex_autopilot._accepted_checkpoint_matches_repository",
+                    wraps=_accepted_checkpoint_matches_repository,
+                ) as mock_comparator,
+            ):
+                result = persisted_continuation(root, state_root, head)
+
+            mock_validate.assert_called_once_with(root)
+            mock_comparator.assert_called_once()
+            called_cp, called_repo = mock_comparator.call_args[0]
+            self.assertEqual(called_repo, drifted_repo)
+            self.assertFalse(_accepted_checkpoint_matches_repository(called_cp, called_repo))
+            self.assertIsNone(result)
+
+            self.assertEqual(drifted_repo, drifted_repo_before)
+            self.assertIs(drifted_repo["assignment_scope"], drifted_repo_before["assignment_scope"])
+            self.assertEqual(checkpoint_path.read_bytes(), initial_checkpoint_bytes)
+
+            gate_error = AutopilotError("repository control gate failure: untracked modification")
+            with patch("scripts.two_site_codex_autopilot.validate_repository", side_effect=gate_error) as mock_gate:
+                with self.assertRaises(AutopilotError) as cm:
+                    persisted_continuation(root, state_root, head)
+                self.assertIs(cm.exception, gate_error)
+            mock_gate.assert_called_once_with(root)
+            self.assertEqual(checkpoint_path.read_bytes(), initial_checkpoint_bytes)
+
+
 class AcceptedCheckpointPublicationBoundaryTests(unittest.TestCase):
     def test_publishes_matching_committed_continue_without_touching_live_status(self) -> None:
         with tempfile.TemporaryDirectory(prefix="test-publish-checkpoint-") as temp_dir:
@@ -929,3 +1102,376 @@ class AcceptedCheckpointPublicationBoundaryTests(unittest.TestCase):
             children = {p.name for p in state_root.iterdir()}
             self.assertEqual(children, {_ACCEPTED_CHECKPOINT_FILENAME, "status.json"})
             self.assertFalse(any(p.name.startswith(".accepted_checkpoint-") for p in state_root.iterdir()))
+
+
+class PostValidationCheckpointPublicationCallTests(unittest.TestCase):
+    def _setup_cycle_env(self, temp_dir: Path) -> tuple[Path, Path, Path]:
+        root = temp_dir / "repo"
+        root.mkdir(parents=True, exist_ok=True)
+        state_root = root / "state"
+        (state_root / "runs").mkdir(parents=True, exist_ok=True)
+        codex = temp_dir / "fake_codex"
+        codex.write_text("#!/bin/sh\nexit 0\n")
+        codex.chmod(0o755)
+        return root, codex, state_root
+
+    def _execute_run_cycle(
+        self,
+        root: Path,
+        codex: Path,
+        state_root: Path,
+        codex_result: dict,
+        transition_result: dict | Exception,
+        repo_snapshots: list[dict | Exception],
+        call_events: list[tuple],
+        on_publish: object = None,
+    ) -> tuple[Path, dict]:
+        mock_proc = MagicMock()
+        mock_proc.pid = os.getpid()
+        mock_proc.returncode = 0
+        mock_proc.__enter__.return_value = mock_proc
+        mock_proc.__exit__.return_value = None
+
+        def fake_capture(process, stdin, stdout_path, stderr_path, timeout, max_output=None):
+            run_dir = stdout_path.parent
+            (run_dir / "result.json").write_text(json.dumps(codex_result, ensure_ascii=False))
+
+        def fake_validate_repository(r, require_clean=True):
+            call_events.append(("validate_repository", r, require_clean))
+            if not repo_snapshots:
+                raise AssertionError("unexpected validate_repository call")
+            snapshot = repo_snapshots.pop(0)
+            if isinstance(snapshot, Exception):
+                raise snapshot
+            return snapshot
+
+        def fake_validate_transition(r, b, res):
+            call_events.append(("validate_transition", r, b, res))
+            if isinstance(transition_result, Exception):
+                raise transition_result
+            return transition_result
+
+        def fake_publish(st_root, res, rep):
+            call_events.append(("publish_accepted_checkpoint", st_root, res, rep))
+            if on_publish is not None:
+                on_publish(st_root, res, rep)
+
+        with (
+            patch("subprocess.Popen", return_value=mock_proc),
+            patch("scripts.two_site_codex_autopilot.prompt_for_cycle", return_value="test prompt"),
+            patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"sha256": "s", "runtime": "r"}),
+            patch("scripts.two_site_codex_autopilot.file_sha256", return_value="s"),
+            patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value="r"),
+            patch("scripts.two_site_codex_autopilot.write_supervisor_state"),
+            patch("scripts.two_site_codex_autopilot._heartbeat_running_cycle", return_value=None),
+            patch("scripts.two_site_codex_autopilot.capture_bounded_process", side_effect=fake_capture),
+            patch("scripts.two_site_codex_autopilot.validate_repository", side_effect=fake_validate_repository),
+            patch("scripts.two_site_codex_autopilot.validate_transition", side_effect=fake_validate_transition),
+            patch("scripts.two_site_codex_autopilot.publish_accepted_checkpoint", side_effect=fake_publish),
+            patch("scripts.two_site_cycle_metrics.record_cycle", create=True),
+        ):
+            return run_cycle(root, codex, state_root, cycle=1, timeout=300)
+
+    def test_committed_continue_publishes_after_transition_and_final_repository_validation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="test-cp-pub-continue-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+
+            head_before = "b" * 40
+            head_after = "a" * 40
+            before_repo = _make_repository(head=head_before)
+            final_repo = _make_repository(head=head_after)
+            continue_receipt = _make_continue_receipt(head_after=head_after, head_before=head_before)
+            codex_result = {k: continue_receipt[k] for k in RESULT_KEYS}
+            call_events: list[tuple] = []
+
+            run_dir, result = self._execute_run_cycle(
+                root,
+                codex,
+                state_root,
+                codex_result=codex_result,
+                transition_result=continue_receipt,
+                repo_snapshots=[before_repo, final_repo],
+                call_events=call_events,
+                on_publish=publish_accepted_checkpoint,
+            )
+
+            call_names = [e[0] for e in call_events]
+            self.assertEqual(
+                call_names,
+                [
+                    "validate_repository",
+                    "validate_transition",
+                    "validate_repository",
+                    "publish_accepted_checkpoint",
+                ],
+            )
+            self.assertEqual(call_events[0], ("validate_repository", root, True))
+            self.assertEqual(call_events[2], ("validate_repository", root, True))
+            self.assertEqual(call_events[3][0], "publish_accepted_checkpoint")
+            self.assertEqual(call_events[3][1], state_root)
+            self.assertIs(call_events[3][2], continue_receipt)
+            self.assertIs(call_events[3][3], final_repo)
+
+            checkpoint_path = state_root / _ACCEPTED_CHECKPOINT_FILENAME
+            self.assertTrue(checkpoint_path.is_file())
+            self.assertFalse(checkpoint_path.is_symlink())
+            self.assertEqual(stat.S_IMODE(checkpoint_path.stat().st_mode), 0o600)
+
+            loaded = _load_accepted_checkpoint(state_root)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded["schema_version"], ACCEPTED_CHECKPOINT_SCHEMA_VERSION)
+            self.assertEqual(loaded["result"]["commit"], head_after)
+            self.assertEqual(loaded["repository"]["head"], head_after)
+
+            self.assertEqual(result["state"], "CONTINUE")
+            self.assertEqual(result["commit"], head_after)
+            self.assertEqual(result["head_before"], head_before)
+            self.assertEqual(result["head_after"], head_after)
+            self.assertEqual(result["advisories"], [])
+
+            status_data = json.loads((run_dir / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "CONTINUE")
+            self.assertEqual(status_data["head_after"], head_after)
+            self.assertIn("post_coordinator_validation", status_data["controller_phase_seconds"])
+
+    def test_non_continue_or_validation_failure_never_publishes(self) -> None:
+        # Scenario 1: COMPLETE validated transition
+        with tempfile.TemporaryDirectory(prefix="test-cp-complete-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+            sentinel = b'{"sentinel": "complete_untouched"}\n'
+            (state_root / _ACCEPTED_CHECKPOINT_FILENAME).write_bytes(sentinel)
+
+            head_before = "b" * 40
+            before_repo = _make_repository(head=head_before)
+            complete_receipt = dict(
+                _make_continue_receipt(head_after=head_before, head_before=head_before),
+                state="COMPLETE",
+                commit=None,
+                head_changed=False,
+                gemini_worker_run_id=None,
+                gemini_reviewer_run_id=None,
+                proposal_sha256=None,
+            )
+            codex_result = {k: complete_receipt[k] for k in RESULT_KEYS}
+            call_events: list[tuple] = []
+
+            run_dir, result = self._execute_run_cycle(
+                root,
+                codex,
+                state_root,
+                codex_result=codex_result,
+                transition_result=complete_receipt,
+                repo_snapshots=[before_repo],
+                call_events=call_events,
+            )
+
+            self.assertEqual(result["state"], "COMPLETE")
+            self.assertNotIn("publish_accepted_checkpoint", [e[0] for e in call_events])
+            self.assertEqual([e[0] for e in call_events].count("validate_repository"), 1)
+            self.assertEqual((state_root / _ACCEPTED_CHECKPOINT_FILENAME).read_bytes(), sentinel)
+            status_data = json.loads((run_dir / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "COMPLETE")
+
+        # Scenario 2: BLOCKED validated transition
+        with tempfile.TemporaryDirectory(prefix="test-cp-blocked-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+            sentinel = b'{"sentinel": "blocked_untouched"}\n'
+            (state_root / _ACCEPTED_CHECKPOINT_FILENAME).write_bytes(sentinel)
+
+            head_before = "b" * 40
+            before_repo = _make_repository(head=head_before)
+            blocked_receipt = dict(
+                _make_continue_receipt(head_after=head_before, head_before=head_before),
+                state="BLOCKED",
+                disposition="HALT",
+                category="EXTERNAL_GATE",
+                commit=None,
+                head_changed=False,
+                blockers=["external blocker"],
+                gemini_worker_run_id=None,
+                gemini_reviewer_run_id=None,
+                proposal_sha256=None,
+            )
+            codex_result = {k: blocked_receipt[k] for k in RESULT_KEYS}
+            call_events = []
+
+            run_dir, result = self._execute_run_cycle(
+                root,
+                codex,
+                state_root,
+                codex_result=codex_result,
+                transition_result=blocked_receipt,
+                repo_snapshots=[before_repo],
+                call_events=call_events,
+            )
+
+            self.assertEqual(result["state"], "BLOCKED")
+            self.assertNotIn("publish_accepted_checkpoint", [e[0] for e in call_events])
+            self.assertEqual([e[0] for e in call_events].count("validate_repository"), 1)
+            self.assertEqual((state_root / _ACCEPTED_CHECKPOINT_FILENAME).read_bytes(), sentinel)
+            status_data = json.loads((run_dir / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "BLOCKED")
+
+        # Scenario 3: Transition validation failure
+        with tempfile.TemporaryDirectory(prefix="test-cp-trans-fail-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+            sentinel = b'{"sentinel": "trans_fail_untouched"}\n'
+            (state_root / _ACCEPTED_CHECKPOINT_FILENAME).write_bytes(sentinel)
+
+            head_before = "b" * 40
+            before_repo = _make_repository(head=head_before)
+            continue_receipt = _make_continue_receipt(head_after="a" * 40, head_before=head_before)
+            codex_result = {k: continue_receipt[k] for k in RESULT_KEYS}
+            call_events = []
+
+            with self.assertRaises(AutopilotError) as cm:
+                self._execute_run_cycle(
+                    root,
+                    codex,
+                    state_root,
+                    codex_result=codex_result,
+                    transition_result=AutopilotError("transition validation rejected"),
+                    repo_snapshots=[before_repo],
+                    call_events=call_events,
+                )
+
+            self.assertIn("transition validation rejected", str(cm.exception))
+            self.assertNotIn("publish_accepted_checkpoint", [e[0] for e in call_events])
+            self.assertEqual([e[0] for e in call_events].count("validate_repository"), 1)
+            self.assertEqual((state_root / _ACCEPTED_CHECKPOINT_FILENAME).read_bytes(), sentinel)
+            runs = list((state_root / "runs").iterdir())
+            self.assertEqual(len(runs), 1)
+            status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "FAILED")
+            self.assertIn("transition validation rejected", status_data["error"])
+
+        # Scenario 4: Final repository validation failure
+        with tempfile.TemporaryDirectory(prefix="test-cp-repo-fail-") as temp_dir:
+            temp_path = Path(temp_dir)
+            root, codex, state_root = self._setup_cycle_env(temp_path)
+            sentinel = b'{"sentinel": "repo_fail_untouched"}\n'
+            (state_root / _ACCEPTED_CHECKPOINT_FILENAME).write_bytes(sentinel)
+
+            head_before = "b" * 40
+            head_after = "a" * 40
+            before_repo = _make_repository(head=head_before)
+            continue_receipt = _make_continue_receipt(head_after=head_after, head_before=head_before)
+            codex_result = {k: continue_receipt[k] for k in RESULT_KEYS}
+            call_events = []
+
+            with self.assertRaises(AutopilotError) as cm:
+                self._execute_run_cycle(
+                    root,
+                    codex,
+                    state_root,
+                    codex_result=codex_result,
+                    transition_result=continue_receipt,
+                    repo_snapshots=[before_repo, AutopilotError("final repository dirty")],
+                    call_events=call_events,
+                )
+
+            self.assertIn("final repository dirty", str(cm.exception))
+            self.assertNotIn("publish_accepted_checkpoint", [e[0] for e in call_events])
+            self.assertEqual([e[0] for e in call_events].count("validate_repository"), 2)
+            self.assertEqual((state_root / _ACCEPTED_CHECKPOINT_FILENAME).read_bytes(), sentinel)
+            runs = list((state_root / "runs").iterdir())
+            self.assertEqual(len(runs), 1)
+            status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
+            self.assertEqual(status_data["state"], "FAILED")
+            self.assertIn("final repository dirty", status_data["error"])
+
+    def test_late_protected_ref_or_scope_drift_never_publishes(self) -> None:
+        head_before = "b" * 40
+        head_after = "a" * 40
+        continue_receipt = _make_continue_receipt(head_after=head_after, head_before=head_before)
+        codex_result = {k: continue_receipt[k] for k in RESULT_KEYS}
+
+        # Subcase 1: protected_refs drift after transition acceptance
+        with self.subTest(drift_kind="protected_refs"):
+            with tempfile.TemporaryDirectory(prefix="test-cp-drift-refs-") as temp_dir:
+                temp_path = Path(temp_dir)
+                root, codex, state_root = self._setup_cycle_env(temp_path)
+                sentinel = b'{"sentinel": "drift_refs_untouched"}\n'
+                (state_root / _ACCEPTED_CHECKPOINT_FILENAME).write_bytes(sentinel)
+
+                before_repo = _make_repository(head=head_before)
+                drifted_refs = dict(before_repo["protected_refs"])
+                drifted_refs[PROTECTED_REFS[0]] = "9" * 40
+                final_repo = _make_repository(head=head_after)
+                final_repo["protected_refs"] = drifted_refs
+                call_events: list[tuple] = []
+
+                with self.assertRaises(AutopilotError) as cm:
+                    self._execute_run_cycle(
+                        root,
+                        codex,
+                        state_root,
+                        codex_result=codex_result,
+                        transition_result=continue_receipt,
+                        repo_snapshots=[before_repo, final_repo],
+                        call_events=call_events,
+                        on_publish=publish_accepted_checkpoint,
+                    )
+
+                self.assertIn("protected_refs changed before checkpoint publication", str(cm.exception))
+                self.assertNotIn("publish_accepted_checkpoint", [e[0] for e in call_events])
+                self.assertEqual([e[0] for e in call_events].count("validate_repository"), 2)
+                self.assertEqual(call_events[0], ("validate_repository", root, True))
+                self.assertEqual(call_events[2], ("validate_repository", root, True))
+                self.assertEqual((state_root / _ACCEPTED_CHECKPOINT_FILENAME).read_bytes(), sentinel)
+                runs = list((state_root / "runs").iterdir())
+                self.assertEqual(len(runs), 1)
+                status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
+                self.assertEqual(status_data["state"], "FAILED")
+                self.assertIn("protected_refs changed before checkpoint publication", status_data["error"])
+
+        # Subcase 2: assignment_scope drift after transition acceptance
+        with self.subTest(drift_kind="assignment_scope"):
+            with tempfile.TemporaryDirectory(prefix="test-cp-drift-scope-") as temp_dir:
+                temp_path = Path(temp_dir)
+                root, codex, state_root = self._setup_cycle_env(temp_path)
+                sentinel = b'{"sentinel": "drift_scope_untouched"}\n'
+                (state_root / _ACCEPTED_CHECKPOINT_FILENAME).write_bytes(sentinel)
+
+                before_repo = _make_repository(head=head_before)
+                base_scope = before_repo["assignment_scope"]
+                assert isinstance(base_scope, AssignmentScope)
+                drifted_scope = AssignmentScope(
+                    assignment_id="WA-DIFFERENT-ID-20260922-999",
+                    stage_id=base_scope.stage_id,
+                    allowed_paths=base_scope.allowed_paths,
+                    forbidden_paths=base_scope.forbidden_paths,
+                    expires_at=base_scope.expires_at,
+                    sha256=base_scope.sha256,
+                )
+                final_repo = _make_repository(head=head_after)
+                final_repo["assignment_scope"] = drifted_scope
+                call_events = []
+
+                with self.assertRaises(AutopilotError) as cm:
+                    self._execute_run_cycle(
+                        root,
+                        codex,
+                        state_root,
+                        codex_result=codex_result,
+                        transition_result=continue_receipt,
+                        repo_snapshots=[before_repo, final_repo],
+                        call_events=call_events,
+                        on_publish=publish_accepted_checkpoint,
+                    )
+
+                self.assertIn("assignment_scope changed before checkpoint publication", str(cm.exception))
+                self.assertNotIn("publish_accepted_checkpoint", [e[0] for e in call_events])
+                self.assertEqual([e[0] for e in call_events].count("validate_repository"), 2)
+                self.assertEqual(call_events[0], ("validate_repository", root, True))
+                self.assertEqual(call_events[2], ("validate_repository", root, True))
+                self.assertEqual((state_root / _ACCEPTED_CHECKPOINT_FILENAME).read_bytes(), sentinel)
+                runs = list((state_root / "runs").iterdir())
+                self.assertEqual(len(runs), 1)
+                status_data = json.loads((runs[0] / "status.json").read_text("utf-8"))
+                self.assertEqual(status_data["state"], "FAILED")
+                self.assertIn("assignment_scope changed before checkpoint publication", status_data["error"])

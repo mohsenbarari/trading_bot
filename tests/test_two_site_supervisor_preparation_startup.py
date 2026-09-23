@@ -96,10 +96,11 @@ def test_run_cycle_publishes_validated_frozen_startup(tmp_path: Path) -> None:
     scope = before["assignment_scope"]
     assert isinstance(scope, AssignmentScope)
     events: list[str] = []
+    final_repo = dict(before, head="b" * 40)
 
     def fake_validate_repo(_r: Path, require_clean: bool = True) -> dict[str, object]:
         events.append("validate_repo")
-        return before
+        return final_repo if "validate_transition" in events else before
 
     def fake_capture(process: _FakePopen, _in: bytes, _out: Path, _err: Path, _t: int, max_output: int = 0) -> None:
         events.append("child_capture")
@@ -143,7 +144,7 @@ def test_run_cycle_publishes_validated_frozen_startup(tmp_path: Path) -> None:
          patch("scripts.two_site_cycle_metrics.record_cycle", create=True):
         run_dir, result = run_cycle(root, codex, state_root, 1, 300)
 
-    assert events == ["validate_repo", "child_open", "child_capture", "validate_transition"]
+    assert events == ["validate_repo", "child_open", "child_capture", "validate_transition", "validate_repo"]
     assert observed_mode == 0o600
     assert len(observed_startup_bytes) <= 4096
     parsed_snapshot = json.loads(observed_startup_bytes.decode("utf-8"))
@@ -214,6 +215,7 @@ def test_valid_commit_keeps_original_source_identity(tmp_path: Path) -> None:
     before_head = "1" * 40
     after_commit = "b" * 40
     before = _make_before(head=before_head)
+    final_repo = dict(before, head=after_commit)
     transition_calls: list[dict] = []
 
     def fake_capture(_p: _FakePopen, _in: bytes, _out: Path, _err: Path, _t: int, max_output: int = 0) -> None:
@@ -227,7 +229,7 @@ def test_valid_commit_keeps_original_source_identity(tmp_path: Path) -> None:
         res["head_changed"] = True
         return res
 
-    with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before), \
+    with patch("scripts.two_site_codex_autopilot.validate_repository", side_effect=[before, final_repo]), \
          patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
@@ -284,6 +286,8 @@ def test_prompt_and_environment_have_no_route_toggle(tmp_path: Path, monkeypatch
                 captured_env = dict(env)
             return self
 
+    final_repo = dict(before, head="b" * 40)
+
     def fake_capture(_p: _FakePopen, _in: bytes, _out: Path, _err: Path, _t: int, max_output: int = 0) -> None:
         (_out.parent / "result.json").write_text(json.dumps(_make_raw_result()))
 
@@ -294,7 +298,7 @@ def test_prompt_and_environment_have_no_route_toggle(tmp_path: Path, monkeypatch
         res["head_changed"] = res["head_before"] != res["head_after"]
         return res
 
-    with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before), \
+    with patch("scripts.two_site_codex_autopilot.validate_repository", side_effect=[before, final_repo]), \
          patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \

@@ -225,10 +225,11 @@ def test_real_run_cycle_selected_legacy_startup(tmp_path: Path, monkeypatch: pyt
         import two_site_codex_autopilot as ap_mod  # type: ignore[no-redef]
 
     events: list[str] = []
+    final_repo = dict(before, head="b" * 40)
 
     def fake_validate_repo(_r: Path, require_clean: bool = True) -> dict[str, object]:
         events.append("validate_repo")
-        return before
+        return final_repo if "validate_transition" in events else before
 
     tamper_cycle_2 = False
 
@@ -290,7 +291,7 @@ def test_real_run_cycle_selected_legacy_startup(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(metrics_mod, "record_cycle", lambda *args, **kwargs: None)
 
     run_dir, result = run_cycle(root, codex, state_root, 1, 300, preparation_route="legacy")
-    assert events == ["validate_repo", "child_open", "child_capture", "validate_transition"]
+    assert events == ["validate_repo", "child_open", "child_capture", "validate_transition", "validate_repo"]
     assert observed_mode == 0o600
     assert len(observed_startup_bytes) <= 4096
     parsed_snapshot = json.loads(observed_startup_bytes.decode("utf-8"))
