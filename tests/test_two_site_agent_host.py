@@ -408,7 +408,7 @@ class HostTests(unittest.TestCase):
             'scripts/two_site_codex_governance_review.sh',
         ):
             source = (root / relative).read_text()
-            self.assertIn('codex_model="gpt-6-sol"', source)
+            self.assertIn('codex_model="gpt-5.6-sol"', source)
             self.assertIn('codex_reasoning_effort="xhigh"', source)
             self.assertIn('--model "$codex_model"', source)
             self.assertIn('model_reasoning_effort=', source)

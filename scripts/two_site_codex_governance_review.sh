@@ -11,7 +11,7 @@ schema_rel="docs/refactor/two-server/templates/governance-review.schema.json"
 schema_path="$repo_root/$schema_rel"
 authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
 codex_bin="$(command -v codex 2>/dev/null || true)"
-codex_model="gpt-6-sol"
+codex_model="gpt-5.6-sol"
 codex_reasoning_effort="xhigh"
 amendment_id=""; bundle_rel=""; base_sha=""; head_sha=""
 
