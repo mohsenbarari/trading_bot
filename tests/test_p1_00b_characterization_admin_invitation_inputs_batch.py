@@ -22,6 +22,10 @@ from bot.handlers.admin import (
     process_invitation_mobile,
 )
 from bot.states import InvitationCreation
+from core.telegram_delivery_runtime_policy import (
+    TelegramDeliveryRuntimeDecision,
+    TelegramDeliveryRuntimeMode,
+)
 
 
 class MinimalFSMContext:
@@ -148,6 +152,112 @@ class AdminInvitationInputsCharacterizationTests(unittest.IsolatedAsyncioTestCas
                 mock_answer.await_args.kwargs.get("reply_markup"),
                 sentinel_role_kb,
             )
+
+    async def test_account_name_invalid_queue_suppresses_stale_prompt_delete(self) -> None:
+        raw_invalid_account_input = "ab"
+        previous_prompt_id = 7001
+        expected_error_prompt_id = 9011
+        expected_error_text = (
+            "❌ **نام کاربری نامعتبر است.**\n"
+            "لطفاً فقط از حروف، اعداد، آندرلاین و فاصله بین کلمات استفاده کنید (۳ تا ۳۲ کاراکتر)."
+        )
+
+        message, state = _make_shared_invitation_fixture(
+            raw_invalid_account_input,
+            initial_data={"last_prompt_message_id": previous_prompt_id},
+        )
+        await state.set_state(InvitationCreation.awaiting_account_name)
+
+        with (
+            patch(
+                "bot.handlers.admin.configured_telegram_delivery_runtime",
+                return_value=TelegramDeliveryRuntimeDecision(
+                    mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                    legacy_workers_enabled=False,
+                    queue_worker_enabled=True,
+                ),
+            ),
+            _invitation_collaborators_harness(
+                prompt_message_id=expected_error_prompt_id,
+            ) as (
+                mock_answer,
+                sentinel_cancel_kb,
+                _,
+            ),
+        ):
+            await process_invitation_account_name(message, state)
+
+            message.bot.delete_message.assert_not_awaited()
+            mock_answer.assert_awaited_once_with(
+                message,
+                None,
+                expected_error_text,
+                reply_markup=sentinel_cancel_kb,
+                parse_mode="Markdown",
+            )
+            stored_data = await state.get_data()
+            self.assertEqual(
+                stored_data.get("last_prompt_message_id"),
+                expected_error_prompt_id,
+            )
+            self.assertIs(
+                await state.get_state(),
+                InvitationCreation.awaiting_account_name,
+            )
+            self.assertNotIn("account_name", stored_data)
+
+    async def test_mobile_invalid_queue_suppresses_stale_prompt_delete(self) -> None:
+        raw_invalid_mobile_input = "invalid-mobile"
+        previous_prompt_id = 7002
+        expected_error_prompt_id = 9012
+        expected_error_text = (
+            "❌ **شماره موبایل نامعتبر است.**\n"
+            "لطفاً شماره را با فرمت 09123456789 (فارسی یا انگلیسی) وارد کنید."
+        )
+
+        message, state = _make_shared_invitation_fixture(
+            raw_invalid_mobile_input,
+            initial_data={"last_prompt_message_id": previous_prompt_id},
+        )
+        await state.set_state(InvitationCreation.awaiting_mobile_number)
+
+        with (
+            patch(
+                "bot.handlers.admin.configured_telegram_delivery_runtime",
+                return_value=TelegramDeliveryRuntimeDecision(
+                    mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                    legacy_workers_enabled=False,
+                    queue_worker_enabled=True,
+                ),
+            ),
+            _invitation_collaborators_harness(
+                prompt_message_id=expected_error_prompt_id,
+            ) as (
+                mock_answer,
+                sentinel_cancel_kb,
+                _,
+            ),
+        ):
+            await process_invitation_mobile(message, state)
+
+            message.bot.delete_message.assert_not_awaited()
+            mock_answer.assert_awaited_once_with(
+                message,
+                None,
+                expected_error_text,
+                reply_markup=sentinel_cancel_kb,
+                parse_mode="Markdown",
+            )
+            stored_data = await state.get_data()
+            self.assertEqual(
+                stored_data.get("last_prompt_message_id"),
+                expected_error_prompt_id,
+            )
+            self.assertIs(
+                await state.get_state(),
+                InvitationCreation.awaiting_mobile_number,
+            )
+            self.assertNotIn("mobile_number", stored_data)
 
 
 if __name__ == "__main__":
