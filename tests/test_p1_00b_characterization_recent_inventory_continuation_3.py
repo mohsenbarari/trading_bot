@@ -14,7 +14,7 @@ install_p1_00_network_fence()
 
 
 class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
-    def test_manifest_indexes_six_units_and_is_sha_bound_to_second_continuation(self):
+    def test_manifest_indexes_ten_units_and_is_sha_bound_to_second_continuation(self):
         repo_root = Path(__file__).resolve().parent.parent
 
         manifest_rel_path = "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json"
@@ -57,7 +57,7 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertEqual(live_predecessor_sha256, predecessor["sha256"])
 
         records = manifest["records"]
-        self.assertEqual(len(records), 6)
+        self.assertEqual(len(records), 10)
 
         expected_records = [
             {
@@ -132,6 +132,55 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
                     "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_room_activity_signal_active_group_publishes_exact_event",
                 ],
             },
+            {
+                "path": "tests/test_p1_00b_characterization_verify_my_session.py",
+                "sha256": "273e252795e46fc9ffe29476493cfe5f814feb812fecbcb33bb864e73b6e0ba4",
+                "last_commit": "9ff5cb21f3a3a9a3d16ec99f4ca90b5c90c15bc9",
+                "seed_ids": [
+                    "API-AUTH-POST-SESSIONS-VERIFY-MY-SESSION-L1031",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_verify_my_session.py::VerifyMySessionCharacterizationTests::test_verify_my_session_active_token_returns_active_status",
+                    "tests/test_p1_00b_characterization_verify_my_session.py::VerifyMySessionCharacterizationTests::test_verify_my_session_missing_token_raises_401",
+                    "tests/test_p1_00b_characterization_verify_my_session.py::VerifyMySessionCharacterizationTests::test_verify_my_session_revoked_token_raises_401",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_notification_get_push_public_key.py",
+                "sha256": "b25a309589c3c49735f903cc1550fd8c5c4771b0969814a4a2393596bb30720d",
+                "last_commit": "d672cc27e5beb0005aa4878fef3590dcd06fac09",
+                "seed_ids": [
+                    "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_notification_get_push_public_key.py::NotificationGetPushPublicKeyCharacterizationTests::test_get_push_public_key_configured_scenario",
+                    "tests/test_p1_00b_characterization_notification_get_push_public_key.py::NotificationGetPushPublicKeyCharacterizationTests::test_get_push_public_key_disabled_scenario",
+                    "tests/test_p1_00b_characterization_notification_get_push_public_key.py::NotificationGetPushPublicKeyCharacterizationTests::test_get_push_public_key_failure_scenario_propagates_exception",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py",
+                "sha256": "9feeb5b30020fbcef13353f916448894b5aa72b658f2b91f327b5306078f2976",
+                "last_commit": "7faf50b9c13a4cc65779c32936375464e79c7cb4",
+                "seed_ids": [
+                    "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py::PublisherChannelPublicTradeCallbackCharacterizationTests::test_public_trade_callback_forwards_public_identity_and_contention_flags",
+                    "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py::PublisherChannelPublicTradeCallbackCharacterizationTests::test_public_trade_callback_forwards_default_contention_flags",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_chat_get_file_success.py",
+                "sha256": "b20f39a0c230a4693d4022ac8d4bc85223910196037f438788ae71cdd58a8783",
+                "last_commit": "f6755ebeecffd932a66fdb0b328983d1263b333a",
+                "seed_ids": [
+                    "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_chat_get_file_success.py::ChatGetFileSuccessCharacterizationTests::test_get_chat_file_authorized_existing_path_returns_exact_file_response",
+                ],
+            },
         ]
 
         expected_record_keys = {
@@ -160,18 +209,28 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             all_seed_ids.extend(rec["seed_ids"])
             all_selectors.extend(rec["test_selectors"])
 
-        self.assertEqual(len(records), 6)
-        self.assertEqual(len(all_seed_ids), 9)
-        self.assertEqual(len(all_selectors), 9)
+        self.assertEqual(len(records), 10)
+        self.assertEqual(len(all_seed_ids), 13)
+        self.assertEqual(len(all_selectors), 18)
 
         unique_seed_ids = set(all_seed_ids)
-        self.assertEqual(len(unique_seed_ids), 9)
+        self.assertEqual(len(unique_seed_ids), 13)
 
-        surface_api_path = repo_root / "docs/refactor/two-server/section-1/inventory/surface-api.json"
-        self.assertTrue(surface_api_path.is_file(), f"Surface API inventory not found at {surface_api_path}")
-        surface_api_data = json.loads(surface_api_path.read_bytes().decode("utf-8"))
-        surface_api_ids = {entry["behavior_id"] for entry in surface_api_data["entries"]}
-        self.assertTrue(unique_seed_ids.issubset(surface_api_ids))
+        expected_surface_paths = [
+            "docs/refactor/two-server/section-1/inventory/surface-api.json",
+            "docs/refactor/two-server/section-1/inventory/surface-bot.json",
+            "docs/refactor/two-server/section-1/inventory/surface-web.json",
+            "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
+        ]
+        source_inventory_ids = set()
+        for rel_path in expected_surface_paths:
+            surface_file_path = repo_root / rel_path
+            self.assertTrue(surface_file_path.is_file(), f"Surface inventory not found at {surface_file_path}")
+            surface_data = json.loads(surface_file_path.read_bytes().decode("utf-8"))
+            source_inventory_ids.update(entry["behavior_id"] for entry in surface_data["entries"])
+
+        self.assertEqual(len(source_inventory_ids), 465)
+        self.assertTrue(unique_seed_ids.issubset(source_inventory_ids))
 
         coverage_path = repo_root / "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
         self.assertTrue(coverage_path.is_file(), f"Coverage manifest not found at {coverage_path}")
@@ -222,9 +281,13 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             "API-NOTIFY-POST-NOTIFICATIONS-UPSERT-PUSH-SUBSCRIPTION-L138",
             "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
             "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
+            "API-AUTH-POST-SESSIONS-VERIFY-MY-SESSION-L1031",
+            "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133",
+            "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
+            "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
         }
         self.assertEqual(new_ids, expected_new_ids)
-        self.assertEqual(len(new_ids), 6)
+        self.assertEqual(len(new_ids), 10)
 
         already_evidenced_ids = unique_seed_ids & prior_evidenced_union
         expected_baseline_ids = {
@@ -234,6 +297,12 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         }
         self.assertEqual(already_evidenced_ids, expected_baseline_ids)
         self.assertTrue(expected_baseline_ids.issubset(baseline_seed_set))
+
+        total_evidenced_set = prior_evidenced_union | unique_seed_ids
+        self.assertEqual(len(total_evidenced_set), 366)
+        remaining_seed_set = source_inventory_ids - total_evidenced_set
+        self.assertEqual(len(remaining_seed_set), 99)
+        self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
 
 if __name__ == "__main__":

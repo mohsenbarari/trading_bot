@@ -78,6 +78,55 @@
         "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_direct_activity_signal_authorized_publishes_exact_event",
         "tests/test_p1_00b_characterization_chat_activity_success_batch.py::ChatActivitySuccessCharacterizationTests::test_send_room_activity_signal_active_group_publishes_exact_event"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_verify_my_session.py",
+      "sha256": "273e252795e46fc9ffe29476493cfe5f814feb812fecbcb33bb864e73b6e0ba4",
+      "last_commit": "9ff5cb21f3a3a9a3d16ec99f4ca90b5c90c15bc9",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-VERIFY-MY-SESSION-L1031"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_verify_my_session.py::VerifyMySessionCharacterizationTests::test_verify_my_session_active_token_returns_active_status",
+        "tests/test_p1_00b_characterization_verify_my_session.py::VerifyMySessionCharacterizationTests::test_verify_my_session_missing_token_raises_401",
+        "tests/test_p1_00b_characterization_verify_my_session.py::VerifyMySessionCharacterizationTests::test_verify_my_session_revoked_token_raises_401"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_get_push_public_key.py",
+      "sha256": "b25a309589c3c49735f903cc1550fd8c5c4771b0969814a4a2393596bb30720d",
+      "last_commit": "d672cc27e5beb0005aa4878fef3590dcd06fac09",
+      "seed_ids": [
+        "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_get_push_public_key.py::NotificationGetPushPublicKeyCharacterizationTests::test_get_push_public_key_configured_scenario",
+        "tests/test_p1_00b_characterization_notification_get_push_public_key.py::NotificationGetPushPublicKeyCharacterizationTests::test_get_push_public_key_disabled_scenario",
+        "tests/test_p1_00b_characterization_notification_get_push_public_key.py::NotificationGetPushPublicKeyCharacterizationTests::test_get_push_public_key_failure_scenario_propagates_exception"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py",
+      "sha256": "9feeb5b30020fbcef13353f916448894b5aa72b658f2b91f327b5306078f2976",
+      "last_commit": "7faf50b9c13a4cc65779c32936375464e79c7cb4",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py::PublisherChannelPublicTradeCallbackCharacterizationTests::test_public_trade_callback_forwards_public_identity_and_contention_flags",
+        "tests/test_p1_00b_characterization_publisher_channel_public_trade_callback.py::PublisherChannelPublicTradeCallbackCharacterizationTests::test_public_trade_callback_forwards_default_contention_flags"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_file_success.py",
+      "sha256": "b20f39a0c230a4693d4022ac8d4bc85223910196037f438788ae71cdd58a8783",
+      "last_commit": "f6755ebeecffd932a66fdb0b328983d1263b333a",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_file_success.py::ChatGetFileSuccessCharacterizationTests::test_get_chat_file_authorized_existing_path_returns_exact_file_response"
+      ]
     }
   ]
 }
