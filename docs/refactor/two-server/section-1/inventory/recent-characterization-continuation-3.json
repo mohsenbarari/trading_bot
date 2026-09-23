@@ -204,6 +204,29 @@
         "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_delegated_rejection_short_circuits",
         "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_authorized_flow"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_parse_offer_text_accountant_denial.py",
+      "sha256": "ccd385d6ea86857dc41905eaa97722ccf2119b43c602b9371da2b6ba93c7c899",
+      "last_commit": "006fcdabae952f66169449dec727604d980a9789",
+      "seed_ids": [
+        "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_parse_offer_text_accountant_denial.py::ParseOfferTextAccountantDenialCharacterizationTests::test_accountant_context_denied_before_parser_or_database"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py",
+      "sha256": "2c88a1c4cef1ab72d35f5a38202c08484286c539bda65d731bc44893f6d8cc6e",
+      "last_commit": "407c86522e3922e5ce95c97923bbee5633ceb935",
+      "seed_ids": [
+        "API-OPS-GET-MAIN-GET-METRICS-L540"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py::MainMetricsUnconfiguredRemoteDenialCharacterizationTests::test_missing_key_denied_when_unconfigured_without_audit",
+        "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py::MainMetricsUnconfiguredRemoteDenialCharacterizationTests::test_nonempty_supplied_key_denied_when_unconfigured"
+      ]
     }
   ]
 }

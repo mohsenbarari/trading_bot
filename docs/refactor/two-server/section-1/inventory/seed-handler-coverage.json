@@ -20,9 +20,9 @@
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 240,
-    "evidenced_seed_count": 375,
-    "remaining_seed_count": 90
+    "reconciled_new_seed_count": 242,
+    "evidenced_seed_count": 377,
+    "remaining_seed_count": 88
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [

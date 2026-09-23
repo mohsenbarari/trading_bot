@@ -87,9 +87,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 240)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 375)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 90)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 242)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 377)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 88)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -444,17 +444,20 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         )
 
         continuation_3_records = continuation_3_data.get("records", [])
-        self.assertEqual(len(continuation_3_records), 16)
+        self.assertEqual(len(continuation_3_records), 18)
 
-        continuation_3_seed_ids = []
-        continuation_3_selectors = []
-        for record in continuation_3_records:
-            continuation_3_seed_ids.extend(record.get("seed_ids", []))
-            continuation_3_selectors.extend(record.get("test_selectors", []))
-        self.assertEqual(len(continuation_3_seed_ids), 22)
-        self.assertEqual(len(continuation_3_selectors), 32)
+        # Historical assertion on prior 16 records
+        prior_16_records = continuation_3_records[:16]
+        self.assertEqual(len(prior_16_records), 16)
+        prior_16_seed_ids = []
+        prior_16_selectors = []
+        for record in prior_16_records:
+            prior_16_seed_ids.extend(record.get("seed_ids", []))
+            prior_16_selectors.extend(record.get("test_selectors", []))
+        self.assertEqual(len(prior_16_seed_ids), 22)
+        self.assertEqual(len(prior_16_selectors), 32)
 
-        expected_continuation_3_unique_seed_ids = {
+        expected_prior_16_unique_seed_ids = {
             "API-IDENTITY-GET-INVITATIONS-LIST-PENDING-INVITATIONS-L266",
             "API-IDENTITY-DELETE-INVITATIONS-DELETE-PENDING-INVITATION-L294",
             "API-NOTIFY-DELETE-NOTIFICATIONS-DISABLE-PUSH-SUBSCRIPTION-L178",
@@ -478,9 +481,30 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
             "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
         }
+        prior_16_seed_set = set(prior_16_seed_ids)
+        self.assertEqual(prior_16_seed_set, expected_prior_16_unique_seed_ids)
+        self.assertEqual(len(prior_16_seed_set), 22)
+        self.assertTrue(prior_16_seed_set.issubset(inventory_seed_set))
+
+        continuation_3_seed_ids = []
+        continuation_3_selectors = []
+        for record in continuation_3_records:
+            continuation_3_seed_ids.extend(record.get("seed_ids", []))
+            continuation_3_selectors.extend(record.get("test_selectors", []))
+        self.assertEqual(len(continuation_3_seed_ids), 24)
+        self.assertEqual(len(continuation_3_selectors), 35)
+
+        two_new_canonical_seed_ids = {
+            "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+            "API-OPS-GET-MAIN-GET-METRICS-L540",
+        }
+        self.assertEqual(len(two_new_canonical_seed_ids), 2)
+        self.assertTrue(two_new_canonical_seed_ids.issubset(inventory_seed_set))
+
+        expected_continuation_3_unique_seed_ids = expected_prior_16_unique_seed_ids | two_new_canonical_seed_ids
         continuation_3_seed_set = set(continuation_3_seed_ids)
         self.assertEqual(continuation_3_seed_set, expected_continuation_3_unique_seed_ids)
-        self.assertEqual(len(continuation_3_seed_set), 22)
+        self.assertEqual(len(continuation_3_seed_set), 24)
         self.assertTrue(continuation_3_seed_set.issubset(inventory_seed_set))
 
         continuation_3_new_seed_ids = {
@@ -503,6 +527,8 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-REQUEST-POST-TRADES-REJECT-OVERTIME-REQUEST-L5091",
             "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
             "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
+            "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+            "API-OPS-GET-MAIN-GET-METRICS-L540",
         }
         continuation_3_baseline_seed_ids = {
             "API-ADMIN-GET-ADMIN-MESSAGES-GET-CURRENT-MARKET-MESSAGE-L180",
@@ -510,7 +536,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-ADMIN-DELETE-ADMIN-MESSAGES-CLEAR-CURRENT-MARKET-MESSAGE-L235",
         }
         self.assertEqual(continuation_3_seed_set - prior_356_evidenced_set, continuation_3_new_seed_ids)
-        self.assertEqual(len(continuation_3_seed_set - prior_356_evidenced_set), 19)
+        self.assertEqual(len(continuation_3_seed_set - prior_356_evidenced_set), 21)
         self.assertTrue(continuation_3_baseline_seed_ids.issubset(baseline_seed_set))
         self.assertTrue(continuation_3_baseline_seed_ids.issubset(prior_356_evidenced_set))
 
@@ -526,7 +552,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         added_repair_seed_set = {added_repair_seed_id}
 
         prior_368_evidenced_set = prior_356_evidenced_set | (
-            continuation_3_seed_set - six_new_canonical_seed_ids - added_repair_seed_set
+            (continuation_3_seed_set - two_new_canonical_seed_ids) - six_new_canonical_seed_ids - added_repair_seed_set
         )
         self.assertEqual(len(prior_368_evidenced_set), 368)
         self.assertEqual(len(six_new_canonical_seed_ids), 6)
@@ -541,19 +567,31 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(added_repair_seed_set.isdisjoint(prior_374_evidenced_set))
         self.assertTrue(added_repair_seed_set.isdisjoint(baseline_seed_set))
 
+        # Historical 375/90 checkpoint assertions preserved
+        prior_375_evidenced_set = prior_374_evidenced_set | added_repair_seed_set
+        self.assertEqual(len(prior_375_evidenced_set), 375)
+        prior_remaining_seed_set = inventory_seed_set - prior_375_evidenced_set
+        self.assertEqual(len(prior_remaining_seed_set), 90)
+
+        # Explicitly prove two new canonical seeds are inventory members, disjoint from prior 375 seeds, and disjoint from each other
+        self.assertTrue(two_new_canonical_seed_ids.issubset(inventory_seed_set))
+        self.assertTrue(two_new_canonical_seed_ids.isdisjoint(prior_375_evidenced_set))
+        self.assertTrue(two_new_canonical_seed_ids.isdisjoint(baseline_seed_set))
+        self.assertEqual(len(two_new_canonical_seed_ids), 2)
+
         all_flattened_recent_ids = flattened_recent_ids + continuation_3_seed_ids
         all_recent_seed_set = set(all_flattened_recent_ids)
         self.assertTrue(all_recent_seed_set.issubset(inventory_seed_set))
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
-        self.assertEqual(len(reconciled_new_beyond_baseline), 240)
+        self.assertEqual(len(reconciled_new_beyond_baseline), 242)
 
         final_evidenced_set = prior_356_evidenced_set | continuation_3_seed_set
-        self.assertEqual(len(final_evidenced_set), 375)
+        self.assertEqual(len(final_evidenced_set), 377)
 
         remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 90)
+        self.assertEqual(len(remaining_seed_set), 88)
         self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
-        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 375)
+        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 377)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(reconciled_new_beyond_baseline))

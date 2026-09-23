@@ -57,7 +57,7 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertEqual(live_predecessor_sha256, predecessor["sha256"])
 
         records = manifest["records"]
-        self.assertEqual(len(records), 16)
+        self.assertEqual(len(records), 18)
 
         expected_records = [
             {
@@ -258,6 +258,29 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
                     "tests/test_p1_00b_characterization_block_manage_start_search.py::CharacterizeBlockManageStartSearchTests::test_start_search_authorized_flow",
                 ],
             },
+            {
+                "path": "tests/test_p1_00b_characterization_parse_offer_text_accountant_denial.py",
+                "sha256": "ccd385d6ea86857dc41905eaa97722ccf2119b43c602b9371da2b6ba93c7c899",
+                "last_commit": "006fcdabae952f66169449dec727604d980a9789",
+                "seed_ids": [
+                    "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_parse_offer_text_accountant_denial.py::ParseOfferTextAccountantDenialCharacterizationTests::test_accountant_context_denied_before_parser_or_database",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py",
+                "sha256": "2c88a1c4cef1ab72d35f5a38202c08484286c539bda65d731bc44893f6d8cc6e",
+                "last_commit": "407c86522e3922e5ce95c97923bbee5633ceb935",
+                "seed_ids": [
+                    "API-OPS-GET-MAIN-GET-METRICS-L540",
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py::MainMetricsUnconfiguredRemoteDenialCharacterizationTests::test_missing_key_denied_when_unconfigured_without_audit",
+                    "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py::MainMetricsUnconfiguredRemoteDenialCharacterizationTests::test_nonempty_supplied_key_denied_when_unconfigured",
+                ],
+            },
         ]
 
         expected_record_keys = {
@@ -286,12 +309,38 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             all_seed_ids.extend(rec["seed_ids"])
             all_selectors.extend(rec["test_selectors"])
 
-        self.assertEqual(len(records), 16)
-        self.assertEqual(len(all_seed_ids), 22)
-        self.assertEqual(len(all_selectors), 32)
+        self.assertEqual(len(records), 18)
+        self.assertEqual(len(all_seed_ids), 24)
+        self.assertEqual(len(all_selectors), 35)
 
         unique_seed_ids = set(all_seed_ids)
-        self.assertEqual(len(unique_seed_ids), 22)
+        self.assertEqual(len(unique_seed_ids), 24)
+
+        prior_selectors = set(all_selectors[:32])
+        self.assertEqual(len(prior_selectors), 32)
+
+        record_16_selectors = set(records[16]["test_selectors"])
+        expected_record_16_selectors = {
+            "tests/test_p1_00b_characterization_parse_offer_text_accountant_denial.py::ParseOfferTextAccountantDenialCharacterizationTests::test_accountant_context_denied_before_parser_or_database",
+        }
+        self.assertEqual(record_16_selectors, expected_record_16_selectors)
+        self.assertTrue(record_16_selectors.isdisjoint(prior_selectors))
+
+        record_17_selectors = set(records[17]["test_selectors"])
+        expected_record_17_selectors = {
+            "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py::MainMetricsUnconfiguredRemoteDenialCharacterizationTests::test_missing_key_denied_when_unconfigured_without_audit",
+            "tests/test_p1_00b_characterization_main_metrics_unconfigured_remote_denial.py::MainMetricsUnconfiguredRemoteDenialCharacterizationTests::test_nonempty_supplied_key_denied_when_unconfigured",
+        }
+        self.assertEqual(record_17_selectors, expected_record_17_selectors)
+        self.assertTrue(record_17_selectors.isdisjoint(prior_selectors))
+        self.assertTrue(record_16_selectors.isdisjoint(record_17_selectors))
+
+        # Assert no pending invitation-input/cancel records are present in this packet
+        for rec in records:
+            path = rec["path"]
+            self.assertNotIn("invitation_input", path)
+            self.assertNotIn("invitation_cancel", path)
+            self.assertNotIn("cancel_invitation", path)
 
         expected_surface_paths = [
             "docs/refactor/two-server/section-1/inventory/surface-api.json",
@@ -371,9 +420,11 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
             "API-REQUEST-POST-TRADES-REJECT-OVERTIME-REQUEST-L5091",
             "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
             "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
+            "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+            "API-OPS-GET-MAIN-GET-METRICS-L540",
         }
         self.assertEqual(new_ids, expected_new_ids)
-        self.assertEqual(len(new_ids), 19)
+        self.assertEqual(len(new_ids), 21)
 
         already_evidenced_ids = unique_seed_ids & prior_evidenced_union
         expected_baseline_ids = {
@@ -385,9 +436,9 @@ class RecentCharacterizationContinuationThreeContractTests(unittest.TestCase):
         self.assertTrue(expected_baseline_ids.issubset(baseline_seed_set))
 
         total_evidenced_set = prior_evidenced_union | unique_seed_ids
-        self.assertEqual(len(total_evidenced_set), 375)
+        self.assertEqual(len(total_evidenced_set), 377)
         remaining_seed_set = source_inventory_ids - total_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 90)
+        self.assertEqual(len(remaining_seed_set), 88)
         self.assertEqual(len(total_evidenced_set) + len(remaining_seed_set), 465)
 
 
