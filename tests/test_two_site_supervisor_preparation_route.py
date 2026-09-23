@@ -276,7 +276,7 @@ def test_real_run_cycle_selected_legacy_startup(tmp_path: Path, monkeypatch: pyt
             "path": str(codex),
             "version": EXPECTED_CODEX_CLI_VERSION,
             "sha256": "4" * 64,
-            "model": "gpt-5.6-sol",
+            "model": "gpt-6-sol",
             "reasoning": "xhigh",
             "runtime": {},
         },
@@ -341,7 +341,7 @@ def test_cli_canonical_state_check_and_stop(tmp_path: Path, monkeypatch: pytest.
             "path": str(codex_p),
             "version": EXPECTED_CODEX_CLI_VERSION,
             "sha256": "4" * 64,
-            "model": "gpt-5.6-sol",
+            "model": "gpt-6-sol",
             "reasoning": "xhigh",
             "runtime": {},
         }

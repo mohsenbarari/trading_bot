@@ -133,7 +133,7 @@ def test_run_cycle_publishes_validated_frozen_startup(tmp_path: Path) -> None:
             return self
 
     with patch("scripts.two_site_codex_autopilot.validate_repository", side_effect=fake_validate_repo), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=SpiedPopen), \
@@ -195,7 +195,7 @@ def test_startup_tampering_blocks_transition(tmp_path: Path, mutation: str) -> N
             startup_p.write_bytes(b"x" * 4097)
 
     with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=_FakePopen), \
@@ -228,7 +228,7 @@ def test_valid_commit_keeps_original_source_identity(tmp_path: Path) -> None:
         return res
 
     with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=_FakePopen), \
@@ -295,7 +295,7 @@ def test_prompt_and_environment_have_no_route_toggle(tmp_path: Path, monkeypatch
         return res
 
     with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=EnvCapturePopen), \
@@ -333,7 +333,7 @@ def test_snapshot_publication_refuses_existing_and_unsafe_targets(tmp_path: Path
             (self / "preparation-startup.json").write_bytes(precreated_content)
 
     with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before_col), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex_col), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex_col), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=GuardPopen), \
@@ -360,7 +360,7 @@ def test_snapshot_publication_refuses_existing_and_unsafe_targets(tmp_path: Path
             os.symlink(alias, self)
 
     with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before_sym), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex_sym), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex_sym), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=GuardPopen), \
@@ -377,7 +377,7 @@ def test_snapshot_publication_refuses_existing_and_unsafe_targets(tmp_path: Path
     external_state.mkdir(parents=True, exist_ok=True)
     (external_state / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     with patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before_ext), \
-         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex_ext), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-5.6-sol", "reasoning": "xhigh", "runtime": {}}), \
+         patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"path": str(codex_ext), "version": EXPECTED_CODEX_CLI_VERSION, "sha256": "4" * 64, "model": "gpt-6-sol", "reasoning": "xhigh", "runtime": {}}), \
          patch("scripts.two_site_codex_autopilot.file_sha256", return_value="4" * 64), \
          patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value={}), \
          patch("scripts.two_site_codex_autopilot.subprocess.Popen", side_effect=GuardPopen):

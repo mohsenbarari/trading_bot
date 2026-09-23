@@ -32,7 +32,7 @@ class TestStableCliPin(unittest.TestCase):
             autopilot.EXPECTED_CODEX_CLI_SHA256,
             "56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da",
         )
-        self.assertEqual(autopilot.MODEL, "gpt-5.6-sol")
+        self.assertEqual(autopilot.MODEL, "gpt-6-sol")
         self.assertEqual(autopilot.REASONING, "xhigh")
 
     @patch.object(autopilot, "codex_identity")
