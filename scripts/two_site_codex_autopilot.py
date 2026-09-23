@@ -176,6 +176,9 @@ CONTROL_PATHS = (
     Path("scripts/two_site_provider_broker.py"),
     Path("scripts/two_site_assignment_scope.py"),
     Path("scripts/two_site_preparation_contract.py"),
+    Path("scripts/two_site_preparation_io.py"),
+    Path("scripts/two_site_preparation_boundary.py"),
+    Path("scripts/two_site_preparation_runtime_gate.py"),
     Path("scripts/two_site_autopilot_tmux.sh"),
     Path("scripts/two_site_autopilot_monitor.sh"),
     GEMINI_RUNTIME_CONTRACT_REL,
@@ -1179,6 +1182,14 @@ def _validate_startup_file(
         raise AutopilotError("preparation startup fingerprint drifted")
 
 
+def _validate_legacy_preparation_startup(root: Path, state_root: Path) -> None:
+    try:
+        from scripts.two_site_preparation_runtime_gate import validate_legacy_preparation_startup
+    except ModuleNotFoundError:
+        from two_site_preparation_runtime_gate import validate_legacy_preparation_startup  # type: ignore[no-redef]
+    validate_legacy_preparation_startup(root, state_root)
+
+
 def prompt_for_cycle(
     root: Path,
     cycle: int,
@@ -1242,7 +1253,11 @@ def run_cycle(
     timeout: int,
     recovery: dict[str, object] | None = None,
     continuation: dict | None = None,
+    *,
+    preparation_route: str = "one_shot",
 ) -> tuple[Path, dict]:
+    if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
+        raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
     global _ACTIVE_PROCESS
     heartbeat_stop: threading.Event | None = None
     heartbeat_thread: threading.Thread | None = None
@@ -1277,7 +1292,7 @@ def run_cycle(
         resolved_run_dir.relative_to(resolved_root)
     except ValueError:
         raise AutopilotError("run directory outside canonical root")
-    startup = PreparationStartup(1, "one_shot", run_dir.name, str(before["head"]), scope.sha256)
+    startup = PreparationStartup(1, preparation_route, run_dir.name, str(before["head"]), scope.sha256)
     if run_dir.name != startup.cycle_id:
         raise AutopilotError("run directory does not match startup cycle ID")
     startup_bytes = json.dumps(
@@ -1542,7 +1557,17 @@ def signal_handler(_signum: int, _frame: object) -> None:
     raise KeyboardInterrupt("autopilot stopped by signal")
 
 
-def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool) -> int:
+def run_loop(
+    root: Path,
+    codex: Path,
+    max_cycles: int,
+    timeout: int,
+    once: bool,
+    *,
+    preparation_route: str = "one_shot",
+) -> int:
+    if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
+        raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
     root = root.resolve(strict=True)
     state_root = root / ".local/two-site-refactor/autopilot"
     if state_root.resolve() != state_root:
@@ -1550,12 +1575,22 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
     (state_root / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = state_root / "autopilot.lock"
     with exclusive_supervisor_lock(lock_path):
+        stop_path = state_root / "STOP"
+        if os.path.lexists(stop_path):
+            if not stop_path.exists():
+                raise AutopilotError("STOP path is a broken symlink")
+            write_supervisor_state(state_root, "STOPPED", cycle=1)
+            return 0
+        if preparation_route == "legacy":
+            _validate_legacy_preparation_startup(root, state_root)
         retryable_failures = 0
         consecutive_rescopes = 0
         recovery_context: dict[str, object] | None = None
         previous_success: dict | None = None
         for cycle in range(1, max_cycles + 1):
-            if (state_root / "STOP").exists():
+            if os.path.lexists(stop_path):
+                if not stop_path.exists():
+                    raise AutopilotError("STOP path is a broken symlink")
                 write_supervisor_state(state_root, "STOPPED", cycle=cycle)
                 return 0
             cycle_start_head = git(root, "rev-parse", "HEAD")
@@ -1573,9 +1608,13 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
             try:
                 continuation_args = ({"continuation": previous_success}
                                      if continuation_hint(previous_success, cycle_start_head) is not None else {})
+                cycle_kwargs: dict[str, object] = {}
+                if preparation_route == "legacy":
+                    cycle_kwargs["preparation_route"] = preparation_route
                 run_dir, result = run_cycle(
                     root, codex, state_root, cycle, timeout, recovery=recovery_context,
                     **continuation_args,
+                    **cycle_kwargs,
                 )
                 previous_success = None
                 retryable_failures = 0
@@ -1724,6 +1763,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument(
+        "--preparation-route",
+        choices=("one_shot", "legacy"),
+        default="one_shot",
+    )
     args = parser.parse_args()
     if args.codex is None:
         args.codex = args.root.resolve() / ".local/tools/codex-0.153.4-56ef98ab4032d317.pin"
@@ -1733,6 +1777,12 @@ def main() -> int:
         signal.signal(handled, signal_handler)
     if args.check:
         state = validate_repository(args.root)
+        if args.preparation_route == "legacy":
+            resolved_root = args.root.resolve(strict=True)
+            state_root = resolved_root / ".local/two-site-refactor/autopilot"
+            lock_path = state_root / "autopilot.lock"
+            with exclusive_supervisor_lock(lock_path):
+                _validate_legacy_preparation_startup(resolved_root, state_root)
         with tempfile.TemporaryDirectory(prefix="two-site-autopilot-check-") as temporary:
             identity = codex_identity(args.codex, Path(temporary))
         print(json.dumps({
@@ -1742,7 +1792,12 @@ def main() -> int:
         }))
         return 0
     try:
-        return run_loop(args.root, args.codex, args.max_cycles, args.timeout, args.once)
+        loop_kwargs: dict[str, object] = {}
+        if args.preparation_route == "legacy":
+            loop_kwargs["preparation_route"] = args.preparation_route
+        return run_loop(
+            args.root, args.codex, args.max_cycles, args.timeout, args.once, **loop_kwargs
+        )
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
