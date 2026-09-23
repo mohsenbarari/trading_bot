@@ -32,6 +32,15 @@ and unrelated remote-service mutation. This does not widen any other gate.
    Supervisor recovery context identifies the rejected unit and next action; it never authorizes
    reuse, skipped gate or repeated scenario. Choose a distinct smaller or context-complete internal unit when rescoping.
 
+   Current bounded recovery (2026-09-23): the five-unit reconciliation through commit
+   `85e314f92eef3cef5ef5cd863d21d68a166adb7d` returned
+   `MODEL_OUTPUT_TRUNCATED` before Reviewer; no proposal was applied. Do not submit that
+   combined packet again or accept a sixth behavior unit first. Reconcile those five
+   already-accepted units in smaller, non-overlapping packets (for example two then
+   three), verifying exact commit/selector evidence and keeping the total pending
+   count until all five are reconciled. This note is a task-selection fence, not
+   acceptance evidence, and is removed only after the ledger is actually updated.
+
 3. Supply authoritative current definitions for every referenced enum, constant, import,
    signature, model field and dependency. UserRole.BUYER is forbidden unless its authoritative definition proves it exists.
    For remaining P1-00b seed-handler work, package 2–4 eligible handlers from exactly one
