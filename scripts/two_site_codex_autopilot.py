@@ -1454,6 +1454,147 @@ def _prove_rescope_link_collision(
     return None
 
 
+def publish_initial_rescope_receipt(
+    state_root: Path,
+    result: object,
+    repository: object,
+) -> None:
+    """Atomically publish the initial (attempt=1) rescope receipt under state_root.
+
+    Fails closed without overwriting existing receipts or deleting uncertain evidence.
+    """
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+
+    payload = serialize_rescope_receipt(result, repository, attempt=1)
+    expected_envelope = parse_rescope_receipt(payload, repository)
+
+    pinned_dir_fd: int | None = None
+    temp_name: str | None = None
+    link_entered = False
+    linked = False
+    primary_exc: BaseException | None = None
+
+    try:
+        pinned_dir_fd = _open_private_rescope_state_dir(state_root)
+
+        try:
+            os.stat(_RESCOPE_RECEIPT_FILENAME, dir_fd=pinned_dir_fd, follow_symlinks=False)
+            raise AutopilotError("target receipt already exists")
+        except FileNotFoundError:
+            pass
+        except TypeError as exc:
+            raise AutopilotError(f"os.stat failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise AutopilotError(f"cannot stat target receipt: {exc}") from exc
+
+        temp_name = _create_rescope_temp_file(pinned_dir_fd, payload)
+
+        try:
+            link_entered = True
+            os.link(
+                temp_name,
+                _RESCOPE_RECEIPT_FILENAME,
+                src_dir_fd=pinned_dir_fd,
+                dst_dir_fd=pinned_dir_fd,
+                follow_symlinks=False,
+            )
+            linked = True
+        except OSError as link_err:
+            try:
+                _prove_rescope_link_collision(pinned_dir_fd, temp_name, link_err)
+            except AutopilotError:
+                raise
+            except Exception as helper_exc:
+                raise AutopilotError(f"ambiguous: link collision helper failed: {helper_exc}") from helper_exc
+
+            try:
+                os.unlink(temp_name, dir_fd=pinned_dir_fd)
+            except OSError as unlink_err:
+                err = AutopilotError(f"error cleaning up temporary rescope file: {unlink_err}")
+                err.__cause__ = link_err
+                raise err
+            raise AutopilotError(f"rescope receipt collision: target already exists ({link_err})") from link_err
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as link_exc:
+            raise AutopilotError(f"ambiguous: os.link failed with unexpected exception: {link_exc}") from link_exc
+
+        try:
+            try:
+                os.unlink(temp_name, dir_fd=pinned_dir_fd)
+            except OSError as exc:
+                raise AutopilotError(f"ambiguous: failed to unlink temporary receipt: {exc}") from exc
+
+            try:
+                os.fsync(pinned_dir_fd)
+            except OSError as exc:
+                raise AutopilotError(f"ambiguous: failed to fsync pinned directory: {exc}") from exc
+
+            try:
+                _recheck_final_root(state_root, pinned_dir_fd)
+            except Exception as exc:
+                raise AutopilotError(f"ambiguous: final state root recheck failed: {exc}") from exc
+
+            try:
+                loaded = load_rescope_receipt(state_root, repository)
+            except Exception as exc:
+                raise AutopilotError(f"ambiguous: failed to load rescope receipt: {exc}") from exc
+
+            if loaded != expected_envelope:
+                raise AutopilotError("ambiguous: loaded receipt does not match expected envelope")
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except AutopilotError as exc:
+            if str(exc).startswith("ambiguous"):
+                raise
+            raise AutopilotError(f"ambiguous: post-link validation failed: {exc}") from exc
+        except Exception as exc:
+            raise AutopilotError(f"ambiguous: post-link failure: {exc}") from exc
+
+    except (KeyboardInterrupt, SystemExit) as exc:
+        primary_exc = exc
+        if temp_name is not None and not link_entered and pinned_dir_fd is not None:
+            try:
+                os.unlink(temp_name, dir_fd=pinned_dir_fd)
+            except OSError:
+                pass
+        raise
+    except Exception as exc:
+        primary_exc = exc
+        if temp_name is not None and not link_entered and pinned_dir_fd is not None:
+            try:
+                os.unlink(temp_name, dir_fd=pinned_dir_fd)
+            except OSError as unlink_err:
+                cleanup_err = AutopilotError(f"error cleaning up temporary rescope file: {unlink_err}")
+                cleanup_err.__cause__ = exc
+                primary_exc = cleanup_err
+        raise primary_exc
+    finally:
+        active_exc_type, active_exc, _ = sys.exc_info()
+        is_interrupt = (
+            (active_exc_type is not None and issubclass(active_exc_type, (KeyboardInterrupt, SystemExit)))
+            or isinstance(primary_exc, (KeyboardInterrupt, SystemExit))
+        )
+        if pinned_dir_fd is not None:
+            try:
+                os.close(pinned_dir_fd)
+            except OSError as close_err:
+                if not is_interrupt:
+                    if link_entered:
+                        close_exc = AutopilotError(f"ambiguous: error closing pinned directory: {close_err}")
+                    else:
+                        close_exc = AutopilotError(f"error closing pinned directory: {close_err}")
+                    if primary_exc is not None and isinstance(primary_exc, Exception):
+                        close_exc.__cause__ = primary_exc
+                    elif active_exc is not None and isinstance(active_exc, Exception):
+                        close_exc.__cause__ = active_exc
+                    else:
+                        close_exc.__cause__ = close_err
+                    raise close_exc
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,

@@ -12,6 +12,10 @@ from scripts.two_site_codex_autopilot import (
     _RESCOPE_RECEIPT_FILENAME,
     AutopilotError,
     _prove_rescope_link_collision,
+    publish_initial_rescope_receipt,
+    parse_rescope_receipt,
+    PROTECTED_REFS,
+    CONTROL_PATHS,
 )
 
 
@@ -229,6 +233,258 @@ class TestTwoSiteAe03InitialPublish(unittest.TestCase):
         with self.assertRaises(AutopilotError) as ctx:
             _prove_rescope_link_collision(-1, temp_name_a, link_error)
         self.assertIn("ambiguous", str(ctx.exception))
+
+    def _make_valid_fixtures(self) -> tuple[dict, dict]:
+        head = "a" * 40
+        result = {
+            "schema_version": "1.0",
+            "state": "BLOCKED",
+            "disposition": "RESCOPE",
+            "category": "INTERNAL_REJECTION",
+            "summary": "Rescope cycle 1",
+            "commit": None,
+            "next_action": "rescope-next",
+            "blockers": ["test-blocker-1"],
+            "gemini_worker_run_id": None,
+            "gemini_reviewer_run_id": None,
+            "proposal_sha256": None,
+            "head_before": head,
+            "head_after": head,
+            "head_changed": False,
+        }
+        repo = {
+            "head": head,
+            "status": "",
+            "protected_refs": {ref: "b" * 40 for ref in PROTECTED_REFS},
+            "control_blobs": {p.as_posix(): "c" * 40 for p in CONTROL_PATHS},
+            "assignment_scope": {
+                "assignment_id": "test-assignment-scope",
+                "stage_id": "P1-00b",
+                "sha256": "d" * 64,
+                "expires_at": "2026-12-31T23:59:59Z",
+                "allowed_paths": ["scripts/two_site_codex_autopilot.py"],
+                "forbidden_paths": [],
+            },
+        }
+        return result, repo
+
+    def test_publish_initial_rescope_receipt_success_exact_full_envelope(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+
+        publish_initial_rescope_receipt(state_root, result, repo)
+
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+        self.assertTrue(target_path.is_file())
+        st = target_path.stat(follow_symlinks=False)
+        self.assertEqual(st.st_mode & 0o777, 0o600)
+        self.assertEqual(st.st_nlink, 1)
+
+        raw_bytes = target_path.read_bytes()
+        envelope = parse_rescope_receipt(raw_bytes, repo)
+        self.assertEqual(envelope["schema_version"], 1)
+        self.assertEqual(envelope["attempt"], 1)
+        self.assertFalse(envelope["terminal"])
+        self.assertEqual(envelope["result"]["summary"], result["summary"])
+        self.assertEqual(envelope["repository"]["head"], repo["head"])
+
+        temp_files = [f for f in os.listdir(state_root) if f.startswith(".rescope_receipt_tmp_")]
+        self.assertEqual(temp_files, [])
+
+    def test_publish_initial_rescope_receipt_second_call_and_unsafe_leaf_preserve_bytes(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+
+        publish_initial_rescope_receipt(state_root, result, repo)
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+        before_bytes = target_path.read_bytes()
+        before_ino = target_path.stat(follow_symlinks=False).st_ino
+
+        with self.assertRaises(AutopilotError):
+            publish_initial_rescope_receipt(state_root, result, repo)
+
+        self.assertEqual(target_path.read_bytes(), before_bytes)
+        self.assertEqual(target_path.stat(follow_symlinks=False).st_ino, before_ino)
+
+        with tempfile.TemporaryDirectory() as other_tmp:
+            other_root = Path(other_tmp).resolve()
+            os.chmod(other_root, 0o700)
+            symlink_target = other_root / "real_file.txt"
+            symlink_target.write_bytes(b"unsafe-leaf-data")
+            symlink_path = other_root / _RESCOPE_RECEIPT_FILENAME
+            os.symlink(symlink_target, symlink_path)
+
+            with self.assertRaises(AutopilotError):
+                publish_initial_rescope_receipt(other_root, result, repo)
+
+            self.assertTrue(symlink_path.is_symlink())
+            self.assertEqual(symlink_target.read_bytes(), b"unsafe-leaf-data")
+            temp_files = [f for f in os.listdir(other_root) if f.startswith(".rescope_receipt_tmp_")]
+            self.assertEqual(temp_files, [])
+
+    def test_publish_initial_rescope_receipt_proven_collision_cleans_temp(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+        target_path.write_bytes(b"existing-unrelated-receipt")
+        os.chmod(target_path, 0o600)
+        target_ino_before = target_path.stat(follow_symlinks=False).st_ino
+
+        orig_stat = os.stat
+        first_stat_skipped = False
+
+        def stat_hide_target_once(path, *args, **kwargs):
+            nonlocal first_stat_skipped
+            if path == _RESCOPE_RECEIPT_FILENAME and not first_stat_skipped:
+                first_stat_skipped = True
+                raise FileNotFoundError(errno.ENOENT, "Target not yet visible")
+            return orig_stat(path, *args, **kwargs)
+
+        with mock.patch("scripts.two_site_codex_autopilot.os.stat", side_effect=stat_hide_target_once):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_initial_rescope_receipt(state_root, result, repo)
+            self.assertIn("collision", str(ctx.exception).lower())
+
+        self.assertEqual(target_path.read_bytes(), b"existing-unrelated-receipt")
+        self.assertEqual(target_path.stat(follow_symlinks=False).st_ino, target_ino_before)
+        temp_files = [f for f in os.listdir(state_root) if f.startswith(".rescope_receipt_tmp_")]
+        self.assertEqual(temp_files, [])
+
+    def test_publish_initial_rescope_receipt_monkeypatched_link_eio_ambiguous_preserves_evidence(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+
+        orig_link = os.link
+
+        def link_then_eio(*args, **kwargs):
+            orig_link(*args, **kwargs)
+            raise OSError(errno.EIO, "Input/output error")
+
+        with mock.patch("scripts.two_site_codex_autopilot.os.link", side_effect=link_then_eio):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_initial_rescope_receipt(state_root, result, repo)
+            self.assertIn("ambiguous", str(ctx.exception).lower())
+
+        self.assertTrue(target_path.is_file())
+        target_st = target_path.stat(follow_symlinks=False)
+        self.assertEqual(target_st.st_nlink, 2)
+
+        temp_files = [f for f in os.listdir(state_root) if f.startswith(".rescope_receipt_tmp_")]
+        self.assertEqual(len(temp_files), 1)
+        temp_path = state_root / temp_files[0]
+        temp_st = temp_path.stat(follow_symlinks=False)
+        self.assertEqual(temp_st.st_nlink, 2)
+        self.assertEqual((temp_st.st_dev, temp_st.st_ino), (target_st.st_dev, target_st.st_ino))
+
+    def test_publish_initial_rescope_receipt_link_keyboard_interrupt_propagates_and_preserves_evidence(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+
+        orig_link = os.link
+
+        def link_then_ki(*args, **kwargs):
+            orig_link(*args, **kwargs)
+            raise KeyboardInterrupt("simulated interrupt")
+
+        with mock.patch("scripts.two_site_codex_autopilot.os.link", side_effect=link_then_ki):
+            with self.assertRaises(KeyboardInterrupt):
+                publish_initial_rescope_receipt(state_root, result, repo)
+
+        self.assertTrue(target_path.is_file())
+        target_st = target_path.stat(follow_symlinks=False)
+        self.assertEqual(target_st.st_nlink, 2)
+
+        temp_files = [f for f in os.listdir(state_root) if f.startswith(".rescope_receipt_tmp_")]
+        self.assertEqual(len(temp_files), 1)
+        temp_path = state_root / temp_files[0]
+        temp_st = temp_path.stat(follow_symlinks=False)
+        self.assertEqual(temp_st.st_nlink, 2)
+        self.assertEqual((temp_st.st_dev, temp_st.st_ino), (target_st.st_dev, target_st.st_ino))
+
+    def test_publish_initial_rescope_receipt_physical_post_link_replacement_ambiguous(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+
+        orig_fsync = os.fsync
+
+        def fsync_replace_target(fd):
+            orig_fsync(fd)
+            if target_path.exists() and stat.S_ISDIR(os.fstat(fd).st_mode):
+                diff_result = dict(result)
+                diff_result["summary"] = "Replaced receipt summary"
+                from scripts.two_site_codex_autopilot import serialize_rescope_receipt
+                other_payload = serialize_rescope_receipt(diff_result, repo, attempt=1)
+                target_path.write_bytes(other_payload)
+
+        with mock.patch("scripts.two_site_codex_autopilot.os.fsync", side_effect=fsync_replace_target):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_initial_rescope_receipt(state_root, result, repo)
+            self.assertIn("ambiguous", str(ctx.exception).lower())
+
+    def test_publish_initial_rescope_receipt_post_link_faults_ambiguity_and_primary_cause(self) -> None:
+        state_root = Path(self.temp_dir.name).resolve()
+        result, repo = self._make_valid_fixtures()
+        target_path = state_root / _RESCOPE_RECEIPT_FILENAME
+
+        # Fault A: post-link unlink fault
+        with mock.patch("scripts.two_site_codex_autopilot.os.unlink", side_effect=OSError(errno.EIO, "unlink failed")):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_initial_rescope_receipt(state_root, result, repo)
+            self.assertIn("ambiguous", str(ctx.exception).lower())
+            self.assertIsInstance(ctx.exception.__cause__, OSError)
+            self.assertEqual(ctx.exception.__cause__.errno, errno.EIO)
+
+        for f in os.listdir(state_root):
+            p = state_root / f
+            p.unlink() if p.is_file() else None
+
+        # Fault B: post-link fsync fault
+        orig_fsync = os.fsync
+
+        def fsync_fail_post_link(fd):
+            if target_path.exists() and stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "fsync failed")
+            return orig_fsync(fd)
+
+        with mock.patch("scripts.two_site_codex_autopilot.os.fsync", side_effect=fsync_fail_post_link):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_initial_rescope_receipt(state_root, result, repo)
+            self.assertIn("ambiguous", str(ctx.exception).lower())
+            self.assertIsInstance(ctx.exception.__cause__, OSError)
+            self.assertEqual(ctx.exception.__cause__.errno, errno.EIO)
+
+        for f in os.listdir(state_root):
+            p = state_root / f
+            p.unlink() if p.is_file() else None
+
+        # Fault C: post-link close fault alone
+        import scripts.two_site_codex_autopilot as autopilot_mod
+        orig_load = autopilot_mod.load_rescope_receipt
+        orig_close = os.close
+        after_load = False
+
+        def wrapped_load(*args, **kwargs):
+            nonlocal after_load
+            res = orig_load(*args, **kwargs)
+            after_load = True
+            return res
+
+        def close_fail(fd):
+            if after_load:
+                orig_close(fd)
+                raise OSError(errno.EIO, "close dir_fd failed")
+            return orig_close(fd)
+
+        with mock.patch("scripts.two_site_codex_autopilot.load_rescope_receipt", side_effect=wrapped_load), \
+             mock.patch("scripts.two_site_codex_autopilot.os.close", side_effect=close_fail):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_initial_rescope_receipt(state_root, result, repo)
+            self.assertIn("ambiguous", str(ctx.exception).lower())
+            self.assertIsInstance(ctx.exception.__cause__, OSError)
+            self.assertEqual(ctx.exception.__cause__.errno, errno.EIO)
 
 
 if __name__ == "__main__":
