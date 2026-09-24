@@ -1,6 +1,6 @@
 # AE03 response custody and no-replay plan (2026-09-24 UTC)
 
-Status: **C1–C3 CODE ACCEPTED / NOT ACTIVATED; C4–C6 OPEN**. R1–R3 can read and validate a terminal quota receipt; C2 publishes it before the response, and C3 can recover the same response after restart without re-executing Provider. Client/Supervisor do not yet consume this path. The existing long-lived Broker process has not been restarted for C1–C3; Supervisor is STOPPED. This plan does not authorize a live retry or a new semantic reservation.
+Status: **C1–C3 AND C4a CODE ACCEPTED / NOT ACTIVATED; C4b/C4c–C6 OPEN**. R1–R3 read and validate a terminal quota receipt; C2 publishes it before the response, C3 recovers the same response after restart without Provider replay, and C4a validates/emits responses before client deletion. Exact-ID reattachment and bounded retention are not implemented. The existing long-lived Broker has not been restarted for these changes; Supervisor is STOPPED. This plan does not authorize a live retry or a new semantic reservation.
 
 ## Current boundary and concrete failure windows
 
@@ -36,3 +36,7 @@ Task `AE03-RECEIPT-FIRST-20260924-109` used two Worker corrections for test fixt
 ## C3 acceptance (2026-09-24 UTC)
 
 Task `AE03-CLAIM-RECOVERY-20260924-110` used a compact 116,476-byte prompt and no Worker correction. Pre-review and independent Codex Broker suites each passed 125 tests; Gemini Reviewer returned `VERIFIED`. Codex validated bindings and applied bytes against proposal SHA `d2dd12282d81f72231c7a2bf480698faf9089b099a8ccc9b565782685754f732`, reviewed the full diff and committed `e753326d8fe74a38e20454d88b9b40682d42b4f8`. Recovery now reads an exact validated receipt and reconstructs only its original response without Provider execution; absent receipt yields the ambiguous error, while unsafe or conflicting evidence retains the claim and stops. Response directory durability precedes claim removal. This is code acceptance only: the live Broker has not loaded C1–C3 and C4–C6 remain open.
+
+## C4a acceptance and rejection (2026-09-24 UTC)
+
+Task 111 passed 136 tests and Gemini review but Codex rejected it without applying bytes: a test manually removed `requests/<id>.json` and re-submitted the same request, falsely presenting potential Provider replay as safe reattachment. Task `AE03-CLIENT-CUSTODY-SAFE-20260924-112` corrected the scope with one Worker correction; 134 pre-review and 134 independent Codex tests passed. Reviewer explicitly verified no second submit or request deletion; Codex checked proposal SHA `45f7c533f51c6726722bb44feff217fc889b2fdfe4761b3c61bc8dea55c4cd5f` and applied bytes. Commit `5ba6bcad44c33728f70e9df09ad8c75a8ea503d0` validates and emits a response before unlink; invalid responses and output failures leave it intact. This is **not** reattachment, durable Supervisor acknowledgement or retention policy. C4b/C4c remain open and the live Broker has not loaded C4a.
