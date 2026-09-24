@@ -609,17 +609,27 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         )
 
         continuation_4_records = continuation_4_data.get("records", [])
-        self.assertEqual(len(continuation_4_records), 1)
+        self.assertEqual(len(continuation_4_records), 2)
 
         continuation_4_seed_ids = []
         continuation_4_selectors = []
         for record in continuation_4_records:
             continuation_4_seed_ids.extend(record.get("seed_ids", []))
             continuation_4_selectors.extend(record.get("test_selectors", []))
-        self.assertEqual(len(continuation_4_seed_ids), 2)
-        self.assertEqual(len(continuation_4_selectors), 2)
+        self.assertEqual(len(continuation_4_seed_ids), 4)
+        self.assertEqual(len(continuation_4_selectors), 4)
+
+        expected_continuation_4_selectors = [
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_valid_queue_suppresses_stale_delete_and_advances",
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_invalid_queue_suppresses_stale_prompt_delete",
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_invalid_queue_suppresses_stale_prompt_delete",
+        ]
+        self.assertEqual(continuation_4_selectors, expected_continuation_4_selectors)
 
         expected_continuation_4_seed_ids = [
+            "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+            "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
         ]

@@ -19,6 +19,19 @@
         "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
         "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_valid_queue_suppresses_stale_delete_and_advances"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py",
+      "sha256": "283e2e87da3049f4c74a1c16914bf129c2384fd9b204e8eb8412cdc22a56c091",
+      "last_commit": "d8ca931a61cdf1eb00fc31a796d38d4445e97fae",
+      "seed_ids": [
+        "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+        "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_invalid_queue_suppresses_stale_prompt_delete",
+        "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_invalid_queue_suppresses_stale_prompt_delete"
+      ]
     }
   ]
 }
