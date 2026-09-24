@@ -962,6 +962,42 @@ def serialize_next_rescope_receipt(
     return serialize_rescope_receipt(result, repository, attempt=attempt + 1)
 
 
+def build_rescope_recovery_context(
+    receipt: object, expected_repository: object
+) -> dict[str, object]:
+    """Translate a validated canonical rescope receipt into run_loop recovery context."""
+    if isinstance(receipt, Path) or isinstance(expected_repository, Path):
+        raise AutopilotError("rescope receipt arguments cannot be Path instances")
+    if not isinstance(receipt, dict):
+        raise AutopilotError("rescope receipt must be a mapping")
+    try:
+        encoded = serialize_json(receipt)
+    except Exception as exc:
+        raise AutopilotError(f"cannot serialize rescope receipt: {exc}") from exc
+    envelope = parse_rescope_receipt(encoded, expected_repository)
+    attempt = envelope.get("attempt")
+    if type(attempt) is not int or isinstance(attempt, bool) or attempt not in {1, 2}:
+        raise AutopilotError("recovery context requires attempt 1 or 2")
+    if envelope.get("terminal") is not False:
+        raise AutopilotError("recovery context requires non-terminal receipt")
+    result = envelope["result"]
+    next_action = result["next_action"]
+    blockers = list(result["blockers"])
+    context: dict[str, object] = {
+        "attempt": attempt,
+        "attempt_count": attempt,
+        "consecutive_rescopes": attempt,
+        "prior_unit_rejected": True,
+        "rejected": True,
+        "next_action": next_action,
+        "blockers": blockers,
+        "defer_prior_unit": attempt >= 2,
+    }
+    if attempt >= 2:
+        context["deferred_unit"] = {"next_action": next_action, "blockers": list(blockers)}
+    return context
+
+
 def rescope_epoch_basename(repository: object) -> str:
     """Derive deterministic epoch directory basename from canonical repository facts."""
     if isinstance(repository, Path) or not isinstance(repository, dict):
