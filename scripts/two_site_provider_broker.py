@@ -266,23 +266,24 @@ def _atomic_new_json(path: Path, value: Mapping[str, object], limit: int) -> Non
              | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
     descriptor = os.open(temporary, flags, 0o600)
     try:
-        view = memoryview(encoded)
-        while view:
-            written = os.write(descriptor, view)
-            if written <= 0:
-                raise BrokerError("broker queue write made no progress")
-            view = view[written:]
-        os.fsync(descriptor)
-        os.fchmod(descriptor, 0o600)
-    finally:
-        os.close(descriptor)
-    try:
+        try:
+            view = memoryview(encoded)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise BrokerError("broker queue write made no progress")
+                view = view[written:]
+            os.fsync(descriptor)
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
         # link(2) is the no-overwrite publication primitive available in the
         # Python stdlib.  The temporary name is removed immediately, leaving
         # the published queue file single-linked for bounded_file_bytes().
-        os.link(temporary, path, follow_symlinks=False)
-    except FileExistsError as exc:
-        raise BrokerError("broker queue target appeared during publication") from exc
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise BrokerError("broker queue target appeared during publication") from exc
     finally:
         temporary.unlink(missing_ok=True)
 

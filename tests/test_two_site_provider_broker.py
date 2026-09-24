@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import threading
 import time
@@ -266,6 +268,107 @@ def test_atomic_queue_publication_never_overwrites_existing_file(tmp_path: Path)
     with pytest.raises(broker.BrokerError, match="target already exists"):
         broker._atomic_new_json(target, {"new": "value"}, 1000)
     assert target.read_text(encoding="utf-8") == "owner-data"
+
+
+@pytest.mark.parametrize(
+    "scenario,target_pre_exists,patch_attr,patch_spec,expected_exc,expected_match",
+    [
+        ("success", False, None, None, None, None),
+        (
+            "write_zero",
+            False,
+            "write",
+            {"return_value": 0},
+            broker.BrokerError,
+            "write made no progress",
+        ),
+        (
+            "fsync_error",
+            False,
+            "fsync",
+            {"side_effect": OSError("fsync failure")},
+            OSError,
+            "fsync failure",
+        ),
+        (
+            "fchmod_error",
+            False,
+            "fchmod",
+            {"side_effect": OSError("fchmod failure")},
+            OSError,
+            "fchmod failure",
+        ),
+        (
+            "link_collision",
+            False,
+            "link",
+            {"side_effect": FileExistsError("collision")},
+            broker.BrokerError,
+            "appeared during publication",
+        ),
+        (
+            "link_oserror",
+            False,
+            "link",
+            {"side_effect": OSError("link failure")},
+            OSError,
+            "link failure",
+        ),
+        (
+            "pre_existing_target",
+            True,
+            None,
+            None,
+            broker.BrokerError,
+            "target already exists",
+        ),
+    ],
+)
+def test_atomic_new_json_cleanup_and_publication(
+    tmp_path: Path,
+    scenario: str,
+    target_pre_exists: bool,
+    patch_attr: str | None,
+    patch_spec: dict | None,
+    expected_exc: type[BaseException] | None,
+    expected_match: str | None,
+) -> None:
+    target = tmp_path / "published.json"
+    payload = {"key": "value", "id": 123}
+    expected_bytes = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+    initial_content = b"prior-data-must-not-change"
+    if target_pre_exists:
+        target.write_bytes(initial_content)
+
+    cm = (
+        mock.patch.object(broker.os, patch_attr, **patch_spec)
+        if patch_attr
+        else contextlib.nullcontext()
+    )
+
+    if expected_exc is not None:
+        with cm:
+            with pytest.raises(expected_exc, match=expected_match):
+                broker._atomic_new_json(target, payload, 1000)
+        if target_pre_exists:
+            assert target.read_bytes() == initial_content
+            assert [p.name for p in tmp_path.iterdir() if p != target] == []
+        else:
+            assert not target.exists()
+            assert list(tmp_path.iterdir()) == []
+    else:
+        with cm:
+            broker._atomic_new_json(target, payload, 1000)
+        assert target.exists()
+        assert target.read_bytes() == expected_bytes
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+        assert [p.name for p in tmp_path.iterdir() if p != target] == []
+
+    temps = [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+    assert temps == []
 
 
 def test_queue_consumer_waits_for_single_link_publication(tmp_path: Path) -> None:
