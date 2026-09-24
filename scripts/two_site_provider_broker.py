@@ -124,6 +124,9 @@ POLL_SECONDS = 0.25
 ORPHAN_RESPONSE_RETENTION_SECONDS = 86_400
 MAINTENANCE_RECORD_RETENTION_SECONDS = 10 * 86_400
 MAX_MAINTENANCE_RECORD_BYTES = 4096
+MAX_RECORD_SCAN_ENTRIES = 64
+MAX_RECORD_BYTES = 32768
+RECORD_FILENAME_RE = re.compile(r"^[0-9a-f]{32}\.json$")
 # ``bounded_file_bytes`` deliberately rejects a pathname whose inode changes
 # while it is being read.  Status publication replaces the inode atomically,
 # so a reader can legitimately observe that protective check in the tiny
@@ -372,6 +375,92 @@ def _prune_maintenance_records(root: Path, *, now: float | None = None) -> int:
                 Path(entry.path).unlink()
                 removed += 1
     return removed
+
+
+def scan_private_record_directory(path: Path) -> list[str]:
+    if not isinstance(path, Path):
+        raise BrokerError("record directory path must be a Path")
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise BrokerError("record directory is unavailable") from exc
+    if resolved != path:
+        raise BrokerError("record directory must be a canonical path without symlinks")
+    try:
+        lstat_before = os.lstat(path)
+    except OSError as exc:
+        raise BrokerError("cannot lstat record directory") from exc
+    if not stat.S_ISDIR(lstat_before.st_mode) or stat.S_ISLNK(lstat_before.st_mode):
+        raise BrokerError("record directory must be a directory and not a symlink")
+    if lstat_before.st_uid != os.geteuid():
+        raise BrokerError("record directory is not owned by current euid")
+    if stat.S_IMODE(lstat_before.st_mode) != 0o700:
+        raise BrokerError("record directory mode must be 0700")
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise BrokerError(f"cannot safely open record directory: {exc}") from exc
+    try:
+        fd_stat = os.fstat(fd)
+        if not stat.S_ISDIR(fd_stat.st_mode):
+            raise BrokerError("record directory descriptor is not a directory")
+        if fd_stat.st_uid != os.geteuid():
+            raise BrokerError("record directory descriptor owner mismatch")
+        if stat.S_IMODE(fd_stat.st_mode) != 0o700:
+            raise BrokerError("record directory descriptor mode mismatch")
+        if (fd_stat.st_dev, fd_stat.st_ino) != (lstat_before.st_dev, lstat_before.st_ino):
+            raise BrokerError("record directory descriptor does not match path before scan")
+
+        names: list[str] = []
+        entry_count = 0
+        with os.scandir(fd) as scanner:
+            for entry in scanner:
+                entry_count += 1
+                if entry_count > MAX_RECORD_SCAN_ENTRIES:
+                    raise BrokerError("record directory exceeds scan entry limit")
+                if not RECORD_FILENAME_RE.fullmatch(entry.name):
+                    raise BrokerError(f"record directory contains invalid entry name: {entry.name}")
+                try:
+                    entry_stat = entry.stat(follow_symlinks=False)
+                except OSError as exc:
+                    raise BrokerError(f"cannot stat record entry {entry.name}") from exc
+                if entry.is_symlink() or stat.S_ISLNK(entry_stat.st_mode):
+                    raise BrokerError(f"record entry {entry.name} cannot be a symlink")
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    raise BrokerError(f"record entry {entry.name} is not a regular file")
+                if entry_stat.st_uid != os.geteuid():
+                    raise BrokerError(f"record entry {entry.name} owner mismatch")
+                if stat.S_IMODE(entry_stat.st_mode) != 0o600:
+                    raise BrokerError(f"record entry {entry.name} mode must be 0600")
+                if entry_stat.st_nlink != 1:
+                    raise BrokerError(f"record entry {entry.name} has invalid link count")
+                if entry_stat.st_size > MAX_RECORD_BYTES:
+                    raise BrokerError(f"record entry {entry.name} exceeds byte limit")
+                names.append(entry.name)
+
+        try:
+            lstat_after = os.lstat(path)
+        except OSError as exc:
+            raise BrokerError("cannot lstat record directory after scan") from exc
+        if not stat.S_ISDIR(lstat_after.st_mode) or stat.S_ISLNK(lstat_after.st_mode):
+            raise BrokerError("record directory changed after scan")
+        if lstat_after.st_uid != os.geteuid():
+            raise BrokerError("record directory owner changed after scan")
+        if stat.S_IMODE(lstat_after.st_mode) != 0o700:
+            raise BrokerError("record directory mode changed after scan")
+        if (lstat_after.st_dev, lstat_after.st_ino) != (fd_stat.st_dev, fd_stat.st_ino):
+            raise BrokerError("record directory descriptor does not match path after scan")
+
+        return sorted(names)
+    finally:
+        os.close(fd)
 
 
 def _task_relative_path(raw: object) -> Path:
