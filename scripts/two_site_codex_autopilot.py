@@ -1118,6 +1118,7 @@ def _open_private_rescope_state_dir(state_root: Path) -> int:
 def load_rescope_receipt(
     state_root: Path,
     expected_repository: object,
+    receipt_filename: str = _RESCOPE_RECEIPT_FILENAME,
 ) -> dict[str, object] | None:
     """Safely load and validate the canonical rescope receipt under state_root.
 
@@ -1125,6 +1126,8 @@ def load_rescope_receipt(
     Fails closed with typed AutopilotError on any directory traversal defect,
     permission/ownership defect, symlink, link count, size, drift, or codec error.
     """
+    if type(receipt_filename) is not str or receipt_filename not in _RESCOPE_RECEIPT_FILENAMES:
+        raise AutopilotError(f"invalid rescope receipt filename: {receipt_filename!r}")
     if not isinstance(state_root, Path):
         raise AutopilotError("state_root must be a Path")
     if not state_root.is_absolute():
@@ -1200,7 +1203,7 @@ def load_rescope_receipt(
         if (dir_stat.st_dev, dir_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
             raise AutopilotError("pinned directory does not match state_root inode")
 
-        leaf_name = _RESCOPE_RECEIPT_FILENAME
+        leaf_name = receipt_filename
         try:
             pre_stat = os.stat(leaf_name, dir_fd=pinned_dir_fd, follow_symlinks=False)
             if stat.S_ISLNK(pre_stat.st_mode):
@@ -1285,7 +1288,12 @@ def load_rescope_receipt(
 
         _recheck_final_root(state_root, pinned_dir_fd)
 
-        return parse_rescope_receipt(raw_bytes, expected_repository)
+        envelope = parse_rescope_receipt(raw_bytes, expected_repository)
+        if envelope.get("attempt") != _RESCOPE_RECEIPT_FILENAMES[receipt_filename]:
+            raise AutopilotError(
+                f"receipt attempt {envelope.get('attempt')!r} does not match expected attempt for {receipt_filename}"
+            )
+        return envelope
     except Exception as exc:
         primary_exc = exc
         raise
