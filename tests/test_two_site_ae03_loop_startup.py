@@ -14,6 +14,7 @@ from scripts.two_site_codex_autopilot import (
     PROTECTED_REFS,
     AutopilotError,
     ensure_rescope_epoch_dir,
+    publish_accepted_checkpoint,
     publish_initial_rescope_receipt,
     publish_next_rescope_receipt,
     publish_rescope_intent,
@@ -64,6 +65,29 @@ def _rescope_result():
         "head_before": HEAD,
         "head_after": HEAD,
         "head_changed": False,
+    }
+
+
+def _accepted_continue_result(
+    head_before="0" * 40,
+    head_after=HEAD,
+    commit=HEAD,
+):
+    return {
+        "schema_version": "1.0",
+        "state": "CONTINUE",
+        "disposition": "NONE",
+        "category": "NONE",
+        "summary": "accepted continue checkpoint",
+        "commit": commit,
+        "next_action": "continue next unit",
+        "blockers": [],
+        "gemini_worker_run_id": "worker-run-ae03-0001",
+        "gemini_reviewer_run_id": "reviewer-run-ae03-0001",
+        "proposal_sha256": "5" * 64,
+        "head_before": head_before,
+        "head_after": head_after,
+        "head_changed": head_before != head_after,
     }
 
 
@@ -327,6 +351,315 @@ class TestAE03LoopStartup(unittest.TestCase):
                     with self.assertRaises(exc_cls):
                         run_loop(self.root, self.codex, 1, 300, True)
                     self.assertEqual(len(cycle_calls), 0)
+
+    def test_prior_epoch_missing_checkpoint_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        old_repo = _repo_facts()
+        old_repo["protected_refs"] = {r: "8" * 40 for r in PROTECTED_REFS}
+        ensure_rescope_epoch_dir(self.state_root, old_repo)
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "prior epoch requires matching accepted checkpoint" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_prior_epoch_corrupt_checkpoint_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        old_repo = _repo_facts()
+        old_repo["protected_refs"] = {r: "8" * 40 for r in PROTECTED_REFS}
+        ensure_rescope_epoch_dir(self.state_root, old_repo)
+        publish_accepted_checkpoint(
+            self.state_root,
+            _accepted_continue_result(head_before="0" * 40, head_after=HEAD, commit=HEAD),
+            self.repo,
+        )
+        checkpoint_paths = [
+            p
+            for p in self.state_root.iterdir()
+            if p.is_file()
+            and ("checkpoint" in p.name or (p.name.endswith(".json") and p.name != "status.json"))
+        ]
+        self.assertTrue(len(checkpoint_paths) > 0)
+        for cp in checkpoint_paths:
+            cp.write_text("{malformed json: true", encoding="utf-8")
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(len(status["blockers"]) > 0)
+
+    def test_prior_epoch_checkpoint_head_drift_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        drift_head = "9" * 40
+        old_repo = _repo_facts()
+        old_repo["head"] = drift_head
+        ensure_rescope_epoch_dir(self.state_root, old_repo)
+        publish_accepted_checkpoint(
+            self.state_root,
+            _accepted_continue_result(
+                head_before="0" * 40, head_after=drift_head, commit=drift_head
+            ),
+            old_repo,
+        )
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "prior epoch requires matching accepted checkpoint" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_prior_epoch_checkpoint_changed_protected_refs_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        repo_diff_refs = _repo_facts()
+        repo_diff_refs["protected_refs"] = {r: "8" * 40 for r in PROTECTED_REFS}
+        ensure_rescope_epoch_dir(self.state_root, repo_diff_refs)
+        publish_accepted_checkpoint(
+            self.state_root,
+            _accepted_continue_result(
+                head_before="0" * 40, head_after=HEAD, commit=HEAD
+            ),
+            repo_diff_refs,
+        )
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "prior epoch requires matching accepted checkpoint" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_prior_epoch_checkpoint_changed_control_blobs_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        repo_diff_blobs = _repo_facts()
+        repo_diff_blobs["control_blobs"] = {
+            p.as_posix(): "8" * 40 for p in CONTROL_PATHS
+        }
+        ensure_rescope_epoch_dir(self.state_root, repo_diff_blobs)
+        publish_accepted_checkpoint(
+            self.state_root,
+            _accepted_continue_result(
+                head_before="0" * 40, head_after=HEAD, commit=HEAD
+            ),
+            repo_diff_blobs,
+        )
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "prior epoch requires matching accepted checkpoint" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_prior_epoch_checkpoint_changed_assignment_scope_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        repo_diff_scope = _repo_facts()
+        repo_diff_scope["assignment_scope"] = AssignmentScope(
+            "AE03-ASSIGN-CHANGED",
+            "P1-00b",
+            "8" * 64,
+            "2099-01-01T00:00:00Z",
+            ("scripts/two_site_codex_autopilot.py",),
+            (),
+        )
+        ensure_rescope_epoch_dir(self.state_root, repo_diff_scope)
+        publish_accepted_checkpoint(
+            self.state_root,
+            _accepted_continue_result(
+                head_before="0" * 40, head_after=HEAD, commit=HEAD
+            ),
+            repo_diff_scope,
+        )
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "prior epoch requires matching accepted checkpoint" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_matching_canonical_checkpoint_permits_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        old_repo = _repo_facts()
+        old_repo["protected_refs"] = {r: "8" * 40 for r in PROTECTED_REFS}
+        ensure_rescope_epoch_dir(self.state_root, old_repo)
+        publish_accepted_checkpoint(
+            self.state_root,
+            _accepted_continue_result(
+                head_before="0" * 40, head_after=HEAD, commit=HEAD
+            ),
+            self.repo,
+        )
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 0)
+            self.assertEqual(len(cycle_calls), 1)
+            self.assertEqual(cycle_calls[0]["cycle"], 1)
+
+    def test_malformed_rescope_epoch_name_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        (self.state_root / "rescope-not-a-valid-hex-digest").mkdir(mode=0o700)
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any("malformed rescope epoch name" in b for b in status["blockers"])
+            )
+
+    def test_epoch_symlink_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        target = self.root / "epoch_target"
+        target.mkdir(mode=0o700)
+        link = self.state_root / f"rescope-{'a' * 64}"
+        link.symlink_to(target)
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any("unsafe rescope epoch symlink" in b for b in status["blockers"])
+            )
+
+    def test_epoch_regular_file_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        reg_file = self.state_root / f"rescope-{'b' * 64}"
+        reg_file.write_text("regular file", encoding="utf-8")
+        reg_file.chmod(0o700)
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "unsafe rescope epoch non-directory" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_old_epoch_mode0755_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        old_repo = _repo_facts()
+        old_repo["protected_refs"] = {r: "8" * 40 for r in PROTECTED_REFS}
+        old_epoch = ensure_rescope_epoch_dir(self.state_root, old_repo)
+        old_epoch.chmod(0o755)
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any("unsafe rescope epoch mode" in b for b in status["blockers"])
+            )
+
+    def test_state_root_scan_overflow_blocked_zero_cycle(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        for i in range(513):
+            (self.state_root / f"entry_{i:04d}").write_text("", encoding="utf-8")
+        p_val, p_git, p_cycle = self._patch_all()
+        with p_val, p_git, p_cycle:
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 2)
+            self.assertEqual(len(cycle_calls), 0)
+            status = unique_json(
+                (self.state_root / "status.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(status["state"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    "state_root entries exceed maximum limit" in b
+                    for b in status["blockers"]
+                )
+            )
+
+    def test_stop_prevents_preflights_even_with_invalid_old_entry(self):
+        self.state_root.mkdir(parents=True, mode=0o700)
+        (self.state_root / "STOP").write_text("", encoding="utf-8")
+        (self.state_root / "rescope-invalid-name").mkdir(mode=0o700)
+
+        def _fail_preflight(*_args, **_kwargs):
+            self.fail("Preflight or validation called despite STOP file presence")
+
+        with patch(
+            "scripts.two_site_codex_autopilot.validate_repository",
+            side_effect=_fail_preflight,
+        ), patch(
+            "scripts.two_site_codex_autopilot.prepare_rescope_attempt",
+            side_effect=_fail_preflight,
+        ), patch(
+            "scripts.two_site_codex_autopilot.run_cycle",
+            side_effect=fake_run_cycle,
+        ):
+            ret = run_loop(self.root, self.codex, 1, 300, True)
+            self.assertEqual(ret, 0)
+            self.assertEqual(len(cycle_calls), 0)
 
 
 if __name__ == "__main__":
