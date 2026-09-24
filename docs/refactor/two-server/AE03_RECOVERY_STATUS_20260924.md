@@ -1,8 +1,14 @@
 # AE03 Recovery Status and Gates (2026-09-24)
 
 - Scope & Context: [AE Plan](AUTOMATION_EFFICIENCY_PLAN.md), [AE01 Evaluation](AE01_EVALUATION_20260923.md), [AE02 Evaluation](AE02_EVALUATION_20260923.md), and [Automation Efficiency Memory](../../memory/areas/automation-efficiency.md).
-- Current Baseline: Clean HEAD `94c01ab2159274acb372b4663573dd41cbcc69fd` on branch `refactor/two-site-architecture`.
+- Current Baseline: Clean HEAD `6cc3b475e3667df7ae6aa2773fd699c1f7449862` on branch `refactor/two-site-architecture`.
 - Governing Rule: No modifications to `main`, production, DNS, or Writer. No active Supervisor recovery or runtime hooks are enabled.
+
+## Update at `6cc3b475` (2026-09-24)
+
+`dc058d7b` propagated valid quota evidence into Pipeline's blocked output. `36d1a0ab` added a pure Broker detector; its first proposal lacked tests and was corrected after Gemini Reviewer rejection. `56bece05` bound the observation to the exact Runner role, attempt ID and SHA of the same bounded status bytes. A pre-review test caught that correction-Worker quota retains both prior Worker and Reviewer IDs in Pipeline state; the corrected test proves the current role comes from the quota attempt, not those stale fields. `6cc3b475` requires Broker to re-read that status through the guarded reader, match its digest and role/model/task/head/evidence, and reject missing, changed or linked status and any result artifact for the quota invocation. Independent selected suites passed 152, 175 and 173 tests, respectively; Worker transport retry occurred in the latter two units and remains real cost.
+
+This is **observational validation only**. Broker still does not journal a terminal quota response, recover an acknowledged response, wait or resume the existing semantic reservation; Supervisor remains STOPPED. The existing detector accepts an unnecessary `verifier-N` run-ID spelling as well as the actual `reviewer-N` spelling; close that conservative-parser gap before runtime custody. Monitor's old ref pins are ancestors of current `main`/`origin/main` but do not match them. No live quota stream or comparable efficiency cohort has been observed, so effect remains **UNKNOWN**. The monolithic quota-journal task 091 was rejected after a hanging `serve(once=True)` test and a truncated correction, with no code applied.
 
 ## Update at `1ee73dd0` (2026-09-24)
 

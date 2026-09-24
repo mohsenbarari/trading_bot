@@ -1,6 +1,6 @@
 # AE03: quota recovery contract (design, not activation)
 
-Status: **DESIGN / NOT IMPLEMENTED** at `dc058d7b`. The [AE plan](AUTOMATION_EFFICIENCY_PLAN.md) remains authoritative. No change to `main`, production, DNS or Web Writer is authorized here.
+Status: **PARTIAL OBSERVATION / NO RUNTIME RECOVERY** at `6cc3b475`. `36d1a0ab`–`6cc3b475` added a pure terminal-quota detector and exact attempt/status binding. Journal, wait, resume and wake remain unimplemented. The [AE plan](AUTOMATION_EFFICIENCY_PLAN.md) remains authoritative. No change to `main`, production, DNS or Web Writer is authorized here.
 
 ## The boundary that matters
 
