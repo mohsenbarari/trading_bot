@@ -861,7 +861,17 @@ def _published_queue_file(path: Path, label: str) -> bool:
     return True
 
 
-def _claim_next(requests: Path, claimed: Path) -> Path | None:
+def _claim_next(
+    requests: Path,
+    claimed: Path,
+    responses: Path | None = None,
+    terminal_quota: Path | None = None,
+) -> Path | None:
+    if responses is None:
+        responses = requests.parent / "responses"
+    if terminal_quota is None:
+        terminal_quota = requests.parent / "terminal-quota"
+
     for name in _queue_names(requests):
         if not re.fullmatch(r"[0-9a-f]{32}\.json", name):
             raise BrokerError("broker request queue contains an invalid entry")
@@ -869,9 +879,62 @@ def _claim_next(requests: Path, claimed: Path) -> Path | None:
         destination = claimed / name
         if not _published_queue_file(source, "broker request"):
             return None
+        try:
+            source_stat = os.lstat(source)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat source request file: {exc}") from exc
+        if (
+            stat.S_ISLNK(source_stat.st_mode)
+            or not stat.S_ISREG(source_stat.st_mode)
+            or source_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(source_stat.st_mode) != 0o600
+            or source_stat.st_nlink != 1
+        ):
+            raise BrokerError("broker request is not a trusted queue file")
+
         if os.path.lexists(destination):
             raise BrokerError("broker claimed request already exists")
+        if os.path.lexists(responses / name):
+            raise BrokerError("broker response already exists for request")
+        if os.path.lexists(terminal_quota):
+            try:
+                tq_stat = os.lstat(terminal_quota)
+            except OSError as exc:
+                raise BrokerError(f"cannot lstat terminal quota directory: {exc}") from exc
+            if stat.S_ISLNK(tq_stat.st_mode):
+                raise BrokerError("terminal quota directory cannot be a symlink")
+            if not stat.S_ISDIR(tq_stat.st_mode):
+                raise BrokerError("terminal quota directory must be a directory")
+            if tq_stat.st_uid != os.geteuid():
+                raise BrokerError("terminal quota directory owner mismatch")
+            if stat.S_IMODE(tq_stat.st_mode) != 0o700:
+                raise BrokerError("terminal quota directory mode must be 0700")
+            try:
+                resolved_tq = terminal_quota.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise BrokerError("terminal quota directory is unavailable") from exc
+            if resolved_tq != terminal_quota:
+                raise BrokerError("terminal quota directory must be a canonical path without symlinks")
+            if os.path.lexists(terminal_quota / name):
+                raise BrokerError("terminal quota record already exists for request")
+
         os.replace(source, destination)
+        try:
+            claimed_stat = os.lstat(destination)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat claimed request: {exc}") from exc
+        if (
+            stat.S_ISLNK(claimed_stat.st_mode)
+            or not stat.S_ISREG(claimed_stat.st_mode)
+            or claimed_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(claimed_stat.st_mode) != 0o600
+            or claimed_stat.st_nlink != 1
+            or (claimed_stat.st_dev, claimed_stat.st_ino, claimed_stat.st_size)
+            != (source_stat.st_dev, source_stat.st_ino, source_stat.st_size)
+        ):
+            raise BrokerError("claimed request file verification failed")
+        fsync_private_record_directory(claimed)
+        fsync_private_record_directory(requests)
         return destination
     return None
 
@@ -962,7 +1025,12 @@ def serve(
                 and not once
                 and _supervisor_stop_acknowledged(root)
             ):
-                claimed_path = _claim_next(requests, claimed)
+                claimed_path = _claim_next(
+                    requests,
+                    claimed,
+                    responses=responses,
+                    terminal_quota=state_root / "terminal-quota",
+                )
                 if claimed_path is None:
                     if time.time() - last_prune >= 60:
                         _prune_orphan_responses(responses)
