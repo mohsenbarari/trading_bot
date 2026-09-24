@@ -992,6 +992,98 @@ def _recheck_final_root(state_root: Path, pinned_dir_fd: int) -> None:
         raise AutopilotError("pinned directory permissions invalid")
 
 
+def _open_private_rescope_state_dir(state_root: Path) -> int:
+    """Open and pin state_root securely, returning an owned directory file descriptor."""
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+    if not state_root.is_absolute():
+        raise AutopilotError("state_root must be an absolute Path")
+    if ".." in state_root.parts or "." in state_root.parts or state_root != Path(os.path.abspath(str(state_root))):
+        raise AutopilotError("state_root must be normalized without relative components")
+    try:
+        resolved_root = state_root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise AutopilotError(f"state_root cannot be resolved: {exc}") from exc
+    if resolved_root != state_root:
+        raise AutopilotError("state_root cannot contain symlinks or path aliases")
+
+    if (
+        getattr(os, "O_NOFOLLOW", None) is None
+        or getattr(os, "O_DIRECTORY", None) is None
+        or getattr(os, "O_CLOEXEC", None) is None
+    ):
+        raise AutopilotError("platform missing required O_NOFOLLOW, O_DIRECTORY, or O_CLOEXEC flags")
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    has_open_dir_fd = os.open in supports_dir_fd or any(getattr(f, "__name__", None) == "open" for f in supports_dir_fd)
+    has_stat_dir_fd = os.stat in supports_dir_fd or any(getattr(f, "__name__", None) == "stat" for f in supports_dir_fd)
+    if not has_open_dir_fd or not has_stat_dir_fd:
+        raise AutopilotError("platform missing dir_fd support for os.open or os.stat")
+
+    tracker = _DescriptorTracker()
+    primary_exc: Exception | None = None
+    try:
+        dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+        try:
+            current_fd = os.open("/", dir_flags)
+        except TypeError as exc:
+            raise AutopilotError(f"os.open failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            raise AutopilotError(f"cannot open root directory: {exc}") from exc
+
+        tracker.add(current_fd)
+
+        for comp in state_root.parts[1:]:
+            try:
+                next_fd = os.open(comp, dir_flags, dir_fd=current_fd)
+            except TypeError as exc:
+                raise AutopilotError(f"dir_fd open failed with TypeError: {exc}") from exc
+            except OSError as exc:
+                raise AutopilotError(f"cannot open directory component {comp!r}: {exc}") from exc
+
+            tracker.add(next_fd)
+            try:
+                os.close(current_fd)
+            except OSError as exc:
+                raise AutopilotError(f"failed to close predecessor directory descriptor: {exc}") from exc
+            finally:
+                tracker.remove(current_fd)
+            current_fd = next_fd
+
+        pinned_dir_fd = current_fd
+        try:
+            dir_stat = os.fstat(pinned_dir_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fstat state_root directory: {exc}") from exc
+
+        if not stat.S_ISDIR(dir_stat.st_mode):
+            raise AutopilotError("state_root is not a directory")
+        if dir_stat.st_uid != os.geteuid():
+            raise AutopilotError("state_root directory owner must be process euid")
+        if (dir_stat.st_mode & 0o777) != 0o700:
+            raise AutopilotError("state_root directory mode must be 0700")
+
+        try:
+            expected_stat = state_root.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise AutopilotError(f"cannot stat state_root path: {exc}") from exc
+
+        if (dir_stat.st_dev, dir_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
+            raise AutopilotError("pinned directory does not match state_root inode")
+
+        _recheck_final_root(state_root, pinned_dir_fd)
+
+        tracker.remove(pinned_dir_fd)
+        return pinned_dir_fd
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        primary_exc = exc
+        raise
+    finally:
+        tracker.close_all(primary_exc)
+
+
 def load_rescope_receipt(
     state_root: Path,
     expected_repository: object,
