@@ -115,7 +115,8 @@ PIPELINE_BASE_KEYS = frozenset({
     "pre_review_test_state",
     "semantic_task_fingerprint",
 })
-PIPELINE_QUOTA_KEYS = PIPELINE_BASE_KEYS | {"quota_evidence"}
+QUOTA_ATTEMPT_KEYS = frozenset({"role", "run_id", "status_sha256"})
+PIPELINE_QUOTA_KEYS = PIPELINE_BASE_KEYS | {"quota_evidence", "quota_attempt"}
 STATUS_MAX_AGE_SECONDS = 30
 HEARTBEAT_SECONDS = 10
 QUEUE_SCAN_LIMIT = 32
@@ -932,23 +933,70 @@ def detect_quota_response(
         if not isinstance(task_id, str) or not task_id or payload.get("task_id") != task_id:
             return None
 
-        final_worker = payload.get("final_worker_run_id")
-        proposal_sha = payload.get("proposal_sha256")
-        if final_worker is None:
-            if proposal_sha is not None:
-                return None
-            expected_model = WORKER_MODEL
-        elif (
-            isinstance(final_worker, str)
-            and bool(CANONICAL_RUN_ID_RE.fullmatch(final_worker))
-            and isinstance(proposal_sha, str)
-            and bool(SHA_RE.fullmatch(proposal_sha))
-        ):
-            expected_model = MODEL
-        else:
+        attempt = payload.get("quota_attempt")
+        if not isinstance(attempt, dict) or set(attempt.keys()) != QUOTA_ATTEMPT_KEYS:
+            return None
+        role = attempt.get("role")
+        if role not in ("worker", "verifier"):
+            return None
+
+        run_id = attempt.get("run_id")
+        if not isinstance(run_id, str):
+            return None
+        run_prefix = request.get("run_prefix")
+        if not isinstance(run_prefix, str) or not RUN_PREFIX_RE.fullmatch(run_prefix):
+            return None
+
+        role_pattern = r"worker" if role == "worker" else r"(?:reviewer|verifier)"
+        run_pattern = rf"^{re.escape(run_prefix)}-{role_pattern}-[0-2](?:-retry-[1-2])?$"
+        if not re.fullmatch(run_pattern, run_id):
+            return None
+
+        status_sha = attempt.get("status_sha256")
+        if not isinstance(status_sha, str) or not SHA_RE.fullmatch(status_sha):
+            return None
+
+        run_dir = canonical / ".local/two-site-refactor/proposals" / run_id
+        if os.path.islink(run_dir) or run_dir.is_symlink() or not run_dir.is_dir():
+            return None
+        if os.path.lexists(run_dir / "result.json") or os.path.lexists(run_dir / "proposal.patch"):
+            return None
+
+        status_path = run_dir / "status.json"
+        if os.path.islink(status_path) or status_path.is_symlink():
+            return None
+        status_bytes = bounded_file_bytes(canonical, status_path, MAX_CONTEXT, "quota status")
+        if hashlib.sha256(status_bytes).hexdigest() != status_sha:
+            return None
+
+        status = unique_json(status_bytes.decode("utf-8"))
+        if not isinstance(status, dict):
+            return None
+
+        expected_model = WORKER_MODEL if role == "worker" else MODEL
+        if status.get("run_id") != run_id:
+            return None
+        if status.get("role") != role:
+            return None
+        if status.get("head") != request.get("source_head"):
+            return None
+        if status.get("model") != expected_model:
+            return None
+        if status.get("state") != "BLOCKED":
+            return None
+        if status.get("task_id") != task_id:
             return None
 
         evidence = payload.get("quota_evidence")
+        if status.get("quota_evidence") != evidence:
+            return None
+
+        if status.get("conversation_id") is not None:
+            if not isinstance(status["conversation_id"], str) or status["conversation_id"] != (
+                evidence.get("conversation_id") if isinstance(evidence, dict) else None
+            ):
+                return None
+
         return validate_quota_evidence(evidence, expected_model)
     except Exception:
         return None

@@ -588,46 +588,144 @@ def test_maintenance_record_pruning_preserves_recent_and_unowned_files(
     assert unrelated.exists()
 
 
+def _write_runner_status(
+    root: Path,
+    run_id: str,
+    *,
+    role: str,
+    head: str,
+    model: str,
+    task_id: str,
+    quota_evidence: dict,
+    conversation_id: str | None = "conv-test",
+    state: str = "BLOCKED",
+    raw_content: bytes | None = None,
+) -> tuple[Path, str]:
+    run_dir = root / ".local/two-site-refactor/proposals" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    status_path = run_dir / "status.json"
+    if raw_content is not None:
+        status_path.write_bytes(raw_content)
+        return status_path, hashlib.sha256(raw_content).hexdigest()
+    status_data = {
+        "run_id": run_id,
+        "role": role,
+        "head": head,
+        "model": model,
+        "state": state,
+        "task_id": task_id,
+        "quota_evidence": quota_evidence,
+    }
+    if conversation_id is not None:
+        status_data["conversation_id"] = conversation_id
+    content = json.dumps(status_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    status_path.write_bytes(content)
+    status_sha = hashlib.sha256(content).hexdigest()
+    return status_path, status_sha
+
+
 def _make_quota_payload(
+    root: Path,
     task_id: str,
     source_head: str,
+    run_prefix: str = "broker-test-run",
     *,
     role: str = "worker",
     kind: str = "QUOTA_RESET_KNOWN",
+    is_correction: bool = False,
+    run_id: str | None = None,
+    corrupt_status_sha: bool = False,
+    extra_attempt_keys: dict | None = None,
+    omit_attempt_key: str | None = None,
+    status_raw_content: bytes | None = None,
+    conversation_id: str | None = None,
+    status_role: str | None = None,
+    status_head: str | None = None,
+    status_model: str | None = None,
+    status_task_id: str | None = None,
+    status_state: str = "BLOCKED",
+    create_result_file: bool = False,
+    create_patch_file: bool = False,
 ) -> dict:
     if role == "worker":
-        worker_run_id = None
-        proposal_sha = None
+        attempt_role = "worker"
         model = broker.WORKER_MODEL
+        if is_correction:
+            effective_run_id = run_id or f"{run_prefix}-worker-1"
+            worker_run_id = f"{run_prefix}-worker-0"
+            reviewer_run_id = f"{run_prefix}-reviewer-0"
+            proposal_sha = "1" * 64
+            corr_count = 1
+        else:
+            effective_run_id = run_id or f"{run_prefix}-worker-0"
+            worker_run_id = None
+            reviewer_run_id = None
+            proposal_sha = None
+            corr_count = 0
     else:
-        worker_run_id = "cycle-0001-20990101T000000Z-123-worker-0"
-        proposal_sha = "1" * 64
+        attempt_role = "verifier"
+        effective_run_id = run_id or f"{run_prefix}-reviewer-0"
         model = broker.MODEL
+        worker_run_id = f"{run_prefix}-worker-0"
+        reviewer_run_id = None
+        proposal_sha = "1" * 64
+        corr_count = 0
 
+    cid = conversation_id if conversation_id is not None else f"conv-{role}-test"
     evidence = {
         "kind": kind,
         "provider": "gemini",
         "model": model,
-        "conversation_id": f"conv-{role}-test",
+        "conversation_id": cid,
         "reset_at_utc": "2099-01-01T00:00:00Z" if kind == "QUOTA_RESET_KNOWN" else None,
     }
+
+    _status_path, status_sha = _write_runner_status(
+        root,
+        effective_run_id,
+        role=status_role or attempt_role,
+        head=status_head or source_head,
+        model=status_model or model,
+        task_id=status_task_id or task_id,
+        quota_evidence=evidence,
+        conversation_id=cid,
+        state=status_state,
+        raw_content=status_raw_content,
+    )
+
+    if create_result_file:
+        (root / ".local/two-site-refactor/proposals" / effective_run_id / "result.json").write_text("{}", encoding="utf-8")
+    if create_patch_file:
+        (root / ".local/two-site-refactor/proposals" / effective_run_id / "proposal.patch").write_text("", encoding="utf-8")
+
+    attempt = {
+        "role": attempt_role,
+        "run_id": effective_run_id,
+        "status_sha256": "0" * 64 if corrupt_status_sha else status_sha,
+    }
+    if extra_attempt_keys:
+        attempt.update(extra_attempt_keys)
+    if omit_attempt_key:
+        del attempt[omit_attempt_key]
+
     return {
         "state": "TASK_BLOCKED",
         "task_id": task_id,
         "source_head": source_head,
         "final_worker_run_id": worker_run_id,
-        "final_reviewer_run_id": None,
+        "final_reviewer_run_id": reviewer_run_id,
         "proposal_sha256": proposal_sha,
         "changed_paths": [],
         "proposal_path": None,
         "reviewer_path": None,
-        "correction_count": 0,
+        "correction_count": corr_count,
         "blockers": ["observational quota, no replay authority"],
         "pre_review_test_path": None,
         "pre_review_test_sha256": None,
         "pre_review_test_state": None,
         "semantic_task_fingerprint": None,
         "quota_evidence": evidence,
+        "quota_attempt": attempt,
     }
 
 
@@ -645,22 +743,49 @@ def _make_quota_response(request: dict, payload: dict) -> dict:
     }
 
 
-@pytest.mark.parametrize("role", ["worker", "reviewer"])
 @pytest.mark.parametrize("kind", ["QUOTA_RESET_KNOWN", "QUOTA_RESET_UNKNOWN"])
-def test_detect_quota_response_positive_worker_and_reviewer(
+def test_detect_quota_response_positive_initial_worker_reviewer_and_correction_worker(
     broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
-    role: str,
     kind: str,
 ) -> None:
     root, task, _scope, environment = broker_repo
     request = make_valid_request(root, task, environment)
-    payload = _make_quota_payload("BROKER-TEST-1", request["source_head"], role=role, kind=kind)
-    response = _make_quota_response(request, payload)
 
-    detected = broker.detect_quota_response(root, request, response)
-    assert detected is not None
-    assert detected == payload["quota_evidence"]
-    assert broker.detect_terminal_quota_response(root, request, response) == detected
+    # 1. Initial Worker
+    payload_worker = _make_quota_payload(
+        root, "BROKER-TEST-1", request["source_head"], role="worker", kind=kind, is_correction=False
+    )
+    resp_worker = _make_quota_response(request, payload_worker)
+    det_worker = broker.detect_quota_response(root, request, resp_worker)
+    assert det_worker is not None
+    assert det_worker == payload_worker["quota_evidence"]
+    assert broker.detect_terminal_quota_response(root, request, resp_worker) == det_worker
+
+    # 2. Reviewer (verifier)
+    payload_rev = _make_quota_payload(
+        root, "BROKER-TEST-1", request["source_head"], role="verifier", kind=kind, is_correction=False
+    )
+    resp_rev = _make_quota_response(request, payload_rev)
+    det_rev = broker.detect_quota_response(root, request, resp_rev)
+    assert det_rev is not None
+    assert det_rev == payload_rev["quota_evidence"]
+    assert broker.detect_terminal_quota_response(root, request, resp_rev) == det_rev
+
+    # 3. CORRECTION Worker with prior stale IDs
+    payload_corr = _make_quota_payload(
+        root, "BROKER-TEST-1", request["source_head"], role="worker", kind=kind, is_correction=True
+    )
+    assert payload_corr["final_worker_run_id"] == f"{request['run_prefix']}-worker-0"
+    assert payload_corr["final_reviewer_run_id"] == f"{request['run_prefix']}-reviewer-0"
+    assert payload_corr["proposal_sha256"] == "1" * 64
+    assert payload_corr["quota_attempt"]["role"] == "worker"
+    assert payload_corr["quota_evidence"]["model"] == broker.WORKER_MODEL
+
+    resp_corr = _make_quota_response(request, payload_corr)
+    det_corr = broker.detect_quota_response(root, request, resp_corr)
+    assert det_corr is not None
+    assert det_corr == payload_corr["quota_evidence"]
+    assert broker.detect_terminal_quota_response(root, request, resp_corr) == det_corr
 
 
 def test_detect_quota_response_negative_matrix(
@@ -668,7 +793,7 @@ def test_detect_quota_response_negative_matrix(
 ) -> None:
     root, task, _scope, environment = broker_repo
     request = make_valid_request(root, task, environment)
-    payload = _make_quota_payload("BROKER-TEST-1", request["source_head"], role="worker")
+    payload = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="worker")
     response = _make_quota_response(request, payload)
 
     assert broker.detect_quota_response(root, request, response) is not None
@@ -685,14 +810,18 @@ def test_detect_quota_response_negative_matrix(
     assert broker.detect_quota_response(root, request, dict(response, source_head="0" * 40)) is None
     p_head = dict(payload, source_head="0" * 40)
     assert broker.detect_quota_response(root, request, _make_quota_response(request, p_head)) is None
+    p_st_head = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], status_head="0" * 40)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st_head)) is None
 
     # Wrong task SHA
     bad_sha_req = dict(request, task_sha256="0" * 64)
     assert broker.detect_quota_response(root, bad_sha_req, response) is None
 
-    # Wrong task ID in payload
+    # Wrong task ID
     p_tid = dict(payload, task_id="WRONG-ID")
     assert broker.detect_quota_response(root, request, _make_quota_response(request, p_tid)) is None
+    p_st_tid = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], status_task_id="WRONG-ID")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st_tid)) is None
 
     # Malformed, duplicate, and trailing JSON
     assert broker.detect_quota_response(root, request, dict(response, stdout="bad json {")) is None
@@ -705,13 +834,17 @@ def test_detect_quota_response_negative_matrix(
         p_blk = dict(payload, blockers=bad_blockers)
         assert broker.detect_quota_response(root, request, _make_quota_response(request, p_blk)) is None
 
-    # Wrong pipeline state or exit code or stderr
+    # Wrong pipeline state, exit code, or stderr
     assert broker.detect_quota_response(root, request, dict(response, state="BROKER_ERROR")) is None
     assert broker.detect_quota_response(root, request, dict(response, exit_code=0)) is None
     assert broker.detect_quota_response(root, request, dict(response, exit_code=2)) is None
     assert broker.detect_quota_response(root, request, dict(response, stderr="err\n")) is None
     p_st = dict(payload, state="READY_FOR_CODEX")
     assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st)) is None
+
+    # Wrong status state
+    p_st_state = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], status_state="PROPOSAL_READY")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st_state)) is None
 
     # Oversize stdout
     assert broker.detect_quota_response(
@@ -732,22 +865,31 @@ def test_detect_quota_response_negative_matrix(
     bad_prov = dict(payload, quota_evidence=dict(payload["quota_evidence"], provider="openai"))
     assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_prov)) is None
 
-    # Wrong model for worker
+    # Wrong model for worker / verifier / correction worker
     bad_mod = dict(payload, quota_evidence=dict(payload["quota_evidence"], model=broker.MODEL))
     assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_mod)) is None
+    p_st_mod = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="worker", is_correction=True, status_model=broker.MODEL)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st_mod)) is None
+    p_ver_bad_mod = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="verifier", status_model=broker.WORKER_MODEL)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_ver_bad_mod)) is None
 
     # Conversation ID variations
     for bad_cid in ["", "conv with space", "conv\nline", "a" * 129]:
         bad_conv = dict(payload, quota_evidence=dict(payload["quota_evidence"], conversation_id=bad_cid))
         assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_conv)) is None
 
+    # Status conversation mismatch
+    p_bad_cid = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], conversation_id="conv-orig")
+    p_bad_cid["quota_evidence"]["conversation_id"] = "conv-mismatch"
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_bad_cid)) is None
+
     # Timezone variations
     for bad_tz in ["2099-01-01T00:00:00+01:00", "not-a-date", "2099-01-01 00:00:00Z"]:
         bad_ts = dict(payload, quota_evidence=dict(payload["quota_evidence"], reset_at_utc=bad_tz))
         assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_ts)) is None
 
-    # Extra and missing keys
-    for missing_k in ["changed_paths", "blockers", "task_id"]:
+    # Extra and missing keys in payload (including old 16-key payload)
+    for missing_k in ["changed_paths", "blockers", "task_id", "quota_attempt"]:
         bad_p = dict(payload)
         del bad_p[missing_k]
         assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_p)) is None
@@ -762,20 +904,66 @@ def test_detect_quota_response_negative_matrix(
     bad_ev_extra = dict(payload, quota_evidence=dict(payload["quota_evidence"], extra_key="extra"))
     assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_ev_extra)) is None
 
-    # Role binding witness mismatches
-    bad_w_sha = dict(payload, proposal_sha256="1" * 64)
-    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_w_sha)) is None
+    # quota_attempt validation: missing, extra, malformed keys
+    p_no_attempt_sha = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], omit_attempt_key="status_sha256")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_no_attempt_sha)) is None
+    p_extra_attempt = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], extra_attempt_keys={"extra": 1})
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_extra_attempt)) is None
+    p_str_attempt = dict(payload, quota_attempt="not-a-dict")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_str_attempt)) is None
 
-    rev_payload = _make_quota_payload("BROKER-TEST-1", request["source_head"], role="reviewer")
-    bad_rev_mod = dict(rev_payload, quota_evidence=dict(rev_payload["quota_evidence"], model=broker.WORKER_MODEL))
-    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_mod)) is None
+    # Forged status digest
+    p_forged_sha = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], corrupt_status_sha=True)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_forged_sha)) is None
 
-    bad_rev_run = dict(rev_payload, final_worker_run_id="invalid run ID with spaces")
-    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_run)) is None
-    bad_rev_sha = dict(rev_payload, proposal_sha256="short-sha")
-    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_sha)) is None
-    bad_rev_nosha = dict(rev_payload, proposal_sha256=None)
-    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_nosha)) is None
+    # Changed status bytes after digest
+    p_changed = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=f"{request['run_prefix']}-worker-0")
+    status_file = root / ".local/two-site-refactor/proposals" / p_changed["quota_attempt"]["run_id"] / "status.json"
+    status_file.write_bytes(status_file.read_bytes() + b" ")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_changed)) is None
+
+    # Duplicate JSON in status
+    dup_status_bytes = b'{"state":"BLOCKED","state":"BLOCKED","run_id":"' + p_changed["quota_attempt"]["run_id"].encode("utf-8") + b'"}'
+    p_dup_st = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=f"{request['run_prefix']}-worker-2", status_raw_content=dup_status_bytes)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_dup_st)) is None
+
+    # Symlinked status
+    p_sym = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=f"{request['run_prefix']}-worker-0-retry-1")
+    st_path = root / ".local/two-site-refactor/proposals" / p_sym["quota_attempt"]["run_id"] / "status.json"
+    real_st = st_path.with_name("real_status.json")
+    os.rename(st_path, real_st)
+    os.symlink(real_st, st_path)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_sym)) is None
+
+    # Hardlinked status
+    st_path.unlink()
+    os.link(real_st, st_path)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_sym)) is None
+
+    # Oversize status
+    oversize_bytes = b"{" + b" " * (broker.MAX_CONTEXT + 1) + b"}"
+    p_big = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=f"{request['run_prefix']}-worker-0-retry-2", status_raw_content=oversize_bytes)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_big)) is None
+
+    # Existing result.json or proposal.patch in proposals dir
+    p_with_result = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=f"{request['run_prefix']}-verifier-0", role="verifier", create_result_file=True)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_with_result)) is None
+    p_with_patch = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=f"{request['run_prefix']}-verifier-1", role="verifier", create_patch_file=True)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_with_patch)) is None
+
+    # Wrong role / run / retry bindings
+    p_bad_role = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"])
+    p_bad_role["quota_attempt"]["role"] = "reviewer"
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_bad_role)) is None
+
+    for bad_run in [
+        "wrong-prefix-worker-0",
+        f"{request['run_prefix']}-worker-3",
+        f"{request['run_prefix']}-worker-0-retry-3",
+        f"{request['run_prefix']}-verifier-0",  # attempt role worker but run is verifier
+    ]:
+        p_bad_run = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], run_id=bad_run)
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, p_bad_run)) is None
 
 
 def test_detect_quota_response_link_unsafe_and_guarded_paths(
@@ -783,7 +971,7 @@ def test_detect_quota_response_link_unsafe_and_guarded_paths(
 ) -> None:
     root, task, _scope, environment = broker_repo
     request = make_valid_request(root, task, environment)
-    payload = _make_quota_payload("BROKER-TEST-1", request["source_head"])
+    payload = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"])
     response = _make_quota_response(request, payload)
 
     # 1. Outside task directory
