@@ -321,3 +321,150 @@ def test_outcome_publish_repository_drift_variants_reject_before_write(
     assert not receipt_path.exists()
     assert load_latest_rescope_receipt(epoch, expected_repo) is None
     assert rescope_intent_exists(epoch, 1) is True
+
+
+def test_outcome_publish_postwrite_reload_fault_raises_ambiguous_and_preserves_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = make_canonical_repo()
+    root = tmp_path / "root"
+    epoch = tmp_path / "epoch"
+    epoch.mkdir(mode=0o700)
+    monkeypatch.setattr(autopilot_mod, "validate_repository", lambda r, require_clean=True: repo)
+
+    call_count = 0
+    orig_loader = autopilot_mod.load_latest_rescope_receipt
+
+    def wrapped_load_latest(*args: object, **kwargs: object) -> dict[str, object] | None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return orig_loader(*args, **kwargs)
+        if call_count == 2:
+            raise AutopilotError("injected reload fault")
+        return orig_loader(*args, **kwargs)
+
+    monkeypatch.setattr(autopilot_mod, "load_latest_rescope_receipt", wrapped_load_latest)
+
+    publish_rescope_intent(epoch, 1)
+    res = make_rescope_result()
+
+    with pytest.raises(AutopilotError, match=r"^ambiguous:") as exc_info:
+        publish_validated_rescope_outcome(root, epoch, 1, res, repo)
+
+    assert str(exc_info.value).startswith("ambiguous:")
+    assert call_count == 2
+    receipt_path = epoch / "rescope_receipt.json"
+    assert receipt_path.exists()
+    persisted = orig_loader(epoch, repo)
+    assert persisted is not None
+    assert persisted["attempt"] == 1
+
+
+def test_outcome_publish_postwrite_identity_drift_raises_ambiguous_and_preserves_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected_repo = make_canonical_repo()
+    drifted_repo = _make_drifted_repo("changed_head")
+    root = tmp_path / "root"
+    epoch = tmp_path / "epoch"
+    epoch.mkdir(mode=0o700)
+
+    validation_calls = 0
+
+    def counting_validate(r: object, require_clean: bool = True) -> dict[str, object]:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls == 1:
+            return expected_repo
+        if validation_calls == 2:
+            return drifted_repo
+        return expected_repo
+
+    monkeypatch.setattr(autopilot_mod, "validate_repository", counting_validate)
+
+    publish_rescope_intent(epoch, 1)
+    res = make_rescope_result()
+
+    with pytest.raises(AutopilotError, match=r"^ambiguous:") as exc_info:
+        publish_validated_rescope_outcome(root, epoch, 1, res, expected_repo)
+
+    assert str(exc_info.value).startswith("ambiguous:")
+    assert validation_calls == 2
+    receipt_path = epoch / "rescope_receipt.json"
+    assert receipt_path.exists()
+    persisted = load_latest_rescope_receipt(epoch, expected_repo)
+    assert persisted is not None
+    assert persisted["attempt"] == 1
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+def test_outcome_publish_prewrite_interrupt_propagates_and_creates_no_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
+) -> None:
+    repo = make_canonical_repo()
+    root = tmp_path / "root"
+    epoch = tmp_path / "epoch"
+    epoch.mkdir(mode=0o700)
+
+    validation_calls = 0
+
+    def raising_validate(r: object, require_clean: bool = True) -> dict[str, object]:
+        nonlocal validation_calls
+        validation_calls += 1
+        raise exc_type()
+
+    monkeypatch.setattr(autopilot_mod, "validate_repository", raising_validate)
+
+    publish_rescope_intent(epoch, 1)
+    assert rescope_intent_exists(epoch, 1) is True
+
+    receipt_path = epoch / "rescope_receipt.json"
+    assert not receipt_path.exists()
+
+    res = make_rescope_result()
+    with pytest.raises(exc_type):
+        publish_validated_rescope_outcome(root, epoch, 1, res, repo)
+
+    assert validation_calls == 1
+    assert not receipt_path.exists()
+    assert load_latest_rescope_receipt(epoch, repo) is None
+    assert rescope_intent_exists(epoch, 1) is True
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+def test_outcome_publish_postwrite_interrupt_propagates_and_preserves_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
+) -> None:
+    repo = make_canonical_repo()
+    root = tmp_path / "root"
+    epoch = tmp_path / "epoch"
+    epoch.mkdir(mode=0o700)
+    monkeypatch.setattr(autopilot_mod, "validate_repository", lambda r, require_clean=True: repo)
+
+    publish_rescope_intent(epoch, 1)
+    res = make_rescope_result()
+
+    call_count = 0
+    orig_loader = autopilot_mod.load_latest_rescope_receipt
+
+    def wrapped_load_latest(*args: object, **kwargs: object) -> dict[str, object] | None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return orig_loader(*args, **kwargs)
+        if call_count == 2:
+            raise exc_type()
+        return orig_loader(*args, **kwargs)
+
+    monkeypatch.setattr(autopilot_mod, "load_latest_rescope_receipt", wrapped_load_latest)
+
+    with pytest.raises(exc_type):
+        publish_validated_rescope_outcome(root, epoch, 1, res, repo)
+
+    assert call_count == 2
+    receipt_path = epoch / "rescope_receipt.json"
+    assert receipt_path.exists()
+    persisted = orig_loader(epoch, repo)
+    assert persisted is not None
+    assert persisted["attempt"] == 1
