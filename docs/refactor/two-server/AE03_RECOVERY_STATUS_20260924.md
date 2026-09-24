@@ -4,6 +4,14 @@
 - Current Baseline: Clean HEAD `94c01ab2159274acb372b4663573dd41cbcc69fd` on branch `refactor/two-site-architecture`.
 - Governing Rule: No modifications to `main`, production, DNS, or Writer. No active Supervisor recovery or runtime hooks are enabled.
 
+## Update at `1ee73dd0` (2026-09-24)
+
+After the cross-epoch gate, `d8462a89` added a conservative classifier for bounded, model/session-bound, zero-usage Gemini quota error streams. `8b4f1c32` records its **observational** result in Runner status; `e16eb442` tests both CLI exit paths and negative cases through the real Runner. This is not `WAITING_QUOTA`, not a retry permit, and not evidence of an actual Antigravity quota stream. Only an explicit timezone-qualified reset time may be known; an ambiguous time remains `UNKNOWN`.
+
+`1ee73dd0` prevents Monitor restart of an absent Supervisor when a durable rescope intent exists or a bounded, no-follow scan is unsafe. Broker-only recovery with a live Supervisor remains eligible. The first Gemini proposal was rejected for unbounded `ls` output/newline splitting; the second failed independent root-run tests because root can scan mode-000 directories. The accepted correction checks owner/permission bits explicitly; exact bindings and bytes passed, and **209 selected independent tests passed**. Both corrections are real cost, not a measured efficiency gain.
+
+Supervisor remains **STOPPED**, not a live recovery pilot. Monitor's pinned `main`/`origin/main` SHAs are stale, so `protected_refs_ok` is false; audit ancestry before any operational resume. A manually launched Broker uses a relative script path invisible to Monitor's exact process matcher, unlike the canonical tmux launcher. Typed quota propagation, durable same-task wait/wakeup without replay, STOP/restart/fault matrix and 1/3/10/20 comparable live evidence remain open. Efficiency effect remains `UNKNOWN`.
+
 ## Update at `c77320ab` (2026-09-24)
 
 The six-helper table below is a historical snapshot, not the current implementation boundary. Subsequent accepted units added sequential receipts, post-write validation, runtime RESCOPE wiring, a bounded cross-epoch startup gate, and a hermetic startup matrix. `0ec45a51` requires a canonical accepted checkpoint matching the full current repository identity before a prior epoch can be crossed; `c77320ab` covers missing/corrupt/stale checkpoints, full-identity drift, unsafe epoch entries, overflow and STOP priority. The selected startup/runtime/autopilot suites passed **60/60** after Codex's byte-binding and independent test gate.
