@@ -702,8 +702,20 @@ class AutopilotContracts(unittest.TestCase):
 
     def test_run_loop_publishes_running_before_cycle_execution(self):
         state_root = self.root / ".local/two-site-refactor/autopilot"
-        with patch.object(autopilot, "git", side_effect=["a" * 40]), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        repo_facts = self.clean_repository_facts()
+
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return "a" * 40
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
+
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=KeyboardInterrupt), \
                 patch.object(autopilot, "write_supervisor_state") as publish:
             with self.assertRaises(KeyboardInterrupt):
@@ -724,8 +736,20 @@ class AutopilotContracts(unittest.TestCase):
 
     def test_run_loop_contains_unexpected_cycle_errors(self):
         state_root = self.root / ".local/two-site-refactor/autopilot"
-        with patch.object(autopilot, "git", side_effect=["a" * 40, "a" * 40, ""]), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        repo_facts = self.clean_repository_facts()
+
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return "a" * 40
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
+
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=RuntimeError("unexpected cycle error")), \
                 patch.object(autopilot, "write_supervisor_state") as publish:
             status = autopilot.run_loop(self.root, self.root / "codex", 1, 300, True)
@@ -919,16 +943,34 @@ class AutopilotContracts(unittest.TestCase):
         )
         commit_result.update({"head_before": "a" * 40, "head_after": "b" * 40, "head_changed": True})
 
+        current_head = "a" * 40
+
+        def fake_validate_repository(*args, **kwargs):
+            return self.clean_repository_facts(current_head)
+
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return current_head
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
+
         calls = []
-        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None, continuation=None, before_model=None):
+            nonlocal current_head
+            if before_model is not None:
+                before_model(self.clean_repository_facts(current_head))
             calls.append((cycle, recovery))
             if cycle == 1:
                 return self.root / "run_001", rescope_result
+            current_head = "b" * 40
             return self.root / "run_002", commit_result
 
         repo_facts = self.clean_repository_facts()
-        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
-                patch.object(autopilot, "git", side_effect=["a" * 40, "a" * 40, "b" * 40]), \
+        with patch.object(autopilot, "validate_repository", side_effect=fake_validate_repository), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
                 patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
@@ -955,14 +997,25 @@ class AutopilotContracts(unittest.TestCase):
         )
         rescope_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
 
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return "a" * 40
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
+
         cycle_runs = []
-        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None, continuation=None, before_model=None):
+            if before_model is not None:
+                before_model(self.clean_repository_facts("a" * 40))
             cycle_runs.append((cycle, recovery))
             return self.root / f"run_{cycle:03d}", rescope_result
 
         repo_facts = self.clean_repository_facts()
         with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
-                patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
                 patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
@@ -998,19 +1051,42 @@ class AutopilotContracts(unittest.TestCase):
             next_action="Continue.", blockers=[],
         )
         commit_result.update({"head_before": "a" * 40, "head_after": "b" * 40, "head_changed": True})
+        rescope_result_b = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Rescope.", blockers=["Need rescope."],
+        )
+        rescope_result_b.update({"head_before": "b" * 40, "head_after": "b" * 40, "head_changed": False})
+
+        current_head = "a" * 40
+
+        def fake_validate_repository(*args, **kwargs):
+            return self.clean_repository_facts(current_head)
+
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return current_head
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
 
         cycle_runs = []
-        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None, continuation=None, before_model=None):
+            nonlocal current_head
+            if before_model is not None:
+                before_model(self.clean_repository_facts(current_head))
             cycle_runs.append((cycle, recovery))
             if cycle == 1:
                 return self.root / "run_1", rescope_result
             if cycle == 2:
+                current_head = "b" * 40
                 return self.root / "run_2", commit_result
-            return self.root / f"run_{cycle}", rescope_result
+            return self.root / f"run_{cycle}", rescope_result_b
 
         repo_facts = self.clean_repository_facts()
-        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
-                patch.object(autopilot, "git", return_value="a" * 40), \
+        with patch.object(autopilot, "validate_repository", side_effect=fake_validate_repository), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
                 patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state"), \
@@ -1031,13 +1107,27 @@ class AutopilotContracts(unittest.TestCase):
         )
         halt_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
 
+        repo_facts = self.clean_repository_facts()
+
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return "a" * 40
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
+
         run_calls = []
-        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None, continuation=None, before_model=None):
+            if before_model is not None:
+                before_model(self.clean_repository_facts("a" * 40))
             run_calls.append(cycle)
             return self.root / "run_001", halt_result
 
-        with patch.object(autopilot, "git", return_value="a" * 40), \
-                patch.object(autopilot, "ref_snapshot", return_value={}), \
+        with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
+                patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
                 patch.object(autopilot, "prune_runs"):
@@ -1055,14 +1145,25 @@ class AutopilotContracts(unittest.TestCase):
         )
         rescope_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
 
+        def fake_git(_root, *args):
+            if "rev-parse" in args and "HEAD" in args:
+                return "a" * 40
+            if "status" in args:
+                return ""
+            if "merge-base" in args:
+                return ""
+            raise AssertionError(f"Unexpected git command: {args}")
+
         run_calls = []
-        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None, continuation=None, before_model=None):
+            if before_model is not None:
+                before_model(self.clean_repository_facts("a" * 40))
             run_calls.append(cycle)
             return self.root / "run_001", rescope_result
 
         repo_facts = self.clean_repository_facts()
         with patch.object(autopilot, "validate_repository", return_value=repo_facts), \
-                patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "git", side_effect=fake_git), \
                 patch.object(autopilot, "ref_snapshot", return_value=repo_facts["protected_refs"]), \
                 patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
                 patch.object(autopilot, "write_supervisor_state") as publish, \
