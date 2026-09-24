@@ -1520,20 +1520,25 @@ def _prove_rescope_link_collision(
     return None
 
 
-def publish_initial_rescope_receipt(
+def _publish_rescope_payload_noreplace(
     state_root: Path,
-    result: object,
+    payload: bytes,
     repository: object,
+    target_filename: str,
 ) -> None:
-    """Atomically publish the initial (attempt=1) rescope receipt under state_root.
-
-    Fails closed without overwriting existing receipts or deleting uncertain evidence.
-    """
+    """Atomically publish a rescope receipt payload under state_root without overwriting."""
     if not isinstance(state_root, Path):
         raise AutopilotError("state_root must be a Path")
+    if type(payload) is not bytes:
+        raise AutopilotError("payload must be bytes")
+    if type(target_filename) is not str or target_filename not in _RESCOPE_RECEIPT_FILENAMES:
+        raise AutopilotError(f"invalid target_filename: {target_filename!r}")
 
-    payload = serialize_rescope_receipt(result, repository, attempt=1)
     expected_envelope = parse_rescope_receipt(payload, repository)
+    if expected_envelope.get("attempt") != _RESCOPE_RECEIPT_FILENAMES[target_filename]:
+        raise AutopilotError(
+            f"receipt attempt {expected_envelope.get('attempt')!r} does not match expected attempt for {target_filename}"
+        )
 
     pinned_dir_fd: int | None = None
     temp_name: str | None = None
@@ -1545,7 +1550,7 @@ def publish_initial_rescope_receipt(
         pinned_dir_fd = _open_private_rescope_state_dir(state_root)
 
         try:
-            os.stat(_RESCOPE_RECEIPT_FILENAME, dir_fd=pinned_dir_fd, follow_symlinks=False)
+            os.stat(target_filename, dir_fd=pinned_dir_fd, follow_symlinks=False)
             raise AutopilotError("target receipt already exists")
         except FileNotFoundError:
             pass
@@ -1561,7 +1566,7 @@ def publish_initial_rescope_receipt(
             link_entered = True
             os.link(
                 temp_name,
-                _RESCOPE_RECEIPT_FILENAME,
+                target_filename,
                 src_dir_fd=pinned_dir_fd,
                 dst_dir_fd=pinned_dir_fd,
                 follow_symlinks=False,
@@ -1569,7 +1574,7 @@ def publish_initial_rescope_receipt(
             linked = True
         except OSError as link_err:
             try:
-                _prove_rescope_link_collision(pinned_dir_fd, temp_name, link_err)
+                _prove_rescope_link_collision(pinned_dir_fd, temp_name, link_err, target_filename=target_filename)
             except AutopilotError:
                 raise
             except Exception as helper_exc:
@@ -1604,7 +1609,7 @@ def publish_initial_rescope_receipt(
                 raise AutopilotError(f"ambiguous: final state root recheck failed: {exc}") from exc
 
             try:
-                loaded = load_rescope_receipt(state_root, repository)
+                loaded = load_rescope_receipt(state_root, repository, receipt_filename=target_filename)
             except Exception as exc:
                 raise AutopilotError(f"ambiguous: failed to load rescope receipt: {exc}") from exc
 
@@ -1659,6 +1664,27 @@ def publish_initial_rescope_receipt(
                     else:
                         close_exc.__cause__ = close_err
                     raise close_exc
+
+
+def publish_initial_rescope_receipt(
+    state_root: Path,
+    result: object,
+    repository: object,
+) -> None:
+    """Atomically publish the initial (attempt=1) rescope receipt under state_root.
+
+    Fails closed without overwriting existing receipts or deleting uncertain evidence.
+    """
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+
+    payload = serialize_rescope_receipt(result, repository, attempt=1)
+    _publish_rescope_payload_noreplace(
+        state_root,
+        payload,
+        repository,
+        _RESCOPE_RECEIPT_FILENAME,
+    )
 
 
 def recover_committed_advisory_result(
