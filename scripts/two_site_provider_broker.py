@@ -13,6 +13,7 @@ from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -1158,6 +1159,120 @@ def detect_quota_response(
 
 
 detect_terminal_quota_response = detect_quota_response
+
+
+def _terminal_quota_directory(root: Path) -> Path:
+    state_root, _status, _requests, _claimed, _responses = broker_paths(root)
+    directory = state_root / "terminal-quota"
+    if not os.path.lexists(directory):
+        try:
+            os.mkdir(directory, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise BrokerError(f"cannot create terminal quota directory: {exc}") from exc
+    return directory
+
+
+def publish_terminal_quota_record(
+    root: Path, request: dict, response: dict
+) -> dict:
+    root = canonical_root(root)
+    if not isinstance(request, dict) or set(request) != REQUEST_KEYS:
+        raise BrokerError("broker request does not match the exact contract")
+    if request.get("schema_version") != "1.0":
+        raise BrokerError("broker request schema version is invalid")
+    if not isinstance(request.get("request_id"), str) or not REQUEST_ID_RE.fullmatch(request["request_id"]):
+        raise BrokerError("broker request ID is invalid")
+    if not isinstance(request.get("run_prefix"), str) or not RUN_PREFIX_RE.fullmatch(request["run_prefix"]):
+        raise BrokerError("broker run-prefix is invalid")
+    if type(request.get("timeout")) is not int or not 10 <= request["timeout"] <= 900:
+        raise BrokerError("broker timeout is invalid")
+    if not isinstance(request.get("source_head"), str) or not HEAD_RE.fullmatch(request["source_head"]):
+        raise BrokerError("broker source HEAD is invalid")
+    if not isinstance(request.get("task_sha256"), str) or not SHA_RE.fullmatch(request["task_sha256"]):
+        raise BrokerError("broker task SHA is invalid")
+    if (
+        not isinstance(request.get("assignment_id"), str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request["assignment_id"])
+    ):
+        raise BrokerError("broker assignment ID is invalid")
+    if not isinstance(request.get("assignment_sha256"), str) or not SHA_RE.fullmatch(request["assignment_sha256"]):
+        raise BrokerError("broker assignment SHA is invalid")
+    if (
+        not isinstance(request.get("controller_run_id"), str)
+        or not CONTROLLER_RUN_RE.fullmatch(request["controller_run_id"])
+    ):
+        raise BrokerError("broker controller run ID is invalid")
+    created_at = request.get("created_at")
+    if (
+        not isinstance(created_at, (int, float))
+        or isinstance(created_at, bool)
+        or not math.isfinite(created_at)
+    ):
+        raise BrokerError("broker request created_at is invalid")
+    _task_relative_path(request.get("task_path"))
+
+    validated_response = validate_response(request, response)
+    if validated_response.get("state") != "COMPLETED" or validated_response.get("exit_code") != 1:
+        raise BrokerError("terminal quota record requires COMPLETED exit_code=1")
+    finished_at = validated_response.get("finished_at")
+    if (
+        not isinstance(finished_at, (int, float))
+        or isinstance(finished_at, bool)
+        or not math.isfinite(finished_at)
+    ):
+        raise BrokerError("broker response finished_at is invalid")
+
+    evidence = detect_quota_response(root, request, validated_response)
+    if evidence is None:
+        raise BrokerError("terminal quota response not detected")
+
+    directory = _terminal_quota_directory(root)
+    existing_entries = scan_private_record_directory(directory)
+    if len(existing_entries) >= MAX_RECORD_SCAN_ENTRIES:
+        raise BrokerError("terminal quota directory exceeds scan entry limit")
+
+    request_id = request["request_id"]
+    filename = f"{request_id}.json"
+    if filename in existing_entries:
+        raise BrokerError("terminal quota record already exists")
+    record_path = directory / filename
+    if os.path.lexists(record_path):
+        raise BrokerError("terminal quota record target already exists")
+
+    try:
+        req_canonical = json.dumps(
+            request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        resp_canonical = json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except ValueError as exc:
+        raise BrokerError("request or response contains non-finite numbers") from exc
+
+    receipt = {
+        "schema_version": "1.0",
+        "request": request,
+        "request_sha256": hashlib.sha256(req_canonical).hexdigest(),
+        "response": response,
+        "response_sha256": hashlib.sha256(resp_canonical).hexdigest(),
+        "quota_evidence": evidence,
+        "finished_at": finished_at,
+    }
+
+    try:
+        encoded_receipt = json.dumps(
+            receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except ValueError as exc:
+        raise BrokerError("receipt contains non-finite numbers") from exc
+    if len(encoded_receipt) > MAX_RECORD_BYTES:
+        raise BrokerError("terminal quota record exceeds maximum record bytes")
+
+    _atomic_new_json(record_path, receipt, MAX_RECORD_BYTES)
+    fsync_private_record_directory(directory)
+    return receipt
 
 
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
