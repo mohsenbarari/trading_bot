@@ -4,6 +4,10 @@
 - Latest accepted implementation baseline: `d36fa4e2031912c127cdf81b84e78b30452554c8` on branch `refactor/two-site-architecture`; this status note is a later documentation change.
 - Governing Rule: No modifications to `main`, production, DNS, or Writer. No active Supervisor recovery or runtime hooks are enabled.
 
+## Task 102 blocked without code (2026-09-24)
+
+The terminal receipt reader proposal exhausted its two-correction budget on test-fixture defects; all three Worker calls returned, but Reviewer never ran and no bytes were applied. This was **not** a proven quota failure for this unit. The default P1 assignment was restored. [Reader replan](AE03_TERMINAL_READER_REPLAN_20260924.md) splits bounded descriptor I/O, strict payload validation and composition into independent units, without renaming a failed task to replay it.
+
 ## Update at `d36fa4e2` (2026-09-24)
 
 The terminal-quota path now has four isolated prerequisites: `2ad7e7a9` cleans private publication temporaries on post-open failure; `84ce53d9` scans a private directory through a no-follow, inode-bound FD with a 64-entry/32-KiB cap and rejects every unexpected entry; `11972949` fsyncs that directory through a separately validated no-follow FD; and `d36fa4e2` publishes one immutable, bounded terminal receipt only after strict Broker quota detection, then fsyncs the directory before reporting success. The publisher is **not wired to serve/client/recovery**. A terminal response can still be pruned by the existing client, and no wait or resume exists. The latest independent cross-component suite passed **214 tests**.
