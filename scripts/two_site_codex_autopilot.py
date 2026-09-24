@@ -2037,6 +2037,96 @@ def prepare_rescope_attempt(
     return epoch_dir, int(next_attempt), recovery
 
 
+def publish_validated_rescope_outcome(
+    root: Path,
+    epoch_dir: Path,
+    attempt: int,
+    result: object,
+    expected_repository: object,
+) -> dict[str, object]:
+    """Publish a validated BLOCKED/RESCOPE outcome receipt to epoch_dir."""
+    if not isinstance(root, Path):
+        raise AutopilotError("root must be a Path")
+    if not isinstance(epoch_dir, Path):
+        raise AutopilotError("epoch_dir must be a Path")
+    if type(attempt) is not int or isinstance(attempt, bool) or attempt not in (1, 2, 3):
+        raise AutopilotError("attempt must be an integer in 1..3")
+    if not isinstance(result, dict):
+        raise AutopilotError("result must be a mapping")
+
+    result_keys = set(result)
+    if result_keys == RESCOPE_RECEIPT_KEYS:
+        pass
+    elif result_keys == (RESCOPE_RECEIPT_KEYS | {"advisories"}):
+        if result.get("advisories") != []:
+            raise AutopilotError("advisories must be an empty list")
+    else:
+        raise AutopilotError("result keys do not match RESCOPE_RECEIPT_KEYS")
+
+    projected_result = {k: result[k] for k in RESCOPE_RESULT_KEYS_ORDER}
+
+    if isinstance(expected_repository, Path) or not isinstance(expected_repository, dict):
+        raise AutopilotError("expected_repository must be a mapping")
+    if isinstance(expected_repository.get("assignment_scope"), AssignmentScope):
+        normalized_expected_repo = validate_accepted_repository(expected_repository)
+    else:
+        normalized_expected_repo = _validate_persisted_repository(expected_repository)
+
+    current_repo = validate_repository(root, require_clean=True)
+    normalized_current_repo = validate_accepted_repository(current_repo)
+    if normalized_current_repo != normalized_expected_repo:
+        raise AutopilotError("current repository facts do not match expected repository facts")
+
+    if not rescope_intent_exists(epoch_dir, attempt):
+        raise AutopilotError(f"rescope intent does not exist for attempt {attempt}")
+
+    latest = load_latest_rescope_receipt(epoch_dir, normalized_expected_repo)
+    if attempt == 1:
+        if latest is not None:
+            raise AutopilotError("attempt 1 requires no prior rescope receipt")
+    else:
+        if latest is None:
+            raise AutopilotError(f"attempt {attempt} requires prior rescope receipt")
+        if latest.get("attempt") != attempt - 1:
+            raise AutopilotError(f"attempt {attempt} requires prior receipt for attempt {attempt - 1}")
+        if latest.get("terminal") is not False:
+            raise AutopilotError("prior rescope receipt must be non-terminal")
+
+    validate_rescope_checkpoint(projected_result, normalized_expected_repo)
+
+    if attempt == 1:
+        publish_initial_rescope_receipt(epoch_dir, projected_result, normalized_expected_repo)
+    else:
+        publish_next_rescope_receipt(epoch_dir, projected_result, normalized_expected_repo)
+
+    try:
+        reloaded = load_latest_rescope_receipt(epoch_dir, normalized_expected_repo)
+        if reloaded is None:
+            raise AutopilotError("ambiguous: reloaded rescope receipt is missing")
+        if reloaded.get("attempt") != attempt:
+            raise AutopilotError("ambiguous: reloaded rescope receipt attempt mismatch")
+        expected_terminal = (attempt == 3)
+        if reloaded.get("terminal") is not expected_terminal:
+            raise AutopilotError("ambiguous: reloaded rescope receipt terminal mismatch")
+        if reloaded.get("result") != projected_result:
+            raise AutopilotError("ambiguous: reloaded rescope receipt result mismatch")
+        if reloaded.get("repository") != normalized_expected_repo:
+            raise AutopilotError("ambiguous: reloaded rescope receipt repository mismatch")
+        live_repo = validate_repository(root, require_clean=True)
+        live_normalized = validate_accepted_repository(live_repo)
+        if live_normalized != normalized_expected_repo:
+            raise AutopilotError("ambiguous: live repository drifted postwrite")
+        return reloaded
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except AutopilotError as exc:
+        if str(exc).startswith("ambiguous"):
+            raise
+        raise AutopilotError(f"ambiguous: {exc}") from exc
+    except Exception as exc:
+        raise AutopilotError(f"ambiguous: {exc}") from exc
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,
