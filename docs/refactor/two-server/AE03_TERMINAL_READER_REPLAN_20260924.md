@@ -1,6 +1,6 @@
 # AE03 terminal receipt reader: bounded restart plan (2026-09-24)
 
-Status: **R1/R2 ISOLATED HELPERS ACCEPTED; R3 AND RUNTIME UNWIRED**. R1 is `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`, R2 is `355894ecb216cdecc9ee487e9736ace1977b9edb`; `fd990e177ff4012a9408833d427694a63bf40377` below is historical task-102 context. Supervisor remains STOPPED; no runtime quota recovery, response custody, wait or replay is authorized.
+Status: **R1–R3 ISOLATED READER ACCEPTED; RUNTIME UNWIRED**. R1 is `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`, R2 is `355894ecb216cdecc9ee487e9736ace1977b9edb`, and R3 is `f00af92bd99834355148c260805dcf18fe1cd317`; `fd990e177ff4012a9408833d427694a63bf40377` below is historical task-102 context. Supervisor remains STOPPED; no runtime quota recovery, response custody, wait or replay is authorized.
 
 ## Why task 102 stopped
 
@@ -62,3 +62,7 @@ Task `AE03-TERMINAL-BYTES-STAT-20260924-105` used task 104's rejected patch as l
 ## Task 106 R2 accepted (2026-09-24 UTC)
 
 Task `AE03-TERMINAL-PAYLOAD-20260924-106` needed one Worker correction for test expectations/fixture generation, then 73 pre-review tests passed and independent Gemini Reviewer returned `VERIFIED`. Codex validated bindings and applied bytes against proposal SHA `3c61713101b12d8beb33b0514575f6340900cc15df4cb185d30713c253aaeb3b`, reviewed the full validator and negative-test matrix, and ran all six Broker suites independently (99 passed). Accepted as isolated R2 in `355894ecb216cdecc9ee487e9736ace1977b9edb`. It validates bounded canonical JSON, exact request/response/receipt schema, SHA bindings, timestamps and the existing quota detector; it does not call R1 or grant retry/replay authority. R3 composition and publisher-to-reader roundtrip remain open.
+
+## Task 107 R3 accepted (2026-09-24 UTC)
+
+Task `AE03-TERMINAL-RECORD-20260924-107` passed Worker 0 and independent Reviewer 0 without correction. Codex validated bindings and applied bytes against proposal SHA `04921b3c58db044dd768f441aae44a7716ddaa767b240849d9403a0dce6bbfb0`, inspected the full diff and ran seven Broker suites independently (103 passed). The test publishes through the real detector and reads back through R1+R2; missing record, changed task bytes and changed status witness fail closed. Accepted as isolated R3 in `f00af92bd99834355148c260805dcf18fe1cd317`. None of R1–R3 is called by serve/client/recovery yet; next AE03 work must establish durable response custody and crash-safe no-replay behavior before any runtime activation.
