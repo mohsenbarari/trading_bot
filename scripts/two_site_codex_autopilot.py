@@ -962,6 +962,21 @@ def serialize_next_rescope_receipt(
     return serialize_rescope_receipt(result, repository, attempt=attempt + 1)
 
 
+def rescope_epoch_basename(repository: object) -> str:
+    """Derive deterministic epoch directory basename from canonical repository facts."""
+    if isinstance(repository, Path) or not isinstance(repository, dict):
+        raise AutopilotError("repository facts must be a mapping, not Path")
+    if isinstance(repository.get("assignment_scope"), AssignmentScope):
+        normalized = validate_accepted_repository(repository)
+    else:
+        normalized = _validate_persisted_repository(repository)
+    payload = serialize_json(normalized)
+    if len(payload) > MAX_RESCOPE_RECEIPT_BYTES:
+        raise AutopilotError(f"repository facts exceed {MAX_RESCOPE_RECEIPT_BYTES} bytes")
+    digest = hashlib.sha256(b"two-site-rescope-epoch-v1\0" + payload).hexdigest()
+    return f"rescope-{digest}"
+
+
 class _DescriptorTracker:
     def __init__(self) -> None:
         self.fds: list[int] = []
