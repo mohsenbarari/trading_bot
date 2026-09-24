@@ -931,6 +931,31 @@ def parse_rescope_receipt(
     return envelope
 
 
+def serialize_next_rescope_receipt(
+    previous: object,
+    result: object,
+    repository: object,
+) -> bytes:
+    """Validate previous rescope receipt and serialize next attempt bytes."""
+    if isinstance(previous, Path) or isinstance(result, Path) or isinstance(repository, Path):
+        raise AutopilotError("rescope receipt arguments cannot be Path instances")
+    if not isinstance(previous, dict):
+        raise AutopilotError("previous rescope receipt must be a mapping")
+    try:
+        encoded_previous = serialize_json(previous)
+    except Exception as exc:
+        raise AutopilotError(f"cannot serialize previous rescope receipt: {exc}") from exc
+    parsed_previous = parse_rescope_receipt(encoded_previous, repository)
+    attempt = parsed_previous.get("attempt")
+    if type(attempt) is not int or isinstance(attempt, bool):
+        raise AutopilotError("previous attempt must be an integer")
+    if attempt not in {1, 2}:
+        raise AutopilotError("previous attempt must be 1 or 2 to advance")
+    if parsed_previous.get("terminal") is not False:
+        raise AutopilotError("previous receipt must not be terminal")
+    return serialize_rescope_receipt(result, repository, attempt=attempt + 1)
+
+
 class _DescriptorTracker:
     def __init__(self) -> None:
         self.fds: list[int] = []
