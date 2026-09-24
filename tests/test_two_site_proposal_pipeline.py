@@ -218,6 +218,7 @@ class TestPipeline(unittest.TestCase):
         }
         self.assertEqual(len(res), 15)
         self.assertEqual(res, expected)
+        self.assertNotIn("quota_attempt", res)
         self.assertFalse(Path(res["proposal_path"]).is_absolute() or Path(res["reviewer_path"]).is_absolute())
         self.assertEqual(self.src_file.read_text(), "# orig\n")
         self.assertEqual(json.loads(self.task_path.read_text()), self.task)
@@ -442,6 +443,12 @@ class TestPipeline(unittest.TestCase):
                 )
             self.assertEqual(len(calls_recorder), 1)
             self.assertEqual(ctx.exception.quota_evidence, evidence)
+            status_path = self.root / ".local/two-site-refactor/proposals/run-q-w-worker-0/status.json"
+            self.assertEqual(ctx.exception.quota_attempt, {
+                "role": "worker",
+                "run_id": "run-q-w-worker-0",
+                "status_sha256": file_sha256(status_path),
+            })
             self.assertEqual(str(ctx.exception), "observational quota, no replay authority")
 
         calls_recorder.clear()
@@ -452,6 +459,13 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(payload["state"], "TASK_BLOCKED")
         self.assertEqual(payload["blockers"], ["observational quota, no replay authority"])
         self.assertEqual(payload["quota_evidence"], evidence)
+        main_status_path = self.root / ".local/two-site-refactor/proposals/run-main-qw-worker-0/status.json"
+        self.assertEqual(payload["quota_attempt"], {
+            "role": "worker",
+            "run_id": "run-main-qw-worker-0",
+            "status_sha256": file_sha256(main_status_path),
+        })
+        self.assertIsNone(payload["final_worker_run_id"])
 
     def test_quota_evidence_propagation_worker_unknown(self):
         calls_recorder = []
@@ -485,6 +499,12 @@ class TestPipeline(unittest.TestCase):
                 )
             self.assertEqual(len(calls_recorder), 1)
             self.assertEqual(ctx.exception.quota_evidence, evidence)
+            status_path = self.root / ".local/two-site-refactor/proposals/run-q-un-worker-0/status.json"
+            self.assertEqual(ctx.exception.quota_attempt, {
+                "role": "worker",
+                "run_id": "run-q-un-worker-0",
+                "status_sha256": file_sha256(status_path),
+            })
 
     def test_quota_evidence_propagation_reviewer(self):
         calls_recorder = []
@@ -523,7 +543,70 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(payload["state"], "TASK_BLOCKED")
         self.assertEqual(payload["blockers"], ["observational quota, no replay authority"])
         self.assertEqual(payload["quota_evidence"], evidence)
+        r_status_path = self.root / ".local/two-site-refactor/proposals/run-main-qr-reviewer-0/status.json"
+        self.assertEqual(payload["quota_attempt"], {
+            "role": "verifier",
+            "run_id": "run-main-qr-reviewer-0",
+            "status_sha256": file_sha256(r_status_path),
+        })
+        self.assertEqual(payload["final_worker_run_id"], "run-main-qr-worker-0")
+        self.assertIsNone(payload["final_reviewer_run_id"])
         self.assertNotIn("READY_FOR_CODEX", payload.values())
+
+    def test_quota_evidence_propagation_worker_correction(self):
+        calls_recorder = []
+        evidence = {
+            "kind": "QUOTA_RESET_KNOWN",
+            "provider": "gemini",
+            "model": WORKER_MODEL,
+            "conversation_id": "conv-worker-corr-quota",
+            "reset_at_utc": "2026-09-24T20:00:00Z",
+        }
+        runner_helper, _ = make_runner(self.root, [
+            {"content": "# worker 0 ok\n"},
+            {"status": "CHANGES_REQUIRED", "findings": ["fix issue"]},
+        ])
+
+        def mock_runner(r, t, role, run_id, timeout, **kw):
+            calls_recorder.append((role, run_id))
+            if len(calls_recorder) <= 2:
+                return runner_helper(r, t, role, run_id, timeout, **kw)
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_json(run_dir / "status.json", {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": WORKER_MODEL,
+                "state": "BLOCKED",
+                "quota_evidence": evidence,
+            })
+            raise ProposalError("worker correction Gemini quota stream exhausted")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            exit_code, payload = self._run_main_with_args("run-main-qcorr")
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(calls_recorder, [
+            ("worker", "run-main-qcorr-worker-0"),
+            ("verifier", "run-main-qcorr-reviewer-0"),
+            ("worker", "run-main-qcorr-worker-1"),
+        ])
+        self.assertEqual(payload["state"], "TASK_BLOCKED")
+        self.assertEqual(payload["blockers"], ["observational quota, no replay authority"])
+        self.assertEqual(payload["quota_evidence"], evidence)
+
+        w1_status_path = self.root / ".local/two-site-refactor/proposals/run-main-qcorr-worker-1/status.json"
+        expected_sha = file_sha256(w1_status_path)
+        self.assertEqual(payload["quota_attempt"], {
+            "role": "worker",
+            "run_id": "run-main-qcorr-worker-1",
+            "status_sha256": expected_sha,
+        })
+        self.assertEqual(payload["quota_attempt"]["role"], "worker")
+        self.assertTrue(payload["quota_attempt"]["run_id"].endswith("worker-1"))
+        self.assertEqual(payload["final_worker_run_id"], "run-main-qcorr-worker-0")
+        self.assertEqual(payload["final_reviewer_run_id"], "run-main-qcorr-reviewer-0")
 
     def test_quota_evidence_propagation_matching_status_conversation_id(self):
         calls_recorder = []
@@ -558,6 +641,12 @@ class TestPipeline(unittest.TestCase):
                 )
             self.assertEqual(len(calls_recorder), 1)
             self.assertEqual(ctx.exception.quota_evidence, evidence)
+            status_path = self.root / ".local/two-site-refactor/proposals/run-q-matching-worker-0/status.json"
+            self.assertEqual(ctx.exception.quota_attempt, {
+                "role": "worker",
+                "run_id": "run-q-matching-worker-0",
+                "status_sha256": file_sha256(status_path),
+            })
 
     def test_quota_rejection_negative_matrix(self):
         valid_evidence = {
@@ -622,6 +711,7 @@ class TestPipeline(unittest.TestCase):
                     exit_code, payload = self._run_main_with_args(f"run-neg-{case_name}")
                 self.assertEqual(exit_code, 1)
                 self.assertNotIn("quota_evidence", payload)
+                self.assertNotIn("quota_attempt", payload)
                 self.assertNotEqual(payload["blockers"], ["observational quota, no replay authority"])
 
     def test_quota_rejection_symlink_and_oversize(self):

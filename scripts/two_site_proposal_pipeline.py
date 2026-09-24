@@ -61,15 +61,22 @@ RUN_PREFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _CANONICAL_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 QUOTA_EVIDENCE_KEYS = frozenset({"kind", "provider", "model", "conversation_id", "reset_at_utc"})
+QUOTA_ATTEMPT_KEYS = frozenset({"role", "run_id", "status_sha256"})
 
 
 class QuotaBlockError(ProposalError):
     """Raised when runner halts with validated Gemini quota evidence."""
 
-    def __init__(self, quota_evidence: dict[str, Any]) -> None:
+    def __init__(self, quota_evidence: dict[str, Any], quota_attempt: dict[str, str] | None = None) -> None:
         super().__init__("observational quota, no replay authority")
         self.quota_evidence = dict(quota_evidence)
         self.evidence = self.quota_evidence
+        if quota_attempt is not None:
+            if not isinstance(quota_attempt, dict) or set(quota_attempt.keys()) != QUOTA_ATTEMPT_KEYS:
+                raise ProposalError("invalid quota_attempt structure")
+            self.quota_attempt = dict(quota_attempt)
+        else:
+            self.quota_attempt = None
 
 
 def validate_quota_evidence(
@@ -124,19 +131,24 @@ def _extract_bound_quota_evidence(
     expected_run_id: str,
     role: str,
     expected_head: str,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any], dict[str, str]] | None:
     try:
         if run_dir.is_symlink() or os.path.islink(run_dir):
             return None
         status_path = run_dir / "status.json"
         if status_path.is_symlink() or os.path.islink(status_path):
             return None
-        raw_text = bounded_file_text(root, status_path, MAX_CONTEXT, f"{role} status")
+        raw_bytes = bounded_file_bytes(root, status_path, MAX_CONTEXT, f"{role} status")
+        status_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        raw_text = raw_bytes.decode("utf-8")
         status = unique_json(raw_text)
     except Exception:
         return None
 
     if not isinstance(status, dict):
+        return None
+
+    if role not in ("worker", "verifier"):
         return None
 
     expected_model = WORKER_MODEL if role == "worker" else MODEL
@@ -157,7 +169,16 @@ def _extract_bound_quota_evidence(
     if expected_conv_id is not None and not isinstance(expected_conv_id, str):
         return None
 
-    return validate_quota_evidence(evidence, expected_model, expected_conv_id)
+    valid_evidence = validate_quota_evidence(evidence, expected_model, expected_conv_id)
+    if valid_evidence is None:
+        return None
+
+    quota_attempt = {
+        "role": role,
+        "run_id": expected_run_id,
+        "status_sha256": status_sha256,
+    }
+    return valid_evidence, quota_attempt
 
 
 def ref_snapshot(root: Path) -> dict[str, str | None]:
@@ -579,11 +600,12 @@ def run_provider_session(
             last_error = exc
         except ProposalError as exc:
             state_check()
-            quota_evidence = _extract_bound_quota_evidence(
+            extracted = _extract_bound_quota_evidence(
                 root, proposals_dir / attempt_id, attempt_id, role, expected_head
             )
-            if quota_evidence is not None:
-                raise QuotaBlockError(quota_evidence) from None
+            if extracted is not None:
+                quota_evidence, quota_attempt = extracted
+                raise QuotaBlockError(quota_evidence, quota_attempt) from None
             raise
     raise ProposalError(
         f"provider session retry exhausted for {base_run_id} after 3 attempts"
@@ -789,6 +811,8 @@ def main() -> int:
     except QuotaBlockError as exc:
         state["state"] = "TASK_BLOCKED"
         state["quota_evidence"] = exc.quota_evidence
+        if exc.quota_attempt is not None:
+            state["quota_attempt"] = exc.quota_attempt
         state["blockers"] = ["observational quota, no replay authority"]
     except (ProposalError, OSError, subprocess.SubprocessError) as exc:
         msg = str(exc).strip() or type(exc).__name__
