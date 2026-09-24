@@ -2010,6 +2010,53 @@ def publish_next_rescope_receipt(
         raise AutopilotError(f"ambiguous: post-publication validation failed: {exc}") from exc
 
 
+def validate_rescope_epoch_startup(
+    state_root: Path,
+    repository: object,
+) -> None:
+    """Fail-closed startup gate verifying epoch directories and accepted checkpoint."""
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+    current_epoch = rescope_epoch_basename(repository)
+    has_prior_epoch = False
+    total_entries = 0
+    try:
+        with os.scandir(state_root) as scanner:
+            for entry in scanner:
+                total_entries += 1
+                if total_entries > 512:
+                    raise AutopilotError("state_root entries exceed maximum limit")
+                if entry.name.startswith("rescope-"):
+                    if not re.fullmatch(r"rescope-[0-9a-f]{64}", entry.name):
+                        raise AutopilotError(f"malformed rescope epoch name: {entry.name}")
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                    except OSError as exc:
+                        raise AutopilotError(f"cannot stat epoch entry {entry.name}: {exc}") from exc
+                    if stat.S_ISLNK(st.st_mode) or entry.is_symlink():
+                        raise AutopilotError(f"unsafe rescope epoch symlink: {entry.name}")
+                    if not stat.S_ISDIR(st.st_mode):
+                        raise AutopilotError(f"unsafe rescope epoch non-directory: {entry.name}")
+                    if st.st_uid != os.geteuid():
+                        raise AutopilotError(f"unsafe rescope epoch owner: {entry.name}")
+                    if (st.st_mode & 0o777) != 0o700:
+                        raise AutopilotError(f"unsafe rescope epoch mode: {entry.name}")
+                    if entry.name != current_epoch:
+                        has_prior_epoch = True
+    except (KeyboardInterrupt, SystemExit, AutopilotError):
+        raise
+    except OSError as exc:
+        raise AutopilotError(f"cannot scan state_root: {exc}") from exc
+
+    if has_prior_epoch:
+        checkpoint = _load_accepted_checkpoint(state_root)
+        if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repository):
+            raise AutopilotError("prior epoch requires matching accepted checkpoint")
+
+
+_validate_rescope_epoch_startup = validate_rescope_epoch_startup
+
+
 def prepare_rescope_attempt(
     state_root: Path,
     repository: object,
@@ -2970,6 +3017,7 @@ def run_loop(
         try:
             repo_facts = validate_repository(root, require_clean=True)
             expected_repository = repo_facts
+            validate_rescope_epoch_startup(state_root, repo_facts)
             epoch_dir, next_attempt, startup_recovery = prepare_rescope_attempt(state_root, expected_repository)
         except (KeyboardInterrupt, SystemExit):
             raise
