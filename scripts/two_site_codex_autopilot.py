@@ -2851,8 +2851,21 @@ def run_loop(
         raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
     root = root.resolve(strict=True)
     state_root = root / ".local/two-site-refactor/autopilot"
+    if not state_root.exists():
+        state_root.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            state_root.mkdir(mode=0o700)
+        except OSError:
+            pass
     if state_root.resolve() != state_root:
         raise AutopilotError("autopilot state directory cannot be a symlink")
+    st = state_root.stat(follow_symlinks=False)
+    if not stat.S_ISDIR(st.st_mode):
+        raise AutopilotError("state_root is not a directory")
+    if st.st_uid != os.geteuid():
+        raise AutopilotError("state_root directory owner must be process euid")
+    if (st.st_mode & 0o777) != 0o700:
+        raise AutopilotError("state_root directory mode must be 0700")
     (state_root / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = state_root / "autopilot.lock"
     with exclusive_supervisor_lock(lock_path):
@@ -2864,10 +2877,19 @@ def run_loop(
             return 0
         if preparation_route == "legacy":
             _validate_legacy_preparation_startup(root, state_root)
+        try:
+            repo_facts = validate_repository(root, require_clean=True)
+            _epoch_dir, next_attempt, startup_recovery = prepare_rescope_attempt(state_root, repo_facts)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            blocker = str(exc)[:512] or type(exc).__name__
+            write_supervisor_state(state_root, "BLOCKED", cycle=1, blockers=[blocker])
+            return 2
+        consecutive_rescopes = next_attempt - 1
+        recovery_context = startup_recovery
         retryable_failures = 0
-        consecutive_rescopes = 0
-        recovery_context: dict[str, object] | None = None
-        previous_success: dict | None = None
+        previous_success = None
         for cycle in range(1, max_cycles + 1):
             if os.path.lexists(stop_path):
                 if not stop_path.exists():
