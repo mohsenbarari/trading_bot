@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import MappingProxyType
 
 try:
     from scripts.two_site_proposal_runner import (
@@ -170,6 +171,11 @@ REPOSITORY_FACT_KEYS = frozenset({
 MAX_RESCOPE_RECEIPT_BYTES = 16 * 1024
 RESCOPE_RECEIPT_SCHEMA_VERSION = 1
 _RESCOPE_RECEIPT_FILENAME = "rescope_receipt.json"
+_RESCOPE_RECEIPT_FILENAMES = MappingProxyType({
+    "rescope_receipt.json": 1,
+    "rescope_receipt_2.json": 2,
+    "rescope_receipt_3.json": 3,
+})
 RESCOPE_RECEIPT_FILENAME = _RESCOPE_RECEIPT_FILENAME
 RESCOPE_RECEIPT_ENVELOPE_KEYS = frozenset({
     "schema_version",
