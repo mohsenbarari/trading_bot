@@ -15,6 +15,7 @@ from scripts.two_site_codex_autopilot import (
     AutopilotError,
     ensure_rescope_epoch_dir,
     load_latest_rescope_receipt,
+    load_rescope_receipt,
     rescope_intent_exists,
     run_loop,
     unique_json,
@@ -69,18 +70,18 @@ def _rescope_result(
     }
 
 
-def _load_all_epoch_receipts(epoch_dir: Path) -> list[dict]:
-    by_attempt: dict[int, dict] = {}
-    for p in sorted(epoch_dir.rglob("*")):
-        if p.is_file():
-            try:
-                data = unique_json(p.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and "attempt" in data and "result" in data:
-                    attempt_num = int(data["attempt"])
-                    by_attempt[attempt_num] = data
-            except Exception:
-                pass
-    return [by_attempt[a] for a in sorted(by_attempt)]
+def _load_all_epoch_receipts(epoch_dir: Path, expected_repository: object) -> list[dict]:
+    canonical_leafs = (
+        "rescope_receipt.json",
+        "rescope_receipt_2.json",
+        "rescope_receipt_3.json",
+    )
+    receipts: list[dict] = []
+    for leaf in canonical_leafs:
+        receipt = load_rescope_receipt(epoch_dir, expected_repository, receipt_filename=leaf)
+        if receipt is not None:
+            receipts.append(receipt)
+    return receipts
 
 
 class TestAE03RuntimeWire(unittest.TestCase):
@@ -161,7 +162,7 @@ class TestAE03RuntimeWire(unittest.TestCase):
         self.assertEqual(rec3["deferred_unit"]["next_action"], "rescope action 2")
         self.assertEqual(rec3["deferred_unit"]["blockers"], ["rescope blocker 2"])
 
-        receipts = _load_all_epoch_receipts(epoch)
+        receipts = _load_all_epoch_receipts(epoch, self.repo)
         self.assertEqual(len(receipts), 3)
         self.assertEqual([r["attempt"] for r in receipts], [1, 2, 3])
         self.assertFalse(receipts[0]["terminal"])
@@ -265,7 +266,7 @@ class TestAE03RuntimeWire(unittest.TestCase):
         self.assertTrue(rescope_intent_exists(epoch, 2))
         self.assertFalse(rescope_intent_exists(epoch, 3))
 
-        receipts = _load_all_epoch_receipts(epoch)
+        receipts = _load_all_epoch_receipts(epoch, self.repo)
         self.assertEqual(len(receipts), 2)
         self.assertEqual([r["attempt"] for r in receipts], [1, 2])
         self.assertFalse(receipts[0]["terminal"])
@@ -310,7 +311,7 @@ class TestAE03RuntimeWire(unittest.TestCase):
 
         self.assertTrue(rescope_intent_exists(epoch, 1))
         self.assertIsNone(load_latest_rescope_receipt(epoch, self.repo))
-        self.assertEqual(len(_load_all_epoch_receipts(epoch)), 0)
+        self.assertEqual(len(_load_all_epoch_receipts(epoch, self.repo)), 0)
 
         status = unique_json((self.state_root / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["state"], "BLOCKED")
@@ -346,7 +347,7 @@ class TestAE03RuntimeWire(unittest.TestCase):
 
         self.assertFalse(rescope_intent_exists(epoch, 1))
         self.assertIsNone(load_latest_rescope_receipt(epoch, self.repo))
-        self.assertEqual(len(_load_all_epoch_receipts(epoch)), 0)
+        self.assertEqual(len(_load_all_epoch_receipts(epoch, self.repo)), 0)
 
         status = unique_json((self.state_root / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["state"], "BLOCKED")
@@ -385,11 +386,111 @@ class TestAE03RuntimeWire(unittest.TestCase):
 
         self.assertTrue(rescope_intent_exists(epoch, 1))
         self.assertIsNone(load_latest_rescope_receipt(epoch, self.repo))
-        self.assertEqual(len(_load_all_epoch_receipts(epoch)), 0)
+        self.assertEqual(len(_load_all_epoch_receipts(epoch, self.repo)), 0)
 
         status = unique_json((self.state_root / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["state"], "BLOCKED")
         self.assertTrue(any("injected outcome fault" in b for b in status.get("blockers", [])))
+
+    def test_f_noop_marker_publisher_hard_blocked_no_receipt_no_retry(self):
+        epoch = ensure_rescope_epoch_dir(self.state_root, self.repo)
+        calls: list[dict] = []
+
+        def fake_run_cycle_noop_marker(
+            root,
+            codex,
+            state_root,
+            cycle,
+            timeout,
+            recovery=None,
+            continuation=None,
+            before_model=None,
+            **kwargs,
+        ):
+            calls.append({"cycle": cycle, "recovery": recovery})
+            if before_model is not None:
+                before_model(self.repo)
+            run_dir = state_root / "runs" / f"cycle-{cycle:04d}"
+            run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            return run_dir, _rescope_result(
+                attempt=cycle,
+                next_action=f"rescope action {cycle}",
+                blockers=[f"rescope blocker {cycle}"],
+            )
+
+        with self._apply_patches(fake_run_cycle_noop_marker), patch(
+            "scripts.two_site_codex_autopilot.publish_rescope_intent",
+            return_value=None,
+        ):
+            ret = run_loop(self.root, self.codex, max_cycles=3, timeout=300, once=False)
+
+        self.assertEqual(ret, 2)
+        self.assertEqual(len(calls), 1)
+
+        self.assertFalse(rescope_intent_exists(epoch, 1))
+        self.assertIsNone(load_latest_rescope_receipt(epoch, self.repo))
+        self.assertEqual(len(_load_all_epoch_receipts(epoch, self.repo)), 0)
+
+        status = unique_json((self.state_root / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertNotIn(status["state"], ("RESCOPE", "CONTINUE", "COMPLETE"))
+        self.assertEqual(status["cycle"], 1)
+        self.assertNotEqual(status.get("state"), "RETRYABLE_FAILURE")
+        self.assertNotIn("retry", status)
+        self.assertTrue(any("without verified durable rescope intent" in b for b in status.get("blockers", [])))
+        self.assertIsNone(status.get("gemini_worker_run_id"))
+        self.assertIsNone(status.get("gemini_reviewer_run_id"))
+        self.assertIsNone(status.get("proposal_sha256"))
+
+    def test_g_removed_post_callback_marker_hard_blocked_no_receipt_no_retry(self):
+        epoch = ensure_rescope_epoch_dir(self.state_root, self.repo)
+        calls: list[dict] = []
+
+        def fake_run_cycle_remove_marker(
+            root,
+            codex,
+            state_root,
+            cycle,
+            timeout,
+            recovery=None,
+            continuation=None,
+            before_model=None,
+            **kwargs,
+        ):
+            calls.append({"cycle": cycle, "recovery": recovery})
+            if before_model is not None:
+                before_model(self.repo)
+            marker_leaf = epoch / "rescope_intent_1"
+            self.assertTrue(marker_leaf.is_file())
+            marker_leaf.unlink()
+            run_dir = state_root / "runs" / f"cycle-{cycle:04d}"
+            run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            return run_dir, _rescope_result(
+                attempt=cycle,
+                next_action=f"rescope action {cycle}",
+                blockers=[f"rescope blocker {cycle}"],
+            )
+
+        with self._apply_patches(fake_run_cycle_remove_marker):
+            ret = run_loop(self.root, self.codex, max_cycles=3, timeout=300, once=False)
+
+        self.assertEqual(ret, 2)
+        self.assertEqual(len(calls), 1)
+
+        self.assertFalse(rescope_intent_exists(epoch, 1))
+        self.assertIsNone(load_latest_rescope_receipt(epoch, self.repo))
+        self.assertEqual(len(_load_all_epoch_receipts(epoch, self.repo)), 0)
+
+        status = unique_json((self.state_root / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertNotIn(status["state"], ("RESCOPE", "CONTINUE", "COMPLETE"))
+        self.assertEqual(status["cycle"], 1)
+        self.assertNotEqual(status.get("state"), "RETRYABLE_FAILURE")
+        self.assertNotIn("retry", status)
+        self.assertTrue(any("without verified durable rescope intent" in b for b in status.get("blockers", [])))
+        self.assertIsNone(status.get("gemini_worker_run_id"))
+        self.assertIsNone(status.get("gemini_reviewer_run_id"))
+        self.assertIsNone(status.get("proposal_sha256"))
 
 
 if __name__ == "__main__":
