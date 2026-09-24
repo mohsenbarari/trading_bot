@@ -2,9 +2,14 @@
 """Offline unit tests for two-site proposal pipeline orchestration."""
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import copy
+import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,17 +17,23 @@ from unittest.mock import patch
 try:
     import scripts.two_site_proposal_pipeline as pipeline
     from scripts.two_site_proposal_pipeline import (
-        BRANCH, ProposalError, normalize_finding, run_pipeline,
+        BRANCH, ProposalError, QuotaBlockError, normalize_finding, run_pipeline,
+        run_provider_session,
     )
-    from scripts.two_site_proposal_runner import MODEL, WORKER_MODEL, file_sha256, write_json
+    from scripts.two_site_proposal_runner import (
+        MAX_CONTEXT, MODEL, WORKER_MODEL, file_sha256, write_json,
+    )
     from scripts.two_site_semantic_attempts import MARKER
     from scripts.two_site_semantic_task import build_identity
 except ModuleNotFoundError:
     import two_site_proposal_pipeline as pipeline  # type: ignore[no-redef]
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
-        BRANCH, ProposalError, normalize_finding, run_pipeline,
+        BRANCH, ProposalError, QuotaBlockError, normalize_finding, run_pipeline,
+        run_provider_session,
     )
-    from two_site_proposal_runner import MODEL, WORKER_MODEL, file_sha256, write_json  # type: ignore[no-redef]
+    from two_site_proposal_runner import (  # type: ignore[no-redef]
+        MAX_CONTEXT, MODEL, WORKER_MODEL, file_sha256, write_json,
+    )
     from two_site_semantic_attempts import MARKER  # type: ignore[no-redef]
     from two_site_semantic_task import build_identity  # type: ignore[no-redef]
 
@@ -382,6 +393,353 @@ class TestPipeline(unittest.TestCase):
             with self.assertRaises(ProposalError):
                 run_pipeline(self.root, self.task_path, "run-mal", 300, None, st_m)
         self.assertNotEqual(st_m["state"], "READY_FOR_CODEX")
+
+    def _run_main_with_args(self, prefix: str) -> tuple[int, dict]:
+        buf = io.StringIO()
+        cli_args = [
+            "two_site_proposal_pipeline.py",
+            "--root", str(self.root),
+            "--task", str(self.task_path),
+            "--run-prefix", prefix,
+            "--timeout", "300",
+        ]
+        with patch.object(sys, "argv", cli_args), redirect_stdout(buf):
+            exit_code = pipeline.main()
+        output_text = buf.getvalue().strip()
+        self.assertTrue(output_text, "main must print JSON output")
+        payload = json.loads(output_text)
+        return exit_code, payload
+
+    def test_quota_evidence_propagation_worker_known(self):
+        calls_recorder = []
+        evidence = {
+            "kind": "QUOTA_RESET_KNOWN",
+            "provider": "gemini",
+            "model": WORKER_MODEL,
+            "conversation_id": "conv-worker-quota",
+            "reset_at_utc": "2026-09-24T18:00:00Z",
+        }
+
+        def mock_runner(_r, _t, role, run_id, timeout, **_kw):
+            calls_recorder.append((role, run_id))
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_json(run_dir / "status.json", {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": WORKER_MODEL,
+                "state": "BLOCKED",
+                "quota_evidence": evidence,
+            })
+            raise ProposalError("Gemini quota stream exhausted")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            with self.assertRaises(QuotaBlockError) as ctx:
+                run_provider_session(
+                    self.root, self.task_path, "worker", "run-q-w-worker-0", 300,
+                    lambda: None, expected_head=HEAD,
+                )
+            self.assertEqual(len(calls_recorder), 1)
+            self.assertEqual(ctx.exception.quota_evidence, evidence)
+            self.assertEqual(str(ctx.exception), "observational quota, no replay authority")
+
+        calls_recorder.clear()
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            exit_code, payload = self._run_main_with_args("run-main-qw")
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(len(calls_recorder), 1)
+        self.assertEqual(payload["state"], "TASK_BLOCKED")
+        self.assertEqual(payload["blockers"], ["observational quota, no replay authority"])
+        self.assertEqual(payload["quota_evidence"], evidence)
+
+    def test_quota_evidence_propagation_worker_unknown(self):
+        calls_recorder = []
+        evidence = {
+            "kind": "QUOTA_RESET_UNKNOWN",
+            "provider": "gemini",
+            "model": WORKER_MODEL,
+            "conversation_id": "conv-worker-unknown",
+            "reset_at_utc": None,
+        }
+
+        def mock_runner(_r, _t, role, run_id, timeout, **_kw):
+            calls_recorder.append((role, run_id))
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_json(run_dir / "status.json", {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": WORKER_MODEL,
+                "state": "BLOCKED",
+                "quota_evidence": evidence,
+            })
+            raise ProposalError("Gemini quota stream exhausted")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            with self.assertRaises(QuotaBlockError) as ctx:
+                run_provider_session(
+                    self.root, self.task_path, "worker", "run-q-un-worker-0", 300,
+                    lambda: None, expected_head=HEAD,
+                )
+            self.assertEqual(len(calls_recorder), 1)
+            self.assertEqual(ctx.exception.quota_evidence, evidence)
+
+    def test_quota_evidence_propagation_reviewer(self):
+        calls_recorder = []
+        evidence = {
+            "kind": "QUOTA_RESET_KNOWN",
+            "provider": "gemini",
+            "model": MODEL,
+            "conversation_id": "conv-reviewer-quota",
+            "reset_at_utc": "2026-09-24T19:30:00Z",
+        }
+        worker_helper, _ = make_runner(self.root, [{"content": "# worker ok\n"}])
+
+        def mock_runner(r, t, role, run_id, timeout, **kw):
+            calls_recorder.append((role, run_id))
+            if role == "worker":
+                return worker_helper(r, t, role, run_id, timeout, **kw)
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_json(run_dir / "status.json", {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": MODEL,
+                "state": "BLOCKED",
+                "quota_evidence": evidence,
+            })
+            raise ProposalError("reviewer Gemini quota limit reached")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            exit_code, payload = self._run_main_with_args("run-main-qr")
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(calls_recorder, [
+            ("worker", "run-main-qr-worker-0"),
+            ("verifier", "run-main-qr-reviewer-0"),
+        ])
+        self.assertEqual(payload["state"], "TASK_BLOCKED")
+        self.assertEqual(payload["blockers"], ["observational quota, no replay authority"])
+        self.assertEqual(payload["quota_evidence"], evidence)
+        self.assertNotIn("READY_FOR_CODEX", payload.values())
+
+    def test_quota_evidence_propagation_matching_status_conversation_id(self):
+        calls_recorder = []
+        evidence = {
+            "kind": "QUOTA_RESET_KNOWN",
+            "provider": "gemini",
+            "model": WORKER_MODEL,
+            "conversation_id": "conv-worker-matching",
+            "reset_at_utc": "2026-09-24T18:00:00Z",
+        }
+
+        def mock_runner(_r, _t, role, run_id, timeout, **_kw):
+            calls_recorder.append((role, run_id))
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_json(run_dir / "status.json", {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": WORKER_MODEL,
+                "conversation_id": "conv-worker-matching",
+                "state": "BLOCKED",
+                "quota_evidence": evidence,
+            })
+            raise ProposalError("Gemini quota stream exhausted")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            with self.assertRaises(QuotaBlockError) as ctx:
+                run_provider_session(
+                    self.root, self.task_path, "worker", "run-q-matching-worker-0", 300,
+                    lambda: None, expected_head=HEAD,
+                )
+            self.assertEqual(len(calls_recorder), 1)
+            self.assertEqual(ctx.exception.quota_evidence, evidence)
+
+    def test_quota_rejection_negative_matrix(self):
+        valid_evidence = {
+            "kind": "QUOTA_RESET_KNOWN",
+            "provider": "gemini",
+            "model": WORKER_MODEL,
+            "conversation_id": "conv-q-neg",
+            "reset_at_utc": "2026-09-24T18:00:00Z",
+        }
+        cases = [
+            ("wrong_run_id", {"run_id": "wrong-id"}),
+            ("wrong_role", {"role": "verifier"}),
+            ("wrong_model", {"model": MODEL}),
+            ("wrong_head", {"head": "0" * 40}),
+            ("wrong_state", {"state": "ERROR"}),
+            ("missing_state", {"state": None}),
+            ("extra_evidence_key", {"quota_evidence": {**valid_evidence, "extra": "bad"}}),
+            ("missing_evidence_key", {"quota_evidence": {"kind": "QUOTA_RESET_KNOWN", "provider": "gemini", "model": WORKER_MODEL, "conversation_id": "conv-q-neg"}}),
+            ("invalid_kind", {"quota_evidence": {**valid_evidence, "kind": "QUOTA_RESET_OTHER"}}),
+            ("invalid_provider", {"quota_evidence": {**valid_evidence, "provider": "other"}}),
+            ("invalid_known_reset_null", {"quota_evidence": {**valid_evidence, "reset_at_utc": None}}),
+            ("invalid_known_reset_non_utc", {"quota_evidence": {**valid_evidence, "reset_at_utc": "not-a-date"}}),
+            ("invalid_unknown_reset_string", {"quota_evidence": {"kind": "QUOTA_RESET_UNKNOWN", "provider": "gemini", "model": WORKER_MODEL, "conversation_id": "conv-q-neg", "reset_at_utc": "2026-09-24T18:00:00Z"}}),
+            ("invalid_evidence_conv_id_empty", {"quota_evidence": {**valid_evidence, "conversation_id": ""}}),
+            ("status_conv_id_mismatch", {"conversation_id": "different-conv-id"}),
+            ("status_conv_id_non_string", {"conversation_id": 12345}),
+            ("nonquota_error", {"quota_evidence": None}),
+        ]
+
+        for case_name, override in cases:
+            with self.subTest(case=case_name):
+                calls = []
+                st = {
+                    "run_id": f"run-neg-{case_name}-worker-0",
+                    "role": "worker",
+                    "head": HEAD,
+                    "model": WORKER_MODEL,
+                    "state": "BLOCKED",
+                    "quota_evidence": copy.deepcopy(valid_evidence),
+                }
+                st.update(override)
+                if st["quota_evidence"] is None:
+                    st.pop("quota_evidence", None)
+
+                def mock_run(_r, _t, role, run_id, timeout, **_kw):
+                    calls.append(run_id)
+                    run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+                    run_dir.mkdir(parents=True, exist_ok=True)
+                    write_json(run_dir / "status.json", st)
+                    raise ProposalError("generic provider error")
+
+                with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_run):
+                    with self.assertRaises(ProposalError) as ctx:
+                        run_provider_session(
+                            self.root, self.task_path, "worker", f"run-neg-{case_name}-worker-0",
+                            300, lambda: None, expected_head=HEAD,
+                        )
+                    self.assertNotIsInstance(ctx.exception, QuotaBlockError)
+                    self.assertEqual(len(calls), 1)
+
+                with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_run):
+                    exit_code, payload = self._run_main_with_args(f"run-neg-{case_name}")
+                self.assertEqual(exit_code, 1)
+                self.assertNotIn("quota_evidence", payload)
+                self.assertNotEqual(payload["blockers"], ["observational quota, no replay authority"])
+
+    def test_quota_rejection_symlink_and_oversize(self):
+        def make_symlink_runner(is_dir: bool):
+            def mock_run(_r, _t, role, run_id, timeout, **_kw):
+                target_dir = self.root / ".local/two-site-refactor/symlink_target" / run_id
+                target_dir.mkdir(parents=True, exist_ok=True)
+                write_json(target_dir / "status.json", {
+                    "run_id": run_id,
+                    "role": role,
+                    "head": HEAD,
+                    "model": WORKER_MODEL,
+                    "state": "BLOCKED",
+                    "quota_evidence": {
+                        "kind": "QUOTA_RESET_UNKNOWN",
+                        "provider": "gemini",
+                        "model": WORKER_MODEL,
+                        "conversation_id": "conv-sym",
+                        "reset_at_utc": None,
+                    },
+                })
+                proposals = self.root / ".local/two-site-refactor/proposals"
+                proposals.mkdir(parents=True, exist_ok=True)
+                if is_dir:
+                    os.symlink(target_dir, proposals / run_id)
+                else:
+                    real_dir = proposals / run_id
+                    real_dir.mkdir(parents=True, exist_ok=True)
+                    os.symlink(target_dir / "status.json", real_dir / "status.json")
+                raise ProposalError("error on symlink attempt")
+            return mock_run
+
+        for is_dir_symlink, label in ((False, "file"), (True, "dir")):
+            with self.subTest(symlink_type=label):
+                with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=make_symlink_runner(is_dir_symlink)):
+                    with self.assertRaises(ProposalError) as ctx:
+                        run_provider_session(
+                            self.root, self.task_path, "worker", f"run-sym-{label}-worker-0",
+                            300, lambda: None, expected_head=HEAD,
+                        )
+                    self.assertNotIsInstance(ctx.exception, QuotaBlockError)
+
+        def mock_oversize_run(_r, _t, role, run_id, timeout, **_kw):
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            huge_status = {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": WORKER_MODEL,
+                "state": "BLOCKED",
+                "quota_evidence": {
+                    "kind": "QUOTA_RESET_UNKNOWN",
+                    "provider": "gemini",
+                    "model": WORKER_MODEL,
+                    "conversation_id": "conv-huge",
+                    "reset_at_utc": None,
+                },
+                "padding": "x" * (MAX_CONTEXT + 1024),
+            }
+            (run_dir / "status.json").write_text(json.dumps(huge_status))
+            raise ProposalError("error on oversize")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_oversize_run):
+            with self.assertRaises(ProposalError) as ctx:
+                run_provider_session(
+                    self.root, self.task_path, "worker", "run-oversize-worker-0",
+                    300, lambda: None, expected_head=HEAD,
+                )
+            self.assertNotIsInstance(ctx.exception, QuotaBlockError)
+
+    def test_quota_rejection_drift(self):
+        evidence = {
+            "kind": "QUOTA_RESET_UNKNOWN",
+            "provider": "gemini",
+            "model": WORKER_MODEL,
+            "conversation_id": "conv-drift",
+            "reset_at_utc": None,
+        }
+
+        def mock_runner(_r, _t, role, run_id, timeout, **_kw):
+            run_dir = self.root / ".local/two-site-refactor/proposals" / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            write_json(run_dir / "status.json", {
+                "run_id": run_id,
+                "role": role,
+                "head": HEAD,
+                "model": WORKER_MODEL,
+                "state": "BLOCKED",
+                "quota_evidence": evidence,
+            })
+            raise ProposalError("error during drift")
+
+        def failing_state_check():
+            raise ProposalError("worktree drift: untracked or modified files detected")
+
+        with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=mock_runner):
+            with self.assertRaises(ProposalError) as ctx:
+                run_provider_session(
+                    self.root, self.task_path, "worker", "run-drift-worker-0",
+                    300, failing_state_check, expected_head=HEAD,
+                )
+            self.assertNotIsInstance(ctx.exception, QuotaBlockError)
+            self.assertIn("worktree drift", str(ctx.exception))
+
+    def test_run_provider_session_fails_closed_when_head_query_fails(self):
+        def failing_git(_root, *args):
+            cmd = " ".join(args)
+            if "rev-parse HEAD" in cmd:
+                raise subprocess.CalledProcessError(1, ["git", "rev-parse", "HEAD"])
+            return fake_git(_root, *args)
+
+        with patch.object(pipeline, "git", side_effect=failing_git):
+            with self.assertRaises(subprocess.CalledProcessError):
+                run_provider_session(
+                    self.root, self.task_path, "worker", "run-head-fail-worker-0", 300,
+                    lambda: None, expected_head=None,
+                )
 
 
 if __name__ == "__main__":

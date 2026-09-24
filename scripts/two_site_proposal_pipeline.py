@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ast
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl, hashlib, json, os, re, stat, subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -58,6 +59,105 @@ PROTECTED_REFS = (
 )
 RUN_PREFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_CANONICAL_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+QUOTA_EVIDENCE_KEYS = frozenset({"kind", "provider", "model", "conversation_id", "reset_at_utc"})
+
+
+class QuotaBlockError(ProposalError):
+    """Raised when runner halts with validated Gemini quota evidence."""
+
+    def __init__(self, quota_evidence: dict[str, Any]) -> None:
+        super().__init__("observational quota, no replay authority")
+        self.quota_evidence = dict(quota_evidence)
+        self.evidence = self.quota_evidence
+
+
+def validate_quota_evidence(
+    evidence: Any,
+    expected_model: str,
+    expected_conv_id: str | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(evidence, dict):
+        return None
+    if set(evidence.keys()) != QUOTA_EVIDENCE_KEYS:
+        return None
+    kind = evidence.get("kind")
+    if kind not in ("QUOTA_RESET_KNOWN", "QUOTA_RESET_UNKNOWN"):
+        return None
+    if evidence.get("provider") != "gemini":
+        return None
+    model = evidence.get("model")
+    if not isinstance(model, str) or len(model) > 128 or model != expected_model:
+        return None
+    conv_id = evidence.get("conversation_id")
+    if not isinstance(conv_id, str) or not conv_id or len(conv_id) > 128:
+        return None
+    if not all(33 <= ord(c) <= 126 for c in conv_id):
+        return None
+    if expected_conv_id is not None and conv_id != expected_conv_id:
+        return None
+    reset_at = evidence.get("reset_at_utc")
+    if kind == "QUOTA_RESET_UNKNOWN":
+        if reset_at is not None:
+            return None
+    else:
+        if not isinstance(reset_at, str) or not _CANONICAL_UTC_RE.fullmatch(reset_at):
+            return None
+        try:
+            dt = datetime.fromisoformat(reset_at[:-1] + "+00:00")
+            if dt.tzinfo != timezone.utc:
+                return None
+        except Exception:
+            return None
+    return {
+        "kind": kind,
+        "provider": "gemini",
+        "model": model,
+        "conversation_id": conv_id,
+        "reset_at_utc": reset_at,
+    }
+
+
+def _extract_bound_quota_evidence(
+    root: Path,
+    run_dir: Path,
+    expected_run_id: str,
+    role: str,
+    expected_head: str,
+) -> dict[str, Any] | None:
+    try:
+        if run_dir.is_symlink() or os.path.islink(run_dir):
+            return None
+        status_path = run_dir / "status.json"
+        if status_path.is_symlink() or os.path.islink(status_path):
+            return None
+        raw_text = bounded_file_text(root, status_path, MAX_CONTEXT, f"{role} status")
+        status = unique_json(raw_text)
+    except Exception:
+        return None
+
+    if not isinstance(status, dict):
+        return None
+
+    expected_model = WORKER_MODEL if role == "worker" else MODEL
+
+    if status.get("run_id") != expected_run_id:
+        return None
+    if status.get("role") != role:
+        return None
+    if status.get("head") != expected_head:
+        return None
+    if status.get("model") != expected_model:
+        return None
+    if status.get("state") != "BLOCKED":
+        return None
+
+    evidence = status.get("quota_evidence")
+    expected_conv_id = status.get("conversation_id")
+    if expected_conv_id is not None and not isinstance(expected_conv_id, str):
+        return None
+
+    return validate_quota_evidence(evidence, expected_model, expected_conv_id)
 
 
 def ref_snapshot(root: Path) -> dict[str, str | None]:
@@ -443,13 +543,15 @@ def run_provider_session(
     root: Path, task_path: Path, role: str, base_run_id: str, timeout: int,
     state_check: Callable[[], None], feedback: Path | None = None,
     proposal: Path | None = None, cli: Path | None = None,
-    test_evidence: Path | None = None,
+    test_evidence: Path | None = None, expected_head: str | None = None,
 ) -> tuple[str, Path]:
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
     last_error: RetryableProviderSessionError | None = None
     output_errors = 0
     label = "reviewer" if role == "verifier" else "worker"
+    if expected_head is None:
+        expected_head = git(root, "rev-parse", "HEAD")
     for attempt_id in attempts:
         state_check()
         if (proposals_dir / attempt_id).exists():
@@ -475,6 +577,14 @@ def run_provider_session(
                 ) from exc
         except RetryableProviderSessionError as exc:
             last_error = exc
+        except ProposalError as exc:
+            state_check()
+            quota_evidence = _extract_bound_quota_evidence(
+                root, proposals_dir / attempt_id, attempt_id, role, expected_head
+            )
+            if quota_evidence is not None:
+                raise QuotaBlockError(quota_evidence) from None
+            raise
     raise ProposalError(
         f"provider session retry exhausted for {base_run_id} after 3 attempts"
     ) from last_error
@@ -527,7 +637,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
 
         worker_run_id, worker_dir = run_provider_session(
             root, task_candidate, "worker", f"{run_prefix}-worker-0", timeout,
-            state_check, cli=cli,
+            state_check, cli=cli, expected_head=initial_head,
         )
         worker_res, worker_st, worker_sha, worker_txt = validate_run(
             root, worker_dir, "worker", worker_run_id, initial_head, task, sources, seen_convs
@@ -577,7 +687,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
                     reviewer_run_id, reviewer_dir = run_provider_session(
                         root, task_candidate, "verifier", f"{run_prefix}-reviewer-{correction_count}", timeout,
                         state_check, proposal=worker_result_path, cli=cli,
-                        test_evidence=receipt_path,
+                        test_evidence=receipt_path, expected_head=initial_head,
                     )
                     reviewer_res, _st, _sha, _txt = validate_run(
                         root, reviewer_dir, "verifier", reviewer_run_id, initial_head, task, sources,
@@ -628,6 +738,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
             worker_run_id, worker_dir = run_provider_session(
                 root, task_candidate, "worker", f"{run_prefix}-worker-{correction_count}", timeout,
                 state_check, feedback=feedback_path, proposal=worker_result_path, cli=cli,
+                expected_head=initial_head,
             )
             worker_res, worker_st, worker_sha, worker_txt = validate_run(
                 root, worker_dir, "worker", worker_run_id, initial_head, task, sources,
@@ -675,6 +786,10 @@ def main() -> int:
     }
     try:
         run_pipeline(args.root, args.task, args.run_prefix, args.timeout, args.cli, state)
+    except QuotaBlockError as exc:
+        state["state"] = "TASK_BLOCKED"
+        state["quota_evidence"] = exc.quota_evidence
+        state["blockers"] = ["observational quota, no replay authority"]
     except (ProposalError, OSError, subprocess.SubprocessError) as exc:
         msg = str(exc).strip() or type(exc).__name__
         state["state"], state["blockers"] = "TASK_BLOCKED", [msg[:200]]
