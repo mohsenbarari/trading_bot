@@ -23,7 +23,13 @@ import stat
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 from typing import Iterator, Mapping
+
+try:
+    from scripts.two_site_quota_evidence import classify_gemini_quota_stream
+except ImportError:
+    from two_site_quota_evidence import classify_gemini_quota_stream
 
 try:
     from scripts.two_site_cli_artifact import prepare_disposable_cli
@@ -3020,6 +3026,15 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
             if process.returncode:
                 raw_stream = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
+                quota_evidence = classify_gemini_quota_stream(
+                    raw_stream, role_model, datetime.now(timezone.utc)
+                )
+                if quota_evidence is not None:
+                    final_cli_identity = cli_identity(disposable_cli)
+                    if final_cli_identity != initial_cli_identity:
+                        raise ProposalError("CLI identity changed during generation")
+                    meta["quota_evidence"] = quota_evidence
+                    write_json(out / "status.json", meta)
                 if is_retryable_zero_token_stream(raw_stream, role_model):
                     final_cli_identity = cli_identity(disposable_cli)
                     if final_cli_identity != initial_cli_identity:
@@ -3037,6 +3052,15 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             if final_cli_identity != initial_cli_identity:
                 raise ProposalError("CLI identity changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
+            quota_evidence = classify_gemini_quota_stream(
+                raw, role_model, datetime.now(timezone.utc)
+            )
+            if quota_evidence is not None:
+                final_cli_identity = cli_identity(disposable_cli)
+                if final_cli_identity != initial_cli_identity:
+                    raise ProposalError("CLI identity changed during generation")
+                meta["quota_evidence"] = quota_evidence
+                write_json(out / "status.json", meta)
             result, envelope = _parse_stream(
                 raw, task, active_sources, role, force_full_paths, role_model
             )
