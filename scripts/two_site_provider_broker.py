@@ -1497,11 +1497,8 @@ def read_terminal_quota_bytes(root: Path, request_id: str) -> bytes:
     if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
         raise BrokerError("terminal quota request ID is invalid")
 
-    state_root, _status, _requests, _claimed, _responses = broker_paths(root)
+    state_root = root / STATE_REL
     directory = state_root / "terminal-quota"
-    target_filename = f"{request_id}.json"
-    target_path = directory / target_filename
-
     try:
         dir_lstat_initial = os.lstat(directory)
     except OSError as exc:
@@ -1512,6 +1509,15 @@ def read_terminal_quota_bytes(root: Path, request_id: str) -> bytes:
         raise BrokerError("terminal quota directory owner mismatch")
     if stat.S_IMODE(dir_lstat_initial.st_mode) != 0o700:
         raise BrokerError("terminal quota directory mode must be 0700")
+
+    try:
+        resolved_dir = directory.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise BrokerError("terminal quota directory is unavailable") from exc
+    if resolved_dir != directory:
+        raise BrokerError("terminal quota directory must be a canonical path without symlinks")
+    target_filename = f"{request_id}.json"
+    target_path = directory / target_filename
 
     try:
         target_lstat_initial = os.lstat(target_path)
@@ -1885,6 +1891,230 @@ def validate_terminal_quota_payload(
 def read_terminal_quota_record(root: Path, request_id: str) -> dict:
     raw_bytes = read_terminal_quota_bytes(root, request_id)
     return validate_terminal_quota_payload(root, request_id, raw_bytes)
+
+
+def read_terminal_quota_for_exact_request(
+    root: Path, expected_request: object
+) -> dict:
+    root = canonical_root(root)
+    if not isinstance(expected_request, dict) or set(expected_request) != REQUEST_KEYS:
+        raise BrokerError("broker request does not match the exact contract")
+    if expected_request.get("schema_version") != "1.0":
+        raise BrokerError("broker request schema version is invalid")
+    request_id = expected_request.get("request_id")
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        raise BrokerError("broker request ID is invalid")
+    run_prefix = expected_request.get("run_prefix")
+    if not isinstance(run_prefix, str) or not RUN_PREFIX_RE.fullmatch(run_prefix):
+        raise BrokerError("broker run-prefix is invalid")
+    timeout = expected_request.get("timeout")
+    if type(timeout) is not int or not 10 <= timeout <= 900:
+        raise BrokerError("broker timeout is invalid")
+    source_head = expected_request.get("source_head")
+    if not isinstance(source_head, str) or not HEAD_RE.fullmatch(source_head):
+        raise BrokerError("broker source HEAD is invalid")
+    task_sha256 = expected_request.get("task_sha256")
+    if not isinstance(task_sha256, str) or not SHA_RE.fullmatch(task_sha256):
+        raise BrokerError("broker task SHA is invalid")
+    assignment_id = expected_request.get("assignment_id")
+    if not isinstance(assignment_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", assignment_id):
+        raise BrokerError("broker assignment ID is invalid")
+    assignment_sha256 = expected_request.get("assignment_sha256")
+    if not isinstance(assignment_sha256, str) or not SHA_RE.fullmatch(assignment_sha256):
+        raise BrokerError("broker assignment SHA is invalid")
+    controller_run_id = expected_request.get("controller_run_id")
+    if not isinstance(controller_run_id, str) or not CONTROLLER_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("broker controller run ID is invalid")
+    created_at = expected_request.get("created_at")
+    if (
+        not isinstance(created_at, (int, float))
+        or isinstance(created_at, bool)
+        or not math.isfinite(created_at)
+    ):
+        raise BrokerError("broker request created_at is invalid")
+    _task_relative_path(expected_request.get("task_path"))
+
+    receipt = read_terminal_quota_record(root, request_id)
+
+    try:
+        expected_canonical = json.dumps(
+            expected_request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        receipt_req_canonical = json.dumps(
+            receipt["request"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except (ValueError, TypeError) as exc:
+        raise BrokerError("request contains non-finite numbers") from exc
+
+    if expected_canonical != receipt_req_canonical:
+        raise BrokerError("expected request does not match receipt request")
+    expected_req_sha = hashlib.sha256(expected_canonical).hexdigest()
+    if receipt.get("request_sha256") != expected_req_sha:
+        raise BrokerError("receipt request digest mismatch")
+
+    state_root = root / STATE_REL
+    responses = state_root / "responses"
+
+    try:
+        dir_lstat_initial = os.lstat(responses)
+    except OSError as exc:
+        raise BrokerError("responses directory is unavailable") from exc
+    if not stat.S_ISDIR(dir_lstat_initial.st_mode) or stat.S_ISLNK(dir_lstat_initial.st_mode):
+        raise BrokerError("responses directory must be a directory and not a symlink")
+    if dir_lstat_initial.st_uid != os.geteuid():
+        raise BrokerError("responses directory owner mismatch")
+    if stat.S_IMODE(dir_lstat_initial.st_mode) != 0o700:
+        raise BrokerError("responses directory mode must be 0700")
+
+    try:
+        resolved_responses = responses.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise BrokerError("responses directory is unavailable") from exc
+    if resolved_responses != responses:
+        raise BrokerError("responses directory must be a canonical path without symlinks")
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    dir_fd = -1
+    try:
+        try:
+            dir_fd = os.open(responses, flags)
+        except OSError as exc:
+            raise BrokerError(f"cannot safely open responses directory: {exc}") from exc
+
+        try:
+            dir_fstat = os.fstat(dir_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat responses directory: {exc}") from exc
+        if not stat.S_ISDIR(dir_fstat.st_mode) or stat.S_ISLNK(dir_fstat.st_mode):
+            raise BrokerError("responses directory descriptor is not a directory")
+        if dir_fstat.st_uid != os.geteuid():
+            raise BrokerError("responses directory descriptor owner mismatch")
+        if stat.S_IMODE(dir_fstat.st_mode) != 0o700:
+            raise BrokerError("responses directory descriptor mode mismatch")
+        if (dir_fstat.st_dev, dir_fstat.st_ino) != (dir_lstat_initial.st_dev, dir_lstat_initial.st_ino):
+            raise BrokerError("responses directory descriptor does not match path before scan")
+
+        try:
+            dir_lstat_after_open = os.lstat(responses)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat responses directory after open: {exc}") from exc
+        if (dir_lstat_after_open.st_dev, dir_lstat_after_open.st_ino) != (dir_fstat.st_dev, dir_fstat.st_ino):
+            raise BrokerError("responses directory path changed during open")
+        if not stat.S_ISDIR(dir_lstat_after_open.st_mode) or stat.S_ISLNK(dir_lstat_after_open.st_mode):
+            raise BrokerError("responses directory path changed during open")
+        if dir_lstat_after_open.st_uid != os.geteuid():
+            raise BrokerError("responses directory path owner mismatch during open")
+        if stat.S_IMODE(dir_lstat_after_open.st_mode) != 0o700:
+            raise BrokerError("responses directory path mode mismatch during open")
+
+        response_filename = f"{request_id}.json"
+        response_path = responses / response_filename
+
+        response_present = False
+        entry_stat: os.stat_result | None = None
+        try:
+            entry_stat = os.stat(response_filename, dir_fd=dir_fd, follow_symlinks=False)
+            response_present = True
+        except FileNotFoundError:
+            response_present = False
+        except OSError as exc:
+            raise BrokerError(f"cannot stat response file via descriptor: {exc}") from exc
+
+        if response_present:
+            assert entry_stat is not None
+            if stat.S_ISLNK(entry_stat.st_mode) or not stat.S_ISREG(entry_stat.st_mode):
+                raise BrokerError("existing response is not a regular file")
+            if entry_stat.st_uid != os.geteuid():
+                raise BrokerError("existing response owner mismatch")
+            if stat.S_IMODE(entry_stat.st_mode) != 0o600:
+                raise BrokerError("existing response mode must be 0600")
+            if entry_stat.st_nlink != 1:
+                raise BrokerError("existing response has invalid link count")
+            if entry_stat.st_size > MAX_RESPONSE_BYTES:
+                raise BrokerError("existing response exceeds byte limit")
+
+            try:
+                path_stat_before = os.lstat(response_path)
+            except OSError as exc:
+                raise BrokerError(f"cannot lstat existing response path: {exc}") from exc
+            if (
+                (path_stat_before.st_dev, path_stat_before.st_ino) != (entry_stat.st_dev, entry_stat.st_ino)
+                or path_stat_before.st_mode != entry_stat.st_mode
+                or path_stat_before.st_uid != entry_stat.st_uid
+                or path_stat_before.st_nlink != entry_stat.st_nlink
+                or path_stat_before.st_size != entry_stat.st_size
+                or path_stat_before.st_mtime_ns != entry_stat.st_mtime_ns
+                or path_stat_before.st_ctime_ns != entry_stat.st_ctime_ns
+            ):
+                raise BrokerError("existing response path metadata does not match descriptor entry")
+
+            existing_resp = _safe_read_existing_response(root, response_path)
+
+            try:
+                path_stat_after = os.lstat(response_path)
+            except OSError as exc:
+                raise BrokerError(f"cannot lstat existing response path after read: {exc}") from exc
+            if (path_stat_after.st_dev, path_stat_after.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                raise BrokerError("existing response path changed during read")
+
+            try:
+                entry_stat_after = os.stat(response_filename, dir_fd=dir_fd, follow_symlinks=False)
+            except OSError as exc:
+                raise BrokerError(f"cannot stat response file via descriptor after read: {exc}") from exc
+            if (entry_stat_after.st_dev, entry_stat_after.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                raise BrokerError("existing response descriptor entry changed during read")
+
+            try:
+                existing_canonical = json.dumps(
+                    existing_resp, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode("utf-8")
+                receipt_resp_canonical = json.dumps(
+                    receipt["response"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode("utf-8")
+            except (ValueError, TypeError) as exc:
+                raise BrokerError("response contains non-finite numbers") from exc
+
+            if existing_canonical != receipt_resp_canonical:
+                raise BrokerError("existing response does not match receipt response")
+            existing_sha = hashlib.sha256(existing_canonical).hexdigest()
+            if receipt.get("response_sha256") != existing_sha:
+                raise BrokerError("existing response digest mismatch")
+
+        try:
+            final_dir_lstat = os.lstat(responses)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat responses directory before return: {exc}") from exc
+        if not stat.S_ISDIR(final_dir_lstat.st_mode) or stat.S_ISLNK(final_dir_lstat.st_mode):
+            raise BrokerError("responses directory changed or became symlink")
+        if final_dir_lstat.st_uid != os.geteuid():
+            raise BrokerError("responses directory owner changed")
+        if stat.S_IMODE(final_dir_lstat.st_mode) != 0o700:
+            raise BrokerError("responses directory mode changed")
+        if (final_dir_lstat.st_dev, final_dir_lstat.st_ino) != (dir_fstat.st_dev, dir_fstat.st_ino):
+            raise BrokerError("responses directory identity mismatch between path and descriptor")
+
+        try:
+            final_dir_fstat = os.fstat(dir_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat responses directory descriptor before return: {exc}") from exc
+        if (final_dir_fstat.st_dev, final_dir_fstat.st_ino) != (dir_fstat.st_dev, dir_fstat.st_ino):
+            raise BrokerError("responses directory descriptor changed")
+
+        return receipt["response"]
+    finally:
+        close_errors: list[OSError] = []
+        if dir_fd >= 0:
+            try:
+                os.close(dir_fd)
+            except OSError as exc:
+                close_errors.append(exc)
+        if close_errors:
+            raise BrokerError(f"cannot safely close responses directory descriptor: {close_errors[0]}") from close_errors[0]
 
 
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
