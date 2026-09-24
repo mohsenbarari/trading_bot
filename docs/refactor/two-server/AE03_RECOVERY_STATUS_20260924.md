@@ -4,6 +4,12 @@
 - Current Baseline: Clean HEAD `94c01ab2159274acb372b4663573dd41cbcc69fd` on branch `refactor/two-site-architecture`.
 - Governing Rule: No modifications to `main`, production, DNS, or Writer. No active Supervisor recovery or runtime hooks are enabled.
 
+## Update at `c77320ab` (2026-09-24)
+
+The six-helper table below is a historical snapshot, not the current implementation boundary. Subsequent accepted units added sequential receipts, post-write validation, runtime RESCOPE wiring, a bounded cross-epoch startup gate, and a hermetic startup matrix. `0ec45a51` requires a canonical accepted checkpoint matching the full current repository identity before a prior epoch can be crossed; `c77320ab` covers missing/corrupt/stale checkpoints, full-identity drift, unsafe epoch entries, overflow and STOP priority. The selected startup/runtime/autopilot suites passed **60/60** after Codex's byte-binding and independent test gate.
+
+Supervisor activation and quota/reset handling remain **not accepted**. The cross-epoch guard is deliberately conservative: a manually changed HEAD without a matching accepted receipt blocks instead of manufacturing acceptance. The effect on token use or delivery speed is still `UNKNOWN`; this document is not a live-success claim. The next work is typed quota evidence and restart-safe waiting, monitor coordination, the remaining fault matrix, then measured pilot cohorts before AE03 can close.
+
 ## 1. Accepted Technical Units vs. Runtime Recovery
 
 The following six isolated helper units have been accepted and merged up to HEAD `94c01ab2`:
