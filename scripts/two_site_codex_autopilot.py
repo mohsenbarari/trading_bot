@@ -1173,6 +1173,131 @@ def load_rescope_receipt(
 _load_rescope_receipt = load_rescope_receipt
 
 
+def _create_rescope_temp_file(pinned_dir_fd: int, payload: bytes) -> str:
+    """Safely create, populate, fsync, and close a private temp file in pinned_dir_fd.
+
+    Returns the unique hidden basename on success.
+    Fails closed with typed AutopilotError on any validation, I/O, or attribute defect,
+    cleaning up any created temp file.
+    """
+    if type(pinned_dir_fd) is not int or isinstance(pinned_dir_fd, bool):
+        raise AutopilotError("pinned_dir_fd must be an integer")
+    if pinned_dir_fd < 0:
+        raise AutopilotError("pinned_dir_fd must be non-negative")
+    if type(payload) is not bytes:
+        raise AutopilotError("payload must be bytes")
+    if not (1 <= len(payload) <= MAX_RESCOPE_RECEIPT_BYTES):
+        raise AutopilotError(
+            f"payload length must be in range 1..{MAX_RESCOPE_RECEIPT_BYTES} bytes"
+        )
+    if (
+        getattr(os, "O_NOFOLLOW", None) is None
+        or getattr(os, "O_CLOEXEC", None) is None
+        or getattr(os, "O_DIRECTORY", None) is None
+    ):
+        raise AutopilotError("platform missing required O_NOFOLLOW, O_CLOEXEC, or O_DIRECTORY flags")
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    has_open_dir_fd = os.open in supports_dir_fd or any(getattr(f, "__name__", None) == "open" for f in supports_dir_fd)
+    has_unlink_dir_fd = os.unlink in supports_dir_fd or any(getattr(f, "__name__", None) == "unlink" for f in supports_dir_fd)
+    if not has_open_dir_fd or not has_unlink_dir_fd:
+        raise AutopilotError("platform missing dir_fd support for os.open or os.unlink")
+
+    try:
+        dir_stat = os.fstat(pinned_dir_fd)
+    except OSError as exc:
+        raise AutopilotError(f"cannot fstat pinned directory fd: {exc}") from exc
+
+    if not stat.S_ISDIR(dir_stat.st_mode):
+        raise AutopilotError("pinned directory fd is not a directory")
+    if dir_stat.st_uid != os.geteuid():
+        raise AutopilotError("pinned directory owner must be process euid")
+    if (dir_stat.st_mode & 0o777) != 0o700:
+        raise AutopilotError("pinned directory mode must be 0700")
+
+    temp_name = f".rescope_receipt_tmp_{os.getpid()}_{os.urandom(8).hex()}"
+    temp_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+
+    try:
+        temp_fd = os.open(temp_name, temp_flags, 0o600, dir_fd=pinned_dir_fd)
+    except TypeError as exc:
+        raise AutopilotError(f"os.open failed with TypeError: {exc}") from exc
+    except OSError as exc:
+        raise AutopilotError(f"cannot open temporary rescope file: {exc}") from exc
+
+    try:
+        try:
+            temp_stat = os.fstat(temp_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fstat temporary rescope file: {exc}") from exc
+
+        if not stat.S_ISREG(temp_stat.st_mode):
+            raise AutopilotError("temporary rescope file is not a regular file")
+        if temp_stat.st_uid != os.geteuid():
+            raise AutopilotError("temporary rescope file owner must be process euid")
+        if (temp_stat.st_mode & 0o777) != 0o600:
+            raise AutopilotError("temporary rescope file mode must be exactly 0600")
+        if temp_stat.st_nlink != 1:
+            raise AutopilotError("temporary rescope file link count must be 1")
+
+        total_written = 0
+        view = memoryview(payload)
+        while total_written < len(payload):
+            try:
+                written = os.write(temp_fd, view[total_written:])
+            except OSError as exc:
+                raise AutopilotError(f"error writing temporary rescope file: {exc}") from exc
+            if written <= 0:
+                raise AutopilotError(f"zero or negative write count on temporary rescope file: {written}")
+            total_written += written
+
+        try:
+            os.fsync(temp_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fsync temporary rescope file: {exc}") from exc
+
+        fd_to_close = temp_fd
+        temp_fd = None
+        try:
+            os.close(fd_to_close)
+        except OSError as exc:
+            raise AutopilotError(f"cannot close temporary rescope file: {exc}") from exc
+
+        return temp_name
+
+    except (KeyboardInterrupt, SystemExit):
+        if temp_fd is not None:
+            try:
+                os.close(temp_fd)
+            except OSError:
+                pass
+            temp_fd = None
+        try:
+            os.unlink(temp_name, dir_fd=pinned_dir_fd)
+        except OSError:
+            pass
+        raise
+    except Exception as exc:
+        cleanup_errors: list[OSError] = []
+        if temp_fd is not None:
+            try:
+                os.close(temp_fd)
+            except OSError as close_err:
+                cleanup_errors.append(close_err)
+            temp_fd = None
+        try:
+            os.unlink(temp_name, dir_fd=pinned_dir_fd)
+        except OSError as unlink_err:
+            cleanup_errors.append(unlink_err)
+
+        if cleanup_errors:
+            err = AutopilotError(f"error cleaning up temporary rescope file: {cleanup_errors[0]}")
+            err.__cause__ = exc
+            raise err
+        if isinstance(exc, AutopilotError):
+            raise
+        raise AutopilotError(f"temporary rescope file operation failed: {exc}") from exc
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,
