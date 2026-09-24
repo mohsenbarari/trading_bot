@@ -340,3 +340,317 @@ def test_preflight_publication_failures(tmp_path, fail_mode):
 
     ok, _ = run_publication_fragment(report_root, stdout_tmp, stderr_tmp)
     assert ok is False, f"Expected publication to fail closed for {fail_mode}"
+
+
+def extract_intent_guard_fragment() -> str:
+    src = MONITOR.read_text()
+    start = src.index('if [[ "$supervisor_count" -eq 0 && "$restart_eligible" == true ]]; then')
+    end = src.index('\n\nif [[ "$restart_eligible" == true ]]; then', start)
+    return src[start:end].strip()
+
+
+def run_intent_guard_fragment(
+    state_root: Path,
+    supervisor_count: int = 0,
+    broker_count: int = 0,
+    restart_eligible: bool = True,
+    provider_probe: bool = False,
+    initial_action: str = "none",
+) -> tuple[str, bool, bool]:
+    frag = extract_intent_guard_fragment()
+    restart_str = "true" if restart_eligible else "false"
+    probe_str = "true" if provider_probe else "false"
+    script = (
+        f'state_root="{state_root}"\n'
+        f'supervisor_count={supervisor_count}\n'
+        f'broker_count={broker_count}\n'
+        f'restart_eligible={restart_str}\n'
+        f'provider_probe={probe_str}\n'
+        f'action="{initial_action}"\n'
+        f'{frag}\n'
+        'printf "action=%s restart_eligible=%s provider_probe=%s" "$action" "$restart_eligible" "$provider_probe"\n'
+    )
+    res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True)
+    parts = dict(item.split("=", 1) for item in res.stdout.split())
+    return parts["action"], parts["restart_eligible"] == "true", parts["provider_probe"] == "true"
+
+
+def test_intent_guard_no_intent_preserves_eligibility(tmp_path):
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is True
+    assert probe is True
+    assert action == "none"
+
+    epoch_hex = "a" * 64
+    epoch_dir = tmp_path / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+    (epoch_dir / "notes.txt").write_text("not an intent leaf\n")
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is True
+    assert probe is True
+    assert action == "none"
+
+
+@pytest.mark.parametrize("attempt", [1, 2, 3])
+def test_intent_guard_suppresses_on_intent_attempts(tmp_path, attempt):
+    epoch_hex = "0123456789abcdef" * 4
+    epoch_dir = tmp_path / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+    leaf = epoch_dir / f"rescope_intent_{attempt}"
+    leaf.write_text(f"intent payload {attempt}\n")
+
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_no_restart"
+
+
+def test_intent_guard_suppresses_on_symlink_or_nonregular_leaf(tmp_path):
+    epoch_hex = "b" * 64
+    epoch_dir = tmp_path / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+
+    symlink_target = tmp_path / "target_intent"
+    symlink_target.write_text("target\n")
+    leaf_symlink = epoch_dir / "rescope_intent_1"
+    leaf_symlink.symlink_to(symlink_target)
+
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_no_restart"
+
+    leaf_symlink.unlink()
+
+    import os
+    fifo_leaf = epoch_dir / "rescope_intent_2"
+    os.mkfifo(fifo_leaf)
+    try:
+        action, eligible, probe = run_intent_guard_fragment(
+            tmp_path, restart_eligible=True, provider_probe=True
+        )
+        assert eligible is False
+        assert probe is False
+        assert action == "unresolved_model_intent_no_restart"
+    finally:
+        fifo_leaf.unlink()
+
+
+FAIL_CLOSED_CASES = [
+    ("symlink_epoch_dir", "unresolved_model_intent_scan_failed"),
+    ("malformed_epoch_name_short", "unresolved_model_intent_scan_failed"),
+    ("malformed_epoch_name_uppercase", "unresolved_model_intent_scan_failed"),
+    ("unreadable_epoch_dir", "unresolved_model_intent_scan_failed"),
+    ("non_directory_epoch_entry", "unresolved_model_intent_scan_failed"),
+    ("epoch_nested_subdirectory", "unresolved_model_intent_scan_failed"),
+    ("epoch_non_intent_symlink", "unresolved_model_intent_scan_failed"),
+    ("epoch_malformed_intent_name", "unresolved_model_intent_scan_failed"),
+    ("symlink_state_root", "unresolved_model_intent_scan_failed"),
+    ("direct_intent_in_state_root", "unresolved_model_intent_no_restart"),
+]
+
+
+@pytest.mark.parametrize("case_name,expected_action", FAIL_CLOSED_CASES)
+def test_intent_guard_fail_closed_cases(tmp_path, case_name, expected_action):
+    case_dir = tmp_path / case_name
+    case_dir.mkdir()
+    state_root = case_dir / "state"
+
+    if case_name == "symlink_epoch_dir":
+        state_root.mkdir()
+        real_epoch = case_dir / "real_epoch"
+        real_epoch.mkdir()
+        (state_root / ("rescope-" + "c" * 64)).symlink_to(real_epoch)
+    elif case_name == "malformed_epoch_name_short":
+        state_root.mkdir()
+        (state_root / "rescope-short").mkdir()
+    elif case_name == "malformed_epoch_name_uppercase":
+        state_root.mkdir()
+        (state_root / ("rescope-" + "C" * 64)).mkdir()
+    elif case_name == "unreadable_epoch_dir":
+        state_root.mkdir()
+        epoch = state_root / ("rescope-" + "d" * 64)
+        epoch.mkdir()
+        epoch.chmod(0o000)
+    elif case_name == "non_directory_epoch_entry":
+        state_root.mkdir()
+        (state_root / ("rescope-" + "e" * 64)).write_text("regular file\n")
+    elif case_name == "epoch_nested_subdirectory":
+        state_root.mkdir()
+        epoch = state_root / ("rescope-" + "f" * 64)
+        epoch.mkdir()
+        (epoch / "nested_dir").mkdir()
+    elif case_name == "epoch_non_intent_symlink":
+        state_root.mkdir()
+        epoch = state_root / ("rescope-" + "1" * 64)
+        epoch.mkdir()
+        tgt = case_dir / "tgt"
+        tgt.write_text("x")
+        (epoch / "symlink_leaf").symlink_to(tgt)
+    elif case_name == "epoch_malformed_intent_name":
+        state_root.mkdir()
+        epoch = state_root / ("rescope-" + "2" * 64)
+        epoch.mkdir()
+        (epoch / "rescope_intent_invalid").write_text("x")
+    elif case_name == "symlink_state_root":
+        real_state = case_dir / "real_state"
+        real_state.mkdir()
+        state_root.symlink_to(real_state)
+    elif case_name == "direct_intent_in_state_root":
+        state_root.mkdir()
+        (state_root / "rescope_intent_1").write_text("x")
+
+    try:
+        action, eligible, probe = run_intent_guard_fragment(
+            state_root, restart_eligible=True, provider_probe=True
+        )
+        assert eligible is False
+        assert probe is False
+        assert action == expected_action
+    finally:
+        if case_name == "unreadable_epoch_dir":
+            epoch.chmod(0o700)
+
+
+def test_intent_guard_broker_only_recovery_remains_eligible(tmp_path):
+    epoch_hex = "3" * 64
+    epoch_dir = tmp_path / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+    (epoch_dir / "rescope_intent_1").write_text("intent\n")
+
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, supervisor_count=1, restart_eligible=True, provider_probe=False
+    )
+    assert eligible is True
+    assert probe is False
+    assert action == "none"
+
+
+def test_intent_guard_stop_still_wins(tmp_path):
+    (tmp_path / "STOP").write_text("STOPPED\n")
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+
+    epoch_hex = "4" * 64
+    epoch_dir = tmp_path / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+    (epoch_dir / "rescope_intent_2").write_text("intent\n")
+
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+
+
+def test_intent_guard_newline_in_filename_suppresses(tmp_path):
+    (tmp_path / "unsafe\nfile").write_text("x\n")
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_scan_failed"
+
+    epoch_hex = "5" * 64
+    epoch_dir = tmp_path / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+    (epoch_dir / "leaf\nname").write_text("x\n")
+    action, eligible, probe = run_intent_guard_fragment(
+        tmp_path, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_scan_failed"
+
+
+def test_intent_guard_entry_limits_exceeded_suppresses(tmp_path):
+    state_root = tmp_path / "state_root_large"
+    state_root.mkdir()
+    for i in range(513):
+        (state_root / f"file_{i}").write_text("")
+    action, eligible, probe = run_intent_guard_fragment(
+        state_root, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_scan_failed"
+
+    state_root_epoch = tmp_path / "state_root_epoch"
+    state_root_epoch.mkdir()
+    epoch_dir = state_root_epoch / ("rescope-" + "7" * 64)
+    epoch_dir.mkdir()
+    for i in range(17):
+        (epoch_dir / f"note_{i}.txt").write_text("")
+    action, eligible, probe = run_intent_guard_fragment(
+        state_root_epoch, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_scan_failed"
+
+
+def test_intent_guard_scanner_failure_suppresses(tmp_path):
+    unreadable_root = tmp_path / "unreadable_state"
+    unreadable_root.mkdir()
+    unreadable_root.chmod(0o000)
+    try:
+        action, eligible, probe = run_intent_guard_fragment(
+            unreadable_root, restart_eligible=True, provider_probe=True
+        )
+        assert eligible is False
+        assert probe is False
+        assert action == "unresolved_model_intent_scan_failed"
+    finally:
+        unreadable_root.chmod(0o700)
+
+    nonexistent_root = tmp_path / "nonexistent_dir"
+    action, eligible, probe = run_intent_guard_fragment(
+        nonexistent_root, restart_eligible=True, provider_probe=True
+    )
+    assert eligible is False
+    assert probe is False
+    assert action == "unresolved_model_intent_scan_failed"
+
+
+def test_intent_guard_rejects_unreadable_or_unsearchable_mode(tmp_path):
+    state_root = tmp_path / "mode_test_state"
+    state_root.mkdir()
+    epoch_hex = "e" * 64
+    epoch_dir = state_root / f"rescope-{epoch_hex}"
+    epoch_dir.mkdir()
+
+    for bad_mode in (0o000, 0o400, 0o100, 0o600):
+        epoch_dir.chmod(bad_mode)
+        try:
+            action, eligible, probe = run_intent_guard_fragment(
+                state_root, restart_eligible=True, provider_probe=True
+            )
+            assert eligible is False
+            assert probe is False
+            assert action == "unresolved_model_intent_scan_failed"
+        finally:
+            epoch_dir.chmod(0o700)
+
+    for bad_mode in (0o000, 0o400, 0o100, 0o600):
+        state_root.chmod(bad_mode)
+        try:
+            action, eligible, probe = run_intent_guard_fragment(
+                state_root, restart_eligible=True, provider_probe=True
+            )
+            assert eligible is False
+            assert probe is False
+            assert action == "unresolved_model_intent_scan_failed"
+        finally:
+            state_root.chmod(0o700)

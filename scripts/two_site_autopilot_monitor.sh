@@ -229,6 +229,89 @@ if [[ "$restart_eligible" == false && "$tmux_observation" == "present"
   recovery_reason="provider_broker_missing"
 fi
 
+if [[ "$supervisor_count" -eq 0 && "$restart_eligible" == true ]]; then
+  if [[ -e "$state_root/STOP" ]]; then
+    restart_eligible=false
+    provider_probe=false
+  elif [[ ! -d "$state_root" || -L "$state_root" ]]; then
+    restart_eligible=false
+    provider_probe=false
+    action="unresolved_model_intent_scan_failed"
+  else
+    scan_status=0
+    /usr/bin/timeout 5 /usr/bin/python3 -c '
+import os, re, stat, sys
+
+root_limit = 512
+epoch_limit = 16
+state_root = sys.argv[1]
+
+def check_dir(p):
+    st = os.lstat(p)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        sys.exit(20)
+    if st.st_uid != os.geteuid():
+        sys.exit(20)
+    if (st.st_mode & 0o500) != 0o500:
+        sys.exit(20)
+
+try:
+    check_dir(state_root)
+
+    intent_found = False
+    root_count = 0
+    with os.scandir(state_root) as it:
+        for entry in it:
+            root_count += 1
+            if root_count > root_limit:
+                sys.exit(20)
+            name = entry.name
+            if any(ord(c) < 32 or ord(c) > 126 for c in name):
+                sys.exit(20)
+            if name in ("rescope_intent_1", "rescope_intent_2", "rescope_intent_3"):
+                intent_found = True
+            elif name.startswith("rescope_intent_"):
+                sys.exit(20)
+            elif name.startswith("rescope"):
+                if not re.fullmatch(r"rescope-[0-9a-f]{64}", name):
+                    sys.exit(20)
+                if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                    sys.exit(20)
+                check_dir(entry.path)
+                epoch_count = 0
+                with os.scandir(entry.path) as epoch_it:
+                    for leaf in epoch_it:
+                        epoch_count += 1
+                        if epoch_count > epoch_limit:
+                            sys.exit(20)
+                        leaf_name = leaf.name
+                        if any(ord(c) < 32 or ord(c) > 126 for c in leaf_name):
+                            sys.exit(20)
+                        if leaf_name in ("rescope_intent_1", "rescope_intent_2", "rescope_intent_3"):
+                            intent_found = True
+                        elif leaf_name.startswith("rescope_intent_"):
+                            sys.exit(20)
+                        elif leaf.is_symlink() or not leaf.is_file(follow_symlinks=False):
+                            sys.exit(20)
+    if intent_found:
+        sys.exit(10)
+    sys.exit(0)
+except Exception:
+    sys.exit(20)
+' "$state_root" >/dev/null 2>&1 || scan_status="$?"
+
+    if [[ "$scan_status" -eq 10 ]]; then
+      restart_eligible=false
+      provider_probe=false
+      action="unresolved_model_intent_no_restart"
+    elif [[ "$scan_status" -ne 0 ]]; then
+      restart_eligible=false
+      provider_probe=false
+      action="unresolved_model_intent_scan_failed"
+    fi
+  fi
+fi
+
 if [[ "$restart_eligible" == true ]]; then
   if [[ "$now_epoch" -lt "$next_attempt_epoch" ]]; then
     action="backoff"
