@@ -1,6 +1,6 @@
 # AE03 response custody and no-replay plan (2026-09-24 UTC)
 
-Status: **C1 CODE ACCEPTED / NOT ACTIVATED; C2–C6 OPEN**. R1–R3 can read and validate a terminal quota receipt, but `serve`, the client and Supervisor do not call that reader. The existing long-lived Broker process has not been restarted for C1; Supervisor is STOPPED. This plan does not authorize a live retry or a new semantic reservation.
+Status: **C1/C2 CODE ACCEPTED / NOT ACTIVATED; C3–C6 OPEN**. R1–R3 can read and validate a terminal quota receipt; C2 wires receipt-first publication in `serve`, but recovery/client/Supervisor do not consume the reader. The existing long-lived Broker process has not been restarted for C1/C2; Supervisor is STOPPED. This plan does not authorize a live retry or a new semantic reservation.
 
 ## Current boundary and concrete failure windows
 
@@ -28,3 +28,7 @@ Each C unit is separately scoped to one small change, Gemini Worker → independ
 ## C1 acceptance (2026-09-24 UTC)
 
 Task `AE03-CLAIM-DURABILITY-20260924-108` used one Worker correction after a global `geteuid` fixture fault hit the request instead of the intended terminal directory. Worker 1 passed 62 pre-review tests; independent Gemini Reviewer returned `VERIFIED`. Codex reviewed the full diff, confirmed exact applied bytes against proposal SHA `6f242d042ab6b881b2f0220c07014b42f7a297941397375d89e1f65a214dff3f`, and independently ran all eight Broker suites (111 passed). Commit `435c7c4f45cc548434ef35af1e82b5d8fef3aea5` fences duplicate IDs and unsafe terminal directories, verifies claimed-file identity, and fsyncs `claimed/` then `requests/` before Provider execution. This is accepted code only; it does not publish receipts, recover ambiguous claims, reattach clients or wake Supervisor.
+
+## C2 acceptance (2026-09-24 UTC)
+
+Task `AE03-RECEIPT-FIRST-20260924-109` used two Worker corrections for test fixture/order expectations, then 117 pre-review tests passed; Gemini Reviewer returned `VERIFIED`. Codex inspected the full diff, validated bindings and applied bytes against proposal SHA `f0857f7abdc52a4df13a8fa3efc8f0fbc386fe0ed2c889d6815e400f946b7bad`, and independently ran all nine Broker suites (117 passed). Commit `9ce3ab3e2c2aea7fc9137b13b317e1a9132becbd` publishes/fsyncs only strictly detected quota receipts before queue responses and claim deletion. Receipt-publication failure leaves the claim and no response; response-write failure after receipt leaves both receipt and claim. Non-quota success is unchanged, while failed non-quota response writing now conservatively retains the claim instead of deleting it. C3 restart recovery is still absent, so C2 code must not be activated in the long-lived Broker yet.
