@@ -22,3 +22,11 @@ returns `INVENTORY_INCONSISTENT: canonical manifest inventory or sources invalid
 4. Rebuild the derived coverage/index only from validated accepted receipts. Keep bounded 2-MiB/file and 8-MiB total reads, full Reviewer diff, and reconciliation within five accepted units. Do not rewrite the 1.27-MiB scenario baseline just to remove this mismatch.
 
 This is an AE04 reader contract problem, not a reason to bypass AE03's no-replay quota gate or activate parallel Workers. No Gemini call is issued while the user reports weekly credit exhausted.
+
+## Consumer audit at integration HEAD `8f607e22`
+
+A tracked-code search found one implementation path for this canonical manifest: `inspect_canonical_evidence` feeds `inventory_view` and the `two_site_cycle_tools.py inventory` CLI. The P1 characterization tests inspect the manifest and continuation files directly. Most reader/presentation tests in `test_two_site_canonical_evidence_inspect.py`, `test_two_site_canonical_evidence_read_bounds.py`, and `test_two_site_inventory_display.py` use older fixtures, but `test_real_worktree_baseline` in the first file does exercise the live manifest and currently fails. No direct call site in Supervisor or Pipeline was found by name; this does **not** prove that a human or another external caller never invokes the CLI. The exact live CLI still exits 1 with `INVENTORY_INCONSISTENT` at this HEAD.
+
+Acceptance must therefore test both the pure reader **and** the real CLI on the current committed manifest, keep five-source fixtures green, and run the read-bound suite after adding continuation 4. A passing continuation-4 provenance test alone is not an end-to-end reader acceptance signal.
+
+Focused baseline at this HEAD: `pytest -q tests/test_two_site_canonical_evidence_inspect.py tests/test_two_site_canonical_evidence_read_bounds.py tests/test_two_site_inventory_display.py tests/test_p1_00b_characterization_recent_inventory_continuation_4.py` gives **1 failed, 30 passed**. The failure is `test_real_worktree_baseline`, which expects `VALID` but gets `INVENTORY_INCONSISTENT` for the current repository; the 30 passing fixture/provenance cases do not negate it. The repair must turn this exact test green without weakening the fail-closed corruption tests.
