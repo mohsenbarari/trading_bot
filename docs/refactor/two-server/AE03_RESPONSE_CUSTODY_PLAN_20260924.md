@@ -1,6 +1,6 @@
 # AE03 response custody and no-replay plan (2026-09-24 UTC)
 
-Status: **DESIGN / NOT ACTIVATED**. R1–R3 can read and validate a terminal quota receipt, but `serve`, the client and Supervisor do not call that reader. Supervisor is STOPPED. This plan does not authorize a live retry or a new semantic reservation.
+Status: **C1 CODE ACCEPTED / NOT ACTIVATED; C2–C6 OPEN**. R1–R3 can read and validate a terminal quota receipt, but `serve`, the client and Supervisor do not call that reader. The existing long-lived Broker process has not been restarted for C1; Supervisor is STOPPED. This plan does not authorize a live retry or a new semantic reservation.
 
 ## Current boundary and concrete failure windows
 
@@ -24,3 +24,7 @@ Status: **DESIGN / NOT ACTIVATED**. R1–R3 can read and validate a terminal quo
 6. **C6—full fault matrix and measured pilot.** Run deterministic crash/fault tests at every `rename/fsync/receipt/response/ack/prune` boundary, then 1/3/10/20 comparable live cohorts. Count failed/corrected attempts, Gemini and Codex usage, elapsed and active time. Only after quality and safety hold may AE03 be called complete; improvement remains UNKNOWN until measured.
 
 Each C unit is separately scoped to one small change, Gemini Worker → independent Gemini Reviewer → Codex exact binding, semantic review, tests and Git. A green unit is not permission to skip later gates. Do not touch `main`, production, DNS, Web Writer or run a live quota replay during preparation.
+
+## C1 acceptance (2026-09-24 UTC)
+
+Task `AE03-CLAIM-DURABILITY-20260924-108` used one Worker correction after a global `geteuid` fixture fault hit the request instead of the intended terminal directory. Worker 1 passed 62 pre-review tests; independent Gemini Reviewer returned `VERIFIED`. Codex reviewed the full diff, confirmed exact applied bytes against proposal SHA `6f242d042ab6b881b2f0220c07014b42f7a297941397375d89e1f65a214dff3f`, and independently ran all eight Broker suites (111 passed). Commit `435c7c4f45cc548434ef35af1e82b5d8fef3aea5` fences duplicate IDs and unsafe terminal directories, verifies claimed-file identity, and fsyncs `claimed/` then `requests/` before Provider execution. This is accepted code only; it does not publish receipts, recover ambiguous claims, reattach clients or wake Supervisor.
