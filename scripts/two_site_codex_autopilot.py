@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 from types import MappingProxyType
+from typing import Callable
 
 try:
     from scripts.two_site_proposal_runner import (
@@ -2525,6 +2526,7 @@ def run_cycle(
     continuation: dict | None = None,
     *,
     preparation_route: str = "one_shot",
+    before_model: Callable[[dict[str, object]], None] | None = None,
 ) -> tuple[Path, dict]:
     if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
         raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
@@ -2621,6 +2623,8 @@ def run_cycle(
     coordinator_started_at: float | None = None
     post_validation_started_at: float | None = None
     try:
+        if before_model is not None:
+            before_model(before)
         coordinator_started_at = time.monotonic()
         with subprocess.Popen(
             command,
