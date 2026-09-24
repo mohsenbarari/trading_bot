@@ -177,6 +177,13 @@ _RESCOPE_RECEIPT_FILENAMES = MappingProxyType({
     "rescope_receipt_3.json": 3,
 })
 RESCOPE_RECEIPT_FILENAME = _RESCOPE_RECEIPT_FILENAME
+_RESCOPE_INTENT_FILENAMES = MappingProxyType({
+    1: "rescope_intent_1",
+    2: "rescope_intent_2",
+    3: "rescope_intent_3",
+})
+_RESCOPE_INTENT_LEAF_NAMES = _RESCOPE_INTENT_FILENAMES
+RESCOPE_INTENT_FILENAMES = _RESCOPE_INTENT_FILENAMES
 RESCOPE_RECEIPT_ENVELOPE_KEYS = frozenset({
     "schema_version",
     "attempt",
@@ -1225,6 +1232,57 @@ def ensure_rescope_epoch_dir(state_root: Path, repository: object) -> Path:
 
 
 _ensure_rescope_epoch_dir = ensure_rescope_epoch_dir
+
+
+def rescope_intent_exists(epoch_dir: Path, attempt: int) -> bool:
+    """Check existence of the bounded rescope intent leaf for attempt in 1..3."""
+    if not isinstance(epoch_dir, Path):
+        raise AutopilotError("epoch_dir must be a Path")
+    if type(attempt) is not int or isinstance(attempt, bool):
+        raise AutopilotError("attempt must be an integer")
+    if attempt not in _RESCOPE_INTENT_FILENAMES:
+        raise AutopilotError("attempt must be an integer in 1..3")
+
+    leaf_name = _RESCOPE_INTENT_FILENAMES[attempt]
+    pinned_fd = _open_private_rescope_state_dir(epoch_dir)
+    primary_exc: BaseException | None = None
+    try:
+        try:
+            os.stat(leaf_name, dir_fd=pinned_fd, follow_symlinks=False)
+            exists = True
+        except TypeError as exc:
+            raise AutopilotError(f"os.stat failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                exists = False
+            else:
+                raise AutopilotError(f"cannot stat rescope intent leaf: {exc}") from exc
+
+        _recheck_final_root(epoch_dir, pinned_fd)
+        return exists
+    except BaseException as exc:
+        primary_exc = exc
+        raise
+    finally:
+        active_exc_type, active_exc, _ = sys.exc_info()
+        is_interrupt = (
+            (active_exc_type is not None and issubclass(active_exc_type, (KeyboardInterrupt, SystemExit)))
+            or isinstance(primary_exc, (KeyboardInterrupt, SystemExit))
+        )
+        try:
+            os.close(pinned_fd)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except OSError as close_err:
+            if not is_interrupt:
+                close_exc = AutopilotError(f"error closing pinned directory: {close_err}")
+                if primary_exc is not None and isinstance(primary_exc, Exception):
+                    close_exc.__cause__ = primary_exc
+                elif active_exc is not None and isinstance(active_exc, Exception):
+                    close_exc.__cause__ = active_exc
+                else:
+                    close_exc.__cause__ = close_err
+                raise close_exc
 
 
 def load_rescope_receipt(
