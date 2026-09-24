@@ -1927,21 +1927,17 @@ def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: boo
                     raise BrokerError("provider broker heartbeat is unavailable or mismatched")
                 last_health_check = time.monotonic()
             time.sleep(POLL_SECONDS)
-        try:
-            response = _read_json_file(
-                root, response_path, MAX_RESPONSE_BYTES, "broker response"
-            )
-        finally:
-            response_path.unlink(missing_ok=True)
-    validated = validate_response(request, response)
-    if validated["stdout"]:
-        sys.stdout.write(validated["stdout"])
-        sys.stdout.flush()
-    if validated["stderr"]:
-        sys.stderr.write(validated["stderr"])
-        if not validated["stderr"].endswith("\n"):
-            sys.stderr.write("\n")
-        sys.stderr.flush()
+        response = _safe_read_existing_response(root, response_path)
+        validated = validate_response(request, response)
+        if validated["stdout"]:
+            sys.stdout.write(validated["stdout"])
+            sys.stdout.flush()
+        if validated["stderr"]:
+            sys.stderr.write(validated["stderr"])
+            if not validated["stderr"].endswith("\n"):
+                sys.stderr.write("\n")
+            sys.stderr.flush()
+        response_path.unlink()
     return validated["exit_code"]
 
 
