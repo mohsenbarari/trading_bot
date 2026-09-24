@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Hermetic tests for AE03 pure rescope receipt byte codec."""
+import errno
+import os
+from pathlib import Path
+import stat
+import tempfile
 import unittest
+from unittest import mock
 
 from scripts.two_site_assignment_scope import AssignmentScope
 from scripts.two_site_codex_autopilot import (
@@ -8,10 +14,12 @@ from scripts.two_site_codex_autopilot import (
     CONTROL_PATHS,
     MAX_RESCOPE_RECEIPT_BYTES,
     PROTECTED_REFS,
+    RESCOPE_RECEIPT_FILENAME,
     RESCOPE_RECEIPT_KEYS,
     RESCOPE_RECEIPT_SCHEMA_VERSION,
     RESCOPE_RESULT_KEYS_ORDER,
     AutopilotError,
+    load_rescope_receipt,
     parse_rescope_receipt,
     serialize_rescope_receipt,
 )
@@ -230,6 +238,319 @@ class TestAE03RescopeReceiptCodec(unittest.TestCase):
         drifted_refs["protected_refs"] = {ref: "9" * 40 for ref in PROTECTED_REFS}
         with self.assertRaises(AutopilotError):
             parse_rescope_receipt(valid_bytes, drifted_refs)
+
+
+class TestAE03RescopeReceiptReader(unittest.TestCase):
+    def test_path_validation_rejects_non_path_relative_and_dot_dot(self) -> None:
+        repo = _make_repo()
+        with self.assertRaises(AutopilotError):
+            load_rescope_receipt("not_a_path", repo)  # type: ignore[arg-type]
+        with self.assertRaises(AutopilotError):
+            load_rescope_receipt(Path("relative/path"), repo)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            dot_dot_path = root / "other" / ".." / "state"
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(dot_dot_path, repo)
+            dot_dot_rel = Path("..") / "state"
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(dot_dot_rel, repo)
+
+    def test_absent_receipt_attempts_leaf_os_open(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            opened_names = []
+            real_open = os.open
+
+            def trace_open(path, flags, *args, **kwargs):
+                if isinstance(path, (str, bytes)):
+                    opened_names.append(os.path.basename(path))
+                return real_open(path, flags, *args, **kwargs)
+
+            with mock.patch("os.open", side_effect=trace_open):
+                result = load_rescope_receipt(state_root, repo)
+
+            self.assertIsNone(result)
+            self.assertIn(RESCOPE_RECEIPT_FILENAME, opened_names)
+
+    def test_symlink_swap_between_precheck_and_leaf_open(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            receipt_file = state_root / RESCOPE_RECEIPT_FILENAME
+            raw_bytes = serialize_rescope_receipt(_make_result(), repo, attempt=1)
+            receipt_file.write_bytes(raw_bytes)
+            receipt_file.chmod(0o600)
+
+            sentinel = root / "sentinel.txt"
+            sentinel.write_text("secret sentinel data")
+
+            real_stat = os.stat
+            swapped = False
+
+            def intercept_stat(path, *args, **kwargs):
+                nonlocal swapped
+                st = real_stat(path, *args, **kwargs)
+                if path == RESCOPE_RECEIPT_FILENAME and not swapped:
+                    receipt_file.unlink()
+                    receipt_file.symlink_to(sentinel)
+                    swapped = True
+                return st
+
+            with mock.patch("os.stat", side_effect=intercept_stat):
+                with self.assertRaises(AutopilotError):
+                    load_rescope_receipt(state_root, repo)
+
+            self.assertTrue(swapped)
+            self.assertEqual(sentinel.read_text(), "secret sentinel data")
+
+    def test_parent_component_swap_detected(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+
+            real_open = os.open
+
+            def swap_dir_on_open(path, flags, *args, **kwargs):
+                if path == RESCOPE_RECEIPT_FILENAME:
+                    state_root.rename(root / "state_old")
+                    new_state = root / "state"
+                    new_state.mkdir(mode=0o700)
+                    new_state.chmod(0o700)
+                return real_open(path, flags, *args, **kwargs)
+
+            with mock.patch("os.open", side_effect=swap_dir_on_open):
+                with self.assertRaises(AutopilotError):
+                    load_rescope_receipt(state_root, repo)
+
+    def test_leaf_attributes_validation(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            receipt_file = state_root / RESCOPE_RECEIPT_FILENAME
+            raw_bytes = serialize_rescope_receipt(_make_result(), repo, attempt=1)
+
+            # Test hardlink (nlink > 1)
+            receipt_file.write_bytes(raw_bytes)
+            receipt_file.chmod(0o600)
+            extra_link = state_root / "extra_link"
+            extra_link.hardlink_to(receipt_file)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+            extra_link.unlink()
+
+            # Test symlink leaf
+            receipt_file.unlink()
+            target = root / "target"
+            target.write_bytes(raw_bytes)
+            target.chmod(0o600)
+            receipt_file.symlink_to(target)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+            receipt_file.unlink()
+
+            # Test mode 0644 (not 0600)
+            receipt_file.write_bytes(raw_bytes)
+            receipt_file.chmod(0o644)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+
+            # Test wrong owner (fstat test double)
+            receipt_file.chmod(0o600)
+            real_fstat = os.fstat
+
+            def wrong_owner_fstat(fd):
+                st = real_fstat(fd)
+                if stat.S_ISREG(st.st_mode):
+                    return os.stat_result((
+                        st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                        os.geteuid() + 100, st.st_gid, st.st_size,
+                        st.st_atime, st.st_mtime, st.st_ctime,
+                    ))
+                return st
+
+            with mock.patch("os.fstat", side_effect=wrong_owner_fstat):
+                with self.assertRaises(AutopilotError):
+                    load_rescope_receipt(state_root, repo)
+
+            # Test oversize
+            oversized = b" " * (MAX_RESCOPE_RECEIPT_BYTES + 1)
+            receipt_file.write_bytes(oversized)
+            receipt_file.chmod(0o600)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+
+    def test_leaf_content_and_stale_repository_validation(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            receipt_file = state_root / RESCOPE_RECEIPT_FILENAME
+
+            # Malformed JSON
+            receipt_file.write_bytes(b"not json")
+            receipt_file.chmod(0o600)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+
+            # Duplicate key JSON
+            valid = serialize_rescope_receipt(_make_result(), repo, attempt=1)
+            dup = valid.replace(b'"attempt": 1', b'"attempt": 1, "attempt": 1', 1)
+            receipt_file.write_bytes(dup)
+            receipt_file.chmod(0o600)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+
+            # Noncanonical JSON
+            receipt_file.write_bytes(valid + b" ")
+            receipt_file.chmod(0o600)
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, repo)
+
+            # Stale expected repository
+            receipt_file.write_bytes(valid)
+            receipt_file.chmod(0o600)
+            stale_repo = dict(repo)
+            stale_repo["head"] = "f" * 40
+            with self.assertRaises(AutopilotError):
+                load_rescope_receipt(state_root, stale_repo)
+
+    def test_injected_read_and_close_oserror(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            receipt_file = state_root / RESCOPE_RECEIPT_FILENAME
+            raw_bytes = serialize_rescope_receipt(_make_result(), repo, attempt=1)
+            receipt_file.write_bytes(raw_bytes)
+            receipt_file.chmod(0o600)
+
+            # Injected os.read OSError
+            with mock.patch("os.read", side_effect=OSError(errno.EIO, "injected read failure")):
+                with self.assertRaises(AutopilotError) as ctx:
+                    load_rescope_receipt(state_root, repo)
+                self.assertIn("error reading rescope receipt", str(ctx.exception))
+
+            # Injected os.close OSError on cleanup
+            real_close = os.close
+            read_done = False
+
+            def failing_close_cleanup(fd):
+                if read_done:
+                    real_close(fd)
+                    raise OSError(errno.EIO, "injected close failure")
+                return real_close(fd)
+
+            real_read = os.read
+
+            def trace_read(fd, n):
+                nonlocal read_done
+                res = real_read(fd, n)
+                read_done = True
+                return res
+
+            with mock.patch("os.read", side_effect=trace_read):
+                with mock.patch("os.close", side_effect=failing_close_cleanup):
+                    with self.assertRaises(AutopilotError) as ctx:
+                        load_rescope_receipt(state_root, repo)
+                    self.assertIn("error closing descriptor", str(ctx.exception))
+
+            # Injected close error preserves primary exception
+            def bad_read(*args, **kwargs):
+                raise OSError(errno.EIO, "primary read failure")
+
+            with mock.patch("os.read", side_effect=bad_read):
+                with mock.patch("os.close", side_effect=failing_close_cleanup):
+                    with self.assertRaises(AutopilotError) as ctx:
+                        load_rescope_receipt(state_root, repo)
+                    self.assertIn("error closing descriptor", str(ctx.exception))
+                    self.assertIsInstance(ctx.exception.__cause__, AutopilotError)
+
+    def test_interrupt_propagation_not_suppressed(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            receipt_file = state_root / RESCOPE_RECEIPT_FILENAME
+            raw_bytes = serialize_rescope_receipt(_make_result(), repo, attempt=1)
+            receipt_file.write_bytes(raw_bytes)
+            receipt_file.chmod(0o600)
+
+            # KeyboardInterrupt during read propagates
+            with mock.patch("os.read", side_effect=KeyboardInterrupt("user interrupt")):
+                with self.assertRaises(KeyboardInterrupt):
+                    load_rescope_receipt(state_root, repo)
+
+            # KeyboardInterrupt with close error does NOT suppress interrupt
+            real_close = os.close
+            interrupted = False
+
+            def interrupt_read(*args, **kwargs):
+                nonlocal interrupted
+                interrupted = True
+                raise KeyboardInterrupt("user interrupt")
+
+            def failing_close_on_cleanup(fd):
+                if interrupted:
+                    real_close(fd)
+                    raise OSError(errno.EIO, "close failure on interrupt cleanup")
+                return real_close(fd)
+
+            with mock.patch("os.read", side_effect=interrupt_read):
+                with mock.patch("os.close", side_effect=failing_close_on_cleanup):
+                    with self.assertRaises(KeyboardInterrupt):
+                        load_rescope_receipt(state_root, repo)
+
+    def test_unsupported_dir_fd_rejected(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td).resolve()
+            with mock.patch.object(os, "supports_dir_fd", set()):
+                with self.assertRaises(AutopilotError):
+                    load_rescope_receipt(state_root, repo)
+
+    def test_successful_load_roundtrip(self) -> None:
+        repo = _make_repo()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            state_root = root / "state"
+            state_root.mkdir(mode=0o700)
+            state_root.chmod(0o700)
+            receipt_file = state_root / RESCOPE_RECEIPT_FILENAME
+            result = _make_result(repo["head"])
+            raw_bytes = serialize_rescope_receipt(result, repo, attempt=1)
+            receipt_file.write_bytes(raw_bytes)
+            receipt_file.chmod(0o600)
+
+            loaded = load_rescope_receipt(state_root, repo)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded["schema_version"], RESCOPE_RECEIPT_SCHEMA_VERSION)
+            self.assertEqual(loaded["attempt"], 1)
+            self.assertFalse(loaded["terminal"])
+            self.assertEqual(loaded["result"]["state"], "BLOCKED")
+            self.assertEqual(loaded["result"]["disposition"], "RESCOPE")
 
 
 if __name__ == "__main__":

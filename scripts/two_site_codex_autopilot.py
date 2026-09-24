@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import errno
 import fcntl
 import hashlib
 import json
@@ -14,6 +15,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -167,6 +169,8 @@ REPOSITORY_FACT_KEYS = frozenset({
 })
 MAX_RESCOPE_RECEIPT_BYTES = 16 * 1024
 RESCOPE_RECEIPT_SCHEMA_VERSION = 1
+_RESCOPE_RECEIPT_FILENAME = "rescope_receipt.json"
+RESCOPE_RECEIPT_FILENAME = _RESCOPE_RECEIPT_FILENAME
 RESCOPE_RECEIPT_ENVELOPE_KEYS = frozenset({
     "schema_version",
     "attempt",
@@ -925,6 +929,248 @@ def parse_rescope_receipt(
         raise AutopilotError("receipt bytes are not canonical")
 
     return envelope
+
+
+class _DescriptorTracker:
+    def __init__(self) -> None:
+        self.fds: list[int] = []
+
+    def add(self, fd: int) -> None:
+        if fd not in self.fds:
+            self.fds.append(fd)
+
+    def remove(self, fd: int) -> None:
+        if fd in self.fds:
+            self.fds.remove(fd)
+
+    def close_all(self, primary_exc: Exception | None = None) -> None:
+        active_exc_type, active_exc, _ = sys.exc_info()
+        is_interrupt = (
+            (active_exc_type is not None and issubclass(active_exc_type, (KeyboardInterrupt, SystemExit)))
+            or isinstance(primary_exc, (KeyboardInterrupt, SystemExit))
+        )
+        close_errors: list[OSError] = []
+        for fd in list(self.fds):
+            try:
+                os.close(fd)
+            except OSError as ce:
+                close_errors.append(ce)
+            finally:
+                self.remove(fd)
+        if close_errors:
+            if is_interrupt:
+                return
+            first_err = close_errors[0]
+            err = AutopilotError(f"error closing descriptor: {first_err}")
+            if primary_exc is not None:
+                err.__cause__ = primary_exc
+            elif active_exc is not None and isinstance(active_exc, Exception):
+                err.__cause__ = active_exc
+            else:
+                err.__cause__ = first_err
+            raise err
+
+
+def _recheck_final_root(state_root: Path, pinned_dir_fd: int) -> None:
+    try:
+        resolved = state_root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise AutopilotError(f"final state_root cannot be resolved: {exc}") from exc
+    if resolved != state_root:
+        raise AutopilotError("state_root canonical path changed")
+    try:
+        st = state_root.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise AutopilotError(f"cannot stat final state_root: {exc}") from exc
+    try:
+        pinned_st = os.fstat(pinned_dir_fd)
+    except OSError as exc:
+        raise AutopilotError(f"cannot fstat pinned directory: {exc}") from exc
+    if (st.st_dev, st.st_ino) != (pinned_st.st_dev, pinned_st.st_ino):
+        raise AutopilotError("state_root directory inode changed")
+    if (pinned_st.st_mode & 0o777) != 0o700 or pinned_st.st_uid != os.geteuid():
+        raise AutopilotError("pinned directory permissions invalid")
+
+
+def load_rescope_receipt(
+    state_root: Path,
+    expected_repository: object,
+) -> dict[str, object] | None:
+    """Safely load and validate the canonical rescope receipt under state_root.
+
+    Returns the parsed envelope dict, or None if the leaf receipt does not exist.
+    Fails closed with typed AutopilotError on any directory traversal defect,
+    permission/ownership defect, symlink, link count, size, drift, or codec error.
+    """
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+    if not state_root.is_absolute():
+        raise AutopilotError("state_root must be an absolute Path")
+    if ".." in state_root.parts or "." in state_root.parts or state_root != Path(os.path.abspath(str(state_root))):
+        raise AutopilotError("state_root must be normalized without relative components")
+    try:
+        resolved_root = state_root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise AutopilotError(f"state_root cannot be resolved: {exc}") from exc
+    if resolved_root != state_root:
+        raise AutopilotError("state_root cannot contain symlinks or path aliases")
+
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise AutopilotError("platform missing required O_NOFOLLOW or O_DIRECTORY flags")
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    has_open_dir_fd = os.open in supports_dir_fd or any(getattr(f, "__name__", None) == "open" for f in supports_dir_fd)
+    has_stat_dir_fd = os.stat in supports_dir_fd or any(getattr(f, "__name__", None) == "stat" for f in supports_dir_fd)
+    if not has_open_dir_fd or not has_stat_dir_fd:
+        raise AutopilotError("platform missing dir_fd support for os.open or os.stat")
+
+    tracker = _DescriptorTracker()
+    primary_exc: Exception | None = None
+    try:
+        dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        if hasattr(os, "O_CLOEXEC"):
+            dir_flags |= os.O_CLOEXEC
+
+        try:
+            current_fd = os.open("/", dir_flags)
+        except TypeError as exc:
+            raise AutopilotError(f"os.open failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            raise AutopilotError(f"cannot open root directory: {exc}") from exc
+
+        tracker.add(current_fd)
+
+        for comp in state_root.parts[1:]:
+            try:
+                next_fd = os.open(comp, dir_flags, dir_fd=current_fd)
+            except TypeError as exc:
+                raise AutopilotError(f"dir_fd open failed with TypeError: {exc}") from exc
+            except OSError as exc:
+                raise AutopilotError(f"cannot open directory component {comp!r}: {exc}") from exc
+
+            tracker.add(next_fd)
+            try:
+                os.close(current_fd)
+            except OSError as exc:
+                raise AutopilotError(f"failed to close predecessor directory descriptor: {exc}") from exc
+            finally:
+                tracker.remove(current_fd)
+            current_fd = next_fd
+
+        pinned_dir_fd = current_fd
+        try:
+            dir_stat = os.fstat(pinned_dir_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fstat state_root directory: {exc}") from exc
+
+        if not stat.S_ISDIR(dir_stat.st_mode):
+            raise AutopilotError("state_root is not a directory")
+        if dir_stat.st_uid != os.geteuid():
+            raise AutopilotError("state_root directory owner must be process euid")
+        if (dir_stat.st_mode & 0o777) != 0o700:
+            raise AutopilotError("state_root directory mode must be 0700")
+
+        try:
+            expected_stat = state_root.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise AutopilotError(f"cannot stat state_root path: {exc}") from exc
+
+        if (dir_stat.st_dev, dir_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
+            raise AutopilotError("pinned directory does not match state_root inode")
+
+        leaf_name = _RESCOPE_RECEIPT_FILENAME
+        try:
+            pre_stat = os.stat(leaf_name, dir_fd=pinned_dir_fd, follow_symlinks=False)
+            if stat.S_ISLNK(pre_stat.st_mode):
+                raise AutopilotError("receipt leaf is a symlink")
+        except FileNotFoundError:
+            pass
+        except TypeError as exc:
+            raise AutopilotError(f"os.stat failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            if exc.errno != errno.ENOENT:
+                raise AutopilotError(f"pre-stat error on leaf: {exc}") from exc
+
+        leaf_flags = os.O_RDONLY | os.O_NOFOLLOW
+        if hasattr(os, "O_CLOEXEC"):
+            leaf_flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NONBLOCK"):
+            leaf_flags |= os.O_NONBLOCK
+
+        try:
+            leaf_fd = os.open(leaf_name, leaf_flags, dir_fd=pinned_dir_fd)
+            tracker.add(leaf_fd)
+        except TypeError as exc:
+            raise AutopilotError(f"os.open failed with TypeError: {exc}") from exc
+        except (FileNotFoundError, OSError) as exc:
+            is_enoent = isinstance(exc, FileNotFoundError) or (isinstance(exc, OSError) and exc.errno == errno.ENOENT)
+            if is_enoent:
+                _recheck_final_root(state_root, pinned_dir_fd)
+                return None
+            raise AutopilotError(f"cannot open rescope receipt leaf: {exc}") from exc
+
+        try:
+            leaf_stat_before = os.fstat(leaf_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fstat receipt leaf: {exc}") from exc
+
+        if not stat.S_ISREG(leaf_stat_before.st_mode):
+            raise AutopilotError("rescope receipt must be a regular file")
+        if leaf_stat_before.st_nlink != 1:
+            raise AutopilotError("rescope receipt must have link count 1")
+        if leaf_stat_before.st_uid != os.geteuid():
+            raise AutopilotError("rescope receipt owner must match process euid")
+        if (leaf_stat_before.st_mode & 0o777) != 0o600:
+            raise AutopilotError("rescope receipt mode must be 0600")
+        if leaf_stat_before.st_size > MAX_RESCOPE_RECEIPT_BYTES:
+            raise AutopilotError(f"rescope receipt size exceeds {MAX_RESCOPE_RECEIPT_BYTES} bytes")
+
+        max_read = MAX_RESCOPE_RECEIPT_BYTES + 1
+        chunks = []
+        total_read = 0
+        while total_read < max_read:
+            to_read = min(4096, max_read - total_read)
+            try:
+                chunk = os.read(leaf_fd, to_read)
+            except OSError as exc:
+                raise AutopilotError(f"error reading rescope receipt: {exc}") from exc
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total_read += len(chunk)
+
+        raw_bytes = b"".join(chunks)
+        if len(raw_bytes) > MAX_RESCOPE_RECEIPT_BYTES:
+            raise AutopilotError(f"rescope receipt exceeds maximum size of {MAX_RESCOPE_RECEIPT_BYTES} bytes")
+
+        try:
+            leaf_stat_after = os.fstat(leaf_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fstat receipt leaf after read: {exc}") from exc
+
+        if file_fingerprint(leaf_stat_before) != file_fingerprint(leaf_stat_after):
+            raise AutopilotError("rescope receipt file fingerprint changed during read")
+
+        try:
+            leaf_stat_dir = os.stat(leaf_name, dir_fd=pinned_dir_fd, follow_symlinks=False)
+        except TypeError as exc:
+            raise AutopilotError(f"os.stat failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            raise AutopilotError(f"cannot stat receipt leaf in pinned directory: {exc}") from exc
+
+        if file_fingerprint(leaf_stat_after) != file_fingerprint(leaf_stat_dir):
+            raise AutopilotError("receipt leaf in directory does not match open descriptor")
+
+        _recheck_final_root(state_root, pinned_dir_fd)
+
+        return parse_rescope_receipt(raw_bytes, expected_repository)
+    except Exception as exc:
+        primary_exc = exc
+        raise
+    finally:
+        tracker.close_all(primary_exc)
+
+
+_load_rescope_receipt = load_rescope_receipt
 
 
 def recover_committed_advisory_result(
