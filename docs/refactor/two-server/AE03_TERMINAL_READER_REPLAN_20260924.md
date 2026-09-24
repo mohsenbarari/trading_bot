@@ -48,3 +48,9 @@ Two isolated fault injections against the proposed module, executed in memory wi
 
 1. Raise `OSError(EIO)` on the file descriptor's `os.close` before it closes. The helper suppresses that error in `finally`, returns successful bytes, and leaves the descriptor open. This is not proof of closure on every path; the close failure must fail closed and the other descriptor must still be closed.
 2. Let the existing scanner finish, then atomically replace the target file with a different valid `0600` single-link file before directory-relative open. The helper returns the replacement bytes. Its first target-file fingerprint is taken only after opening, so it cannot detect this scan-to-open swap. Latch the target's no-follow identity before the scan and compare it with the opened descriptor and final path, or use an equivalent bounded design that demonstrably rejects the same test.
+
+## Task 104 Codex rejection (2026-09-24 UTC)
+
+Task `AE03-TERMINAL-BYTES-REPLAN-20260924-104` reused rejected Gemini helper as reference, not accepted code. One fixture correction was needed; 85 tests passed, Gemini Reviewer returned `VERIFIED`, and formal bindings passed. Codex repeated both task-103 counterexamples in memory: scan-to-open replacement now raises; a file-close failure raises and still attempts directory close. No proposal bytes were applied.
+
+Final review found that post-read directory-relative `os.stat` compares `file_stat_after.st_mtime_ns` and `st_ctime_ns` to themselves, not to `file_fstat_after`. A scoped fault changing only the second directory-relative stat's `st_mtime_ns` returned successful bytes. This does not claim an ordinary filesystem exploit; it disproves the promised post-read comparison. Task 104 is rejected. Next unit must add a focused negative test, compare both timestamps to `file_fstat_after`, preserve the two earlier counterexamples, and avoid runtime wiring or aliases. R2 and R3 remain unopened.
