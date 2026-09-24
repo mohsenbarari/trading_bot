@@ -35,7 +35,13 @@ def _broker_tree_snapshot(
     if not os.path.lexists(local_dir):
         return snap
     all_paths = [local_dir]
-    for current_root, dirs, files in os.walk(local_dir, followlinks=False):
+
+    def _on_walk_error(err: OSError) -> None:
+        raise err
+
+    for current_root, dirs, files in os.walk(
+        local_dir, followlinks=False, onerror=_on_walk_error
+    ):
         for name in dirs + files:
             all_paths.append(Path(current_root) / name)
     for p in sorted(all_paths, key=lambda x: str(x.relative_to(root))):
@@ -400,6 +406,32 @@ class TestExactReattach(unittest.TestCase):
 
         self.assertIn("terminal quota response not detected", str(ctx.exception))
         self.assertEqual(snap_before, snap_after)
+
+    def test_broker_tree_snapshot_propagates_targeted_scandir_os_error(self) -> None:
+        target_dir = (
+            self.root / ".local" / "two-site-refactor" / "provider-broker" / "responses"
+        ).resolve()
+        self.assertTrue(target_dir.is_dir())
+
+        injected_error = OSError(13, "Permission denied: simulated scandir failure")
+        real_scandir = os.scandir
+        intercepted = False
+
+        def hooked_scandir(path=None):
+            nonlocal intercepted
+            if path is not None and Path(path).resolve() == target_dir:
+                intercepted = True
+                raise injected_error
+            return real_scandir(path)
+
+        os.scandir = hooked_scandir
+        try:
+            with self.assertRaises(OSError) as ctx:
+                _broker_tree_snapshot(self.root)
+            self.assertTrue(intercepted)
+            self.assertIs(ctx.exception, injected_error)
+        finally:
+            os.scandir = real_scandir
 
 
 if __name__ == "__main__":
