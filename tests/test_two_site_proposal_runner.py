@@ -1,5 +1,6 @@
 """Offline contracts; fake CLI output is not evidence of a real Gemini run."""
 from copy import deepcopy
+from datetime import datetime, timezone
 import inspect
 import json
 import os
@@ -366,10 +367,11 @@ class ProposalContracts(unittest.TestCase):
     def invoke_fake_cli(self, *, drift=None, timeout=False, denied=False,
                         result=None, events=None, raw_output=None,
                         git_side_effect=None, run_id="run-001",
-                        cli_identities=None, feedback=None, proposal=None):
+                        cli_identities=None, feedback=None, proposal=None,
+                        process_returncode=0):
         process = MagicMock()
         process.__enter__.return_value = process
-        process.returncode = 0
+        process.returncode = process_returncode
         process.pid = 987654
         process.poll.return_value = None
 
@@ -1627,6 +1629,178 @@ class ProposalContracts(unittest.TestCase):
         self.assertFalse((out / "result.json").exists())
         self.assertFalse((out / "proposal.patch").exists())
         self.assertEqual((self.root / "source.py").read_text(), "VALUE = 1\n")
+
+    def patch_runner_now(self, fixed_now=None):
+        if fixed_now is None:
+            fixed_now = datetime(2026, 9, 24, 18, 0, 0, tzinfo=timezone.utc)
+
+        class FakeDatetime(datetime):
+            now = MagicMock(return_value=fixed_now)
+
+        FakeDatetime.datetime = FakeDatetime
+
+        try:
+            now_patch = patch.object(runner.datetime, "now", return_value=fixed_now)
+            now_patch.start()
+        except (TypeError, AttributeError):
+            now_patch = patch.object(runner, "datetime", FakeDatetime)
+            now_patch.start()
+        self.addCleanup(now_patch.stop)
+        return fixed_now
+
+    def worker_model(self):
+        if callable(getattr(runner, "role_model", None)):
+            return runner.role_model("worker")
+        if hasattr(runner, "ROLE_MODELS") and "worker" in runner.ROLE_MODELS:
+            return runner.ROLE_MODELS["worker"]
+        return "gemini-3.8-flash-medium"
+
+    def quota_events(self, *, error="RESOURCE_EXHAUSTED: quota exceeded, resets at 2026-09-24T19:00:00Z",
+                     usage=None, conversation_id="session-quota", model=None):
+        if usage is None:
+            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        return [
+            {
+                "event": "init",
+                "conversation_id": conversation_id,
+                "init": {"model": model or self.worker_model()},
+            },
+            {
+                "event": "result",
+                "conversation_id": conversation_id,
+                "result": {
+                    "status": "ERROR",
+                    "conversation_id": conversation_id,
+                    "usage": usage,
+                    "error": error,
+                },
+            },
+        ]
+
+    def test_actual_runner_records_quota_evidence_on_both_process_exit_branches(self):
+        self.patch_runner_now(datetime(2026, 9, 24, 18, 0, 0, tzinfo=timezone.utc))
+        role_model = self.worker_model()
+        expected_keys = {"kind", "provider", "model", "conversation_id", "reset_at_utc"}
+
+        for rc in (0, 1):
+            run_id = f"quota-exit-{rc}"
+            with self.subTest(process_returncode=rc):
+                events = self.quota_events(conversation_id=f"session-exit-{rc}")
+                with self.assertRaises(runner.ProposalError):
+                    self.invoke_fake_cli(
+                        events=events,
+                        run_id=run_id,
+                        process_returncode=rc,
+                    )
+
+                out = self.root / f".local/two-site-refactor/proposals/{run_id}"
+                status_file = out / "status.json"
+                self.assertTrue(status_file.exists())
+                status = json.loads(status_file.read_text())
+                self.assertEqual(status["state"], "BLOCKED")
+
+                self.assertIn("quota_evidence", status)
+                evidence = status["quota_evidence"]
+                self.assertEqual(set(evidence.keys()), expected_keys)
+                self.assertEqual(evidence["kind"], "QUOTA_RESET_KNOWN")
+                self.assertEqual(evidence["provider"], "gemini")
+                self.assertEqual(evidence["model"], role_model)
+                self.assertEqual(evidence["conversation_id"], f"session-exit-{rc}")
+                self.assertEqual(evidence["reset_at_utc"], "2026-09-24T19:00:00Z")
+                self.assertEqual(evidence, {
+                    "kind": "QUOTA_RESET_KNOWN",
+                    "provider": "gemini",
+                    "model": role_model,
+                    "conversation_id": f"session-exit-{rc}",
+                    "reset_at_utc": "2026-09-24T19:00:00Z",
+                })
+
+                self.assertFalse((out / "result.json").exists())
+                self.assertFalse((out / "proposal.patch").exists())
+                self.assertEqual((self.root / "source.py").read_text(), "VALUE = 1\n")
+
+    def test_ambiguous_quota_reset_records_unknown_with_null_reset_at(self):
+        self.patch_runner_now(datetime(2026, 9, 24, 18, 0, 0, tzinfo=timezone.utc))
+        role_model = self.worker_model()
+        run_id = "quota-ambiguous-001"
+        ambiguous_error = "RESOURCE_EXHAUSTED: quota limit reached, reset at 8:09 AM"
+        events = self.quota_events(error=ambiguous_error, conversation_id="session-ambiguous")
+
+        with self.assertRaises(runner.ProposalError):
+            self.invoke_fake_cli(events=events, run_id=run_id, process_returncode=0)
+
+        out = self.root / f".local/two-site-refactor/proposals/{run_id}"
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+
+        self.assertIn("quota_evidence", status)
+        evidence = status["quota_evidence"]
+        self.assertEqual(set(evidence.keys()), {"kind", "provider", "model", "conversation_id", "reset_at_utc"})
+        self.assertEqual(evidence["kind"], "QUOTA_RESET_UNKNOWN")
+        self.assertEqual(evidence["provider"], "gemini")
+        self.assertEqual(evidence["model"], role_model)
+        self.assertEqual(evidence["conversation_id"], "session-ambiguous")
+        self.assertIsNone(evidence["reset_at_utc"])
+        self.assertNotEqual(evidence["reset_at_utc"], "UNKNOWN")
+        self.assertEqual(evidence, {
+            "kind": "QUOTA_RESET_UNKNOWN",
+            "provider": "gemini",
+            "model": role_model,
+            "conversation_id": "session-ambiguous",
+            "reset_at_utc": None,
+        })
+
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((out / "proposal.patch").exists())
+        self.assertEqual((self.root / "source.py").read_text(), "VALUE = 1\n")
+
+    def test_negative_scenarios_do_not_record_quota_evidence(self):
+        self.patch_runner_now(datetime(2026, 9, 24, 18, 0, 0, tzinfo=timezone.utc))
+
+        # 1. Nonquota ERROR
+        nonquota_events = self.quota_events(
+            error="RuntimeError: Internal model failure without quota",
+            conversation_id="session-nonquota",
+        )
+        with self.assertRaises(runner.ProposalError):
+            self.invoke_fake_cli(events=nonquota_events, run_id="neg-nonquota")
+        out_nonquota = self.root / ".local/two-site-refactor/proposals/neg-nonquota"
+        status_nonquota = json.loads((out_nonquota / "status.json").read_text())
+        self.assertEqual(status_nonquota["state"], "BLOCKED")
+        self.assertNotIn("quota_evidence", status_nonquota)
+        self.assertFalse((out_nonquota / "result.json").exists())
+
+        # 2. Nonzero usage
+        nonzero_usage_events = self.quota_events(
+            usage={"prompt_tokens": 12, "completion_tokens": 0, "total_tokens": 12},
+            conversation_id="session-nonzero-usage",
+        )
+        with self.assertRaises(runner.ProposalError):
+            self.invoke_fake_cli(events=nonzero_usage_events, run_id="neg-nonzero-usage")
+        out_usage = self.root / ".local/two-site-refactor/proposals/neg-nonzero-usage"
+        status_usage = json.loads((out_usage / "status.json").read_text())
+        self.assertEqual(status_usage["state"], "BLOCKED")
+        self.assertNotIn("quota_evidence", status_usage)
+        self.assertFalse((out_usage / "result.json").exists())
+
+        # 3. Changed CLI identity
+        initial = {
+            "path": str(Path(__file__).resolve()),
+            "version": runner.EXPECTED_CLI_VERSION,
+            "sha256": runner.EXPECTED_CLI_SHA256,
+        }
+        changed = dict(initial, version="unexpected-version")
+        with self.assertRaisesRegex(runner.ProposalError, "identity changed"):
+            self.invoke_fake_cli(
+                cli_identities=[initial, changed],
+                events=self.quota_events(conversation_id="session-changed-cli"),
+                run_id="neg-changed-cli",
+            )
+        out_cli = self.root / ".local/two-site-refactor/proposals/neg-changed-cli"
+        status_cli = json.loads((out_cli / "status.json").read_text())
+        self.assertEqual(status_cli["state"], "BLOCKED")
+        self.assertNotIn("quota_evidence", status_cli)
+        self.assertFalse((out_cli / "result.json").exists())
 
 
 if __name__ == "__main__":
