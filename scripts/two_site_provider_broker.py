@@ -2117,6 +2117,208 @@ def read_terminal_quota_for_exact_request(
             raise BrokerError(f"cannot safely close responses directory descriptor: {close_errors[0]}") from close_errors[0]
 
 
+RESERVATION_KEYS = frozenset({
+    "controller_run_id",
+    "run_prefix",
+    "task_path",
+    "task_sha256",
+    "source_head",
+    "assignment_id",
+    "assignment_sha256",
+})
+
+
+def find_terminal_quota_for_reservation(
+    root: Path, expected_reservation: object
+) -> dict:
+    root = canonical_root(root)
+    if not isinstance(expected_reservation, dict) or set(expected_reservation) != RESERVATION_KEYS:
+        raise BrokerError("reservation does not match the exact contract")
+    for key in RESERVATION_KEYS:
+        val = expected_reservation[key]
+        if type(val) is not str:
+            raise BrokerError(f"reservation field {key} must be a string")
+    if not CONTROLLER_RUN_RE.fullmatch(expected_reservation["controller_run_id"]):
+        raise BrokerError("reservation controller_run_id is invalid")
+    if not RUN_PREFIX_RE.fullmatch(expected_reservation["run_prefix"]):
+        raise BrokerError("reservation run_prefix is invalid")
+    if not HEAD_RE.fullmatch(expected_reservation["source_head"]):
+        raise BrokerError("reservation source_head is invalid")
+    if not SHA_RE.fullmatch(expected_reservation["task_sha256"]):
+        raise BrokerError("reservation task_sha256 is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", expected_reservation["assignment_id"]):
+        raise BrokerError("reservation assignment_id is invalid")
+    if not SHA_RE.fullmatch(expected_reservation["assignment_sha256"]):
+        raise BrokerError("reservation assignment_sha256 is invalid")
+    task_rel = _task_relative_path(expected_reservation["task_path"])
+    if task_rel.as_posix() != expected_reservation["task_path"]:
+        raise BrokerError("reservation task_path is not canonical")
+
+    state_root = root / STATE_REL
+    directory = state_root / "terminal-quota"
+
+    try:
+        dir_stat_start = os.lstat(directory)
+    except OSError as exc:
+        raise BrokerError("terminal quota directory is unavailable") from exc
+    if not stat.S_ISDIR(dir_stat_start.st_mode) or stat.S_ISLNK(dir_stat_start.st_mode):
+        raise BrokerError("terminal quota directory must be a directory and not a symlink")
+    if dir_stat_start.st_uid != os.geteuid():
+        raise BrokerError("terminal quota directory owner mismatch")
+    if stat.S_IMODE(dir_stat_start.st_mode) != 0o700:
+        raise BrokerError("terminal quota directory mode must be 0700")
+
+    try:
+        resolved_dir = directory.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise BrokerError("terminal quota directory is unavailable") from exc
+    if resolved_dir != directory:
+        raise BrokerError("terminal quota directory must be a canonical path without symlinks")
+
+    entry_names = scan_private_record_directory(directory)
+
+    read_entries: list[tuple[str, dict, bytes, os.stat_result]] = []
+    for entry_name in entry_names:
+        req_id = entry_name[:-5]
+        entry_path = directory / entry_name
+        raw_bytes = read_terminal_quota_bytes(root, req_id)
+        receipt = validate_terminal_quota_payload(root, req_id, raw_bytes)
+        try:
+            entry_stat = os.lstat(entry_path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat receipt file {entry_name}: {exc}") from exc
+        if (
+            stat.S_ISLNK(entry_stat.st_mode)
+            or not stat.S_ISREG(entry_stat.st_mode)
+            or entry_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(entry_stat.st_mode) != 0o600
+            or entry_stat.st_nlink != 1
+            or entry_stat.st_size != len(raw_bytes)
+        ):
+            raise BrokerError(f"receipt file {entry_name} stat mismatch")
+        read_entries.append((entry_name, receipt, raw_bytes, entry_stat))
+
+    matching_entries: list[tuple[str, dict, bytes, os.stat_result]] = []
+    for entry_name, receipt, raw_bytes, entry_stat in read_entries:
+        req = receipt["request"]
+        matches = True
+        for key in RESERVATION_KEYS:
+            actual_val = req.get(key)
+            if type(actual_val) is not str or actual_val != expected_reservation[key]:
+                matches = False
+                break
+        if matches:
+            matching_entries.append((entry_name, receipt, raw_bytes, entry_stat))
+
+    if len(matching_entries) == 0:
+        raise BrokerError("no terminal quota record matched reservation")
+    if len(matching_entries) > 1:
+        raise BrokerError("multiple terminal quota records matched reservation")
+
+    selected_entry_name, selected_receipt, original_raw_bytes, stat_before_c4b1 = matching_entries[0]
+    selected_request = selected_receipt["request"]
+    selected_path = directory / selected_entry_name
+
+    pinned_dev = stat_before_c4b1.st_dev
+    pinned_ino = stat_before_c4b1.st_ino
+    pinned_mode = stat_before_c4b1.st_mode
+    pinned_uid = stat_before_c4b1.st_uid
+    pinned_nlink = stat_before_c4b1.st_nlink
+    pinned_size = stat_before_c4b1.st_size
+    pinned_mtime_ns = stat_before_c4b1.st_mtime_ns
+    pinned_ctime_ns = stat_before_c4b1.st_ctime_ns
+
+    try:
+        dir_stat_mid = os.lstat(directory)
+    except OSError as exc:
+        raise BrokerError("cannot lstat terminal quota directory before C4b1 read") from exc
+    if (
+        dir_stat_mid.st_dev != dir_stat_start.st_dev
+        or dir_stat_mid.st_ino != dir_stat_start.st_ino
+        or dir_stat_mid.st_uid != dir_stat_start.st_uid
+        or stat.S_IMODE(dir_stat_mid.st_mode) != 0o700
+        or not stat.S_ISDIR(dir_stat_mid.st_mode)
+        or stat.S_ISLNK(dir_stat_mid.st_mode)
+    ):
+        raise BrokerError("terminal quota directory identity changed before C4b1 read")
+
+    c4b1_response = read_terminal_quota_for_exact_request(root, selected_request)
+
+    try:
+        c4b1_resp_canonical = json.dumps(
+            c4b1_response, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        receipt_resp_canonical = json.dumps(
+            selected_receipt["response"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except (ValueError, TypeError) as exc:
+        raise BrokerError("response contains non-finite numbers") from exc
+
+    if c4b1_resp_canonical != receipt_resp_canonical:
+        raise BrokerError("C4b1 response canonical bytes mismatch with receipt response")
+
+    try:
+        stat_after_c4b1 = os.lstat(selected_path)
+    except OSError as exc:
+        raise BrokerError(f"cannot lstat receipt file {selected_entry_name} after C4b1 read: {exc}") from exc
+
+    if (
+        stat_after_c4b1.st_dev != pinned_dev
+        or stat_after_c4b1.st_ino != pinned_ino
+        or stat_after_c4b1.st_mode != pinned_mode
+        or stat_after_c4b1.st_uid != pinned_uid
+        or stat_after_c4b1.st_nlink != pinned_nlink
+        or stat_after_c4b1.st_size != pinned_size
+        or stat_after_c4b1.st_mtime_ns != pinned_mtime_ns
+        or stat_after_c4b1.st_ctime_ns != pinned_ctime_ns
+    ):
+        raise BrokerError("receipt file identity or metadata changed across C4b1 read")
+
+    re_read_raw_bytes = read_terminal_quota_bytes(root, selected_request["request_id"])
+    re_read_receipt = validate_terminal_quota_payload(root, selected_request["request_id"], re_read_raw_bytes)
+
+    if re_read_raw_bytes != original_raw_bytes:
+        raise BrokerError("receipt canonical bytes changed across C4b1 read")
+    if re_read_receipt != selected_receipt:
+        raise BrokerError("receipt structure changed across C4b1 read")
+
+    try:
+        stat_after_reread = os.lstat(selected_path)
+    except OSError as exc:
+        raise BrokerError(f"cannot lstat receipt file {selected_entry_name} after re-read: {exc}") from exc
+
+    if (
+        stat_after_reread.st_dev != pinned_dev
+        or stat_after_reread.st_ino != pinned_ino
+        or stat_after_reread.st_mode != pinned_mode
+        or stat_after_reread.st_uid != pinned_uid
+        or stat_after_reread.st_nlink != pinned_nlink
+        or stat_after_reread.st_size != pinned_size
+        or stat_after_reread.st_mtime_ns != pinned_mtime_ns
+        or stat_after_reread.st_ctime_ns != pinned_ctime_ns
+    ):
+        raise BrokerError("receipt file identity or metadata changed after re-read")
+
+    try:
+        dir_stat_end = os.lstat(directory)
+    except OSError as exc:
+        raise BrokerError("cannot lstat terminal quota directory after discovery") from exc
+    if not stat.S_ISDIR(dir_stat_end.st_mode) or stat.S_ISLNK(dir_stat_end.st_mode):
+        raise BrokerError("terminal quota directory changed or became symlink")
+    if dir_stat_end.st_uid != dir_stat_start.st_uid:
+        raise BrokerError("terminal quota directory owner changed")
+    if stat.S_IMODE(dir_stat_end.st_mode) != 0o700:
+        raise BrokerError("terminal quota directory mode changed")
+    if (dir_stat_end.st_dev, dir_stat_end.st_ino) != (dir_stat_start.st_dev, dir_stat_start.st_ino):
+        raise BrokerError("terminal quota directory identity changed across discovery")
+
+    final_entry_names = scan_private_record_directory(directory)
+    if final_entry_names != entry_names:
+        raise BrokerError("terminal quota directory entries changed during discovery")
+
+    return c4b1_response
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
