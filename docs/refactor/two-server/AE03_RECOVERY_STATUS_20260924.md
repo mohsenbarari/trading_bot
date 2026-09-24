@@ -1,8 +1,16 @@
 # AE03 Recovery Status and Gates (2026-09-24)
 
 - Scope & Context: [AE Plan](AUTOMATION_EFFICIENCY_PLAN.md), [AE01 Evaluation](AE01_EVALUATION_20260923.md), [AE02 Evaluation](AE02_EVALUATION_20260923.md), and [Automation Efficiency Memory](../../memory/areas/automation-efficiency.md).
-- Current Baseline: Clean HEAD `6cc3b475e3667df7ae6aa2773fd699c1f7449862` on branch `refactor/two-site-architecture`.
+- Latest accepted implementation baseline: `d36fa4e2031912c127cdf81b84e78b30452554c8` on branch `refactor/two-site-architecture`; this status note is a later documentation change.
 - Governing Rule: No modifications to `main`, production, DNS, or Writer. No active Supervisor recovery or runtime hooks are enabled.
+
+## Update at `d36fa4e2` (2026-09-24)
+
+The terminal-quota path now has four isolated prerequisites: `2ad7e7a9` cleans private publication temporaries on post-open failure; `84ce53d9` scans a private directory through a no-follow, inode-bound FD with a 64-entry/32-KiB cap and rejects every unexpected entry; `11972949` fsyncs that directory through a separately validated no-follow FD; and `d36fa4e2` publishes one immutable, bounded terminal receipt only after strict Broker quota detection, then fsyncs the directory before reporting success. The publisher is **not wired to serve/client/recovery**. A terminal response can still be pruned by the existing client, and no wait or resume exists. The latest independent cross-component suite passed **214 tests**.
+
+Codex rejected task 100 despite Gemini Reviewer VERIFIED and 72 passing tests: the proposed newly-created directory received a path-based `chmod` after `mkdir`, allowing a path-replacement race; its fake quota evidence did not match the actual five-field schema; and broad fsync exception wrapping masked defects. No bytes from that proposal were applied. Corrected task 101 removes path-based chmod, uses realistic evidence and a directory-FD fsync fault test, and passed independent byte binding, semantic review and tests before commit. The prior private-fsync test had one weak closure assertion; Codex independently injected `fstat` failure and verified the FD was closed.
+
+Next gates are strict private receipt read/validation, serve publication before client acknowledgment, crash recovery without replay, bounded wait/resume under the same semantic reservation, Supervisor/Monitor STOP/ref gates and full fault matrix. The detector's extra `verifier-N` spelling must close before runtime wiring. Supervisor remains STOPPED with stale protected-ref pins; empirical quota behavior and efficiency effect remain **UNKNOWN**.
 
 ## Update at `6cc3b475` (2026-09-24)
 
