@@ -3026,11 +3026,15 @@ def run_loop(
                     **continuation_args,
                     **cycle_kwargs,
                 )
-                if not callback_entered:
+                if not (callback_entered and callback_published and rescope_intent_exists(epoch_dir, next_attempt)):
                     write_supervisor_state(
                         state_root, "BLOCKED", cycle=cycle,
                         head=git(root, "rev-parse", "HEAD"),
-                        blockers=["run_cycle returned without before_model callback invocation"],
+                        blockers=[
+                            "run_cycle returned without before_model callback invocation"
+                            if not callback_entered
+                            else "run_cycle returned without verified durable rescope intent"
+                        ],
                     )
                     return 2
                 previous_success = None
