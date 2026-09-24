@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json",
+    "sha256": "75e090c1ef0b42c935432664a1ea30bbb2d90094df5a4f185a64bd1ff85211df",
+    "last_commit": "c7cc52cf61e5770348cbaa79ef8677804c62ee38"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py",
+      "sha256": "3961f3af3f4bacaceff115b37f6143f0c6b40b275459f507dd3d0d69a196b3ea",
+      "last_commit": "67cd61b9b4601394b61728aa314a592d8dd96492",
+      "seed_ids": [
+        "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+        "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
+        "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_valid_queue_suppresses_stale_delete_and_advances"
+      ]
+    }
+  ]
+}

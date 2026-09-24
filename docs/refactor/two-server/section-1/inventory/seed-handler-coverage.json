@@ -16,7 +16,8 @@
     "base_path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
     "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json",
     "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json",
-    "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json"
+    "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json",
+    "continuation_4_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,

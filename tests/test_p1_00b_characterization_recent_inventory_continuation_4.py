@@ -1,0 +1,140 @@
+import hashlib
+import json
+from pathlib import Path
+import unittest
+
+
+class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
+    def test_valid_invitation_inputs_provenance_and_prior_seed_membership(self):
+        repo_root = Path(__file__).resolve().parent.parent
+
+        continuation_4_rel_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json"
+        )
+        continuation_4_path = repo_root / continuation_4_rel_path
+        self.assertTrue(
+            continuation_4_path.is_file(),
+            f"Continuation 4 file not found at {continuation_4_path}",
+        )
+
+        continuation_4_bytes = continuation_4_path.read_bytes()
+        continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
+
+        expected_predecessor_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json"
+        )
+        expected_predecessor_sha = (
+            "75e090c1ef0b42c935432664a1ea30bbb2d90094df5a4f185a64bd1ff85211df"
+        )
+        expected_predecessor_commit = "c7cc52cf61e5770348cbaa79ef8677804c62ee38"
+
+        predecessor_binding = continuation_4_data.get("predecessor_inventory", {})
+        self.assertEqual(predecessor_binding.get("path"), expected_predecessor_path)
+        self.assertEqual(predecessor_binding.get("sha256"), expected_predecessor_sha)
+        self.assertEqual(
+            predecessor_binding.get("last_commit"),
+            expected_predecessor_commit,
+        )
+
+        predecessor_file = repo_root / expected_predecessor_path
+        self.assertTrue(predecessor_file.is_file())
+        self.assertEqual(
+            hashlib.sha256(predecessor_file.read_bytes()).hexdigest(),
+            expected_predecessor_sha,
+        )
+
+        records = continuation_4_data.get("records", [])
+        self.assertEqual(len(records), 1)
+
+        record = records[0]
+        expected_record_keys = {
+            "path",
+            "sha256",
+            "last_commit",
+            "seed_ids",
+            "test_selectors",
+        }
+        self.assertEqual(set(record.keys()), expected_record_keys)
+
+        expected_test_path = (
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py"
+        )
+        expected_test_sha = (
+            "3961f3af3f4bacaceff115b37f6143f0c6b40b275459f507dd3d0d69a196b3ea"
+        )
+        expected_last_commit = "67cd61b9b4601394b61728aa314a592d8dd96492"
+        self.assertEqual(record["path"], expected_test_path)
+        self.assertEqual(record["sha256"], expected_test_sha)
+        self.assertEqual(record["last_commit"], expected_last_commit)
+
+        live_test_path = repo_root / expected_test_path
+        self.assertTrue(live_test_path.is_file())
+        live_test_bytes = live_test_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(live_test_bytes).hexdigest(),
+            expected_test_sha,
+        )
+
+        expected_selectors = [
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
+            "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_valid_queue_suppresses_stale_delete_and_advances",
+        ]
+        self.assertEqual(record["test_selectors"], expected_selectors)
+
+        live_test_text = live_test_bytes.decode("utf-8")
+        for selector in expected_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(f"def {method_name}(", live_test_text)
+
+        expected_seed_ids = [
+            "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+            "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
+        ]
+        self.assertEqual(record["seed_ids"], expected_seed_ids)
+
+        surface_bot_path = (
+            repo_root / "docs/refactor/two-server/section-1/inventory/surface-bot.json"
+        )
+        self.assertTrue(surface_bot_path.is_file())
+        surface_bot_data = json.loads(surface_bot_path.read_bytes().decode("utf-8"))
+        surface_bot_seed_set = {
+            entry["behavior_id"] for entry in surface_bot_data.get("entries", [])
+        }
+        for seed_id in expected_seed_ids:
+            self.assertIn(seed_id, surface_bot_seed_set)
+
+        base_evidence_path = (
+            repo_root / "docs/refactor/two-server/section-1/inventory/recent-characterization.json"
+        )
+        self.assertTrue(base_evidence_path.is_file())
+        base_evidence_data = json.loads(base_evidence_path.read_bytes().decode("utf-8"))
+
+        norm_record = next(
+            (
+                r
+                for r in base_evidence_data.get("records", [])
+                if r.get("last_commit") == "2a84eeb0bf7ea187f3a4df1690917eaafd3f15f3"
+            ),
+            None,
+        )
+        self.assertIsNotNone(norm_record)
+        norm_seed_ids = norm_record.get("seed_ids", [])
+        self.assertIn(expected_seed_ids[0], norm_seed_ids)
+        self.assertIn(expected_seed_ids[1], norm_seed_ids)
+
+        all_base_seeds = {
+            seed_id
+            for r in base_evidence_data.get("records", [])
+            for seed_id in r.get("seed_ids", [])
+        }
+        record_seed_set = set(expected_seed_ids)
+        self.assertTrue(record_seed_set.issubset(all_base_seeds))
+        self.assertEqual(len(record_seed_set - all_base_seeds), 0)
+        self.assertEqual(len(record_seed_set.intersection(all_base_seeds)), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
