@@ -1304,6 +1304,28 @@ def load_rescope_receipt(
 _load_rescope_receipt = load_rescope_receipt
 
 
+def load_latest_rescope_receipt(
+    state_root: Path,
+    expected_repository: object,
+) -> dict[str, object] | None:
+    """Safely load the latest rescope receipt, requiring a contiguous prefix in 1..3."""
+    receipts = [
+        load_rescope_receipt(state_root, expected_repository, filename)
+        for filename in _RESCOPE_RECEIPT_FILENAMES
+    ]
+    r1, r2, r3 = receipts
+    if (r2 is not None and r1 is None) or (r3 is not None and r2 is None):
+        raise AutopilotError("non-contiguous rescope receipt sequence")
+    if r3 is not None:
+        return r3
+    if r2 is not None:
+        return r2
+    return r1
+
+
+_load_latest_rescope_receipt = load_latest_rescope_receipt
+
+
 def _create_rescope_temp_file(pinned_dir_fd: int, payload: bytes) -> str:
     """Safely create, populate, fsync, and close a private temp file in pinned_dir_fd.
 
