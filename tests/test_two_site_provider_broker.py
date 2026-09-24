@@ -586,3 +586,222 @@ def test_maintenance_record_pruning_preserves_recent_and_unowned_files(
     assert not old.exists()
     assert recent.exists()
     assert unrelated.exists()
+
+
+def _make_quota_payload(
+    task_id: str,
+    source_head: str,
+    *,
+    role: str = "worker",
+    kind: str = "QUOTA_RESET_KNOWN",
+) -> dict:
+    if role == "worker":
+        worker_run_id = None
+        proposal_sha = None
+        model = broker.WORKER_MODEL
+    else:
+        worker_run_id = "cycle-0001-20990101T000000Z-123-worker-0"
+        proposal_sha = "1" * 64
+        model = broker.MODEL
+
+    evidence = {
+        "kind": kind,
+        "provider": "gemini",
+        "model": model,
+        "conversation_id": f"conv-{role}-test",
+        "reset_at_utc": "2099-01-01T00:00:00Z" if kind == "QUOTA_RESET_KNOWN" else None,
+    }
+    return {
+        "state": "TASK_BLOCKED",
+        "task_id": task_id,
+        "source_head": source_head,
+        "final_worker_run_id": worker_run_id,
+        "final_reviewer_run_id": None,
+        "proposal_sha256": proposal_sha,
+        "changed_paths": [],
+        "proposal_path": None,
+        "reviewer_path": None,
+        "correction_count": 0,
+        "blockers": ["observational quota, no replay authority"],
+        "pre_review_test_path": None,
+        "pre_review_test_sha256": None,
+        "pre_review_test_state": None,
+        "semantic_task_fingerprint": None,
+        "quota_evidence": evidence,
+    }
+
+
+def _make_quota_response(request: dict, payload: dict) -> dict:
+    return {
+        "schema_version": "1.0",
+        "request_id": request["request_id"],
+        "run_prefix": request["run_prefix"],
+        "source_head": request["source_head"],
+        "state": "COMPLETED",
+        "exit_code": 1,
+        "stdout": json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
+        "stderr": "",
+        "finished_at": time.time(),
+    }
+
+
+@pytest.mark.parametrize("role", ["worker", "reviewer"])
+@pytest.mark.parametrize("kind", ["QUOTA_RESET_KNOWN", "QUOTA_RESET_UNKNOWN"])
+def test_detect_quota_response_positive_worker_and_reviewer(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+    role: str,
+    kind: str,
+) -> None:
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload("BROKER-TEST-1", request["source_head"], role=role, kind=kind)
+    response = _make_quota_response(request, payload)
+
+    detected = broker.detect_quota_response(root, request, response)
+    assert detected is not None
+    assert detected == payload["quota_evidence"]
+    assert broker.detect_terminal_quota_response(root, request, response) == detected
+
+
+def test_detect_quota_response_negative_matrix(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload("BROKER-TEST-1", request["source_head"], role="worker")
+    response = _make_quota_response(request, payload)
+
+    assert broker.detect_quota_response(root, request, response) is not None
+
+    # Untrusted request / response types
+    assert broker.detect_quota_response(root, None, response) is None
+    assert broker.detect_quota_response(root, request, None) is None
+    assert broker.detect_quota_response(root, "bad", response) is None
+
+    # Wrong request ID
+    assert broker.detect_quota_response(root, request, dict(response, request_id="0" * 32)) is None
+
+    # Wrong head
+    assert broker.detect_quota_response(root, request, dict(response, source_head="0" * 40)) is None
+    p_head = dict(payload, source_head="0" * 40)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_head)) is None
+
+    # Wrong task SHA
+    bad_sha_req = dict(request, task_sha256="0" * 64)
+    assert broker.detect_quota_response(root, bad_sha_req, response) is None
+
+    # Wrong task ID in payload
+    p_tid = dict(payload, task_id="WRONG-ID")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_tid)) is None
+
+    # Malformed, duplicate, and trailing JSON
+    assert broker.detect_quota_response(root, request, dict(response, stdout="bad json {")) is None
+    dup_json = '{"state":"TASK_BLOCKED","state":"TASK_BLOCKED"}'
+    assert broker.detect_quota_response(root, request, dict(response, stdout=dup_json)) is None
+    assert broker.detect_quota_response(root, request, dict(response, stdout=response["stdout"] + " trailing")) is None
+
+    # Wrong blocker
+    for bad_blockers in [[], ["other"], ["observational quota, no replay authority", "extra"]]:
+        p_blk = dict(payload, blockers=bad_blockers)
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, p_blk)) is None
+
+    # Wrong pipeline state or exit code or stderr
+    assert broker.detect_quota_response(root, request, dict(response, state="BROKER_ERROR")) is None
+    assert broker.detect_quota_response(root, request, dict(response, exit_code=0)) is None
+    assert broker.detect_quota_response(root, request, dict(response, exit_code=2)) is None
+    assert broker.detect_quota_response(root, request, dict(response, stderr="err\n")) is None
+    p_st = dict(payload, state="READY_FOR_CODEX")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st)) is None
+
+    # Oversize stdout
+    assert broker.detect_quota_response(
+        root, request, dict(response, stdout=" " * (broker.MAX_QUOTA_STDOUT_BYTES + 1))
+    ) is None
+
+    # Bogus KNOWN / UNKNOWN
+    for bad_kind, bad_reset in [
+        ("BOGUS", None),
+        ("QUOTA_RESET_KNOWN", None),
+        ("QUOTA_RESET_UNKNOWN", "2099-01-01T00:00:00Z"),
+    ]:
+        bad_ev = dict(payload["quota_evidence"], kind=bad_kind, reset_at_utc=bad_reset)
+        p_ev = dict(payload, quota_evidence=bad_ev)
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, p_ev)) is None
+
+    # Model / provider / conversation / timezone
+    bad_prov = dict(payload, quota_evidence=dict(payload["quota_evidence"], provider="openai"))
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_prov)) is None
+
+    # Wrong model for worker
+    bad_mod = dict(payload, quota_evidence=dict(payload["quota_evidence"], model=broker.MODEL))
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_mod)) is None
+
+    # Conversation ID variations
+    for bad_cid in ["", "conv with space", "conv\nline", "a" * 129]:
+        bad_conv = dict(payload, quota_evidence=dict(payload["quota_evidence"], conversation_id=bad_cid))
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_conv)) is None
+
+    # Timezone variations
+    for bad_tz in ["2099-01-01T00:00:00+01:00", "not-a-date", "2099-01-01 00:00:00Z"]:
+        bad_ts = dict(payload, quota_evidence=dict(payload["quota_evidence"], reset_at_utc=bad_tz))
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_ts)) is None
+
+    # Extra and missing keys
+    for missing_k in ["changed_paths", "blockers", "task_id"]:
+        bad_p = dict(payload)
+        del bad_p[missing_k]
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_p)) is None
+    bad_p_extra = dict(payload, extra_field=1)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_p_extra)) is None
+
+    for missing_ev_k in ["kind", "provider", "model", "conversation_id", "reset_at_utc"]:
+        bad_ev = dict(payload["quota_evidence"])
+        del bad_ev[missing_ev_k]
+        p_missing_ev = dict(payload, quota_evidence=bad_ev)
+        assert broker.detect_quota_response(root, request, _make_quota_response(request, p_missing_ev)) is None
+    bad_ev_extra = dict(payload, quota_evidence=dict(payload["quota_evidence"], extra_key="extra"))
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_ev_extra)) is None
+
+    # Role binding witness mismatches
+    bad_w_sha = dict(payload, proposal_sha256="1" * 64)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_w_sha)) is None
+
+    rev_payload = _make_quota_payload("BROKER-TEST-1", request["source_head"], role="reviewer")
+    bad_rev_mod = dict(rev_payload, quota_evidence=dict(rev_payload["quota_evidence"], model=broker.WORKER_MODEL))
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_mod)) is None
+
+    bad_rev_run = dict(rev_payload, final_worker_run_id="invalid run ID with spaces")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_run)) is None
+    bad_rev_sha = dict(rev_payload, proposal_sha256="short-sha")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_sha)) is None
+    bad_rev_nosha = dict(rev_payload, proposal_sha256=None)
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_rev_nosha)) is None
+
+
+def test_detect_quota_response_link_unsafe_and_guarded_paths(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload("BROKER-TEST-1", request["source_head"])
+    response = _make_quota_response(request, payload)
+
+    # 1. Outside task directory
+    outside_req = dict(request, task_path="source.py")
+    assert broker.detect_quota_response(root, outside_req, response) is None
+
+    # 2. Hardlinked task
+    hardlink_task = task.with_name("task_hl.json")
+    os.link(task, hardlink_task)
+    hl_req = dict(request, task_path=hardlink_task.relative_to(root).as_posix())
+    assert broker.detect_quota_response(root, hl_req, response) is None
+
+    # 3. Symlinked task
+    symlink_task = task.with_name("task_sym.json")
+    symlink_task.symlink_to(task)
+    sym_req = dict(request, task_path=symlink_task.relative_to(root).as_posix())
+    assert broker.detect_quota_response(root, sym_req, response) is None
+
+    # 4. Nonexistent task
+    missing_req = dict(request, task_path=".local/two-site-refactor/tasks/missing.json")
+    assert broker.detect_quota_response(root, missing_req, response) is None

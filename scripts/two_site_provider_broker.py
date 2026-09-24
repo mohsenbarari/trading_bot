@@ -33,8 +33,11 @@ try:
         load_active_assignment_scope,
         validate_task_scope,
     )
+    from scripts.two_site_proposal_pipeline import validate_quota_evidence
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT,
+        MODEL,
+        WORKER_MODEL,
         ProposalError,
         bounded_file_bytes,
         capture_bounded_process,
@@ -50,8 +53,11 @@ except ModuleNotFoundError:  # Direct ``python scripts/...`` execution.
         load_active_assignment_scope,
         validate_task_scope,
     )
+    from two_site_proposal_pipeline import validate_quota_evidence  # type: ignore[no-redef]
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT,
+        MODEL,
+        WORKER_MODEL,
         ProposalError,
         bounded_file_bytes,
         capture_bounded_process,
@@ -90,6 +96,26 @@ MAX_REQUEST_BYTES = 64_000
 MAX_RESPONSE_BYTES = 2_200_000
 MAX_PIPELINE_OUTPUT_BYTES = 2_000_000
 MAX_ERROR_BYTES = 16_000
+MAX_QUOTA_STDOUT_BYTES = 16_384
+CANONICAL_RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+PIPELINE_BASE_KEYS = frozenset({
+    "state",
+    "task_id",
+    "source_head",
+    "final_worker_run_id",
+    "final_reviewer_run_id",
+    "proposal_sha256",
+    "changed_paths",
+    "proposal_path",
+    "reviewer_path",
+    "correction_count",
+    "blockers",
+    "pre_review_test_path",
+    "pre_review_test_sha256",
+    "pre_review_test_state",
+    "semantic_task_fingerprint",
+})
+PIPELINE_QUOTA_KEYS = PIPELINE_BASE_KEYS | {"quota_evidence"}
 STATUS_MAX_AGE_SECONDS = 30
 HEARTBEAT_SECONDS = 10
 QUEUE_SCAN_LIMIT = 32
@@ -852,6 +878,83 @@ def validate_response(request: dict, response: object) -> dict:
     if response["state"] == "BROKER_ERROR" and response["exit_code"] != 2:
         raise BrokerError("broker error response has an invalid exit code")
     return response
+
+
+def detect_quota_response(
+    root: Path, request: object, response: object
+) -> dict | None:
+    """Pure predicate/detector for a terminal observational Gemini quota Broker response.
+
+    Returns sanitized exact quota evidence dict for a valid response, else None.
+    Fails closed on any contract violation, schema drift, or unverified witness.
+    Observation only; provides NO replay authority or durable receipt.
+    """
+    try:
+        if not isinstance(request, dict):
+            return None
+        canonical = canonical_root(root)
+        validated = validate_response(request, response)
+        if validated.get("state") != "COMPLETED":
+            return None
+        if type(validated.get("exit_code")) is not int or validated.get("exit_code") != 1:
+            return None
+        if validated.get("stderr") != "":
+            return None
+        raw_stdout = validated.get("stdout")
+        if not isinstance(raw_stdout, str):
+            return None
+        stdout_bytes = raw_stdout.encode("utf-8")
+        if len(stdout_bytes) > MAX_QUOTA_STDOUT_BYTES:
+            return None
+        if not raw_stdout.strip():
+            return None
+
+        payload = unique_json(raw_stdout)
+        if not isinstance(payload, dict) or set(payload.keys()) != PIPELINE_QUOTA_KEYS:
+            return None
+
+        if payload.get("state") != "TASK_BLOCKED":
+            return None
+        if payload.get("blockers") != ["observational quota, no replay authority"]:
+            return None
+        if payload.get("source_head") != request.get("source_head"):
+            return None
+
+        task_rel = _task_relative_path(request.get("task_path"))
+        task_path = canonical / task_rel
+        task_bytes = bounded_file_bytes(canonical, task_path, MAX_CONTEXT, "broker task")
+        if hashlib.sha256(task_bytes).hexdigest() != request.get("task_sha256"):
+            return None
+        task_data = unique_json(task_bytes.decode("utf-8"))
+        if not isinstance(task_data, dict):
+            return None
+        task_id = task_data.get("task_id")
+        if not isinstance(task_id, str) or not task_id or payload.get("task_id") != task_id:
+            return None
+
+        final_worker = payload.get("final_worker_run_id")
+        proposal_sha = payload.get("proposal_sha256")
+        if final_worker is None:
+            if proposal_sha is not None:
+                return None
+            expected_model = WORKER_MODEL
+        elif (
+            isinstance(final_worker, str)
+            and bool(CANONICAL_RUN_ID_RE.fullmatch(final_worker))
+            and isinstance(proposal_sha, str)
+            and bool(SHA_RE.fullmatch(proposal_sha))
+        ):
+            expected_model = MODEL
+        else:
+            return None
+
+        evidence = payload.get("quota_evidence")
+        return validate_quota_evidence(evidence, expected_model)
+    except Exception:
+        return None
+
+
+detect_terminal_quota_response = detect_quota_response
 
 
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
