@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,25 +27,44 @@ from tests.test_two_site_provider_broker_terminal_record import (
 )
 
 
-def _broker_tree_snapshot(root: Path) -> dict[str, tuple[int, int, int, int, int, int, int]]:
-    snap: dict[str, tuple[int, int, int, int, int, int, int]] = {}
+def _broker_tree_snapshot(
+    root: Path,
+) -> dict[str, tuple[int, int, int, int, int, int, int, int, bytes | None]]:
+    snap: dict[str, tuple[int, int, int, int, int, int, int, int, bytes | None]] = {}
     local_dir = root / ".local"
-    if not local_dir.exists():
+    if not os.path.lexists(local_dir):
         return snap
-    for p in sorted(local_dir.rglob("*")):
-        try:
-            st = os.lstat(p)
-            snap[str(p.relative_to(root))] = (
-                st.st_dev,
-                st.st_ino,
-                st.st_mode,
-                st.st_uid,
-                st.st_size,
-                st.st_mtime_ns,
-                st.st_ctime_ns,
-            )
-        except OSError:
-            pass
+    all_paths = [local_dir]
+    for current_root, dirs, files in os.walk(local_dir, followlinks=False):
+        for name in dirs + files:
+            all_paths.append(Path(current_root) / name)
+    for p in sorted(all_paths, key=lambda x: str(x.relative_to(root))):
+        st = os.lstat(p)
+        content: bytes | None = None
+        if stat.S_ISREG(st.st_mode) and not stat.S_ISLNK(st.st_mode):
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            fd = os.open(p, flags)
+            try:
+                chunks: list[bytes] = []
+                while True:
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                content = b"".join(chunks)
+            finally:
+                os.close(fd)
+        snap[str(p.relative_to(root))] = (
+            st.st_dev,
+            st.st_ino,
+            st.st_mode,
+            st.st_uid,
+            st.st_nlink,
+            st.st_size,
+            st.st_mtime_ns,
+            st.st_ctime_ns,
+            content,
+        )
     return snap
 
 
@@ -256,6 +276,130 @@ class TestExactReattach(unittest.TestCase):
             self.assertIn("link count", str(ctx.exception).lower())
         finally:
             link_path.unlink()
+
+    def test_exact_reattach_symlink_response_file_fails_closed_zero_mutation(self) -> None:
+        request, response, _task_path, _status_path = _setup_quota_roundtrip_fixture(self.root)
+        publish_terminal_quota_record(self.root, request, response)
+
+        state_root = self.root / ".local/two-site-refactor/provider-broker"
+        responses_dir = state_root / "responses"
+        response_path = responses_dir / f"{request['request_id']}.json"
+
+        encoded_resp = json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        response_path.write_bytes(encoded_resp)
+        os.chmod(response_path, 0o600)
+
+        owned_target = state_root / "owned_target.json"
+        owned_target.write_bytes(encoded_resp)
+        os.chmod(owned_target, 0o600)
+        response_path.unlink()
+        response_path.symlink_to(owned_target)
+
+        snap_before = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError) as ctx:
+            read_terminal_quota_for_exact_request(self.root, request)
+        snap_after = _broker_tree_snapshot(self.root)
+
+        self.assertIn("regular file", str(ctx.exception).lower())
+        self.assertEqual(snap_before, snap_after)
+        self.assertTrue(response_path.is_symlink())
+
+    def test_exact_reattach_created_at_integer_vs_float_exact_mismatch(self) -> None:
+        request, response, _task_path, _status_path = _setup_quota_roundtrip_fixture(self.root)
+        int_created_at = 1700000000
+        request["created_at"] = int_created_at
+        self.assertIsInstance(request["created_at"], int)
+
+        publish_terminal_quota_record(self.root, request, response)
+
+        float_req = copy.deepcopy(request)
+        float_req["created_at"] = float(int_created_at)
+        self.assertIsInstance(float_req["created_at"], float)
+        self.assertEqual(request["created_at"], float_req["created_at"])
+        self.assertIsNot(type(request["created_at"]), type(float_req["created_at"]))
+
+        snap_before = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError) as ctx:
+            read_terminal_quota_for_exact_request(self.root, float_req)
+        snap_after = _broker_tree_snapshot(self.root)
+
+        err_msg = str(ctx.exception).lower()
+        self.assertTrue(
+            "does not match receipt request" in err_msg or "digest mismatch" in err_msg
+        )
+        self.assertEqual(snap_before, snap_after)
+
+    def test_exact_reattach_missing_receipt_fails_closed_no_creation(self) -> None:
+        request, response, _task_path, _status_path = _setup_quota_roundtrip_fixture(self.root)
+
+        state_root = self.root / ".local/two-site-refactor/provider-broker"
+        terminal_quota_dir = state_root / "terminal-quota"
+        self.assertFalse(terminal_quota_dir.exists())
+
+        snap_before = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError) as ctx:
+            read_terminal_quota_for_exact_request(self.root, request)
+        snap_after = _broker_tree_snapshot(self.root)
+
+        self.assertIn("unavailable", str(ctx.exception).lower())
+        self.assertFalse(terminal_quota_dir.exists())
+        self.assertEqual(snap_before, snap_after)
+
+        terminal_quota_dir.mkdir(mode=0o700)
+        snap_before2 = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError) as ctx:
+            read_terminal_quota_for_exact_request(self.root, request)
+        snap_after2 = _broker_tree_snapshot(self.root)
+
+        err_msg = str(ctx.exception).lower()
+        self.assertTrue("unavailable" in err_msg or "not found" in err_msg)
+        self.assertEqual(snap_before2, snap_after2)
+
+    def test_exact_reattach_corrupt_receipt_fails_closed_no_creation(self) -> None:
+        request, response, _task_path, _status_path = _setup_quota_roundtrip_fixture(self.root)
+        publish_terminal_quota_record(self.root, request, response)
+
+        state_root = self.root / ".local/two-site-refactor/provider-broker"
+        receipt_path = state_root / "terminal-quota" / f"{request['request_id']}.json"
+        self.assertTrue(receipt_path.is_file())
+
+        receipt_path.write_bytes(b"not valid json")
+        os.chmod(receipt_path, 0o600)
+
+        snap_before = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError) as ctx:
+            read_terminal_quota_for_exact_request(self.root, request)
+        snap_after = _broker_tree_snapshot(self.root)
+
+        self.assertIn("not valid json", str(ctx.exception).lower())
+        self.assertEqual(snap_before, snap_after)
+
+        receipt_path.write_bytes(b'{"schema_version":"1.0","corrupted":true}')
+        os.chmod(receipt_path, 0o600)
+
+        snap_before2 = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError):
+            read_terminal_quota_for_exact_request(self.root, request)
+        snap_after2 = _broker_tree_snapshot(self.root)
+
+        self.assertEqual(snap_before2, snap_after2)
+
+    def test_exact_reattach_status_witness_drift_post_publish_fails_closed(self) -> None:
+        request, response, _task_path, status_path = _setup_quota_roundtrip_fixture(self.root)
+        publish_terminal_quota_record(self.root, request, response)
+
+        status_path.write_bytes(b'{"run_id":"test-run-record-worker-0","drifted":true}')
+        os.chmod(status_path, 0o600)
+
+        snap_before = _broker_tree_snapshot(self.root)
+        with self.assertRaises(BrokerError) as ctx:
+            read_terminal_quota_for_exact_request(self.root, request)
+        snap_after = _broker_tree_snapshot(self.root)
+
+        self.assertIn("terminal quota response not detected", str(ctx.exception))
+        self.assertEqual(snap_before, snap_after)
 
 
 if __name__ == "__main__":
