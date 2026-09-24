@@ -1687,6 +1687,45 @@ def publish_initial_rescope_receipt(
     )
 
 
+def publish_next_rescope_receipt(
+    state_root: Path,
+    result: object,
+    repository: object,
+) -> None:
+    """Atomically publish the sequential next rescope receipt under state_root."""
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+
+    latest = load_latest_rescope_receipt(state_root, repository)
+    if latest is None:
+        raise AutopilotError("no prior rescope receipt found; attempt 1 requires publish_initial_rescope_receipt")
+
+    payload = serialize_next_rescope_receipt(latest, result, repository)
+    next_attempt = latest.get("attempt") + 1 if isinstance(latest.get("attempt"), int) else None
+    target_filename = next(
+        (name for name, att in _RESCOPE_RECEIPT_FILENAMES.items() if att == next_attempt),
+        None,
+    )
+    if target_filename is None:
+        raise AutopilotError(f"unsupported next rescope attempt: {next_attempt}")
+
+    _publish_rescope_payload_noreplace(state_root, payload, repository, target_filename)
+
+    try:
+        expected = parse_rescope_receipt(payload, repository)
+        observed = load_latest_rescope_receipt(state_root, repository)
+        if observed != expected:
+            raise AutopilotError("ambiguous: latest rescope receipt does not match expected envelope")
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except AutopilotError as exc:
+        if str(exc).startswith("ambiguous"):
+            raise
+        raise AutopilotError(f"ambiguous: post-publication validation failed: {exc}") from exc
+    except Exception as exc:
+        raise AutopilotError(f"ambiguous: post-publication validation failed: {exc}") from exc
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,
