@@ -1,6 +1,6 @@
 # AE03 terminal receipt reader: bounded restart plan (2026-09-24)
 
-Status: **DESIGN ONLY / NO READER APPLIED**. The current implementation baseline is `fd990e177ff4012a9408833d427694a63bf40377`. Supervisor remains STOPPED; no runtime quota recovery, response custody, wait or replay is authorized.
+Status: **R1 BYTE READER ACCEPTED; R2/R3 AND RUNTIME UNWIRED**. The R1 implementation is `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`; `fd990e177ff4012a9408833d427694a63bf40377` below is historical task-102 context. Supervisor remains STOPPED; no runtime quota recovery, response custody, wait or replay is authorized.
 
 ## Why task 102 stopped
 
@@ -54,3 +54,7 @@ Two isolated fault injections against the proposed module, executed in memory wi
 Task `AE03-TERMINAL-BYTES-REPLAN-20260924-104` reused rejected Gemini helper as reference, not accepted code. One fixture correction was needed; 85 tests passed, Gemini Reviewer returned `VERIFIED`, and formal bindings passed. Codex repeated both task-103 counterexamples in memory: scan-to-open replacement now raises; a file-close failure raises and still attempts directory close. No proposal bytes were applied.
 
 Final review found that post-read directory-relative `os.stat` compares `file_stat_after.st_mtime_ns` and `st_ctime_ns` to themselves, not to `file_fstat_after`. A scoped fault changing only the second directory-relative stat's `st_mtime_ns` returned successful bytes. This does not claim an ordinary filesystem exploit; it disproves the promised post-read comparison. Task 104 is rejected. Next unit must add a focused negative test, compare both timestamps to `file_fstat_after`, preserve the two earlier counterexamples, and avoid runtime wiring or aliases. R2 and R3 remain unopened.
+
+## Task 105 R1 accepted (2026-09-24 UTC)
+
+Task `AE03-TERMINAL-BYTES-STAT-20260924-105` used task 104's rejected patch as labeled context, not approved code. Worker 0 and independent Reviewer 0 passed without correction; formal bindings and applied bytes matched proposal SHA `21a51923257b36008edfe49a47115d401c2b54eb5d0c387a9de710caae43d428`. Codex reviewed the complete diff, ran all five Broker suites (87 passed), and independently faulted the second directory-relative `stat` for both nanosecond timestamps; each raised `BrokerError`, while normal bytes read succeeded. Accepted as isolated R1 in `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`. No runtime call site, receipt JSON validation, wait, or replay was added. R2 strict payload validation and R3 composition remain open.
