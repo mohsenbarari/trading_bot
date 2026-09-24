@@ -1130,6 +1130,67 @@ def _open_private_rescope_state_dir(state_root: Path) -> int:
         tracker.close_all(primary_exc)
 
 
+def ensure_rescope_epoch_dir(state_root: Path, repository: object) -> Path:
+    """Ensure private epoch directory exists, validating state and directory invariants."""
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+    basename = rescope_epoch_basename(repository)
+    child_path = state_root / basename
+    parent_fd = _open_private_rescope_state_dir(state_root)
+    primary_exc: BaseException | None = None
+    try:
+        try:
+            os.mkdir(basename, mode=0o700, dir_fd=parent_fd)
+        except OSError as exc:
+            if exc.errno != errno.EEXIST:
+                raise AutopilotError(f"ambiguous: cannot mkdir epoch dir: {exc}") from exc
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise AutopilotError(f"ambiguous: unexpected mkdir error: {exc}") from exc
+
+        try:
+            child_fd = _open_private_rescope_state_dir(child_path)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise AutopilotError(f"ambiguous: cannot open epoch child dir: {exc}") from exc
+
+        try:
+            os.close(child_fd)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise AutopilotError(f"ambiguous: cannot close epoch child fd: {exc}") from exc
+
+        try:
+            os.fsync(parent_fd)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise AutopilotError(f"ambiguous: cannot fsync parent dir: {exc}") from exc
+
+        return child_path
+    except BaseException as exc:
+        primary_exc = exc
+        raise
+    finally:
+        is_interrupt = isinstance(primary_exc, (KeyboardInterrupt, SystemExit))
+        try:
+            os.close(parent_fd)
+        except Exception as close_err:
+            if not is_interrupt:
+                close_exc = AutopilotError(f"ambiguous: error closing parent dir: {close_err}")
+                if primary_exc is not None and isinstance(primary_exc, Exception):
+                    close_exc.__cause__ = primary_exc
+                else:
+                    close_exc.__cause__ = close_err
+                raise close_exc
+
+
+_ensure_rescope_epoch_dir = ensure_rescope_epoch_dir
+
+
 def load_rescope_receipt(
     state_root: Path,
     expected_repository: object,
