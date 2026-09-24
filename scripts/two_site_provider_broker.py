@@ -1669,6 +1669,11 @@ def validate_terminal_quota_payload(
     return receipt
 
 
+def read_terminal_quota_record(root: Path, request_id: str) -> dict:
+    raw_bytes = read_terminal_quota_bytes(root, request_id)
+    return validate_terminal_quota_payload(root, request_id, raw_bytes)
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
