@@ -1390,6 +1390,70 @@ def _create_rescope_temp_file(pinned_dir_fd: int, payload: bytes) -> str:
         raise AutopilotError(f"temporary rescope file operation failed: {exc}") from exc
 
 
+def _prove_rescope_link_collision(
+    pinned_dir_fd: int,
+    temp_name: str,
+    link_error: OSError,
+) -> None:
+    """Classify a rescope receipt link error, returning None only for a proven collision."""
+    if not isinstance(link_error, OSError):
+        raise AutopilotError("ambiguous: link_error must be an OSError")
+    if type(pinned_dir_fd) is not int or isinstance(pinned_dir_fd, bool) or pinned_dir_fd < 0:
+        raise AutopilotError("ambiguous: pinned_dir_fd must be a non-negative integer") from link_error
+    if (
+        type(temp_name) is not str
+        or not temp_name.startswith(".rescope_receipt_tmp_")
+        or "/" in temp_name
+        or "\\" in temp_name
+        or "\x00" in temp_name
+        or ".." in temp_name
+        or os.path.basename(temp_name) != temp_name
+    ):
+        raise AutopilotError(
+            "ambiguous: temp_name must be a safe basename starting with .rescope_receipt_tmp_"
+        ) from link_error
+
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    has_stat_dir_fd = os.stat in supports_dir_fd or any(
+        getattr(f, "__name__", None) == "stat" for f in supports_dir_fd
+    )
+    if not has_stat_dir_fd:
+        raise AutopilotError("ambiguous: platform missing dir_fd support for os.stat") from link_error
+
+    if getattr(link_error, "errno", None) != errno.EEXIST:
+        raise AutopilotError(f"ambiguous: link_error errno is not EEXIST: {link_error}") from link_error
+
+    try:
+        temp_st = os.stat(temp_name, dir_fd=pinned_dir_fd, follow_symlinks=False)
+    except TypeError as exc:
+        raise AutopilotError(f"ambiguous: os.stat temp failed with TypeError: {exc}") from exc
+    except OSError as exc:
+        raise AutopilotError(f"ambiguous: cannot stat temporary rescope file: {exc}") from exc
+
+    if not stat.S_ISREG(temp_st.st_mode):
+        raise AutopilotError("ambiguous: temporary rescope file is not a regular file") from link_error
+    if temp_st.st_uid != os.geteuid():
+        raise AutopilotError("ambiguous: temporary rescope file owner does not match current euid") from link_error
+    if (temp_st.st_mode & 0o777) != 0o600:
+        raise AutopilotError("ambiguous: temporary rescope file mode is not 0600") from link_error
+    if temp_st.st_nlink != 1:
+        raise AutopilotError(
+            f"ambiguous: temporary rescope file link count is {temp_st.st_nlink}, expected 1"
+        ) from link_error
+
+    try:
+        target_st = os.stat(_RESCOPE_RECEIPT_FILENAME, dir_fd=pinned_dir_fd, follow_symlinks=False)
+    except TypeError as exc:
+        raise AutopilotError(f"ambiguous: os.stat target failed with TypeError: {exc}") from exc
+    except OSError as exc:
+        raise AutopilotError(f"ambiguous: cannot stat target rescope receipt: {exc}") from exc
+
+    if (target_st.st_dev, target_st.st_ino) == (temp_st.st_dev, temp_st.st_ino):
+        raise AutopilotError("ambiguous: target receipt shares inode with temporary file") from link_error
+
+    return None
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,
