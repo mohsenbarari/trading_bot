@@ -463,6 +463,71 @@ def scan_private_record_directory(path: Path) -> list[str]:
         os.close(fd)
 
 
+def fsync_private_record_directory(path: Path) -> None:
+    if not isinstance(path, Path):
+        raise BrokerError("record directory path must be a Path")
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise BrokerError("record directory is unavailable") from exc
+    if resolved != path:
+        raise BrokerError("record directory must be a canonical path without symlinks")
+    try:
+        lstat_before = os.lstat(path)
+    except OSError as exc:
+        raise BrokerError(f"cannot lstat record directory: {exc}") from exc
+    if not stat.S_ISDIR(lstat_before.st_mode) or stat.S_ISLNK(lstat_before.st_mode):
+        raise BrokerError("record directory must be a directory and not a symlink")
+    if lstat_before.st_uid != os.geteuid():
+        raise BrokerError("record directory is not owned by current euid")
+    if stat.S_IMODE(lstat_before.st_mode) != 0o700:
+        raise BrokerError("record directory mode must be 0700")
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise BrokerError(f"cannot safely open record directory: {exc}") from exc
+    try:
+        try:
+            fd_stat = os.fstat(fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat record directory: {exc}") from exc
+        if not stat.S_ISDIR(fd_stat.st_mode):
+            raise BrokerError("record directory descriptor is not a directory")
+        if fd_stat.st_uid != os.geteuid():
+            raise BrokerError("record directory descriptor owner mismatch")
+        if stat.S_IMODE(fd_stat.st_mode) != 0o700:
+            raise BrokerError("record directory descriptor mode mismatch")
+        if (fd_stat.st_dev, fd_stat.st_ino) != (lstat_before.st_dev, lstat_before.st_ino):
+            raise BrokerError("record directory descriptor does not match path before fsync")
+
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fsync record directory: {exc}") from exc
+
+        try:
+            lstat_after = os.lstat(path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat record directory after fsync: {exc}") from exc
+        if not stat.S_ISDIR(lstat_after.st_mode) or stat.S_ISLNK(lstat_after.st_mode):
+            raise BrokerError("record directory changed after fsync")
+        if lstat_after.st_uid != os.geteuid():
+            raise BrokerError("record directory owner changed after fsync")
+        if stat.S_IMODE(lstat_after.st_mode) != 0o700:
+            raise BrokerError("record directory mode changed after fsync")
+        if (lstat_after.st_dev, lstat_after.st_ino) != (fd_stat.st_dev, fd_stat.st_ino):
+            raise BrokerError("record directory descriptor does not match path after fsync")
+    finally:
+        os.close(fd)
+
+
 def _task_relative_path(raw: object) -> Path:
     if not isinstance(raw, str) or not raw or raw != raw.strip() or "\\" in raw:
         raise BrokerError("broker task path is invalid")
