@@ -2009,6 +2009,33 @@ def publish_next_rescope_receipt(
         raise AutopilotError(f"ambiguous: post-publication validation failed: {exc}") from exc
 
 
+def prepare_rescope_attempt(
+    state_root: Path,
+    repository: object,
+) -> tuple[Path, int, dict[str, object] | None]:
+    """Prepare the next validated rescope attempt and recovery context."""
+    if not isinstance(state_root, Path):
+        raise AutopilotError("state_root must be a Path")
+    epoch_dir = ensure_rescope_epoch_dir(state_root, repository)
+    latest = load_latest_rescope_receipt(epoch_dir, repository)
+    if latest is None:
+        next_attempt = 1
+        recovery = None
+    else:
+        attempt = latest.get("attempt")
+        if latest.get("terminal") is True or attempt == 3:
+            raise AutopilotError("terminal rescope receipt reached; cannot advance")
+        if attempt not in (1, 2):
+            raise AutopilotError(f"invalid latest rescope attempt: {attempt!r}")
+        next_attempt = attempt + 1
+        recovery = dict(build_rescope_recovery_context(latest, repository))
+    if rescope_intent_exists(epoch_dir, next_attempt):
+        raise AutopilotError(
+            f"ambiguous: rescope intent already exists for attempt {next_attempt}"
+        )
+    return epoch_dir, int(next_attempt), recovery
+
+
 def recover_committed_advisory_result(
     raw_result: object,
     validation_error: Exception,
