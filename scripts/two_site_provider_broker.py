@@ -1069,12 +1069,13 @@ def serve(
                             raise BrokerError("broker executor returned an invalid response")
                 except Exception as exc:
                     response = _error_response(request, exc)
+                else:
+                    if detect_quota_response(root, validated, response) is not None:
+                        publish_terminal_quota_record(root, validated, response)
                 request_id = claimed_path.stem
                 response_path = _response_path(responses, request_id)
-                try:
-                    _atomic_new_json(response_path, response, MAX_RESPONSE_BYTES)
-                finally:
-                    claimed_path.unlink(missing_ok=True)
+                _atomic_new_json(response_path, response, MAX_RESPONSE_BYTES)
+                claimed_path.unlink(missing_ok=True)
                 _write_status(
                     status_path, "IDLE", started_at=started_at,
                     last_request_id=response["request_id"],
