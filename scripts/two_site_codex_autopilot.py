@@ -2969,7 +2969,8 @@ def run_loop(
             _validate_legacy_preparation_startup(root, state_root)
         try:
             repo_facts = validate_repository(root, require_clean=True)
-            _epoch_dir, next_attempt, startup_recovery = prepare_rescope_attempt(state_root, repo_facts)
+            expected_repository = repo_facts
+            epoch_dir, next_attempt, startup_recovery = prepare_rescope_attempt(state_root, expected_repository)
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as exc:
@@ -2998,6 +2999,21 @@ def run_loop(
                 summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
                 blockers=[],
             )
+            callback_entered = False
+            callback_published = False
+
+            def before_model_callback(before: dict[str, object]) -> None:
+                nonlocal callback_entered, callback_published
+                callback_entered = True
+                norm_expected = validate_accepted_repository(expected_repository)
+                norm_before = validate_accepted_repository(before)
+                current_repo = validate_repository(root, require_clean=True)
+                norm_current = validate_accepted_repository(current_repo)
+                if norm_before != norm_expected or norm_current != norm_expected:
+                    raise AutopilotError("repository facts do not match expected repository facts before model invocation")
+                publish_rescope_intent(epoch_dir, next_attempt)
+                callback_published = True
+
             try:
                 continuation_args = ({"continuation": previous_success}
                                      if continuation_hint(previous_success, cycle_start_head) is not None else {})
@@ -3006,9 +3022,17 @@ def run_loop(
                     cycle_kwargs["preparation_route"] = preparation_route
                 run_dir, result = run_cycle(
                     root, codex, state_root, cycle, timeout, recovery=recovery_context,
+                    before_model=before_model_callback,
                     **continuation_args,
                     **cycle_kwargs,
                 )
+                if not callback_entered:
+                    write_supervisor_state(
+                        state_root, "BLOCKED", cycle=cycle,
+                        head=git(root, "rev-parse", "HEAD"),
+                        blockers=["run_cycle returned without before_model callback invocation"],
+                    )
+                    return 2
                 previous_success = None
                 retryable_failures = 0
                 if result.get("head_changed") and result.get("commit") is not None:
@@ -3049,6 +3073,22 @@ def run_loop(
                     )
                     if once:
                         return 2
+                    try:
+                        expected_repository = validate_repository(root, require_clean=True)
+                        epoch_dir, next_attempt, startup_recovery = prepare_rescope_attempt(
+                            state_root, expected_repository
+                        )
+                        consecutive_rescopes = next_attempt - 1
+                        recovery_context = startup_recovery
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except Exception as exc:
+                        write_supervisor_state(
+                            state_root, "BLOCKED", cycle=cycle,
+                            head=result["head_after"],
+                            blockers=[type(exc).__name__ + ": " + str(exc)],
+                        )
+                        return 2
                     continue
 
                 is_rescope = (
@@ -3061,8 +3101,22 @@ def run_loop(
                     and result.get("proposal_sha256") is None
                 )
                 if is_rescope:
-                    consecutive_rescopes += 1
-                    if consecutive_rescopes >= MAX_CONSECUTIVE_RESCOPES:
+                    try:
+                        rescope_receipt = publish_validated_rescope_outcome(
+                            root, epoch_dir, next_attempt, result, expected_repository
+                        )
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except Exception as exc:
+                        write_supervisor_state(
+                            state_root, "BLOCKED", cycle=cycle,
+                            head=result["head_after"],
+                            blockers=[type(exc).__name__ + ": " + str(exc)],
+                        )
+                        return 2
+                    attempt = rescope_receipt.get("attempt")
+                    consecutive_rescopes = int(attempt)
+                    if rescope_receipt.get("terminal") is True or consecutive_rescopes >= MAX_CONSECUTIVE_RESCOPES:
                         prune_runs(state_root)
                         write_supervisor_state(
                             state_root, "BLOCKED", cycle=cycle,
@@ -3086,21 +3140,21 @@ def run_loop(
                     )
                     if once:
                         return 2
-                    recovery_context = {
-                        "attempt": consecutive_rescopes,
-                        "attempt_count": consecutive_rescopes,
-                        "consecutive_rescopes": consecutive_rescopes,
-                        "prior_unit_rejected": True,
-                        "rejected": True,
-                        "next_action": result["next_action"],
-                        "blockers": list(result["blockers"]),
-                        "defer_prior_unit": consecutive_rescopes >= 2,
-                    }
-                    if recovery_context["defer_prior_unit"]:
-                        recovery_context["deferred_unit"] = {
-                            "next_action": result["next_action"],
-                            "blockers": list(result["blockers"]),
-                        }
+                    recovery_context = build_rescope_recovery_context(rescope_receipt, expected_repository)
+                    try:
+                        epoch_dir, next_attempt, _ = prepare_rescope_attempt(
+                            state_root, expected_repository
+                        )
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except Exception as exc:
+                        write_supervisor_state(
+                            state_root, "BLOCKED", cycle=cycle,
+                            head=result["head_after"],
+                            blockers=[type(exc).__name__ + ": " + str(exc)],
+                        )
+                        return 2
+                    consecutive_rescopes = next_attempt - 1
                     continue
 
                 prune_runs(state_root)
@@ -3125,6 +3179,13 @@ def run_loop(
                 current_head = git(root, "rev-parse", "HEAD")
                 dirty = bool(git(root, "status", "--porcelain=v1", "--untracked-files=all"))
                 ambiguous_change = current_head != cycle_start_head or ref_snapshot(root) != cycle_start_refs
+                if callback_entered:
+                    write_supervisor_state(
+                        state_root, "BLOCKED", cycle=cycle, head=current_head,
+                        blockers=[type(exc).__name__ + ": " + str(exc)], dirty=dirty,
+                        ambiguous_change=ambiguous_change,
+                    )
+                    return 2
                 retryable_failures += 1
                 if dirty or ambiguous_change or retryable_failures > MAX_RETRYABLE_FAILURES:
                     write_supervisor_state(
