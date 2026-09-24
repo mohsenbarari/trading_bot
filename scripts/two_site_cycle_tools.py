@@ -516,8 +516,9 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             raise runner.ProposalError("canonical manifest sections missing")
         expected = inventory.get("expected_seed_count")
         surfaces = inventory.get("paths")
-        source_keys = {"baseline_path", "base_path", "continuation_path", "continuation_2_path", "continuation_3_path"}
-        if type(expected) is not int or not isinstance(surfaces, list) or len(surfaces) != 4 or set(sources) != source_keys:
+        known_5_sources = {"baseline_path", "base_path", "continuation_path", "continuation_2_path", "continuation_3_path"}
+        known_6_sources = known_5_sources | {"continuation_4_path"}
+        if type(expected) is not int or not isinstance(surfaces, list) or len(surfaces) != 4 or set(sources) not in (known_5_sources, known_6_sources):
             raise runner.ProposalError("canonical manifest inventory or sources invalid")
         values = [counts.get(key) for key in ("baseline_evidenced_seed_count", "reconciled_new_seed_count", "evidenced_seed_count", "remaining_seed_count")]
         if any(type(value) is not int or value < 0 for value in values) or values[0] + values[1] != values[2] or values[2] + values[3] != expected:
@@ -574,7 +575,12 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         if c1.get("schema_version") != 1 or c1.get("stage") != "P1-00b" or not isinstance(c1.get("records"), list) or not isinstance(c1_base, dict) or c1_base.get("path") != sources["base_path"] or c1_base.get("sha256") != base_sha or not ancestor(c1_base.get("inspected_head")):
             raise runner.ProposalError("continuation 1 invalid")
 
-        continuations = [(sources["continuation_2_path"], sources["continuation_path"], c1_sha), (sources["continuation_3_path"], sources["continuation_2_path"], None)]
+        continuations = [
+            (sources["continuation_2_path"], sources["continuation_path"], c1_sha),
+            (sources["continuation_3_path"], sources["continuation_2_path"], None),
+        ]
+        if "continuation_4_path" in sources:
+            continuations.append((sources["continuation_4_path"], sources["continuation_3_path"], None))
         docs = [base, c1]
         for index, (path, predecessor, predecessor_sha) in enumerate(continuations, start=2):
             current, current_sha = load(path)
@@ -586,6 +592,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 raise runner.ProposalError(f"continuation {index} invalid")
             docs.append(current)
 
+        current_seen: set[str] = set()
         proven: set[str] = set()
         unknown: set[str] = set()
         for doc in docs:
@@ -602,14 +609,47 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 # behavior is requested.
                 if behavior_id is not None and behavior_id not in seed_ids:
                     continue
-                valid = isinstance(record.get("path"), str) and isinstance(record.get("sha256"), str) and _HEX64.fullmatch(record["sha256"]) and isinstance(record.get("last_commit"), str) and _HEX40.fullmatch(record["last_commit"]) and isinstance(record.get("test_selectors"), list) and record["test_selectors"] and all(isinstance(selector, str) and selector for selector in record["test_selectors"])
+                valid = (
+                    isinstance(record.get("path"), str)
+                    and isinstance(record.get("sha256"), str)
+                    and bool(_HEX64.fullmatch(record["sha256"]))
+                    and isinstance(record.get("last_commit"), str)
+                    and bool(_HEX40.fullmatch(record["last_commit"]))
+                    and isinstance(record.get("test_selectors"), list)
+                    and bool(record["test_selectors"])
+                    and all(isinstance(selector, str) and bool(selector) for selector in record["test_selectors"])
+                )
+                if not valid:
+                    unknown.update(seed_ids)
+                    continue
                 try:
-                    path = record["path"]
+                    path = _validate_safe_path(record["path"])
                     runner.git(root, "ls-files", "--error-unmatch", "--", path)
-                    valid = bool(valid) and record["sha256"] == git_blob_digest(head, path) and record["last_commit"] == runner.git(root, "log", "-1", "--format=%H", head, "--", path) and ancestor(record["last_commit"])
-                except (KeyError, subprocess.CalledProcessError, runner.ProposalError):
-                    valid = False
-                (proven if valid else unknown).update(seed_ids)
+                    last_commit = record["last_commit"]
+                    latest_touch = runner.git(root, "log", "-1", "--format=%H", head, "--", path)
+                except subprocess.CalledProcessError:
+                    unknown.update(seed_ids)
+                    continue
+
+                if last_commit == latest_touch:
+                    for seed in seed_ids:
+                        if seed in current_seen:
+                            raise runner.ProposalError(f"conflicting current evidence: {seed}")
+                        current_seen.add(seed)
+                    proof_sha = None
+                    try:
+                        proof_sha = git_blob_digest(head, path)
+                    except runner.ProposalError:
+                        proof_sha = None
+                    if record["sha256"] == proof_sha and ancestor(last_commit):
+                        proven.update(seed_ids)
+                    else:
+                        unknown.update(seed_ids)
+                else:
+                    if not ancestor(last_commit) or git_blob_digest(last_commit, path) != record["sha256"]:
+                        raise runner.ProposalError("historical record invalid")
+                    unknown.update(seed_ids)
+        unknown.difference_update(proven)
         covered_ids = ids if behavior_id is None else [behavior_id] if behavior_id in known else []
         coverage = {bid: "PROVEN_FOR_REQUESTED_SCENARIO" if bid in proven else "UNKNOWN" if bid in unknown else "PARTIAL_OR_SEED_ONLY" for bid in covered_ids}
         result = {"status": "VALID", "expected_seed_count": expected, "seed_count": len(ids), "coverage": coverage}
