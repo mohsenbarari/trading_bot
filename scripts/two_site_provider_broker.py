@@ -968,29 +968,173 @@ def _prune_orphan_responses(responses: Path, *, now: float | None = None) -> int
     return removed
 
 
-def _recover_interrupted_claims(root: Path, claimed: Path, responses: Path) -> None:
+def _validate_claimed_request_shape(request: object, expected_request_id: str) -> dict:
+    if not isinstance(request, dict) or set(request) != REQUEST_KEYS:
+        raise BrokerError("claimed broker request does not match the exact contract")
+    if request.get("schema_version") != "1.0":
+        raise BrokerError("claimed broker request schema version is invalid")
+    if not isinstance(request.get("request_id"), str) or not REQUEST_ID_RE.fullmatch(request["request_id"]):
+        raise BrokerError("claimed broker request ID is invalid")
+    if request["request_id"] != expected_request_id:
+        raise BrokerError("claimed broker request filename binding is invalid")
+    if not isinstance(request.get("run_prefix"), str) or not RUN_PREFIX_RE.fullmatch(request["run_prefix"]):
+        raise BrokerError("claimed broker request run-prefix is invalid")
+    if type(request.get("timeout")) is not int or not 10 <= request["timeout"] <= 900:
+        raise BrokerError("claimed broker request timeout is invalid")
+    if not isinstance(request.get("source_head"), str) or not HEAD_RE.fullmatch(request["source_head"]):
+        raise BrokerError("claimed broker request source HEAD is invalid")
+    if not isinstance(request.get("task_sha256"), str) or not SHA_RE.fullmatch(request["task_sha256"]):
+        raise BrokerError("claimed broker request task SHA is invalid")
+    if (
+        not isinstance(request.get("assignment_id"), str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request["assignment_id"])
+    ):
+        raise BrokerError("claimed broker request assignment ID is invalid")
+    if not isinstance(request.get("assignment_sha256"), str) or not SHA_RE.fullmatch(request["assignment_sha256"]):
+        raise BrokerError("claimed broker request assignment SHA is invalid")
+    if (
+        not isinstance(request.get("controller_run_id"), str)
+        or not CONTROLLER_RUN_RE.fullmatch(request["controller_run_id"])
+    ):
+        raise BrokerError("claimed broker request controller run ID is invalid")
+    created_at = request.get("created_at")
+    if (
+        not isinstance(created_at, (int, float))
+        or isinstance(created_at, bool)
+        or not math.isfinite(created_at)
+    ):
+        raise BrokerError("claimed broker request created_at is invalid")
+    _task_relative_path(request.get("task_path"))
+    return request
+
+
+def _safe_read_existing_response(root: Path, path: Path) -> dict:
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise BrokerError(f"cannot lstat existing response: {exc}") from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+        or info.st_size > MAX_RESPONSE_BYTES
+    ):
+        raise BrokerError("existing broker response is not a trusted queue file")
+    return _read_json_file(root, path, MAX_RESPONSE_BYTES, "broker response")
+
+
+def _recover_interrupted_claims(
+    root: Path,
+    claimed: Path,
+    responses: Path,
+    requests: Path | None = None,
+    terminal_quota: Path | None = None,
+) -> None:
     """Fail ambiguous in-flight work closed; never repeat its provider call."""
+    root = canonical_root(root)
+    if requests is None:
+        requests = claimed.parent / "requests"
+    if terminal_quota is None:
+        terminal_quota = claimed.parent / "terminal-quota"
+
     for name in _queue_names(claimed):
         if not re.fullmatch(r"[0-9a-f]{32}\.json", name):
             raise BrokerError("broker claimed queue contains an invalid entry")
         path = claimed / name
-        request: object = {}
         try:
-            request = _read_json_file(root, path, MAX_REQUEST_BYTES, "claimed broker request")
-            request_id = request.get("request_id") if isinstance(request, dict) else None
-            if request_id != name[:-5]:
-                raise BrokerError("claimed broker request filename binding is invalid")
-            response_path = _response_path(responses, request_id)
+            claim_stat = os.lstat(path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat claimed request: {exc}") from exc
+        if (
+            stat.S_ISLNK(claim_stat.st_mode)
+            or not stat.S_ISREG(claim_stat.st_mode)
+            or claim_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(claim_stat.st_mode) != 0o600
+            or claim_stat.st_nlink != 1
+            or claim_stat.st_size > MAX_REQUEST_BYTES
+        ):
+            raise BrokerError("broker claimed request is not a trusted queue file")
+
+        request = _read_json_file(root, path, MAX_REQUEST_BYTES, "claimed broker request")
+        request_id = name[:-5]
+        _validate_claimed_request_shape(request, request_id)
+
+        if os.path.lexists(requests / name):
+            raise BrokerError("broker request collision in requests directory")
+
+        matching_receipt_present = False
+        if os.path.lexists(terminal_quota):
+            entries = scan_private_record_directory(terminal_quota)
+            if name in entries:
+                matching_receipt_present = True
+
+        response_path = _response_path(responses, request_id)
+
+        if matching_receipt_present:
+            receipt = read_terminal_quota_record(root, request_id)
+            try:
+                claimed_canonical = json.dumps(
+                    request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode("utf-8")
+                receipt_req_canonical = json.dumps(
+                    receipt["request"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                ).encode("utf-8")
+            except (ValueError, TypeError) as exc:
+                raise BrokerError("request contains non-finite numbers") from exc
+
+            if claimed_canonical != receipt_req_canonical:
+                raise BrokerError("claimed request does not match receipt request")
+            if receipt.get("request_sha256") != hashlib.sha256(claimed_canonical).hexdigest():
+                raise BrokerError("claimed request digest mismatch")
+
+            if not os.path.lexists(response_path):
+                _atomic_new_json(response_path, receipt["response"], MAX_RESPONSE_BYTES)
+                fsync_private_record_directory(responses)
+                path.unlink()
+                fsync_private_record_directory(claimed)
+            else:
+                existing_resp = _safe_read_existing_response(root, response_path)
+                try:
+                    existing_resp_canonical = json.dumps(
+                        existing_resp, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode("utf-8")
+                    receipt_resp_canonical = json.dumps(
+                        receipt["response"], ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode("utf-8")
+                except (ValueError, TypeError) as exc:
+                    raise BrokerError("response contains non-finite numbers") from exc
+
+                if existing_resp_canonical != receipt_resp_canonical:
+                    raise BrokerError("existing response does not match receipt response")
+                if receipt.get("response_sha256") != hashlib.sha256(existing_resp_canonical).hexdigest():
+                    raise BrokerError("existing response digest mismatch")
+
+                fsync_private_record_directory(responses)
+                path.unlink()
+                fsync_private_record_directory(claimed)
+        else:
             if not os.path.lexists(response_path):
                 _atomic_new_json(
                     response_path,
-                    _error_response(request, BrokerError(
-                        "broker restarted after an ambiguous in-flight provider call; refusing duplicate execution"
-                    )),
+                    _error_response(
+                        request,
+                        BrokerError(
+                            "broker restarted after an ambiguous in-flight provider call; refusing duplicate execution"
+                        ),
+                    ),
                     MAX_RESPONSE_BYTES,
                 )
-        finally:
-            path.unlink(missing_ok=True)
+                fsync_private_record_directory(responses)
+                path.unlink()
+                fsync_private_record_directory(claimed)
+            else:
+                existing_resp = _safe_read_existing_response(root, response_path)
+                validate_response(request, existing_resp)
+                fsync_private_record_directory(responses)
+                path.unlink()
+                fsync_private_record_directory(claimed)
 
 
 def serve(
