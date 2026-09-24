@@ -2181,6 +2181,19 @@ def find_terminal_quota_for_reservation(
     for entry_name in entry_names:
         req_id = entry_name[:-5]
         entry_path = directory / entry_name
+        try:
+            entry_stat_before = os.lstat(entry_path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat receipt file {entry_name}: {exc}") from exc
+        if (
+            stat.S_ISLNK(entry_stat_before.st_mode)
+            or not stat.S_ISREG(entry_stat_before.st_mode)
+            or entry_stat_before.st_uid != os.geteuid()
+            or stat.S_IMODE(entry_stat_before.st_mode) != 0o600
+            or entry_stat_before.st_nlink != 1
+            or entry_stat_before.st_size > MAX_RECORD_BYTES
+        ):
+            raise BrokerError(f"receipt file {entry_name} stat mismatch before read")
         raw_bytes = read_terminal_quota_bytes(root, req_id)
         receipt = validate_terminal_quota_payload(root, req_id, raw_bytes)
         try:
@@ -2196,6 +2209,29 @@ def find_terminal_quota_for_reservation(
             or entry_stat.st_size != len(raw_bytes)
         ):
             raise BrokerError(f"receipt file {entry_name} stat mismatch")
+        if (
+            (
+                entry_stat.st_dev,
+                entry_stat.st_ino,
+                entry_stat.st_mode,
+                entry_stat.st_uid,
+                entry_stat.st_nlink,
+                entry_stat.st_size,
+                entry_stat.st_mtime_ns,
+                entry_stat.st_ctime_ns,
+            )
+            != (
+                entry_stat_before.st_dev,
+                entry_stat_before.st_ino,
+                entry_stat_before.st_mode,
+                entry_stat_before.st_uid,
+                entry_stat_before.st_nlink,
+                entry_stat_before.st_size,
+                entry_stat_before.st_mtime_ns,
+                entry_stat_before.st_ctime_ns,
+            )
+        ):
+            raise BrokerError(f"receipt file {entry_name} identity or metadata changed during read")
         read_entries.append((entry_name, receipt, raw_bytes, entry_stat))
 
     matching_entries: list[tuple[str, dict, bytes, os.stat_result]] = []

@@ -384,6 +384,60 @@ class TestReceiptDiscovery(unittest.TestCase):
                     tq_dir.rename(swap_dir)
                 temp_pinned.rename(tq_dir)
 
+    def test_discovery_target_receipt_first_read_replacement_fails_closed(self) -> None:
+        request, response, _task_path, _status_path = _setup_quota_roundtrip_fixture(self.root)
+        publish_terminal_quota_record(self.root, request, response)
+        reservation = _reservation_from_request(request)
+
+        state_root = self.root / ".local/two-site-refactor/provider-broker"
+        record_path = state_root / "terminal-quota" / f"{request['request_id']}.json"
+        exact_bytes = record_path.read_bytes()
+        initial_stat = os.lstat(record_path)
+
+        orig_read_bytes = broker_mod.read_terminal_quota_bytes
+        replaced = False
+
+        def hooked_read_bytes(root_arg, req_id_arg):
+            result = orig_read_bytes(root_arg, req_id_arg)
+            nonlocal replaced
+            if not replaced and req_id_arg == request["request_id"]:
+                replaced = True
+                temp_file = record_path.with_name(f".{record_path.name}.swap.tmp")
+                flags = (
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                )
+                fd = os.open(temp_file, flags, 0o600)
+                try:
+                    os.write(fd, exact_bytes)
+                finally:
+                    os.close(fd)
+                os.chmod(temp_file, 0o600)
+                try:
+                    temp_stat = os.lstat(temp_file)
+                    self.assertNotEqual(initial_stat.st_ino, temp_stat.st_ino)
+                    os.replace(temp_file, record_path)
+                    new_stat = os.lstat(record_path)
+                    self.assertNotEqual(initial_stat.st_ino, new_stat.st_ino)
+                    self.assertEqual(temp_stat.st_ino, new_stat.st_ino)
+                finally:
+                    if temp_file.exists():
+                        temp_file.unlink()
+            return result
+
+        broker_mod.read_terminal_quota_bytes = hooked_read_bytes
+        try:
+            with self.assertRaises(BrokerError) as ctx:
+                find_terminal_quota_for_reservation(self.root, reservation)
+            self.assertTrue(replaced)
+            err = str(ctx.exception).lower()
+            self.assertTrue("identity" in err or "changed" in err or "metadata" in err)
+        finally:
+            broker_mod.read_terminal_quota_bytes = orig_read_bytes
+
     def test_discovery_target_receipt_replacement_new_inode_fails_closed(self) -> None:
         request, response, _task_path, _status_path = _setup_quota_roundtrip_fixture(self.root)
         publish_terminal_quota_record(self.root, request, response)
