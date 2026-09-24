@@ -131,9 +131,6 @@ _ACCEPTED_CHECKPOINT_FILENAME = "accepted_checkpoint.json"
 ACCEPTED_CHECKPOINT_FILENAME = _ACCEPTED_CHECKPOINT_FILENAME
 ACCEPTED_RECEIPT_EXTRA_KEYS = ("head_before", "head_after", "head_changed")
 ACCEPTED_RECEIPT_KEYS = frozenset(RESULT_KEYS | set(ACCEPTED_RECEIPT_EXTRA_KEYS))
-REPOSITORY_FACT_KEYS = frozenset({
-    "head", "status", "protected_refs", "control_blobs", "assignment_scope",
-})
 ACCEPTED_RESULT_KEYS_ORDER = (
     "schema_version",
     "state",
@@ -165,6 +162,20 @@ ASSIGNMENT_SCOPE_KEYS_ORDER = (
     "allowed_paths",
     "forbidden_paths",
 )
+REPOSITORY_FACT_KEYS = frozenset({
+    "head", "status", "protected_refs", "control_blobs", "assignment_scope",
+})
+MAX_RESCOPE_RECEIPT_BYTES = 16 * 1024
+RESCOPE_RECEIPT_SCHEMA_VERSION = 1
+RESCOPE_RECEIPT_ENVELOPE_KEYS = frozenset({
+    "schema_version",
+    "attempt",
+    "terminal",
+    "result",
+    "repository",
+})
+RESCOPE_RECEIPT_KEYS = ACCEPTED_RECEIPT_KEYS
+RESCOPE_RESULT_KEYS_ORDER = ACCEPTED_RESULT_KEYS_ORDER
 PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
 CONTROL_PATHS = (
@@ -754,6 +765,166 @@ def _accepted_checkpoint_matches_repository(
         return persisted_repo == current_repo
     except Exception:
         return False
+
+
+def validate_rescope_receipt(result: object, repo_head: str) -> dict[str, object]:
+    """Validate and normalize a BLOCKED/RESCOPE transition receipt."""
+    if isinstance(result, Path):
+        raise AutopilotError("receipt cannot be a Path")
+    if not isinstance(result, dict) or set(result) != RESCOPE_RECEIPT_KEYS:
+        raise AutopilotError("receipt keys must exactly match RESULT_KEYS plus head_before, head_after, and head_changed")
+    projection = {k: result[k] for k in RESULT_KEYS}
+    validate_result(projection)
+    if result.get("state") != "BLOCKED":
+        raise AutopilotError("receipt state must be BLOCKED")
+    if result.get("disposition") != "RESCOPE":
+        raise AutopilotError("receipt disposition must be RESCOPE")
+    if result.get("category") != "INTERNAL_REJECTION":
+        raise AutopilotError("receipt category must be INTERNAL_REJECTION")
+    if result.get("commit") is not None:
+        raise AutopilotError("receipt commit must be None")
+    if result.get("gemini_worker_run_id") is not None:
+        raise AutopilotError("receipt gemini_worker_run_id must be None")
+    if result.get("gemini_reviewer_run_id") is not None:
+        raise AutopilotError("receipt gemini_reviewer_run_id must be None")
+    if result.get("proposal_sha256") is not None:
+        raise AutopilotError("receipt proposal_sha256 must be None")
+    if result.get("head_changed") is not False or type(result.get("head_changed")) is not bool:
+        raise AutopilotError("receipt head_changed must be False")
+    head_before = result.get("head_before")
+    head_after = result.get("head_after")
+    if not isinstance(head_before, str) or not re.fullmatch(r"[0-9a-f]{40}", head_before):
+        raise AutopilotError("head_before must be a lowercase 40-hex SHA")
+    if not isinstance(head_after, str) or not re.fullmatch(r"[0-9a-f]{40}", head_after):
+        raise AutopilotError("head_after must be a lowercase 40-hex SHA")
+    if head_before != head_after:
+        raise AutopilotError("head_before and head_after must be equal lowercase 40-hex SHAs")
+    if head_after != repo_head:
+        raise AutopilotError("head_before and head_after must equal repository head")
+
+    return {k: result[k] for k in RESCOPE_RESULT_KEYS_ORDER}
+
+
+def validate_rescope_checkpoint(
+    result: object,
+    repository: object,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Validate both the BLOCKED/RESCOPE receipt and repository facts, returning normalized mappings."""
+    if isinstance(result, Path) or isinstance(repository, Path):
+        raise AutopilotError("checkpoint arguments cannot be Path instances")
+    if isinstance(repository, dict) and isinstance(repository.get("assignment_scope"), AssignmentScope):
+        normalized_repo = validate_accepted_repository(repository)
+    else:
+        normalized_repo = _validate_persisted_repository(repository)
+    normalized_result = validate_rescope_receipt(result, str(normalized_repo["head"]))
+    return normalized_result, normalized_repo
+
+
+def serialize_rescope_receipt(
+    result: object,
+    repository: object,
+    attempt: int,
+    terminal: bool | None = None,
+) -> bytes:
+    """Construct and serialize a canonical rescope receipt envelope into deterministic UTF-8 bytes."""
+    if isinstance(result, Path) or isinstance(repository, Path):
+        raise AutopilotError("rescope receipt arguments cannot be Path instances")
+    if type(attempt) is not int or isinstance(attempt, bool):
+        raise AutopilotError("attempt must be an integer")
+    if attempt not in {1, 2, 3}:
+        raise AutopilotError("attempt must be an integer in 1..3")
+    expected_terminal = (attempt == 3)
+    if terminal is not None:
+        if type(terminal) is not bool:
+            raise AutopilotError("terminal must be a boolean")
+        if terminal is not expected_terminal:
+            raise AutopilotError("terminal must be True iff attempt is 3")
+    terminal = expected_terminal
+
+    normalized_result, normalized_repo = validate_rescope_checkpoint(result, repository)
+
+    envelope = {
+        "schema_version": RESCOPE_RECEIPT_SCHEMA_VERSION,
+        "attempt": attempt,
+        "terminal": terminal,
+        "result": normalized_result,
+        "repository": normalized_repo,
+    }
+    encoded = serialize_json(envelope)
+    if len(encoded) > MAX_RESCOPE_RECEIPT_BYTES:
+        raise AutopilotError(
+            f"serialized rescope receipt exceeds {MAX_RESCOPE_RECEIPT_BYTES} bytes ({len(encoded)} bytes)"
+        )
+    return encoded
+
+
+def parse_rescope_receipt(
+    raw_bytes: object,
+    expected_repository: object,
+) -> dict[str, object]:
+    """Parse and validate canonical rescope receipt bytes against expected repository facts."""
+    if isinstance(raw_bytes, Path) or isinstance(expected_repository, Path):
+        raise AutopilotError("parse_rescope_receipt arguments cannot be Path instances")
+    if not isinstance(raw_bytes, (bytes, bytearray)):
+        raise AutopilotError("rescope receipt raw payload must be bytes")
+    if len(raw_bytes) > MAX_RESCOPE_RECEIPT_BYTES:
+        raise AutopilotError(
+            f"rescope receipt exceeds maximum size of {MAX_RESCOPE_RECEIPT_BYTES} bytes ({len(raw_bytes)} bytes)"
+        )
+    try:
+        raw_text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AutopilotError("rescope receipt payload is not valid UTF-8") from exc
+
+    try:
+        parsed = unique_json(raw_text)
+    except (json.JSONDecodeError, ValueError, ProposalError) as exc:
+        raise AutopilotError("rescope receipt payload is malformed or duplicate-keyed JSON") from exc
+
+    if not isinstance(parsed, dict) or set(parsed) != RESCOPE_RECEIPT_ENVELOPE_KEYS:
+        raise AutopilotError("rescope receipt envelope keys do not match the exact contract")
+
+    schema_version = parsed.get("schema_version")
+    if type(schema_version) is not int or schema_version != RESCOPE_RECEIPT_SCHEMA_VERSION:
+        raise AutopilotError("rescope receipt schema_version must be 1")
+
+    attempt = parsed.get("attempt")
+    if type(attempt) is not int or isinstance(attempt, bool):
+        raise AutopilotError("rescope receipt attempt must be an integer")
+    if attempt not in {1, 2, 3}:
+        raise AutopilotError("rescope receipt attempt must be in range 1..3")
+
+    terminal = parsed.get("terminal")
+    if type(terminal) is not bool:
+        raise AutopilotError("rescope receipt terminal must be a boolean")
+    if terminal is not (attempt == 3):
+        raise AutopilotError("rescope receipt terminal must be True iff attempt is 3")
+
+    normalized_repo = _validate_persisted_repository(parsed.get("repository"))
+
+    if isinstance(expected_repository, dict) and isinstance(expected_repository.get("assignment_scope"), AssignmentScope):
+        normalized_expected_repo = validate_accepted_repository(expected_repository)
+    else:
+        normalized_expected_repo = _validate_persisted_repository(expected_repository)
+
+    if normalized_repo != normalized_expected_repo:
+        raise AutopilotError("receipt repository facts do not match expected repository facts")
+
+    repo_head = str(normalized_repo["head"])
+    normalized_result = validate_rescope_receipt(parsed.get("result"), repo_head)
+
+    envelope = {
+        "schema_version": RESCOPE_RECEIPT_SCHEMA_VERSION,
+        "attempt": attempt,
+        "terminal": terminal,
+        "result": normalized_result,
+        "repository": normalized_repo,
+    }
+    canonical_bytes = serialize_json(envelope)
+    if canonical_bytes != raw_bytes:
+        raise AutopilotError("receipt bytes are not canonical")
+
+    return envelope
 
 
 def recover_committed_advisory_result(
