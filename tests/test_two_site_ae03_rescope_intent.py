@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts import two_site_codex_autopilot
-from scripts.two_site_codex_autopilot import AutopilotError, _RESCOPE_INTENT_FILENAMES, rescope_intent_exists
+from scripts.two_site_codex_autopilot import AutopilotError, _RESCOPE_INTENT_FILENAMES, publish_rescope_intent, rescope_intent_exists
 
 
 class TestRescopeIntent(unittest.TestCase):
@@ -120,6 +120,109 @@ class TestRescopeIntent(unittest.TestCase):
             with patch.object(os, "close", side_effect=close_interrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     rescope_intent_exists(self.epoch_dir, 1)
+
+    def test_publish_exact_attempts_and_args(self) -> None:
+        for att in (1, 2, 3):
+            self.assertFalse(rescope_intent_exists(self.epoch_dir, att))
+            publish_rescope_intent(self.epoch_dir, att)
+            self.assertTrue(rescope_intent_exists(self.epoch_dir, att))
+            leaf = self.epoch_dir / _RESCOPE_INTENT_FILENAMES[att]
+            self.assertEqual(leaf.read_bytes(), f"{leaf.name}\n".encode("ascii"))
+        for bad_dir in ("/not/a/path", None, 123):
+            with self.assertRaises(AutopilotError):
+                publish_rescope_intent(bad_dir, 1)  # type: ignore[arg-type]
+        for bad_att in (True, False, 0, 4, -1, "1", 1.5, None):
+            with self.assertRaises(AutopilotError):
+                publish_rescope_intent(self.epoch_dir, bad_att)  # type: ignore[arg-type]
+
+    def test_publish_collision_and_symlink(self) -> None:
+        publish_rescope_intent(self.epoch_dir, 1)
+        leaf = self.epoch_dir / _RESCOPE_INTENT_FILENAMES[1]
+        st1 = leaf.stat()
+        bytes1 = leaf.read_bytes()
+        with self.assertRaises(AutopilotError):
+            publish_rescope_intent(self.epoch_dir, 1)
+        st2 = leaf.stat()
+        self.assertEqual((st1.st_dev, st1.st_ino), (st2.st_dev, st2.st_ino))
+        self.assertEqual(bytes1, leaf.read_bytes())
+        target = self.epoch_dir / "target"
+        target.write_bytes(b"target")
+        (self.epoch_dir / _RESCOPE_INTENT_FILENAMES[2]).symlink_to(target)
+        with self.assertRaises(AutopilotError):
+            publish_rescope_intent(self.epoch_dir, 2)
+        self.assertEqual(target.read_bytes(), b"target")
+
+    def test_publish_partial_write_and_no_unlink(self) -> None:
+        orig_write = os.write
+        write_calls = [0]
+        def partial_write(fd, data):
+            if write_calls[0] == 0:
+                write_calls[0] += 1
+                return orig_write(fd, data[:4])
+            return orig_write(fd, data)
+        with patch.object(os, "write", side_effect=partial_write), \
+             patch.object(os, "unlink", side_effect=AssertionError("unlink called")), \
+             patch.object(os, "replace", side_effect=AssertionError("replace called")):
+            publish_rescope_intent(self.epoch_dir, 1)
+        self.assertTrue(rescope_intent_exists(self.epoch_dir, 1))
+        self.assertGreater(write_calls[0], 0)
+
+    def test_publish_faults_leave_marker(self) -> None:
+        def fsync_fail(fd):
+            raise OSError(errno.EIO, "fsync fail")
+        with patch.object(os, "fsync", side_effect=fsync_fail):
+            with self.assertRaises(AutopilotError):
+                publish_rescope_intent(self.epoch_dir, 1)
+        self.assertTrue((self.epoch_dir / _RESCOPE_INTENT_FILENAMES[1]).exists())
+        calls = [0]
+        def recheck_fail(path, fd):
+            calls[0] += 1
+            if calls[0] > 1:
+                raise AutopilotError("root swapped")
+        with patch.object(two_site_codex_autopilot, "_recheck_final_root", side_effect=recheck_fail):
+            with self.assertRaises(AutopilotError):
+                publish_rescope_intent(self.epoch_dir, 2)
+        self.assertTrue((self.epoch_dir / _RESCOPE_INTENT_FILENAMES[2]).exists())
+        fsync_cnt = [0]
+        def dir_fsync_fail(fd):
+            fsync_cnt[0] += 1
+            if fsync_cnt[0] == 2:
+                raise OSError(errno.EIO, "dir fsync fail")
+        with patch.object(os, "fsync", side_effect=dir_fsync_fail):
+            with self.assertRaises(AutopilotError):
+                publish_rescope_intent(self.epoch_dir, 3)
+        self.assertTrue((self.epoch_dir / _RESCOPE_INTENT_FILENAMES[3]).exists())
+
+    def test_publish_inode_mismatch_dual_fault_and_interrupt(self) -> None:
+        orig_stat = os.stat
+        def fake_stat(path, *args, **kwargs):
+            res = orig_stat(path, *args, **kwargs)
+            if path == _RESCOPE_INTENT_FILENAMES[1]:
+                return os.stat_result((res.st_mode, res.st_ino + 999) + res[2:])
+            return res
+        with patch.object(os, "stat", side_effect=fake_stat):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_rescope_intent(self.epoch_dir, 1)
+            self.assertIn("inode mismatch", str(ctx.exception))
+        orig_write, orig_close = os.write, os.close
+        write_occurred = [False]
+        def write_fail(fd, data):
+            write_occurred[0] = True
+            raise OSError(errno.EIO, "write error")
+        def close_fail(fd):
+            orig_close(fd)
+            if write_occurred[0]:
+                raise OSError(errno.EIO, "close error")
+        with patch.object(os, "write", side_effect=write_fail), \
+             patch.object(os, "close", side_effect=close_fail):
+            with self.assertRaises(AutopilotError) as ctx:
+                publish_rescope_intent(self.epoch_dir, 2)
+            self.assertIn("error closing descriptor", str(ctx.exception))
+            self.assertIsInstance(ctx.exception.__cause__, AutopilotError)
+            self.assertIn("cannot write", str(ctx.exception.__cause__))
+        with patch.object(os, "write", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                publish_rescope_intent(self.epoch_dir, 3)
 
 
 if __name__ == "__main__":

@@ -1285,6 +1285,119 @@ def rescope_intent_exists(epoch_dir: Path, attempt: int) -> bool:
                 raise close_exc
 
 
+def publish_rescope_intent(epoch_dir: Path, attempt: int) -> None:
+    """Publish a durable rescope intent marker for attempt in 1..3."""
+    if not isinstance(epoch_dir, Path):
+        raise AutopilotError("epoch_dir must be a Path")
+    if type(attempt) is not int or isinstance(attempt, bool):
+        raise AutopilotError("attempt must be an integer")
+    if attempt not in _RESCOPE_INTENT_FILENAMES:
+        raise AutopilotError("attempt must be an integer in 1..3")
+
+    leaf_name = _RESCOPE_INTENT_FILENAMES[attempt]
+    pinned_fd = _open_private_rescope_state_dir(epoch_dir)
+    file_fd: int | None = None
+    primary_exc: BaseException | None = None
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+        try:
+            file_fd = os.open(leaf_name, flags, 0o600, dir_fd=pinned_fd)
+        except TypeError as exc:
+            raise AutopilotError(f"os.open failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            raise AutopilotError(f"cannot open rescope intent leaf: {exc}") from exc
+
+        payload = f"{leaf_name}\n".encode("ascii")
+        total_written = 0
+        view = memoryview(payload)
+        for _ in range(len(payload) + 5):
+            try:
+                written = os.write(file_fd, view[total_written:])
+            except OSError as exc:
+                raise AutopilotError(f"cannot write rescope intent leaf: {exc}") from exc
+            if written <= 0:
+                raise AutopilotError(f"invalid write count on rescope intent leaf: {written}")
+            total_written += written
+            if total_written >= len(payload):
+                break
+        else:
+            raise AutopilotError("partial write loop exceeded maximum iterations")
+
+        try:
+            st = os.fstat(file_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fstat rescope intent leaf: {exc}") from exc
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_uid != os.geteuid()
+            or (st.st_mode & 0o777) != 0o600
+            or st.st_nlink != 1
+            or st.st_size != len(payload)
+        ):
+            raise AutopilotError("rescope intent leaf metadata invalid")
+
+        try:
+            os.fsync(file_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fsync rescope intent leaf: {exc}") from exc
+
+        try:
+            os.fsync(pinned_fd)
+        except OSError as exc:
+            raise AutopilotError(f"cannot fsync pinned directory: {exc}") from exc
+
+        _recheck_final_root(epoch_dir, pinned_fd)
+
+        try:
+            leaf_st = os.stat(leaf_name, dir_fd=pinned_fd, follow_symlinks=False)
+        except TypeError as exc:
+            raise AutopilotError(f"os.stat failed with TypeError: {exc}") from exc
+        except OSError as exc:
+            raise AutopilotError(f"cannot stat rescope intent leaf: {exc}") from exc
+
+        if (leaf_st.st_dev, leaf_st.st_ino) != (st.st_dev, st.st_ino):
+            raise AutopilotError("rescope intent leaf inode mismatch")
+    except BaseException as exc:
+        primary_exc = exc
+        raise
+    finally:
+        active_exc_type, active_exc, _ = sys.exc_info()
+        close_errors: list[OSError] = []
+        interrupt_exc: BaseException | None = None
+        if file_fd is not None:
+            try:
+                os.close(file_fd)
+            except (KeyboardInterrupt, SystemExit) as exc:
+                interrupt_exc = exc
+            except OSError as exc:
+                close_errors.append(exc)
+        try:
+            os.close(pinned_fd)
+        except (KeyboardInterrupt, SystemExit) as exc:
+            if interrupt_exc is None:
+                interrupt_exc = exc
+        except OSError as exc:
+            close_errors.append(exc)
+        is_interrupt = (
+            (active_exc_type is not None and issubclass(active_exc_type, (KeyboardInterrupt, SystemExit)))
+            or isinstance(primary_exc, (KeyboardInterrupt, SystemExit))
+            or interrupt_exc is not None
+        )
+        if is_interrupt:
+            if interrupt_exc is not None:
+                raise interrupt_exc
+        elif close_errors:
+            first_close_err = close_errors[0]
+            close_exc = AutopilotError(f"error closing descriptor: {first_close_err}")
+            if primary_exc is not None and isinstance(primary_exc, Exception):
+                close_exc.__cause__ = primary_exc
+            elif active_exc is not None and isinstance(active_exc, Exception):
+                close_exc.__cause__ = active_exc
+            else:
+                close_exc.__cause__ = first_close_err
+            raise close_exc
+
+
 def load_rescope_receipt(
     state_root: Path,
     expected_repository: object,
