@@ -1275,6 +1275,258 @@ def publish_terminal_quota_record(
     return receipt
 
 
+def read_terminal_quota_bytes(root: Path, request_id: str) -> bytes:
+    root = canonical_root(root)
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        raise BrokerError("terminal quota request ID is invalid")
+
+    state_root, _status, _requests, _claimed, _responses = broker_paths(root)
+    directory = state_root / "terminal-quota"
+    target_filename = f"{request_id}.json"
+    target_path = directory / target_filename
+
+    try:
+        dir_lstat_initial = os.lstat(directory)
+    except OSError as exc:
+        raise BrokerError("terminal quota directory is unavailable") from exc
+    if not stat.S_ISDIR(dir_lstat_initial.st_mode) or stat.S_ISLNK(dir_lstat_initial.st_mode):
+        raise BrokerError("terminal quota directory must be a directory and not a symlink")
+    if dir_lstat_initial.st_uid != os.geteuid():
+        raise BrokerError("terminal quota directory owner mismatch")
+    if stat.S_IMODE(dir_lstat_initial.st_mode) != 0o700:
+        raise BrokerError("terminal quota directory mode must be 0700")
+
+    try:
+        target_lstat_initial = os.lstat(target_path)
+    except OSError as exc:
+        raise BrokerError(f"terminal quota record {target_filename} is unavailable") from exc
+    if not stat.S_ISREG(target_lstat_initial.st_mode) or stat.S_ISLNK(target_lstat_initial.st_mode):
+        raise BrokerError("terminal quota record is not a regular file")
+    if target_lstat_initial.st_uid != os.geteuid():
+        raise BrokerError("terminal quota record owner mismatch")
+    if stat.S_IMODE(target_lstat_initial.st_mode) != 0o600:
+        raise BrokerError("terminal quota record mode must be 0600")
+    if target_lstat_initial.st_nlink != 1:
+        raise BrokerError("terminal quota record has invalid link count")
+    if target_lstat_initial.st_size > MAX_RECORD_BYTES:
+        raise BrokerError("terminal quota record exceeds byte limit")
+
+    existing_entries = scan_private_record_directory(directory)
+    if target_filename not in existing_entries:
+        raise BrokerError(f"terminal quota record {target_filename} not found")
+
+    dir_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        dir_fd = os.open(directory, dir_flags)
+    except OSError as exc:
+        raise BrokerError(f"cannot safely open terminal quota directory: {exc}") from exc
+
+    file_fd = -1
+    try:
+        try:
+            dir_fstat_before = os.fstat(dir_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat terminal quota directory: {exc}") from exc
+        if not stat.S_ISDIR(dir_fstat_before.st_mode) or stat.S_ISLNK(dir_fstat_before.st_mode):
+            raise BrokerError("terminal quota directory descriptor is not a directory")
+        if dir_fstat_before.st_uid != os.geteuid():
+            raise BrokerError("terminal quota directory descriptor owner mismatch")
+        if stat.S_IMODE(dir_fstat_before.st_mode) != 0o700:
+            raise BrokerError("terminal quota directory descriptor mode mismatch")
+        if (dir_fstat_before.st_dev, dir_fstat_before.st_ino) != (dir_lstat_initial.st_dev, dir_lstat_initial.st_ino):
+            raise BrokerError("terminal quota directory descriptor does not match path before open")
+
+        try:
+            dir_lstat_before_open = os.lstat(directory)
+        except OSError as exc:
+            raise BrokerError("cannot lstat terminal quota directory before open") from exc
+        if (dir_lstat_before_open.st_dev, dir_lstat_before_open.st_ino) != (dir_fstat_before.st_dev, dir_fstat_before.st_ino):
+            raise BrokerError("terminal quota directory path changed before open")
+        if not stat.S_ISDIR(dir_lstat_before_open.st_mode) or stat.S_ISLNK(dir_lstat_before_open.st_mode):
+            raise BrokerError("terminal quota directory path changed before open")
+        if dir_lstat_before_open.st_uid != os.geteuid():
+            raise BrokerError("terminal quota directory path owner mismatch before open")
+        if stat.S_IMODE(dir_lstat_before_open.st_mode) != 0o700:
+            raise BrokerError("terminal quota directory path mode mismatch before open")
+
+        file_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        try:
+            file_fd = os.open(target_filename, file_flags, dir_fd=dir_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot safely open terminal quota record: {exc}") from exc
+
+        try:
+            file_fstat_before = os.fstat(file_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat terminal quota record: {exc}") from exc
+        if not stat.S_ISREG(file_fstat_before.st_mode) or stat.S_ISLNK(file_fstat_before.st_mode):
+            raise BrokerError("terminal quota record is not a regular file")
+        if file_fstat_before.st_uid != os.geteuid():
+            raise BrokerError("terminal quota record owner mismatch")
+        if stat.S_IMODE(file_fstat_before.st_mode) != 0o600:
+            raise BrokerError("terminal quota record mode must be 0600")
+        if file_fstat_before.st_nlink != 1:
+            raise BrokerError("terminal quota record has invalid link count")
+        if file_fstat_before.st_size > MAX_RECORD_BYTES:
+            raise BrokerError("terminal quota record exceeds byte limit")
+        if (
+            (file_fstat_before.st_dev, file_fstat_before.st_ino) != (target_lstat_initial.st_dev, target_lstat_initial.st_ino)
+            or file_fstat_before.st_mode != target_lstat_initial.st_mode
+            or file_fstat_before.st_uid != target_lstat_initial.st_uid
+            or file_fstat_before.st_nlink != target_lstat_initial.st_nlink
+            or file_fstat_before.st_size != target_lstat_initial.st_size
+            or file_fstat_before.st_mtime_ns != target_lstat_initial.st_mtime_ns
+            or file_fstat_before.st_ctime_ns != target_lstat_initial.st_ctime_ns
+        ):
+            raise BrokerError("terminal quota record changed between scan and open")
+
+        try:
+            file_stat_before = os.stat(target_filename, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise BrokerError(f"cannot stat terminal quota record path: {exc}") from exc
+        if (
+            (file_fstat_before.st_dev, file_fstat_before.st_ino) != (file_stat_before.st_dev, file_stat_before.st_ino)
+            or file_fstat_before.st_mode != file_stat_before.st_mode
+            or file_fstat_before.st_uid != file_stat_before.st_uid
+            or file_fstat_before.st_nlink != file_stat_before.st_nlink
+            or file_fstat_before.st_size != file_stat_before.st_size
+            or file_fstat_before.st_mtime_ns != file_stat_before.st_mtime_ns
+            or file_fstat_before.st_ctime_ns != file_stat_before.st_ctime_ns
+        ):
+            raise BrokerError("terminal quota record descriptor does not match path before read")
+
+        try:
+            target_lstat_before = os.lstat(target_path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat terminal quota record path: {exc}") from exc
+        if (
+            (file_fstat_before.st_dev, file_fstat_before.st_ino) != (target_lstat_before.st_dev, target_lstat_before.st_ino)
+            or file_fstat_before.st_mode != target_lstat_before.st_mode
+            or file_fstat_before.st_uid != target_lstat_before.st_uid
+            or file_fstat_before.st_nlink != target_lstat_before.st_nlink
+            or file_fstat_before.st_size != target_lstat_before.st_size
+            or file_fstat_before.st_mtime_ns != target_lstat_before.st_mtime_ns
+            or file_fstat_before.st_ctime_ns != target_lstat_before.st_ctime_ns
+        ):
+            raise BrokerError("terminal quota record descriptor does not match canonical path before read")
+
+        expected_size = file_fstat_before.st_size
+        chunks: list[bytes] = []
+        total_read = 0
+        limit = MAX_RECORD_BYTES + 1
+        while total_read < limit:
+            try:
+                chunk = os.read(file_fd, limit - total_read)
+            except OSError as exc:
+                raise BrokerError(f"cannot read terminal quota record: {exc}") from exc
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total_read += len(chunk)
+
+        data = b"".join(chunks)
+        if len(data) > MAX_RECORD_BYTES:
+            raise BrokerError("terminal quota record exceeds maximum record bytes")
+        if len(data) != expected_size:
+            raise BrokerError("terminal quota record read size mismatch")
+
+        try:
+            file_fstat_after = os.fstat(file_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat terminal quota record after read: {exc}") from exc
+        if (
+            (file_fstat_after.st_dev, file_fstat_after.st_ino) != (file_fstat_before.st_dev, file_fstat_before.st_ino)
+            or file_fstat_after.st_mode != file_fstat_before.st_mode
+            or file_fstat_after.st_uid != file_fstat_before.st_uid
+            or file_fstat_after.st_nlink != file_fstat_before.st_nlink
+            or file_fstat_after.st_size != file_fstat_before.st_size
+            or file_fstat_after.st_mtime_ns != file_fstat_before.st_mtime_ns
+            or file_fstat_after.st_ctime_ns != file_fstat_before.st_ctime_ns
+        ):
+            raise BrokerError("terminal quota record descriptor metadata drift after read")
+
+        try:
+            file_stat_after = os.stat(target_filename, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise BrokerError(f"cannot stat terminal quota record path after read: {exc}") from exc
+        if (
+            (file_stat_after.st_dev, file_stat_after.st_ino) != (file_fstat_after.st_dev, file_fstat_after.st_ino)
+            or file_stat_after.st_mode != file_fstat_after.st_mode
+            or file_stat_after.st_uid != file_fstat_after.st_uid
+            or file_stat_after.st_nlink != file_fstat_after.st_nlink
+            or file_stat_after.st_size != file_fstat_after.st_size
+            or file_stat_after.st_mtime_ns != file_fstat_after.st_mtime_ns
+            or file_stat_after.st_ctime_ns != file_fstat_after.st_ctime_ns
+        ):
+            raise BrokerError("terminal quota record path metadata mismatch after read")
+
+        try:
+            target_lstat_after = os.lstat(target_path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat terminal quota record path after read: {exc}") from exc
+        if (
+            (target_lstat_after.st_dev, target_lstat_after.st_ino) != (file_fstat_after.st_dev, file_fstat_after.st_ino)
+            or target_lstat_after.st_mode != file_fstat_after.st_mode
+            or target_lstat_after.st_uid != file_fstat_after.st_uid
+            or target_lstat_after.st_nlink != file_fstat_after.st_nlink
+            or target_lstat_after.st_size != file_fstat_after.st_size
+            or target_lstat_after.st_mtime_ns != file_fstat_after.st_mtime_ns
+            or target_lstat_after.st_ctime_ns != file_fstat_after.st_ctime_ns
+        ):
+            raise BrokerError("terminal quota record canonical path mismatch after read")
+
+        try:
+            dir_fstat_after = os.fstat(dir_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat terminal quota directory after read: {exc}") from exc
+        if not stat.S_ISDIR(dir_fstat_after.st_mode) or stat.S_ISLNK(dir_fstat_after.st_mode):
+            raise BrokerError("terminal quota directory descriptor is not a directory after read")
+        if dir_fstat_after.st_uid != os.geteuid():
+            raise BrokerError("terminal quota directory descriptor owner mismatch after read")
+        if stat.S_IMODE(dir_fstat_after.st_mode) != 0o700:
+            raise BrokerError("terminal quota directory descriptor mode mismatch after read")
+        if (dir_fstat_after.st_dev, dir_fstat_after.st_ino) != (dir_fstat_before.st_dev, dir_fstat_before.st_ino):
+            raise BrokerError("terminal quota directory descriptor changed after read")
+
+        try:
+            dir_lstat_after = os.lstat(directory)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat terminal quota directory after read: {exc}") from exc
+        if not stat.S_ISDIR(dir_lstat_after.st_mode) or stat.S_ISLNK(dir_lstat_after.st_mode):
+            raise BrokerError("terminal quota directory path changed after read")
+        if dir_lstat_after.st_uid != os.geteuid():
+            raise BrokerError("terminal quota directory path owner mismatch after read")
+        if stat.S_IMODE(dir_lstat_after.st_mode) != 0o700:
+            raise BrokerError("terminal quota directory path mode mismatch after read")
+        if (dir_lstat_after.st_dev, dir_lstat_after.st_ino) != (dir_fstat_after.st_dev, dir_fstat_after.st_ino):
+            raise BrokerError("terminal quota directory path does not match descriptor after read")
+
+        return data
+    finally:
+        close_errors: list[OSError] = []
+        if file_fd >= 0:
+            try:
+                os.close(file_fd)
+            except OSError as exc:
+                close_errors.append(exc)
+        if dir_fd >= 0:
+            try:
+                os.close(dir_fd)
+            except OSError as exc:
+                close_errors.append(exc)
+        if close_errors:
+            raise BrokerError(f"cannot safely close descriptor: {close_errors[0]}") from close_errors[0]
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
