@@ -39,3 +39,12 @@ The next Gemini assignment is **R1 only**, not a corrected replay of task 102. B
 5. Before a Provider call, locally validate task JSON, allowed paths, exact HEAD/assignment binding, and that the requested test scenarios are reachable under root permissions. After Worker output, the standard independent Gemini Reviewer must inspect the full materialized diff; Codex then checks the complete fingerprint, test reachability and no runtime wiring, runs focused and existing Broker suites, and commits only accepted bytes. Any correction must address the *specific* failed assertion; a fourth try disguised as a new task is forbidden.
 
 R2 and R3 are separately dispatched only after R1 acceptance. This handoff is preparation, **not** acceptance or evidence that Gemini credit has reset.
+
+## Task 103 Codex rejection (2026-09-24 UTC)
+
+The new R1 task `AE03-TERMINAL-BYTES-20260924-103` was genuinely distinct from exhausted task 102. Gemini credit was confirmed with one bounded pin-verified probe. Worker needed two corrections for fixture failures, then its third proposal passed 88 pre-review tests; the independent Gemini Reviewer returned `VERIFIED`. Codex validated the exact Worker/Reviewer/proposal bindings, but **rejected the proposed code before application**. No tracked source/test bytes were applied and the integration tree stayed clean.
+
+Two isolated fault injections against the proposed module, executed in memory with temporary root-owned files, contradicted R1's own safety requirements:
+
+1. Raise `OSError(EIO)` on the file descriptor's `os.close` before it closes. The helper suppresses that error in `finally`, returns successful bytes, and leaves the descriptor open. This is not proof of closure on every path; the close failure must fail closed and the other descriptor must still be closed.
+2. Let the existing scanner finish, then atomically replace the target file with a different valid `0600` single-link file before directory-relative open. The helper returns the replacement bytes. Its first target-file fingerprint is taken only after opening, so it cannot detect this scan-to-open swap. Latch the target's no-follow identity before the scan and compare it with the opened descriptor and final path, or use an equivalent bounded design that demonstrably rejects the same test.
