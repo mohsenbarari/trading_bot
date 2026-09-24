@@ -83,6 +83,10 @@ RESPONSE_KEYS = {
     "schema_version", "request_id", "run_prefix", "source_head", "state",
     "exit_code", "stdout", "stderr", "finished_at",
 }
+RECEIPT_KEYS = {
+    "schema_version", "request", "request_sha256", "response",
+    "response_sha256", "quota_evidence", "finished_at",
+}
 REQUEST_ID_RE = re.compile(r"[0-9a-f]{32}")
 RUN_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,60}")
 HEAD_RE = re.compile(r"[0-9a-f]{40}")
@@ -1525,6 +1529,144 @@ def read_terminal_quota_bytes(root: Path, request_id: str) -> bytes:
                 close_errors.append(exc)
         if close_errors:
             raise BrokerError(f"cannot safely close descriptor: {close_errors[0]}") from close_errors[0]
+
+
+def validate_terminal_quota_payload(
+    root: Path, expected_request_id: str, raw_bytes: bytes
+) -> dict:
+    if not isinstance(raw_bytes, bytes):
+        raise BrokerError("terminal quota raw payload must be bytes")
+    if len(raw_bytes) > MAX_RECORD_BYTES:
+        raise BrokerError("terminal quota raw payload exceeds maximum record bytes")
+
+    root = canonical_root(root)
+    if not isinstance(expected_request_id, str) or not REQUEST_ID_RE.fullmatch(expected_request_id):
+        raise BrokerError("expected request ID is invalid")
+
+    try:
+        decoded = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BrokerError("terminal quota payload is not valid UTF-8") from exc
+
+    try:
+        receipt = unique_json(decoded)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise BrokerError(f"terminal quota payload is not valid JSON: {exc}") from exc
+
+    if not isinstance(receipt, dict):
+        raise BrokerError("terminal quota payload must be a JSON object")
+
+    try:
+        canonical_bytes = json.dumps(
+            receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except (ValueError, TypeError) as exc:
+        raise BrokerError("terminal quota payload cannot be canonically encoded") from exc
+
+    if canonical_bytes != raw_bytes:
+        raise BrokerError("terminal quota payload is not byte-for-byte canonical JSON")
+
+    if set(receipt) != RECEIPT_KEYS:
+        raise BrokerError("terminal quota receipt keys do not match exact contract")
+    if receipt.get("schema_version") != "1.0":
+        raise BrokerError("terminal quota receipt schema version is invalid")
+
+    request = receipt.get("request")
+    if not isinstance(request, dict) or set(request) != REQUEST_KEYS:
+        raise BrokerError("broker request does not match the exact contract")
+    if request.get("schema_version") != "1.0":
+        raise BrokerError("broker request schema version is invalid")
+    if not isinstance(request.get("request_id"), str) or not REQUEST_ID_RE.fullmatch(request["request_id"]):
+        raise BrokerError("broker request ID is invalid")
+    if request["request_id"] != expected_request_id:
+        raise BrokerError("receipt request ID does not match expected request ID")
+    if not isinstance(request.get("run_prefix"), str) or not RUN_PREFIX_RE.fullmatch(request["run_prefix"]):
+        raise BrokerError("broker run-prefix is invalid")
+    if type(request.get("timeout")) is not int or not 10 <= request["timeout"] <= 900:
+        raise BrokerError("broker timeout is invalid")
+    if not isinstance(request.get("source_head"), str) or not HEAD_RE.fullmatch(request["source_head"]):
+        raise BrokerError("broker source HEAD is invalid")
+    if not isinstance(request.get("task_sha256"), str) or not SHA_RE.fullmatch(request["task_sha256"]):
+        raise BrokerError("broker task SHA is invalid")
+    if (
+        not isinstance(request.get("assignment_id"), str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request["assignment_id"])
+    ):
+        raise BrokerError("broker assignment ID is invalid")
+    if not isinstance(request.get("assignment_sha256"), str) or not SHA_RE.fullmatch(request["assignment_sha256"]):
+        raise BrokerError("broker assignment SHA is invalid")
+    if (
+        not isinstance(request.get("controller_run_id"), str)
+        or not CONTROLLER_RUN_RE.fullmatch(request["controller_run_id"])
+    ):
+        raise BrokerError("broker controller run ID is invalid")
+    created_at = request.get("created_at")
+    if (
+        not isinstance(created_at, (int, float))
+        or isinstance(created_at, bool)
+        or not math.isfinite(created_at)
+    ):
+        raise BrokerError("broker request created_at is invalid")
+    _task_relative_path(request.get("task_path"))
+
+    response = receipt.get("response")
+    if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
+        raise BrokerError("broker response does not match the exact contract")
+
+    validated_response = validate_response(request, response)
+    if validated_response.get("state") != "COMPLETED":
+        raise BrokerError("terminal quota response state must be COMPLETED")
+    if type(validated_response.get("exit_code")) is not int or validated_response.get("exit_code") != 1:
+        raise BrokerError("terminal quota response exit_code must be 1")
+    if validated_response.get("stderr") != "":
+        raise BrokerError("terminal quota response stderr must be empty")
+    resp_finished_at = validated_response.get("finished_at")
+    if (
+        not isinstance(resp_finished_at, (int, float))
+        or isinstance(resp_finished_at, bool)
+        or not math.isfinite(resp_finished_at)
+    ):
+        raise BrokerError("broker response finished_at is invalid")
+
+    receipt_finished_at = receipt.get("finished_at")
+    if (
+        not isinstance(receipt_finished_at, (int, float))
+        or isinstance(receipt_finished_at, bool)
+        or not math.isfinite(receipt_finished_at)
+    ):
+        raise BrokerError("terminal quota receipt finished_at is invalid")
+    if receipt_finished_at != resp_finished_at or type(receipt_finished_at) is not type(resp_finished_at):
+        raise BrokerError("terminal quota receipt finished_at mismatch")
+
+    try:
+        req_canonical = json.dumps(
+            request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        resp_canonical = json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    except (ValueError, TypeError) as exc:
+        raise BrokerError("request or response contains non-finite numbers") from exc
+
+    req_sha = receipt.get("request_sha256")
+    if not isinstance(req_sha, str) or not SHA_RE.fullmatch(req_sha):
+        raise BrokerError("receipt request_sha256 is invalid")
+    if req_sha != hashlib.sha256(req_canonical).hexdigest():
+        raise BrokerError("receipt request_sha256 digest mismatch")
+
+    resp_sha = receipt.get("response_sha256")
+    if not isinstance(resp_sha, str) or not SHA_RE.fullmatch(resp_sha):
+        raise BrokerError("receipt response_sha256 is invalid")
+    if resp_sha != hashlib.sha256(resp_canonical).hexdigest():
+        raise BrokerError("receipt response_sha256 digest mismatch")
+
+    evidence = detect_quota_response(root, request, validated_response)
+    if evidence is None:
+        raise BrokerError("terminal quota response not detected")
+    if receipt.get("quota_evidence") != evidence:
+        raise BrokerError("receipt quota evidence mismatch")
+
+    return receipt
 
 
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
