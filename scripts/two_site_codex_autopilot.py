@@ -1455,6 +1455,7 @@ def _prove_rescope_link_collision(
     pinned_dir_fd: int,
     temp_name: str,
     link_error: OSError,
+    target_filename: str = _RESCOPE_RECEIPT_FILENAME,
 ) -> None:
     """Classify a rescope receipt link error, returning None only for a proven collision."""
     if not isinstance(link_error, OSError):
@@ -1472,6 +1473,10 @@ def _prove_rescope_link_collision(
     ):
         raise AutopilotError(
             "ambiguous: temp_name must be a safe basename starting with .rescope_receipt_tmp_"
+        ) from link_error
+    if type(target_filename) is not str or target_filename not in _RESCOPE_RECEIPT_FILENAMES:
+        raise AutopilotError(
+            f"ambiguous: invalid target_filename: {target_filename!r}"
         ) from link_error
 
     supports_dir_fd = getattr(os, "supports_dir_fd", set())
@@ -1503,7 +1508,7 @@ def _prove_rescope_link_collision(
         ) from link_error
 
     try:
-        target_st = os.stat(_RESCOPE_RECEIPT_FILENAME, dir_fd=pinned_dir_fd, follow_symlinks=False)
+        target_st = os.stat(target_filename, dir_fd=pinned_dir_fd, follow_symlinks=False)
     except TypeError as exc:
         raise AutopilotError(f"ambiguous: os.stat target failed with TypeError: {exc}") from exc
     except OSError as exc:
