@@ -1,6 +1,6 @@
 # AE03 terminal receipt reader: bounded restart plan (2026-09-24)
 
-Status: **R1 BYTE READER ACCEPTED; R2/R3 AND RUNTIME UNWIRED**. The R1 implementation is `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`; `fd990e177ff4012a9408833d427694a63bf40377` below is historical task-102 context. Supervisor remains STOPPED; no runtime quota recovery, response custody, wait or replay is authorized.
+Status: **R1/R2 ISOLATED HELPERS ACCEPTED; R3 AND RUNTIME UNWIRED**. R1 is `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`, R2 is `355894ecb216cdecc9ee487e9736ace1977b9edb`; `fd990e177ff4012a9408833d427694a63bf40377` below is historical task-102 context. Supervisor remains STOPPED; no runtime quota recovery, response custody, wait or replay is authorized.
 
 ## Why task 102 stopped
 
@@ -58,3 +58,7 @@ Final review found that post-read directory-relative `os.stat` compares `file_st
 ## Task 105 R1 accepted (2026-09-24 UTC)
 
 Task `AE03-TERMINAL-BYTES-STAT-20260924-105` used task 104's rejected patch as labeled context, not approved code. Worker 0 and independent Reviewer 0 passed without correction; formal bindings and applied bytes matched proposal SHA `21a51923257b36008edfe49a47115d401c2b54eb5d0c387a9de710caae43d428`. Codex reviewed the complete diff, ran all five Broker suites (87 passed), and independently faulted the second directory-relative `stat` for both nanosecond timestamps; each raised `BrokerError`, while normal bytes read succeeded. Accepted as isolated R1 in `85552cdc09c4d1a94b47e2e10d09889f2b56e0c6`. No runtime call site, receipt JSON validation, wait, or replay was added. R2 strict payload validation and R3 composition remain open.
+
+## Task 106 R2 accepted (2026-09-24 UTC)
+
+Task `AE03-TERMINAL-PAYLOAD-20260924-106` needed one Worker correction for test expectations/fixture generation, then 73 pre-review tests passed and independent Gemini Reviewer returned `VERIFIED`. Codex validated bindings and applied bytes against proposal SHA `3c61713101b12d8beb33b0514575f6340900cc15df4cb185d30713c253aaeb3b`, reviewed the full validator and negative-test matrix, and ran all six Broker suites independently (99 passed). Accepted as isolated R2 in `355894ecb216cdecc9ee487e9736ace1977b9edb`. It validates bounded canonical JSON, exact request/response/receipt schema, SHA bindings, timestamps and the existing quota detector; it does not call R1 or grant retry/replay authority. R3 composition and publisher-to-reader roundtrip remain open.
