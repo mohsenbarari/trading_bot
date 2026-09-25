@@ -24,7 +24,7 @@ import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
-from typing import Iterator, Mapping
+from typing import Callable, Iterator, Mapping
 
 try:
     from scripts.two_site_quota_evidence import classify_gemini_quota_stream
@@ -2867,7 +2867,8 @@ def write_json(path: Path, value: dict) -> None:
 
 def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         feedback: Path | None = None, proposal: Path | None = None,
-        cli: Path | None = None, test_evidence: Path | None = None) -> Path:
+        cli: Path | None = None, test_evidence: Path | None = None,
+        *, pre_provider_check: Callable[[], None] | None = None) -> Path:
     root = root.resolve(strict=True)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", run_id) or not 10 <= timeout <= 900:
         raise ProposalError("invalid run ID or timeout")
@@ -3011,6 +3012,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                    ))]
         try:
             # Auth belongs to the CLI. No credential files are read or copied here.
+            if pre_provider_check is not None:
+                pre_provider_check()
             with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   start_new_session=True,
