@@ -29,6 +29,19 @@ except ImportError:
         _open_existing_cycle_run_directory,
     )
 
+try:
+    from scripts.two_site_quota_wait_record import (
+        WaitRecordError,
+        _EXPECTED_KEYS,
+        validate_initial_wait_record,
+    )
+except ImportError:
+    from two_site_quota_wait_record import (  # type: ignore
+        WaitRecordError,
+        _EXPECTED_KEYS,
+        validate_initial_wait_record,
+    )
+
 QUOTA_WAIT_FILENAME: str = "quota-wait.json"
 MAX_WAIT_RECORD_BYTES: int = 16384
 _READ_LIMIT: int = 16385
@@ -379,3 +392,76 @@ def publish_initial_wait_record_bytes(
         raise WaitStorageError("ambiguous post-link publication failure: readback data mismatch")
 
     return readback_bytes
+
+
+def read_initial_wait_record(
+    root: Path,
+    controller_run_id: str,
+    expected: object,
+) -> dict:
+    """Read and validate initial quota wait record against independent expected identity.
+
+    This function performs READ+VALIDATE composition only and NEVER grants wake
+    or replay execution authority.
+
+    The caller MUST independently obtain expected from validated reservation,
+    terminal receipt, repository and rescope intent in a future unit, and hold
+    the Supervisor lock while invoking this function.
+
+    No field from the record is used to construct or fill expected.
+    """
+    if not isinstance(root, Path):
+        raise WaitStorageError("root must be a Path")
+    if type(controller_run_id) is not str:
+        raise WaitStorageError(
+            f"controller_run_id must be exact str, got {type(controller_run_id).__name__}"
+        )
+    if not controller_run_id:
+        raise WaitStorageError("controller_run_id must be a non-empty string")
+    if type(expected) is not dict:
+        raise WaitStorageError(
+            f"expected must be exact dict, got {type(expected).__name__}"
+        )
+    if set(expected.keys()) != _EXPECTED_KEYS:
+        raise WaitStorageError(
+            f"expected keys must exactly match {sorted(_EXPECTED_KEYS)!r}"
+        )
+    expected_ctrl_id = expected["controller_run_id"]
+    if type(expected_ctrl_id) is not type(controller_run_id) or expected_ctrl_id != controller_run_id:
+        raise WaitStorageError(
+            f"expected controller_run_id {expected_ctrl_id!r} does not match {controller_run_id!r}"
+        )
+
+    raw_bytes = read_initial_wait_record_bytes(root, controller_run_id)
+
+    try:
+        decoded = raw_bytes.decode("utf-8")
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except UnicodeDecodeError as exc:
+        raise WaitStorageError(f"{QUOTA_WAIT_FILENAME} is not valid UTF-8: {exc}") from exc
+
+    try:
+        record = unique_json(decoded)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise WaitStorageError(f"{QUOTA_WAIT_FILENAME} is not valid JSON: {exc}") from exc
+    except Exception as exc:
+        raise WaitStorageError(f"{QUOTA_WAIT_FILENAME} is not valid JSON: {exc}") from exc
+
+    if type(record) is not dict:
+        raise WaitStorageError(
+            f"{QUOTA_WAIT_FILENAME} must be a JSON object, got {type(record).__name__}"
+        )
+
+    try:
+        return validate_initial_wait_record(record, expected)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except WaitRecordError as exc:
+        raise WaitStorageError(f"initial wait record validation failed: {exc}") from exc
+    except Exception as exc:
+        raise WaitStorageError(
+            f"unexpected error validating initial wait record: {exc}"
+        ) from exc
