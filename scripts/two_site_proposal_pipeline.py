@@ -561,10 +561,11 @@ def validate_run(
 ) -> tuple[dict, dict, str, str]:
     status = unique_json(bounded_file_text(root, run_dir / "status.json", MAX_CONTEXT, f"{role} status"))
     snapshot = unique_json(bounded_file_text(root, run_dir / "task.json", 2 * MAX_CONTEXT, f"{role} task"))
-    result_text = bounded_file_text(root, run_dir / "result.json", MAX_CONTEXT, f"{role} result")
+    raw_result_bytes = bounded_file_bytes(root, run_dir / "result.json", MAX_CONTEXT, f"{role} result")
+    result_text = raw_result_bytes.decode("utf-8")
     result = unique_json(result_text)
     validate_result(result, expected_task, expected_sources, role, enforce_raw_transport=False)
-    result_sha = file_sha256(run_dir / "result.json")
+    result_sha = hashlib.sha256(raw_result_bytes).hexdigest()
     expected_model = WORKER_MODEL if role == "worker" else MODEL
     if (
         status.get("run_id") != expected_run_id or status.get("role") != role

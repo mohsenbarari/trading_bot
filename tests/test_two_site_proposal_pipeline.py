@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 import copy
+import hashlib
 import io
 import json
 import os
@@ -830,6 +831,36 @@ class TestPipeline(unittest.TestCase):
                     self.root, self.task_path, "worker", "run-head-fail-worker-0", 300,
                     lambda: None, expected_head=None,
                 )
+
+    def test_validate_run_single_bounded_read_and_tampered_sha(self):
+        runner, _ = make_runner(self.root, [{"content": "# v1\n"}])
+        run_dir = runner(self.root, self.task_path, "worker", "run-validate-worker-0", 300)
+        task, sources = pipeline.load_task(self.root, self.task_path)
+        expected_bytes = (run_dir / "result.json").read_bytes()
+        expected_sha = hashlib.sha256(expected_bytes).hexdigest()
+
+        seen_convs = set()
+        with patch.object(pipeline, "file_sha256") as mock_sha:
+            res, st, res_sha, res_txt = pipeline.validate_run(
+                self.root, run_dir, "worker", "run-validate-worker-0", HEAD,
+                task, sources, seen_convs,
+            )
+            mock_sha.assert_not_called()
+
+        self.assertEqual(res_sha, expected_sha)
+        self.assertEqual(res_txt, expected_bytes.decode("utf-8"))
+        self.assertEqual(st["result_sha256"], expected_sha)
+
+        status_path = run_dir / "status.json"
+        st_data = json.loads(status_path.read_text())
+        st_data["result_sha256"] = "0" * 64
+        write_json(status_path, st_data)
+        with self.assertRaises(ProposalError) as ctx:
+            pipeline.validate_run(
+                self.root, run_dir, "worker", "run-validate-worker-0", HEAD,
+                task, sources, set(),
+            )
+        self.assertIn("metadata or snapshot mismatch", str(ctx.exception))
 
 
 if __name__ == "__main__":
