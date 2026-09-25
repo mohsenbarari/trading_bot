@@ -51,6 +51,7 @@ __all__ = [
     "ClaimStorageError",
     "MAX_CLAIM_RECORD_BYTES",
     "QUOTA_RESUME_CLAIM_FILENAME",
+    "publish_known_reset_resume_claim",
     "read_known_reset_resume_claim",
 ]
 
@@ -265,3 +266,270 @@ def read_known_reset_resume_claim(
                         ) from exc
     except BrokerError as exc:
         raise ClaimStorageError(f"cannot safely open cycle run directory: {exc}") from exc
+
+
+def _type_sensitive_equal(a: Any, b: Any) -> bool:
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(_type_sensitive_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return False
+        return all(_type_sensitive_equal(x, y) for x, y in zip(a, b))
+    return bool(a == b)
+
+
+def publish_known_reset_resume_claim(
+    root: Path,
+    original_controller_run_id: str,
+    claim: object,
+    expected: object,
+) -> dict[str, Any]:
+    """Publish version 1.0 known-reset quota resume claim under caller-held Supervisor lock.
+
+    One-shot durable publication primitive. NEVER grants wake, Provider, or lock acquisition authority.
+    The caller MUST hold the Supervisor lock throughout this invocation (do not fabricate lock).
+
+    Pre-I/O validation:
+    - Enforces exact Path/str/dict types
+    - Independent expected exact keys and original CID match
+    - Calls validate_known_reset_resume_claim(claim, expected)
+    - Serializes canonical JSON (sorted compact UTF-8 allow_nan=False) <= 8192 bytes
+    """
+    if not isinstance(root, Path):
+        raise ClaimStorageError("root must be a Path")
+    if type(original_controller_run_id) is not str:
+        raise ClaimStorageError(
+            f"original_controller_run_id must be exact str, got {type(original_controller_run_id).__name__}"
+        )
+    if not original_controller_run_id:
+        raise ClaimStorageError("original_controller_run_id must be a non-empty string")
+    if type(claim) is not dict:
+        raise ClaimStorageError(
+            f"claim must be exact dict, got {type(claim).__name__}"
+        )
+    if type(expected) is not dict:
+        raise ClaimStorageError(
+            f"expected must be exact dict, got {type(expected).__name__}"
+        )
+    if set(expected.keys()) != _EXPECTED_KEYS:
+        raise ClaimStorageError(
+            f"expected keys must exactly match {sorted(_EXPECTED_KEYS)!r}"
+        )
+    expected_orig_cid = expected["original_controller_run_id"]
+    if type(expected_orig_cid) is not type(original_controller_run_id) or expected_orig_cid != original_controller_run_id:
+        raise ClaimStorageError(
+            f"expected original_controller_run_id {expected_orig_cid!r} does not match {original_controller_run_id!r}"
+        )
+
+    try:
+        validated_claim = validate_known_reset_resume_claim(claim, expected)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except ResumeClaimRecordError as exc:
+        raise ClaimStorageError(f"known-reset resume claim validation failed: {exc}") from exc
+    except Exception as exc:
+        raise ClaimStorageError(
+            f"unexpected error validating known-reset resume claim: {exc}"
+        ) from exc
+
+    try:
+        canonical_text = json.dumps(
+            validated_claim,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        canonical_bytes = canonical_text.encode("utf-8")
+    except (ValueError, TypeError) as exc:
+        raise ClaimStorageError(
+            f"known-reset resume claim cannot be serialized to canonical JSON: {exc}"
+        ) from exc
+
+    if len(canonical_bytes) > MAX_CLAIM_RECORD_BYTES:
+        raise ClaimStorageError("known-reset resume claim exceeds byte limit")
+
+    temp_name = f".{QUOTA_RESUME_CLAIM_FILENAME}.tmp.{os.getpid()}"
+    target_name = QUOTA_RESUME_CLAIM_FILENAME
+    temp_created = False
+    linked = False
+
+    try:
+        with _open_existing_cycle_run_directory(root, original_controller_run_id) as (run_path, run_fd, verify_identity):
+            try:
+                verify_identity()
+            except BrokerError as exc:
+                raise ClaimStorageError(f"directory identity verification failed before write: {exc}") from exc
+
+            file_path = run_path / target_name
+            target_exists = False
+            try:
+                os.stat(target_name, dir_fd=run_fd, follow_symlinks=False)
+                target_exists = True
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise ClaimStorageError(f"cannot stat {target_name} via dir_fd: {exc}") from exc
+
+            if not target_exists:
+                try:
+                    os.lstat(file_path)
+                    target_exists = True
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise ClaimStorageError(f"cannot lstat {target_name}: {exc}") from exc
+
+            if target_exists:
+                raise ClaimStorageError(f"{target_name} already exists")
+
+            file_fd: int | None = None
+            try:
+                flags = (
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+                try:
+                    file_fd = os.open(temp_name, flags, 0o600, dir_fd=run_fd)
+                except OSError as exc:
+                    raise ClaimStorageError(f"cannot safely create temp file {temp_name}: {exc}") from exc
+                temp_created = True
+
+                try:
+                    total_written = 0
+                    data_len = len(canonical_bytes)
+                    while total_written < data_len:
+                        try:
+                            written = os.write(file_fd, canonical_bytes[total_written:])
+                        except OSError as exc:
+                            raise ClaimStorageError(f"cannot write {temp_name}: {exc}") from exc
+                        if written <= 0:
+                            raise ClaimStorageError(f"write stalled while writing {temp_name}")
+                        total_written += written
+
+                    try:
+                        os.fchmod(file_fd, 0o600)
+                    except OSError as exc:
+                        raise ClaimStorageError(f"cannot fchmod {temp_name}: {exc}") from exc
+
+                    try:
+                        temp_stat = os.fstat(file_fd)
+                    except OSError as exc:
+                        raise ClaimStorageError(f"cannot fstat {temp_name}: {exc}") from exc
+                    _validate_stat(temp_stat, f"temp file {temp_name}")
+                    if temp_stat.st_size != data_len:
+                        raise ClaimStorageError(f"temp file {temp_name} size mismatch")
+
+                    try:
+                        os.fsync(file_fd)
+                    except OSError as exc:
+                        raise ClaimStorageError(f"cannot fsync {temp_name}: {exc}") from exc
+                finally:
+                    if file_fd is not None:
+                        try:
+                            os.close(file_fd)
+                        except OSError as exc:
+                            file_fd = None
+                            if sys.exc_info()[1] is not None:
+                                raise ClaimStorageError(
+                                    f"cannot safely close temp file {temp_name}: {exc}"
+                                ) from sys.exc_info()[1]
+                            raise ClaimStorageError(f"cannot safely close temp file {temp_name}: {exc}") from exc
+                        file_fd = None
+
+                try:
+                    os.link(
+                        temp_name,
+                        target_name,
+                        src_dir_fd=run_fd,
+                        dst_dir_fd=run_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as exc:
+                    raise ClaimStorageError(f"cannot link {target_name}: target already exists") from exc
+                except OSError as exc:
+                    raise ClaimStorageError(f"cannot link {target_name}: {exc}") from exc
+                linked = True
+
+                try:
+                    os.unlink(temp_name, dir_fd=run_fd)
+                except OSError as exc:
+                    raise ClaimStorageError(
+                        f"ambiguous post-link publication failure: cannot unlink {temp_name}: {exc}"
+                    ) from exc
+
+                try:
+                    os.fsync(run_fd)
+                except OSError as exc:
+                    raise ClaimStorageError(
+                        f"ambiguous post-link publication failure: cannot fsync directory: {exc}"
+                    ) from exc
+
+                try:
+                    verify_identity()
+                except BrokerError as exc:
+                    raise ClaimStorageError(
+                        f"ambiguous post-link publication failure: directory identity verification failed after write: {exc}"
+                    ) from exc
+            finally:
+                if file_fd is not None:
+                    try:
+                        os.close(file_fd)
+                    except OSError:
+                        pass
+                if temp_created and not linked:
+                    try:
+                        os.unlink(temp_name, dir_fd=run_fd)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as exc:
+                        if sys.exc_info()[1] is not None:
+                            raise ClaimStorageError(
+                                f"failed to clean up temp file {temp_name}: {exc}"
+                            ) from sys.exc_info()[1]
+                        raise ClaimStorageError(
+                            f"failed to clean up temp file {temp_name}: {exc}"
+                        ) from exc
+    except ClaimStorageError:
+        raise
+    except BrokerError as exc:
+        if linked:
+            raise ClaimStorageError(
+                f"ambiguous post-link publication failure: cycle run directory error: {exc}"
+            ) from exc
+        raise ClaimStorageError(f"cannot safely open cycle run directory: {exc}") from exc
+    except OSError as exc:
+        if linked:
+            raise ClaimStorageError(
+                f"ambiguous post-link publication failure: {exc}"
+            ) from exc
+        raise ClaimStorageError(f"cannot safely access cycle run directory: {exc}") from exc
+    except Exception as exc:
+        if linked:
+            raise ClaimStorageError(
+                f"ambiguous post-link publication failure: {exc}"
+            ) from exc
+        raise
+
+    try:
+        readback_claim = read_known_reset_resume_claim(root, original_controller_run_id, expected)
+    except ClaimStorageError as exc:
+        raise ClaimStorageError(
+            f"ambiguous post-link publication failure: readback failed: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise ClaimStorageError(
+            f"ambiguous post-link publication failure: readback unexpected error: {exc}"
+        ) from exc
+
+    if not _type_sensitive_equal(readback_claim, validated_claim):
+        raise ClaimStorageError("ambiguous post-link publication failure: readback claim mismatch")
+
+    return copy.deepcopy(readback_claim)
