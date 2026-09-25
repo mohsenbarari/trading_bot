@@ -51,6 +51,7 @@ _REQUEST_KEYS = frozenset({
     "assignment_sha256",
     "run_prefix",
     "role",
+    "claimed_at_utc",
     "timeout",
     "created_at",
 })
@@ -70,6 +71,7 @@ _MIRRORED_LINEAGE_FIELDS = (
     ("assignment_sha256", "assignment_sha256"),
     ("run_prefix", "resume_run_prefix"),
     ("role", "role"),
+    ("claimed_at_utc", "claimed_at_utc"),
 )
 
 
@@ -204,6 +206,7 @@ def build_quota_resume_request(
         "assignment_sha256": validated_claim["assignment_sha256"],
         "run_prefix": validated_claim["resume_run_prefix"],
         "role": validated_claim["role"],
+        "claimed_at_utc": validated_claim["claimed_at_utc"],
         "timeout": timeout,
         "created_at": now_epoch,
     }

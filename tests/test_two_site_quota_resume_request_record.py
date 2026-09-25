@@ -47,6 +47,7 @@ def _build_valid_request_fixtures() -> tuple[dict[str, Any], dict[str, Any], dic
         "assignment_sha256": claim["assignment_sha256"],
         "run_prefix": claim["resume_run_prefix"],
         "role": claim["role"],
+        "claimed_at_utc": claim["claimed_at_utc"],
         "timeout": 120,
         "created_at": created_at,
     }
@@ -60,7 +61,9 @@ def test_valid_roundtrip_detached_and_boundary() -> None:
     assert res == req and res is not req
     assert req == req_snap and claim == claim_snap and exp == exp_snap
     res["schema_version"] = "MUTATED"
+    res["claimed_at_utc"] = "MUTATED"
     assert req["schema_version"] == "1.0"
+    assert req["claimed_at_utc"] == claim["claimed_at_utc"]
 
     claim_dt = datetime.fromisoformat(claim["claimed_at_utc"].replace("Z", "+00:00"))
     boundary_epoch = claim_dt.timestamp()
@@ -115,6 +118,7 @@ def test_bad_claim_expected_and_digest_rejected() -> None:
     ("mutator", "match_snip"),
     [
         (lambda r: r.pop("schema_version"), "request keys mismatch"),
+        (lambda r: r.pop("claimed_at_utc"), "request keys mismatch"),
         (lambda r: r.__setitem__("extra_key", 1), "request keys mismatch"),
         (lambda r: r.__setitem__("schema_version", "2.0"), "schema_version must be '1.0'"),
         (lambda r: r.__setitem__("request_type", "OTHER"), "request_type must be 'QUOTA_CONTINUATION'"),
@@ -164,6 +168,7 @@ def test_non_dict_request_rejected() -> None:
         ("assignment_sha256", "0" * 64),
         ("run_prefix", "qresume-other"),
         ("role", "verifier"),
+        ("claimed_at_utc", "2026-09-25T01:00:01Z"),
     ],
 )
 def test_lineage_field_mismatch_rejected(key: str, val: Any) -> None:
@@ -188,7 +193,7 @@ def test_build_quota_resume_request_success_and_detached() -> None:
     assert claim == claim_snap
     assert expected_claim == exp_snap
     assert req is not claim and req is not expected_claim
-    assert len(req) == 19
+    assert len(req) == 20
     assert req["schema_version"] == "1.0"
     assert req["request_type"] == "QUOTA_CONTINUATION"
     assert req["request_id"] == claim["resume_request_id"]
@@ -206,6 +211,7 @@ def test_build_quota_resume_request_success_and_detached() -> None:
     assert req["assignment_sha256"] == claim["assignment_sha256"]
     assert req["run_prefix"] == claim["resume_run_prefix"]
     assert req["role"] == claim["role"]
+    assert req["claimed_at_utc"] == claim["claimed_at_utc"]
     assert req["timeout"] == timeout
     assert req["created_at"] == now_epoch
 
@@ -213,7 +219,9 @@ def test_build_quota_resume_request_success_and_detached() -> None:
     assert validated == req and validated is not req
 
     req["schema_version"] = "MUTATED"
+    req["claimed_at_utc"] = "MUTATED"
     assert claim["schema_version"] == "1.0"
+    assert claim["claimed_at_utc"] != "MUTATED"
 
 
 def test_build_quota_resume_request_rejections() -> None:
@@ -258,3 +266,52 @@ def test_build_quota_resume_request_never_calls_system_clock(monkeypatch: pytest
     now_epoch = claim_dt.timestamp() + 10.0
     res = build_quota_resume_request(claim, exp, claim_sha, 60, now_epoch)
     assert res["created_at"] == now_epoch
+
+
+def test_claimed_at_utc_validation_negative_cases_and_drift() -> None:
+    req, claim, exp, sha, now = _build_valid_request_fixtures()
+    missing_req = dict(req)
+    del missing_req["claimed_at_utc"]
+    with pytest.raises(ResumeRequestRecordError, match="request keys mismatch: missing=\\['claimed_at_utc'\\]"):
+        validate_quota_resume_request(missing_req, claim, exp, sha, now)
+
+    alias_req = dict(req)
+    alias_req["claimed_at"] = alias_req.pop("claimed_at_utc")
+    with pytest.raises(ResumeRequestRecordError, match="request keys mismatch"):
+        validate_quota_resume_request(alias_req, claim, exp, sha, now)
+
+    extra_req = dict(req, extra_alias="2026-09-25T00:00:00Z")
+    with pytest.raises(ResumeRequestRecordError, match="request keys mismatch"):
+        validate_quota_resume_request(extra_req, claim, exp, sha, now)
+
+    claim_dt = datetime.fromisoformat(claim["claimed_at_utc"].replace("Z", "+00:00"))
+    drifted_sec = (claim_dt.second + 1) % 60
+    drifted_plus = claim_dt.replace(second=drifted_sec).strftime("%Y-%m-%dT%H:%M:%SZ")
+    drifted_req = dict(req, claimed_at_utc=drifted_plus)
+    with pytest.raises(ResumeRequestRecordError, match="Field 'claimed_at_utc' mismatch"):
+        validate_quota_resume_request(drifted_req, claim, exp, sha, now)
+
+    for noncanonical in ("2026-09-25 00:00:00", "2026-09-25T00:00:00+00:00", "invalid-iso", "2026-09-25T00:00:00"):
+        bad_ts_req = dict(req, claimed_at_utc=noncanonical)
+        with pytest.raises(ResumeRequestRecordError, match="Field 'claimed_at_utc' mismatch"):
+            validate_quota_resume_request(bad_ts_req, claim, exp, sha, now)
+
+    for bad_val in (True, False, 1758762000, 1758762000.5):
+        bad_type_req = dict(req, claimed_at_utc=bad_val)
+        with pytest.raises(ResumeRequestRecordError, match="Field 'claimed_at_utc' mismatch"):
+            validate_quota_resume_request(bad_type_req, claim, exp, sha, now)
+
+
+def test_request_created_at_legitimately_seconds_after_claim() -> None:
+    req, claim, exp, sha, _ = _build_valid_request_fixtures()
+    claim_dt = datetime.fromisoformat(claim["claimed_at_utc"].replace("Z", "+00:00"))
+    claim_epoch = claim_dt.timestamp()
+
+    post_claim_created_at = claim_epoch + 15.0
+    now_epoch = claim_epoch + 20.0
+    req["created_at"] = post_claim_created_at
+
+    res = validate_quota_resume_request(req, claim, exp, sha, now_epoch)
+    assert res["created_at"] == post_claim_created_at
+    assert res["claimed_at_utc"] == claim["claimed_at_utc"]
+    assert res["created_at"] != claim_epoch
