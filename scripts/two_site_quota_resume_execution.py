@@ -7,9 +7,10 @@ ordinary run_pipeline, auto-wake or live hook execution authority is granted.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 try:
     from scripts.two_site_proposal_pipeline import (
@@ -44,14 +45,18 @@ except ImportError:
     )
     from two_site_quota_resume_worker_reader import load_prior_worker_chain
 
-__all__ = ["prepare_verifier_continuation"]
+__all__ = [
+    "prepare_verifier_continuation",
+    "verifier_continuation_context",
+]
 
 
-def prepare_verifier_continuation(
+@contextmanager
+def verifier_continuation_context(
     root: Path,
     continuation_request: dict,
-) -> dict[str, Any]:
-    """Prepare detached verifier continuation context under pipeline_lock.
+) -> Iterator[dict[str, Any]]:
+    """Yield detached verifier continuation context while holding pipeline_lock.
 
     Lock-file creation (.pipeline.lock via pipeline_lock) is the only allowed persistence.
     Produces pure detached context without provider execution authority.
@@ -116,7 +121,7 @@ def prepare_verifier_continuation(
             sources_2,
         )
 
-        return {
+        yield {
             "continuation_run_prefix": admitted_2["run_prefix"],
             "original_run_prefix": artifacts["original_run_prefix"],
             "worker_run_id": artifacts["final_worker_run_id"],
@@ -138,3 +143,16 @@ def prepare_verifier_continuation(
             "task": copy.deepcopy(task_2),
             "sources": copy.deepcopy(sources_2),
         }
+
+
+def prepare_verifier_continuation(
+    root: Path,
+    continuation_request: dict,
+) -> dict[str, Any]:
+    """Prepare detached verifier continuation context under pipeline_lock.
+
+    Lock-file creation (.pipeline.lock via pipeline_lock) is the only allowed persistence.
+    Produces pure detached context without provider execution authority.
+    """
+    with verifier_continuation_context(root, continuation_request) as context:
+        return context

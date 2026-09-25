@@ -16,14 +16,20 @@ try:
     import scripts.two_site_proposal_runner as runner_mod
     import scripts.two_site_provider_broker as broker_mod
     import scripts.two_site_quota_resume_execution as target_mod
-    from scripts.two_site_quota_resume_execution import prepare_verifier_continuation
+    from scripts.two_site_quota_resume_execution import (
+        prepare_verifier_continuation,
+        verifier_continuation_context,
+    )
 except ImportError:
     from two_site_proposal_pipeline import ProposalError
     import two_site_proposal_pipeline as pipeline_mod
     import two_site_proposal_runner as runner_mod
     import two_site_provider_broker as broker_mod
     import two_site_quota_resume_execution as target_mod
-    from two_site_quota_resume_execution import prepare_verifier_continuation
+    from two_site_quota_resume_execution import (
+        prepare_verifier_continuation,
+        verifier_continuation_context,
+    )
 
 
 class TestTwoSiteQuotaResumeExecution(unittest.TestCase):
@@ -91,6 +97,71 @@ class TestTwoSiteQuotaResumeExecution(unittest.TestCase):
             self.assertEqual(ctx["original_receipt"]["request"]["id"], self.valid_req["original_request_id"])
             self.assertNotEqual(ctx.get("status"), "READY_FOR_CODEX")
             self.assertNotIn("READY_FOR_CODEX", ctx.values())
+
+    def test_verifier_continuation_context_holds_lock_during_body(self) -> None:
+        with self._default_patches() as mocks:
+            lock_cm = mocks["lock"].return_value
+            body_observed_lock = False
+
+            self.assertEqual(lock_cm.__enter__.call_count, 0)
+            self.assertEqual(lock_cm.__exit__.call_count, 0)
+
+            with verifier_continuation_context(self.root, self.valid_req) as ctx:
+                body_observed_lock = True
+                mocks["lock"].assert_called_once_with(self.root)
+                self.assertEqual(lock_cm.__enter__.call_count, 1)
+                self.assertEqual(lock_cm.__exit__.call_count, 0)
+                self.assertEqual(ctx["continuation_run_prefix"], "run_cont")
+                self.assertEqual(ctx["original_run_prefix"], "run_orig")
+                self.assertEqual(ctx["proposal_sha256"], "1" * 64)
+                self.assertEqual(ctx["source_head"], "1a3fe8984d52601ad13b881a21cc3069cb5a4b01")
+
+            self.assertTrue(body_observed_lock)
+            self.assertEqual(lock_cm.__enter__.call_count, 1)
+            self.assertEqual(lock_cm.__exit__.call_count, 1)
+
+    def test_verifier_continuation_context_releases_lock_on_exception(self) -> None:
+        with self._default_patches() as mocks:
+            lock_cm = mocks["lock"].return_value
+            self.assertEqual(lock_cm.__enter__.call_count, 0)
+            self.assertEqual(lock_cm.__exit__.call_count, 0)
+
+            with self.assertRaises(RuntimeError) as cm:
+                with verifier_continuation_context(self.root, self.valid_req) as ctx:
+                    self.assertEqual(lock_cm.__enter__.call_count, 1)
+                    self.assertEqual(lock_cm.__exit__.call_count, 0)
+                    self.assertEqual(ctx["continuation_run_prefix"], "run_cont")
+                    raise RuntimeError("caller body exception")
+
+            self.assertEqual(str(cm.exception), "caller body exception")
+            self.assertEqual(lock_cm.__enter__.call_count, 1)
+            self.assertEqual(lock_cm.__exit__.call_count, 1)
+
+    def test_verifier_continuation_context_rejects_before_lock(self) -> None:
+        bad_req = dict(self.valid_req, role="worker")
+        with (
+            patch.object(
+                target_mod,
+                "pipeline_lock",
+                side_effect=AssertionError("pipeline_lock should not be called"),
+            ) as mock_lock,
+            patch.object(
+                target_mod,
+                "validate_quota_continuation_request",
+                side_effect=AssertionError("admission should not be called"),
+            ) as mock_adm,
+        ):
+            with self.assertRaises(ProposalError):
+                with verifier_continuation_context("invalid_root", self.valid_req):
+                    pass
+            with self.assertRaises(ProposalError):
+                with verifier_continuation_context(self.root, "invalid_req"):
+                    pass
+            with self.assertRaises(ProposalError):
+                with verifier_continuation_context(self.root, bad_req):
+                    pass
+            mock_lock.assert_not_called()
+            mock_adm.assert_not_called()
 
     def test_reject_non_verifier_role(self) -> None:
         bad_req = dict(self.valid_req, role="worker")
