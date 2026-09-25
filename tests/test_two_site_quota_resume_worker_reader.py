@@ -177,3 +177,17 @@ class TestTwoSiteQuotaResumeWorkerReader(unittest.TestCase):
         (run_dir3 / "result.json").write_text("x" * (MAX_CONTEXT + 1024))
         with self.assertRaises(ProposalError):
             load_prior_worker_zero(self.root, self.task_path, art3)
+
+    def test_hardlink_result_rejected(self):
+        artifacts, run_dir = self._create_artifacts("run-hard-worker-0", orig_prefix="run-hard")
+        res_file = run_dir / "result.json"
+        link_target = self.root / "hardlink_result.json"
+        os.link(res_file, link_target)
+        self.assertEqual(os.stat(res_file).st_nlink, 2)
+        self.assertEqual(
+            hashlib.sha256(res_file.read_bytes()).hexdigest(),
+            artifacts["proposal_sha256"],
+        )
+        with self.assertRaises(ProposalError) as ctx:
+            load_prior_worker_zero(self.root, self.task_path, artifacts)
+        self.assertIn("hardlink", str(ctx.exception).lower())
