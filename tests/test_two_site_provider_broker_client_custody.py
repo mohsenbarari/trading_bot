@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -261,3 +262,92 @@ def test_client_custody_unlink_fault_surfaces(
     assert response_path.exists()
     request_file = requests_dir / f"{request['request_id']}.json"
     assert request_file.exists()
+
+
+def test_submit_request_prepublished_reservation_fails_closed_before_queue(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, request, response_path, requests_dir = _prepare_client_context(
+        broker_repo, "custody-dup-res"
+    )
+    request_file = requests_dir / f"{request['request_id']}.json"
+    cycle_id = request["controller_run_id"]
+    reservation_path = (
+        root / ".local/two-site-refactor/autopilot/runs" / cycle_id / "broker-reservation.json"
+    )
+
+    record = broker.publish_cycle_reservation(root, request)
+    assert record["request_id"] == request["request_id"]
+    assert reservation_path.is_file()
+    orig_bytes = reservation_path.read_bytes()
+
+    with pytest.raises(broker.BrokerError, match="broker reservation target already exists"):
+        broker._submit_request(root, request, 30, maintenance=False)
+
+    assert not request_file.exists()
+    assert not response_path.exists()
+    assert reservation_path.is_file()
+    assert reservation_path.read_bytes() == orig_bytes
+
+
+def test_submit_request_missing_startup_fails_closed_before_queue(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, request, response_path, requests_dir = _prepare_client_context(
+        broker_repo, "custody-no-startup"
+    )
+    request_file = requests_dir / f"{request['request_id']}.json"
+    cycle_id = request["controller_run_id"]
+    run_dir = root / ".local/two-site-refactor/autopilot/runs" / cycle_id
+    startup_file = run_dir / "preparation-startup.json"
+    reservation_path = run_dir / "broker-reservation.json"
+
+    startup_file.unlink()
+    assert not startup_file.exists()
+
+    with pytest.raises(broker.BrokerError):
+        broker._submit_request(root, request, 30, maintenance=False)
+
+    assert not request_file.exists()
+    assert not response_path.exists()
+    assert not reservation_path.exists()
+
+
+def test_submit_request_dir_fsync_fault_preserves_reservation_and_prevents_retry(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, request, response_path, requests_dir = _prepare_client_context(
+        broker_repo, "custody-dir-fsync"
+    )
+    request_file = requests_dir / f"{request['request_id']}.json"
+    cycle_id = request["controller_run_id"]
+    reservation_path = (
+        root / ".local/two-site-refactor/autopilot/runs" / cycle_id / "broker-reservation.json"
+    )
+
+    real_fsync = os.fsync
+    dir_fsync_called = False
+
+    def failing_dir_fsync(fd: int) -> None:
+        nonlocal dir_fsync_called
+        st = os.fstat(fd)
+        if stat.S_ISDIR(st.st_mode):
+            dir_fsync_called = True
+            raise OSError("simulated dir fsync failure")
+        real_fsync(fd)
+
+    with mock.patch.object(os, "fsync", side_effect=failing_dir_fsync):
+        with pytest.raises(broker.BrokerError):
+            broker._submit_request(root, request, 30, maintenance=False)
+
+    assert dir_fsync_called is True
+    assert reservation_path.is_file()
+    assert not request_file.exists()
+    assert not response_path.exists()
+
+    with pytest.raises(broker.BrokerError, match="broker reservation target already exists"):
+        broker._submit_request(root, request, 30, maintenance=False)
+
+    assert reservation_path.is_file()
+    assert not request_file.exists()
+    assert not response_path.exists()
