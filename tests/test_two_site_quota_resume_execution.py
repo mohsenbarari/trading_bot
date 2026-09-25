@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import ast
 from contextlib import contextmanager
+import inspect
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 try:
     from scripts.two_site_proposal_pipeline import ProposalError
+    import scripts.two_site_proposal_pipeline as pipeline_mod
+    import scripts.two_site_proposal_runner as runner_mod
+    import scripts.two_site_provider_broker as broker_mod
     import scripts.two_site_quota_resume_execution as target_mod
     from scripts.two_site_quota_resume_execution import prepare_verifier_continuation
 except ImportError:
     from two_site_proposal_pipeline import ProposalError
+    import two_site_proposal_pipeline as pipeline_mod
+    import two_site_proposal_runner as runner_mod
+    import two_site_provider_broker as broker_mod
     import two_site_quota_resume_execution as target_mod
     from two_site_quota_resume_execution import prepare_verifier_continuation
 
@@ -85,8 +94,22 @@ class TestTwoSiteQuotaResumeExecution(unittest.TestCase):
 
     def test_reject_non_verifier_role(self) -> None:
         bad_req = dict(self.valid_req, role="worker")
-        with self.assertRaises(ProposalError):
-            prepare_verifier_continuation(self.root, bad_req)
+        with (
+            patch.object(
+                target_mod,
+                "pipeline_lock",
+                side_effect=AssertionError("pipeline_lock should not be called"),
+            ) as mock_lock,
+            patch.object(
+                target_mod,
+                "validate_quota_continuation_request",
+                side_effect=AssertionError("admission should not be called"),
+            ) as mock_adm,
+        ):
+            with self.assertRaises(ProposalError):
+                prepare_verifier_continuation(self.root, bad_req)
+            mock_lock.assert_not_called()
+            mock_adm.assert_not_called()
         with self._default_patches() as mocks:
             mocks["adm"].return_value = (dict(self.valid_req, role="reviewer"), Path("task.json"), {})
             with self.assertRaises(ProposalError):
@@ -133,11 +156,94 @@ class TestTwoSiteQuotaResumeExecution(unittest.TestCase):
 
     def test_proves_no_provider_call(self) -> None:
         with self._default_patches():
-            provider_fn = MagicMock()
-            with patch("scripts.two_site_provider_broker.validate_request", provider_fn):
-                ctx = prepare_verifier_continuation(self.root, self.valid_req)
-                provider_fn.assert_not_called()
-                self.assertIsInstance(ctx, dict)
+            pipeline_entrypoint = (
+                "scripts.two_site_proposal_pipeline.run_provider_session"
+                if "scripts.two_site_proposal_pipeline" in sys.modules
+                else f"{pipeline_mod.__name__}.run_provider_session"
+            )
+            runner_entrypoint = (
+                "scripts.two_site_proposal_runner.run"
+                if "scripts.two_site_proposal_runner" in sys.modules
+                else f"{runner_mod.__name__}.run"
+            )
+            with (
+                patch(
+                    pipeline_entrypoint,
+                    side_effect=AssertionError("Provider entrypoint run_provider_session called"),
+                ) as mock_pipeline_run,
+                patch(
+                    runner_entrypoint,
+                    side_effect=AssertionError("Provider entrypoint runner.run called"),
+                ) as mock_runner_run,
+            ):
+                if hasattr(broker_mod, "execute_pipeline"):
+                    broker_entrypoint = (
+                        "scripts.two_site_provider_broker.execute_pipeline"
+                        if "scripts.two_site_provider_broker" in sys.modules
+                        else f"{broker_mod.__name__}.execute_pipeline"
+                    )
+                    with patch(
+                        broker_entrypoint,
+                        side_effect=AssertionError("Broker execute_pipeline called"),
+                    ) as mock_broker_exec:
+                        ctx = prepare_verifier_continuation(self.root, self.valid_req)
+                        mock_pipeline_run.assert_not_called()
+                        mock_runner_run.assert_not_called()
+                        mock_broker_exec.assert_not_called()
+                        self.assertIsInstance(ctx, dict)
+                else:
+                    ctx = prepare_verifier_continuation(self.root, self.valid_req)
+                    mock_pipeline_run.assert_not_called()
+                    mock_runner_run.assert_not_called()
+                    self.assertIsInstance(ctx, dict)
+
+    def test_static_ast_no_provider_or_broker_execution_imports_or_calls(self) -> None:
+        try:
+            source = inspect.getsource(target_mod)
+        except (OSError, TypeError):
+            source = Path(target_mod.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        imported_names: set[str] = set()
+        called_names: set[str] = set()
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported_names.add(alias.asname or alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                for alias in node.names:
+                    name = alias.asname or alias.name
+                    imported_names.add(name)
+                    if "runner" in mod and alias.name == "run":
+                        imported_names.add("runner_run")
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    called_names.add(node.func.id)
+                elif isinstance(node.func, ast.Attribute):
+                    called_names.add(node.func.attr)
+
+        forbidden_direct = {"run_provider_session", "runner_run"}
+        self.assertTrue(
+            forbidden_direct.isdisjoint(imported_names),
+            f"Preflight module imports forbidden symbols: {forbidden_direct & imported_names}",
+        )
+        self.assertTrue(
+            forbidden_direct.isdisjoint(called_names),
+            f"Preflight module calls forbidden symbols: {forbidden_direct & called_names}",
+        )
+
+        forbidden_broker_ops = {
+            name
+            for name in (imported_names | called_names)
+            if "submit" in name.lower() or "execute" in name.lower()
+        }
+        self.assertEqual(
+            forbidden_broker_ops,
+            set(),
+            f"Preflight module imports or calls Broker submit/execute operations: {forbidden_broker_ops}",
+        )
 
 
 if __name__ == "__main__":
