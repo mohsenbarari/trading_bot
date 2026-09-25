@@ -62,6 +62,232 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _CANONICAL_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 QUOTA_EVIDENCE_KEYS = frozenset({"kind", "provider", "model", "conversation_id", "reset_at_utc"})
 QUOTA_ATTEMPT_KEYS = frozenset({"role", "run_id", "status_sha256"})
+_QUOTA_CONTINUATION_KEYS = frozenset({
+    "schema_version",
+    "request_type",
+    "request_id",
+    "controller_run_id",
+    "original_controller_run_id",
+    "original_request_id",
+    "claim_sha256",
+    "original_wait_sha256",
+    "semantic_task_fingerprint",
+    "task_id",
+    "task_path",
+    "task_sha256",
+    "source_head",
+    "assignment_id",
+    "assignment_sha256",
+    "run_prefix",
+    "role",
+    "claimed_at_utc",
+    "timeout",
+    "created_at",
+})
+
+
+def _derive_verifier_resume_artifacts(
+    admitted_request: Mapping[str, Any],
+    validated_terminal_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Pure derivation of verifier resume artifacts from continuation request and terminal receipt."""
+    try:
+        from scripts.two_site_provider_broker import (
+            PIPELINE_QUOTA_KEYS,
+            RECEIPT_KEYS,
+            REQUEST_KEYS,
+        )
+    except ImportError:
+        from two_site_provider_broker import (
+            PIPELINE_QUOTA_KEYS,
+            RECEIPT_KEYS,
+            REQUEST_KEYS,
+        )
+
+    if not isinstance(admitted_request, dict):
+        raise ProposalError(f"admitted_request must be dict, got {type(admitted_request).__name__}")
+    if not isinstance(validated_terminal_receipt, dict):
+        raise ProposalError(
+            f"validated_terminal_receipt must be dict, got {type(validated_terminal_receipt).__name__}"
+        )
+
+    if set(admitted_request.keys()) != _QUOTA_CONTINUATION_KEYS:
+        raise ProposalError("admitted_request keys mismatch with QUOTA_CONTINUATION schema")
+
+    if admitted_request.get("schema_version") != "1.0":
+        raise ProposalError("admitted_request schema_version must be '1.0'")
+    if admitted_request.get("request_type") != "QUOTA_CONTINUATION":
+        raise ProposalError("admitted_request request_type must be 'QUOTA_CONTINUATION'")
+    if admitted_request.get("role") != "verifier":
+        raise ProposalError("admitted_request role must be 'verifier'")
+
+    if set(validated_terminal_receipt.keys()) != RECEIPT_KEYS:
+        raise ProposalError("validated_terminal_receipt keys mismatch with RECEIPT_KEYS")
+
+    receipt_req = validated_terminal_receipt.get("request")
+    if not isinstance(receipt_req, dict) or set(receipt_req.keys()) != REQUEST_KEYS:
+        raise ProposalError("receipt request keys mismatch with ordinary REQUEST_KEYS")
+
+    lineage_bindings = (
+        ("request_id", "original_request_id"),
+        ("controller_run_id", "original_controller_run_id"),
+        ("task_path", "task_path"),
+        ("task_sha256", "task_sha256"),
+        ("source_head", "source_head"),
+        ("assignment_id", "assignment_id"),
+        ("assignment_sha256", "assignment_sha256"),
+    )
+    for req_field, admitted_field in lineage_bindings:
+        req_val = receipt_req.get(req_field)
+        admitted_val = admitted_request.get(admitted_field)
+        if type(req_val) is not type(admitted_val) or req_val != admitted_val:
+            raise ProposalError(
+                f"Receipt request lineage field {req_field!r} mismatch: "
+                f"{req_val!r} != admitted {admitted_field!r} ({admitted_val!r})"
+            )
+
+    orig_run_prefix = receipt_req.get("run_prefix")
+    if not isinstance(orig_run_prefix, str) or not RUN_PREFIX_RE.fullmatch(orig_run_prefix):
+        raise ProposalError(f"receipt request run_prefix invalid: {orig_run_prefix!r}")
+
+    response = validated_terminal_receipt.get("response")
+    if not isinstance(response, dict):
+        raise ProposalError("receipt response must be dict")
+    stdout = response.get("stdout")
+    if not isinstance(stdout, str):
+        raise ProposalError("receipt response stdout must be str")
+
+    try:
+        pipeline_state = unique_json(stdout)
+    except Exception as exc:
+        raise ProposalError(f"failed to parse pipeline state from stdout: {exc}") from exc
+
+    if not isinstance(pipeline_state, dict) or set(pipeline_state.keys()) != PIPELINE_QUOTA_KEYS:
+        raise ProposalError("pipeline state keys mismatch with PIPELINE_QUOTA_KEYS")
+
+    if pipeline_state.get("state") != "TASK_BLOCKED":
+        raise ProposalError(f"pipeline state must be 'TASK_BLOCKED', got {pipeline_state.get('state')!r}")
+    if pipeline_state.get("blockers") != ["observational quota, no replay authority"]:
+        raise ProposalError(f"pipeline blockers sentinel mismatch: {pipeline_state.get('blockers')!r}")
+
+    for bound_field in ("task_id", "semantic_task_fingerprint", "source_head"):
+        state_val = pipeline_state.get(bound_field)
+        admitted_val = admitted_request.get(bound_field)
+        if type(state_val) is not type(admitted_val) or state_val != admitted_val:
+            raise ProposalError(
+                f"pipeline state field {bound_field!r} mismatch: {state_val!r} != {admitted_val!r}"
+            )
+
+    quota_attempt = pipeline_state.get("quota_attempt")
+    if not isinstance(quota_attempt, dict) or set(quota_attempt.keys()) != QUOTA_ATTEMPT_KEYS:
+        raise ProposalError("pipeline quota_attempt keys mismatch with QUOTA_ATTEMPT_KEYS")
+    if quota_attempt.get("role") != "verifier":
+        raise ProposalError(f"quota_attempt.role must be 'verifier', got {quota_attempt.get('role')!r}")
+
+    status_sha = quota_attempt.get("status_sha256")
+    if not isinstance(status_sha, str) or not SHA_PATTERN.fullmatch(status_sha):
+        raise ProposalError(f"quota_attempt.status_sha256 must be 64 lowercase hex, got {status_sha!r}")
+
+    verifier_run_id = quota_attempt.get("run_id")
+    if not isinstance(verifier_run_id, str):
+        raise ProposalError(f"quota_attempt.run_id must be str, got {type(verifier_run_id).__name__}")
+    verifier_match = re.fullmatch(
+        rf"^{re.escape(orig_run_prefix)}-(?:reviewer|verifier)-([0-2])(?:-retry-[12])?$",
+        verifier_run_id,
+    )
+    if not verifier_match:
+        raise ProposalError(
+            f"quota_attempt.run_id {verifier_run_id!r} does not match original run_prefix "
+            f"{orig_run_prefix!r} reviewer/verifier pattern"
+        )
+    verifier_index = int(verifier_match.group(1))
+
+    correction_count = pipeline_state.get("correction_count")
+    if type(correction_count) is not int or type(correction_count) is bool or not (0 <= correction_count <= 2):
+        raise ProposalError(f"correction_count must be exact int 0..2, got {correction_count!r}")
+
+    if verifier_index != correction_count:
+        raise ProposalError(
+            f"verifier index {verifier_index} does not match correction_count {correction_count}"
+        )
+
+    final_worker_run_id = pipeline_state.get("final_worker_run_id")
+    if not isinstance(final_worker_run_id, str):
+        raise ProposalError(f"final_worker_run_id must be str, got {type(final_worker_run_id).__name__}")
+    worker_match = re.fullmatch(
+        rf"^{re.escape(orig_run_prefix)}-worker-([0-2])(?:-retry-[12])?$",
+        final_worker_run_id,
+    )
+    if not worker_match:
+        raise ProposalError(
+            f"final_worker_run_id {final_worker_run_id!r} does not match original run_prefix "
+            f"{orig_run_prefix!r} worker pattern"
+        )
+    worker_index = int(worker_match.group(1))
+    if worker_index != correction_count:
+        raise ProposalError(
+            f"final_worker_run_id index {worker_index} does not match correction_count {correction_count}"
+        )
+
+    proposal_sha = pipeline_state.get("proposal_sha256")
+    if not isinstance(proposal_sha, str) or not SHA_PATTERN.fullmatch(proposal_sha):
+        raise ProposalError(f"proposal_sha256 must be 64 lowercase hex, got {proposal_sha!r}")
+
+    proposal_path = pipeline_state.get("proposal_path")
+    expected_proposal_path = f".local/two-site-refactor/proposals/{final_worker_run_id}/result.json"
+    if proposal_path != expected_proposal_path:
+        raise ProposalError(
+            f"proposal_path mismatch: {proposal_path!r} != {expected_proposal_path!r}"
+        )
+
+    if pipeline_state.get("pre_review_test_state") != "PASSED":
+        raise ProposalError(
+            f"pre_review_test_state must be 'PASSED', got {pipeline_state.get('pre_review_test_state')!r}"
+        )
+
+    test_sha = pipeline_state.get("pre_review_test_sha256")
+    if not isinstance(test_sha, str) or not SHA_PATTERN.fullmatch(test_sha):
+        raise ProposalError(f"pre_review_test_sha256 must be 64 lowercase hex, got {test_sha!r}")
+
+    test_path = pipeline_state.get("pre_review_test_path")
+    expected_test_path = f".local/two-site-refactor/pipeline/{orig_run_prefix}/pre-review-tests-{correction_count}.json"
+    if test_path != expected_test_path:
+        raise ProposalError(
+            f"pre_review_test_path mismatch: {test_path!r} != {expected_test_path!r}"
+        )
+
+    if pipeline_state.get("final_reviewer_run_id") is not None:
+        raise ProposalError(
+            f"final_reviewer_run_id must be None at blocked verifier, got {pipeline_state.get('final_reviewer_run_id')!r}"
+        )
+    if pipeline_state.get("reviewer_path") is not None:
+        raise ProposalError(
+            f"reviewer_path must be None at blocked verifier, got {pipeline_state.get('reviewer_path')!r}"
+        )
+
+    quota_evidence = pipeline_state.get("quota_evidence")
+    if not isinstance(quota_evidence, dict) or set(quota_evidence.keys()) != QUOTA_EVIDENCE_KEYS:
+        raise ProposalError("quota_evidence keys mismatch with QUOTA_EVIDENCE_KEYS")
+
+    return {
+        "task_id": pipeline_state["task_id"],
+        "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
+        "source_head": pipeline_state["source_head"],
+        "original_run_prefix": orig_run_prefix,
+        "correction_count": correction_count,
+        "final_worker_run_id": final_worker_run_id,
+        "proposal_path": proposal_path,
+        "proposal_sha256": proposal_sha,
+        "pre_review_test_path": test_path,
+        "pre_review_test_sha256": test_sha,
+        "pre_review_test_state": "PASSED",
+        "verifier_run_id": verifier_run_id,
+        "verifier_status_sha256": status_sha,
+        "quota_evidence": json.loads(json.dumps(quota_evidence)),
+    }
+
+
+derive_verifier_resume_artifacts = _derive_verifier_resume_artifacts
 
 
 class QuotaBlockError(ProposalError):
