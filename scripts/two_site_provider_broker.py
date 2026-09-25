@@ -2803,6 +2803,108 @@ def publish_cycle_reservation(root: Path, request: dict) -> dict:
                     raise BrokerError(f"cannot safely clean temporary reservation file: {exc}") from exc
 
 
+def read_cycle_reservation(root: Path, controller_run_id: str) -> dict:
+    if not isinstance(controller_run_id, str):
+        raise BrokerError("controller run ID must be a string")
+    if MAINTENANCE_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("cycle reservation rejects maintenance run ID; controller run ID must be a cycle run ID")
+    if not CYCLE_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("controller run ID must be a cycle run ID")
+
+    with _open_existing_cycle_run_directory(root, controller_run_id) as (
+        run_path, run_fd, verify_identity
+    ):
+        startup_payload, _startup_bytes = _read_cycle_private_json(
+            run_path, run_fd, "preparation-startup.json"
+        )
+        record_payload, raw_record_bytes = _read_cycle_private_json(
+            run_path, run_fd, "broker-reservation.json"
+        )
+
+        startup = _parse_cycle_preparation_startup(startup_payload, controller_run_id)
+        if startup_payload.get("schema_version") != 1 or type(startup_payload.get("schema_version")) is not int:
+            raise BrokerError("preparation startup schema version must be integer 1")
+        if getattr(startup, "schema_version", 1) != 1:
+            raise BrokerError("preparation startup schema version must be integer 1")
+        if startup.cycle_id != controller_run_id:
+            raise BrokerError("preparation startup cycle ID does not match controller run ID")
+
+        try:
+            canonical_bytes = json.dumps(
+                record_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (ValueError, TypeError) as exc:
+            raise BrokerError("broker reservation record cannot be canonically encoded") from exc
+        if canonical_bytes != raw_record_bytes:
+            raise BrokerError("broker reservation record is not byte-for-byte canonical JSON")
+
+        if set(record_payload) != {
+            "schema_version",
+            "controller_run_id",
+            "request_id",
+            "reservation",
+            "request_sha256",
+            "created_at",
+        }:
+            raise BrokerError("broker reservation record does not match the exact contract")
+
+        if record_payload.get("schema_version") != "1.0" or type(record_payload.get("schema_version")) is not str:
+            raise BrokerError("broker reservation schema version is invalid")
+        if record_payload.get("controller_run_id") != controller_run_id or type(record_payload.get("controller_run_id")) is not str:
+            raise BrokerError("broker reservation controller run ID mismatch")
+        request_id = record_payload.get("request_id")
+        if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+            raise BrokerError("broker reservation request ID is invalid")
+
+        reservation = record_payload.get("reservation")
+        if not isinstance(reservation, dict) or set(reservation) != RESERVATION_KEYS:
+            raise BrokerError("broker reservation does not match the exact contract")
+        for key in RESERVATION_KEYS:
+            val = reservation[key]
+            if type(val) is not str:
+                raise BrokerError(f"broker reservation field {key} must be a string")
+
+        if reservation["controller_run_id"] != controller_run_id:
+            raise BrokerError("reservation controller run ID mismatch")
+        if not RUN_PREFIX_RE.fullmatch(reservation["run_prefix"]):
+            raise BrokerError("reservation run-prefix is invalid")
+        task_rel = _task_relative_path(reservation["task_path"])
+        if task_rel.as_posix() != reservation["task_path"]:
+            raise BrokerError("reservation task_path is not canonical")
+        if not SHA_RE.fullmatch(reservation["task_sha256"]):
+            raise BrokerError("reservation task SHA is invalid")
+        if not HEAD_RE.fullmatch(reservation["source_head"]):
+            raise BrokerError("reservation source HEAD is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", reservation["assignment_id"]):
+            raise BrokerError("reservation assignment ID is invalid")
+        if not SHA_RE.fullmatch(reservation["assignment_sha256"]):
+            raise BrokerError("reservation assignment SHA is invalid")
+
+        request_sha256 = record_payload.get("request_sha256")
+        if not isinstance(request_sha256, str) or not SHA_RE.fullmatch(request_sha256):
+            raise BrokerError("broker reservation request SHA is invalid")
+
+        created_at = record_payload.get("created_at")
+        if (
+            not isinstance(created_at, (int, float))
+            or isinstance(created_at, bool)
+            or not math.isfinite(created_at)
+        ):
+            raise BrokerError("broker reservation created_at is invalid")
+
+        if reservation["source_head"] != startup.source_head:
+            raise BrokerError("reservation source HEAD does not match preparation startup")
+        if reservation["assignment_sha256"] != startup.assignment_sha256:
+            raise BrokerError("reservation assignment SHA does not match preparation startup")
+
+        verify_identity()
+        return record_payload
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
