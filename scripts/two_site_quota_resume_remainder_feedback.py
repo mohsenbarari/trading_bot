@@ -21,6 +21,25 @@ except ImportError:
         validate_correction_feedback,
     )
 
+try:
+    from scripts.two_site_pre_review_receipt import (
+        SandboxError,
+        validate_test_receipt,
+    )
+except ImportError:
+    try:
+        from two_site_pre_review_receipt import (
+            SandboxError,
+            validate_test_receipt,
+        )
+    except ImportError:
+        try:
+            from scripts.two_site_agent_sandbox import SandboxError
+            from scripts.two_site_pre_review_receipt import validate_test_receipt
+        except ImportError:
+            from two_site_agent_sandbox import SandboxError
+            from two_site_pre_review_receipt import validate_test_receipt
+
 __all__ = [
     "ProposalError",
     "build_reviewer_correction_feedback",
@@ -85,26 +104,20 @@ def build_reviewer_correction_feedback(
             raise ProposalError(f"recurring normalized findings: {finding}")
         current_seen_norm.add(norm)
 
-    if not isinstance(receipt, Mapping) or isinstance(receipt, (str, bytes)):
-        raise ProposalError("receipt must be a mapping")
-
-    if receipt.get("state") != "PASSED":
-        raise ProposalError("receipt state must be PASSED")
-    if receipt.get("proposal_sha256") != worker_sha:
-        raise ProposalError("receipt proposal_sha256 does not match worker_sha")
-
-    raw_selectors = receipt.get("selectors")
-    if not isinstance(raw_selectors, list) or not (1 <= len(raw_selectors) <= MAX_SELECTORS):
-        raise ProposalError(f"receipt selectors must be a non-empty list of up to {MAX_SELECTORS} entries")
-    for sel in raw_selectors:
-        if not isinstance(sel, str) or not sel.strip():
-            raise ProposalError("receipt selectors entries must be non-empty strings")
+    try:
+        norm_receipt = validate_test_receipt(
+            receipt,
+            worker_sha,
+            require_passed=True,
+        )
+    except SandboxError as exc:
+        raise ProposalError(f"invalid test receipt: {exc}") from exc
 
     new_seen.update(current_seen_norm)
 
     evidence_str = (
         f"receipt_sha256={receipt_sha} proposal_sha256={worker_sha} "
-        f"selector_count={len(raw_selectors)}"
+        f"selector_count={len(norm_receipt['selectors'])}"
     )
 
     feedback_payload: dict[str, Any] = {

@@ -10,6 +10,25 @@ from scripts.two_site_quota_resume_remainder_feedback import (
     build_reviewer_correction_feedback,
 )
 
+try:
+    from scripts.two_site_pre_review_receipt import (
+        SandboxError,
+        validate_test_receipt,
+    )
+except ImportError:
+    try:
+        from two_site_pre_review_receipt import (
+            SandboxError,
+            validate_test_receipt,
+        )
+    except ImportError:
+        try:
+            from scripts.two_site_agent_sandbox import SandboxError
+            from scripts.two_site_pre_review_receipt import validate_test_receipt
+        except ImportError:
+            from two_site_agent_sandbox import SandboxError
+            from two_site_pre_review_receipt import validate_test_receipt
+
 
 class TestTwoSiteQuotaResumeRemainderFeedback(unittest.TestCase):
     """Unit test suite validating reviewer correction feedback behavior."""
@@ -28,7 +47,13 @@ class TestTwoSiteQuotaResumeRemainderFeedback(unittest.TestCase):
             "state": "PASSED",
             "proposal_sha256": self.worker_sha,
             "selectors": ["tests/test_foo.py", "tests/test_bar.py"],
+            "unsupported_specs": [],
             "returncode": 0,
+            "stdout_tail": "",
+            "stderr_tail": "",
+            "snapshot_files": 2,
+            "snapshot_bytes": 1024,
+            "isolation": "bwrap:ro-source,empty-home,clearenv,unshare-all",
         }
         self.seen_norm_findings = {"prior issue already fixed"}
 
@@ -180,23 +205,162 @@ class TestTwoSiteQuotaResumeRemainderFeedback(unittest.TestCase):
                         self.seen_norm_findings,
                     )
 
-    def test_invalid_receipt_state_and_selectors(self) -> None:
-        cases = [
-            {"state": "FAILED", "proposal_sha256": self.worker_sha, "selectors": ["test"]},
-            {"state": "PASSED", "proposal_sha256": "f" * 64, "selectors": ["test"]},
-            {"state": "PASSED", "proposal_sha256": self.worker_sha, "selectors": []},
-            {"state": "PASSED", "proposal_sha256": self.worker_sha, "selectors": "not-list"},
-            {"state": "PASSED", "proposal_sha256": self.worker_sha, "selectors": [""]},
-            {"state": "PASSED", "proposal_sha256": self.worker_sha, "selectors": ["   "]},
-            {"state": "PASSED", "proposal_sha256": self.worker_sha, "selectors": [123]},
-        ]
-        for receipt in cases:
-            with self.subTest(receipt=receipt):
+    def test_unmocked_validator_accepts_valid_fixture(self) -> None:
+        norm = validate_test_receipt(self.valid_receipt, self.worker_sha, require_passed=True)
+        self.assertEqual(norm["state"], "PASSED")
+        self.assertEqual(norm["proposal_sha256"], self.worker_sha)
+        self.assertEqual(norm["selectors"], ["tests/test_foo.py", "tests/test_bar.py"])
+        self.assertEqual(norm["unsupported_specs"], [])
+        self.assertEqual(norm["returncode"], 0)
+        self.assertEqual(norm["stdout_tail"], "")
+        self.assertEqual(norm["stderr_tail"], "")
+        self.assertEqual(norm["snapshot_files"], 2)
+        self.assertEqual(norm["snapshot_bytes"], 1024)
+        self.assertEqual(norm["isolation"], "bwrap:ro-source,empty-home,clearenv,unshare-all")
+
+    def test_unmocked_validator_rejects_missing_and_extra_keys(self) -> None:
+        for missing_key in self.valid_receipt:
+            with self.subTest(missing_key=missing_key):
+                bad = {k: v for k, v in self.valid_receipt.items() if k != missing_key}
+                with self.assertRaises(SandboxError):
+                    validate_test_receipt(bad, self.worker_sha, require_passed=True)
                 with self.assertRaises(ProposalError):
                     build_reviewer_correction_feedback(
                         self.valid_reviewer_result,
                         self.worker_sha,
-                        receipt,
+                        bad,
+                        self.receipt_sha,
+                        0,
+                        self.seen_norm_findings,
+                    )
+        extra = {**self.valid_receipt, "unexpected": "value"}
+        with self.assertRaises(SandboxError):
+            validate_test_receipt(extra, self.worker_sha, require_passed=True)
+        with self.assertRaises(ProposalError):
+            build_reviewer_correction_feedback(
+                self.valid_reviewer_result,
+                self.worker_sha,
+                extra,
+                self.receipt_sha,
+                0,
+                self.seen_norm_findings,
+            )
+
+    def test_unmocked_validator_rejects_wrong_returncode(self) -> None:
+        bad_rcs = [1, -1, True, False, "0", None]
+        for rc in bad_rcs:
+            with self.subTest(rc=rc):
+                bad = {**self.valid_receipt, "returncode": rc}
+                with self.assertRaises(SandboxError):
+                    validate_test_receipt(bad, self.worker_sha, require_passed=True)
+                with self.assertRaises(ProposalError):
+                    build_reviewer_correction_feedback(
+                        self.valid_reviewer_result,
+                        self.worker_sha,
+                        bad,
+                        self.receipt_sha,
+                        0,
+                        self.seen_norm_findings,
+                    )
+
+    def test_unmocked_validator_rejects_unsupported_specs(self) -> None:
+        bad_specs = [
+            "not-a-list",
+            [""],
+            [123],
+            ["spec-a", "spec-a"],
+            [f"spec_{i}" for i in range(33)],
+        ]
+        for specs in bad_specs:
+            with self.subTest(specs=specs):
+                bad = {**self.valid_receipt, "unsupported_specs": specs}
+                with self.assertRaises(SandboxError):
+                    validate_test_receipt(bad, self.worker_sha, require_passed=True)
+                with self.assertRaises(ProposalError):
+                    build_reviewer_correction_feedback(
+                        self.valid_reviewer_result,
+                        self.worker_sha,
+                        bad,
+                        self.receipt_sha,
+                        0,
+                        self.seen_norm_findings,
+                    )
+
+    def test_unmocked_validator_rejects_duplicate_and_invalid_selectors(self) -> None:
+        bad_selectors = [
+            [],
+            "not-a-list",
+            ["not_a_test_selector"],
+            ["tests/test_foo.py", "tests/test_foo.py"],
+            [""],
+            [123],
+        ]
+        for sel in bad_selectors:
+            with self.subTest(selectors=sel):
+                bad = {**self.valid_receipt, "selectors": sel}
+                with self.assertRaises(SandboxError):
+                    validate_test_receipt(bad, self.worker_sha, require_passed=True)
+                with self.assertRaises(ProposalError):
+                    build_reviewer_correction_feedback(
+                        self.valid_reviewer_result,
+                        self.worker_sha,
+                        bad,
+                        self.receipt_sha,
+                        0,
+                        self.seen_norm_findings,
+                    )
+
+    def test_unmocked_validator_rejects_bad_snapshot_types(self) -> None:
+        bad_values = [-1, True, False, "10", None]
+        for key in ("snapshot_files", "snapshot_bytes"):
+            for val in bad_values:
+                with self.subTest(key=key, val=val):
+                    bad = {**self.valid_receipt, key: val}
+                    with self.assertRaises(SandboxError):
+                        validate_test_receipt(bad, self.worker_sha, require_passed=True)
+                    with self.assertRaises(ProposalError):
+                        build_reviewer_correction_feedback(
+                            self.valid_reviewer_result,
+                            self.worker_sha,
+                            bad,
+                            self.receipt_sha,
+                            0,
+                            self.seen_norm_findings,
+                        )
+
+    def test_unmocked_validator_rejects_mismatch_sha(self) -> None:
+        for bad_sha in ("c" * 64, "not-a-sha", "A" * 64, ""):
+            with self.subTest(bad_sha=bad_sha):
+                bad = {**self.valid_receipt, "proposal_sha256": bad_sha}
+                with self.assertRaises(SandboxError):
+                    validate_test_receipt(bad, self.worker_sha, require_passed=True)
+                with self.assertRaises(ProposalError):
+                    build_reviewer_correction_feedback(
+                        self.valid_reviewer_result,
+                        self.worker_sha,
+                        bad,
+                        self.receipt_sha,
+                        0,
+                        self.seen_norm_findings,
+                    )
+
+    def test_unmocked_validator_rejects_failed_state(self) -> None:
+        cases = [
+            {"state": "FAILED", "returncode": 1},
+            {"state": "FAILED", "returncode": 0},
+            {"state": "UNKNOWN", "returncode": 0},
+            {"state": 123, "returncode": 0},
+        ]
+        for patch in cases:
+            with self.subTest(patch=patch):
+                bad = {**self.valid_receipt, **patch}
+                with self.assertRaises(SandboxError):
+                    validate_test_receipt(bad, self.worker_sha, require_passed=True)
+                with self.assertRaises(ProposalError):
+                    build_reviewer_correction_feedback(
+                        self.valid_reviewer_result,
+                        self.worker_sha,
+                        bad,
                         self.receipt_sha,
                         0,
                         self.seen_norm_findings,
