@@ -1,6 +1,6 @@
 # AE04 inventory reader mismatch (2026-09-24)
 
-Status: **CONFIRMED READ-ONLY FAILURE; NO CODE FIX APPLIED**. On clean `refactor/two-site-architecture` at `a076e1e14e9d116d9f2ee7568c5e5e0d6e9d1590`, the real command
+Status: **REPAIRED AND ACCEPTED ON 2026-09-25; HISTORICAL FAILURE BELOW**. On clean `refactor/two-site-architecture` at `a076e1e14e9d116d9f2ee7568c5e5e0d6e9d1590`, the real command
 
 ```sh
 APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
@@ -30,3 +30,11 @@ A tracked-code search found one implementation path for this canonical manifest:
 Acceptance must therefore test both the pure reader **and** the real CLI on the current committed manifest, keep five-source fixtures green, and run the read-bound suite after adding continuation 4. A passing continuation-4 provenance test alone is not an end-to-end reader acceptance signal.
 
 Focused baseline at this HEAD: `pytest -q tests/test_two_site_canonical_evidence_inspect.py tests/test_two_site_canonical_evidence_read_bounds.py tests/test_two_site_inventory_display.py tests/test_p1_00b_characterization_recent_inventory_continuation_4.py` gives **1 failed, 30 passed**. The failure is `test_real_worktree_baseline`, which expects `VALID` but gets `INVENTORY_INCONSISTENT` for the current repository; the 30 passing fixture/provenance cases do not negate it. The repair must turn this exact test green without weakening the fail-closed corruption tests.
+
+## Acceptance checkpoint (2026-09-25 UTC)
+
+The first combined code+tests task 121 hit `MODEL_OUTPUT_TRUNCATED` before a proposal; zero bytes were applied. Rescoped reader-only task 122 used two Worker corrections for old-fixture semantics, then independent Reviewer verified proposal SHA `193865e3abba67326604eb0e4aa62fd8b9090856b4bd82b71e4ac4f8750bd6cb`. Codex checked exact applied bytes, 31 focused tests and the real CLI, then committed `74b6815682a6517711405e7ae5c854e99e38dc3b`. The reader now accepts exactly five or six known source keys, validates continuation-4 predecessor lineage, and verifies historical provenance at the old ancestor blob without counting it as current coverage.
+
+Test-only task 123 needed one Worker correction for fixture errors; Codex accepted proposal SHA `d7481d519774bef0491825c6b6d98db609f57081ad8faa720ddf9bc30d7c9b1c` after 44 independent focused tests, commit `58f8beae991800d8eca0ef20357c375b6943b42f`. Codex found an overclaim in Reviewer wording: the CLI test sliced stdout only after unbounded `capture_output`. Narrow task 124 corrected capture with the existing streaming hard cap and replaced a nonexistent-hash ancestry test with a real side-branch commit. Proposal SHA `97c68c47871eebf6dccbd0d330a400856af3efa18978ae5987414732f11d0ea8`, 45 independent tests, commit `0983fae6d7eef3fb3de27a30aa6a99f2a5b8a568`.
+
+At committed HEAD `0983fae6`, the exact real CLI request for `BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183` returns `status=VALID`, `seed_count=465`, and `requested_coverage=PROVEN_FOR_REQUESTED_SCENARIO`; the integration tree is clean. No inventory source, baseline, product, production or Supervisor runtime was changed. This closes the AE04 reader regression, not AE03 quota recovery or the empirical efficiency assessment.

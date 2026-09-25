@@ -11,7 +11,7 @@ These are **not matched cohorts** and `task_context` is not an end-to-end measur
 ## Gate consequence
 
 - AE05: no draft queue, speculative snapshot or overlap hook is activated. Continue single-task serial preparation. Revisit only after instrumentation separately measures build/preflight/context latency and a comparable accepted-work cohort shows that latency is material relative to Provider waiting and discarded-draft cost.
-- AE06: keep one Worker and one Git/Writer owner. AE03 no-replay recovery and AE04 current inventory-reader validity are open; immutable-base, conflict and global-reservation contracts for two lanes are not proven. Do not weaken HEAD checks or locks to force parallelism.
+- AE06: keep one Worker and one Git/Writer owner. AE03 no-replay recovery is open; AE04 reader validity was repaired on 2026-09-25, but immutable-base, conflict and global-reservation contracts for two lanes are not proven. Do not weaken HEAD checks or locks to force parallelism.
 - Re-evaluate with at least 10 comparable accepted units, including failed attempts, discarded drafts, Codex uncached/cached/output tokens, Gemini usage and active/calendar time. A pilot must preserve all review, tests, semantic identity and STOP gates. If measurement remains insufficient, the serial decision stands.
 
 This decision can close the **current activation question** for AE05/AE06 without shipping complexity lacking evidence. It does not close AE03, AE04 or the empirical acceptance of the whole optimization plan.
