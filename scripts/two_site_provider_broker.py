@@ -2635,6 +2635,174 @@ def _parse_cycle_preparation_startup(
     return parsed
 
 
+def publish_cycle_reservation(root: Path, request: dict) -> dict:
+    if not isinstance(request, dict):
+        raise BrokerError("claimed broker request does not match the exact contract")
+    req_id = request.get("request_id")
+    if not isinstance(req_id, str):
+        req_id = ""
+    _validate_claimed_request_shape(request, req_id)
+
+    controller_run_id = request["controller_run_id"]
+    if MAINTENANCE_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("cycle reservation rejects maintenance run ID; controller run ID must be a cycle run ID")
+    if not CYCLE_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("controller run ID must be a cycle run ID")
+
+    with _open_existing_cycle_run_directory(root, controller_run_id) as (
+        run_path, run_fd, verify_identity
+    ):
+        startup_payload, _startup_bytes = _read_cycle_private_json(
+            run_path, run_fd, "preparation-startup.json"
+        )
+        startup = _parse_cycle_preparation_startup(startup_payload, controller_run_id)
+        if startup.source_head != request["source_head"]:
+            raise BrokerError("preparation startup source HEAD does not match request")
+        if startup.assignment_sha256 != request["assignment_sha256"]:
+            raise BrokerError("preparation startup assignment SHA does not match request")
+
+        target_filename = "broker-reservation.json"
+        target_path = run_path / target_filename
+        try:
+            os.stat(target_filename, dir_fd=run_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise BrokerError(f"cannot stat broker reservation via dir_fd: {exc}") from exc
+        else:
+            raise BrokerError("broker reservation target already exists")
+
+        if os.path.lexists(target_path):
+            raise BrokerError("broker reservation target already exists")
+
+        reservation = {
+            "controller_run_id": request["controller_run_id"],
+            "run_prefix": request["run_prefix"],
+            "task_path": request["task_path"],
+            "task_sha256": request["task_sha256"],
+            "source_head": request["source_head"],
+            "assignment_id": request["assignment_id"],
+            "assignment_sha256": request["assignment_sha256"],
+        }
+
+        try:
+            request_canonical = json.dumps(
+                request,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (ValueError, TypeError) as exc:
+            raise BrokerError("request contains non-finite numbers") from exc
+
+        request_sha256 = hashlib.sha256(request_canonical).hexdigest()
+
+        record = {
+            "schema_version": "1.0",
+            "controller_run_id": request["controller_run_id"],
+            "request_id": request["request_id"],
+            "reservation": reservation,
+            "request_sha256": request_sha256,
+            "created_at": request["created_at"],
+        }
+
+        try:
+            encoded_record = json.dumps(
+                record,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (ValueError, TypeError) as exc:
+            raise BrokerError("record contains non-finite numbers") from exc
+
+        if len(encoded_record) > 4096:
+            raise BrokerError("broker reservation record exceeds maximum 4096 bytes")
+
+        verify_identity()
+
+        temp_filename = f".{target_filename}.{uuid.uuid4().hex}.tmp"
+        temp_fd = -1
+        linked = False
+        try:
+            temp_flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            try:
+                temp_fd = os.open(temp_filename, temp_flags, 0o600, dir_fd=run_fd)
+            except OSError as exc:
+                raise BrokerError(f"cannot safely open temporary reservation file: {exc}") from exc
+
+            try:
+                view = memoryview(encoded_record)
+                while view:
+                    written = os.write(temp_fd, view)
+                    if written <= 0:
+                        raise BrokerError("broker reservation write made no progress")
+                    view = view[written:]
+                os.fchmod(temp_fd, 0o600)
+                os.fsync(temp_fd)
+            finally:
+                try:
+                    os.close(temp_fd)
+                except OSError as exc:
+                    if sys.exc_info()[1] is None:
+                        raise BrokerError(f"cannot safely close temporary reservation file: {exc}") from exc
+                temp_fd = -1
+
+            try:
+                os.link(
+                    temp_filename,
+                    target_filename,
+                    src_dir_fd=run_fd,
+                    dst_dir_fd=run_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as exc:
+                raise BrokerError("broker reservation target already exists") from exc
+            except OSError as exc:
+                raise BrokerError(f"cannot safely link broker reservation: {exc}") from exc
+            linked = True
+
+            try:
+                os.unlink(temp_filename, dir_fd=run_fd)
+            except OSError as exc:
+                raise BrokerError(f"cannot safely unlink temporary reservation file: {exc}") from exc
+
+            try:
+                os.fsync(run_fd)
+            except OSError as exc:
+                raise BrokerError(f"cannot fsync run directory: {exc}") from exc
+
+            read_payload, read_bytes = _read_cycle_private_json(run_path, run_fd, target_filename)
+            if read_bytes != encoded_record:
+                raise BrokerError("broker reservation readback byte mismatch")
+            if read_payload != record:
+                raise BrokerError("broker reservation readback record mismatch")
+
+            verify_identity()
+            return record
+        finally:
+            if temp_fd >= 0:
+                try:
+                    os.close(temp_fd)
+                except OSError:
+                    pass
+            if not linked:
+                try:
+                    os.unlink(temp_filename, dir_fd=run_fd)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise BrokerError(f"cannot safely clean temporary reservation file: {exc}") from exc
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
