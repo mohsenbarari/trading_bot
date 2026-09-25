@@ -41,7 +41,8 @@ try:
 except ImportError:
     from two_site_quota_resume_worker_paths import validate_prior_worker_paths
 
-DEFAULT_MAX_FEEDBACK_BYTES = 65536
+MAX_FEEDBACK_BYTES = 65536
+DEFAULT_MAX_FEEDBACK_BYTES = MAX_FEEDBACK_BYTES
 
 FORBIDDEN_ALIAS_KEYS = frozenset(
     {"attempted_index", "original_prefix", "prior_worker_id", "prior_reviewer_id"}
@@ -67,7 +68,6 @@ def load_bound_correction_feedback(
     artifacts: Mapping[str, Any],
     reviewer_result: Mapping[str, Any],
     test_receipt: Mapping[str, Any],
-    max_bytes: int = DEFAULT_MAX_FEEDBACK_BYTES,
 ) -> tuple[dict[str, Any], str, str]:
     """Validate and load bound correction feedback for Worker resume (read-only)."""
     if not isinstance(root, (Path, str)):
@@ -162,7 +162,7 @@ def load_bound_correction_feedback(
     raw_bytes = bounded_file_bytes(
         root=root_path,
         path=Path(feedback_rel_path),
-        limit=max_bytes,
+        limit=MAX_FEEDBACK_BYTES,
         label="correction feedback",
     )
     raw_sha = hashlib.sha256(raw_bytes).hexdigest()

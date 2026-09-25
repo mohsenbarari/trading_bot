@@ -11,7 +11,10 @@ import pytest
 
 from scripts.two_site_pre_review_receipt import SandboxError
 from scripts.two_site_proposal_pipeline import ProposalError
-from scripts.two_site_quota_resume_worker_feedback import load_bound_correction_feedback
+from scripts.two_site_quota_resume_worker_feedback import (
+    MAX_FEEDBACK_BYTES,
+    load_bound_correction_feedback,
+)
 
 
 def _make_artifacts(
@@ -266,6 +269,20 @@ def test_negative_symlink_hardlink_oversize():
 
         # Oversize
         fb_path.unlink()
-        fb_path.write_bytes(json.dumps(fb_data).encode("utf-8"))
+        fb_path.write_bytes(b"x" * (MAX_FEEDBACK_BYTES + 1))
         with pytest.raises(ProposalError, match="budget"):
-            load_bound_correction_feedback(root, art, rev_res, receipt, max_bytes=10)
+            load_bound_correction_feedback(root, art, rev_res, receipt)
+
+
+def test_reject_symlink_hardlink_and_oversize():
+    test_negative_symlink_hardlink_oversize()
+
+
+def test_reject_max_bytes_keyword_argument():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        art = _make_artifacts()
+        rev_res = {"status": "CHANGES_REQUIRED", "findings": ["fix"]}
+        receipt = _make_receipt(art["proposal_sha256"])
+        with pytest.raises(TypeError, match="max_bytes"):
+            load_bound_correction_feedback(root, art, rev_res, receipt, max_bytes=65536)
