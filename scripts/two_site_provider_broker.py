@@ -2355,6 +2355,127 @@ def find_terminal_quota_for_reservation(
     return c4b1_response
 
 
+def _verify_pinned_directory(
+    path: Path,
+    fd: int,
+    *,
+    is_final: bool,
+    expected_dev: int | None = None,
+    expected_ino: int | None = None,
+) -> tuple[int, int]:
+    try:
+        lstat_info = os.lstat(path)
+    except OSError as exc:
+        raise BrokerError(f"cannot lstat directory {path}: {exc}") from exc
+    if not stat.S_ISDIR(lstat_info.st_mode) or stat.S_ISLNK(lstat_info.st_mode):
+        raise BrokerError(f"directory {path} must be a directory and not a symlink")
+    if lstat_info.st_uid != os.geteuid():
+        raise BrokerError(f"directory {path} is not owned by current euid")
+
+    try:
+        fstat_info = os.fstat(fd)
+    except OSError as exc:
+        raise BrokerError(f"cannot fstat directory descriptor for {path}: {exc}") from exc
+    if not stat.S_ISDIR(fstat_info.st_mode):
+        raise BrokerError(f"directory descriptor for {path} is not a directory")
+    if fstat_info.st_uid != os.geteuid():
+        raise BrokerError(f"directory descriptor for {path} is not owned by current euid")
+
+    if is_final:
+        if stat.S_IMODE(lstat_info.st_mode) != 0o700:
+            raise BrokerError(f"run directory {path} mode must be 0700")
+        if stat.S_IMODE(fstat_info.st_mode) != 0o700:
+            raise BrokerError(f"run directory descriptor for {path} mode must be 0700")
+    else:
+        if stat.S_IMODE(lstat_info.st_mode) & 0o022 != 0:
+            raise BrokerError(f"directory {path} has group or world write bits")
+        if stat.S_IMODE(fstat_info.st_mode) & 0o022 != 0:
+            raise BrokerError(f"directory descriptor for {path} has group or world write bits")
+
+    if (fstat_info.st_dev, fstat_info.st_ino) != (lstat_info.st_dev, lstat_info.st_ino):
+        raise BrokerError(f"directory descriptor for {path} does not match path")
+
+    if expected_dev is not None and expected_ino is not None:
+        if (
+            (fstat_info.st_dev, fstat_info.st_ino) != (expected_dev, expected_ino)
+            or (lstat_info.st_dev, lstat_info.st_ino) != (expected_dev, expected_ino)
+        ):
+            raise BrokerError(f"directory {path} identity changed")
+
+    return fstat_info.st_dev, fstat_info.st_ino
+
+
+@contextmanager
+def _open_existing_cycle_run_directory(
+    root: Path, controller_run_id: str
+):
+    if not isinstance(root, Path):
+        raise BrokerError("broker root must be a Path")
+    root = canonical_root(root)
+    if not isinstance(controller_run_id, str) or not CYCLE_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("controller run ID must be a cycle run ID")
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptors: list[int] = []
+    pinned: list[tuple[Path, int, bool, int, int]] = []
+    closed = False
+
+    def verify_identity() -> None:
+        if closed:
+            raise BrokerError("cycle run directory context is closed")
+        for p, d, fin, exp_dev, exp_ino in pinned:
+            _verify_pinned_directory(
+                p,
+                d,
+                is_final=fin,
+                expected_dev=exp_dev,
+                expected_ino=exp_ino,
+            )
+
+    try:
+        try:
+            root_fd = os.open(root, flags)
+        except OSError as exc:
+            raise BrokerError(f"cannot safely open root directory: {exc}") from exc
+        descriptors.append(root_fd)
+        dev, ino = _verify_pinned_directory(root, root_fd, is_final=False)
+        pinned.append((root, root_fd, False, dev, ino))
+
+        current_path = root
+        parent_fd = root_fd
+        components = [".local", "two-site-refactor", "autopilot", "runs", controller_run_id]
+        for idx, comp in enumerate(components):
+            current_path = current_path / comp
+            is_final = (idx == len(components) - 1)
+            try:
+                comp_fd = os.open(comp, flags, dir_fd=parent_fd)
+            except OSError as exc:
+                raise BrokerError(f"cannot safely open directory {comp}: {exc}") from exc
+            descriptors.append(comp_fd)
+            dev, ino = _verify_pinned_directory(current_path, comp_fd, is_final=is_final)
+            pinned.append((current_path, comp_fd, is_final, dev, ino))
+            parent_fd = comp_fd
+
+        run_path = current_path
+        run_fd = descriptors[-1]
+        yield run_path, run_fd, verify_identity
+    finally:
+        closed = True
+        close_errors: list[OSError] = []
+        for fd in reversed(descriptors):
+            try:
+                os.close(fd)
+            except OSError as exc:
+                close_errors.append(exc)
+        if close_errors and sys.exc_info()[1] is None:
+            raise BrokerError(f"cannot safely close descriptor: {close_errors[0]}") from close_errors[0]
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
