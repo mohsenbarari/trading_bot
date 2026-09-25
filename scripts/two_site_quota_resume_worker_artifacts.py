@@ -36,6 +36,11 @@ except ImportError:
         REQUEST_KEYS,
     )
 
+try:
+    from scripts.two_site_quota_resume_worker_paths import validate_prior_worker_paths
+except ImportError:
+    from two_site_quota_resume_worker_paths import validate_prior_worker_paths
+
 QUOTA_EVIDENCE_KEYS = frozenset(
     {"kind", "provider", "model", "conversation_id", "reset_at_utc"}
 )
@@ -62,11 +67,10 @@ LINEAGE_BINDINGS = (
 )
 
 
-def derive_worker_zero_resume_artifacts(
+def _validate_common_worker_preconditions(
     admitted_request: Mapping[str, Any],
     validated_terminal_receipt: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Pure derivation of Worker-0 resume artifacts from continuation request and receipt."""
+) -> tuple[dict[str, Any], str, dict[str, Any], str, str]:
     if not isinstance(admitted_request, dict):
         raise ProposalError(f"admitted_request must be dict, got {type(admitted_request).__name__}")
     if not isinstance(validated_terminal_receipt, dict):
@@ -144,15 +148,6 @@ def derive_worker_zero_resume_artifacts(
     worker_run_id = quota_attempt.get("run_id")
     if not isinstance(worker_run_id, str):
         raise ProposalError(f"quota_attempt.run_id must be str, got {type(worker_run_id).__name__}")
-    worker_match = re.fullmatch(
-        rf"^{re.escape(orig_run_prefix)}-worker-0(?:-retry-[12])?$",
-        worker_run_id,
-    )
-    if not worker_match:
-        raise ProposalError(
-            f"quota_attempt.run_id {worker_run_id!r} does not match original run_prefix "
-            f"{orig_run_prefix!r} worker-0 pattern"
-        )
 
     receipt_evidence = validated_terminal_receipt.get("quota_evidence")
     if not isinstance(receipt_evidence, dict) or set(receipt_evidence.keys()) != QUOTA_EVIDENCE_KEYS:
@@ -164,6 +159,28 @@ def derive_worker_zero_resume_artifacts(
 
     if quota_evidence != receipt_evidence:
         raise ProposalError("pipeline quota_evidence must equal receipt quota_evidence")
+
+    return pipeline_state, orig_run_prefix, quota_evidence, worker_run_id, status_sha
+
+
+def derive_worker_zero_resume_artifacts(
+    admitted_request: Mapping[str, Any],
+    validated_terminal_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Pure derivation of Worker-0 resume artifacts from continuation request and receipt."""
+    pipeline_state, orig_run_prefix, quota_evidence, worker_run_id, status_sha = (
+        _validate_common_worker_preconditions(admitted_request, validated_terminal_receipt)
+    )
+
+    worker_match = re.fullmatch(
+        rf"^{re.escape(orig_run_prefix)}-worker-0(?:-retry-[12])?$",
+        worker_run_id,
+    )
+    if not worker_match:
+        raise ProposalError(
+            f"quota_attempt.run_id {worker_run_id!r} does not match original run_prefix "
+            f"{orig_run_prefix!r} worker-0 pattern"
+        )
 
     correction_count = pipeline_state.get("correction_count")
     if type(correction_count) is not int or type(correction_count) is bool or correction_count != 0:
@@ -192,5 +209,131 @@ def derive_worker_zero_resume_artifacts(
     }
 
 
-derive_worker_resume_artifacts = derive_worker_zero_resume_artifacts
+def derive_worker_resume_artifacts(
+    admitted_request: Mapping[str, Any],
+    validated_terminal_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Pure derivation of Worker 0..2 resume artifacts from continuation request and receipt."""
+    pipeline_state, orig_run_prefix, quota_evidence, worker_run_id, status_sha = (
+        _validate_common_worker_preconditions(admitted_request, validated_terminal_receipt)
+    )
+
+    worker_match = re.fullmatch(
+        rf"^{re.escape(orig_run_prefix)}-worker-([012])(?:-retry-[12])?$",
+        worker_run_id,
+    )
+    if not worker_match:
+        raise ProposalError(
+            f"quota_attempt.run_id {worker_run_id!r} does not match original run_prefix "
+            f"{orig_run_prefix!r} worker-0..2 pattern"
+        )
+
+    attempted_index = int(worker_match.group(1))
+
+    if attempted_index == 0:
+        correction_count = pipeline_state.get("correction_count")
+        if type(correction_count) is not int or type(correction_count) is bool or correction_count != 0:
+            raise ProposalError(f"correction_count must be exact int 0, got {correction_count!r}")
+
+        for none_field in WORKER_ZERO_NONE_FIELDS:
+            if pipeline_state.get(none_field) is not None:
+                raise ProposalError(
+                    f"{none_field!r} must be None at blocked worker-0, got {pipeline_state.get(none_field)!r}"
+                )
+
+        changed_paths = pipeline_state.get("changed_paths")
+        if not isinstance(changed_paths, list) or len(changed_paths) != 0:
+            raise ProposalError(f"changed_paths must be empty list, got {changed_paths!r}")
+
+        return {
+            "task_id": pipeline_state["task_id"],
+            "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
+            "source_head": pipeline_state["source_head"],
+            "original_run_prefix": orig_run_prefix,
+            "attempted_run_id": worker_run_id,
+            "status_sha256": status_sha,
+            "status_sha": status_sha,
+            "quota_evidence": json.loads(json.dumps(quota_evidence)),
+            "worker_index": 0,
+        }
+
+    expected_correction_count = attempted_index - 1
+    correction_count = pipeline_state.get("correction_count")
+    if (
+        type(correction_count) is not int
+        or type(correction_count) is bool
+        or correction_count != expected_correction_count
+    ):
+        raise ProposalError(
+            f"correction_count must be exact int {expected_correction_count}, got {correction_count!r}"
+        )
+
+    prior_worker_id = pipeline_state.get("final_worker_run_id")
+    prior_reviewer_id = pipeline_state.get("final_reviewer_run_id")
+    try:
+        canonical_paths = validate_prior_worker_paths(
+            orig_run_prefix,
+            attempted_index,
+            prior_worker_id,
+            prior_reviewer_id,
+        )
+    except (ValueError, TypeError) as exc:
+        raise ProposalError(f"prior worker/reviewer paths validation failed: {exc}") from exc
+
+    for path_key in ("proposal_path", "reviewer_path", "pre_review_test_path"):
+        state_path = pipeline_state.get(path_key)
+        expected_path = canonical_paths[path_key]
+        if state_path != expected_path:
+            raise ProposalError(
+                f"{path_key} mismatch: expected {expected_path!r}, got {state_path!r}"
+            )
+
+    proposal_sha = pipeline_state.get("proposal_sha256")
+    if not isinstance(proposal_sha, str) or not SHA_PATTERN.fullmatch(proposal_sha):
+        raise ProposalError(
+            f"proposal_sha256 must be 64 lowercase hex, got {proposal_sha!r}"
+        )
+
+    pre_review_test_sha = pipeline_state.get("pre_review_test_sha256")
+    if not isinstance(pre_review_test_sha, str) or not SHA_PATTERN.fullmatch(pre_review_test_sha):
+        raise ProposalError(
+            f"pre_review_test_sha256 must be 64 lowercase hex, got {pre_review_test_sha!r}"
+        )
+
+    pre_review_test_state = pipeline_state.get("pre_review_test_state")
+    if pre_review_test_state != "PASSED":
+        raise ProposalError(
+            f"pre_review_test_state must be 'PASSED', got {pre_review_test_state!r}"
+        )
+
+    changed_paths = pipeline_state.get("changed_paths")
+    if not isinstance(changed_paths, list) or len(changed_paths) == 0:
+        raise ProposalError(f"changed_paths must be non-empty list, got {changed_paths!r}")
+    for item in changed_paths:
+        if not isinstance(item, str) or len(item) == 0:
+            raise ProposalError(f"changed_paths must contain non-empty strings, got {item!r}")
+
+    return {
+        "task_id": pipeline_state["task_id"],
+        "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
+        "source_head": pipeline_state["source_head"],
+        "original_run_prefix": orig_run_prefix,
+        "attempted_run_id": worker_run_id,
+        "status_sha256": status_sha,
+        "status_sha": status_sha,
+        "quota_evidence": json.loads(json.dumps(quota_evidence)),
+        "worker_index": attempted_index,
+        "final_worker_run_id": prior_worker_id,
+        "final_reviewer_run_id": prior_reviewer_id,
+        "proposal_path": canonical_paths["proposal_path"],
+        "proposal_sha256": proposal_sha,
+        "reviewer_path": canonical_paths["reviewer_path"],
+        "pre_review_test_path": canonical_paths["pre_review_test_path"],
+        "pre_review_test_sha256": pre_review_test_sha,
+        "pre_review_test_state": pre_review_test_state,
+        "changed_paths": list(changed_paths),
+        "expected_feedback_path": canonical_paths["expected_feedback_path"],
+    }
+
+
 _derive_worker_zero_resume_artifacts = derive_worker_zero_resume_artifacts
