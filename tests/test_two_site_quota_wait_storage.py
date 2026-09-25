@@ -3,22 +3,27 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import stat
 from typing import Any
 
 import pytest
 
 try:
+    from scripts import two_site_quota_wait_storage as storage_mod
     from scripts.two_site_quota_wait_storage import (
         MAX_WAIT_RECORD_BYTES,
         QUOTA_WAIT_FILENAME,
         WaitStorageError,
+        publish_initial_wait_record_bytes,
         read_initial_wait_record_bytes,
     )
 except ImportError:
+    import two_site_quota_wait_storage as storage_mod  # type: ignore
     from two_site_quota_wait_storage import (  # type: ignore
         MAX_WAIT_RECORD_BYTES,
         QUOTA_WAIT_FILENAME,
         WaitStorageError,
+        publish_initial_wait_record_bytes,
         read_initial_wait_record_bytes,
     )
 
@@ -301,3 +306,283 @@ def test_inode_replacement_between_stat_and_open_fails_closed(
     assert target_fd in closed_fds
     with pytest.raises(OSError):
         os.fstat(target_fd)
+
+
+def test_publish_initial_wait_record_bytes_success_and_no_overwrite(tmp_path: Path) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    payload = {"quota_wait": 60, "reason": "rate_limited"}
+    canonical_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    returned_bytes = publish_initial_wait_record_bytes(root, CYCLE_ID, canonical_bytes)
+    assert returned_bytes == canonical_bytes
+
+    target_file = run_dir / QUOTA_WAIT_FILENAME
+    assert target_file.is_file()
+    assert not target_file.is_symlink()
+    assert target_file.read_bytes() == canonical_bytes
+
+    target_stat = os.stat(target_file)
+    assert stat.S_ISREG(target_stat.st_mode)
+    assert not stat.S_ISLNK(target_stat.st_mode)
+    assert stat.S_IMODE(target_stat.st_mode) == 0o600
+    assert target_stat.st_nlink == 1
+    assert target_stat.st_uid == os.geteuid()
+
+    entries = [p.name for p in run_dir.iterdir()]
+    assert entries == [QUOTA_WAIT_FILENAME]
+
+    with pytest.raises(WaitStorageError, match=f"{QUOTA_WAIT_FILENAME} already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, canonical_bytes)
+
+    different_payload = {"quota_wait": 120, "reason": "different"}
+    different_bytes = json.dumps(different_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    with pytest.raises(WaitStorageError, match=f"{QUOTA_WAIT_FILENAME} already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, different_bytes)
+
+    assert target_file.read_bytes() == canonical_bytes
+
+
+def test_publish_rejection_before_mutation(tmp_path: Path) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+
+    for invalid_data in ("string_payload", 12345, ["a", "b"], None):
+        with pytest.raises(WaitStorageError, match="data must be bytes"):
+            publish_initial_wait_record_bytes(root, CYCLE_ID, invalid_data)  # type: ignore[arg-type]
+
+    for noncanonical in (b'{"quota_wait": 10}', b'{"b":2,"a":1}'):
+        with pytest.raises(WaitStorageError, match="data is not canonical JSON bytes"):
+            publish_initial_wait_record_bytes(root, CYCLE_ID, noncanonical)
+
+    with pytest.raises(WaitStorageError, match="data is not valid JSON"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, b'{"a":1,"a":2}')
+
+    for scalar in (b'"a_string"', b"12345", b"[1,2,3]", b"true"):
+        with pytest.raises(WaitStorageError, match="data must be a JSON object"):
+            publish_initial_wait_record_bytes(root, CYCLE_ID, scalar)
+
+    prefix_len = len('{"p":"')
+    suffix_len = len('"}')
+    target_padding_len = MAX_WAIT_RECORD_BYTES - prefix_len - suffix_len
+    oversized_payload = {"p": "a" * (target_padding_len + 1)}
+    oversized_bytes = json.dumps(oversized_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert len(oversized_bytes) == MAX_WAIT_RECORD_BYTES + 1
+    with pytest.raises(WaitStorageError, match="data exceeds byte limit"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, oversized_bytes)
+
+    external_file = tmp_path / "other_target.json"
+    external_file.write_bytes(b'{"quota_wait":5}')
+    os.chmod(external_file, 0o600)
+
+    symlink_file = run_dir / QUOTA_WAIT_FILENAME
+    symlink_file.symlink_to(external_file)
+
+    valid_bytes = b'{"quota_wait":50}'
+    with pytest.raises(WaitStorageError, match=f"{QUOTA_WAIT_FILENAME} already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    assert symlink_file.is_symlink()
+    assert symlink_file.resolve() == external_file.resolve()
+    assert [p for p in run_dir.iterdir() if p.name.startswith(".")] == []
+
+
+def test_publish_fault_before_link_fsync_cleans_temp_and_no_fd_leak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    valid_bytes = b'{"quota_wait":50}'
+
+    opened_fds: list[int] = []
+    closed_fds: list[int] = []
+    real_open = os.open
+    real_close = os.close
+    real_fsync = os.fsync
+
+    def tracking_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if isinstance(path, (str, bytes, Path)) and f".{QUOTA_WAIT_FILENAME}.tmp." in str(path):
+            opened_fds.append(fd)
+        return fd
+
+    def tracking_close(fd: int) -> None:
+        closed_fds.append(fd)
+        real_close(fd)
+
+    def failing_fsync(fd: int) -> None:
+        if fd in opened_fds:
+            raise OSError("simulated temp fsync failure")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "close", tracking_close)
+    monkeypatch.setattr(os, "fsync", failing_fsync)
+
+    with pytest.raises(WaitStorageError, match=f"cannot fsync \\.{QUOTA_WAIT_FILENAME}\\.tmp\\."):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    assert not (run_dir / QUOTA_WAIT_FILENAME).exists()
+    assert [p for p in run_dir.iterdir() if p.name.startswith(".")] == []
+    assert len(opened_fds) == 1
+    temp_fd = opened_fds[0]
+    assert temp_fd in closed_fds
+    with pytest.raises(OSError):
+        os.fstat(temp_fd)
+
+
+def test_publish_fault_before_link_os_link_cleans_temp_and_no_fd_leak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    valid_bytes = b'{"quota_wait":50}'
+
+    opened_fds: list[int] = []
+    closed_fds: list[int] = []
+    real_open = os.open
+    real_close = os.close
+
+    def tracking_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        fd = real_open(path, flags, *args, **kwargs)
+        if isinstance(path, (str, bytes, Path)) and f".{QUOTA_WAIT_FILENAME}.tmp." in str(path):
+            opened_fds.append(fd)
+        return fd
+
+    def tracking_close(fd: int) -> None:
+        closed_fds.append(fd)
+        real_close(fd)
+
+    def failing_link(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
+        raise OSError("simulated link failure")
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "close", tracking_close)
+    monkeypatch.setattr(os, "link", failing_link)
+
+    with pytest.raises(WaitStorageError, match=f"cannot link {QUOTA_WAIT_FILENAME}"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    assert not (run_dir / QUOTA_WAIT_FILENAME).exists()
+    assert [p for p in run_dir.iterdir() if p.name.startswith(".")] == []
+    assert len(opened_fds) == 1
+    temp_fd = opened_fds[0]
+    assert temp_fd in closed_fds
+    with pytest.raises(OSError):
+        os.fstat(temp_fd)
+
+
+def test_publish_collision_after_prestat_before_link_preserves_competing_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    valid_bytes = b'{"quota_wait":50}'
+    competing_bytes = b'{"competing":true}'
+
+    real_link = os.link
+
+    def colliding_link(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
+        competing_target = run_dir / QUOTA_WAIT_FILENAME
+        competing_target.write_bytes(competing_bytes)
+        os.chmod(competing_target, 0o600)
+        real_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", colliding_link)
+
+    with pytest.raises(WaitStorageError, match="target already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    target_file = run_dir / QUOTA_WAIT_FILENAME
+    assert target_file.is_file()
+    assert target_file.read_bytes() == competing_bytes
+    assert [p for p in run_dir.iterdir() if p.name.startswith(".")] == []
+
+
+def test_publish_fault_after_link_unlink_temp_leaves_target_and_blocks_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    valid_bytes = b'{"quota_wait":50}'
+
+    real_unlink = os.unlink
+
+    def failing_unlink(path: Any, *args: Any, **kwargs: Any) -> None:
+        if isinstance(path, (str, bytes, Path)) and f".{QUOTA_WAIT_FILENAME}.tmp." in str(path):
+            raise OSError("simulated temp unlink failure")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", failing_unlink)
+
+    with pytest.raises(WaitStorageError, match="ambiguous post-link publication failure: cannot unlink"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    target_file = run_dir / QUOTA_WAIT_FILENAME
+    assert target_file.is_file()
+    assert target_file.read_bytes() == valid_bytes
+    assert os.stat(target_file).st_nlink == 2
+
+    with pytest.raises(WaitStorageError, match="has invalid link count"):
+        read_initial_wait_record_bytes(root, CYCLE_ID)
+
+    with pytest.raises(WaitStorageError, match=f"{QUOTA_WAIT_FILENAME} already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    assert target_file.exists()
+
+
+def test_publish_fault_after_link_directory_fsync_leaves_target_and_blocks_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    valid_bytes = b'{"quota_wait":50}'
+
+    real_fsync = os.fsync
+
+    def failing_dir_fsync(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("simulated directory fsync failure")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", failing_dir_fsync)
+
+    with pytest.raises(WaitStorageError, match="ambiguous post-link publication failure: cannot fsync directory"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    target_file = run_dir / QUOTA_WAIT_FILENAME
+    assert target_file.is_file()
+    assert target_file.read_bytes() == valid_bytes
+    target_stat = os.stat(target_file)
+    assert stat.S_IMODE(target_stat.st_mode) == 0o600
+    assert target_stat.st_nlink == 1
+    assert [p for p in run_dir.iterdir() if p.name.startswith(".")] == []
+
+    readback = read_initial_wait_record_bytes(root, CYCLE_ID)
+    assert readback == valid_bytes
+
+    with pytest.raises(WaitStorageError, match=f"{QUOTA_WAIT_FILENAME} already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    assert target_file.exists()
+
+
+def test_publish_fault_after_link_readback_failure_leaves_target_and_blocks_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, run_dir = _setup_cycle_root(str(tmp_path))
+    valid_bytes = b'{"quota_wait":50}'
+
+    def failing_readback(root_arg: Any, run_id_arg: Any) -> bytes:
+        raise WaitStorageError("simulated readback corruption")
+
+    monkeypatch.setattr(storage_mod, "read_initial_wait_record_bytes", failing_readback)
+
+    with pytest.raises(
+        WaitStorageError,
+        match="ambiguous post-link publication failure: readback failed: simulated readback corruption",
+    ):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    target_file = run_dir / QUOTA_WAIT_FILENAME
+    assert target_file.is_file()
+    assert target_file.read_bytes() == valid_bytes
+
+    with pytest.raises(WaitStorageError, match=f"{QUOTA_WAIT_FILENAME} already exists"):
+        publish_initial_wait_record_bytes(root, CYCLE_ID, valid_bytes)
+
+    assert target_file.exists()
