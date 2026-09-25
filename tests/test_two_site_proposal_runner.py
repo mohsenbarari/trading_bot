@@ -368,7 +368,7 @@ class ProposalContracts(unittest.TestCase):
                         result=None, events=None, raw_output=None,
                         git_side_effect=None, run_id="run-001",
                         cli_identities=None, feedback=None, proposal=None,
-                        process_returncode=0):
+                        process_returncode=0, pre_provider_check=None):
         process = MagicMock()
         process.__enter__.return_value = process
         process.returncode = process_returncode
@@ -473,9 +473,14 @@ class ProposalContracts(unittest.TestCase):
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
                 patch.object(runner.os, "killpg") as kill:
             try:
+                self.last_popen = popen
+                run_kwargs = {}
+                if pre_provider_check is not None:
+                    run_kwargs["pre_provider_check"] = pre_provider_check
                 out = runner.run(self.root, self.task_path, "worker", run_id, 30,
                                  feedback=feedback, proposal=proposal,
-                                 cli=Path(__file__).resolve())
+                                 cli=Path(__file__).resolve(),
+                                 **run_kwargs)
                 self.assertNotIn("--dangerously-skip-permissions", popen.call_args.args[0])
                 self.assertIn("--sandbox", popen.call_args.args[0])
                 return out
@@ -1801,6 +1806,65 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(status_cli["state"], "BLOCKED")
         self.assertNotIn("quota_evidence", status_cli)
         self.assertFalse((out_cli / "result.json").exists())
+
+    def test_pre_provider_check_invoked_once_before_popen_on_success(self):
+        call_count = 0
+
+        def check():
+            nonlocal call_count
+            call_count += 1
+            self.assertFalse(self.last_popen.called)
+
+        out = self.invoke_fake_cli(run_id="fence-success-001", pre_provider_check=check)
+        self.assertEqual(call_count, 1)
+        self.last_popen.assert_called_once()
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "PROPOSAL_READY")
+        self.assertEqual(status["cli_pid"], 987654)
+        self.assertTrue((out / "result.json").exists())
+
+    def test_pre_provider_check_rejection_blocks_and_prevents_popen_and_replay(self):
+        class SentinelFenceError(RuntimeError):
+            pass
+
+        def reject():
+            raise SentinelFenceError("sentinel provider fence rejection")
+
+        run_id = "fence-reject-001"
+        with self.assertRaises(SentinelFenceError) as ctx:
+            self.invoke_fake_cli(run_id=run_id, pre_provider_check=reject)
+        self.assertEqual(str(ctx.exception), "sentinel provider fence rejection")
+        self.last_popen.assert_not_called()
+
+        out = self.root / f".local/two-site-refactor/proposals/{run_id}"
+        status_file = out / "status.json"
+        self.assertTrue(status_file.exists())
+        status_before = json.loads(status_file.read_text())
+        self.assertEqual(status_before["state"], "BLOCKED")
+        self.assertIn("SentinelFenceError: sentinel provider fence rejection", status_before["error"])
+        self.assertNotIn("cli_pid", status_before)
+        self.assertFalse((out / "stream.jsonl").exists())
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((out / "proposal.patch").exists())
+        status_bytes_before = status_file.read_bytes()
+
+        with self.assertRaises(FileExistsError):
+            self.invoke_fake_cli(run_id=run_id)
+
+        self.last_popen.assert_not_called()
+        self.assertEqual(status_file.read_bytes(), status_bytes_before)
+        status_after = json.loads(status_file.read_text())
+        self.assertEqual(status_after, status_before)
+        self.assertFalse((out / "stream.jsonl").exists())
+        self.assertFalse((out / "result.json").exists())
+
+    def test_pre_provider_check_omitted_callback_remains_unchanged(self):
+        out = self.invoke_fake_cli(run_id="fence-omitted-001")
+        self.last_popen.assert_called_once()
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "PROPOSAL_READY")
+        self.assertEqual(status["cli_pid"], 987654)
+        self.assertTrue((out / "result.json").exists())
 
 
 if __name__ == "__main__":
