@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from typing import Any
 import pytest
@@ -14,9 +15,12 @@ try:
         derive_verifier_resume_artifacts,
     )
     from scripts.two_site_provider_broker import (
+        BrokerError,
         PIPELINE_QUOTA_KEYS,
         RECEIPT_KEYS,
         REQUEST_KEYS,
+        RESPONSE_KEYS,
+        validate_response,
     )
     from scripts.two_site_quota_resume_claim_admission import prepare_known_reset_resume_claim
     from scripts.two_site_quota_resume_request_record import build_quota_resume_request
@@ -34,9 +38,12 @@ except ImportError:
         derive_verifier_resume_artifacts,
     )
     from two_site_provider_broker import (
+        BrokerError,
         PIPELINE_QUOTA_KEYS,
         RECEIPT_KEYS,
         REQUEST_KEYS,
+        RESPONSE_KEYS,
+        validate_response,
     )
     from two_site_quota_resume_claim_admission import prepare_known_reset_resume_claim
     from two_site_quota_resume_request_record import build_quota_resume_request
@@ -54,6 +61,17 @@ _SHA_STATUS = "6" * 64
 _SHA_CLAIM = "c" * 64
 _SHA_WAIT = "1" * 64
 _VALID_CONT_CYCLE_ID = _CONT_CYCLE_ID if "_CONT_CYCLE_ID" in globals() else "cycle-2026-20260925T020304Z-456"
+
+
+def _canonical_sha256(payload: Any) -> str:
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _build_valid_pair(
@@ -137,18 +155,27 @@ def _build_valid_pair(
         },
     }
 
+    finished_at = 1758762423.0
+    broker_response = {
+        "schema_version": "1.0",
+        "request_id": broker_request["request_id"],
+        "run_prefix": orig_prefix,
+        "source_head": broker_request["source_head"],
+        "state": "COMPLETED",
+        "exit_code": 1,
+        "stdout": json.dumps(pipeline_state),
+        "stderr": "",
+        "finished_at": finished_at,
+    }
+
     receipt = {
         "schema_version": "1.0",
         "request": broker_request,
-        "request_sha256": "7" * 64,
-        "response": {
-            "stdout": json.dumps(pipeline_state),
-            "stderr": "",
-            "returncode": 1,
-        },
-        "response_sha256": "8" * 64,
+        "request_sha256": _canonical_sha256(broker_request),
+        "response": broker_response,
+        "response_sha256": _canonical_sha256(broker_response),
         "quota_evidence": copy.deepcopy(wait_record["quota_evidence"]),
-        "finished_at": "2026-09-25T01:03:00Z",
+        "finished_at": finished_at,
     }
     return admitted_request, receipt, pipeline_state
 
@@ -159,7 +186,12 @@ def test_derive_verifier_resume_artifacts_success_and_immutability() -> None:
     receipt_snap = copy.deepcopy(receipt)
 
     assert set(receipt["request"].keys()) == REQUEST_KEYS
+    assert set(receipt["response"].keys()) == RESPONSE_KEYS
+    assert validate_response(receipt["request"], receipt["response"]) == receipt["response"]
     assert set(receipt.keys()) == RECEIPT_KEYS
+    assert receipt["request_sha256"] == _canonical_sha256(receipt["request"])
+    assert receipt["response_sha256"] == _canonical_sha256(receipt["response"])
+    assert receipt["finished_at"] == receipt["response"]["finished_at"]
     assert set(state.keys()) == PIPELINE_QUOTA_KEYS
     assert "task_id" not in receipt["request"]
     assert "payload" not in receipt
@@ -280,3 +312,34 @@ def test_derive_verifier_resume_artifacts_non_dict_and_invalid_stdout() -> None:
     invalid_json_stdout["response"]["stdout"] = "{not valid json}"
     with pytest.raises(ProposalError, match="failed to parse pipeline state"):
         _derive_verifier_resume_artifacts(admitted_req, invalid_json_stdout)
+
+
+def test_validate_response_rejects_malformed_envelope_and_lineage_mismatch() -> None:
+    admitted_req, receipt, _ = _build_valid_pair(correction_count=0)
+    req = receipt["request"]
+    resp = receipt["response"]
+
+    extra_resp = copy.deepcopy(resp)
+    extra_resp["extra_field"] = "unexpected"
+    with pytest.raises(BrokerError, match="broker response does not match the exact contract"):
+        validate_response(req, extra_resp)
+
+    missing_resp = copy.deepcopy(resp)
+    missing_resp.pop("finished_at")
+    with pytest.raises(BrokerError, match="broker response does not match the exact contract"):
+        validate_response(req, missing_resp)
+
+    bad_req_id = copy.deepcopy(resp)
+    bad_req_id["request_id"] = "mismatched-id"
+    with pytest.raises(BrokerError, match="broker response binding is invalid"):
+        validate_response(req, bad_req_id)
+
+    bad_prefix = copy.deepcopy(resp)
+    bad_prefix["run_prefix"] = "mismatched-prefix"
+    with pytest.raises(BrokerError, match="broker response binding is invalid"):
+        validate_response(req, bad_prefix)
+
+    bad_source_head = copy.deepcopy(resp)
+    bad_source_head["source_head"] = "0" * 40
+    with pytest.raises(BrokerError, match="broker response binding is invalid"):
+        validate_response(req, bad_source_head)
