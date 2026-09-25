@@ -126,6 +126,27 @@ def _scopes_equal(s1: Any, s2: Any) -> bool:
     return True
 
 
+def _check_wait_pair_identity(
+    raw_bytes: bytes,
+    record: dict[str, Any],
+    *,
+    label: str = "initial wait record",
+) -> None:
+    try:
+        canonical_text = json.dumps(
+            record,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        canonical_bytes = canonical_text.encode("utf-8")
+    except Exception as exc:
+        raise ContinuationAdmissionError(f"{label} cannot be serialized to canonical JSON: {exc}") from exc
+    if raw_bytes != canonical_bytes:
+        raise ContinuationAdmissionError(f"{label} bytes do not match canonical validated record")
+
+
 def _check_stop(root: Path) -> None:
     if not isinstance(root, Path):
         raise ContinuationAdmissionError("root must be a Path")
@@ -268,6 +289,9 @@ def validate_quota_continuation_request(
         raise ContinuationAdmissionError(
             f"original wait SHA mismatch: computed {computed_wait_sha} != request {orig_wait_sha256}"
         )
+
+    _check_wait_pair_identity(raw_wait_bytes, wait_record, label="initial wait record")
+
     if wait_record.get("request_id") != orig_request_id:
         raise ContinuationAdmissionError(
             f"original request ID mismatch: wait record {wait_record.get('request_id')!r} != request {orig_request_id!r}"
@@ -409,6 +433,8 @@ def validate_quota_continuation_request(
         raise
     except Exception as exc:
         raise ContinuationAdmissionError(f"initial wait record re-read failed: {exc}") from exc
+
+    _check_wait_pair_identity(raw_wait_bytes_2, wait_record_2, label="initial wait record re-read")
 
     if raw_wait_bytes_2 != raw_wait_bytes:
         raise ContinuationAdmissionError("initial wait record bytes drifted during admission")

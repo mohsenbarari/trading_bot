@@ -17,6 +17,7 @@ from scripts.two_site_quota_continuation_admission import (
     _check_stop,
     validate_quota_continuation_request,
 )
+from scripts.two_site_quota_wait_record import validate_initial_wait_record
 from scripts.two_site_quota_resume_claim_admission import prepare_known_reset_resume_claim
 from scripts.two_site_quota_resume_request_record import build_quota_resume_request
 from tests.test_two_site_quota_resume_claim_admission import (
@@ -369,3 +370,76 @@ def test_request_envelope_rejections(tmp_path: Path) -> None:
 
     with pytest.raises(ContinuationAdmissionError, match="now_epoch must be finite numeric"):
         validate_quota_continuation_request(tmp_path, req, now_epoch=True)
+
+
+def test_wait_pair_cross_read_mismatch_adversarial_rejection(tmp_path: Path) -> None:
+    sc = _setup_valid_scenario(tmp_path)
+    record_a = sc["record"]
+    raw_wait_bytes_a = sc["raw_wait_bytes"]
+    wait_sha_a = sc["wait_sha"]
+
+    record_b = copy.deepcopy(record_a)
+    record_b["terminal_receipt_sha256"] = "3" * 64
+    assert record_a != record_b
+
+    expected_b = copy.deepcopy(sc["expected_wait"])
+    expected_b["terminal_receipt_sha256"] = "3" * 64
+    assert validate_initial_wait_record(record_b, expected_b)["terminal_receipt_sha256"] == "3" * 64
+
+    request = sc["request"]
+    assert request["original_wait_sha256"] == wait_sha_a
+
+    with (
+        mock.patch("scripts.two_site_quota_continuation_admission.validate_request") as mock_val,
+        mock.patch("scripts.two_site_quota_continuation_admission.read_pending_rescope_intent", return_value=(sc["intent_epoch"], sc["intent_attempt"], sc["intent_repo"])),
+        mock.patch("scripts.two_site_quota_continuation_admission.collect_initial_wait_source_expected", return_value=sc["expected_wait"]),
+        mock.patch("scripts.two_site_quota_continuation_admission.read_initial_wait_record_bytes") as mock_bytes,
+        mock.patch("scripts.two_site_quota_continuation_admission.read_initial_wait_record") as mock_wait,
+        mock.patch("scripts.two_site_quota_continuation_admission.load_task") as mock_task,
+        mock.patch("scripts.two_site_quota_continuation_admission.read_existing_semantic_attempt") as mock_sem,
+        mock.patch("scripts.two_site_quota_continuation_admission.read_known_reset_resume_claim") as mock_claim,
+    ):
+        mock_val.return_value = ({k: request[k] for k in request if k != "request_type"}, sc["task_path"], sc["fake_scope"])
+        mock_bytes.return_value = raw_wait_bytes_a
+        mock_wait.return_value = record_b
+
+        with pytest.raises(ContinuationAdmissionError, match="initial wait record bytes do not match canonical validated record"):
+            validate_quota_continuation_request(tmp_path, request, now_epoch=sc["now_epoch"])
+
+        assert mock_bytes.call_count == 1
+        assert mock_wait.call_count == 1
+        assert mock_claim.call_count == 0
+        assert mock_task.call_count == 0
+        assert mock_sem.call_count == 0
+
+
+def test_wait_pair_second_pass_cross_read_mismatch_rejection(tmp_path: Path) -> None:
+    sc = _setup_valid_scenario(tmp_path)
+    record_a = sc["record"]
+    raw_wait_bytes_a = sc["raw_wait_bytes"]
+
+    record_b = copy.deepcopy(record_a)
+    record_b["terminal_receipt_sha256"] = "3" * 64
+
+    request = sc["request"]
+
+    with (
+        mock.patch("scripts.two_site_quota_continuation_admission.validate_request") as mock_val,
+        mock.patch("scripts.two_site_quota_continuation_admission.read_pending_rescope_intent", return_value=(sc["intent_epoch"], sc["intent_attempt"], sc["intent_repo"])),
+        mock.patch("scripts.two_site_quota_continuation_admission.collect_initial_wait_source_expected", return_value=sc["expected_wait"]),
+        mock.patch("scripts.two_site_quota_continuation_admission.read_initial_wait_record_bytes") as mock_bytes,
+        mock.patch("scripts.two_site_quota_continuation_admission.read_initial_wait_record") as mock_wait,
+        mock.patch("scripts.two_site_quota_continuation_admission.load_task", return_value=(sc["task_obj"], {})),
+        mock.patch("scripts.two_site_quota_continuation_admission.read_existing_semantic_attempt", return_value=sc["semantic_attempt"]),
+        mock.patch("scripts.two_site_quota_continuation_admission.read_known_reset_resume_claim", return_value=sc["claim"]) as mock_claim,
+    ):
+        mock_val.return_value = ({k: request[k] for k in request if k != "request_type"}, sc["task_path"], sc["fake_scope"])
+        mock_bytes.side_effect = [raw_wait_bytes_a, raw_wait_bytes_a]
+        mock_wait.side_effect = [record_a, record_b]
+
+        with pytest.raises(ContinuationAdmissionError, match="initial wait record re-read bytes do not match canonical validated record"):
+            validate_quota_continuation_request(tmp_path, request, now_epoch=sc["now_epoch"])
+
+        assert mock_bytes.call_count == 2
+        assert mock_wait.call_count == 2
+        assert mock_claim.call_count == 1
