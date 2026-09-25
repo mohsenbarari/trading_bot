@@ -2476,6 +2476,143 @@ def _open_existing_cycle_run_directory(
             raise BrokerError(f"cannot safely close descriptor: {close_errors[0]}") from close_errors[0]
 
 
+def _stat_fingerprint(info: os.stat_result) -> tuple[int, int, int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_uid,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _read_cycle_private_json(
+    run_path: Path, run_fd: int, filename: str
+) -> tuple[dict, bytes]:
+    if not isinstance(run_path, Path):
+        raise BrokerError("run directory path must be a Path")
+    if type(run_fd) is not int or run_fd < 0:
+        raise BrokerError("run directory descriptor must be a non-negative integer")
+    if filename not in ("preparation-startup.json", "broker-reservation.json"):
+        raise BrokerError("cycle private filename must be 'preparation-startup.json' or 'broker-reservation.json'")
+
+    file_path = run_path / filename
+
+    def _validate_stat(info: os.stat_result, label: str) -> None:
+        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            raise BrokerError(f"{label} is not a regular file")
+        if info.st_uid != os.geteuid():
+            raise BrokerError(f"{label} owner mismatch")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise BrokerError(f"{label} mode must be 0600")
+        if info.st_nlink != 1:
+            raise BrokerError(f"{label} has invalid link count")
+        if info.st_size > 4096:
+            raise BrokerError(f"{label} exceeds byte limit")
+
+    try:
+        lstat_before = os.lstat(file_path)
+    except OSError as exc:
+        raise BrokerError(f"cannot lstat cycle private file {filename}: {exc}") from exc
+    _validate_stat(lstat_before, f"cycle private file {filename} path before open")
+    initial_fingerprint = _stat_fingerprint(lstat_before)
+
+    try:
+        dirfd_stat_before = os.stat(filename, dir_fd=run_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise BrokerError(f"cannot stat cycle private file {filename} via dir_fd before open: {exc}") from exc
+    _validate_stat(dirfd_stat_before, f"cycle private file {filename} via dir_fd before open")
+    if _stat_fingerprint(dirfd_stat_before) != initial_fingerprint:
+        raise BrokerError(f"cycle private file {filename} dir_fd stat mismatch before open")
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        file_fd = os.open(filename, flags, dir_fd=run_fd)
+    except OSError as exc:
+        raise BrokerError(f"cannot safely open cycle private file {filename}: {exc}") from exc
+
+    try:
+        try:
+            fstat_before = os.fstat(file_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat cycle private file {filename} before read: {exc}") from exc
+        _validate_stat(fstat_before, f"cycle private file {filename} descriptor before read")
+        if _stat_fingerprint(fstat_before) != initial_fingerprint:
+            raise BrokerError(f"cycle private file {filename} descriptor metadata mismatch before read")
+
+        expected_size = initial_fingerprint[5]
+        chunks: list[bytes] = []
+        total_read = 0
+        limit = 4097
+        while total_read < limit:
+            try:
+                chunk = os.read(file_fd, limit - total_read)
+            except OSError as exc:
+                raise BrokerError(f"cannot read cycle private file {filename}: {exc}") from exc
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total_read += len(chunk)
+
+        data = b"".join(chunks)
+        if len(data) > 4096:
+            raise BrokerError(f"cycle private file {filename} exceeds byte limit")
+        if len(data) != expected_size:
+            raise BrokerError(f"cycle private file {filename} read size mismatch")
+
+        try:
+            fstat_after = os.fstat(file_fd)
+        except OSError as exc:
+            raise BrokerError(f"cannot fstat cycle private file {filename} after read: {exc}") from exc
+        _validate_stat(fstat_after, f"cycle private file {filename} descriptor after read")
+        if _stat_fingerprint(fstat_after) != initial_fingerprint:
+            raise BrokerError(f"cycle private file {filename} descriptor metadata changed after read")
+
+        try:
+            dirfd_stat_after = os.stat(filename, dir_fd=run_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise BrokerError(f"cannot stat cycle private file {filename} via dir_fd after read: {exc}") from exc
+        _validate_stat(dirfd_stat_after, f"cycle private file {filename} via dir_fd after read")
+        if _stat_fingerprint(dirfd_stat_after) != initial_fingerprint:
+            raise BrokerError(f"cycle private file {filename} dir_fd metadata changed after read")
+
+        try:
+            lstat_after = os.lstat(file_path)
+        except OSError as exc:
+            raise BrokerError(f"cannot lstat cycle private file {filename} after read: {exc}") from exc
+        _validate_stat(lstat_after, f"cycle private file {filename} path after read")
+        if _stat_fingerprint(lstat_after) != initial_fingerprint:
+            raise BrokerError(f"cycle private file {filename} path metadata changed after read")
+
+        try:
+            decoded = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BrokerError(f"cycle private file {filename} is not valid UTF-8") from exc
+
+        try:
+            payload = unique_json(decoded)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise BrokerError(f"cycle private file {filename} is not valid JSON: {exc}") from exc
+
+        if not isinstance(payload, dict) or type(payload) is not dict:
+            raise BrokerError(f"cycle private file {filename} must be a JSON object")
+
+        return payload, data
+    finally:
+        try:
+            os.close(file_fd)
+        except OSError as exc:
+            if sys.exc_info()[1] is None:
+                raise BrokerError(f"cannot safely close cycle private file {filename} descriptor: {exc}") from exc
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
