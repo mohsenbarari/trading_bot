@@ -7,9 +7,17 @@ import re
 from typing import Any, Mapping
 
 try:
-    from scripts.two_site_proposal_pipeline import normalize_finding
+    from scripts.two_site_proposal_pipeline import (
+        normalize_finding,
+        test_failure_signature,
+        test_gate_feedback,
+    )
 except ImportError:
-    from two_site_proposal_pipeline import normalize_finding
+    from two_site_proposal_pipeline import (
+        normalize_finding,
+        test_failure_signature,
+        test_gate_feedback,
+    )
 
 try:
     from scripts.two_site_proposal_runner import (
@@ -46,6 +54,7 @@ __all__ = [
     "build_bootstrap_correction_feedback",
     "build_reviewer_correction_feedback",
     "normalize_finding",
+    "plan_test_receipt_gate",
 ]
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -189,3 +198,47 @@ def build_bootstrap_correction_feedback(
     new_seen.add(signature)
 
     return feedback_payload, signature, new_seen
+
+
+def plan_test_receipt_gate(
+    receipt: Mapping[str, Any],
+    worker_sha: str,
+    correction_count: int,
+    seen_test_signatures: set[str],
+) -> tuple[str, dict[str, Any] | None, str | None, set[str]]:
+    """Pure receipt gate returning action, optional feedback/signature, and copied seen signatures."""
+    if not isinstance(worker_sha, str) or not SHA_PATTERN.fullmatch(worker_sha):
+        raise ProposalError("worker_sha must be a lowercase 64-hex SHA")
+
+    if type(correction_count) is not int:
+        raise ProposalError("correction_count must be a built-in integer")
+    if correction_count not in (0, 1, 2):
+        raise ProposalError(f"invalid correction_count: {correction_count}")
+
+    if not isinstance(seen_test_signatures, (set, frozenset)):
+        raise ProposalError("seen_test_signatures must be a set")
+    for item in seen_test_signatures:
+        if not isinstance(item, str) or not SHA_PATTERN.fullmatch(item):
+            raise ProposalError("seen_test_signatures elements must be lowercase 64-hex SHA strings")
+
+    try:
+        validated = validate_test_receipt(receipt, worker_sha)
+    except SandboxError as exc:
+        raise ProposalError(f"invalid test receipt: {exc}") from exc
+
+    state = validated.get("state")
+    if state == "PASSED":
+        return "RUN_REVIEWER", None, None, set(seen_test_signatures)
+
+    if state == "FAILED":
+        if correction_count >= 2:
+            raise ProposalError("correction exhaustion: maximum 2 corrections exceeded")
+        signature = test_failure_signature(validated)
+        if signature in seen_test_signatures:
+            raise ProposalError(f"repeated test failure signature: {signature}")
+        feedback = test_gate_feedback(validated, worker_sha)
+        new_seen = set(seen_test_signatures)
+        new_seen.add(signature)
+        return "CORRECTION_REQUIRED", feedback, signature, new_seen
+
+    raise ProposalError(f"unsupported receipt state: {state!r}")
