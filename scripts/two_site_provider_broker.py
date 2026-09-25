@@ -2926,6 +2926,8 @@ def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: boo
                 validate_task_scope(scope, task)
                 _prune_maintenance_records(root)
                 _publish_maintenance_record(root, request)
+        else:
+            publish_cycle_reservation(root, request)
         request_path = requests / f"{request['request_id']}.json"
         response_path = _response_path(responses, request["request_id"])
         _atomic_new_json(request_path, request, MAX_REQUEST_BYTES)
