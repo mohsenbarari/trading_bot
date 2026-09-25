@@ -12,6 +12,7 @@ import pytest
 
 from scripts import two_site_provider_broker as broker
 from scripts.two_site_assignment_scope import AssignmentScope
+from scripts.two_site_preparation_contract import PreparationStartup
 
 
 @pytest.fixture
@@ -66,6 +67,23 @@ def _prepare_client_context(
     broker._write_status(status_path, "IDLE")
     request = broker.make_request(root, task, run_prefix, 30, environment)
     response_path = broker._response_path(responses_dir, request["request_id"])
+    cycle_id = environment["TWO_SITE_AUTOPILOT_RUN_ID"]
+    run_dir = root / ".local/two-site-refactor/autopilot/runs" / cycle_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(run_dir, 0o700)
+    startup_payload = PreparationStartup(
+        schema_version=1,
+        route="one_shot",
+        cycle_id=environment["TWO_SITE_AUTOPILOT_RUN_ID"],
+        source_head=request["source_head"],
+        assignment_sha256=request["assignment_sha256"],
+    ).to_mapping()
+    startup_file = run_dir / "preparation-startup.json"
+    startup_file.write_text(
+        json.dumps(startup_payload, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    os.chmod(startup_file, 0o600)
     return root, request, response_path, requests_dir
 
 

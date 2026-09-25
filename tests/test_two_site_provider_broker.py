@@ -15,6 +15,7 @@ import pytest
 
 from scripts import two_site_provider_broker as broker
 from scripts.two_site_assignment_scope import AssignmentScope
+from scripts.two_site_preparation_contract import PreparationStartup
 
 
 def git(root: Path, *args: str) -> str:
@@ -193,6 +194,24 @@ def test_filesystem_queue_round_trip_preserves_exact_pipeline_result(
     while not status_path.exists() and time.time() < deadline:
         time.sleep(0.01)
     assert status_path.exists()
+
+    cycle_id = environment["TWO_SITE_AUTOPILOT_RUN_ID"]
+    run_dir = root / ".local/two-site-refactor/autopilot/runs" / cycle_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(run_dir, 0o700)
+    startup_payload = PreparationStartup(
+        schema_version=1,
+        route="one_shot",
+        cycle_id=environment["TWO_SITE_AUTOPILOT_RUN_ID"],
+        source_head=git(root, "rev-parse", "HEAD"),
+        assignment_sha256=scope.sha256,
+    ).to_mapping()
+    startup_file = run_dir / "preparation-startup.json"
+    startup_file.write_text(
+        json.dumps(startup_payload, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    os.chmod(startup_file, 0o600)
 
     result = broker.submit(root, task, "queue-round-trip", 30, environment)
     thread.join(timeout=5)
