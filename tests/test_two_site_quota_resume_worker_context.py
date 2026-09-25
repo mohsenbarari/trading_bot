@@ -5,7 +5,10 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-from scripts.two_site_quota_resume_execution import ProposalError
+from scripts.two_site_quota_resume_execution import (
+    ContinuationAdmissionError,
+    ProposalError,
+)
 from scripts.two_site_quota_resume_worker_context import (
     prepare_worker_zero_continuation,
     worker_zero_continuation_context,
@@ -210,3 +213,86 @@ def test_no_provider_calls_or_execution_authority():
     ]
     for symbol in forbidden:
         assert not hasattr(mod, symbol), f"forbidden symbol {symbol} exposed in worker context"
+
+
+def test_first_admission_stop_propagation(tmp_path: Path):
+    req, _, _, _, _, _, _ = _base_fixtures()
+    lock = MockLock()
+    stop_msg = "autopilot STOP sentinel exists: .local/two-site-refactor/autopilot/STOP"
+    stop_err = ContinuationAdmissionError(stop_msg)
+
+    with patch("scripts.two_site_quota_resume_worker_context.pipeline_lock", lock), \
+         patch("scripts.two_site_quota_resume_worker_context.validate_quota_continuation_request", side_effect=stop_err) as mock_admission, \
+         patch("scripts.two_site_quota_resume_worker_context.read_terminal_quota_record") as mock_read_record, \
+         patch("scripts.two_site_quota_resume_worker_context.derive_worker_resume_artifacts") as mock_derive_artifacts, \
+         patch("scripts.two_site_quota_resume_worker_context.ref_snapshot") as mock_ref_snapshot, \
+         patch("scripts.two_site_quota_resume_worker_context.load_task") as mock_load_task, \
+         patch("scripts.two_site_quota_resume_worker_context.check_state") as mock_check_state:
+
+        body_entered = False
+        with pytest.raises(ContinuationAdmissionError) as exc_info:
+            with worker_zero_continuation_context(tmp_path, req):
+                body_entered = True
+
+        assert exc_info.value is stop_err
+        assert str(exc_info.value) == stop_msg
+        assert body_entered is False
+        assert lock.locked is False
+        assert lock.acquire_count == 1
+        assert lock.release_count == 1
+
+        mock_admission.assert_called_once_with(tmp_path, req)
+        mock_read_record.assert_not_called()
+        mock_derive_artifacts.assert_not_called()
+        mock_ref_snapshot.assert_not_called()
+        mock_load_task.assert_not_called()
+        mock_check_state.assert_not_called()
+
+        import scripts.two_site_quota_resume_worker_context as mod
+        for symbol in ("runner_run", "run_provider_session", "execute_pipeline", "run_pipeline"):
+            assert not hasattr(mod, symbol)
+
+
+def test_second_admission_stop_propagation(tmp_path: Path):
+    req, admitted, receipt, artifacts, refs, task, sources = _base_fixtures()
+    lock = MockLock()
+    stop_msg = "autopilot STOP sentinel exists: .local/two-site-refactor/autopilot/STOP"
+    stop_err = ContinuationAdmissionError(stop_msg)
+
+    with patch("scripts.two_site_quota_resume_worker_context.pipeline_lock", lock), \
+         patch("scripts.two_site_quota_resume_worker_context.validate_quota_continuation_request", side_effect=[(admitted, "t.json", "res"), stop_err]) as mock_admission, \
+         patch("scripts.two_site_quota_resume_worker_context.read_terminal_quota_record", return_value=receipt) as mock_read_record, \
+         patch("scripts.two_site_quota_resume_worker_context.derive_worker_resume_artifacts", return_value=artifacts) as mock_derive_artifacts, \
+         patch("scripts.two_site_quota_resume_worker_context.ref_snapshot", return_value=refs) as mock_ref_snapshot, \
+         patch("scripts.two_site_quota_resume_worker_context.load_task", return_value=(task, sources)) as mock_load_task, \
+         patch("scripts.two_site_quota_resume_worker_context.check_state") as mock_check_state:
+
+        body_entered = False
+        with pytest.raises(ContinuationAdmissionError) as exc_info:
+            with worker_zero_continuation_context(tmp_path, req):
+                body_entered = True
+
+        assert exc_info.value is stop_err
+        assert str(exc_info.value) == stop_msg
+        assert body_entered is False
+        assert lock.locked is False
+        assert lock.acquire_count == 1
+        assert lock.release_count == 1
+
+        assert mock_admission.call_count == 2
+        mock_read_record.assert_called_once_with(tmp_path, "orig-42")
+        mock_derive_artifacts.assert_called_once_with(admitted, receipt)
+        mock_ref_snapshot.assert_called_once_with(tmp_path)
+        mock_load_task.assert_called_once_with(tmp_path, "t.json")
+        mock_check_state.assert_called_once_with(
+            tmp_path,
+            artifacts["source_head"],
+            refs,
+            "t.json",
+            task,
+            sources,
+        )
+
+        import scripts.two_site_quota_resume_worker_context as mod
+        for symbol in ("runner_run", "run_provider_session", "execute_pipeline", "run_pipeline"):
+            assert not hasattr(mod, symbol)
