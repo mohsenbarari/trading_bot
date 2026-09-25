@@ -198,3 +198,184 @@ def read_initial_wait_record_bytes(root: Path, controller_run_id: str) -> bytes:
                         raise WaitStorageError(f"cannot safely close {QUOTA_WAIT_FILENAME} descriptor: {exc}") from exc
     except BrokerError as exc:
         raise WaitStorageError(f"cannot safely open cycle run directory: {exc}") from exc
+
+
+def publish_initial_wait_record_bytes(
+    root: Path,
+    controller_run_id: str,
+    data: bytes,
+) -> bytes:
+    if not isinstance(root, Path):
+        raise WaitStorageError("root must be a Path")
+    if not isinstance(controller_run_id, str) or not controller_run_id:
+        raise WaitStorageError("controller_run_id must be a non-empty string")
+    if not isinstance(data, bytes) or type(data) is not bytes:
+        raise WaitStorageError("data must be bytes")
+    if len(data) > MAX_WAIT_RECORD_BYTES:
+        raise WaitStorageError("data exceeds byte limit")
+
+    try:
+        decoded = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WaitStorageError(f"data is not valid UTF-8: {exc}") from exc
+
+    try:
+        payload = unique_json(decoded)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise WaitStorageError(f"data is not valid JSON: {exc}") from exc
+
+    if not isinstance(payload, dict) or type(payload) is not dict:
+        raise WaitStorageError("data must be a JSON object")
+
+    try:
+        canonical_text = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        canonical_bytes = canonical_text.encode("utf-8")
+    except (ValueError, TypeError) as exc:
+        raise WaitStorageError(f"data cannot be serialized to canonical JSON: {exc}") from exc
+
+    if data != canonical_bytes:
+        raise WaitStorageError("data is not canonical JSON bytes")
+
+    temp_name = f".{QUOTA_WAIT_FILENAME}.tmp.{os.getpid()}"
+    target_name = QUOTA_WAIT_FILENAME
+    temp_created = False
+    linked = False
+
+    try:
+        with _open_existing_cycle_run_directory(root, controller_run_id) as (run_path, run_fd, verify_identity):
+            try:
+                verify_identity()
+            except BrokerError as exc:
+                raise WaitStorageError(f"directory identity verification failed before write: {exc}") from exc
+
+            file_path = run_path / target_name
+            target_exists = False
+            try:
+                os.stat(target_name, dir_fd=run_fd, follow_symlinks=False)
+                target_exists = True
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise WaitStorageError(f"cannot stat {target_name} via dir_fd: {exc}") from exc
+
+            if not target_exists:
+                try:
+                    os.lstat(file_path)
+                    target_exists = True
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise WaitStorageError(f"cannot lstat {target_name}: {exc}") from exc
+
+            if target_exists:
+                raise WaitStorageError(f"{target_name} already exists")
+
+            file_fd: int | None = None
+            try:
+                flags = (
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+                try:
+                    file_fd = os.open(temp_name, flags, 0o600, dir_fd=run_fd)
+                except OSError as exc:
+                    raise WaitStorageError(f"cannot safely create temp file {temp_name}: {exc}") from exc
+                temp_created = True
+
+                try:
+                    total_written = 0
+                    data_len = len(data)
+                    while total_written < data_len:
+                        try:
+                            written = os.write(file_fd, data[total_written:])
+                        except OSError as exc:
+                            raise WaitStorageError(f"cannot write {temp_name}: {exc}") from exc
+                        if written <= 0:
+                            raise WaitStorageError(f"write stalled while writing {temp_name}")
+                        total_written += written
+
+                    try:
+                        os.fchmod(file_fd, 0o600)
+                    except OSError as exc:
+                        raise WaitStorageError(f"cannot fchmod {temp_name}: {exc}") from exc
+
+                    try:
+                        os.fsync(file_fd)
+                    except OSError as exc:
+                        raise WaitStorageError(f"cannot fsync {temp_name}: {exc}") from exc
+                finally:
+                    try:
+                        os.close(file_fd)
+                    except OSError as exc:
+                        file_fd = None
+                        raise WaitStorageError(f"cannot safely close temp file {temp_name}: {exc}") from exc
+                    file_fd = None
+
+                try:
+                    os.link(
+                        temp_name,
+                        target_name,
+                        src_dir_fd=run_fd,
+                        dst_dir_fd=run_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as exc:
+                    raise WaitStorageError(f"cannot link {target_name}: target already exists") from exc
+                except OSError as exc:
+                    raise WaitStorageError(f"cannot link {target_name}: {exc}") from exc
+                linked = True
+
+                try:
+                    os.unlink(temp_name, dir_fd=run_fd)
+                except OSError as exc:
+                    raise WaitStorageError(f"ambiguous post-link publication failure: cannot unlink {temp_name}: {exc}") from exc
+
+                try:
+                    os.fsync(run_fd)
+                except OSError as exc:
+                    raise WaitStorageError(f"ambiguous post-link publication failure: cannot fsync directory: {exc}") from exc
+
+                try:
+                    verify_identity()
+                except BrokerError as exc:
+                    raise WaitStorageError(f"ambiguous post-link publication failure: directory identity verification failed after write: {exc}") from exc
+            finally:
+                if file_fd is not None:
+                    try:
+                        os.close(file_fd)
+                    except OSError:
+                        pass
+                if temp_created and not linked:
+                    try:
+                        os.unlink(temp_name, dir_fd=run_fd)
+                    except OSError:
+                        pass
+    except BrokerError as exc:
+        if linked:
+            raise WaitStorageError(f"ambiguous post-link publication failure: cycle run directory error: {exc}") from exc
+        raise WaitStorageError(f"cannot safely open cycle run directory: {exc}") from exc
+    except OSError as exc:
+        if linked:
+            raise WaitStorageError(f"ambiguous post-link publication failure: {exc}") from exc
+        raise WaitStorageError(f"cannot safely access cycle run directory: {exc}") from exc
+
+    try:
+        readback_bytes = read_initial_wait_record_bytes(root, controller_run_id)
+    except WaitStorageError as exc:
+        raise WaitStorageError(f"ambiguous post-link publication failure: readback failed: {exc}") from exc
+    except Exception as exc:
+        raise WaitStorageError(f"ambiguous post-link publication failure: readback unexpected error: {exc}") from exc
+
+    if readback_bytes != data:
+        raise WaitStorageError("ambiguous post-link publication failure: readback data mismatch")
+
+    return readback_bytes
