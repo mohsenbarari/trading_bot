@@ -99,7 +99,11 @@ def derive_worker_two_history_base(
         raise ProposalError(f"worker_info missing valid status Mapping, got {type(worker1_status).__name__}")
 
     status_worker1_id = worker1_status.get("run_id")
-    if status_worker1_id is not None and status_worker1_id != final_worker_run_id:
+    if (
+        type(status_worker1_id) is not str
+        or not status_worker1_id.strip()
+        or status_worker1_id != final_worker_run_id
+    ):
         raise ProposalError(
             f"Worker1 status run_id mismatch: {status_worker1_id!r} != artifacts {final_worker_run_id!r}"
         )
@@ -140,7 +144,11 @@ def derive_worker_two_history_base(
         raise ProposalError(f"invalid Reviewer1 conversation_id: {reviewer1_conv_id!r}")
 
     reviewer_status_run_id = reviewer_status.get("run_id")
-    if reviewer_status_run_id is not None and reviewer_status_run_id != final_reviewer_run_id:
+    if (
+        type(reviewer_status_run_id) is not str
+        or not reviewer_status_run_id.strip()
+        or reviewer_status_run_id != final_reviewer_run_id
+    ):
         raise ProposalError(
             f"Reviewer1 status run_id mismatch: {reviewer_status_run_id!r} != artifacts {final_reviewer_run_id!r}"
         )

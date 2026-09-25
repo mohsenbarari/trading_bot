@@ -184,3 +184,45 @@ def test_hardlink_feedback_rejected(tmp_path: Path) -> None:
     os.link(fb_path, link_target)
     with pytest.raises(ProposalError, match="hardlinked"):
         derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+
+@pytest.mark.parametrize(
+    ("bad_run_id", "is_missing"),
+    [
+        pytest.param(None, True, id="missing"),
+        pytest.param(None, False, id="none"),
+        pytest.param("", False, id="empty"),
+        pytest.param("wrong-worker-1", False, id="wrong"),
+    ],
+)
+def test_worker1_status_run_id_negative(
+    tmp_path: Path, bad_run_id: str | None, is_missing: bool
+) -> None:
+    artifacts, evidence, _, _ = _create_valid_fixtures(tmp_path)
+    if is_missing:
+        evidence["worker_info"]["status"].pop("run_id", None)
+    else:
+        evidence["worker_info"]["status"]["run_id"] = bad_run_id
+    with pytest.raises(ProposalError, match="Worker1 status run_id mismatch"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+
+@pytest.mark.parametrize(
+    ("bad_run_id", "is_missing"),
+    [
+        pytest.param(None, True, id="missing"),
+        pytest.param(None, False, id="none"),
+        pytest.param("", False, id="empty"),
+        pytest.param("wrong-reviewer-1", False, id="wrong"),
+    ],
+)
+def test_reviewer1_status_run_id_negative(
+    tmp_path: Path, bad_run_id: str | None, is_missing: bool
+) -> None:
+    artifacts, evidence, _, _ = _create_valid_fixtures(tmp_path)
+    if is_missing:
+        evidence["reviewer_status"].pop("run_id", None)
+    else:
+        evidence["reviewer_status"]["run_id"] = bad_run_id
+    with pytest.raises(ProposalError, match="Reviewer1 status run_id mismatch"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
