@@ -10,12 +10,14 @@ import pytest
 try:
     from scripts.two_site_quota_resume_request_record import (
         ResumeRequestRecordError,
+        build_quota_resume_request,
         validate_quota_resume_request,
     )
     from tests.test_two_site_quota_resume_claim_record import _build_valid_claim_fixtures
 except ImportError:
     from two_site_quota_resume_request_record import (
         ResumeRequestRecordError,
+        build_quota_resume_request,
         validate_quota_resume_request,
     )
     from test_two_site_quota_resume_claim_record import _build_valid_claim_fixtures
@@ -169,3 +171,90 @@ def test_lineage_field_mismatch_rejected(key: str, val: Any) -> None:
     req[key] = val
     with pytest.raises(ResumeRequestRecordError, match="mismatch"):
         validate_quota_resume_request(req, claim, exp, sha, now)
+
+
+def test_build_quota_resume_request_success_and_detached() -> None:
+    claim, expected_claim = _build_valid_claim_fixtures()
+    claim_sha = "a" * 64
+    claim_dt = datetime.fromisoformat(claim["claimed_at_utc"].replace("Z", "+00:00"))
+    now_epoch = claim_dt.timestamp() + 5.0
+    timeout = 120
+
+    claim_snap = copy.deepcopy(claim)
+    exp_snap = copy.deepcopy(expected_claim)
+
+    req = build_quota_resume_request(claim, expected_claim, claim_sha, timeout, now_epoch)
+
+    assert claim == claim_snap
+    assert expected_claim == exp_snap
+    assert req is not claim and req is not expected_claim
+    assert len(req) == 19
+    assert req["schema_version"] == "1.0"
+    assert req["request_type"] == "QUOTA_CONTINUATION"
+    assert req["request_id"] == claim["resume_request_id"]
+    assert req["controller_run_id"] == claim["continuation_controller_run_id"]
+    assert req["original_controller_run_id"] == claim["original_controller_run_id"]
+    assert req["original_request_id"] == claim["original_request_id"]
+    assert req["claim_sha256"] == claim_sha
+    assert req["original_wait_sha256"] == claim["original_wait_sha256"]
+    assert req["semantic_task_fingerprint"] == claim["semantic_task_fingerprint"]
+    assert req["task_id"] == claim["task_id"]
+    assert req["task_path"] == claim["task_path"]
+    assert req["task_sha256"] == claim["task_sha256"]
+    assert req["source_head"] == claim["source_head"]
+    assert req["assignment_id"] == claim["assignment_id"]
+    assert req["assignment_sha256"] == claim["assignment_sha256"]
+    assert req["run_prefix"] == claim["resume_run_prefix"]
+    assert req["role"] == claim["role"]
+    assert req["timeout"] == timeout
+    assert req["created_at"] == now_epoch
+
+    validated = validate_quota_resume_request(req, claim, expected_claim, claim_sha, now_epoch)
+    assert validated == req and validated is not req
+
+    req["schema_version"] = "MUTATED"
+    assert claim["schema_version"] == "1.0"
+
+
+def test_build_quota_resume_request_rejections() -> None:
+    claim, exp = _build_valid_claim_fixtures()
+    claim_sha = "a" * 64
+    claim_dt = datetime.fromisoformat(claim["claimed_at_utc"].replace("Z", "+00:00"))
+    now_epoch = claim_dt.timestamp() + 5.0
+
+    with pytest.raises(ResumeRequestRecordError, match="claim validation failed"):
+        build_quota_resume_request(dict(claim, schema_version="2.0"), exp, claim_sha, 120, now_epoch)
+    with pytest.raises(ResumeRequestRecordError, match="claim validation failed"):
+        build_quota_resume_request(claim, dict(exp, task_id="drift-id"), claim_sha, 120, now_epoch)
+    with pytest.raises(ResumeRequestRecordError, match="claim validation failed"):
+        build_quota_resume_request(["not", "dict"], exp, claim_sha, 120, now_epoch)
+    with pytest.raises(ResumeRequestRecordError, match="claim validation failed"):
+        build_quota_resume_request(claim, ["not", "dict"], claim_sha, 120, now_epoch)
+
+    for bad_sha in ("bad", "A" * 64, "a" * 63, "a" * 65, 12345, None):
+        with pytest.raises(ResumeRequestRecordError, match="expected_claim_sha256 must be 64 lowercase hex"):
+            build_quota_resume_request(claim, exp, bad_sha, 120, now_epoch)
+
+    for bad_timeout in (True, False, 9, 901, 120.0, "120", None):
+        with pytest.raises(ResumeRequestRecordError, match="timeout must be exact int 10..900"):
+            build_quota_resume_request(claim, exp, claim_sha, bad_timeout, now_epoch)
+
+    for bad_now in (True, False, float("nan"), float("inf"), float("-inf"), "123", None):
+        with pytest.raises(ResumeRequestRecordError, match="now_epoch must be finite numeric"):
+            build_quota_resume_request(claim, exp, claim_sha, 120, bad_now)
+
+    with pytest.raises(ResumeRequestRecordError, match="Clock regression"):
+        build_quota_resume_request(claim, exp, claim_sha, 120, claim_dt.timestamp() - 1.0)
+
+
+def test_build_quota_resume_request_never_calls_system_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _forbidden_time() -> float:
+        raise AssertionError("time.time() was called during pure build_quota_resume_request")
+
+    monkeypatch.setattr("time.time", _forbidden_time)
+    claim, exp = _build_valid_claim_fixtures()
+    claim_sha = "b" * 64
+    claim_dt = datetime.fromisoformat(claim["claimed_at_utc"].replace("Z", "+00:00"))
+    now_epoch = claim_dt.timestamp() + 10.0
+    res = build_quota_resume_request(claim, exp, claim_sha, 60, now_epoch)
+    assert res["created_at"] == now_epoch

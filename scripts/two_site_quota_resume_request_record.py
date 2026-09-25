@@ -22,6 +22,7 @@ except ImportError:
 
 __all__ = [
     "ResumeRequestRecordError",
+    "build_quota_resume_request",
     "validate_quota_resume_request",
 ]
 
@@ -157,3 +158,60 @@ def validate_quota_resume_request(
         )
 
     return copy.deepcopy(request)
+
+
+def build_quota_resume_request(
+    claim: object,
+    expected_claim: object,
+    expected_claim_sha256: object,
+    timeout: object,
+    now_epoch: object,
+) -> dict[str, Any]:
+    """Pure builder for version 1.0 quota resume request records."""
+    if type(expected_claim_sha256) is not str or not _HEX_64_RE.fullmatch(expected_claim_sha256):
+        raise ResumeRequestRecordError(
+            f"expected_claim_sha256 must be 64 lowercase hex: {expected_claim_sha256!r}"
+        )
+
+    if type(timeout) is not int or type(timeout) is bool or not (10 <= timeout <= 900):
+        raise ResumeRequestRecordError(
+            f"timeout must be exact int 10..900, got {timeout!r} ({type(timeout).__name__})"
+        )
+
+    if type(now_epoch) is bool or not isinstance(now_epoch, (int, float)) or not math.isfinite(now_epoch):
+        raise ResumeRequestRecordError(f"now_epoch must be finite numeric (not bool), got {now_epoch!r}")
+
+    try:
+        validated_claim = validate_known_reset_resume_claim(claim, expected_claim)
+    except ResumeClaimRecordError as exc:
+        raise ResumeRequestRecordError(f"claim validation failed: {exc}") from exc
+
+    request: dict[str, Any] = {
+        "schema_version": "1.0",
+        "request_type": "QUOTA_CONTINUATION",
+        "request_id": validated_claim["resume_request_id"],
+        "controller_run_id": validated_claim["continuation_controller_run_id"],
+        "original_controller_run_id": validated_claim["original_controller_run_id"],
+        "original_request_id": validated_claim["original_request_id"],
+        "claim_sha256": expected_claim_sha256,
+        "original_wait_sha256": validated_claim["original_wait_sha256"],
+        "semantic_task_fingerprint": validated_claim["semantic_task_fingerprint"],
+        "task_id": validated_claim["task_id"],
+        "task_path": validated_claim["task_path"],
+        "task_sha256": validated_claim["task_sha256"],
+        "source_head": validated_claim["source_head"],
+        "assignment_id": validated_claim["assignment_id"],
+        "assignment_sha256": validated_claim["assignment_sha256"],
+        "run_prefix": validated_claim["resume_run_prefix"],
+        "role": validated_claim["role"],
+        "timeout": timeout,
+        "created_at": now_epoch,
+    }
+
+    return validate_quota_resume_request(
+        request,
+        claim,
+        expected_claim,
+        expected_claim_sha256,
+        now_epoch,
+    )
