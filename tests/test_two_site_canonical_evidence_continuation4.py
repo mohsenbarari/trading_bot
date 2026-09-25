@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -17,6 +18,7 @@ from tests.test_p1_00_characterization_network_isolation import install_p1_00_ne
 install_p1_00_network_fence()
 
 from scripts.two_site_cycle_tools import inspect_canonical_evidence
+from scripts.two_site_proposal_runner import ProposalError, capture_bounded_process
 from tests.test_two_site_canonical_evidence_inspect import _make_canonical_repo, _run_git
 
 
@@ -150,25 +152,71 @@ def test_real_worktree_cli_inventory_request() -> None:
         "APP_ENV_FILE": "config/unit-test.env.example",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    proc = subprocess.run(
-        [
-            sys.executable,
-            str(root / "scripts/two_site_cycle_tools.py"),
-            "inventory",
-            "--behavior-id",
-            behavior,
-        ],
-        cwd=root,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=30,
-    )
-    assert proc.returncode == 0, proc.stderr
-    raw_output = proc.stdout[:65536]
-    data = json.loads(raw_output)
-    assert data.get("status") == "VALID", data
-    assert data.get("requested_coverage") == "PROVEN_FOR_REQUESTED_SCENARIO"
+    with tempfile.TemporaryDirectory() as td:
+        out_path = Path(td) / "cli_stdout.log"
+        err_path = Path(td) / "cli_stderr.log"
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(root / "scripts/two_site_cycle_tools.py"),
+                "inventory",
+                "--behavior-id",
+                behavior,
+            ],
+            cwd=root,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        capture_bounded_process(
+            proc,
+            b"",
+            out_path,
+            err_path,
+            timeout=30,
+            max_output=65536,
+        )
+        with open(out_path, "rb") as f:
+            stdout_bytes = f.read(65537)
+        with open(err_path, "rb") as f:
+            stderr_bytes = f.read(65537)
+        assert proc.returncode == 0, stderr_bytes.decode("utf-8", errors="replace")
+        data = json.loads(stdout_bytes.decode("utf-8"))
+        assert data.get("status") == "VALID", data
+        assert data.get("requested_coverage") == "PROVEN_FOR_REQUESTED_SCENARIO"
+
+
+def test_capture_bounded_process_overflow_terminates_child() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        out_path = Path(td) / "fake_stdout.log"
+        err_path = Path(td) / "fake_stderr.log"
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import sys, time; sys.stdout.write('x' * 70000); sys.stdout.flush(); time.sleep(10)",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        with pytest.raises(ProposalError):
+            capture_bounded_process(
+                proc,
+                b"",
+                out_path,
+                err_path,
+                timeout=30,
+                max_output=65536,
+            )
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        assert proc.poll() is not None
 
 
 def test_continuation4_synthetic_current_and_historical_proof(tmp_path: Path) -> None:
@@ -272,9 +320,23 @@ def test_negative_malformed_historical_old_sha(tmp_path: Path) -> None:
 
 
 def test_negative_malformed_historical_nonancestor(tmp_path: Path) -> None:
-    repo, _, _, _, _ = _make_continuation4_repo(
-        tmp_path / "nonancestor_hist_repo",
-        records=lambda c0, c0_sha, c4, c4_sha: [
+    repo_path = tmp_path / "nonancestor_hist_repo"
+    side_commit_holder: list[str] = []
+
+    def make_records(c0: str, c0_sha: str, c4: str, c4_sha: str) -> list[dict]:
+        tree_c0 = _run_git(repo_path, "rev-parse", f"{c0}^{{tree}}")
+        sc = _run_git(
+            repo_path,
+            "commit-tree",
+            tree_c0,
+            "-p",
+            c0,
+            "-m",
+            "commit on side branch: not an ancestor of HEAD",
+        )
+        _run_git(repo_path, "branch", "side-branch", sc)
+        side_commit_holder.append(sc)
+        return [
             {
                 "seed_ids": ["API-DEMO-SEED-PROVEN"],
                 "path": "tests/test_sample.py",
@@ -285,12 +347,42 @@ def test_negative_malformed_historical_nonancestor(tmp_path: Path) -> None:
             {
                 "seed_ids": ["API-DEMO-SEED-PROVEN"],
                 "path": "tests/test_sample.py",
-                "sha256": "a" * 64,
-                "last_commit": "1" * 40,
+                "sha256": c0_sha,
+                "last_commit": sc,
                 "test_selectors": ["tests/test_sample.py::test_sample"],
             },
-        ],
+        ]
+
+    repo, c0, c0_sha, c4, c4_sha = _make_continuation4_repo(
+        repo_path,
+        records=make_records,
     )
+    side_commit = side_commit_holder[0]
+
+    # Precondition: sample-file blob exists and has valid sha in side commit
+    blob_check = subprocess.run(
+        ["git", "cat-file", "-e", f"{side_commit}:tests/test_sample.py"],
+        cwd=repo,
+        capture_output=True,
+    )
+    assert blob_check.returncode == 0
+    side_blob_bytes = subprocess.run(
+        ["git", "show", f"{side_commit}:tests/test_sample.py"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert hashlib.sha256(side_blob_bytes).hexdigest() == c0_sha
+
+    # Precondition: side commit is NOT an ancestor of current HEAD
+    ancestor_probe = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", side_commit, "HEAD"],
+        cwd=repo,
+        capture_output=True,
+    )
+    assert ancestor_probe.returncode != 0
+
+    # Reader must return INVENTORY_INCONSISTENT because of ancestry rather than missing object
     result = inspect_canonical_evidence(repo, "API-DEMO-SEED-PROVEN")
     assert result["status"] == "INVENTORY_INCONSISTENT", result
     assert "historical record invalid" in result.get("reason", "")
