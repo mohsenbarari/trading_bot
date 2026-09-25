@@ -18,7 +18,12 @@ except ModuleNotFoundError:
     from two_site_proposal_runner import bounded_file_bytes, unique_json
     from two_site_semantic_task import validate_identity
 
-__all__ = ["SemanticAttemptError", "extract_semantic_identity", "reserve_semantic_attempt"]
+__all__ = [
+    "SemanticAttemptError",
+    "extract_semantic_identity",
+    "read_existing_semantic_attempt",
+    "reserve_semantic_attempt",
+]
 
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
 _TASK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
@@ -50,24 +55,81 @@ def extract_semantic_identity(task: Any) -> dict[str, Any]:
         raise SemanticAttemptError(f"semantic identity extraction failed: {exc}") from exc
 
 
-def _canonical_dirs(root: Any, pipeline_dir: Any) -> tuple[Path, Path, Path]:
-    root_path = Path(root).resolve(strict=True)
+def _canonical_dirs(root: Any, pipeline_dir: Any, *, create: bool = True) -> tuple[Path, Path, Path]:
+    root_path = Path(root)
+    if (not root_path.is_absolute() or not root_path.is_dir()
+            or root_path.resolve(strict=True) != root_path):
+        raise SemanticAttemptError("root directory is not canonical")
     raw_pipeline = Path(pipeline_dir)
     candidate = Path(os.path.abspath(raw_pipeline if raw_pipeline.is_absolute() else root_path / raw_pipeline))
     resolved = candidate.resolve(strict=True)
-    if (not root_path.is_dir() or not resolved.is_dir() or resolved != candidate
+    if (not resolved.is_dir() or resolved != candidate
             or resolved == root_path or not resolved.is_relative_to(root_path)):
         raise SemanticAttemptError("pipeline directory is not canonical inside root")
     attempts = resolved / "semantic-attempts"
-    try:
-        os.mkdir(attempts, 0o700)
-    except FileExistsError:
-        pass
+    if create:
+        try:
+            os.mkdir(attempts, 0o700)
+        except FileExistsError:
+            pass
     before = attempts.lstat()
     if (not stat.S_ISDIR(before.st_mode) or before.st_uid != os.geteuid()
             or (before.st_mode & 0o777) != 0o700 or attempts.resolve(strict=True) != attempts):
         raise SemanticAttemptError("semantic attempts directory is untrusted")
     return root_path, resolved, attempts
+
+
+def _stat_fingerprint(st: os.stat_result) -> tuple[int, int, int, int, int, int, int, int]:
+    return (
+        st.st_dev,
+        st.st_ino,
+        st.st_mode,
+        st.st_uid,
+        st.st_nlink,
+        st.st_size,
+        st.st_mtime_ns,
+        st.st_ctime_ns,
+    )
+
+
+def read_existing_semantic_attempt(
+    root: Any, pipeline_dir: Any, task: Any, expected_run_prefix: Any,
+) -> dict[str, Any]:
+    try:
+        if not isinstance(expected_run_prefix, str) or not _PREFIX_RE.fullmatch(expected_run_prefix):
+            raise SemanticAttemptError("invalid expected_run_prefix")
+        if (not isinstance(task, dict) or not isinstance(task.get("task_id"), str)
+                or not _TASK_RE.fullmatch(task["task_id"])):
+            raise SemanticAttemptError("invalid task_id in task")
+        task_id = task["task_id"]
+        identity = extract_semantic_identity(task)
+        root_path, _, attempts = _canonical_dirs(root, pipeline_dir, create=False)
+        before_dir = attempts.lstat()
+        target = attempts / f"{identity['fingerprint']}.json"
+        if not os.path.lexists(target):
+            raise SemanticAttemptError("semantic attempt record does not exist")
+        before_target = target.lstat()
+        if (not stat.S_ISREG(before_target.st_mode) or before_target.st_uid != os.geteuid()
+                or before_target.st_nlink != 1 or (before_target.st_mode & 0o777) != 0o600
+                or target.resolve(strict=True) != target):
+            raise SemanticAttemptError("semantic attempt record is untrusted")
+        found = _validate_existing(root_path, target, identity)
+        after_target = target.lstat()
+        after_dir = attempts.lstat()
+        if (_stat_fingerprint(before_target) != _stat_fingerprint(after_target)
+                or _stat_fingerprint(before_dir) != _stat_fingerprint(after_dir)):
+            raise SemanticAttemptError("semantic attempt metadata changed during read")
+        if found.get("task_id") != task_id:
+            raise SemanticAttemptError(f"task_id mismatch: expected {task_id}, found {found.get('task_id')}")
+        if found.get("run_prefix") != expected_run_prefix:
+            raise SemanticAttemptError(
+                f"run_prefix mismatch: expected {expected_run_prefix}, found {found.get('run_prefix')}"
+            )
+        return copy.deepcopy(found)
+    except (KeyboardInterrupt, SystemExit, SemanticAttemptError):
+        raise
+    except Exception as exc:
+        raise SemanticAttemptError(f"semantic attempt read failed: {exc}") from exc
 
 
 def _record(identity: dict[str, Any], task_id: str, run_prefix: str, created_at: float) -> dict[str, Any]:

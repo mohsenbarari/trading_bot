@@ -127,3 +127,142 @@ def test_short_writes_and_concurrent_winner(tmp_path, monkeypatch):
     assert len(results) == 1 and len(errors) == 7
     path = pipeline / "semantic-attempts" / f"{value['fingerprint']}.json"
     assert json.loads(path.read_text())["fingerprint"] == value["fingerprint"]
+
+
+def test_symlink_alias_root_fails_even_with_canonical_pipeline(tmp_path):
+    root, pipeline = dirs(tmp_path)
+    alias_root = tmp_path / "root_alias"
+    alias_root.symlink_to(root)
+    val = identity()
+    t = task(val)
+    with pytest.raises(attempts.SemanticAttemptError, match="canonical"):
+        attempts.read_existing_semantic_attempt(alias_root, pipeline, t, "run-1")
+    with pytest.raises(attempts.SemanticAttemptError, match="canonical"):
+        attempts.reserve_semantic_attempt(alias_root, pipeline, t, "T1", "run-1")
+
+
+def test_read_existing_success_and_no_write(tmp_path):
+    root, pipeline = dirs(tmp_path)
+    val = identity()
+    t = task(val)
+    reserved = attempts.reserve_semantic_attempt(root, pipeline, t, "T1", "run-1", now=10.0)
+    target = pipeline / "semantic-attempts" / f"{val['fingerprint']}.json"
+    file_before = target.stat()
+    dir_before = (pipeline / "semantic-attempts").stat()
+
+    found = attempts.read_existing_semantic_attempt(root, pipeline, t, "run-1")
+    assert found == reserved
+    assert found is not reserved
+    found["task_id"] = "mutated"
+    assert json.loads(target.read_text())["task_id"] == "T1"
+
+    file_after = target.stat()
+    dir_after = (pipeline / "semantic-attempts").stat()
+    assert file_before.st_mtime_ns == file_after.st_mtime_ns
+    assert file_before.st_size == file_after.st_size
+    assert dir_before.st_mtime_ns == dir_after.st_mtime_ns
+
+
+def test_read_existing_missing_directory_never_creates(tmp_path):
+    root, pipeline = dirs(tmp_path)
+    attempts_dir = pipeline / "semantic-attempts"
+    assert not attempts_dir.exists()
+    val = identity()
+    with pytest.raises(attempts.SemanticAttemptError):
+        attempts.read_existing_semantic_attempt(root, pipeline, task(val), "run-1")
+    assert not attempts_dir.exists()
+
+
+def test_read_existing_missing_target_record_fails(tmp_path):
+    root, pipeline = dirs(tmp_path)
+    attempts_dir = pipeline / "semantic-attempts"
+    attempts_dir.mkdir(mode=0o700)
+    val = identity()
+    with pytest.raises(attempts.SemanticAttemptError):
+        attempts.read_existing_semantic_attempt(root, pipeline, task(val), "run-1")
+
+
+def test_read_existing_detects_target_chmod_race(tmp_path, monkeypatch):
+    root, pipeline = dirs(tmp_path)
+    val = identity()
+    t = task(val)
+    attempts.reserve_semantic_attempt(root, pipeline, t, "T1", "run-1", now=1.0)
+    real_validate = attempts._validate_existing
+
+    def race_chmod(r, path, ident):
+        res = real_validate(r, path, ident)
+        path.chmod(0o644)
+        return res
+
+    monkeypatch.setattr(attempts, "_validate_existing", race_chmod)
+    with pytest.raises(attempts.SemanticAttemptError):
+        attempts.read_existing_semantic_attempt(root, pipeline, t, "run-1")
+
+
+def test_read_existing_detects_directory_chmod_race(tmp_path, monkeypatch):
+    root, pipeline = dirs(tmp_path)
+    val = identity()
+    t = task(val)
+    attempts.reserve_semantic_attempt(root, pipeline, t, "T1", "run-1", now=1.0)
+    real_validate = attempts._validate_existing
+    attempts_dir = pipeline / "semantic-attempts"
+
+    def race_dir_chmod(r, path, ident):
+        res = real_validate(r, path, ident)
+        attempts_dir.chmod(0o755)
+        return res
+
+    monkeypatch.setattr(attempts, "_validate_existing", race_dir_chmod)
+    with pytest.raises(attempts.SemanticAttemptError):
+        attempts.read_existing_semantic_attempt(root, pipeline, t, "run-1")
+
+
+def test_read_existing_detects_mtime_drift_race(tmp_path, monkeypatch):
+    root, pipeline = dirs(tmp_path)
+    val = identity()
+    t = task(val)
+    attempts.reserve_semantic_attempt(root, pipeline, t, "T1", "run-1", now=1.0)
+    real_validate = attempts._validate_existing
+
+    def race_mtime(r, path, ident):
+        res = real_validate(r, path, ident)
+        st = path.stat()
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+        return res
+
+    monkeypatch.setattr(attempts, "_validate_existing", race_mtime)
+    with pytest.raises(attempts.SemanticAttemptError):
+        attempts.read_existing_semantic_attempt(root, pipeline, t, "run-1")
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["corrupt", "symlink", "hardlink", "wrong_task", "wrong_prefix", "oversize", "mode"],
+)
+def test_read_existing_untrusted_records_fail_closed(tmp_path, case):
+    root, pipeline = dirs(tmp_path)
+    val = identity()
+    attempts.reserve_semantic_attempt(root, pipeline, task(val), "T1", "run-1", now=1)
+    path = pipeline / "semantic-attempts" / f"{val['fingerprint']}.json"
+    t = task(val)
+    run_prefix = "run-1"
+    if case == "corrupt":
+        path.write_text("{bad")
+    elif case == "symlink":
+        path.unlink()
+        outside = tmp_path / "outside"
+        outside.write_text("{}")
+        path.symlink_to(outside)
+    elif case == "hardlink":
+        os.link(path, pipeline / "semantic-attempts" / "alias.json")
+    elif case == "wrong_task":
+        t = copy.deepcopy(t)
+        t["task_id"] = "T2"
+    elif case == "wrong_prefix":
+        run_prefix = "run-2"
+    elif case == "oversize":
+        path.write_text("x" * 5000)
+    elif case == "mode":
+        path.chmod(0o644)
+    with pytest.raises(attempts.SemanticAttemptError):
+        attempts.read_existing_semantic_attempt(root, pipeline, t, run_prefix)
