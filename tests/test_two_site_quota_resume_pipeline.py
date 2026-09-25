@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+from pathlib import Path
 from typing import Any
 import pytest
 
@@ -13,7 +15,14 @@ try:
         ProposalError,
         _derive_verifier_resume_artifacts,
         derive_verifier_resume_artifacts,
+        _load_verifier_pre_review_receipt,
+        load_verifier_pre_review_receipt,
     )
+    from scripts.two_site_proposal_runner import (
+        MAX_CONTEXT,
+        serialize_json,
+    )
+    from scripts.two_site_pre_review_receipt import SandboxError
     from scripts.two_site_provider_broker import (
         BrokerError,
         PIPELINE_QUOTA_KEYS,
@@ -36,7 +45,14 @@ except ImportError:
         ProposalError,
         _derive_verifier_resume_artifacts,
         derive_verifier_resume_artifacts,
+        _load_verifier_pre_review_receipt,
+        load_verifier_pre_review_receipt,
     )
+    from two_site_proposal_runner import (
+        MAX_CONTEXT,
+        serialize_json,
+    )
+    from two_site_pre_review_receipt import SandboxError
     from two_site_provider_broker import (
         BrokerError,
         PIPELINE_QUOTA_KEYS,
@@ -343,3 +359,172 @@ def test_validate_response_rejects_malformed_envelope_and_lineage_mismatch() -> 
     bad_source_head["source_head"] = "0" * 40
     with pytest.raises(BrokerError, match="broker response binding is invalid"):
         validate_response(req, bad_source_head)
+
+
+def test_load_verifier_pre_review_receipt_success_and_immutability(tmp_path: Path) -> None:
+    root = tmp_path
+    admitted_req, receipt, state = _build_valid_pair(correction_count=0)
+    artifacts = _derive_verifier_resume_artifacts(admitted_req, receipt)
+
+    orig_prefix = artifacts["original_run_prefix"]
+    corr = artifacts["correction_count"]
+    receipt_rel = f".local/two-site-refactor/pipeline/{orig_prefix}/pre-review-tests-{corr}.json"
+    assert artifacts["pre_review_test_path"] == receipt_rel
+
+    receipt_file = root / receipt_rel
+    receipt_file.parent.mkdir(parents=True, exist_ok=True)
+
+    valid_payload = {
+        "state": "PASSED",
+        "proposal_sha256": artifacts["proposal_sha256"],
+        "selectors": ["tests/test_demo.py"],
+        "unsupported_specs": [],
+        "returncode": 0,
+        "stdout_tail": "1 passed in 0.01s",
+        "stderr_tail": "",
+        "snapshot_files": 0,
+        "snapshot_bytes": 0,
+        "isolation": "sandbox",
+    }
+    raw_bytes = serialize_json(valid_payload)
+    receipt_file.write_bytes(raw_bytes)
+    real_sha = hashlib.sha256(raw_bytes).hexdigest()
+    artifacts["pre_review_test_sha256"] = real_sha
+
+    artifacts_snap = copy.deepcopy(artifacts)
+    res = _load_verifier_pre_review_receipt(root, artifacts)
+    alias_res = load_verifier_pre_review_receipt(root, artifacts)
+
+    assert res == alias_res
+    assert res["state"] == "PASSED"
+    assert res["proposal_sha256"] == artifacts["proposal_sha256"]
+    assert res["returncode"] == 0
+    assert res["selectors"] == ["tests/test_demo.py"]
+    assert res["isolation"] == "sandbox"
+    assert artifacts == artifacts_snap
+
+    res["selectors"].append("tests/test_extra.py")
+    assert res != _load_verifier_pre_review_receipt(root, artifacts)
+
+
+def test_load_verifier_pre_review_receipt_drift_and_schema_rejections(tmp_path: Path) -> None:
+    root = tmp_path
+    admitted_req, receipt, _ = _build_valid_pair(correction_count=0)
+    artifacts = _derive_verifier_resume_artifacts(admitted_req, receipt)
+
+    with pytest.raises(ProposalError, match="artifacts must be a mapping"):
+        _load_verifier_pre_review_receipt(root, "not-a-mapping")  # type: ignore[arg-type]
+
+    bad_root_file = tmp_path / "a_file"
+    bad_root_file.write_text("data", encoding="utf-8")
+    with pytest.raises(ProposalError, match="outside the project root|project root"):
+        _load_verifier_pre_review_receipt(bad_root_file, artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["original_run_prefix"] = "invalid prefix with spaces!"
+    with pytest.raises(ProposalError, match="original_run_prefix invalid"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["correction_count"] = True
+    with pytest.raises(ProposalError, match="correction_count must be exact int 0..2"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["correction_count"] = 3
+    with pytest.raises(ProposalError, match="correction_count must be exact int 0..2"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["pre_review_test_path"] = ".local/two-site-refactor/pipeline/other/pre-review-tests-0.json"
+    with pytest.raises(ProposalError, match="pre_review_test_path mismatch"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["proposal_sha256"] = "not-a-valid-sha"
+    with pytest.raises(ProposalError, match="proposal_sha256 must be 64 lowercase hex"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["pre_review_test_sha256"] = "not-a-valid-sha"
+    with pytest.raises(ProposalError, match="pre_review_test_sha256 must be 64 lowercase hex"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["pre_review_test_state"] = "FAILED"
+    with pytest.raises(ProposalError, match="pre_review_test_state must be 'PASSED'"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+
+def test_load_verifier_pre_review_receipt_content_and_security_rejections(tmp_path: Path) -> None:
+    root = tmp_path
+    admitted_req, receipt, _ = _build_valid_pair(correction_count=0)
+    artifacts = _derive_verifier_resume_artifacts(admitted_req, receipt)
+
+    orig_prefix = artifacts["original_run_prefix"]
+    corr = artifacts["correction_count"]
+    receipt_rel = f".local/two-site-refactor/pipeline/{orig_prefix}/pre-review-tests-{corr}.json"
+    receipt_file = root / receipt_rel
+    receipt_file.parent.mkdir(parents=True, exist_ok=True)
+
+    valid_payload = {
+        "state": "PASSED",
+        "proposal_sha256": artifacts["proposal_sha256"],
+        "selectors": ["tests/test_demo.py"],
+        "unsupported_specs": [],
+        "returncode": 0,
+        "stdout_tail": "1 passed",
+        "stderr_tail": "",
+        "snapshot_files": 0,
+        "snapshot_bytes": 0,
+        "isolation": "sandbox",
+    }
+    raw_bytes = serialize_json(valid_payload)
+    receipt_file.write_bytes(raw_bytes)
+    real_sha = hashlib.sha256(raw_bytes).hexdigest()
+    artifacts["pre_review_test_sha256"] = real_sha
+
+    # 1. Wrong receipt SHA
+    bad_artifacts = copy.deepcopy(artifacts)
+    bad_artifacts["pre_review_test_sha256"] = "0" * 64
+    with pytest.raises(ProposalError, match="pre-review test receipt SHA mismatch"):
+        _load_verifier_pre_review_receipt(root, bad_artifacts)
+
+    # 2. Wrong proposal SHA
+    bad_prop_artifacts = copy.deepcopy(artifacts)
+    bad_prop_artifacts["proposal_sha256"] = "1" * 64
+    with pytest.raises((ProposalError, SandboxError), match="proposal_sha256"):
+        _load_verifier_pre_review_receipt(root, bad_prop_artifacts)
+
+    # 3. State FAILED
+    failed_payload = copy.deepcopy(valid_payload)
+    failed_payload["state"] = "FAILED"
+    failed_payload["returncode"] = 1
+    failed_bytes = serialize_json(failed_payload)
+    receipt_file.write_bytes(failed_bytes)
+    failed_artifacts = copy.deepcopy(artifacts)
+    failed_artifacts["pre_review_test_sha256"] = hashlib.sha256(failed_bytes).hexdigest()
+    with pytest.raises((ProposalError, SandboxError), match="receipt state must be PASSED|pre_review_test_state"):
+        _load_verifier_pre_review_receipt(root, failed_artifacts)
+
+    # 4. Over MAX_CONTEXT
+    oversized = b" " * (MAX_CONTEXT + 1)
+    receipt_file.write_bytes(oversized)
+    over_artifacts = copy.deepcopy(artifacts)
+    over_artifacts["pre_review_test_sha256"] = hashlib.sha256(oversized).hexdigest()
+    with pytest.raises(ProposalError, match="exceeds the safe context budget"):
+        _load_verifier_pre_review_receipt(root, over_artifacts)
+
+    # 5. Symlink
+    receipt_file.unlink()
+    target_file = root / "real_receipt.json"
+    target_file.write_bytes(raw_bytes)
+    os.symlink(target_file, receipt_file)
+    with pytest.raises(ProposalError, match="symlink or path escape"):
+        _load_verifier_pre_review_receipt(root, artifacts)
+
+    # 6. Hardlink
+    receipt_file.unlink()
+    os.link(target_file, receipt_file)
+    with pytest.raises(ProposalError, match="hardlinked and cannot be trusted"):
+        _load_verifier_pre_review_receipt(root, artifacts)

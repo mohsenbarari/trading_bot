@@ -11,7 +11,7 @@ import argparse
 import ast
 from contextlib import contextmanager
 from datetime import datetime, timezone
-import fcntl, hashlib, json, os, re, stat, subprocess
+import copy, fcntl, hashlib, json, os, re, stat, subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -288,6 +288,88 @@ def _derive_verifier_resume_artifacts(
 
 
 derive_verifier_resume_artifacts = _derive_verifier_resume_artifacts
+
+
+def _load_verifier_pre_review_receipt(
+    root: Path | str,
+    artifacts: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Load and validate the pre-review test receipt recorded in verifier resume artifacts."""
+    if isinstance(root, str):
+        root = Path(root)
+    elif not isinstance(root, Path):
+        raise ProposalError("root must be a Path or str")
+
+    try:
+        resolved_root = root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ProposalError(f"project root does not exist: {exc}") from exc
+    if not resolved_root.is_dir():
+        raise ProposalError("project root must be a directory")
+
+    if not isinstance(artifacts, Mapping) or isinstance(artifacts, (str, bytes)):
+        raise ProposalError(f"artifacts must be a mapping, got {type(artifacts).__name__}")
+
+    orig_run_prefix = artifacts.get("original_run_prefix")
+    if not isinstance(orig_run_prefix, str) or not RUN_PREFIX_RE.fullmatch(orig_run_prefix):
+        raise ProposalError(f"artifacts original_run_prefix invalid: {orig_run_prefix!r}")
+
+    correction_count = artifacts.get("correction_count")
+    if type(correction_count) is not int or type(correction_count) is bool or not (0 <= correction_count <= 2):
+        raise ProposalError(f"artifacts correction_count must be exact int 0..2, got {correction_count!r}")
+
+    expected_test_path = (
+        f".local/two-site-refactor/pipeline/{orig_run_prefix}/pre-review-tests-{correction_count}.json"
+    )
+    pre_review_test_path = artifacts.get("pre_review_test_path")
+    if pre_review_test_path != expected_test_path:
+        raise ProposalError(
+            f"artifacts pre_review_test_path mismatch: {pre_review_test_path!r} != {expected_test_path!r}"
+        )
+
+    proposal_sha = artifacts.get("proposal_sha256")
+    if not isinstance(proposal_sha, str) or not SHA_PATTERN.fullmatch(proposal_sha):
+        raise ProposalError(f"artifacts proposal_sha256 must be 64 lowercase hex, got {proposal_sha!r}")
+
+    receipt_sha = artifacts.get("pre_review_test_sha256")
+    if not isinstance(receipt_sha, str) or not SHA_PATTERN.fullmatch(receipt_sha):
+        raise ProposalError(f"artifacts pre_review_test_sha256 must be 64 lowercase hex, got {receipt_sha!r}")
+
+    test_state = artifacts.get("pre_review_test_state")
+    if test_state != "PASSED":
+        raise ProposalError(f"artifacts pre_review_test_state must be 'PASSED', got {test_state!r}")
+
+    raw_bytes = bounded_file_bytes(
+        resolved_root, Path(expected_test_path), MAX_CONTEXT, "pre-review test receipt"
+    )
+
+    computed_sha = hashlib.sha256(raw_bytes).hexdigest()
+    if computed_sha != receipt_sha:
+        raise ProposalError(
+            f"pre-review test receipt SHA mismatch: computed {computed_sha!r} != expected {receipt_sha!r}"
+        )
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ProposalError("pre-review test receipt is not valid UTF-8") from exc
+
+    try:
+        parsed = unique_json(text)
+    except Exception as exc:
+        raise ProposalError(f"failed to parse pre-review test receipt JSON: {exc}") from exc
+
+    normalized = validate_test_receipt(parsed, proposal_sha, require_passed=True)
+
+    if normalized.get("state") != "PASSED" or normalized.get("state") != test_state:
+        raise ProposalError(
+            f"normalized receipt state {normalized.get('state')!r} does not match expected {test_state!r}"
+        )
+
+    return copy.deepcopy(normalized)
+
+
+load_verifier_pre_review_receipt = _load_verifier_pre_review_receipt
 
 
 class QuotaBlockError(ProposalError):
