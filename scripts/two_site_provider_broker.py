@@ -34,6 +34,10 @@ try:
         load_active_assignment_scope,
         validate_task_scope,
     )
+    from scripts.two_site_preparation_contract import (
+        PreparationConfigError,
+        PreparationStartup,
+    )
     from scripts.two_site_proposal_pipeline import validate_quota_evidence
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT,
@@ -53,6 +57,10 @@ except ModuleNotFoundError:  # Direct ``python scripts/...`` execution.
         AssignmentScopeError,
         load_active_assignment_scope,
         validate_task_scope,
+    )
+    from two_site_preparation_contract import (  # type: ignore[no-redef]
+        PreparationConfigError,
+        PreparationStartup,
     )
     from two_site_proposal_pipeline import validate_quota_evidence  # type: ignore[no-redef]
     from two_site_proposal_runner import (  # type: ignore[no-redef]
@@ -2611,6 +2619,20 @@ def _read_cycle_private_json(
         except OSError as exc:
             if sys.exc_info()[1] is None:
                 raise BrokerError(f"cannot safely close cycle private file {filename} descriptor: {exc}") from exc
+
+
+def _parse_cycle_preparation_startup(
+    startup: object, controller_run_id: str
+) -> PreparationStartup:
+    if not isinstance(controller_run_id, str) or not CYCLE_RUN_RE.fullmatch(controller_run_id):
+        raise BrokerError("controller run ID must be a cycle run ID")
+    try:
+        parsed = PreparationStartup.from_mapping(startup)
+    except PreparationConfigError as exc:
+        raise BrokerError(f"invalid preparation startup: {exc}") from exc
+    if parsed.cycle_id != controller_run_id:
+        raise BrokerError("preparation startup cycle ID does not match controller run ID")
+    return parsed
 
 
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
