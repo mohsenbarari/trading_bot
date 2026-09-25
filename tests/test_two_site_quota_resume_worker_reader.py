@@ -15,13 +15,24 @@ try:
         MAX_CONTEXT,
         ProposalError,
     )
-    from scripts.two_site_quota_resume_worker_reader import load_prior_worker_zero
+    from scripts.two_site_quota_resume_worker_reader import (
+        load_prior_worker_chain,
+        load_prior_worker_zero,
+    )
 except ImportError:
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         MAX_CONTEXT,
         ProposalError,
     )
-    from two_site_quota_resume_worker_reader import load_prior_worker_zero  # type: ignore[no-redef]
+    from two_site_quota_resume_worker_reader import (  # type: ignore[no-redef]
+        load_prior_worker_chain,
+        load_prior_worker_zero,
+    )
+
+
+def _write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data))
 
 try:
     from tests.test_two_site_proposal_pipeline import HEAD, make_runner
@@ -191,3 +202,228 @@ class TestTwoSiteQuotaResumeWorkerReader(unittest.TestCase):
         with self.assertRaises(ProposalError) as ctx:
             load_prior_worker_zero(self.root, self.task_path, artifacts)
         self.assertIn("hardlink", str(ctx.exception).lower())
+
+    def _create_chain_artifacts(
+        self,
+        corr: int = 1,
+        orig_prefix: str = "run-chain",
+        final_worker_run_id: str | None = None,
+        responses: list[dict] | None = None,
+    ) -> tuple[dict, list[Path]]:
+        if responses is None:
+            responses = [{"content": f"# c {i}\n"} for i in range(corr + 1)]
+        runner, _ = make_runner(self.root, responses)
+        run_dirs = []
+        prior_dir = None
+        prior_sha = None
+
+        for j in range(corr + 1):
+            if j == corr and final_worker_run_id is not None:
+                r_id = final_worker_run_id
+            else:
+                r_id = f"{orig_prefix}-worker-{j}"
+
+            fb_path = None
+            prop_path = None
+            if j > 0:
+                fb_path = self.root / ".local" / "two-site-refactor" / "pipeline" / orig_prefix / f"feedback-correction-{j}.json"
+                fb_data = {
+                    "reviewer": "codex",
+                    "reviewed_proposal_sha256": prior_sha,
+                    "findings": [f"fix-{j}"],
+                    "test_evidence": [],
+                }
+                _write_json(fb_path, fb_data)
+                prop_path = prior_dir / "result.json"
+
+            r_dir = runner(
+                self.root,
+                self.task_path,
+                "worker",
+                r_id,
+                300,
+                feedback=fb_path,
+                proposal=prop_path,
+            )
+            run_dirs.append(r_dir)
+            prior_dir = r_dir
+            prior_sha = hashlib.sha256((r_dir / "result.json").read_bytes()).hexdigest()
+
+        final_id = run_dirs[-1].name
+        artifacts = {
+            "task_id": "T1",
+            "source_head": HEAD,
+            "original_run_prefix": orig_prefix,
+            "final_worker_run_id": final_id,
+            "proposal_path": f".local/two-site-refactor/proposals/{final_id}/result.json",
+            "proposal_sha256": prior_sha,
+            "correction_count": corr,
+        }
+        return artifacts, run_dirs
+
+    def test_chain_success_corr_0_1_2(self):
+        art0, _ = self._create_chain_artifacts(corr=0, orig_prefix="run-c0")
+        rec0 = load_prior_worker_chain(self.root, self.task_path, art0)
+        self.assertEqual(rec0["result_sha"], art0["proposal_sha256"])
+        self.assertEqual(rec0["status"]["run_id"], "run-c0-worker-0")
+
+        art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-c1")
+        rec1 = load_prior_worker_chain(self.root, self.task_path, art1)
+        self.assertEqual(rec1["result_sha"], art1["proposal_sha256"])
+        self.assertEqual(rec1["status"]["run_id"], "run-c1-worker-1")
+        self.assertEqual(rec1["conversation_id"], "conv-run-c1-worker-1")
+        rec1["result"]["summary"] = "mutated"
+        self.assertNotEqual((run_dirs1[1] / "result.json").read_text(), "mutated")
+
+        art1r, _ = self._create_chain_artifacts(
+            corr=1,
+            orig_prefix="run-c1r",
+            final_worker_run_id="run-c1r-worker-1-retry-1",
+        )
+        rec1r = load_prior_worker_chain(self.root, self.task_path, art1r)
+        self.assertEqual(rec1r["status"]["run_id"], "run-c1r-worker-1-retry-1")
+
+        art2, run_dirs2 = self._create_chain_artifacts(corr=2, orig_prefix="run-c2")
+        rec2 = load_prior_worker_chain(self.root, self.task_path, art2)
+        self.assertEqual(rec2["result_sha"], art2["proposal_sha256"])
+        self.assertEqual(rec2["status"]["run_id"], "run-c2-worker-2")
+        self.assertEqual(rec2["conversation_id"], "conv-run-c2-worker-2")
+
+    def test_chain_invalid_correction_count(self):
+        art1, _ = self._create_chain_artifacts(corr=1, orig_prefix="run-cc")
+        for invalid_corr in (-1, 3, "1", None, True, False):
+            with self.subTest(corr=invalid_corr):
+                bad_art = dict(art1, correction_count=invalid_corr)
+                with self.assertRaises(ProposalError):
+                    load_prior_worker_chain(self.root, self.task_path, bad_art)
+
+    def test_chain_backward_prior_id_tamper(self):
+        art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-bkw")
+        st1_path = run_dirs1[1] / "status.json"
+        st1 = json.loads(st1_path.read_text())
+
+        cases = [
+            ("self_prior_id", dict(input_worker_run_id="run-bkw-worker-1")),
+            ("wrong_prefix", dict(input_worker_run_id="other-worker-0")),
+            ("invalid_retry", dict(input_worker_run_id="run-bkw-worker-0-retry-3")),
+            ("non_hex_sha", dict(input_proposal_sha256="G" * 64)),
+            ("short_sha", dict(input_proposal_sha256="0" * 63)),
+        ]
+        for name, override in cases:
+            with self.subTest(case=name):
+                tampered = dict(st1, **override)
+                _write_json(st1_path, tampered)
+                with self.assertRaises(ProposalError):
+                    load_prior_worker_chain(self.root, self.task_path, art1)
+        _write_json(st1_path, st1)
+
+    def test_chain_feedback_tamper(self):
+        art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-fb")
+        fb_path = self.root / ".local" / "two-site-refactor" / "pipeline" / "run-fb" / "feedback-correction-1.json"
+        fb = json.loads(fb_path.read_text())
+
+        fb_cases = [
+            ("invalid_reviewer", dict(reviewer="unknown")),
+            ("wrong_reviewed_sha", dict(reviewed_proposal_sha256="0" * 64)),
+            ("empty_findings", dict(findings=[])),
+            ("invalid_findings_type", dict(findings="not-a-list")),
+        ]
+        for name, override in fb_cases:
+            with self.subTest(case=name):
+                _write_json(fb_path, dict(fb, **override))
+                with self.assertRaises(ProposalError):
+                    load_prior_worker_chain(self.root, self.task_path, art1)
+        _write_json(fb_path, fb)
+
+        st1_path = run_dirs1[1] / "status.json"
+        st1 = json.loads(st1_path.read_text())
+        st1["input_feedback_sha256"] = "1" * 64
+        _write_json(st1_path, st1)
+        with self.assertRaises(ProposalError):
+            load_prior_worker_chain(self.root, self.task_path, art1)
+        st1["input_feedback_sha256"] = hashlib.sha256(fb_path.read_bytes()).hexdigest()
+        _write_json(st1_path, st1)
+
+        fb_path.unlink()
+        with self.assertRaises(ProposalError):
+            load_prior_worker_chain(self.root, self.task_path, art1)
+
+    def test_chain_reused_conversation_and_unchanged_proposal(self):
+        art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-re")
+        st1_path = run_dirs1[1] / "status.json"
+        st0_path = run_dirs1[0] / "status.json"
+        st1 = json.loads(st1_path.read_text())
+        st0 = json.loads(st0_path.read_text())
+        st1["conversation_id"] = st0["conversation_id"]
+        _write_json(st1_path, st1)
+        with self.assertRaises(ProposalError) as ctx:
+            load_prior_worker_chain(self.root, self.task_path, art1)
+        self.assertIn("conversation_id", str(ctx.exception))
+
+        art_same, _ = self._create_chain_artifacts(
+            corr=1,
+            orig_prefix="run-same",
+            responses=[{"content": "# same\n"}, {"content": "# same\n"}],
+        )
+        with self.assertRaises(ProposalError) as ctx:
+            load_prior_worker_chain(self.root, self.task_path, art_same)
+        self.assertIn("differ", str(ctx.exception).lower())
+
+    def test_chain_status_drift(self):
+        art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-drift")
+        reader_mod = sys.modules[load_prior_worker_chain.__module__]
+        orig_validate_run = reader_mod.validate_run
+
+        def mutating_validate_run(*args, **kwargs):
+            res = orig_validate_run(*args, **kwargs)
+            st_path = run_dirs1[1] / "status.json"
+            st = json.loads(st_path.read_text())
+            st["extra"] = "drifted"
+            _write_json(st_path, st)
+            return res
+
+        with patch.object(reader_mod, "validate_run", side_effect=mutating_validate_run):
+            with self.assertRaises(ProposalError) as ctx:
+                load_prior_worker_chain(self.root, self.task_path, art1)
+            self.assertIn("drift", str(ctx.exception).lower())
+
+    def test_chain_symlink_hardlink_oversize_and_sha_mismatch(self):
+        art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-sec")
+        res_file = run_dirs1[1] / "result.json"
+        link_target = self.root / "hardlink_chain_result.json"
+        os.link(res_file, link_target)
+        with self.assertRaises(ProposalError) as ctx:
+            load_prior_worker_chain(self.root, self.task_path, art1)
+        self.assertIn("hardlink", str(ctx.exception).lower())
+        link_target.unlink()
+
+        sym_dir = self.root / ".local/two-site-refactor/proposals/run-sec-sym-worker-1"
+        os.symlink(run_dirs1[1], sym_dir)
+        bad_sym_art = dict(
+            art1,
+            final_worker_run_id="run-sec-sym-worker-1",
+            original_run_prefix="run-sec-sym",
+            proposal_path=".local/two-site-refactor/proposals/run-sec-sym-worker-1/result.json",
+        )
+        with self.assertRaises(ProposalError):
+            load_prior_worker_chain(self.root, self.task_path, bad_sym_art)
+        sym_dir.unlink()
+
+        st1_path = run_dirs1[1] / "status.json"
+        orig_st_bytes = st1_path.read_bytes()
+        st1_path.write_text("x" * (MAX_CONTEXT + 1024))
+        with self.assertRaises(ProposalError):
+            load_prior_worker_chain(self.root, self.task_path, art1)
+        st1_path.write_bytes(orig_st_bytes)
+
+        fb_path = self.root / ".local" / "two-site-refactor" / "pipeline" / "run-sec" / "feedback-correction-1.json"
+        orig_fb_bytes = fb_path.read_bytes()
+        fb_path.write_text("x" * (MAX_CONTEXT + 1024))
+        with self.assertRaises(ProposalError):
+            load_prior_worker_chain(self.root, self.task_path, art1)
+        fb_path.write_bytes(orig_fb_bytes)
+
+        bad_sha_art = dict(art1, proposal_sha256="0" * 64)
+        with self.assertRaises(ProposalError) as ctx:
+            load_prior_worker_chain(self.root, self.task_path, bad_sha_art)
+        self.assertIn("proposal sha mismatch", str(ctx.exception).lower())
