@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import copy
+import hashlib
+import json
+import os
 from pathlib import Path
 from typing import Any
 import pytest
 
 from scripts.two_site_proposal_pipeline import ProposalError, QuotaBlockError
+try:
+    from scripts.two_site_proposal_runner import MODEL
+except ImportError:
+    from two_site_proposal_runner import MODEL  # type: ignore[no-redef]
 from scripts.two_site_quota_continuation_admission import ContinuationAdmissionError
 import scripts.two_site_quota_resume_verifier as verifier_mod
 from scripts.two_site_quota_resume_verifier import execute_verifier_once
@@ -209,17 +216,149 @@ def test_original_evidence_drift(tmp_path: Path, accepted_ctx: dict[str, Any], m
 
 def test_second_quota_one_runner_call(tmp_path: Path, accepted_ctx: dict[str, Any], monkeypatch):
     _setup_common(monkeypatch, accepted_ctx)
+    run_dir = tmp_path / ".local/two-site-refactor/proposals/cont-run-reviewer-0"
+    calls = []
+    status_content = None
+
+    def fake_runner(root, task_path, role, run_id, timeout, **kwargs):
+        nonlocal status_content
+        calls.append(run_id)
+        if kwargs.get("pre_provider_check"):
+            kwargs["pre_provider_check"]()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        status_payload = {
+            "run_id": run_id,
+            "role": "verifier",
+            "head": accepted_ctx["source_head"],
+            "model": MODEL,
+            "state": "BLOCKED",
+            "conversation_id": "c1",
+            "quota_evidence": {
+                "kind": "QUOTA_RESET_UNKNOWN",
+                "provider": "gemini",
+                "model": MODEL,
+                "conversation_id": "c1",
+                "reset_at_utc": None,
+            },
+        }
+        status_path = run_dir / "status.json"
+        status_content = json.dumps(status_payload).encode("utf-8")
+        status_path.write_bytes(status_content)
+        raise ProposalError("runner failed with quota error")
+
+    monkeypatch.setattr(verifier_mod, "runner_run", fake_runner)
+    with pytest.raises(QuotaBlockError) as exc_info:
+        execute_verifier_once(tmp_path, {"role": "verifier"})
+
+    assert len(calls) == 1
+    assert status_content is not None
+    expected_sha256 = hashlib.sha256(status_content).hexdigest()
+    assert exc_info.value.quota_attempt == {
+        "role": "verifier",
+        "run_id": "cont-run-reviewer-0",
+        "status_sha256": expected_sha256,
+    }
+    assert exc_info.value.quota_evidence == {
+        "kind": "QUOTA_RESET_UNKNOWN",
+        "provider": "gemini",
+        "model": MODEL,
+        "conversation_id": "c1",
+        "reset_at_utc": None,
+    }
+
+    with pytest.raises(ProposalError, match="already exists"):
+        execute_verifier_once(tmp_path, {"role": "verifier"})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("override_key", "override_value"),
+    [
+        ("model", "wrong-model"),
+        ("head", "wrong-head"),
+        ("role", "worker"),
+    ],
+)
+def test_second_quota_negative_wrong_fields_not_upgraded(
+    tmp_path: Path, accepted_ctx: dict[str, Any], monkeypatch, override_key: str, override_value: str
+):
+    _setup_common(monkeypatch, accepted_ctx)
+    run_dir = tmp_path / ".local/two-site-refactor/proposals/cont-run-reviewer-0"
     calls = []
 
     def fake_runner(root, task_path, role, run_id, timeout, **kwargs):
         calls.append(run_id)
         if kwargs.get("pre_provider_check"):
             kwargs["pre_provider_check"]()
-        raise QuotaBlockError(
-            {"kind": "QUOTA_RESET_UNKNOWN", "provider": "gemini", "model": "gemini-2.5-pro", "conversation_id": "c1", "reset_at_utc": None}
-        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        status_payload = {
+            "run_id": run_id,
+            "role": "verifier",
+            "head": accepted_ctx["source_head"],
+            "model": MODEL,
+            "state": "BLOCKED",
+            "conversation_id": "c1",
+            "quota_evidence": {
+                "kind": "QUOTA_RESET_UNKNOWN",
+                "provider": "gemini",
+                "model": MODEL,
+                "conversation_id": "c1",
+                "reset_at_utc": None,
+            },
+        }
+        status_payload[override_key] = override_value
+        status_path = run_dir / "status.json"
+        status_path.write_bytes(json.dumps(status_payload).encode("utf-8"))
+        raise ProposalError("runner failed with invalid status")
 
     monkeypatch.setattr(verifier_mod, "runner_run", fake_runner)
-    with pytest.raises(QuotaBlockError):
+    with pytest.raises(ProposalError, match="runner failed with invalid status") as exc_info:
         execute_verifier_once(tmp_path, {"role": "verifier"})
+
+    assert not isinstance(exc_info.value, QuotaBlockError)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("link_type", ["symlink", "hardlink"])
+def test_second_quota_negative_linked_status_not_upgraded(
+    tmp_path: Path, accepted_ctx: dict[str, Any], monkeypatch, link_type: str
+):
+    _setup_common(monkeypatch, accepted_ctx)
+    run_dir = tmp_path / ".local/two-site-refactor/proposals/cont-run-reviewer-0"
+    calls = []
+
+    def fake_runner(root, task_path, role, run_id, timeout, **kwargs):
+        calls.append(run_id)
+        if kwargs.get("pre_provider_check"):
+            kwargs["pre_provider_check"]()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        status_payload = {
+            "run_id": run_id,
+            "role": "verifier",
+            "head": accepted_ctx["source_head"],
+            "model": MODEL,
+            "state": "BLOCKED",
+            "conversation_id": "c1",
+            "quota_evidence": {
+                "kind": "QUOTA_RESET_UNKNOWN",
+                "provider": "gemini",
+                "model": MODEL,
+                "conversation_id": "c1",
+                "reset_at_utc": None,
+            },
+        }
+        target_file = tmp_path / f"target_{link_type}.json"
+        target_file.write_bytes(json.dumps(status_payload).encode("utf-8"))
+        status_path = run_dir / "status.json"
+        if link_type == "symlink":
+            status_path.symlink_to(target_file)
+        else:
+            os.link(target_file, status_path)
+        raise ProposalError(f"runner failed with {link_type} status")
+
+    monkeypatch.setattr(verifier_mod, "runner_run", fake_runner)
+    with pytest.raises(ProposalError, match=f"runner failed with {link_type} status") as exc_info:
+        execute_verifier_once(tmp_path, {"role": "verifier"})
+
+    assert not isinstance(exc_info.value, QuotaBlockError)
     assert len(calls) == 1
