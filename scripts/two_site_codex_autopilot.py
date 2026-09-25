@@ -2983,7 +2983,10 @@ def run_loop(
     once: bool,
     *,
     preparation_route: str = "one_shot",
+    quota_wait_enabled: bool = False,
 ) -> int:
+    if type(quota_wait_enabled) is not bool:
+        raise AutopilotError("quota_wait_enabled must be an exact bool")
     if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
         raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
     root = root.resolve(strict=True)
@@ -3085,6 +3088,33 @@ def run_loop(
                         ],
                     )
                     return 2
+                if quota_wait_enabled:
+                    try:
+                        from scripts.two_site_quota_supervisor_bridge import (
+                            accept_cycle_quota_disposition_locked,
+                        )
+                    except ModuleNotFoundError:
+                        from two_site_quota_supervisor_bridge import (
+                            accept_cycle_quota_disposition_locked,
+                        )
+                    record = accept_cycle_quota_disposition_locked(
+                        root, run_dir, result, enabled=True,
+                    )
+                    if record is not None:
+                        if type(record) is not dict or record.get("state") != "WAITING_QUOTA":
+                            raise AutopilotError("invalid quota wait admission record")
+                        write_supervisor_state(
+                            state_root,
+                            "WAITING_QUOTA",
+                            cycle=cycle,
+                            evidence=str(run_dir),
+                            head=result["head_after"],
+                            request_id=record["request_id"],
+                            schedule=record["schedule"],
+                            summary="Validated terminal quota; awaiting explicit resume gate.",
+                            blockers=[],
+                        )
+                        return 2
                 previous_success = None
                 retryable_failures = 0
                 if result.get("head_changed") and result.get("commit") is not None:
