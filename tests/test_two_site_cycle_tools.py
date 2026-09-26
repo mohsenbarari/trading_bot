@@ -5,7 +5,9 @@ import subprocess
 
 import pytest
 
+from scripts import two_site_codex_autopilot as autopilot
 from scripts import two_site_cycle_tools as ct
+from scripts import two_site_proposal_pipeline as pipeline
 from scripts import two_site_proposal_runner as runner
 
 
@@ -323,6 +325,71 @@ def test_correction_worker_requires_fresh_session_and_exact_prior(repo, reuse_co
             ct.review(root, output, "w1", "r1", digest)
     else:
         assert ct.review(root, output, "w1", "r1", digest)["state"] == "BINDINGS_VALID"
+
+
+@pytest.mark.parametrize("forged_prior", [False, True])
+def test_correction_worker_model_routing_and_forged_prior_gate(repo, monkeypatch, forged_prior):
+    root, _ = repo
+    opus_model = "claude-opus-4-6-thinking"
+    output, digest, result, reviewer = chain(repo)
+    worker = reviewer.parent / "w1"
+    prior = reviewer.parent / "w0"
+    prior.mkdir()
+    snapshot = json.loads((worker / "task.json").read_text())
+    expected_task_id = snapshot["task"]["task_id"]
+
+    calls = []
+
+    def fake_expected_role_model(role, task_id):
+        assert task_id == expected_task_id
+        calls.append((role, task_id))
+        if role == "worker":
+            return opus_model
+        return runner.MODEL
+
+    monkeypatch.setattr(pipeline, "expected_role_model", fake_expected_role_model)
+    monkeypatch.setattr(autopilot, "expected_role_model", fake_expected_role_model)
+
+    previous = {**result, "changes": [{**result["changes"][0], "content": "def test_new():\n    assert False\n"}]}
+    runner.write_json(prior / "result.json", previous)
+    prior_text = (prior / "result.json").read_text()
+    prior_sha = runner.sha(prior_text.encode())
+    runner.write_json(prior / "task.json", snapshot)
+
+    status = json.loads((worker / "status.json").read_text())
+    prior_model = runner.MODEL if forged_prior else opus_model
+    runner.write_json(
+        prior / "status.json",
+        {**status, "run_id": "w0", "model": prior_model, "result_sha256": prior_sha, "conversation_id": "wc0"},
+    )
+    feedback = {
+        "reviewer": "codex",
+        "reviewed_proposal_sha256": prior_sha,
+        "findings": ["Assertion must reflect true behavior"],
+        "test_evidence": [],
+    }
+    runner.write_json(worker / "task.json", {**snapshot, "proposal": prior_text, "feedback": feedback})
+    status.update(
+        model=opus_model,
+        input_worker_run_id="w0",
+        input_proposal_sha256=prior_sha,
+        input_worker_conversation_id="wc0",
+    )
+    runner.write_json(worker / "status.json", status)
+
+    if forged_prior:
+        with pytest.raises(runner.ProposalError, match="prior identity mismatch"):
+            ct.review(root, output, "w1", "r1", digest)
+        assert calls == [("worker", expected_task_id), ("worker", expected_task_id)]
+    else:
+        receipt = ct.review(root, output, "w1", "r1", digest)
+        assert receipt["state"] == "BINDINGS_VALID"
+        assert calls == [
+            ("worker", expected_task_id),
+            ("worker", expected_task_id),
+            ("worker", expected_task_id),
+            ("verifier", expected_task_id),
+        ]
 
 
 def test_review_rejects_pre_apply_dirty_tree(repo):
