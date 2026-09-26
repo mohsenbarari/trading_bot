@@ -34,6 +34,49 @@ from scripts.two_site_quota_resume_worker_evidence import (
 )
 
 
+def _validate_origin_and_reviewer_status(
+    root: Path,
+    artifacts: dict[str, Any],
+    evidence: dict[str, Any],
+    *,
+    readmission: bool = False,
+) -> bytes | None:
+    origin = artifacts.get("correction_origin")
+    if origin is None:
+        origin = "REVIEWER"
+
+    if origin == "REVIEWER":
+        reviewer_path = artifacts.get("reviewer_path")
+        if not isinstance(reviewer_path, (str, Path)):
+            suffix = " on re-admission" if readmission else ""
+            raise ProposalError(f"artifacts missing reviewer_path{suffix}")
+        status_path = Path(reviewer_path).with_name("status.json")
+        return bounded_file_bytes(
+            root,
+            status_path,
+            MAX_CONTEXT,
+            "prior reviewer status",
+        )
+
+    if origin in ("BOOTSTRAP", "TEST_FAILED"):
+        if artifacts.get("reviewer_path") is not None:
+            raise ProposalError(
+                f"artifacts reviewer_path must be None for {origin}, got {artifacts.get('reviewer_path')!r}"
+            )
+        if artifacts.get("final_reviewer_run_id") is not None:
+            raise ProposalError(
+                f"artifacts final_reviewer_run_id must be None for {origin}, got {artifacts.get('final_reviewer_run_id')!r}"
+            )
+        for key in ("reviewer_status", "reviewer_result", "reviewer_sha"):
+            if evidence.get(key) is not None:
+                raise ProposalError(
+                    f"evidence {key} must be None for {origin}, got {evidence.get(key)!r}"
+                )
+        return None
+
+    raise ProposalError(f"artifacts correction_origin invalid: {origin!r}")
+
+
 @contextmanager
 def worker_correction_continuation_context(
     root: Path,
@@ -96,15 +139,11 @@ def worker_correction_continuation_context(
             sources,
         )
 
-        reviewer_path_1 = artifacts_1.get("reviewer_path")
-        if not isinstance(reviewer_path_1, (str, Path)):
-            raise ProposalError("artifacts missing reviewer_path")
-        status_path_1 = Path(reviewer_path_1).with_name("status.json")
-        status_bytes_1 = bounded_file_bytes(
+        status_bytes_1 = _validate_origin_and_reviewer_status(
             root,
-            status_path_1,
-            MAX_CONTEXT,
-            "prior reviewer status",
+            artifacts_1,
+            evidence_1,
+            readmission=False,
         )
 
         admitted_2, task_path_2, _ = validate_quota_continuation_request(
@@ -141,15 +180,11 @@ def worker_correction_continuation_context(
         if evidence_2 != evidence_1:
             raise ProposalError("correction evidence drifted across re-admission")
 
-        reviewer_path_2 = artifacts_2.get("reviewer_path")
-        if not isinstance(reviewer_path_2, (str, Path)):
-            raise ProposalError("artifacts missing reviewer_path on re-admission")
-        status_path_2 = Path(reviewer_path_2).with_name("status.json")
-        status_bytes_2 = bounded_file_bytes(
+        status_bytes_2 = _validate_origin_and_reviewer_status(
             root,
-            status_path_2,
-            MAX_CONTEXT,
-            "prior reviewer status",
+            artifacts_2,
+            evidence_2,
+            readmission=True,
         )
         if status_bytes_2 != status_bytes_1:
             raise ProposalError(
