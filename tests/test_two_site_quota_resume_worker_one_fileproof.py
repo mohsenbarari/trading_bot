@@ -887,6 +887,161 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
                     self.assertFalse(rev0_dir.exists())
                     env["bytes_mock"].assert_not_called()
 
+    def test_execute_worker_one_post_result_status_drift_fails_closed(
+        self,
+    ) -> None:
+        for origin in ("BOOTSTRAP", "TEST_FAILED"):
+            with self.subTest(origin=origin):
+                with self._post_result_gate_env(origin) as env:
+                    ctx = env["ctx"]
+                    returned_state = env["returned_state"]
+                    prefix = ctx["continuation_run_prefix"]
+                    w1_status_path = env["w1_status_path"]
+
+                    ctx["admitted_request"]["timeout"] = 300
+                    pipeline_dir = (
+                        self.root / ".local/two-site-refactor/pipeline"
+                    )
+                    pipeline_dir.mkdir(
+                        parents=True, exist_ok=True, mode=0o700
+                    )
+
+                    def mutate_status_and_pass(
+                        root: Path,
+                        task: dict,
+                        worker_res: dict,
+                        worker_sha: str,
+                        **kwargs: Any,
+                    ) -> dict[str, Any]:
+                        st_data = json.loads(w1_status_path.read_text())
+                        st_data["result_sha256"] = "0" * 64
+                        w1_status_path.write_text(json.dumps(st_data))
+                        return passed_receipt(worker_sha)
+
+                    provider_mock = MagicMock(
+                        side_effect=AssertionError(
+                            "run_provider_session must not be called"
+                        )
+                    )
+
+                    with patch.object(
+                        pipeline_mod,
+                        "run_candidate_tests",
+                        mutate_status_and_pass,
+                    ), patch.object(
+                        pipeline_mod,
+                        "run_provider_session",
+                        provider_mock,
+                    ):
+                        with self.assertRaises(ProposalError):
+                            execute_worker_one_post_result_remainder(
+                                self.root, env["request"], returned_state
+                            )
+
+                    provider_mock.assert_not_called()
+                    self.assertFalse(env["lock_open"][0])
+
+                    evidence_dir = pipeline_dir / prefix
+                    rcpt_path = evidence_dir / "pre-review-tests-1.json"
+                    self.assertTrue(rcpt_path.is_file())
+                    rcpt_data = json.loads(rcpt_path.read_text())
+                    self.assertEqual(rcpt_data["state"], "PASSED")
+                    self.assertEqual(
+                        rcpt_data["proposal_sha256"],
+                        returned_state["proposal_sha256"],
+                    )
+
+                    rev1_dir = (
+                        self.root
+                        / ".local/two-site-refactor/proposals"
+                        / f"{prefix}-reviewer-1"
+                    )
+                    self.assertFalse(rev1_dir.exists())
+                    env["bytes_mock"].assert_not_called()
+
+    def test_execute_worker_one_post_result_test_failed_repeated_signature_rejects(
+        self,
+    ) -> None:
+        with self._post_result_gate_env("TEST_FAILED") as env:
+            ctx = env["ctx"]
+            returned_state = env["returned_state"]
+            prefix = ctx["continuation_run_prefix"]
+            sig = env["sig"]
+
+            ctx["admitted_request"]["timeout"] = 300
+            pipeline_dir = self.root / ".local/two-site-refactor/pipeline"
+            pipeline_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+            orig_receipt = ctx["evidence"]["receipt"]
+
+            def return_repeated_failed_receipt(
+                root: Path,
+                task: dict,
+                worker_res: dict,
+                worker_sha: str,
+                **kwargs: Any,
+            ) -> dict[str, Any]:
+                failed_rcpt = copy.deepcopy(orig_receipt)
+                failed_rcpt["proposal_sha256"] = worker_sha
+                return validate_test_receipt(failed_rcpt, worker_sha)
+
+            provider_mock = MagicMock(
+                side_effect=AssertionError(
+                    "run_provider_session must not be called"
+                )
+            )
+
+            with patch.object(
+                pipeline_mod,
+                "run_candidate_tests",
+                return_repeated_failed_receipt,
+            ), patch.object(
+                pipeline_mod,
+                "run_provider_session",
+                provider_mock,
+            ):
+                with self.assertRaises(ProposalError) as exc:
+                    execute_worker_one_post_result_remainder(
+                        self.root, env["request"], returned_state
+                    )
+
+            self.assertEqual(
+                str(exc.exception), f"repeated test failure signature: {sig}"
+            )
+            provider_mock.assert_not_called()
+            self.assertFalse(env["lock_open"][0])
+
+            evidence_dir = pipeline_dir / prefix
+            rcpt_path = evidence_dir / "pre-review-tests-1.json"
+            self.assertTrue(rcpt_path.is_file())
+            rcpt_data = json.loads(rcpt_path.read_text())
+            self.assertEqual(rcpt_data["state"], "FAILED")
+            self.assertEqual(
+                rcpt_data["proposal_sha256"],
+                returned_state["proposal_sha256"],
+            )
+            self.assertEqual(
+                rcpt_data["returncode"], orig_receipt["returncode"]
+            )
+            self.assertEqual(
+                rcpt_data["selectors"], orig_receipt["selectors"]
+            )
+
+            rev1_dir = (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{prefix}-reviewer-1"
+            )
+            self.assertFalse(rev1_dir.exists())
+
+            w2_dir = (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{prefix}-worker-2"
+            )
+            self.assertFalse(w2_dir.exists())
+            env["bytes_mock"].assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
