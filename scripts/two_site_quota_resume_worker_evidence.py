@@ -37,10 +37,12 @@ except ImportError:
 try:
     from scripts.two_site_quota_resume_worker_feedback import (
         load_bound_correction_feedback,
+        load_bound_test_gate_feedback,
     )
 except ImportError:
     from two_site_quota_resume_worker_feedback import (  # type: ignore[no-redef]
         load_bound_correction_feedback,
+        load_bound_test_gate_feedback,
     )
 
 
@@ -56,13 +58,29 @@ def load_worker_correction_evidence(
 
     task, sources = load_task(root, admitted_task_path)
 
-    reviewer_result, reviewer_status, reviewer_sha = validate_bound_prior_reviewer(
-        root, artifacts, worker_info, receipt, task, sources
-    )
+    origin = artifacts.get("correction_origin")
+    if origin is None:
+        origin = "REVIEWER"
 
-    feedback, feedback_sha, feedback_path = load_bound_correction_feedback(
-        root, artifacts, reviewer_result, receipt
-    )
+    if origin == "REVIEWER":
+        reviewer_result, reviewer_status, reviewer_sha = validate_bound_prior_reviewer(
+            root, artifacts, worker_info, receipt, task, sources
+        )
+        feedback, feedback_sha, feedback_path = load_bound_correction_feedback(
+            root, artifacts, reviewer_result, receipt
+        )
+        detached_reviewer_result = copy.deepcopy(reviewer_result)
+        detached_reviewer_status = copy.deepcopy(reviewer_status)
+        detached_reviewer_sha: str | None = str(reviewer_sha)
+    elif origin in ("BOOTSTRAP", "TEST_FAILED"):
+        feedback, feedback_sha, feedback_path = load_bound_test_gate_feedback(
+            root, artifacts, worker_info, receipt
+        )
+        detached_reviewer_result = None
+        detached_reviewer_status = None
+        detached_reviewer_sha = None
+    else:
+        raise ProposalError(f"artifacts correction_origin invalid: {origin!r}")
 
     try:
         expected_feedback_path = artifacts["expected_feedback_path"]
@@ -80,9 +98,9 @@ def load_worker_correction_evidence(
         "feedback_path": str(feedback_path),
         "feedback_sha": str(feedback_sha),
         "receipt": copy.deepcopy(receipt),
-        "reviewer_result": copy.deepcopy(reviewer_result),
-        "reviewer_sha": str(reviewer_sha),
-        "reviewer_status": copy.deepcopy(reviewer_status),
+        "reviewer_result": detached_reviewer_result,
+        "reviewer_sha": detached_reviewer_sha,
+        "reviewer_status": detached_reviewer_status,
         "sources": copy.deepcopy(sources),
         "task": copy.deepcopy(task),
         "worker_info": copy.deepcopy(worker_info),
