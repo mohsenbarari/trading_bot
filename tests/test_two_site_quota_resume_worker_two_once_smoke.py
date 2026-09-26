@@ -306,9 +306,21 @@ class TestTwoSiteQuotaResumeWorkerTwoOnceSmoke(unittest.TestCase):
                     ctx["artifacts"]["final_reviewer_run_id"] = None
                     ctx["evidence"]["correction_origin"] = origin
                     ctx["evidence"].pop("reviewer_status", None)
+                    reviewer_status_file = (
+                        root
+                        / ".local/two-site-refactor/proposals"
+                        / f"{ctx['original_run_prefix']}-verifier-1"
+                        / "status.json"
+                    )
+                    reviewer_status_file.unlink()
+                    self.assertFalse(reviewer_status_file.exists())
                     req = {"role": "worker", "request_id": "req-2"}
 
-                    lock_state = {"runner_calls": 0, "validate_checked": False}
+                    lock_state = {
+                        "runner_calls": 0,
+                        "validate_checked": False,
+                        "pre_provider_checked": False,
+                    }
 
                     @contextmanager
                     def mock_context(r: Path, q: dict):
@@ -321,6 +333,7 @@ class TestTwoSiteQuotaResumeWorkerTwoOnceSmoke(unittest.TestCase):
                         lock_state["runner_calls"] += 1
                         self.assertIsNotNone(pre_provider_check)
                         pre_provider_check()
+                        lock_state["pre_provider_checked"] = True
                         run_dir.mkdir(parents=True, exist_ok=True)
                         return run_dir
 
@@ -347,16 +360,19 @@ class TestTwoSiteQuotaResumeWorkerTwoOnceSmoke(unittest.TestCase):
                          patch("scripts.two_site_quota_resume_worker_two_once.check_state"), \
                          patch("scripts.two_site_quota_resume_worker_two_once.ref_snapshot", return_value={}), \
                          patch("scripts.two_site_quota_resume_worker_two_once.complete_worker_two_history", return_value=fake_history), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.bounded_file_bytes", side_effect=AssertionError("unexpected current reviewer read")) as mock_bounded_bytes, \
                          patch("scripts.two_site_quota_resume_worker_two_once.runner_run", side_effect=mock_runner), \
                          patch("scripts.two_site_quota_resume_worker_two_once.validate_run", side_effect=mock_validate_run):
 
                         res = execute_worker_two_once(root, req)
 
                     self.assertEqual(lock_state["runner_calls"], 1)
+                    self.assertTrue(lock_state["pre_provider_checked"])
                     self.assertTrue(lock_state["validate_checked"])
                     self.assertEqual(res["state"], "WORKER_PROPOSAL_READY")
                     self.assertEqual(res["correction_count"], 2)
                     self.assertEqual(res["final_worker_run_id"], expected_run_id)
+                    mock_bounded_bytes.assert_not_called()
 
     def test_forged_reviewer_negatives_rejected_before_runner(self) -> None:
         for origin in ("BOOTSTRAP", "TEST_FAILED"):
