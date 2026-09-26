@@ -34,35 +34,59 @@ TEST_DEFAULT_EFFORT = _runtime_contract["worker_effort"]
 class TestWorkerModelRouting(unittest.TestCase):
     """Test suite verifying strict policy validation, deterministic routing, and inactive defaults."""
 
-    def test_r1_default_template_is_disabled_and_matches_schema(self) -> None:
+    def test_r1_active_template_matches_schema_and_routes_models(self) -> None:
         template_path = Path(DEFAULT_POLICY_PATH)
         self.assertTrue(template_path.is_file(), f"Template missing at {DEFAULT_POLICY_PATH}")
 
         policy = load_worker_routing_policy(template_path)
         self.assertEqual(policy.schema_version, "1.0")
-        self.assertFalse(policy.enabled, "Template must be disabled by default")
+        self.assertTrue(policy.enabled, "Template must be enabled on active deployment")
         self.assertEqual(policy.percent, REQUIRED_PERCENT)
         self.assertEqual(policy.percent, 22)
         self.assertEqual(policy.model, OPUS_MODEL)
         self.assertEqual(policy.effort, OPUS_EFFORT)
 
-        route = select_worker_model_route(
-            "task-1234",
+        opus_task_id = next(
+            f"task-opus-{i}" for i in range(100) if compute_task_bucket(f"task-opus-{i}") < 22
+        )
+        self.assertLess(compute_task_bucket(opus_task_id), 22)
+        opus_route = select_worker_model_route(
+            opus_task_id,
             policy=policy,
             default_model=TEST_DEFAULT_MODEL,
             default_effort=TEST_DEFAULT_EFFORT,
         )
-        self.assertEqual(route.model, TEST_DEFAULT_MODEL)
-        self.assertEqual(route.effort, TEST_DEFAULT_EFFORT)
-        self.assertEqual(route, (TEST_DEFAULT_MODEL, TEST_DEFAULT_EFFORT))
+        self.assertEqual(opus_route.model, OPUS_MODEL)
+        self.assertEqual(opus_route.effort, OPUS_EFFORT)
+        self.assertEqual(opus_route, (OPUS_MODEL, OPUS_EFFORT))
 
-        auto_route = select_worker_model_route(
-            "task-5678",
+        auto_opus_route = select_worker_model_route(
+            opus_task_id,
             default_model=TEST_DEFAULT_MODEL,
             default_effort=TEST_DEFAULT_EFFORT,
         )
-        self.assertEqual(auto_route.model, TEST_DEFAULT_MODEL)
-        self.assertEqual(auto_route.effort, TEST_DEFAULT_EFFORT)
+        self.assertEqual(auto_opus_route.model, OPUS_MODEL)
+        self.assertEqual(auto_opus_route.effort, OPUS_EFFORT)
+
+        gemini_task_id = "OPUS-POLICY-ACTIVATE-20260926-380"
+        self.assertEqual(compute_task_bucket(gemini_task_id), 85)
+        gemini_route = select_worker_model_route(
+            gemini_task_id,
+            policy=policy,
+            default_model=TEST_DEFAULT_MODEL,
+            default_effort=TEST_DEFAULT_EFFORT,
+        )
+        self.assertEqual(gemini_route.model, TEST_DEFAULT_MODEL)
+        self.assertEqual(gemini_route.effort, TEST_DEFAULT_EFFORT)
+        self.assertEqual(gemini_route, (TEST_DEFAULT_MODEL, TEST_DEFAULT_EFFORT))
+
+        auto_gemini_route = select_worker_model_route(
+            gemini_task_id,
+            default_model=TEST_DEFAULT_MODEL,
+            default_effort=TEST_DEFAULT_EFFORT,
+        )
+        self.assertEqual(auto_gemini_route.model, TEST_DEFAULT_MODEL)
+        self.assertEqual(auto_gemini_route.effort, TEST_DEFAULT_EFFORT)
 
     def test_r2_deterministic_and_retry_stable(self) -> None:
         sample_task_ids = [f"retry-task-{idx:04d}" for idx in range(25)]
@@ -372,11 +396,19 @@ class TestWorkerModelRouting(unittest.TestCase):
             with self.assertRaises(PolicyValidationError):
                 load_worker_routing_policy(outside_file, base_dir=sandbox_dir)
 
-    def test_r4_opus_remains_strictly_inactive_by_default(self) -> None:
+    def test_r4_opus_remains_strictly_inactive_when_disabled(self) -> None:
+        disabled_policy = WorkerRoutingPolicy(
+            schema_version="1.0",
+            enabled=False,
+            percent=22,
+            model=OPUS_MODEL,
+            effort=OPUS_EFFORT,
+        )
         for i in range(100):
             task_id = f"production-worker-task-{i}"
             route = select_worker_model_route(
                 task_id,
+                policy=disabled_policy,
                 default_model=TEST_DEFAULT_MODEL,
                 default_effort=TEST_DEFAULT_EFFORT,
             )
