@@ -2,6 +2,7 @@
 """Offline unit tests for worker-one file-backed result reader and binding contract."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import copy
 import hashlib
 import json
@@ -9,6 +10,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 import unittest
+from unittest.mock import MagicMock, patch
 
 try:
     from scripts.two_site_proposal_pipeline import (
@@ -26,6 +28,11 @@ try:
     from scripts.two_site_quota_resume_worker_one_file_reader import (
         read_and_bind_worker_one_result,
     )
+    import scripts.two_site_quota_resume_post_worker_one as post_mod
+    from scripts.two_site_quota_resume_post_worker_one import (
+        _EXPECTED_BOUND_KEYS,
+        worker_one_post_result_context,
+    )
 except ImportError:
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         ProposalError,
@@ -42,11 +49,28 @@ except ImportError:
     from two_site_quota_resume_worker_one_file_reader import (  # type: ignore[no-redef]
         read_and_bind_worker_one_result,
     )
+    import two_site_quota_resume_post_worker_one as post_mod  # type: ignore[no-redef]
+    from two_site_quota_resume_post_worker_one import (  # type: ignore[no-redef]
+        _EXPECTED_BOUND_KEYS,
+        worker_one_post_result_context,
+    )
 
 try:
     from tests.test_two_site_proposal_pipeline import HEAD, make_runner
 except ImportError:
     from test_two_site_proposal_pipeline import HEAD, make_runner  # type: ignore[no-redef]
+
+_EXPECTED_NINE_KEYS = frozenset({
+    "base_context",
+    "worker_info",
+    "returned_state",
+    "current_worker",
+    "seen_convs",
+    "seen_norm_findings",
+    "seen_test_signatures",
+    "seen_bootstrap_signatures",
+    "state_check",
+})
 
 
 class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
@@ -577,6 +601,169 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
         bad_boot_rcpt["evidence"]["receipt"] = {"state": "FAILED"}
         with self.assertRaises(ProposalError):
             read_and_bind_worker_one_result(self.root, bad_boot_rcpt, ret_b)
+
+    @contextmanager
+    def _post_result_gate_env(self, origin: str):
+        ctx, returned_state, w1_status_path, w1_result_path, _, sig = (
+            self._setup_test_gate_scenario(origin)
+        )
+        task_path = self.root / "task.json"
+        ctx["admitted_request"] = {
+            "role": "worker",
+            "original_request_id": f"orig-{origin.lower()}-req",
+        }
+        ctx["admitted_task_path"] = task_path
+        ctx["original_terminal_receipt"] = {
+            "terminal_quota": f"receipt-{origin.lower()}"
+        }
+        ctx["initial_refs"] = {
+            "refs/heads/main": "0123456789abcdef0123456789abcdef01234567"
+        }
+
+        lock_open = [False]
+
+        @contextmanager
+        def fake_continuation_context(root: Path, req: dict):
+            lock_open[0] = True
+            try:
+                yield ctx
+            finally:
+                lock_open[0] = False
+
+        val_mock = MagicMock(
+            return_value=(ctx["admitted_request"], ctx["admitted_task_path"], None)
+        )
+        receipt_mock = MagicMock(return_value=ctx["original_terminal_receipt"])
+        art_mock = MagicMock(return_value=ctx["artifacts"])
+        ev_mock = MagicMock(return_value=ctx["evidence"])
+        check_mock = MagicMock(return_value=None)
+        bytes_mock = MagicMock(
+            side_effect=AssertionError("bounded_file_bytes must not be called")
+        )
+
+        with patch.object(
+            post_mod,
+            "worker_correction_continuation_context",
+            fake_continuation_context,
+        ), patch.object(
+            post_mod, "validate_quota_continuation_request", val_mock
+        ), patch.object(
+            post_mod, "read_terminal_quota_record", receipt_mock
+        ), patch.object(
+            post_mod, "derive_worker_resume_artifacts", art_mock
+        ), patch.object(
+            post_mod, "load_worker_correction_evidence", ev_mock
+        ), patch.object(
+            post_mod, "check_state", check_mock
+        ), patch.object(
+            post_mod, "bounded_file_bytes", bytes_mock
+        ):
+            yield {
+                "ctx": ctx,
+                "returned_state": returned_state,
+                "w1_status_path": w1_status_path,
+                "w1_result_path": w1_result_path,
+                "sig": sig,
+                "lock_open": lock_open,
+                "val_mock": val_mock,
+                "receipt_mock": receipt_mock,
+                "art_mock": art_mock,
+                "ev_mock": ev_mock,
+                "check_mock": check_mock,
+                "bytes_mock": bytes_mock,
+                "request": {"continuation": True},
+            }
+
+    def test_post_result_context_both_test_gate_origins(self) -> None:
+        for origin in ("BOOTSTRAP", "TEST_FAILED"):
+            with self.subTest(origin=origin):
+                with self._post_result_gate_env(origin) as env:
+                    ctx = env["ctx"]
+                    returned_state = env["returned_state"]
+                    lock_open = env["lock_open"]
+                    sig = env["sig"]
+                    w0_conv = ctx["evidence"]["worker_info"]["status"]["conversation_id"]
+
+                    self.assertFalse(lock_open[0])
+
+                    with worker_one_post_result_context(
+                        self.root, env["request"], returned_state
+                    ) as post_ctx:
+                        self.assertTrue(lock_open[0])
+                        self.assertEqual(set(post_ctx.keys()), _EXPECTED_NINE_KEYS)
+
+                        curr_worker = post_ctx["current_worker"]
+                        w1_conv = curr_worker[3]
+                        self.assertNotEqual(w0_conv, w1_conv)
+                        self.assertEqual(post_ctx["seen_convs"], {w0_conv, w1_conv})
+                        self.assertEqual(post_ctx["seen_norm_findings"], set())
+
+                        if origin == "BOOTSTRAP":
+                            self.assertEqual(
+                                post_ctx["seen_bootstrap_signatures"], {sig}
+                            )
+                            self.assertEqual(post_ctx["seen_test_signatures"], set())
+                        else:
+                            self.assertEqual(post_ctx["seen_test_signatures"], {sig})
+                            self.assertEqual(
+                                post_ctx["seen_bootstrap_signatures"], set()
+                            )
+
+                        self.assertIsNot(post_ctx["base_context"], ctx)
+                        self.assertIsNot(post_ctx["returned_state"], returned_state)
+                        self.assertIsNot(post_ctx["seen_convs"], ctx["evidence"])
+                        post_ctx["returned_state"]["tampered_key"] = True
+                        self.assertNotIn("tampered_key", returned_state)
+
+                        post_ctx["state_check"]()
+                        env["bytes_mock"].assert_not_called()
+
+                    self.assertFalse(lock_open[0])
+
+    def test_post_result_context_tamper_and_drift_fail_closed(self) -> None:
+        for origin in ("BOOTSTRAP", "TEST_FAILED"):
+            with self.subTest(origin=origin):
+                with self._post_result_gate_env(origin) as env:
+                    with worker_one_post_result_context(
+                        self.root, env["request"], env["returned_state"]
+                    ) as post_ctx:
+                        st_path = env["w1_status_path"]
+                        orig_st_text = st_path.read_text()
+                        st_data = json.loads(orig_st_text)
+                        st_data["result_sha256"] = "0" * 64
+                        st_path.write_text(json.dumps(st_data))
+                        with self.assertRaises(ProposalError):
+                            post_ctx["state_check"]()
+                        st_path.write_text(orig_st_text)
+                        post_ctx["state_check"]()
+
+                        res_path = env["w1_result_path"]
+                        orig_res_bytes = res_path.read_bytes()
+                        res_path.write_bytes(
+                            b'{"status": "PROPOSAL_READY", "tampered": true}'
+                        )
+                        with self.assertRaises(ProposalError):
+                            post_ctx["state_check"]()
+                        res_path.write_bytes(orig_res_bytes)
+                        post_ctx["state_check"]()
+
+                        drifted_ev = copy.deepcopy(env["ctx"]["evidence"])
+                        drifted_ev["feedback"]["drift"] = "injected"
+                        env["ev_mock"].return_value = drifted_ev
+                        with self.assertRaises(ProposalError):
+                            post_ctx["state_check"]()
+                        env["ev_mock"].return_value = env["ctx"]["evidence"]
+                        post_ctx["state_check"]()
+
+                        env["check_mock"].side_effect = ProposalError(
+                            "STOP: check_state detected drift"
+                        )
+                        with self.assertRaises(ProposalError):
+                            post_ctx["state_check"]()
+                        env["check_mock"].side_effect = None
+                        post_ctx["state_check"]()
+
+                        env["bytes_mock"].assert_not_called()
 
 
 if __name__ == "__main__":
