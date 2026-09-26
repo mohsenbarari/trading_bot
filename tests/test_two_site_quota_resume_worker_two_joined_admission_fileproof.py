@@ -68,6 +68,12 @@ try:
     from scripts.two_site_quota_wait_storage import (
         publish_initial_wait_record_bytes,
     )
+    from scripts.two_site_semantic_attempts import (
+        MARKER,
+        read_existing_semantic_attempt,
+        reserve_semantic_attempt,
+    )
+    from scripts.two_site_semantic_task import build_identity
 except ImportError:
     from two_site_codex_autopilot import exclusive_supervisor_lock  # type: ignore[no-redef]
     from two_site_provider_broker import (  # type: ignore[no-redef]
@@ -98,6 +104,12 @@ except ImportError:
     from two_site_quota_wait_storage import (  # type: ignore[no-redef]
         publish_initial_wait_record_bytes,
     )
+    from two_site_semantic_attempts import (  # type: ignore[no-redef]
+        MARKER,
+        read_existing_semantic_attempt,
+        reserve_semantic_attempt,
+    )
+    from two_site_semantic_task import build_identity  # type: ignore[no-redef]
 
 try:
     from tests.test_two_site_proposal_pipeline import HEAD
@@ -110,7 +122,6 @@ try:
         _FakeScope,
     )
     from tests.test_two_site_quota_resume_claim_admission import (
-        _build_valid_semantic_attempt,
         _build_valid_wait_fixtures,
         _step_iso_seconds,
     )
@@ -132,7 +143,6 @@ except ImportError:
         _FakeScope,
     )
     from test_two_site_quota_resume_claim_admission import (  # type: ignore[no-redef]
-        _build_valid_semantic_attempt,
         _build_valid_wait_fixtures,
         _step_iso_seconds,
     )
@@ -156,15 +166,28 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
         meta,
     ) = _setup_materialized_worker_two_terminal_scenario(tmp_path)
 
-    # Reconcile semantic task fingerprint to canonical 64 lowercase hex
-    raw_fp = admitted_request["semantic_task_fingerprint"]
-    valid_fp = (
-        raw_fp
-        if len(raw_fp) == 64 and all(c in "0123456789abcdef" for c in raw_fp)
-        else hashlib.sha256(raw_fp.encode("utf-8")).hexdigest()
+    # Build valid semantic identity from fixture source bytes
+    src_bytes = (root / "src.py").read_bytes()
+    src_sha = hashlib.sha256(src_bytes).hexdigest()
+    identity = build_identity(
+        stage_id="P1-00b",
+        gap_reference="docs/refactor/two-server/AE03_C5D_TEST_GATE_RESUME_MATRIX_20260926.md#4-ordered-implementation-and-validation-steps",
+        scenario_key="ae03.c5d.w2-joined-real-semantic-attempt-20260926-452",
+        symbol_groups=[],
+        source_manifest={"src.py": src_sha},
     )
+    valid_fp = identity["fingerprint"]
     admitted_request["semantic_task_fingerprint"] = valid_fp
-    response = json.loads(json.dumps(response).replace(raw_fp, valid_fp))
+
+    # Replace ONLY the exact pipeline-state field parsed from response['stdout']
+    pipe_state = json.loads(response["stdout"])
+    pipe_state["semantic_task_fingerprint"] = valid_fp
+    response["stdout"] = json.dumps(pipe_state, sort_keys=True, separators=(",", ":"))
+
+    task_obj = {
+        "task_id": admitted_request["task_id"],
+        "goal": MARKER + json.dumps({"semantic_identity": identity}, sort_keys=True, separators=(",", ":")),
+    }
 
     # 1. Publish real Broker terminal quota record and read back
     before_files = set(root.rglob("*.json"))
@@ -279,11 +302,28 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
         )
     assert published_wait_bytes == raw_wait_bytes
 
-    # 4. Prepare and publish known-reset claim
-    sem_attempt = _build_valid_semantic_attempt()
-    sem_attempt["task_id"] = admitted_request["task_id"]
-    sem_attempt["fingerprint"] = admitted_request["semantic_task_fingerprint"]
-    sem_attempt["run_prefix"] = request["run_prefix"]
+    # 4. Prepare and publish known-reset claim with immutable file-backed semantic attempt
+    with exclusive_supervisor_lock(lock_file):
+        reserved_attempt = reserve_semantic_attempt(
+            root,
+            root / ".local" / "two-site-refactor",
+            task_obj,
+            admitted_request["task_id"],
+            request["run_prefix"],
+            now=request["created_at"],
+        )
+    read_attempt = read_existing_semantic_attempt(
+        root,
+        root / ".local" / "two-site-refactor",
+        task_obj,
+        request["run_prefix"],
+    )
+    assert read_attempt == reserved_attempt
+    assert read_attempt["fingerprint"] == wait_record["semantic_task_fingerprint"]
+    assert read_attempt["fingerprint"] == admitted_request["semantic_task_fingerprint"]
+    assert read_attempt["task_id"] == admitted_request["task_id"]
+    assert read_attempt["run_prefix"] == request["run_prefix"]
+    assert read_attempt["run_prefix"] == wait_record["reservation"]["run_prefix"]
 
     due_time = schedule["next_check_at_utc"]
     claimed_at = _step_iso_seconds(due_time, 10)
@@ -298,7 +338,7 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
     claim_prep = prepare_known_reset_resume_claim(
         wait_record=wait_record,
         expected_wait=expected_wait,
-        semantic_attempt=sem_attempt,
+        semantic_attempt=read_attempt,
         expected_task_id=admitted_request["task_id"],
         original_wait_sha256=wait_sha,
         continuation_controller_run_id=cont_ctrl_run_id,
@@ -338,7 +378,7 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
     assert continuation_request["original_wait_sha256"] == wait_sha
     assert continuation_request["claim_sha256"] == claim_sha
 
-    # 6. Real admission validation with ONLY external Git/repo/intent/semantic/task seams patched
+    # 6. Real admission validation with ONLY external Git/repo/intent/task seams patched
     fake_scope = _FakeScope(request["assignment_id"], request["assignment_sha256"])
     common_dict = {k: continuation_request[k] for k in continuation_request if k != "request_type"}
 
@@ -347,13 +387,11 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
         patch("scripts.two_site_quota_continuation_admission.read_pending_rescope_intent") as mock_intent,
         patch("scripts.two_site_quota_continuation_admission.collect_initial_wait_source_expected") as mock_collect,
         patch("scripts.two_site_quota_continuation_admission.load_task") as mock_task,
-        patch("scripts.two_site_quota_continuation_admission.read_existing_semantic_attempt") as mock_sem,
     ):
         mock_val.return_value = (common_dict, canonical_task_path, fake_scope)
         mock_intent.return_value = (rescope_epoch, rescope_attempt, repo)
         mock_collect.return_value = expected_wait
-        mock_task.return_value = ({"task_id": admitted_request["task_id"], "goal": "hermetic goal"}, {})
-        mock_sem.return_value = sem_attempt
+        mock_task.return_value = (task_obj, {})
 
         admitted_continuation, out_task_path, out_scope = validate_quota_continuation_request(
             root,
