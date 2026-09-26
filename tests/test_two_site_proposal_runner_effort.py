@@ -291,11 +291,11 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         self.assertEqual(status_data.get("effort"), runner.WORKER_EFFORT)
 
     def test_enabled_policy_routes_worker_opus_and_gemini_buckets(self) -> None:
-        """For task_id bucket <22 assert Opus model/effort; for bucket >=22 assert Gemini pin."""
+        """For task_id bucket <22 assert Opus model without --effort; for bucket >=22 assert Gemini pin."""
         self.assertLess(compute_task_bucket(TASK_ID_OPUS), 22)
         self.assertGreaterEqual(compute_task_bucket(TASK_ID_GEMINI), 22)
 
-        # Worker with bucket < 22 -> claude-opus-4-6-thinking, high effort
+        # Worker with bucket < 22 -> claude-opus-4-6-thinking, model-default effort (omitted from argv)
         commands_opus, status_opus = self._execute_mock_run(
             role="worker",
             task_id=TASK_ID_OPUS,
@@ -305,8 +305,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         cmd_opus = commands_opus[0]
         self.assertIn("--model", cmd_opus)
         self.assertEqual(cmd_opus[cmd_opus.index("--model") + 1], OPUS_MODEL)
-        self.assertIn("--effort", cmd_opus)
-        self.assertEqual(cmd_opus[cmd_opus.index("--effort") + 1], OPUS_EFFORT)
+        self.assertNotIn("--effort", cmd_opus)
         self.assertEqual(status_opus.get("model"), OPUS_MODEL)
         self.assertEqual(status_opus.get("effort"), OPUS_EFFORT)
 
