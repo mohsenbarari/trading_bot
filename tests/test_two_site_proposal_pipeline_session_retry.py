@@ -58,6 +58,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                     feedback=feedback_path,
                     proposal=proposal_path,
                     cli=cli_path,
+                    expected_head="a" * 40,
                 )
 
                 self.assertEqual(run_id, f"{base_run_id}-retry-1")
@@ -147,6 +148,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                     feedback=feedback_path,
                     proposal=proposal_path,
                     cli=cli_path,
+                    expected_head="a" * 40,
                 )
 
                 self.assertEqual(run_id, f"{base_run_id}-retry-2")
@@ -247,6 +249,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=30,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 exc = ctx.exception
@@ -286,11 +289,12 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=30,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 self.assertIs(ctx.exception, expected_err)
                 self.assertEqual(mock_run.call_count, 1)
-                self.assertEqual(state_check.call_count, 1)
+                self.assertEqual(state_check.call_count, 2)
                 mock_run.assert_called_once_with(
                     root, task_path, "worker", base_run_id, 30,
                     feedback=None, proposal=None, cli=None,
@@ -315,6 +319,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=45,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 self.assertIs(ctx.exception, expected_err)
@@ -346,6 +351,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=30,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 exc = ctx.exception
@@ -387,6 +393,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=45,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 exc = ctx.exception
@@ -431,6 +438,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                     base_run_id=base_run_id,
                     timeout=90,
                     state_check=state_check,
+                    expected_head="a" * 40,
                 )
 
                 self.assertEqual(run_id, f"{base_run_id}-retry-1")
@@ -464,6 +472,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=90,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 exc = ctx.exception
@@ -504,6 +513,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id,
                         timeout=60,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
 
                 exc = ctx.exception
@@ -542,6 +552,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id1,
                         timeout=30,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
                 self.assertEqual(
                     str(ctx.exception),
@@ -566,6 +577,7 @@ class TestTwoSiteProposalPipelineSessionRetry(unittest.TestCase):
                         base_run_id=base_run_id2,
                         timeout=30,
                         state_check=state_check,
+                        expected_head="a" * 40,
                     )
                 self.assertEqual(
                     str(ctx.exception),
