@@ -50,6 +50,11 @@ try:
 except ModuleNotFoundError:
     from two_site_semantic_attempts import reserve_semantic_attempt
 
+try:
+    from scripts.two_site_quota_evidence import provider_for_model
+except ImportError:
+    from two_site_quota_evidence import provider_for_model
+
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
 PROTECTED_REFS = (
@@ -396,10 +401,13 @@ def validate_quota_evidence(
         return None
     if set(evidence.keys()) != QUOTA_EVIDENCE_KEYS:
         return None
+    expected_provider = provider_for_model(expected_model)
+    if expected_provider is None:
+        return None
     kind = evidence.get("kind")
     if kind not in ("QUOTA_RESET_KNOWN", "QUOTA_RESET_UNKNOWN"):
         return None
-    if evidence.get("provider") != "gemini":
+    if evidence.get("provider") != expected_provider:
         return None
     model = evidence.get("model")
     if not isinstance(model, str) or len(model) > 128 or model != expected_model:
@@ -426,7 +434,7 @@ def validate_quota_evidence(
             return None
     return {
         "kind": kind,
-        "provider": "gemini",
+        "provider": expected_provider,
         "model": model,
         "conversation_id": conv_id,
         "reset_at_utc": reset_at,
