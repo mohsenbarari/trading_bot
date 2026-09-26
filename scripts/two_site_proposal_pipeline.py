@@ -17,7 +17,7 @@ from typing import Any, Callable, Mapping
 
 try:
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ProposalError,
         RetryableProviderOutputError, RetryableProviderSessionError,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
@@ -25,7 +25,7 @@ try:
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ProposalError,
         RetryableProviderOutputError, RetryableProviderSessionError,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
@@ -54,6 +54,19 @@ try:
     from scripts.two_site_quota_evidence import provider_for_model
 except ImportError:
     from two_site_quota_evidence import provider_for_model
+
+try:
+    from scripts.two_site_worker_model_routing import (
+        DEFAULT_POLICY_PATH,
+        load_worker_routing_policy,
+        select_worker_model_route,
+    )
+except ImportError:
+    from two_site_worker_model_routing import (
+        DEFAULT_POLICY_PATH,
+        load_worker_routing_policy,
+        select_worker_model_route,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
@@ -561,6 +574,21 @@ def normalize_finding(text: str) -> str:
     return " ".join(text.strip().lower().split())
 
 
+def expected_role_model(role: str, task_id: str) -> str:
+    if role == "verifier":
+        return MODEL
+    if role == "worker":
+        policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+        route = select_worker_model_route(
+            task_id,
+            policy=policy,
+            default_model=WORKER_MODEL,
+            default_effort=WORKER_EFFORT,
+        )
+        return route.model
+    raise ProposalError(f"unsupported role: {role!r}")
+
+
 def validate_run(
     root: Path, run_dir: Path, role: str, expected_run_id: str, expected_head: str,
     expected_task: dict, expected_sources: dict, seen_convs: set[str],
@@ -574,7 +602,18 @@ def validate_run(
     result = unique_json(result_text)
     validate_result(result, expected_task, expected_sources, role, enforce_raw_transport=False)
     result_sha = hashlib.sha256(raw_result_bytes).hexdigest()
-    expected_model = WORKER_MODEL if role == "worker" else MODEL
+    task_id = expected_task.get("task_id") if isinstance(expected_task, dict) else None
+    if isinstance(task_id, str) and task_id.strip():
+        expected_model = expected_role_model(role, task_id)
+    elif role == "verifier":
+        expected_model = expected_role_model(role, "")
+    elif role == "worker":
+        policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+        if policy.enabled:
+            raise ProposalError("missing or invalid top-level task_id in expected_task")
+        expected_model = WORKER_MODEL
+    else:
+        raise ProposalError(f"unsupported role: {role!r}")
     if (
         status.get("run_id") != expected_run_id or status.get("role") != role
         or status.get("head") != expected_head or status.get("model") != expected_model
