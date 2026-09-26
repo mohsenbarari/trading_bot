@@ -460,6 +460,7 @@ def _extract_bound_quota_evidence(
     expected_run_id: str,
     role: str,
     expected_head: str,
+    expected_task_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]] | None:
     try:
         if run_dir.is_symlink() or os.path.islink(run_dir):
@@ -480,7 +481,26 @@ def _extract_bound_quota_evidence(
     if role not in ("worker", "verifier"):
         return None
 
-    expected_model = WORKER_MODEL if role == "worker" else MODEL
+    if role == "verifier":
+        expected_model = MODEL
+    elif role == "worker":
+        if isinstance(expected_task_id, str) and expected_task_id.strip():
+            if status.get("task_id") != expected_task_id:
+                return None
+            try:
+                expected_model = expected_role_model("worker", expected_task_id)
+            except Exception:
+                return None
+        else:
+            try:
+                policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+            except Exception:
+                return None
+            if policy.enabled:
+                return None
+            expected_model = WORKER_MODEL
+    else:
+        return None
 
     if status.get("run_id") != expected_run_id:
         return None
@@ -956,8 +976,14 @@ def run_provider_session(
             last_error = exc
         except ProposalError as exc:
             state_check()
+            expected_task_id = None
+            if role == "worker":
+                policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+                if policy.enabled:
+                    task, _ = load_task(root, task_path)
+                    expected_task_id = task["task_id"]
             extracted = _extract_bound_quota_evidence(
-                root, proposals_dir / attempt_id, attempt_id, role, expected_head
+                root, proposals_dir / attempt_id, attempt_id, role, expected_head, expected_task_id
             )
             if extracted is not None:
                 quota_evidence, quota_attempt = extracted
