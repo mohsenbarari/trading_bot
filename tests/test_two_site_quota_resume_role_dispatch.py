@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
-from scripts.two_site_proposal_pipeline import ProposalError
+from scripts.two_site_proposal_pipeline import ProposalError, QuotaBlockError
 from scripts.two_site_quota_resume_role_dispatch import (
     dispatch_quota_continuation_once,
 )
@@ -23,13 +23,68 @@ class TestTwoSiteQuotaResumeRoleDispatch(unittest.TestCase):
             "request_type": "QUOTA_CONTINUATION",
             "original_request_id": "req-orig-123",
             "task_id": "task-456",
+            "source_head": "0a6a0bc1069a142065d7cd6fb1a00c5cce52b307",
+            "semantic_task_fingerprint": "627f44e6bea25f3f307ce4f4c4abfcc10a88e76f38fe77a9b8391a50130ee3e8",
             "role": "verifier",
+        }
+        self.worker_zero_intermediate = {
+            "state": "WORKER_PROPOSAL_READY",
+            "task_id": "task-456",
+            "source_head": "0a6a0bc1069a142065d7cd6fb1a00c5cce52b307",
+            "final_worker_run_id": "run-worker-0",
+            "proposal_sha256": "a" * 64,
+            "changed_paths": ["scripts/foo.py"],
+            "proposal_path": ".local/two-site-refactor/proposals/run-worker-0/result.json",
+            "correction_count": 0,
+            "semantic_task_fingerprint": "627f44e6bea25f3f307ce4f4c4abfcc10a88e76f38fe77a9b8391a50130ee3e8",
+        }
+        self.worker_zero_final_uncorrected = {
+            "state": "READY_FOR_CODEX",
+            "final_reviewer_run_id": "run-rev-0",
+            "task_id": "task-456",
+            "source_head": "0a6a0bc1069a142065d7cd6fb1a00c5cce52b307",
+            "semantic_task_fingerprint": "627f44e6bea25f3f307ce4f4c4abfcc10a88e76f38fe77a9b8391a50130ee3e8",
+            "correction_count": 0,
+            "final_worker_run_id": "run-worker-0",
+            "proposal_sha256": "a" * 64,
+            "changed_paths": ["scripts/foo.py"],
+            "proposal_path": ".local/two-site-refactor/proposals/run-worker-0/result.json",
+        }
+        self.worker_zero_final_corrected = {
+            "state": "READY_FOR_CODEX",
+            "final_reviewer_run_id": "run-rev-1",
+            "task_id": "task-456",
+            "source_head": "0a6a0bc1069a142065d7cd6fb1a00c5cce52b307",
+            "semantic_task_fingerprint": "627f44e6bea25f3f307ce4f4c4abfcc10a88e76f38fe77a9b8391a50130ee3e8",
+            "correction_count": 1,
+            "final_worker_run_id": "run-worker-1",
+            "proposal_sha256": "b" * 64,
+            "changed_paths": ["scripts/bar.py"],
+            "proposal_path": ".local/two-site-refactor/proposals/run-worker-1/result.json",
         }
         self.fake_receipt = {
             "schema_version": "1.0",
             "request": {"request_id": "req-orig-123"},
             "response": {"stdout": "{}"},
         }
+
+    def _setup_worker_zero(
+        self,
+        mock_validate: MagicMock,
+        mock_read_record: MagicMock,
+        mock_derive_artifacts: MagicMock,
+    ) -> tuple[dict, dict]:
+        req = dict(self.base_request, role="worker")
+        admitted = dict(req)
+        mock_validate.return_value = (admitted, Path("tasks/task.json"), {})
+        mock_read_record.return_value = self.fake_receipt
+        mock_derive_artifacts.return_value = {
+            "worker_index": 0,
+            "task_id": "task-456",
+            "source_head": "0a6a0bc1069a142065d7cd6fb1a00c5cce52b307",
+            "semantic_task_fingerprint": "627f44e6bea25f3f307ce4f4c4abfcc10a88e76f38fe77a9b8391a50130ee3e8",
+        }
+        return req, admitted
 
     @patch("scripts.two_site_quota_resume_role_dispatch.execute_verifier_once")
     @patch("scripts.two_site_quota_resume_role_dispatch._derive_verifier_resume_artifacts")
@@ -59,6 +114,7 @@ class TestTwoSiteQuotaResumeRoleDispatch(unittest.TestCase):
         mock_exec_verifier.assert_called_once_with(self.root, admitted, self.cli)
         self.assertEqual(res["state"], "READY_FOR_CODEX")
 
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_post_result_remainder")
     @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_once")
     @patch("scripts.two_site_quota_resume_role_dispatch.derive_worker_resume_artifacts")
     @patch("scripts.two_site_quota_resume_role_dispatch.read_terminal_quota_record")
@@ -69,22 +125,96 @@ class TestTwoSiteQuotaResumeRoleDispatch(unittest.TestCase):
         mock_read_record: MagicMock,
         mock_derive_artifacts: MagicMock,
         mock_exec_worker_zero: MagicMock,
+        mock_remainder: MagicMock,
     ) -> None:
-        req = dict(self.base_request, role="worker")
-        admitted = dict(req)
-        mock_validate.return_value = (admitted, Path("tasks/task.json"), {})
-        mock_read_record.return_value = self.fake_receipt
-        mock_derive_artifacts.return_value = {"worker_index": 0}
-        mock_exec_worker_zero.return_value = {
-            "state": "WORKER_PROPOSAL_READY",
-            "correction_count": 0,
-        }
+        req, admitted = self._setup_worker_zero(
+            mock_validate, mock_read_record, mock_derive_artifacts
+        )
+        mock_exec_worker_zero.return_value = self.worker_zero_intermediate
+        mock_remainder.return_value = self.worker_zero_final_uncorrected
 
         res = dispatch_quota_continuation_once(self.root, req, self.cli)
 
         mock_derive_artifacts.assert_called_once_with(admitted, self.fake_receipt)
         mock_exec_worker_zero.assert_called_once_with(self.root, admitted, self.cli)
+        mock_remainder.assert_called_once_with(
+            self.root, admitted, self.worker_zero_intermediate, self.cli
+        )
+        self.assertEqual(res["state"], "READY_FOR_CODEX")
         self.assertEqual(res["correction_count"], 0)
+
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_post_result_remainder")
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_once")
+    @patch("scripts.two_site_quota_resume_role_dispatch.derive_worker_resume_artifacts")
+    @patch("scripts.two_site_quota_resume_role_dispatch.read_terminal_quota_record")
+    @patch("scripts.two_site_quota_resume_role_dispatch.validate_quota_continuation_request")
+    def test_worker_zero_malformed_intermediate_proves_adapter_not_called(
+        self,
+        mock_validate: MagicMock,
+        mock_read_record: MagicMock,
+        mock_derive_artifacts: MagicMock,
+        mock_exec_worker_zero: MagicMock,
+        mock_remainder: MagicMock,
+    ) -> None:
+        req, _ = self._setup_worker_zero(
+            mock_validate, mock_read_record, mock_derive_artifacts
+        )
+        mock_exec_worker_zero.return_value = {"state": "WORKER_PROPOSAL_READY"}
+
+        with self.assertRaises(ProposalError):
+            dispatch_quota_continuation_once(self.root, req, self.cli)
+        mock_remainder.assert_not_called()
+
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_post_result_remainder")
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_once")
+    @patch("scripts.two_site_quota_resume_role_dispatch.derive_worker_resume_artifacts")
+    @patch("scripts.two_site_quota_resume_role_dispatch.read_terminal_quota_record")
+    @patch("scripts.two_site_quota_resume_role_dispatch.validate_quota_continuation_request")
+    def test_worker_zero_quota_block_error_propagates_without_retry(
+        self,
+        mock_validate: MagicMock,
+        mock_read_record: MagicMock,
+        mock_derive_artifacts: MagicMock,
+        mock_exec_worker_zero: MagicMock,
+        mock_remainder: MagicMock,
+    ) -> None:
+        req, _ = self._setup_worker_zero(
+            mock_validate, mock_read_record, mock_derive_artifacts
+        )
+        quota_err = QuotaBlockError(quota_evidence={"reason": "RESOURCE_EXHAUSTED"})
+        mock_exec_worker_zero.side_effect = quota_err
+
+        with self.assertRaises(QuotaBlockError) as cm:
+            dispatch_quota_continuation_once(self.root, req, self.cli)
+        self.assertIs(cm.exception, quota_err)
+        mock_remainder.assert_not_called()
+
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_post_result_remainder")
+    @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_zero_once")
+    @patch("scripts.two_site_quota_resume_role_dispatch.derive_worker_resume_artifacts")
+    @patch("scripts.two_site_quota_resume_role_dispatch.read_terminal_quota_record")
+    @patch("scripts.two_site_quota_resume_role_dispatch.validate_quota_continuation_request")
+    def test_worker_zero_route_correction_count_one_success(
+        self,
+        mock_validate: MagicMock,
+        mock_read_record: MagicMock,
+        mock_derive_artifacts: MagicMock,
+        mock_exec_worker_zero: MagicMock,
+        mock_remainder: MagicMock,
+    ) -> None:
+        req, admitted = self._setup_worker_zero(
+            mock_validate, mock_read_record, mock_derive_artifacts
+        )
+        mock_exec_worker_zero.return_value = self.worker_zero_intermediate
+        mock_remainder.return_value = self.worker_zero_final_corrected
+
+        res = dispatch_quota_continuation_once(self.root, req, self.cli)
+
+        mock_remainder.assert_called_once_with(
+            self.root, admitted, self.worker_zero_intermediate, self.cli
+        )
+        self.assertEqual(res["state"], "READY_FOR_CODEX")
+        self.assertEqual(res["correction_count"], 1)
 
     @patch("scripts.two_site_quota_resume_role_dispatch.execute_worker_one_once")
     @patch("scripts.two_site_quota_resume_role_dispatch.derive_worker_resume_artifacts")

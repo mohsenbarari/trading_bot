@@ -50,6 +50,24 @@ except (ImportError, AttributeError):
             )
 
 try:
+    from scripts.two_site_quota_resume_post_worker_zero import (
+        _EXPECTED_RESULT_STATE_KEYS,
+    )
+except ImportError:
+    from two_site_quota_resume_post_worker_zero import (  # type: ignore[no-redef]
+        _EXPECTED_RESULT_STATE_KEYS,
+    )
+
+try:
+    from scripts.two_site_quota_resume_post_worker_zero_remainder import (
+        execute_worker_zero_post_result_remainder,
+    )
+except ImportError:
+    from two_site_quota_resume_post_worker_zero_remainder import (  # type: ignore[no-redef]
+        execute_worker_zero_post_result_remainder,
+    )
+
+try:
     from scripts.two_site_quota_resume_worker_artifacts import (
         derive_worker_resume_artifacts,
     )
@@ -161,8 +179,88 @@ def dispatch_quota_continuation_once(
             )
 
         if worker_index == 0:
-            result = execute_worker_zero_once(root, admitted, cli)
-        elif worker_index == 1:
+            intermediate = execute_worker_zero_once(root, admitted, cli)
+            if type(intermediate) is not dict:
+                raise ProposalError(
+                    f"worker executor result must be dict, got {type(intermediate).__name__}"
+                )
+            if set(intermediate.keys()) != _EXPECTED_RESULT_STATE_KEYS:
+                raise ProposalError("intermediate worker-0 keys do not match expected keys")
+            if intermediate["state"] != "WORKER_PROPOSAL_READY":
+                raise ProposalError(
+                    f"mismatched returned route for worker-0: {intermediate!r}"
+                )
+            corr = intermediate["correction_count"]
+            if type(corr) is not int or type(corr) is bool or corr != 0:
+                raise ProposalError(
+                    f"intermediate correction_count must be exact int 0, got {corr!r}"
+                )
+            for field in ("task_id", "source_head", "semantic_task_fingerprint"):
+                try:
+                    if (
+                        intermediate[field] != admitted[field]
+                        or intermediate[field] != artifacts[field]
+                    ):
+                        raise ProposalError(
+                            f"intermediate {field} mismatch with admitted/artifacts"
+                        )
+                except KeyError as exc:
+                    raise ProposalError(f"missing required lineage field {exc}") from exc
+
+            result = execute_worker_zero_post_result_remainder(
+                root, admitted, intermediate, cli
+            )
+            if type(result) is not dict:
+                raise ProposalError(
+                    f"worker remainder result must be dict, got {type(result).__name__}"
+                )
+            if result.get("state") != "READY_FOR_CODEX":
+                raise ProposalError(
+                    f"final state must be READY_FOR_CODEX, got {result.get('state')!r}"
+                )
+            reviewer_run_id = result.get("final_reviewer_run_id")
+            if not isinstance(reviewer_run_id, str) or not reviewer_run_id.strip():
+                raise ProposalError(
+                    f"final_reviewer_run_id must be non-empty str, got {reviewer_run_id!r}"
+                )
+            for field in ("task_id", "source_head", "semantic_task_fingerprint"):
+                try:
+                    if (
+                        result[field] != admitted[field]
+                        or result[field] != artifacts[field]
+                        or result[field] != intermediate[field]
+                    ):
+                        raise ProposalError(
+                            f"final {field} mismatch with admitted/artifacts/intermediate"
+                        )
+                except KeyError as exc:
+                    raise ProposalError(f"missing required final lineage field {exc}") from exc
+            final_corr = result.get("correction_count")
+            if (
+                type(final_corr) is not int
+                or type(final_corr) is bool
+                or final_corr not in (0, 1, 2)
+            ):
+                raise ProposalError(
+                    f"final correction_count must be exact int in 0..2, got {final_corr!r}"
+                )
+            if final_corr == 0:
+                for field in (
+                    "final_worker_run_id",
+                    "proposal_sha256",
+                    "changed_paths",
+                    "proposal_path",
+                ):
+                    try:
+                        if result[field] != intermediate[field]:
+                            raise ProposalError(
+                                f"uncorrected {field} mismatch: {field}"
+                            )
+                    except KeyError as exc:
+                        raise ProposalError(f"missing uncorrected field {exc}") from exc
+            return result
+
+        if worker_index == 1:
             result = execute_worker_one_once(root, admitted, cli)
         elif worker_index == 2:
             result = execute_worker_two_once(root, admitted, cli)
