@@ -38,7 +38,10 @@ try:
         PreparationConfigError,
         PreparationStartup,
     )
-    from scripts.two_site_proposal_pipeline import validate_quota_evidence
+    from scripts.two_site_proposal_pipeline import (
+        expected_role_model,
+        validate_quota_evidence,
+    )
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT,
         MODEL,
@@ -62,7 +65,10 @@ except ModuleNotFoundError:  # Direct ``python scripts/...`` execution.
         PreparationConfigError,
         PreparationStartup,
     )
-    from two_site_proposal_pipeline import validate_quota_evidence  # type: ignore[no-redef]
+    from two_site_proposal_pipeline import (  # type: ignore[no-redef]
+        expected_role_model,
+        validate_quota_evidence,
+    )
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT,
         MODEL,
@@ -1354,7 +1360,7 @@ def detect_quota_response(
         if not isinstance(status, dict):
             return None
 
-        expected_model = WORKER_MODEL if role == "worker" else MODEL
+        expected_model = expected_role_model(role, task_id)
         if status.get("run_id") != run_id:
             return None
         if status.get("role") != role:
