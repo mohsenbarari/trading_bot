@@ -546,3 +546,256 @@ def test_no_provider_calls_or_execution_authority():
         assert not hasattr(
             mod, symbol
         ), f"forbidden symbol {symbol} exposed in worker correction context"
+
+
+@pytest.mark.parametrize("worker_index", [1, 2])
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+def test_happy_test_gate_origin_lock_held(
+    tmp_path: Path, worker_index: int, origin: str
+):
+    req, admitted, receipt, artifacts, evidence, _, refs = _base_fixtures(
+        worker_index
+    )
+    artifacts.update({
+        "correction_origin": origin,
+        "reviewer_path": None,
+        "final_reviewer_run_id": None,
+    })
+    evidence.update({
+        "reviewer_status": None,
+        "reviewer_result": None,
+        "reviewer_sha": None,
+    })
+    lock = MockLock()
+    inside_body_locked = False
+
+    with patch(
+        "scripts.two_site_quota_resume_worker_correction_context.pipeline_lock",
+        lock,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.validate_quota_continuation_request",
+        return_value=(admitted, "t.json", "res"),
+    ) as mock_admission, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.read_terminal_quota_record",
+        return_value=receipt,
+    ) as mock_read_record, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.derive_worker_resume_artifacts",
+        return_value=artifacts,
+    ) as mock_derive_artifacts, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.load_worker_correction_evidence",
+        return_value=evidence,
+    ) as mock_load_evidence, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.bounded_file_bytes",
+    ) as mock_bounded_bytes, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.ref_snapshot",
+        return_value=refs,
+    ) as mock_ref_snapshot, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.check_state",
+    ) as mock_check_state:
+        with worker_correction_continuation_context(tmp_path, req) as ctx:
+            inside_body_locked = lock.locked
+            assert ctx["continuation_run_prefix"] == f"run-w{worker_index}"
+            assert ctx["original_run_prefix"] == "run-orig"
+            assert ctx["source_head"] == "c44e63"
+            assert ctx["initial_refs"] == refs
+            assert ctx["original_receipt"] == receipt
+            assert ctx["original_terminal_receipt"] == receipt
+            assert ctx["admitted_request"] == admitted
+            assert ctx["admitted_task_path"] == "t.json"
+            assert ctx["artifacts"] == artifacts
+            assert ctx["evidence"] == evidence
+            assert ctx["task"] == evidence["task"]
+            assert ctx["sources"] == evidence["sources"]
+            assert ctx["artifacts"]["correction_origin"] == origin
+            assert ctx["artifacts"]["reviewer_path"] is None
+            assert ctx["artifacts"]["final_reviewer_run_id"] is None
+            assert ctx["evidence"]["reviewer_status"] is None
+            assert ctx["evidence"]["reviewer_result"] is None
+            assert ctx["evidence"]["reviewer_sha"] is None
+
+        assert inside_body_locked is True
+        assert lock.locked is False
+        assert lock.acquire_count == 1
+        assert lock.release_count == 1
+        assert mock_admission.call_count == 2
+        assert mock_read_record.call_count == 2
+        assert mock_derive_artifacts.call_count == 2
+        assert mock_load_evidence.call_count == 2
+        assert mock_bounded_bytes.call_count == 0
+        assert mock_ref_snapshot.call_count == 1
+        assert mock_check_state.call_count == 2
+
+        prepared = prepare_worker_correction_continuation(tmp_path, req)
+        assert prepared["continuation_run_prefix"] == f"run-w{worker_index}"
+        assert prepared["artifacts"]["correction_origin"] == origin
+        assert lock.locked is False
+
+
+@pytest.mark.parametrize(
+    "origin, artifact_patch, evidence_patch, expected_match",
+    [
+        (
+            "BOOTSTRAP",
+            {"reviewer_path": ".local/rev.json"},
+            {},
+            "artifacts reviewer_path must be None for BOOTSTRAP",
+        ),
+        (
+            "TEST_FAILED",
+            {"reviewer_path": ".local/rev.json"},
+            {},
+            "artifacts reviewer_path must be None for TEST_FAILED",
+        ),
+        (
+            "BOOTSTRAP",
+            {"final_reviewer_run_id": "run-rev-1"},
+            {},
+            "artifacts final_reviewer_run_id must be None for BOOTSTRAP",
+        ),
+        (
+            "TEST_FAILED",
+            {"final_reviewer_run_id": "run-rev-2"},
+            {},
+            "artifacts final_reviewer_run_id must be None for TEST_FAILED",
+        ),
+        (
+            "BOOTSTRAP",
+            {},
+            {"reviewer_status": "FAILED"},
+            "evidence reviewer_status must be None for BOOTSTRAP",
+        ),
+        (
+            "TEST_FAILED",
+            {},
+            {"reviewer_result": {"status": "error"}},
+            "evidence reviewer_result must be None for TEST_FAILED",
+        ),
+        (
+            "BOOTSTRAP",
+            {},
+            {"reviewer_sha": "abc123"},
+            "evidence reviewer_sha must be None for BOOTSTRAP",
+        ),
+        (
+            "UNKNOWN_ORIGIN",
+            {},
+            {},
+            "artifacts correction_origin invalid: 'UNKNOWN_ORIGIN'",
+        ),
+    ],
+)
+def test_test_gate_origin_validation_negatives(
+    tmp_path: Path,
+    origin: str,
+    artifact_patch: dict,
+    evidence_patch: dict,
+    expected_match: str,
+):
+    req, admitted, receipt, artifacts, evidence, _, refs = _base_fixtures(1)
+    artifacts.update({
+        "correction_origin": origin,
+        "reviewer_path": None,
+        "final_reviewer_run_id": None,
+        **artifact_patch,
+    })
+    evidence.update({
+        "reviewer_status": None,
+        "reviewer_result": None,
+        "reviewer_sha": None,
+        **evidence_patch,
+    })
+    lock = MockLock()
+    with patch(
+        "scripts.two_site_quota_resume_worker_correction_context.pipeline_lock",
+        lock,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.validate_quota_continuation_request",
+        return_value=(admitted, "t.json", "res"),
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.read_terminal_quota_record",
+        return_value=receipt,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.derive_worker_resume_artifacts",
+        return_value=artifacts,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.load_worker_correction_evidence",
+        return_value=evidence,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.ref_snapshot",
+        return_value=refs,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.check_state",
+    ):
+        with pytest.raises(ProposalError, match=expected_match):
+            with worker_correction_continuation_context(tmp_path, req):
+                pass
+        assert lock.locked is False
+        assert lock.release_count == 1
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+@pytest.mark.parametrize(
+    "drift_type, expected_match",
+    [
+        ("artifacts", "resume artifacts drifted across re-admission"),
+        ("evidence", "correction evidence drifted across re-admission"),
+    ],
+)
+def test_test_gate_second_pass_drift_refused(
+    tmp_path: Path, origin: str, drift_type: str, expected_match: str
+):
+    req, admitted, receipt, artifacts, evidence, _, refs = _base_fixtures(1)
+    artifacts.update({
+        "correction_origin": origin,
+        "reviewer_path": None,
+        "final_reviewer_run_id": None,
+    })
+    evidence.update({
+        "reviewer_status": None,
+        "reviewer_result": None,
+        "reviewer_sha": None,
+    })
+    lock = MockLock()
+    drifted_artifacts = {**artifacts, "source_head": "drifted"}
+    drifted_evidence = {**evidence, "feedback": {"mutated": True}}
+
+    derive_side_effect = (
+        [artifacts, drifted_artifacts]
+        if drift_type == "artifacts"
+        else [artifacts, artifacts]
+    )
+    load_evidence_side_effect = (
+        [evidence, drifted_evidence]
+        if drift_type == "evidence"
+        else [evidence, evidence]
+    )
+
+    with patch(
+        "scripts.two_site_quota_resume_worker_correction_context.pipeline_lock",
+        lock,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.validate_quota_continuation_request",
+        return_value=(admitted, "t.json", "res"),
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.read_terminal_quota_record",
+        return_value=receipt,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.derive_worker_resume_artifacts",
+        side_effect=derive_side_effect,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.load_worker_correction_evidence",
+        side_effect=load_evidence_side_effect,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.ref_snapshot",
+        return_value=refs,
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.check_state",
+    ), patch(
+        "scripts.two_site_quota_resume_worker_correction_context.bounded_file_bytes",
+    ) as mock_bounded:
+        with pytest.raises(ProposalError, match=expected_match):
+            with worker_correction_continuation_context(tmp_path, req):
+                pass
+        assert lock.locked is False
+        assert lock.release_count == 1
+        assert mock_bounded.call_count == 0
