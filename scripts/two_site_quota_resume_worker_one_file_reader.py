@@ -147,14 +147,56 @@ def read_and_bind_worker_one_result(
     if not isinstance(prior_worker_conv, str) or not prior_worker_conv.strip():
         raise ProposalError("prior worker_info['conversation_id'] missing or empty")
 
-    reviewer_status = evidence.get("reviewer_status")
-    if not isinstance(reviewer_status, dict):
-        raise ProposalError("evidence missing or invalid reviewer_status")
-    reviewer_conv = reviewer_status.get("conversation_id")
-    if not isinstance(reviewer_conv, str) or not reviewer_conv.strip():
-        raise ProposalError("reviewer conversation_id missing or empty")
-    if reviewer_conv == prior_worker_conv:
-        raise ProposalError("reviewer conversation_id must differ from prior worker conversation_id")
+    correction_origin = artifacts.get("correction_origin")
+    if "correction_origin" in evidence and evidence.get("correction_origin") != correction_origin:
+        raise ProposalError("mixed correction_origin between artifacts and evidence")
+    if "correction_origin" in ctx and ctx.get("correction_origin") != correction_origin:
+        raise ProposalError("mixed correction_origin between artifacts and ctx")
+
+    if correction_origin is None:
+        origin = "REVIEWER"
+    elif correction_origin in ("REVIEWER", "BOOTSTRAP", "TEST_FAILED"):
+        origin = correction_origin
+    else:
+        raise ProposalError(f"unknown correction_origin: {correction_origin!r}")
+
+    if origin == "REVIEWER":
+        reviewer_status = evidence.get("reviewer_status")
+        if not isinstance(reviewer_status, dict):
+            raise ProposalError("evidence missing or invalid reviewer_status")
+        reviewer_conv = reviewer_status.get("conversation_id")
+        if not isinstance(reviewer_conv, str) or not reviewer_conv.strip():
+            raise ProposalError("reviewer conversation_id missing or empty")
+        if reviewer_conv == prior_worker_conv:
+            raise ProposalError("reviewer conversation_id must differ from prior worker conversation_id")
+        seen_convs: set[str] = {prior_worker_conv, reviewer_conv}
+    else:
+        if artifacts.get("reviewer_path") is not None:
+            raise ProposalError(
+                f"artifacts reviewer_path must be None for {origin}, got {artifacts.get('reviewer_path')!r}"
+            )
+        if artifacts.get("final_reviewer_run_id") is not None:
+            raise ProposalError(
+                f"artifacts final_reviewer_run_id must be None for {origin}, got {artifacts.get('final_reviewer_run_id')!r}"
+            )
+        if evidence.get("reviewer_status") is not None:
+            raise ProposalError(f"evidence reviewer_status must be None for {origin}")
+        if evidence.get("reviewer_result") is not None:
+            raise ProposalError(f"evidence reviewer_result must be None for {origin}")
+        if (
+            evidence.get("reviewer_sha") is not None
+            or evidence.get("reviewer_sha256") is not None
+            or evidence.get("reviewer_result_sha") is not None
+        ):
+            raise ProposalError(f"evidence reviewer sha must be None for {origin}")
+
+        feedback = evidence.get("feedback")
+        if not isinstance(feedback, dict):
+            raise ProposalError("evidence missing or invalid feedback")
+        if feedback.get("reviewer") != "test-gate":
+            raise ProposalError(f"feedback reviewer must be 'test-gate', got {feedback.get('reviewer')!r}")
+
+        seen_convs = {prior_worker_conv}
 
     source_head = ctx.get("source_head")
     if not isinstance(source_head, str) or not source_head.strip():
@@ -167,8 +209,6 @@ def read_and_bind_worker_one_result(
     sources = ctx.get("sources")
     if not isinstance(sources, dict):
         raise ProposalError("ctx missing or invalid sources")
-
-    seen_convs: set[str] = {prior_worker_conv, reviewer_conv}
     prior_worker_tuple = (prior_run_id, prior_sha, prior_result_text, prior_worker_conv)
 
     validated = validate_run(
