@@ -97,7 +97,7 @@ def make_runner(root: Path, responses: list[dict]):
             snapshot.update(resp["task_override"])
         write_json(out / "task.json", snapshot)
 
-        st = {"run_id": run_id, "role": role, "head": HEAD,
+        st = {"run_id": run_id, "task_id": snapshot["task"].get("task_id"), "role": role, "head": HEAD,
               "model": WORKER_MODEL if role == "worker" else MODEL,
               "result_sha256": res_sha, "conversation_id": resp.get("conv_id", f"conv-{run_id}"),
               "state": st_val}
@@ -428,6 +428,7 @@ class TestPipeline(unittest.TestCase):
             run_dir.mkdir(parents=True, exist_ok=True)
             write_json(run_dir / "status.json", {
                 "run_id": run_id,
+                "task_id": self.task["task_id"],
                 "role": role,
                 "head": HEAD,
                 "model": WORKER_MODEL,
@@ -484,6 +485,7 @@ class TestPipeline(unittest.TestCase):
             run_dir.mkdir(parents=True, exist_ok=True)
             write_json(run_dir / "status.json", {
                 "run_id": run_id,
+                "task_id": self.task["task_id"],
                 "role": role,
                 "head": HEAD,
                 "model": WORKER_MODEL,
@@ -576,6 +578,7 @@ class TestPipeline(unittest.TestCase):
             run_dir.mkdir(parents=True, exist_ok=True)
             write_json(run_dir / "status.json", {
                 "run_id": run_id,
+                "task_id": self.task["task_id"],
                 "role": role,
                 "head": HEAD,
                 "model": WORKER_MODEL,
@@ -625,6 +628,7 @@ class TestPipeline(unittest.TestCase):
             run_dir.mkdir(parents=True, exist_ok=True)
             write_json(run_dir / "status.json", {
                 "run_id": run_id,
+                "task_id": self.task["task_id"],
                 "role": role,
                 "head": HEAD,
                 "model": WORKER_MODEL,
@@ -682,6 +686,7 @@ class TestPipeline(unittest.TestCase):
                 calls = []
                 st = {
                     "run_id": f"run-neg-{case_name}-worker-0",
+                    "task_id": self.task["task_id"],
                     "role": "worker",
                     "head": HEAD,
                     "model": WORKER_MODEL,

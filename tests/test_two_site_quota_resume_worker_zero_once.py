@@ -46,13 +46,13 @@ def accepted_ctx(tmp_path: Path) -> dict[str, Any]:
             "run_prefix": "cont-run",
             "role": "worker",
             "timeout": 120,
-            "task_id": "task-1",
+            "task_id": "task-100",
             "semantic_task_fingerprint": "d" * 64,
             "source_head": "c" * 40,
         },
         "admitted_task_path": task_p,
         "artifacts": {
-            "task_id": "task-1",
+            "task_id": "task-100",
             "semantic_task_fingerprint": "d" * 64,
             "source_head": "c" * 40,
             "original_run_prefix": "orig-run",
@@ -68,7 +68,7 @@ def accepted_ctx(tmp_path: Path) -> dict[str, Any]:
             },
             "worker_index": 0,
         },
-        "task": {"task_id": "task-1"},
+        "task": {"task_id": "task-100"},
         "sources": {},
     }
 
@@ -126,7 +126,7 @@ def test_worker_zero_proposal_ready_result(tmp_path: Path, accepted_ctx: dict[st
     res = execute_worker_zero_once(tmp_path, {"role": "worker"})
     assert calls == ["cont-run-worker-0"]
     assert res["state"] == "WORKER_PROPOSAL_READY"
-    assert res["task_id"] == "task-1"
+    assert res["task_id"] == "task-100"
     assert res["source_head"] == accepted_ctx["source_head"]
     assert res["final_worker_run_id"] == "cont-run-worker-0"
     assert res["proposal_sha256"] == "res_sha_123"
@@ -441,6 +441,7 @@ def test_second_quota_negative_wrong_fields_not_upgraded(
         run_dir.mkdir(parents=True, exist_ok=True)
         status_payload = {
             "run_id": run_id,
+            "task_id": accepted_ctx["task"]["task_id"],
             "role": "worker",
             "head": accepted_ctx["source_head"],
             "model": WORKER_MODEL,
