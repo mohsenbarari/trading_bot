@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 try:
+    import scripts.two_site_proposal_pipeline as pipeline_mod
     from scripts.two_site_proposal_pipeline import (
         ProposalError,
         test_failure_signature as producer_test_failure_signature,
@@ -25,6 +26,9 @@ try:
         p1_00_characterization_bootstrap_findings,
         validate_test_receipt,
     )
+    from scripts.two_site_quota_resume_post_worker_one_remainder import (
+        execute_worker_one_post_result_remainder,
+    )
     from scripts.two_site_quota_resume_worker_one_file_reader import (
         read_and_bind_worker_one_result,
     )
@@ -34,6 +38,7 @@ try:
         worker_one_post_result_context,
     )
 except ImportError:
+    import two_site_proposal_pipeline as pipeline_mod  # type: ignore[no-redef]
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         ProposalError,
         test_failure_signature as producer_test_failure_signature,
@@ -46,6 +51,9 @@ except ImportError:
         p1_00_characterization_bootstrap_findings,
         validate_test_receipt,
     )
+    from two_site_quota_resume_post_worker_one_remainder import (  # type: ignore[no-redef]
+        execute_worker_one_post_result_remainder,
+    )
     from two_site_quota_resume_worker_one_file_reader import (  # type: ignore[no-redef]
         read_and_bind_worker_one_result,
     )
@@ -56,9 +64,17 @@ except ImportError:
     )
 
 try:
-    from tests.test_two_site_proposal_pipeline import HEAD, make_runner
+    from tests.test_two_site_proposal_pipeline import (
+        HEAD,
+        make_runner,
+        passed_receipt,
+    )
 except ImportError:
-    from test_two_site_proposal_pipeline import HEAD, make_runner  # type: ignore[no-redef]
+    from test_two_site_proposal_pipeline import (  # type: ignore[no-redef]
+        HEAD,
+        make_runner,
+        passed_receipt,
+    )
 
 _EXPECTED_NINE_KEYS = frozenset({
     "base_context",
@@ -764,6 +780,112 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
                         post_ctx["state_check"]()
 
                         env["bytes_mock"].assert_not_called()
+
+    def test_execute_worker_one_post_result_remainder_success_both_test_gate_origins(
+        self,
+    ) -> None:
+        for origin in ("BOOTSTRAP", "TEST_FAILED"):
+            with self.subTest(origin=origin):
+                with self._post_result_gate_env(origin) as env:
+                    ctx = env["ctx"]
+                    returned_state = env["returned_state"]
+                    prefix = ctx["continuation_run_prefix"]
+                    expected_rev_id = f"{prefix}-reviewer-1"
+
+                    ctx["admitted_request"]["timeout"] = 300
+                    pipeline_dir = self.root / ".local/two-site-refactor/pipeline"
+                    pipeline_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+                    fake_run_candidate_tests = (
+                        lambda root, task, worker_res, worker_sha, **kwargs: (
+                            passed_receipt(worker_sha)
+                        )
+                    )
+
+                    verifier_calls: list[str] = []
+                    worker_calls: list[str] = []
+
+                    def fake_run_provider_session(
+                        root: Path,
+                        task_path: Path,
+                        role: str,
+                        base_run_id: str,
+                        timeout: int,
+                        state_check: Any,
+                        feedback: Path | None = None,
+                        proposal: Path | None = None,
+                        cli: Path | None = None,
+                        test_evidence: Path | None = None,
+                        expected_head: str | None = None,
+                    ) -> tuple[str, Path]:
+                        state_check()
+                        if role == "verifier":
+                            verifier_calls.append(base_run_id)
+                        else:
+                            worker_calls.append(base_run_id)
+                        runner, _ = make_runner(root, [{"status": "VERIFIED"}])
+                        run_dir = runner(
+                            root,
+                            task_path,
+                            role,
+                            base_run_id,
+                            timeout,
+                            feedback=feedback,
+                            proposal=proposal,
+                            test_evidence=test_evidence,
+                        )
+                        return base_run_id, run_dir
+
+                    with patch.object(
+                        pipeline_mod,
+                        "run_candidate_tests",
+                        fake_run_candidate_tests,
+                    ), patch.object(
+                        pipeline_mod,
+                        "run_provider_session",
+                        fake_run_provider_session,
+                    ), patch.object(
+                        pipeline_mod,
+                        "check_state",
+                        MagicMock(return_value=None),
+                    ):
+                        final_state = execute_worker_one_post_result_remainder(
+                            self.root, env["request"], returned_state
+                        )
+
+                    self.assertEqual(final_state["state"], "READY_FOR_CODEX")
+                    self.assertEqual(final_state["blockers"], [])
+                    self.assertEqual(final_state["correction_count"], 1)
+                    self.assertEqual(
+                        final_state["final_reviewer_run_id"], expected_rev_id
+                    )
+                    self.assertEqual(verifier_calls, [expected_rev_id])
+                    self.assertEqual(worker_calls, [])
+
+                    rcpt_path = self.root / final_state["pre_review_test_path"]
+                    self.assertTrue(rcpt_path.is_file())
+                    self.assertEqual(
+                        final_state["pre_review_test_state"], "PASSED"
+                    )
+                    rcpt_bytes = rcpt_path.read_bytes()
+                    self.assertEqual(
+                        hashlib.sha256(rcpt_bytes).hexdigest(),
+                        final_state["pre_review_test_sha256"],
+                    )
+                    rcpt_data = json.loads(rcpt_bytes.decode("utf-8"))
+                    self.assertEqual(rcpt_data["state"], "PASSED")
+                    self.assertEqual(
+                        rcpt_data["proposal_sha256"],
+                        returned_state["proposal_sha256"],
+                    )
+
+                    rev0_dir = (
+                        self.root
+                        / ".local/two-site-refactor/proposals"
+                        / f"{prefix}-reviewer-0"
+                    )
+                    self.assertFalse(rev0_dir.exists())
+                    env["bytes_mock"].assert_not_called()
 
 
 if __name__ == "__main__":
