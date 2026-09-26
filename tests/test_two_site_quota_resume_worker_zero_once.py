@@ -357,6 +357,7 @@ def test_second_quota_one_runner_call(tmp_path: Path, accepted_ctx: dict[str, An
         run_dir.mkdir(parents=True, exist_ok=True)
         status_payload = {
             "run_id": run_id,
+            "task_id": accepted_ctx["task"]["task_id"],
             "role": "worker",
             "head": accepted_ctx["source_head"],
             "model": WORKER_MODEL,

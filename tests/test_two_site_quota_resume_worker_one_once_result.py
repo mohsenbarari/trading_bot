@@ -81,6 +81,7 @@ def _build_fixture_context(root: Path) -> dict[str, Any]:
 def _quota_status_payload(run_id: str, head: str) -> dict[str, Any]:
     return {
         "run_id": run_id,
+        "task_id": "task-100",
         "role": "worker",
         "head": head,
         "model": WORKER_MODEL,
