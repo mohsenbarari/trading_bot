@@ -414,6 +414,65 @@ class AutopilotContracts(unittest.TestCase):
         with self.assertRaisesRegex(autopilot.AutopilotError, "independent fresh"):
             autopilot.validate_gemini_chain(self.root, 'a' * 40, result)
 
+    def test_gemini_chain_accepts_routed_opus_worker_with_snapshot_task_id(self):
+        result, worker_result, _ = self.gemini_chain()
+        worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
+        worker_status = json.loads((worker_dir / "status.json").read_text())
+        worker_status["model"] = "claude-opus-4-6-thinking"
+        proposal_runner.write_json(worker_dir / "status.json", worker_status)
+
+        with patch.object(autopilot, "expected_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+            validated = autopilot.validate_gemini_chain(self.root, "a" * 40, result)
+        self.assertEqual(validated, worker_result)
+        mock_expected.assert_called_once_with("worker", "CHAIN-001")
+
+    def test_gemini_chain_rejects_forged_gemini_worker_status_for_routed_opus_task(self):
+        result, _, _ = self.gemini_chain()
+        with patch.object(autopilot, "expected_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+            with self.assertRaisesRegex(autopilot.AutopilotError, "evidence is not exactly bound"):
+                autopilot.validate_gemini_chain(self.root, "a" * 40, result)
+        mock_expected.assert_called_once_with("worker", "CHAIN-001")
+
+    def test_gemini_chain_rejects_opus_worker_with_forged_opus_reviewer_status(self):
+        result, _, reviewer_dir = self.gemini_chain()
+        worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
+        worker_status = json.loads((worker_dir / "status.json").read_text())
+        worker_status["model"] = "claude-opus-4-6-thinking"
+        proposal_runner.write_json(worker_dir / "status.json", worker_status)
+
+        reviewer_status = json.loads((reviewer_dir / "status.json").read_text())
+        reviewer_status["model"] = "claude-opus-4-6-thinking"
+        proposal_runner.write_json(reviewer_dir / "status.json", reviewer_status)
+
+        with patch.object(autopilot, "expected_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+            with self.assertRaisesRegex(autopilot.AutopilotError, "evidence is not exactly bound"):
+                autopilot.validate_gemini_chain(self.root, "a" * 40, result)
+        mock_expected.assert_called_once_with("worker", "CHAIN-001")
+
+    def test_gemini_chain_rejects_missing_or_invalid_snapshot_task_id_before_model_fallback(self):
+        result, _, reviewer_dir = self.gemini_chain()
+        worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
+        base_worker_task = json.loads((worker_dir / "task.json").read_text())
+        base_reviewer_task = json.loads((reviewer_dir / "task.json").read_text())
+
+        for invalid_task_id in (None, "", "   ", 123):
+            with self.subTest(invalid_task_id=invalid_task_id):
+                worker_task_data = json.loads(json.dumps(base_worker_task))
+                reviewer_task_data = json.loads(json.dumps(base_reviewer_task))
+                if invalid_task_id is None:
+                    worker_task_data["task"].pop("task_id", None)
+                    reviewer_task_data["task"].pop("task_id", None)
+                else:
+                    worker_task_data["task"]["task_id"] = invalid_task_id
+                    reviewer_task_data["task"]["task_id"] = invalid_task_id
+                proposal_runner.write_json(worker_dir / "task.json", worker_task_data)
+                proposal_runner.write_json(reviewer_dir / "task.json", reviewer_task_data)
+
+                with patch.object(autopilot, "expected_role_model") as mock_expected:
+                    with self.assertRaisesRegex(autopilot.AutopilotError, "snapshot is incomplete"):
+                        autopilot.validate_gemini_chain(self.root, "a" * 40, result)
+                    mock_expected.assert_not_called()
+
     def test_scoped_gemini_chain_enforces_assignment_scope(self):
         result, worker_result, _ = self.gemini_chain()
         self.assertEqual(
