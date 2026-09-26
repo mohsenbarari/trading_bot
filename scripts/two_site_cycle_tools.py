@@ -385,6 +385,10 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
 
 def _prior_worker(root: Path, snapshot: dict, worker_dir: Path) -> tuple:
     """Validate final correction input using the existing runner's full prior binding."""
+    try:
+        from scripts.two_site_proposal_pipeline import expected_role_model
+    except ModuleNotFoundError:
+        from two_site_proposal_pipeline import expected_role_model
     status = runner.unique_json(runner.bounded_file_text(root, worker_dir / "status.json", runner.MAX_CONTEXT, "worker status"))
     prior_id = status.get("input_worker_run_id")
     if not isinstance(prior_id, str) or not runner.re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", prior_id):
@@ -393,7 +397,7 @@ def _prior_worker(root: Path, snapshot: dict, worker_dir: Path) -> tuple:
     if runner.bounded_file_text(root, path, runner.MAX_CONTEXT, "prior result") != snapshot["proposal"]:
         raise runner.ProposalError("prior result bytes mismatch")
     _, prior, digest = runner.load_prior_worker(root, path, snapshot["proposal"], snapshot["task"], snapshot["sources"], snapshot["source_head"])
-    if prior.get("run_id") != prior_id or prior.get("model") != runner.WORKER_MODEL:
+    if prior.get("run_id") != prior_id or prior.get("model") != expected_role_model("worker", snapshot["task"]["task_id"]):
         raise runner.ProposalError("prior identity mismatch")
     feedback = snapshot.get("feedback")
     if not isinstance(feedback, dict):
