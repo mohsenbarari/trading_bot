@@ -125,7 +125,8 @@ def execute_worker_zero_once(
         except ProposalError:
             check_state(root, head, initial_refs, task_path, task, sources)
             extracted = _extract_bound_quota_evidence(
-                root, proposals_dir / run_id, run_id, "worker", head
+                root, proposals_dir / run_id, run_id, "worker", head,
+                expected_task_id=task["task_id"],
             )
             if extracted is not None:
                 quota_ev, quota_att = extracted
