@@ -2,10 +2,21 @@
 
 import copy
 import pytest
-from scripts.two_site_quota_wait_schedule import (
-    QuotaWaitScheduleError,
-    initial_wait_schedule,
-)
+try:
+    from scripts.two_site_quota_wait_schedule import (
+        QuotaWaitScheduleError,
+        initial_wait_schedule,
+    )
+except ImportError:
+    from two_site_quota_wait_schedule import (
+        QuotaWaitScheduleError,
+        initial_wait_schedule,
+    )
+
+try:
+    from scripts.two_site_worker_model_routing import OPUS_MODEL
+except ImportError:
+    from two_site_worker_model_routing import OPUS_MODEL
 
 BASE_KNOWN = {
     "kind": "QUOTA_RESET_KNOWN",
@@ -18,6 +29,22 @@ BASE_UNKNOWN = {
     "kind": "QUOTA_RESET_UNKNOWN",
     "provider": "gemini",
     "model": "gemini-2.5-pro",
+    "conversation_id": "conv-123",
+    "reset_at_utc": None,
+}
+
+BASE_OPUS_KNOWN = {
+    "kind": "QUOTA_RESET_KNOWN",
+    "provider": "claude",
+    "model": OPUS_MODEL,
+    "conversation_id": "conv-123",
+    "reset_at_utc": "2026-09-25T12:00:00Z",
+}
+
+BASE_OPUS_UNKNOWN = {
+    "kind": "QUOTA_RESET_UNKNOWN",
+    "provider": "claude",
+    "model": OPUS_MODEL,
     "conversation_id": "conv-123",
     "reset_at_utc": None,
 }
@@ -181,3 +208,75 @@ def test_negative_year_9999_overflow_both_branches():
             dict(BASE_KNOWN, reset_at_utc=ts_overflow_known),
             "9999-12-31T23:00:00Z",
         )
+
+
+def test_positive_schedule_opus_known_and_unknown():
+    created = "2026-09-25T11:59:00Z"
+    ev_known = copy.deepcopy(BASE_OPUS_KNOWN)
+    res_known = initial_wait_schedule(ev_known, created)
+
+    assert res_known == {
+        "reset_kind": "QUOTA_RESET_KNOWN",
+        "reset_at_utc": "2026-09-25T12:00:00Z",
+        "created_at_utc": "2026-09-25T11:59:00Z",
+        "next_check_at_utc": "2026-09-25T12:00:30Z",
+        "remaining_check_budget": 0,
+        "remaining_resume_budget": 1,
+    }
+
+    ev_unknown = copy.deepcopy(BASE_OPUS_UNKNOWN)
+    res_unknown = initial_wait_schedule(ev_unknown, created)
+    assert res_unknown == {
+        "reset_kind": "QUOTA_RESET_UNKNOWN",
+        "reset_at_utc": None,
+        "created_at_utc": "2026-09-25T11:59:00Z",
+        "next_check_at_utc": "2026-09-25T12:14:00Z",
+        "remaining_check_budget": 5,
+        "remaining_resume_budget": 1,
+    }
+
+
+@pytest.mark.parametrize(
+    "provider,model",
+    [
+        ("claude", "gemini-2.5-pro"),
+        ("gemini", OPUS_MODEL),
+        ("claude", "claude-3-5-sonnet"),
+        ("claude", "claude-opus-4-6"),
+        ("gemini", "unknown-model"),
+        ("openai", "gpt-4o"),
+        ("gemini", "gemini"),
+        ("gemini", "gemini-"),
+    ],
+)
+def test_negative_provider_model_mismatches_and_unsupported(provider, model):
+    ev = {
+        "kind": "QUOTA_RESET_KNOWN",
+        "provider": provider,
+        "model": model,
+        "conversation_id": "conv-123",
+        "reset_at_utc": "2026-09-25T12:00:00Z",
+    }
+    with pytest.raises(QuotaWaitScheduleError):
+        initial_wait_schedule(ev, "2026-09-25T10:00:00Z")
+
+
+def test_direct_script_import_wait_schedule_subprocess():
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    scripts_dir = repo_root / "scripts"
+    code = (
+        "import two_site_quota_wait_schedule; "
+        "from two_site_worker_model_routing import OPUS_MODEL; "
+        "ev = {'kind': 'QUOTA_RESET_UNKNOWN', 'provider': 'claude', 'model': OPUS_MODEL, 'conversation_id': 'c1', 'reset_at_utc': None}; "
+        "sched = two_site_quota_wait_schedule.initial_wait_schedule(ev, '2026-09-25T11:59:00Z'); "
+        "assert sched['remaining_check_budget'] == 5"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(scripts_dir)
+    res = subprocess.run([sys.executable, "-c", code], cwd=str(scripts_dir), env=env, capture_output=True, text=True)
+    assert res.returncode == 0, f"Direct import failed:\n{res.stderr}"

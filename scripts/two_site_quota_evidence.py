@@ -6,6 +6,11 @@ from datetime import datetime, timedelta, timezone
 import json
 import re
 
+try:
+    from scripts.two_site_worker_model_routing import OPUS_MODEL
+except ImportError:
+    from two_site_worker_model_routing import OPUS_MODEL
+
 _RFC3339_RE = re.compile(
     r"\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))\b"
 )
@@ -50,6 +55,22 @@ def _has_conflicting_reset_time(error_str: str, attached_ts: str) -> bool:
     return False
 
 
+def provider_for_model(model: str) -> str | None:
+    """Return provider for model identifier.
+
+    Returns 'claude' only for exact OPUS_MODEL and 'gemini' only for gemini-* models.
+    """
+    if not isinstance(model, str):
+        return None
+    if model == OPUS_MODEL:
+        return "claude"
+    if model.startswith("gemini-"):
+        suffix = model[len("gemini-") :]
+        if suffix and len(suffix) <= 128 and suffix.isprintable():
+            return "gemini"
+    return None
+
+
 def classify_gemini_quota_stream(
     raw: str,
     expected_model: str,
@@ -65,6 +86,10 @@ def classify_gemini_quota_stream(
     now_clean = now_utc.astimezone(timezone.utc)
 
     if not _is_bounded_ascii(expected_model):
+        return None
+
+    provider = provider_for_model(expected_model)
+    if provider is None:
         return None
 
     if not isinstance(raw, str):
@@ -173,7 +198,7 @@ def classify_gemini_quota_stream(
     if len(attached_dts) != 1 or _has_conflicting_reset_time(error_str, attached_dts[0]):
         return {
             "kind": "QUOTA_RESET_UNKNOWN",
-            "provider": "gemini",
+            "provider": provider,
             "model": model,
             "conversation_id": cid,
             "reset_at_utc": None,
@@ -191,7 +216,7 @@ def classify_gemini_quota_stream(
     if dt is None:
         return {
             "kind": "QUOTA_RESET_UNKNOWN",
-            "provider": "gemini",
+            "provider": provider,
             "model": model,
             "conversation_id": cid,
             "reset_at_utc": None,
@@ -201,7 +226,7 @@ def classify_gemini_quota_stream(
     if dt_utc <= now_clean or dt_utc > now_clean + timedelta(days=8):
         return {
             "kind": "QUOTA_RESET_UNKNOWN",
-            "provider": "gemini",
+            "provider": provider,
             "model": model,
             "conversation_id": cid,
             "reset_at_utc": None,
@@ -214,7 +239,7 @@ def classify_gemini_quota_stream(
 
     return {
         "kind": "QUOTA_RESET_KNOWN",
-        "provider": "gemini",
+        "provider": provider,
         "model": model,
         "conversation_id": cid,
         "reset_at_utc": formatted_utc,

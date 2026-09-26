@@ -6,7 +6,21 @@ from datetime import datetime, timedelta, timezone
 import json
 import unittest
 
-from scripts.two_site_quota_evidence import classify_gemini_quota_stream
+try:
+    from scripts.two_site_quota_evidence import (
+        classify_gemini_quota_stream,
+        provider_for_model,
+    )
+except ImportError:
+    from two_site_quota_evidence import (
+        classify_gemini_quota_stream,
+        provider_for_model,
+    )
+
+try:
+    from scripts.two_site_worker_model_routing import OPUS_MODEL
+except ImportError:
+    from two_site_worker_model_routing import OPUS_MODEL
 
 
 def _build_stream(cid: str, model: str, error: str, usage: dict | None = None) -> str:
@@ -217,6 +231,88 @@ class TestTwoSiteQuotaEvidence(unittest.TestCase):
         self.assertIsNotNone(res_valid)
         self.assertEqual(res_valid["kind"], "QUOTA_RESET_KNOWN")
         self.assertEqual(res_valid["reset_at_utc"], valid_ts)
+
+    def test_provider_for_model_attribution(self) -> None:
+        self.assertEqual(provider_for_model(OPUS_MODEL), "claude")
+        self.assertEqual(provider_for_model("gemini-1.5-pro"), "gemini")
+        self.assertEqual(provider_for_model("gemini-2.5-pro"), "gemini")
+        self.assertEqual(provider_for_model("gemini-experimental"), "gemini")
+
+        self.assertIsNone(provider_for_model("claude-opus-4-6"))
+        self.assertIsNone(provider_for_model("claude-3-5-sonnet"))
+        self.assertIsNone(provider_for_model("claude"))
+        self.assertIsNone(provider_for_model("gemini"))
+        self.assertIsNone(provider_for_model("gemini-"))
+        self.assertIsNone(provider_for_model("gemini-\n"))
+        self.assertIsNone(provider_for_model("gemini-" + "a" * 129))
+        self.assertIsNone(provider_for_model("gpt-4o"))
+        self.assertIsNone(provider_for_model(""))
+        self.assertIsNone(provider_for_model(123))  # type: ignore[arg-type]
+        self.assertIsNone(provider_for_model(None))  # type: ignore[arg-type]
+
+    def test_opus_known_reset_classification(self) -> None:
+        reset_ts = "2026-09-24T19:00:00Z"
+        error = f"RESOURCE_EXHAUSTED: Quota exceeded for Opus model. Reset at {reset_ts}"
+        raw = _build_stream(self.cid, OPUS_MODEL, error)
+        res = classify_gemini_quota_stream(raw, OPUS_MODEL, self.now_utc)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["kind"], "QUOTA_RESET_KNOWN")
+        self.assertEqual(res["provider"], "claude")
+        self.assertEqual(res["model"], OPUS_MODEL)
+        self.assertEqual(res["conversation_id"], self.cid)
+        self.assertEqual(res["reset_at_utc"], reset_ts)
+
+    def test_opus_unknown_reset_classification(self) -> None:
+        error = "RESOURCE_EXHAUSTED: Quota exceeded for Opus model with no reset details"
+        raw = _build_stream(self.cid, OPUS_MODEL, error)
+        res = classify_gemini_quota_stream(raw, OPUS_MODEL, self.now_utc)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["kind"], "QUOTA_RESET_UNKNOWN")
+        self.assertEqual(res["provider"], "claude")
+        self.assertEqual(res["model"], OPUS_MODEL)
+        self.assertEqual(res["conversation_id"], self.cid)
+        self.assertIsNone(res["reset_at_utc"])
+
+    def test_opus_model_mismatch_and_unsupported_rejected(self) -> None:
+        error = "RESOURCE_EXHAUSTED: Quota exceeded. reset at 2026-09-24T19:00:00Z"
+        raw_opus = _build_stream(self.cid, OPUS_MODEL, error)
+        self.assertIsNone(classify_gemini_quota_stream(raw_opus, "gemini-1.5-pro", self.now_utc))
+
+        raw_gemini = _build_stream(self.cid, "gemini-1.5-pro", error)
+        self.assertIsNone(classify_gemini_quota_stream(raw_gemini, OPUS_MODEL, self.now_utc))
+
+        self.assertIsNone(classify_gemini_quota_stream(raw_opus, "unknown-model", self.now_utc))
+
+    def test_opus_nonzero_usage_rejected(self) -> None:
+        error = "RESOURCE_EXHAUSTED: Quota exceeded. reset at 2026-09-24T19:00:00Z"
+        raw_nonzero = _build_stream(self.cid, OPUS_MODEL, error, usage={"prompt_tokens": 10})
+        self.assertIsNone(classify_gemini_quota_stream(raw_nonzero, OPUS_MODEL, self.now_utc))
+
+    def test_bare_gemini_model_rejected(self) -> None:
+        error = "RESOURCE_EXHAUSTED: Quota exceeded. reset at 2026-09-24T19:00:00Z"
+        raw = _build_stream(self.cid, "gemini-", error)
+        self.assertIsNone(classify_gemini_quota_stream(raw, "gemini-", self.now_utc))
+        self.assertIsNone(classify_gemini_quota_stream(raw, "gemini-1.5-pro", self.now_utc))
+
+    def test_direct_script_import_subprocess(self) -> None:
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parent.parent
+        scripts_dir = repo_root / "scripts"
+        cmd = [
+            sys.executable,
+            "-c",
+            "import two_site_quota_evidence; "
+            "assert two_site_quota_evidence.provider_for_model(two_site_quota_evidence.OPUS_MODEL) == 'claude'; "
+            "assert two_site_quota_evidence.provider_for_model('gemini-1.5-pro') == 'gemini'",
+        ]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(scripts_dir)
+        proc = subprocess.run(cmd, cwd=str(scripts_dir), env=env, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Direct import failed:\nstdout={proc.stdout}\nstderr={proc.stderr}")
 
 
 if __name__ == "__main__":

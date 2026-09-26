@@ -6,6 +6,11 @@ from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
+try:
+    from scripts.two_site_quota_evidence import provider_for_model
+except ImportError:
+    from two_site_quota_evidence import provider_for_model
+
 __all__ = ["QuotaWaitScheduleError", "initial_wait_schedule"]
 
 _CANONICAL_UTC_RE = re.compile(
@@ -56,8 +61,10 @@ def initial_wait_schedule(
         raise QuotaWaitScheduleError(f"Unsupported kind: {kind!r}")
 
     provider = evidence["provider"]
-    if type(provider) is not str or provider != "gemini":
-        raise QuotaWaitScheduleError(f"provider must be 'gemini', got {provider!r}")
+    if type(provider) is not str or not provider:
+        raise QuotaWaitScheduleError(
+            f"provider must be non-empty str, got {provider!r}"
+        )
 
     model = evidence["model"]
     if (
@@ -67,6 +74,12 @@ def initial_wait_schedule(
         or not model.isprintable()
     ):
         raise QuotaWaitScheduleError("model must be nonempty printable str <= 128 chars")
+
+    expected_provider = provider_for_model(model)
+    if expected_provider is None or expected_provider != provider:
+        raise QuotaWaitScheduleError(
+            f"provider/model mismatch or unsupported model: provider={provider!r}, model={model!r}"
+        )
 
     conv_id = evidence["conversation_id"]
     if (
