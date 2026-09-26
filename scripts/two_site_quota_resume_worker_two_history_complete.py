@@ -88,6 +88,68 @@ def complete_worker_two_history(
     if not isinstance(orig_prefix, str) or not RUN_PREFIX_RE.fullmatch(orig_prefix):
         raise ProposalError(f"invalid original_run_prefix in artifacts: {orig_prefix!r}")
 
+    has_origin = "correction_origin" in base
+    has_needs_r1 = "needs_reviewer1" in base
+    if not has_origin and not has_needs_r1:
+        origin = "REVIEWER"
+        needs_reviewer1 = True
+    elif has_origin and has_needs_r1:
+        origin = base["correction_origin"]
+        if origin not in ("REVIEWER", "BOOTSTRAP", "TEST_FAILED"):
+            raise ProposalError(f"invalid correction_origin in base: {origin!r}")
+        needs_reviewer1 = base["needs_reviewer1"]
+        if type(needs_reviewer1) is not bool:
+            raise ProposalError(f"needs_reviewer1 must be bool, got {type(needs_reviewer1).__name__}")
+        if origin == "REVIEWER" and not needs_reviewer1:
+            raise ProposalError(
+                f"contradiction: correction_origin 'REVIEWER' requires needs_reviewer1 True, got {needs_reviewer1!r}"
+            )
+        if origin in ("BOOTSTRAP", "TEST_FAILED") and needs_reviewer1:
+            raise ProposalError(
+                f"contradiction: correction_origin {origin!r} requires needs_reviewer1 False, got {needs_reviewer1!r}"
+            )
+    else:
+        raise ProposalError(
+            "contradiction: base must either include both correction_origin and needs_reviewer1, or neither"
+        )
+
+    art_origin = artifacts.get("correction_origin")
+    if art_origin is not None and art_origin != origin:
+        raise ProposalError(
+            f"contradiction: artifacts correction_origin {art_origin!r} != base {origin!r}"
+        )
+
+    r1_id = base.get("reviewer1_id")
+    r1_run_id = base.get("reviewer1_run_id")
+    r1_conv = base.get("reviewer1_conversation_id")
+
+    if needs_reviewer1:
+        if not isinstance(r1_id, str) or not r1_id.strip():
+            raise ProposalError(
+                f"contradiction: needs_reviewer1 True requires valid string reviewer1_id, got {r1_id!r}"
+            )
+        if not isinstance(r1_run_id, str) or not r1_run_id.strip():
+            raise ProposalError(
+                f"contradiction: needs_reviewer1 True requires valid string reviewer1_run_id, got {r1_run_id!r}"
+            )
+        if not isinstance(r1_conv, str) or not r1_conv.strip():
+            raise ProposalError(
+                f"contradiction: needs_reviewer1 True requires valid string reviewer1_conversation_id, got {r1_conv!r}"
+            )
+    else:
+        if r1_id is not None or r1_run_id is not None or r1_conv is not None:
+            raise ProposalError(
+                f"contradiction: needs_reviewer1 False requires reviewer1 fields to be None, got "
+                f"reviewer1_id={r1_id!r}, reviewer1_run_id={r1_run_id!r}, reviewer1_conversation_id={r1_conv!r}"
+            )
+
+    w0_conv = base.get("worker0_conversation_id")
+    if not isinstance(w0_conv, str) or not w0_conv.strip():
+        raise ProposalError(f"invalid worker0_conversation_id in base: {w0_conv!r}")
+    w1_conv = base.get("worker1_conversation_id")
+    if not isinstance(w1_conv, str) or not w1_conv.strip():
+        raise ProposalError(f"invalid worker1_conversation_id in base: {w1_conv!r}")
+
     candidate_ids = (
         f"{orig_prefix}-reviewer-0",
         f"{orig_prefix}-reviewer-0-retry-1",
@@ -109,10 +171,17 @@ def complete_worker_two_history(
                     f"unexpected Reviewer0 result candidate found in test-gate history: {cid}"
                 )
 
-        w0_conv = base["worker0_conversation_id"]
-        w1_conv = base["worker1_conversation_id"]
-        r1_conv = base["reviewer1_conversation_id"]
-        ordered_convs = [w0_conv, w1_conv, r1_conv]
+        if needs_reviewer1:
+            ordered_convs = [w0_conv, w1_conv, r1_conv]
+        else:
+            ordered_convs = [w0_conv, w1_conv]
+
+        if len(set(ordered_convs)) != len(ordered_convs):
+            raise ProposalError(
+                f"duplicate conversation IDs detected across Worker0, Worker1"
+                + (", Reviewer1" if needs_reviewer1 else "")
+                + f": {ordered_convs}"
+            )
 
         out = copy.deepcopy(base)
         out["complete"] = True
@@ -239,13 +308,16 @@ def complete_worker_two_history(
         if not isinstance(rev_conv_id, str) or not rev_conv_id.strip():
             raise ProposalError(f"invalid Reviewer0 conversation_id: {rev_conv_id!r}")
 
-        w0_conv = base["worker0_conversation_id"]
-        w1_conv = base["worker1_conversation_id"]
-        r1_conv = base["reviewer1_conversation_id"]
-        ordered_convs = [w0_conv, rev_conv_id, w1_conv, r1_conv]
-        if len(set(ordered_convs)) != 4:
+        if needs_reviewer1:
+            ordered_convs = [w0_conv, rev_conv_id, w1_conv, r1_conv]
+        else:
+            ordered_convs = [w0_conv, rev_conv_id, w1_conv]
+
+        if len(set(ordered_convs)) != len(ordered_convs):
             raise ProposalError(
-                f"duplicate conversation IDs detected across Worker0, Reviewer0, Worker1, Reviewer1: {ordered_convs}"
+                f"duplicate conversation IDs detected across Worker0, Reviewer0, Worker1"
+                + (", Reviewer1" if needs_reviewer1 else "")
+                + f": {ordered_convs}"
             )
 
         out = copy.deepcopy(base)

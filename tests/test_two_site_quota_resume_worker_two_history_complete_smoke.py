@@ -16,8 +16,9 @@ def _make_base_dict(
     prefix: str = "run-20260925-sample",
     feedback1_kind: str = "test-gate",
     needs_reviewer0: bool = False,
+    origin: str | None = None,
 ) -> dict:
-    return {
+    d = {
         "worker0_id": f"{prefix}-worker-0",
         "worker0_run_id": f"{prefix}-worker-0",
         "worker0_conversation_id": "conv-w0",
@@ -37,18 +38,33 @@ def _make_base_dict(
         },
         "needs_reviewer0": needs_reviewer0,
     }
+    if origin is not None:
+        d["correction_origin"] = origin
+        d["needs_reviewer1"] = (origin == "REVIEWER")
+        if origin != "REVIEWER":
+            d["reviewer1_id"] = None
+            d["reviewer1_run_id"] = None
+            d["reviewer1_conversation_id"] = None
+    return d
 
 
-def _make_artifacts(prefix: str = "run-20260925-sample") -> dict:
-    return {
+def _make_artifacts(
+    prefix: str = "run-20260925-sample",
+    origin: str | None = None,
+) -> dict:
+    arts = {
         "worker_index": 2,
         "original_run_prefix": prefix,
         "final_worker_run_id": f"{prefix}-worker-1",
-        "final_reviewer_run_id": f"{prefix}-reviewer-1",
         "proposal_sha256": "1" * 64,
         "task_id": "task-sample",
         "source_head": "a" * 40,
     }
+    if origin is not None:
+        arts["correction_origin"] = origin
+    if origin is None or origin == "REVIEWER":
+        arts["final_reviewer_run_id"] = f"{prefix}-reviewer-1"
+    return arts
 
 
 @patch("scripts.two_site_quota_resume_worker_two_history_complete.derive_worker_two_history_base")
@@ -331,4 +347,111 @@ def test_gemini_invalid_existent_candidate_hard_stops(
     (cand_dir / "result.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(ProposalError, match="corrupt reviewer result"):
+        complete_worker_two_history(tmp_path, "task.json", artifacts, {})
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+@patch("scripts.two_site_quota_resume_worker_two_history_complete.derive_worker_two_history_base")
+def test_test_gate_non_reviewer_origin_happy_path(
+    mock_derive, origin: str, tmp_path: Path
+) -> None:
+    prefix = "run-20260925-sample"
+    mock_derive.return_value = _make_base_dict(prefix, "test-gate", False, origin=origin)
+    artifacts = _make_artifacts(prefix, origin=origin)
+
+    res = complete_worker_two_history(tmp_path, "task.json", artifacts, {})
+    assert res["complete"] is True
+    assert res["conversation_ids"] == ["conv-w0", "conv-w1"]
+    assert res["ordered_conversation_ids"] == ["conv-w0", "conv-w1"]
+    assert "reviewer0_id" not in res
+    assert res["reviewer1_id"] is None
+    assert res["reviewer1_run_id"] is None
+    assert res["reviewer1_conversation_id"] is None
+    assert res["needs_reviewer1"] is False
+    assert res["correction_origin"] == origin
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+@patch("scripts.two_site_quota_resume_worker_two_history_complete.derive_worker_two_history_base")
+@patch("scripts.two_site_quota_resume_worker_two_history_complete.load_prior_worker_zero")
+@patch("scripts.two_site_quota_resume_worker_two_history_complete._load_verifier_pre_review_receipt")
+@patch("scripts.two_site_quota_resume_worker_two_history_complete.load_task")
+@patch("scripts.two_site_quota_resume_worker_two_history_complete.validate_bound_prior_reviewer")
+def test_gemini_non_reviewer_origin_happy_path(
+    mock_validate_rev,
+    mock_load_task,
+    mock_load_receipt,
+    mock_load_w0,
+    mock_derive,
+    origin: str,
+    tmp_path: Path,
+) -> None:
+    prefix = "run-20260925-sample"
+    mock_derive.return_value = _make_base_dict(prefix, "gemini", True, origin=origin)
+    artifacts = _make_artifacts(prefix, origin=origin)
+
+    mock_load_w0.return_value = {
+        "conversation_id": "conv-w0",
+        "result_sha": "0" * 64,
+    }
+    mock_load_receipt.return_value = {
+        "state": "PASSED",
+        "proposal_sha256": "0" * 64,
+    }
+    mock_load_task.return_value = ({"task_id": "task-sample"}, {})
+    mock_validate_rev.return_value = {
+        "findings": ["finding-alpha"],
+        "status": "CHANGES_REQUIRED",
+    }, {
+        "conversation_id": "conv-r0",
+        "state": "CHANGES_REQUIRED",
+    }, "r0_sha" * 8
+
+    pipe_dir = tmp_path / ".local" / "two-site-refactor" / "pipeline" / prefix
+    pipe_dir.mkdir(parents=True, exist_ok=True)
+    (pipe_dir / "pre-review-tests-0.json").write_text("{}", encoding="utf-8")
+
+    cand_dir = tmp_path / ".local" / "two-site-refactor" / "proposals" / f"{prefix}-reviewer-0"
+    cand_dir.mkdir(parents=True, exist_ok=True)
+    (cand_dir / "result.json").write_text("{}", encoding="utf-8")
+
+    res = complete_worker_two_history(tmp_path, "task.json", artifacts, {})
+    assert res["complete"] is True
+    assert res["reviewer0_id"] == f"{prefix}-reviewer-0"
+    assert res["reviewer0_conversation_id"] == "conv-r0"
+    assert res["conversation_ids"] == ["conv-w0", "conv-r0", "conv-w1"]
+    assert res["ordered_conversation_ids"] == ["conv-w0", "conv-r0", "conv-w1"]
+    assert res["reviewer1_id"] is None
+    assert res["reviewer1_run_id"] is None
+    assert res["reviewer1_conversation_id"] is None
+    assert res["needs_reviewer1"] is False
+    assert res["correction_origin"] == origin
+    assert res["reviewer0_result_sha"] == "r0_sha" * 8
+
+
+@pytest.mark.parametrize(
+    "base_override",
+    [
+        {"correction_origin": "REVIEWER", "needs_reviewer1": False},
+        {"correction_origin": "BOOTSTRAP", "needs_reviewer1": True},
+        {
+            "correction_origin": "TEST_FAILED",
+            "needs_reviewer1": False,
+            "reviewer1_id": "r1",
+            "reviewer1_run_id": "r1",
+            "reviewer1_conversation_id": "conv-r1",
+        },
+        {"correction_origin": "REVIEWER", "needs_reviewer1": True, "reviewer1_id": None},
+        {"correction_origin": "BOOTSTRAP"},
+    ],
+)
+@patch("scripts.two_site_quota_resume_worker_two_history_complete.derive_worker_two_history_base")
+def test_contradiction_rejection(mock_derive, base_override: dict, tmp_path: Path) -> None:
+    prefix = "run-20260925-sample"
+    base = _make_base_dict(prefix, "test-gate", False)
+    base.update(base_override)
+    mock_derive.return_value = base
+    artifacts = _make_artifacts(prefix)
+
+    with pytest.raises(ProposalError, match="contradiction"):
         complete_worker_two_history(tmp_path, "task.json", artifacts, {})
