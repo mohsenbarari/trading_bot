@@ -51,6 +51,7 @@ def test_worker_zero_derivation_success_and_retry():
     assert artifacts["status_sha"] == artifacts["status_sha256"]
     assert artifacts["quota_evidence"] == receipt["quota_evidence"]
     assert artifacts["worker_index"] == 0
+    assert "correction_origin" not in artifacts
 
     for retry_tag in ("-retry-1", "-retry-2"):
         req_r, rec_r, _ = _build_worker_zero_fixtures(worker_retry=retry_tag)
@@ -246,6 +247,7 @@ def test_worker_dispatcher_success_and_retries():
                     assert artifacts["pre_review_test_path"] == state["pre_review_test_path"]
                     assert artifacts["pre_review_test_sha256"] == "b" * 64
                     assert artifacts["pre_review_test_state"] == "PASSED"
+                    assert artifacts["correction_origin"] == "REVIEWER"
                     assert artifacts["changed_paths"] == ["scripts/two_site_proposal_pipeline.py"]
                     assert artifacts["expected_feedback_path"] == (
                         f".local/two-site-refactor/pipeline/{orig_prefix}/feedback-correction-{idx}.json"
@@ -397,3 +399,28 @@ def test_helper_actually_called_and_compared(monkeypatch):
     artifacts = derive_worker_resume_artifacts(req, rec)
     assert len(called) == 1
     assert artifacts["worker_index"] == 1
+
+
+def test_no_reviewer_helper_actually_called_and_compared(monkeypatch):
+    called = []
+    import scripts.two_site_quota_resume_worker_artifacts as mod
+    orig_helper = mod.validate_prior_worker_no_reviewer_paths
+
+    def spy_helper(*args, **kwargs):
+        called.append(True)
+        return orig_helper(*args, **kwargs)
+
+    monkeypatch.setattr(mod, "validate_prior_worker_no_reviewer_paths", spy_helper)
+
+    req, rec, state = _build_worker_correction_fixtures(1)
+    state["final_reviewer_run_id"] = None
+    state["reviewer_path"] = None
+    state["pre_review_test_path"] = None
+    state["pre_review_test_sha256"] = None
+    state["pre_review_test_state"] = None
+    rec["response"]["stdout"] = json.dumps(state)
+
+    artifacts = derive_worker_resume_artifacts(req, rec)
+    assert len(called) == 1
+    assert artifacts["worker_index"] == 1
+    assert artifacts["correction_origin"] == "BOOTSTRAP"

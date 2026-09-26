@@ -37,9 +37,15 @@ except ImportError:
     )
 
 try:
-    from scripts.two_site_quota_resume_worker_paths import validate_prior_worker_paths
+    from scripts.two_site_quota_resume_worker_paths import (
+        validate_prior_worker_no_reviewer_paths,
+        validate_prior_worker_paths,
+    )
 except ImportError:
-    from two_site_quota_resume_worker_paths import validate_prior_worker_paths
+    from two_site_quota_resume_worker_paths import (
+        validate_prior_worker_no_reviewer_paths,
+        validate_prior_worker_paths,
+    )
 
 QUOTA_EVIDENCE_KEYS = frozenset(
     {"kind", "provider", "model", "conversation_id", "reset_at_utc"}
@@ -270,40 +276,15 @@ def derive_worker_resume_artifacts(
 
     prior_worker_id = pipeline_state.get("final_worker_run_id")
     prior_reviewer_id = pipeline_state.get("final_reviewer_run_id")
-    try:
-        canonical_paths = validate_prior_worker_paths(
-            orig_run_prefix,
-            attempted_index,
-            prior_worker_id,
-            prior_reviewer_id,
-        )
-    except (ValueError, TypeError) as exc:
-        raise ProposalError(f"prior worker/reviewer paths validation failed: {exc}") from exc
-
-    for path_key in ("proposal_path", "reviewer_path", "pre_review_test_path"):
-        state_path = pipeline_state.get(path_key)
-        expected_path = canonical_paths[path_key]
-        if state_path != expected_path:
-            raise ProposalError(
-                f"{path_key} mismatch: expected {expected_path!r}, got {state_path!r}"
-            )
+    reviewer_path = pipeline_state.get("reviewer_path")
+    pre_review_test_path = pipeline_state.get("pre_review_test_path")
+    pre_review_test_sha = pipeline_state.get("pre_review_test_sha256")
+    pre_review_test_state = pipeline_state.get("pre_review_test_state")
 
     proposal_sha = pipeline_state.get("proposal_sha256")
     if not isinstance(proposal_sha, str) or not SHA_PATTERN.fullmatch(proposal_sha):
         raise ProposalError(
             f"proposal_sha256 must be 64 lowercase hex, got {proposal_sha!r}"
-        )
-
-    pre_review_test_sha = pipeline_state.get("pre_review_test_sha256")
-    if not isinstance(pre_review_test_sha, str) or not SHA_PATTERN.fullmatch(pre_review_test_sha):
-        raise ProposalError(
-            f"pre_review_test_sha256 must be 64 lowercase hex, got {pre_review_test_sha!r}"
-        )
-
-    pre_review_test_state = pipeline_state.get("pre_review_test_state")
-    if pre_review_test_state != "PASSED":
-        raise ProposalError(
-            f"pre_review_test_state must be 'PASSED', got {pre_review_test_state!r}"
         )
 
     changed_paths = pipeline_state.get("changed_paths")
@@ -313,27 +294,152 @@ def derive_worker_resume_artifacts(
         if not isinstance(item, str) or len(item) == 0:
             raise ProposalError(f"changed_paths must contain non-empty strings, got {item!r}")
 
-    return {
-        "task_id": pipeline_state["task_id"],
-        "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
-        "source_head": pipeline_state["source_head"],
-        "original_run_prefix": orig_run_prefix,
-        "attempted_run_id": worker_run_id,
-        "status_sha256": status_sha,
-        "status_sha": status_sha,
-        "quota_evidence": json.loads(json.dumps(quota_evidence)),
-        "worker_index": attempted_index,
-        "final_worker_run_id": prior_worker_id,
-        "final_reviewer_run_id": prior_reviewer_id,
-        "proposal_path": canonical_paths["proposal_path"],
-        "proposal_sha256": proposal_sha,
-        "reviewer_path": canonical_paths["reviewer_path"],
-        "pre_review_test_path": canonical_paths["pre_review_test_path"],
-        "pre_review_test_sha256": pre_review_test_sha,
-        "pre_review_test_state": pre_review_test_state,
-        "changed_paths": list(changed_paths),
-        "expected_feedback_path": canonical_paths["expected_feedback_path"],
-    }
+    if prior_reviewer_id is not None:
+        if reviewer_path is None:
+            raise ProposalError(
+                "prior worker/reviewer paths validation failed: reviewer_path cannot be None when final_reviewer_run_id is present"
+            )
+        if pre_review_test_state != "PASSED":
+            raise ProposalError(
+                f"pre_review_test_state must be 'PASSED' for reviewer-backed resume, got {pre_review_test_state!r}"
+            )
+
+        try:
+            canonical_paths = validate_prior_worker_paths(
+                orig_run_prefix,
+                attempted_index,
+                prior_worker_id,
+                prior_reviewer_id,
+            )
+        except (ValueError, TypeError) as exc:
+            raise ProposalError(f"prior worker/reviewer paths validation failed: {exc}") from exc
+
+        for path_key in ("proposal_path", "reviewer_path", "pre_review_test_path"):
+            state_path = pipeline_state.get(path_key)
+            expected_path = canonical_paths[path_key]
+            if state_path != expected_path:
+                raise ProposalError(
+                    f"{path_key} mismatch: expected {expected_path!r}, got {state_path!r}"
+                )
+
+        if not isinstance(pre_review_test_sha, str) or not SHA_PATTERN.fullmatch(pre_review_test_sha):
+            raise ProposalError(
+                f"pre_review_test_sha256 must be 64 lowercase hex, got {pre_review_test_sha!r}"
+            )
+
+        return {
+            "task_id": pipeline_state["task_id"],
+            "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
+            "source_head": pipeline_state["source_head"],
+            "original_run_prefix": orig_run_prefix,
+            "attempted_run_id": worker_run_id,
+            "status_sha256": status_sha,
+            "status_sha": status_sha,
+            "quota_evidence": json.loads(json.dumps(quota_evidence)),
+            "worker_index": attempted_index,
+            "correction_origin": "REVIEWER",
+            "final_worker_run_id": prior_worker_id,
+            "final_reviewer_run_id": prior_reviewer_id,
+            "proposal_path": canonical_paths["proposal_path"],
+            "proposal_sha256": proposal_sha,
+            "reviewer_path": canonical_paths["reviewer_path"],
+            "pre_review_test_path": canonical_paths["pre_review_test_path"],
+            "pre_review_test_sha256": pre_review_test_sha,
+            "pre_review_test_state": "PASSED",
+            "changed_paths": list(changed_paths),
+            "expected_feedback_path": canonical_paths["expected_feedback_path"],
+        }
+
+    # No-reviewer branches: BOOTSTRAP and TEST_FAILED
+    if reviewer_path is not None:
+        raise ProposalError(
+            "prior worker/reviewer paths validation failed: reviewer_path must be None when final_reviewer_run_id is None"
+        )
+
+    try:
+        canonical_paths = validate_prior_worker_no_reviewer_paths(
+            orig_run_prefix,
+            attempted_index,
+            prior_worker_id,
+        )
+    except (ValueError, TypeError) as exc:
+        raise ProposalError(f"prior worker/reviewer paths validation failed: {exc}") from exc
+
+    state_proposal_path = pipeline_state.get("proposal_path")
+    expected_proposal_path = canonical_paths["proposal_path"]
+    if state_proposal_path != expected_proposal_path:
+        raise ProposalError(
+            f"proposal_path mismatch: expected {expected_proposal_path!r}, got {state_proposal_path!r}"
+        )
+
+    if pre_review_test_state is None:
+        if pre_review_test_path is not None or pre_review_test_sha is not None:
+            raise ProposalError(
+                "pre_review_test_path and pre_review_test_sha256 must be None for bootstrap resume"
+            )
+
+        return {
+            "task_id": pipeline_state["task_id"],
+            "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
+            "source_head": pipeline_state["source_head"],
+            "original_run_prefix": orig_run_prefix,
+            "attempted_run_id": worker_run_id,
+            "status_sha256": status_sha,
+            "status_sha": status_sha,
+            "quota_evidence": json.loads(json.dumps(quota_evidence)),
+            "worker_index": attempted_index,
+            "correction_origin": "BOOTSTRAP",
+            "final_worker_run_id": prior_worker_id,
+            "final_reviewer_run_id": None,
+            "proposal_path": canonical_paths["proposal_path"],
+            "proposal_sha256": proposal_sha,
+            "reviewer_path": None,
+            "pre_review_test_path": None,
+            "pre_review_test_sha256": None,
+            "pre_review_test_state": None,
+            "changed_paths": list(changed_paths),
+            "expected_feedback_path": canonical_paths["expected_feedback_path"],
+        }
+
+    if pre_review_test_state == "FAILED":
+        state_test_path = pipeline_state.get("pre_review_test_path")
+        expected_test_path = canonical_paths["pre_review_test_path"]
+        if state_test_path != expected_test_path:
+            raise ProposalError(
+                f"pre_review_test_path mismatch: expected {expected_test_path!r}, got {state_test_path!r}"
+            )
+
+        if not isinstance(pre_review_test_sha, str) or not SHA_PATTERN.fullmatch(pre_review_test_sha):
+            raise ProposalError(
+                f"pre_review_test_sha256 must be 64 lowercase hex, got {pre_review_test_sha!r}"
+            )
+
+        return {
+            "task_id": pipeline_state["task_id"],
+            "semantic_task_fingerprint": pipeline_state["semantic_task_fingerprint"],
+            "source_head": pipeline_state["source_head"],
+            "original_run_prefix": orig_run_prefix,
+            "attempted_run_id": worker_run_id,
+            "status_sha256": status_sha,
+            "status_sha": status_sha,
+            "quota_evidence": json.loads(json.dumps(quota_evidence)),
+            "worker_index": attempted_index,
+            "correction_origin": "TEST_FAILED",
+            "final_worker_run_id": prior_worker_id,
+            "final_reviewer_run_id": None,
+            "proposal_path": canonical_paths["proposal_path"],
+            "proposal_sha256": proposal_sha,
+            "reviewer_path": None,
+            "pre_review_test_path": canonical_paths["pre_review_test_path"],
+            "pre_review_test_sha256": pre_review_test_sha,
+            "pre_review_test_state": "FAILED",
+            "changed_paths": list(changed_paths),
+            "expected_feedback_path": canonical_paths["expected_feedback_path"],
+        }
+
+    raise ProposalError(
+        f"pre_review_test_state {pre_review_test_state!r} invalid when final_reviewer_run_id is None"
+    )
 
 
 _derive_worker_zero_resume_artifacts = derive_worker_zero_resume_artifacts
