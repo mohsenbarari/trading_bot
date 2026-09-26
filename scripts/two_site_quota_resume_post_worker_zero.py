@@ -6,7 +6,18 @@ from pathlib import Path
 from typing import Any, Iterator
 
 try:
-    from scripts.two_site_proposal_pipeline import ProposalError, SHA_PATTERN
+    from scripts.two_site_proposal_pipeline import (
+        ProposalError,
+        SHA_PATTERN,
+        check_state,
+    )
+    from scripts.two_site_provider_broker import read_terminal_quota_record
+    from scripts.two_site_quota_continuation_admission import (
+        validate_quota_continuation_request,
+    )
+    from scripts.two_site_quota_resume_worker_artifacts import (
+        derive_worker_resume_artifacts,
+    )
     from scripts.two_site_quota_resume_worker_context import (
         worker_zero_continuation_context,
     )
@@ -15,6 +26,16 @@ except ImportError:
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         ProposalError,
         SHA_PATTERN,
+        check_state,
+    )
+    from two_site_provider_broker import (  # type: ignore[no-redef]
+        read_terminal_quota_record,
+    )
+    from two_site_quota_continuation_admission import (  # type: ignore[no-redef]
+        validate_quota_continuation_request,
+    )
+    from two_site_quota_resume_worker_artifacts import (  # type: ignore[no-redef]
+        derive_worker_resume_artifacts,
     )
     from two_site_quota_resume_worker_context import (  # type: ignore[no-redef]
         worker_zero_continuation_context,
@@ -148,10 +169,55 @@ def worker_zero_post_result_context(
         if not isinstance(conv_id, str) or not conv_id.strip():
             raise ProposalError("missing or empty conversation_id in loaded status")
 
+        def state_check() -> None:
+            admitted, task_path, _ = validate_quota_continuation_request(
+                root, continuation_request
+            )
+            if admitted != ctx["admitted_request"]:
+                raise ProposalError("admitted request drifted across recheck")
+            if task_path != ctx["admitted_task_path"]:
+                raise ProposalError("admitted task path drifted across recheck")
+
+            orig_id = admitted.get("original_request_id")
+            if not isinstance(orig_id, str):
+                raise ProposalError(
+                    "missing original_request_id in admitted request"
+                )
+
+            record = read_terminal_quota_record(root, orig_id)
+            if record != ctx["original_terminal_receipt"]:
+                raise ProposalError(
+                    "original terminal quota record drifted across recheck"
+                )
+
+            derived_artifacts = derive_worker_resume_artifacts(admitted, record)
+            if derived_artifacts != ctx["artifacts"]:
+                raise ProposalError(
+                    "worker resume artifacts drifted across recheck"
+                )
+
+            check_state(
+                root,
+                ctx["source_head"],
+                ctx["initial_refs"],
+                ctx["admitted_task_path"],
+                ctx["task"],
+                ctx["sources"],
+            )
+
+            reloaded = load_prior_worker_zero(root, task_path, read_artifacts)
+            if reloaded != loaded:
+                raise ProposalError(
+                    "loaded worker zero record drifted across recheck"
+                )
+
+        state_check()
+
         yield {
             "base_context": copy.deepcopy(ctx),
             "worker_info": copy.deepcopy(loaded),
             "returned_state": copy.deepcopy(returned_state),
             "current_worker": (expected_run_id, sha, loaded["result_text"], conv_id),
             "seen_convs": {conv_id},
+            "state_check": state_check,
         }

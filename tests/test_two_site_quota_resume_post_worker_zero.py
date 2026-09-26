@@ -68,16 +68,40 @@ class TestTwoSiteQuotaResumePostWorkerZero(unittest.TestCase):
         self.load_task_patcher.start()
 
         self.lock_held = False
+        self.orig_receipt = {
+            "request_id": "orig-req-1",
+            "status": "TERMINAL_QUOTA",
+        }
+        self.admitted_request = {
+            "role": "worker",
+            "original_request_id": "orig-req-1",
+            "run_prefix": "run-post",
+        }
+        self.artifacts = {
+            "worker_index": 0,
+            "original_run_prefix": "run-post",
+            "source_head": HEAD,
+            "semantic_task_fingerprint": "fp-post-0",
+        }
+        self.initial_refs = {"HEAD": HEAD}
+        self.sources = {
+            "src.py": {
+                "sha256": hashlib.sha256(self.src_file.read_bytes()).hexdigest(),
+                "content": self.src_file.read_text(),
+            }
+        }
         self.base_ctx = {
             "continuation_run_prefix": "run-post",
-            "admitted_request": {"role": "worker"},
-            "artifacts": {
-                "worker_index": 0,
-                "semantic_task_fingerprint": "fp-post-0",
-            },
-            "task": copy.deepcopy(self.task),
+            "original_run_prefix": "run-post",
             "source_head": HEAD,
+            "initial_refs": copy.deepcopy(self.initial_refs),
+            "original_receipt": copy.deepcopy(self.orig_receipt),
+            "original_terminal_receipt": copy.deepcopy(self.orig_receipt),
+            "admitted_request": copy.deepcopy(self.admitted_request),
             "admitted_task_path": self.task_path,
+            "artifacts": copy.deepcopy(self.artifacts),
+            "task": copy.deepcopy(self.task),
+            "sources": copy.deepcopy(self.sources),
         }
 
         @contextmanager
@@ -96,7 +120,43 @@ class TestTwoSiteQuotaResumePostWorkerZero(unittest.TestCase):
         )
         self.continuation_patcher.start()
 
+        self.validate_patcher = patch.object(
+            post_mod,
+            "validate_quota_continuation_request",
+            side_effect=lambda root, req: (
+                copy.deepcopy(self.admitted_request),
+                self.task_path,
+                {},
+            ),
+        )
+        self.validate_patcher.start()
+
+        self.read_record_patcher = patch.object(
+            post_mod,
+            "read_terminal_quota_record",
+            side_effect=lambda root, req_id: copy.deepcopy(self.orig_receipt),
+        )
+        self.read_record_patcher.start()
+
+        self.derive_artifacts_patcher = patch.object(
+            post_mod,
+            "derive_worker_resume_artifacts",
+            side_effect=lambda admitted, record: copy.deepcopy(self.artifacts),
+        )
+        self.derive_artifacts_patcher.start()
+
+        self.check_state_patcher = patch.object(
+            post_mod,
+            "check_state",
+            return_value=None,
+        )
+        self.check_state_patcher.start()
+
     def tearDown(self):
+        self.check_state_patcher.stop()
+        self.derive_artifacts_patcher.stop()
+        self.read_record_patcher.stop()
+        self.validate_patcher.stop()
         self.continuation_patcher.stop()
         self.load_task_patcher.stop()
         self.tmp_dir.cleanup()
@@ -153,6 +213,9 @@ class TestTwoSiteQuotaResumePostWorkerZero(unittest.TestCase):
             self.assertEqual(ctx["current_worker"], expected_current)
             self.assertEqual(ctx["seen_convs"], {f"conv-{run_id}"})
 
+            self.assertTrue(callable(ctx["state_check"]))
+            ctx["state_check"]()
+
             ctx["worker_info"]["result"]["summary"] = "mutated-worker-info"
             ctx["returned_state"]["state"] = "mutated-state"
             self.assertEqual(returned_state["state"], "WORKER_PROPOSAL_READY")
@@ -194,3 +257,108 @@ class TestTwoSiteQuotaResumePostWorkerZero(unittest.TestCase):
         finally:
             run_dir.unlink()
             backup_dir.rename(run_dir)
+
+    def test_worker_result_and_status_file_drift_rejects(self):
+        returned_state, run_dir, _ = self._create_real_worker_zero()
+        result_file = run_dir / "result.json"
+        status_file = run_dir / "status.json"
+        orig_res_bytes = result_file.read_bytes()
+        orig_status_bytes = status_file.read_bytes()
+
+        with worker_zero_post_result_context(self.root, {}, returned_state) as ctx:
+            state_check = ctx["state_check"]
+            state_check()
+
+            # 1. Mutate result.json on disk
+            res_data = json.loads(orig_res_bytes.decode("utf-8"))
+            res_data["summary"] = "mutated-drift"
+            result_file.write_text(json.dumps(res_data), "utf-8")
+            with self.assertRaises(ProposalError):
+                state_check()
+
+            # Restore result.json and verify state_check passes
+            result_file.write_bytes(orig_res_bytes)
+            state_check()
+
+            # 2. Mutate status.json on disk
+            status_data = json.loads(orig_status_bytes.decode("utf-8"))
+            status_data["conversation_id"] = "conv-mutated"
+            status_file.write_text(json.dumps(status_data), "utf-8")
+            with self.assertRaises(ProposalError):
+                state_check()
+
+            # Restore status.json and verify state_check passes
+            status_file.write_bytes(orig_status_bytes)
+            state_check()
+
+    def test_admission_failure_and_receipt_drift_rejection(self):
+        returned_state, _, _ = self._create_real_worker_zero()
+        post_mod = sys.modules[worker_zero_post_result_context.__module__]
+
+        # Rejection before yield if initial state_check fails
+        with patch.object(
+            post_mod,
+            "validate_quota_continuation_request",
+            side_effect=ProposalError("initial STOP failure"),
+        ):
+            with self.assertRaises(ProposalError):
+                with worker_zero_post_result_context(self.root, {}, returned_state):
+                    pass
+
+        # Rejections after yield via state_check callable
+        with worker_zero_post_result_context(self.root, {}, returned_state) as ctx:
+            state_check = ctx["state_check"]
+            state_check()
+
+            # 1. STOP/admission error rejection
+            with patch.object(
+                post_mod,
+                "validate_quota_continuation_request",
+                side_effect=ProposalError("STOP signal encountered"),
+            ):
+                with self.assertRaises(ProposalError) as cm:
+                    state_check()
+                self.assertIn("STOP", str(cm.exception))
+
+            # 2. Admitted request drift rejection
+            mutated_admitted = dict(self.admitted_request, run_prefix="drifted-prefix")
+            with patch.object(
+                post_mod,
+                "validate_quota_continuation_request",
+                return_value=(mutated_admitted, self.task_path, {}),
+            ):
+                with self.assertRaises(ProposalError):
+                    state_check()
+
+            # 3. Admitted task path drift rejection
+            with patch.object(
+                post_mod,
+                "validate_quota_continuation_request",
+                return_value=(
+                    copy.deepcopy(self.admitted_request),
+                    self.root / "other_task.json",
+                    {},
+                ),
+            ):
+                with self.assertRaises(ProposalError):
+                    state_check()
+
+            # 4. Original receipt drift rejection
+            drifted_receipt = dict(self.orig_receipt, status="COMPLETED")
+            with patch.object(
+                post_mod,
+                "read_terminal_quota_record",
+                return_value=drifted_receipt,
+            ):
+                with self.assertRaises(ProposalError):
+                    state_check()
+
+            # 5. Derived artifacts drift rejection
+            drifted_artifacts = dict(self.artifacts, source_head="drifted-head")
+            with patch.object(
+                post_mod,
+                "derive_worker_resume_artifacts",
+                return_value=drifted_artifacts,
+            ):
+                with self.assertRaises(ProposalError):
+                    state_check()
