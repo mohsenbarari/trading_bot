@@ -88,3 +88,42 @@ def test_test_gate_ignored_and_codex_or_wrong_sha_rejected():
 
         with pytest.raises(ProposalError):
             load_prior_normalized_findings(root, prefix, 1, ["c" * 64])
+
+
+def test_symlink_root_rejected():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        canonical_dir = Path(tmpdir).resolve()
+        target = canonical_dir / "target"
+        target.mkdir()
+        symlink_root = canonical_dir / "symlink_root"
+        symlink_root.symlink_to(target, target_is_directory=True)
+        prefix = _valid_prefix()
+        with pytest.raises(ProposalError):
+            load_prior_normalized_findings(symlink_root, prefix, 0, [])
+
+
+def test_relative_and_noncanonical_root_rejected():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        canonical_dir = Path(tmpdir).resolve()
+        prefix = _valid_prefix()
+        sub = canonical_dir / "sub"
+        sub.mkdir()
+        noncanonical = canonical_dir / "sub" / ".."
+        with pytest.raises(ProposalError):
+            load_prior_normalized_findings(noncanonical, prefix, 0, [])
+        with pytest.raises(ProposalError):
+            load_prior_normalized_findings(Path("relative_root"), prefix, 0, [])
+
+
+def test_malformed_json_produces_proposal_error():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir).resolve()
+        prefix = _valid_prefix()
+        sha1 = "a" * 64
+        dir_path = root / ".local" / "two-site-refactor" / "pipeline" / prefix
+        dir_path.mkdir(parents=True)
+        (dir_path / "feedback-correction-1.json").write_text(
+            "not valid json {{{", encoding="utf-8"
+        )
+        with pytest.raises(ProposalError):
+            load_prior_normalized_findings(root, prefix, 1, [sha1])

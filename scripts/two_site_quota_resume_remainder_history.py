@@ -1,6 +1,7 @@
 """History loader for prior normalized reviewer findings in two-site proposal pipeline."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 try:
@@ -43,10 +44,14 @@ def load_prior_normalized_findings(
     """Read and normalize prior gemini reviewer findings across correction steps."""
     if not isinstance(root, Path):
         raise ProposalError("root must be a Path")
+    if root.is_symlink():
+        raise ProposalError(f"root must not be a symlink: {root}")
     try:
         canonical_root = root.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise ProposalError(f"root must exist: {exc}") from exc
+    if not (canonical_root == root):
+        raise ProposalError(f"root must be canonical: {root}")
     if not canonical_root.is_dir():
         raise ProposalError(f"root must be a directory: {root}")
 
@@ -82,7 +87,10 @@ def load_prior_normalized_findings(
         except UnicodeDecodeError as exc:
             raise ProposalError(f"{label} is not valid UTF-8: {exc}") from exc
 
-        feedback = validate_correction_feedback(text, prior_worker_shas[j - 1])
+        try:
+            feedback = validate_correction_feedback(text, prior_worker_shas[j - 1])
+        except json.JSONDecodeError as exc:
+            raise ProposalError(f"{label} is not valid JSON: {exc}") from exc
         reviewer = feedback.get("reviewer")
         if reviewer == "gemini":
             for finding in feedback["findings"]:
