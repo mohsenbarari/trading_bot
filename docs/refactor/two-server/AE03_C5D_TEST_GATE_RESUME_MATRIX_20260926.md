@@ -67,6 +67,12 @@
 - **Unproven Boundaries & Open Gates**:
   Does NOT prove wait/claim storage admission, full common continuation admission, W2 joined path, candidate sandbox, Provider execution, live Broker/Supervisor hook, STOP/race/crash fault recovery, replay authority, or C5d completion. Full common admission, wait/claim, W2 join, Provider/live hook and replay authority remain explicitly OPEN under sentinel `observational quota, no replay authority`.
 
+### 1.5 Canonical Broker Task and Semantic Attempt Fixture (Commit d810490f)
+
+- `tests/test_two_site_quota_join_semantic_fixture.py` builds a hermetic Git repository with a tracked gap and execution-order file, an ignored real active Assignment, and the full four-key HEAD-bound excerpt package. Real `load_task`, Broker `validate_request`, `build_task_identity`, `reserve_semantic_attempt`, and `read_existing_semantic_attempt` succeed against that same task; the persisted attempt is mode `0600`.
+- Independent Gemini Reviewer verified the first Worker proposal; Codex checked exact SHA/bytes and 108 focused Broker/semantic tests passed. The fixture is reusable by a later joined admission test.
+- This proves only common Broker/task/Assignment validation plus semantic-attempt storage. It does **not** prove wait/claim, terminal receipt, full continuation admission, W2, Provider, live Broker/Supervisor hook, replay authority, or C5d completion. Sentinel: `observational quota, no replay authority`.
+
 ## 2. Persisted State Fields at Pipeline Quota Block
 
 When `run_pipeline` halts with `QuotaBlockError`, `state['correction_count']` stays pinned at `attempted_index - 1` (e.g. `0` for Worker-1 quota attempt, `1` for Worker-2 quota attempt). State field invariants across the three trigger categories:
