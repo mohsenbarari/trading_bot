@@ -11,12 +11,34 @@ from typing import Any
 import unittest
 
 try:
-    from scripts.two_site_proposal_pipeline import ProposalError
+    from scripts.two_site_proposal_pipeline import (
+        ProposalError,
+        test_failure_signature as producer_test_failure_signature,
+        test_gate_feedback as producer_test_gate_feedback,
+    )
+    from scripts.two_site_proposal_runner import (
+        validate_correction_feedback,
+    )
+    from scripts.two_site_pre_review_receipt import (
+        p1_00_characterization_bootstrap_findings,
+        validate_test_receipt,
+    )
     from scripts.two_site_quota_resume_worker_one_file_reader import (
         read_and_bind_worker_one_result,
     )
 except ImportError:
-    from two_site_proposal_pipeline import ProposalError  # type: ignore[no-redef]
+    from two_site_proposal_pipeline import (  # type: ignore[no-redef]
+        ProposalError,
+        test_failure_signature as producer_test_failure_signature,
+        test_gate_feedback as producer_test_gate_feedback,
+    )
+    from two_site_proposal_runner import (  # type: ignore[no-redef]
+        validate_correction_feedback,
+    )
+    from two_site_pre_review_receipt import (  # type: ignore[no-redef]
+        p1_00_characterization_bootstrap_findings,
+        validate_test_receipt,
+    )
     from two_site_quota_resume_worker_one_file_reader import (  # type: ignore[no-redef]
         read_and_bind_worker_one_result,
     )
@@ -244,6 +266,317 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
         bad_paths_state["changed_paths"] = ["other.py"]
         with self.assertRaises(ProposalError):
             read_and_bind_worker_one_result(self.root, ctx, bad_paths_state)
+
+    def _setup_test_gate_scenario(
+        self,
+        origin: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], Path, Path, str, str]:
+        src_path = self.root / "src.py"
+        src_path.write_text("# orig\n")
+        src_sha = hashlib.sha256(b"# orig\n").hexdigest()
+
+        prefix = f"proof-gate-{origin.lower()}"
+        w0_run_id = f"{prefix}-worker-0"
+        w1_run_id = f"{prefix}-worker-1"
+        fingerprint = f"fp-proof-{origin.lower()}-5e92fa77"
+        task_path = self.root / "task.json"
+
+        if origin == "BOOTSTRAP":
+            new_test = "tests/test_p1_00_characterization_example.py"
+            task = {
+                "task_id": "T1",
+                "goal": "G",
+                "context_files": ["src.py"],
+                "allowed_files": ["src.py", new_test],
+                "requirements": ["R1"],
+                "test_selectors": ["tests/test_a.py"],
+            }
+            task_path.write_text(json.dumps(task))
+
+            runner, _ = make_runner(
+                self.root,
+                [
+                    {
+                        "result_override": {
+                            "status": "PROPOSAL_READY",
+                            "summary": "w0 bootstrap defect",
+                            "covered_requirements": [1],
+                            "findings": [],
+                            "changes": [
+                                {
+                                    "path": new_test,
+                                    "original_sha256": None,
+                                    "content": "import main\n",
+                                }
+                            ],
+                        }
+                    },
+                    {"content": "# v2\n"},
+                ],
+            )
+            w0_dir = runner(self.root, task_path, "worker", w0_run_id, 300)
+            w0_result_path = w0_dir / "result.json"
+            w0_status_path = w0_dir / "status.json"
+            w0_result = json.loads(w0_result_path.read_text())
+            w0_status = json.loads(w0_status_path.read_text())
+            w0_sha = w0_status["result_sha256"]
+            w0_result_text = w0_result_path.read_text()
+
+            findings = p1_00_characterization_bootstrap_findings(w0_result)
+            fb_payload = {
+                "reviewer": "test-gate",
+                "reviewed_proposal_sha256": w0_sha,
+                "findings": findings,
+                "test_evidence": [
+                    "gate=P1-00-characterization-bootstrap",
+                    f"proposal_sha256={w0_sha}",
+                    f"finding_count={len(findings)}",
+                ],
+            }
+            fb_data = validate_correction_feedback(
+                json.dumps(fb_payload), w0_sha
+            )
+            sig = hashlib.sha256(
+                json.dumps(findings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            receipt = None
+        else:
+            task = {
+                "task_id": "T1",
+                "goal": "G",
+                "context_files": ["src.py"],
+                "allowed_files": ["src.py"],
+                "requirements": ["R1"],
+                "test_selectors": ["tests/test_a.py"],
+            }
+            task_path.write_text(json.dumps(task))
+
+            runner, _ = make_runner(
+                self.root,
+                [
+                    {"content": "# v1\n"},
+                    {"content": "# v2\n"},
+                ],
+            )
+            w0_dir = runner(self.root, task_path, "worker", w0_run_id, 300)
+            w0_result_path = w0_dir / "result.json"
+            w0_status_path = w0_dir / "status.json"
+            w0_result = json.loads(w0_result_path.read_text())
+            w0_status = json.loads(w0_status_path.read_text())
+            w0_sha = w0_status["result_sha256"]
+            w0_result_text = w0_result_path.read_text()
+
+            raw_receipt = {
+                "state": "FAILED",
+                "proposal_sha256": w0_sha,
+                "selectors": ["tests/test_a.py"],
+                "unsupported_specs": [],
+                "returncode": 1,
+                "stdout_tail": "FAILED tests/test_a.py::test_case",
+                "stderr_tail": "",
+                "snapshot_files": 1,
+                "snapshot_bytes": 10,
+                "isolation": "test-double",
+            }
+            receipt = validate_test_receipt(raw_receipt, w0_sha)
+            fb_data = producer_test_gate_feedback(receipt, w0_sha)
+            sig = producer_test_failure_signature(receipt)
+
+        fb_path = self.root / f"feedback-{origin.lower()}.json"
+        fb_path.write_text(json.dumps(fb_data))
+        fb_sha = hashlib.sha256(fb_path.read_bytes()).hexdigest()
+
+        w1_dir = runner(
+            self.root,
+            task_path,
+            "worker",
+            w1_run_id,
+            300,
+            feedback=fb_path,
+            proposal=w0_result_path,
+        )
+        w1_result_path = w1_dir / "result.json"
+        w1_status_path = w1_dir / "status.json"
+        w1_status = json.loads(w1_status_path.read_text())
+        w1_sha = w1_status["result_sha256"]
+
+        artifacts: dict[str, Any] = {
+            "worker_index": 1,
+            "final_worker_run_id": w0_run_id,
+            "proposal_sha256": w0_sha,
+            "semantic_task_fingerprint": fingerprint,
+            "correction_origin": origin,
+            "reviewer_path": None,
+            "final_reviewer_run_id": None,
+        }
+        if origin == "BOOTSTRAP":
+            artifacts.update({
+                "pre_review_test_path": None,
+                "pre_review_test_sha256": None,
+                "pre_review_test_state": None,
+            })
+        else:
+            artifacts["pre_review_test_state"] = "FAILED"
+
+        ctx: dict[str, Any] = {
+            "continuation_run_prefix": prefix,
+            "source_head": HEAD,
+            "task": task,
+            "sources": {
+                "src.py": {
+                    "sha256": src_sha,
+                    "content": "# orig\n",
+                },
+            },
+            "artifacts": artifacts,
+            "evidence": {
+                "worker_info": {
+                    "result": copy.deepcopy(w0_result),
+                    "status": copy.deepcopy(w0_status),
+                    "result_sha": w0_sha,
+                    "result_text": w0_result_text,
+                    "conversation_id": w0_status["conversation_id"],
+                },
+                "reviewer_status": None,
+                "reviewer_result": None,
+                "reviewer_sha": None,
+                "feedback": copy.deepcopy(fb_data),
+                "feedback_sha": fb_sha,
+                "receipt": copy.deepcopy(receipt),
+            },
+        }
+
+        returned_state: dict[str, Any] = {
+            "state": "WORKER_PROPOSAL_READY",
+            "task_id": "T1",
+            "source_head": HEAD,
+            "final_worker_run_id": w1_run_id,
+            "proposal_sha256": w1_sha,
+            "changed_paths": ["src.py"],
+            "proposal_path": f".local/two-site-refactor/proposals/{w1_run_id}/result.json",
+            "correction_count": 1,
+            "semantic_task_fingerprint": fingerprint,
+        }
+
+        return ctx, returned_state, w1_status_path, w1_result_path, fb_sha, sig
+
+    def test_read_and_bind_worker_one_bootstrap_origin(self) -> None:
+        ctx, returned_state, w1_status_path, w1_result_path, _, sig = (
+            self._setup_test_gate_scenario("BOOTSTRAP")
+        )
+        bound = read_and_bind_worker_one_result(
+            self.root, ctx, returned_state
+        )
+
+        w0_status = ctx["evidence"]["worker_info"]["status"]
+        w1_status = json.loads(w1_status_path.read_text())
+        w1_result_text = w1_result_path.read_text()
+        w1_sha = w1_status["result_sha256"]
+
+        self.assertEqual(
+            bound["seen_convs"],
+            {w0_status["conversation_id"], w1_status["conversation_id"]},
+        )
+        self.assertEqual(bound["seen_norm_findings"], set())
+        self.assertEqual(bound["seen_test_signatures"], set())
+        self.assertEqual(bound["seen_bootstrap_signatures"], {sig})
+
+        curr_worker = bound["current_worker"]
+        self.assertEqual(curr_worker[0], "proof-gate-bootstrap-worker-1")
+        self.assertEqual(curr_worker[1], w1_sha)
+        self.assertEqual(curr_worker[2], w1_result_text)
+        self.assertEqual(curr_worker[3], w1_status["conversation_id"])
+
+        self.assertEqual(bound["returned_state"]["changed_paths"], ["src.py"])
+        self.assertEqual(bound["returned_state"]["proposal_sha256"], w1_sha)
+
+    def test_read_and_bind_worker_one_test_failed_origin(self) -> None:
+        ctx, returned_state, w1_status_path, w1_result_path, _, sig = (
+            self._setup_test_gate_scenario("TEST_FAILED")
+        )
+        bound = read_and_bind_worker_one_result(
+            self.root, ctx, returned_state
+        )
+
+        w0_status = ctx["evidence"]["worker_info"]["status"]
+        w1_status = json.loads(w1_status_path.read_text())
+        w1_result_text = w1_result_path.read_text()
+        w1_sha = w1_status["result_sha256"]
+
+        self.assertEqual(
+            bound["seen_convs"],
+            {w0_status["conversation_id"], w1_status["conversation_id"]},
+        )
+        self.assertEqual(bound["seen_norm_findings"], set())
+        self.assertEqual(bound["seen_test_signatures"], {sig})
+        self.assertEqual(bound["seen_bootstrap_signatures"], set())
+
+        curr_worker = bound["current_worker"]
+        self.assertEqual(curr_worker[0], "proof-gate-test_failed-worker-1")
+        self.assertEqual(curr_worker[1], w1_sha)
+        self.assertEqual(curr_worker[2], w1_result_text)
+        self.assertEqual(curr_worker[3], w1_status["conversation_id"])
+
+        self.assertEqual(bound["returned_state"]["changed_paths"], ["src.py"])
+        self.assertEqual(bound["returned_state"]["proposal_sha256"], w1_sha)
+
+    def test_test_gate_real_file_tamper_and_faults_fail_closed(self) -> None:
+        ctx_b, ret_b, w1_st_path, w1_res_path, fb_sha, _ = (
+            self._setup_test_gate_scenario("BOOTSTRAP")
+        )
+
+        # 1. Tamper status input_feedback_sha256
+        st_data = json.loads(w1_st_path.read_text())
+        st_data["input_feedback_sha256"] = "0" * 64
+        w1_st_path.write_text(json.dumps(st_data))
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, ctx_b, ret_b)
+        st_data["input_feedback_sha256"] = fb_sha
+        w1_st_path.write_text(json.dumps(st_data))
+
+        # 2. Tamper status result_sha256
+        st_data["result_sha256"] = "0" * 64
+        w1_st_path.write_text(json.dumps(st_data))
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, ctx_b, ret_b)
+        st_data["result_sha256"] = ret_b["proposal_sha256"]
+        w1_st_path.write_text(json.dumps(st_data))
+
+        # 3. Tamper result bytes on disk
+        orig_bytes = w1_res_path.read_bytes()
+        w1_res_path.write_bytes(b'{"status": "PROPOSAL_READY", "tampered": true}')
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, ctx_b, ret_b)
+        w1_res_path.write_bytes(orig_bytes)
+
+        # 4. Fake Reviewer evidence injected into test-gate context
+        bad_rev_ctx = copy.deepcopy(ctx_b)
+        bad_rev_ctx["evidence"]["reviewer_status"] = {"conversation_id": "fake-rev"}
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, bad_rev_ctx, ret_b)
+
+        bad_rev_art = copy.deepcopy(ctx_b)
+        bad_rev_art["artifacts"]["final_reviewer_run_id"] = "fake-rev-run"
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, bad_rev_art, ret_b)
+
+        # 5. Invalid FAILED receipt in TEST_FAILED origin
+        ctx_tf, ret_tf, _, _, _, _ = self._setup_test_gate_scenario("TEST_FAILED")
+        bad_rcpt_state = copy.deepcopy(ctx_tf)
+        bad_rcpt_state["evidence"]["receipt"]["state"] = "PASSED"
+        bad_rcpt_state["evidence"]["receipt"]["returncode"] = 0
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, bad_rcpt_state, ret_tf)
+
+        bad_rcpt_missing = copy.deepcopy(ctx_tf)
+        bad_rcpt_missing["evidence"]["receipt"] = None
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, bad_rcpt_missing, ret_tf)
+
+        bad_boot_rcpt = copy.deepcopy(ctx_b)
+        bad_boot_rcpt["evidence"]["receipt"] = {"state": "FAILED"}
+        with self.assertRaises(ProposalError):
+            read_and_bind_worker_one_result(self.root, bad_boot_rcpt, ret_b)
 
 
 if __name__ == "__main__":
