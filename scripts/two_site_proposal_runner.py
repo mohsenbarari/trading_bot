@@ -37,6 +37,17 @@ except ImportError:
     from two_site_cli_artifact import prepare_disposable_cli
 
 try:
+    from scripts.two_site_worker_model_routing import (
+        load_worker_routing_policy,
+        select_worker_model_route,
+    )
+except ImportError:
+    from two_site_worker_model_routing import (
+        load_worker_routing_policy,
+        select_worker_model_route,
+    )
+
+try:
     from scripts.two_site_assignment_scope import (
         AssignmentFact,
         AssignmentScopeError,
@@ -2879,6 +2890,28 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     # before the Gemini CLI can consume a token or create a run artifact.
     validate_runtime_contract(root)
     task, sources = load_task(root, task_path)
+    if role == "worker":
+        policy = load_worker_routing_policy(
+            ROOT / "docs/refactor/two-server/templates/worker-model-routing.json",
+            base_dir=ROOT,
+        )
+        route = select_worker_model_route(
+            task["task_id"],
+            policy=policy,
+            default_model=WORKER_MODEL,
+            default_effort=WORKER_EFFORT,
+        )
+        if hasattr(route, "model") and hasattr(route, "effort"):
+            role_model = route.model
+            role_effort = route.effort
+        elif isinstance(route, dict):
+            role_model = route["model"]
+            role_effort = route["effort"]
+        else:
+            role_model, role_effort = route
+    else:
+        role_model = MODEL
+        role_effort = EFFORT
     prep_notes = enrich_repository_dependency_context(
         root, task, sources, task_preparation_notes(task, sources)
     )
@@ -2978,8 +3011,6 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         write_json(workspace / ".agents/hooks.json", DENY_HOOK)
         write_json(out / "task.json", material)
         (out / "prompt.txt").write_text(prompt)
-        role_model = WORKER_MODEL if role == "worker" else MODEL
-        role_effort = WORKER_EFFORT if role == "worker" else EFFORT
         meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
                 "head": head, "model": role_model, "effort": role_effort, "state": "RUNNING", "started_at": time.time(),
                 "retain_until": time.time() + 7 * 86400,
