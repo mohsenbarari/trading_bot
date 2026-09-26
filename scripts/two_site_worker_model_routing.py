@@ -17,7 +17,7 @@ from typing import Any, Mapping, NamedTuple, Optional, Union
 
 SCHEMA_VERSION: str = "1.0"
 OPUS_MODEL: str = "claude-opus-4-6-thinking"
-OPUS_EFFORT: str = "high"
+OPUS_EFFORT: str = "model-default"
 REQUIRED_PERCENT: int = 22
 
 MAX_POLICY_FILE_BYTES: int = 4096  # 4 KiB limit
@@ -70,7 +70,7 @@ def validate_worker_routing_policy(
     - enabled is boolean
     - percent == 22 (strictly fail-closed on 0, 21, 23, 100, etc.)
     - model == 'claude-opus-4-6-thinking'
-    - effort == 'high'
+    - effort == 'model-default'
     - exact expected keys with no missing or unexpected keys for mappings
     """
     if isinstance(data, WorkerRoutingPolicy):

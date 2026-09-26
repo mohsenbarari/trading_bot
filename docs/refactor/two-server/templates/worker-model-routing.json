@@ -3,5 +3,5 @@
   "enabled": true,
   "percent": 22,
   "model": "claude-opus-4-6-thinking",
-  "effort": "high"
+  "effort": "model-default"
 }

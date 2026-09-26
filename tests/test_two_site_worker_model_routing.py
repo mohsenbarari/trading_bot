@@ -45,6 +45,7 @@ class TestWorkerModelRouting(unittest.TestCase):
         self.assertEqual(policy.percent, 22)
         self.assertEqual(policy.model, OPUS_MODEL)
         self.assertEqual(policy.effort, OPUS_EFFORT)
+        self.assertEqual(policy.effort, "model-default")
 
         opus_task_id = next(
             f"task-opus-{i}" for i in range(100) if compute_task_bucket(f"task-opus-{i}") < 22
@@ -59,6 +60,7 @@ class TestWorkerModelRouting(unittest.TestCase):
         self.assertEqual(opus_route.model, OPUS_MODEL)
         self.assertEqual(opus_route.effort, OPUS_EFFORT)
         self.assertEqual(opus_route, (OPUS_MODEL, OPUS_EFFORT))
+        self.assertEqual(opus_route.effort, "model-default")
 
         auto_opus_route = select_worker_model_route(
             opus_task_id,
@@ -262,6 +264,8 @@ class TestWorkerModelRouting(unittest.TestCase):
         with self.assertRaises(PolicyValidationError):
             validate_worker_routing_policy({**valid_dict, "model": "claude-sonnet-4-5"})
         with self.assertRaises(PolicyValidationError):
+            validate_worker_routing_policy({**valid_dict, "effort": "high"})
+        with self.assertRaises(PolicyValidationError):
             validate_worker_routing_policy({**valid_dict, "effort": "medium"})
 
     def test_r3_reject_unchecked_worker_routing_policy_instances(self) -> None:
@@ -273,6 +277,7 @@ class TestWorkerModelRouting(unittest.TestCase):
             WorkerRoutingPolicy("1.0", True, 100, OPUS_MODEL, OPUS_EFFORT),
             WorkerRoutingPolicy("2.0", True, 22, OPUS_MODEL, OPUS_EFFORT),
             WorkerRoutingPolicy("1.0", True, 22, "claude-sonnet-4-5", OPUS_EFFORT),
+            WorkerRoutingPolicy("1.0", True, 22, OPUS_MODEL, "high"),
             WorkerRoutingPolicy("1.0", True, 22, OPUS_MODEL, "medium"),
             WorkerRoutingPolicy("1.0", "not-bool", 22, OPUS_MODEL, OPUS_EFFORT),  # type: ignore[arg-type]
         ]
@@ -319,7 +324,7 @@ class TestWorkerModelRouting(unittest.TestCase):
             dup_file = Path(tmp_dir) / "duplicate.json"
             dup_content = (
                 '{"schema_version": "1.0", "enabled": false, "enabled": true, '
-                '"percent": 22, "model": "claude-opus-4-6-thinking", "effort": "high"}'
+                '"percent": 22, "model": "claude-opus-4-6-thinking", "effort": "model-default"}'
             )
             dup_file.write_text(dup_content, encoding="utf-8")
             with self.assertRaises(PolicyValidationError):
@@ -345,7 +350,7 @@ class TestWorkerModelRouting(unittest.TestCase):
             base_path = Path(tmp_dir)
             valid_content = (
                 '{"schema_version": "1.0", "enabled": false, "percent": 22, '
-                '"model": "claude-opus-4-6-thinking", "effort": "high"}'
+                '"model": "claude-opus-4-6-thinking", "effort": "model-default"}'
             )
             valid_file = base_path / "valid.json"
             valid_file.write_text(valid_content, encoding="utf-8")
@@ -353,7 +358,7 @@ class TestWorkerModelRouting(unittest.TestCase):
             oversize_file = base_path / "oversize.json"
             oversize_bytes = (
                 b'{"schema_version": "1.0", "enabled": false, "percent": 22, '
-                b'"model": "claude-opus-4-6-thinking", "effort": "high", "padding": "'
+                b'"model": "claude-opus-4-6-thinking", "effort": "model-default", "padding": "'
                 + b"a" * 4100
                 + b'"}'
             )
@@ -383,6 +388,7 @@ class TestWorkerModelRouting(unittest.TestCase):
             clean_file.write_text(valid_content, encoding="utf-8")
             loaded = load_worker_routing_policy(clean_file)
             self.assertEqual(loaded.percent, 22)
+            self.assertEqual(loaded.effort, "model-default")
 
             dir_target = base_path / "policy_dir"
             dir_target.mkdir()
