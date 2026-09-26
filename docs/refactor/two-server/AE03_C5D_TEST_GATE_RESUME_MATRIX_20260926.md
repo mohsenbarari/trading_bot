@@ -55,6 +55,18 @@
 - **Unproven Boundaries & Open Gates**:
   Does NOT claim a valid wait/claim, completed quota admission, real scope registry, joined W2 full success, candidate sandbox/Provider, live Broker/Supervisor hook, replay authority, or full C5d completion. Full common Broker request admission remains strictly OPEN (see Section 1.1/1.2) because the successful path is stopped at pending intent. All quota continuation processing remains strictly under sentinel `observational quota, no replay authority`.
 
+### 1.4 Real Common Request Validation and Intent Marker Fileproof Evidence (Commit 8cab47ca)
+
+- **Commit `8cab47ca`** (`tests/test_two_site_quota_continuation_common_intent_fileproof.py`):
+  Proves common request validation coupled with durable file-backed pending rescope intent marker verification across two hermetic tests:
+  - **Positive Boundary Case** (`test_quota_continuation_common_intent_fileproof_positive`): Uses real unpatched Broker common `validate_request` over an actual Git/task/assignment fixture and a real file-backed `0600` marker published by `ensure_rescope_epoch_dir` and `publish_rescope_intent`. The marker is read by unpatched `read_pending_rescope_intent`, successfully passing through to a deliberate sentinel intercepted at `collect_initial_wait_source_expected`.
+  - **Negative Permission Tamper Case** (`test_quota_continuation_common_intent_fileproof_negative_permission_tamper`): Tampering marker permissions to `0644` fails closed with `WaitIntentError` before expected-wait collection, leaving task bytes, marker bytes, and Git HEAD preserved.
+- **Explicit Disclosures & Patched Seams**:
+  - `scripts.two_site_quota_wait_intent.validate_repository` is patched using constructed facts with placeholder protected-ref and control-blob SHAs; this does NOT prove real Autopilot repository validation.
+  - `collect_initial_wait_source_expected` is patched as a deliberate sentinel boundary. Reviewer must inspect actual test patch sites and reject overclaim.
+- **Unproven Boundaries & Open Gates**:
+  Does NOT prove wait/claim storage admission, full common continuation admission, W2 joined path, candidate sandbox, Provider execution, live Broker/Supervisor hook, STOP/race/crash fault recovery, replay authority, or C5d completion. Full common admission, wait/claim, W2 join, Provider/live hook and replay authority remain explicitly OPEN under sentinel `observational quota, no replay authority`.
+
 ## 2. Persisted State Fields at Pipeline Quota Block
 
 When `run_pipeline` halts with `QuotaBlockError`, `state['correction_count']` stays pinned at `attempted_index - 1` (e.g. `0` for Worker-1 quota attempt, `1` for Worker-2 quota attempt). State field invariants across the three trigger categories:
