@@ -3035,8 +3035,13 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             meta["candidate_sources_sha256"] = candidate_sources_sha256
         write_json(out / "status.json", meta)
         active_sources = candidate_sources if candidate_sources is not None else sources
+        effort_args = ["--effort", role_effort]
+        if role == "worker" and policy.enabled and role_model == policy.model:
+            if role_effort != policy.effort:
+                raise ProposalError("invalid worker model route effort")
+            effort_args = []
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
-                   "--effort", role_effort, "--input-format", "stream-json",
+                   *effort_args, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", json.dumps(schema(
                        role, task, active_sources, force_full_paths
