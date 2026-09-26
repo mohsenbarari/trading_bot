@@ -40,7 +40,7 @@ class TestWorkerModelRouting(unittest.TestCase):
 
         policy = load_worker_routing_policy(template_path)
         self.assertEqual(policy.schema_version, "1.0")
-        self.assertTrue(policy.enabled, "Template must be enabled on active deployment")
+        self.assertFalse(policy.enabled, "Template must be disabled fail-closed for safety stabilization")
         self.assertEqual(policy.percent, REQUIRED_PERCENT)
         self.assertEqual(policy.percent, 22)
         self.assertEqual(policy.model, OPUS_MODEL)
@@ -57,18 +57,18 @@ class TestWorkerModelRouting(unittest.TestCase):
             default_model=TEST_DEFAULT_MODEL,
             default_effort=TEST_DEFAULT_EFFORT,
         )
-        self.assertEqual(opus_route.model, OPUS_MODEL)
-        self.assertEqual(opus_route.effort, OPUS_EFFORT)
-        self.assertEqual(opus_route, (OPUS_MODEL, OPUS_EFFORT))
-        self.assertEqual(opus_route.effort, "model-default")
+        self.assertEqual(opus_route.model, TEST_DEFAULT_MODEL)
+        self.assertEqual(opus_route.effort, TEST_DEFAULT_EFFORT)
+        self.assertEqual(opus_route, (TEST_DEFAULT_MODEL, TEST_DEFAULT_EFFORT))
 
         auto_opus_route = select_worker_model_route(
             opus_task_id,
             default_model=TEST_DEFAULT_MODEL,
             default_effort=TEST_DEFAULT_EFFORT,
         )
-        self.assertEqual(auto_opus_route.model, OPUS_MODEL)
-        self.assertEqual(auto_opus_route.effort, OPUS_EFFORT)
+        self.assertEqual(auto_opus_route.model, TEST_DEFAULT_MODEL)
+        self.assertEqual(auto_opus_route.effort, TEST_DEFAULT_EFFORT)
+        self.assertEqual(auto_opus_route, (TEST_DEFAULT_MODEL, TEST_DEFAULT_EFFORT))
 
         gemini_task_id = "OPUS-POLICY-ACTIVATE-20260926-380"
         self.assertEqual(compute_task_bucket(gemini_task_id), 85)
