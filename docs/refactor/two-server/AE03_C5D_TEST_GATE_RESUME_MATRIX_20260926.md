@@ -70,8 +70,15 @@
 ### 1.5 Canonical Broker Task and Semantic Attempt Fixture (Commit d810490f)
 
 - `tests/test_two_site_quota_join_semantic_fixture.py` builds a hermetic Git repository with a tracked gap and execution-order file, an ignored real active Assignment, and the full four-key HEAD-bound excerpt package. Real `load_task`, Broker `validate_request`, `build_task_identity`, `reserve_semantic_attempt`, and `read_existing_semantic_attempt` succeed against that same task; the persisted attempt is mode `0600`.
-- Independent Gemini Reviewer verified the first Worker proposal; Codex checked exact SHA/bytes and 108 focused Broker/semantic tests passed. The fixture is reusable by a later joined admission test.
+- Independent Gemini Reviewer verified the first Worker proposal; Codex checked exact SHA/bytes and 108 focused Broker/semantic tests passed. Section 1.6 reuses this fixture.
 - This proves only common Broker/task/Assignment validation plus semantic-attempt storage. It does **not** prove wait/claim, terminal receipt, full continuation admission, W2, Provider, live Broker/Supervisor hook, replay authority, or C5d completion. Sentinel: `observational quota, no replay authority`.
+
+### 1.6 Common Broker Through Persisted Wait/Claim Admission (Commit f1dfb4d0)
+
+- `tests/test_two_site_quota_common_wait_claim_join_fileproof.py` joins the real canonical Broker/Assignment/task and persisted semantic attempt to real pending-intent, wait-file, claim-file and continuation-admission readers. The positive case succeeds; a `0644` wait file fails closed after common validation, before claim acceptance.
+- The only patched sources are Autopilot repository-fact collection for the tiny fixture and `collect_initial_wait_source_expected`. Original terminal-receipt/response hashes are synthetic, **not** real receipt evidence. This is not a complete original-provider provenance proof.
+- Gemini Worker and independent Reviewer passed first try; Codex checked exact SHA/bytes and 1,034 quota-family tests passed.
+- Still open: real original wait-source collector and terminal receipt in this same chain, common→W2 outer join, candidate sandbox/Provider, Broker/Supervisor live hook, STOP/race/crash cohorts, replay authority and C5d completion. Sentinel: `observational quota, no replay authority`.
 
 ## 2. Persisted State Fields at Pipeline Quota Block
 
