@@ -150,7 +150,8 @@ def worker_zero_post_result_context(
 
         yield {
             "base_context": copy.deepcopy(ctx),
-            "worker_info": copy.deepcopy(returned_state),
+            "worker_info": copy.deepcopy(loaded),
+            "returned_state": copy.deepcopy(returned_state),
             "current_worker": (expected_run_id, sha, loaded["result_text"], conv_id),
             "seen_convs": {conv_id},
         }
