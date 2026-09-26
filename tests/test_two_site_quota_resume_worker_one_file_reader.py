@@ -13,6 +13,7 @@ from scripts.two_site_proposal_pipeline import ProposalError
 from scripts.two_site_quota_resume_worker_one_file_reader import (
     read_and_bind_worker_one_result,
 )
+import tests.test_two_site_quota_resume_worker_one_result_contract as contract_module
 
 
 def _make_valid_context_and_state(
@@ -359,3 +360,154 @@ def test_no_provider_or_lock_authority_in_file_reader() -> None:
     )
     for token in forbidden_tokens:
         assert token not in source, f"Found unauthorized token {token!r} in reader implementation"
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+def test_read_and_bind_test_gate_origins_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    if origin == "BOOTSTRAP":
+        ctx, returned_state, validated, findings = (
+            contract_module._make_bootstrap_bundle()
+        )
+        expected_sig = hashlib.sha256(
+            json.dumps(findings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    else:
+        ctx, returned_state, validated, receipt = (
+            contract_module._make_test_failed_bundle()
+        )
+        val_receipt = contract_module.validate_test_receipt(
+            receipt, ctx["artifacts"]["proposal_sha256"]
+        )
+        expected_sig = contract_module.producer_test_failure_signature(val_receipt)
+
+    root = tmp_path.resolve()
+    expected_run_id = f"{ctx['continuation_run_prefix']}-worker-1"
+    run_dir = root / f".local/two-site-refactor/proposals/{expected_run_id}"
+    run_dir.mkdir(parents=True)
+
+    ctx["sources"] = {"file_a.py": {"sha256": "1" * 64, "content": "x"}}
+    feedback_sha = "f" * 64
+    ctx["evidence"]["feedback_sha"] = feedback_sha
+
+    calls: list[dict[str, Any]] = []
+
+    def fake_validate_run(
+        root_arg: Path,
+        run_dir_arg: Path,
+        role_arg: str,
+        expected_run_id_arg: str,
+        source_head_arg: str,
+        task_arg: dict,
+        sources_arg: dict,
+        seen_convs: set[str],
+        prior_worker: tuple[str, str, str, str],
+        expected_feedback_sha: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], str, str]:
+        calls.append({
+            "seen_convs": set(seen_convs),
+            "prior_worker": prior_worker,
+            "expected_feedback_sha": expected_feedback_sha,
+        })
+        return validated
+
+    monkeypatch.setattr(
+        "scripts.two_site_quota_resume_worker_one_file_reader.validate_run",
+        fake_validate_run,
+    )
+
+    res = read_and_bind_worker_one_result(root, ctx, returned_state)
+
+    assert len(calls) == 1
+    call = calls[0]
+    prior_conv = ctx["evidence"]["worker_info"]["conversation_id"]
+    assert call["seen_convs"] == {prior_conv}
+    assert "conv-reviewer-0" not in call["seen_convs"]
+    assert call["prior_worker"] == (
+        ctx["artifacts"]["final_worker_run_id"],
+        ctx["artifacts"]["proposal_sha256"],
+        ctx["evidence"]["worker_info"]["result_text"],
+        prior_conv,
+    )
+    assert call["expected_feedback_sha"] == feedback_sha
+
+    if origin == "BOOTSTRAP":
+        assert res["seen_bootstrap_signatures"] == {expected_sig}
+        assert res["seen_test_signatures"] == set()
+    else:
+        assert res["seen_test_signatures"] == {expected_sig}
+        assert res["seen_bootstrap_signatures"] == set()
+    assert res["seen_convs"] == {prior_conv, "conv-worker-1"}
+
+
+def test_test_gate_fail_before_validate_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    run_dir = root / ".local/two-site-refactor/proposals/run-cont-456-worker-1"
+    run_dir.mkdir(parents=True)
+
+    def fail_if_validate_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("validate_run should not have been called")
+
+    monkeypatch.setattr(
+        "scripts.two_site_quota_resume_worker_one_file_reader.validate_run",
+        fail_if_validate_called,
+    )
+
+    ctx, ret, _, _ = contract_module._make_bootstrap_bundle()
+    ctx["sources"] = {"file_a.py": {"sha256": "1" * 64, "content": "x"}}
+    ctx["evidence"]["feedback_sha"] = "f" * 64
+
+    cases_reviewer_fields = [
+        ({"artifacts": {"reviewer_path": ".local/r.json"}}, "artifacts reviewer_path must be None"),
+        ({"artifacts": {"final_reviewer_run_id": "rev-0"}}, "artifacts final_reviewer_run_id must be None"),
+        ({"evidence": {"reviewer_status": {"conversation_id": "conv-r"}}}, "evidence reviewer_status must be None"),
+        ({"evidence": {"reviewer_result": {"findings": []}}}, "evidence reviewer_result must be None"),
+        ({"evidence": {"reviewer_sha": "a" * 64}}, "evidence reviewer sha must be None"),
+        ({"evidence": {"reviewer_sha256": "a" * 64}}, "evidence reviewer sha must be None"),
+        ({"evidence": {"reviewer_result_sha": "a" * 64}}, "evidence reviewer sha must be None"),
+    ]
+    for patch_dict, err_match in cases_reviewer_fields:
+        bad_ctx = copy.deepcopy(ctx)
+        for section, fields in patch_dict.items():
+            bad_ctx[section].update(fields)
+        with pytest.raises(ProposalError, match=err_match):
+            read_and_bind_worker_one_result(root, bad_ctx, ret)
+
+    bad_ctx = copy.deepcopy(ctx)
+    bad_ctx["evidence"]["feedback"]["reviewer"] = "gemini"
+    with pytest.raises(ProposalError, match="feedback reviewer must be 'test-gate'"):
+        read_and_bind_worker_one_result(root, bad_ctx, ret)
+
+    bad_ctx = copy.deepcopy(ctx)
+    bad_ctx["evidence"]["feedback"] = "not-a-dict"
+    with pytest.raises(ProposalError, match="evidence missing or invalid feedback"):
+        read_and_bind_worker_one_result(root, bad_ctx, ret)
+
+    bad_ctx = copy.deepcopy(ctx)
+    bad_ctx["artifacts"]["correction_origin"] = "UNKNOWN_ORIGIN"
+    with pytest.raises(ProposalError, match="unknown correction_origin"):
+        read_and_bind_worker_one_result(root, bad_ctx, ret)
+
+    bad_ctx = copy.deepcopy(ctx)
+    bad_ctx["evidence"]["correction_origin"] = "TEST_FAILED"
+    with pytest.raises(ProposalError, match="mixed correction_origin between artifacts and evidence"):
+        read_and_bind_worker_one_result(root, bad_ctx, ret)
+
+    bad_ctx = copy.deepcopy(ctx)
+    bad_ctx["correction_origin"] = "TEST_FAILED"
+    with pytest.raises(ProposalError, match="mixed correction_origin between artifacts and ctx"):
+        read_and_bind_worker_one_result(root, bad_ctx, ret)
+
+    rev_ctx, rev_ret, _ = _make_valid_context_and_state()
+    rev_run_dir = root / ".local/two-site-refactor/proposals/cont-run-42-worker-1"
+    rev_run_dir.mkdir(parents=True, exist_ok=True)
+    rev_ctx["evidence"]["reviewer_status"]["conversation_id"] = "conv-worker-0"
+    with pytest.raises(ProposalError, match="reviewer conversation_id must differ"):
+        read_and_bind_worker_one_result(root, rev_ctx, rev_ret)
+
+    rev_ctx["artifacts"]["correction_origin"] = "REVIEWER"
+    with pytest.raises(ProposalError, match="reviewer conversation_id must differ"):
+        read_and_bind_worker_one_result(root, rev_ctx, rev_ret)
