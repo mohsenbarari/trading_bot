@@ -43,6 +43,18 @@
 - **Unproven Boundaries & Open Gates**:
   Does NOT prove real Broker common request admission, real storage seams joined to outer, real candidate sandbox, live Provider, Broker/Supervisor live hook, complete STOP/race/crash matrix, replay authority, or full C5d completion. These boundaries and open gates remain strictly OPEN under sentinel `observational quota, no replay authority`.
 
+### 1.3 Standalone Common Broker Request Validation Boundary Proof Evidence (Commit d88c6b2a)
+
+- **Commit `d88c6b2a`** (`tests/test_two_site_quota_continuation_common_broker_boundary.py`):
+  Proves standalone common Broker request validation boundary on clean base `d88c6b2a045a87e105264502df8ab3ad0a9dff00` (1085 related quota/Broker/pipeline tests passed at Codex final verification).
+  - **Positive Boundary Case** (`test_quota_continuation_common_validation_boundary_positive`): A continuation-shaped request assembled from real hermetic Broker fixture facts passes real unpatched common `validate_request` (including actual Git branch, HEAD, and clean worktree state, file-backed task bytes, task SHA, and schema, plus an injected valid `AssignmentScope`); execution then reaches the first `read_pending_rescope_intent` call, deliberately intercepted by a sentinel `RuntimeError`.
+  - **Negative Task SHA Drift** (`test_quota_continuation_common_validation_rejects_task_sha_drift`): Task SHA drift fails closed during real common validation with `BrokerError` ("broker task SHA drift") before the pending-intent reader is called, leaving disk bytes and Git HEAD unchanged.
+  - **Negative Assignment SHA Drift** (`test_quota_continuation_common_validation_rejects_assignment_mismatch`): Assignment SHA drift fails closed during real common validation with `BrokerError` ("broker assignment binding mismatch") before the pending-intent reader is called.
+- **Injected Scope & Deliberate Sentinels**:
+  This is a STANDALONE boundary only. Reviewer must inspect the test source and confirm the sentinel `RuntimeError` and remaining mocked seam (`scope_loader` is injected; no real assignment scope registry; `read_pending_rescope_intent` is deliberately intercepted by a sentinel).
+- **Unproven Boundaries & Open Gates**:
+  Does NOT claim a valid wait/claim, completed quota admission, real scope registry, joined W2 full success, candidate sandbox/Provider, live Broker/Supervisor hook, replay authority, or full C5d completion. Full common Broker request admission remains strictly OPEN (see Section 1.1/1.2) because the successful path is stopped at pending intent. All quota continuation processing remains strictly under sentinel `observational quota, no replay authority`.
+
 ## 2. Persisted State Fields at Pipeline Quota Block
 
 When `run_pipeline` halts with `QuotaBlockError`, `state['correction_count']` stays pinned at `attempted_index - 1` (e.g. `0` for Worker-1 quota attempt, `1` for Worker-2 quota attempt). State field invariants across the three trigger categories:
