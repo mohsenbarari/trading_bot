@@ -72,6 +72,74 @@ _EXPECTED_SET_KEYS = (
 )
 
 
+def _validate_origin_and_reviewer_status(
+    root: Path,
+    artifacts: dict[str, Any],
+    evidence: dict[str, Any],
+    ctx: dict[str, Any] | None = None,
+    *,
+    expected_origin: str | None = None,
+    recheck: bool = False,
+) -> tuple[str, bytes | None]:
+    correction_origin = artifacts.get("correction_origin")
+    if (
+        "correction_origin" in evidence
+        and evidence.get("correction_origin") != correction_origin
+    ):
+        raise ProposalError("mixed correction_origin between artifacts and evidence")
+    if (
+        ctx is not None
+        and "correction_origin" in ctx
+        and ctx.get("correction_origin") != correction_origin
+    ):
+        raise ProposalError("mixed correction_origin between artifacts and ctx")
+
+    if correction_origin is None:
+        origin = "REVIEWER"
+    elif correction_origin in ("REVIEWER", "BOOTSTRAP", "TEST_FAILED"):
+        origin = correction_origin
+    else:
+        raise ProposalError(f"unknown correction_origin: {correction_origin!r}")
+
+    if expected_origin is not None and origin != expected_origin:
+        raise ProposalError("correction origin drifted across recheck")
+
+    if origin == "REVIEWER":
+        reviewer_path = artifacts.get("reviewer_path")
+        if not isinstance(reviewer_path, (str, Path)):
+            suffix = " on recheck" if recheck else ""
+            raise ProposalError(f"artifacts missing reviewer_path{suffix}")
+        status_path = Path(reviewer_path).with_name("status.json")
+        status_bytes = bounded_file_bytes(
+            root,
+            status_path,
+            MAX_CONTEXT,
+            "prior reviewer status",
+        )
+        return origin, status_bytes
+
+    if artifacts.get("reviewer_path") is not None:
+        raise ProposalError(
+            f"artifacts reviewer_path must be None for {origin}, got {artifacts.get('reviewer_path')!r}"
+        )
+    if artifacts.get("final_reviewer_run_id") is not None:
+        raise ProposalError(
+            f"artifacts final_reviewer_run_id must be None for {origin}, got {artifacts.get('final_reviewer_run_id')!r}"
+        )
+    for key in ("reviewer_status", "reviewer_result", "reviewer_sha"):
+        if evidence.get(key) is not None:
+            raise ProposalError(
+                f"evidence {key} must be None for {origin}, got {evidence.get(key)!r}"
+            )
+    if (
+        evidence.get("reviewer_sha256") is not None
+        or evidence.get("reviewer_result_sha") is not None
+    ):
+        raise ProposalError(f"evidence reviewer sha must be None for {origin}")
+
+    return origin, None
+
+
 @contextmanager
 def worker_one_post_result_context(
     root: Path,
@@ -113,15 +181,16 @@ def worker_one_post_result_context(
         ):
             raise ProposalError(f"worker_index must be 1, got {worker_index!r}")
 
-        reviewer_path = artifacts.get("reviewer_path")
-        if not isinstance(reviewer_path, (str, Path)):
-            raise ProposalError("artifacts missing reviewer_path")
-        status_path = Path(reviewer_path).with_name("status.json")
-        prior_status_bytes = bounded_file_bytes(
+        evidence = ctx.get("evidence")
+        if type(evidence) is not dict:
+            raise ProposalError("invalid evidence in context")
+
+        origin, prior_status_bytes = _validate_origin_and_reviewer_status(
             root,
-            status_path,
-            MAX_CONTEXT,
-            "prior reviewer status",
+            artifacts,
+            evidence,
+            ctx,
+            recheck=False,
         )
 
         bound = read_and_bind_worker_one_result(root, ctx, snapshot)
@@ -179,15 +248,13 @@ def worker_one_post_result_context(
             if reloaded_evidence != ctx["evidence"]:
                 raise ProposalError("correction evidence drifted across recheck")
 
-            reloaded_reviewer_path = derived_artifacts.get("reviewer_path")
-            if not isinstance(reloaded_reviewer_path, (str, Path)):
-                raise ProposalError("artifacts missing reviewer_path on recheck")
-            reloaded_status_path = Path(reloaded_reviewer_path).with_name("status.json")
-            reloaded_status_bytes = bounded_file_bytes(
+            _, reloaded_status_bytes = _validate_origin_and_reviewer_status(
                 root,
-                reloaded_status_path,
-                MAX_CONTEXT,
-                "prior reviewer status",
+                derived_artifacts,
+                reloaded_evidence,
+                ctx,
+                expected_origin=origin,
+                recheck=True,
             )
             if reloaded_status_bytes != prior_status_bytes:
                 raise ProposalError(
