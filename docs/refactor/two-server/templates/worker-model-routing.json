@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "enabled": false,
+  "percent": 22,
+  "model": "claude-opus-4-6-thinking",
+  "effort": "high"
+}
