@@ -232,6 +232,226 @@ class TestTwoSiteQuotaResumeWorkerTwoOnceSmoke(unittest.TestCase):
 
             self.assertFalse(runner_called)
 
+    def test_artifacts_missing_origin_with_evidence_reviewer_rejected_before_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            ctx = _build_fixture_context(root, worker_index=2)
+            ctx["artifacts"].pop("correction_origin", None)
+            ctx["evidence"]["correction_origin"] = "REVIEWER"
+            req = {"role": "worker", "request_id": "req-2"}
+
+            @contextmanager
+            def mock_context(r: Path, q: dict):
+                yield ctx
+
+            runner_called = False
+
+            def mock_runner(*args, **kwargs):
+                nonlocal runner_called
+                runner_called = True
+                return root / "not_reached"
+
+            with patch("scripts.two_site_quota_resume_worker_two_once.worker_correction_continuation_context", side_effect=mock_context), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.runner_run", side_effect=mock_runner):
+
+                with self.assertRaises(ProposalError) as exc_info:
+                    execute_worker_two_once(root, req)
+                self.assertIn("correction_origin mismatch: artifacts None != evidence 'REVIEWER'", str(exc_info.exception))
+
+            self.assertFalse(runner_called)
+
+    def test_correction_origin_mismatch_and_unknown_rejected_before_runner(self) -> None:
+        cases = [
+            ("BOOTSTRAP", "REVIEWER", "correction_origin mismatch"),
+            ("REVIEWER", "BOOTSTRAP", "correction_origin mismatch"),
+            ("UNKNOWN_ORIGIN", "UNKNOWN_ORIGIN", "unknown correction_origin: 'UNKNOWN_ORIGIN'"),
+        ]
+        for art_orig, ev_orig, expected_msg in cases:
+            with self.subTest(art_orig=art_orig, ev_orig=ev_orig):
+                with tempfile.TemporaryDirectory() as td:
+                    root = Path(td).resolve()
+                    ctx = _build_fixture_context(root, worker_index=2)
+                    ctx["artifacts"]["correction_origin"] = art_orig
+                    ctx["evidence"]["correction_origin"] = ev_orig
+                    req = {"role": "worker", "request_id": "req-2"}
+
+                    @contextmanager
+                    def mock_context(r: Path, q: dict):
+                        yield ctx
+
+                    runner_called = False
+
+                    def mock_runner(*args, **kwargs):
+                        nonlocal runner_called
+                        runner_called = True
+                        return root / "not_reached"
+
+                    with patch("scripts.two_site_quota_resume_worker_two_once.worker_correction_continuation_context", side_effect=mock_context), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.runner_run", side_effect=mock_runner):
+
+                        with self.assertRaises(ProposalError) as exc_info:
+                            execute_worker_two_once(root, req)
+                        self.assertIn(expected_msg, str(exc_info.exception))
+
+                    self.assertFalse(runner_called)
+
+    def test_worker_two_once_smoke_bootstrap_and_test_failed_success(self) -> None:
+        for origin in ("BOOTSTRAP", "TEST_FAILED"):
+            with self.subTest(origin=origin):
+                with tempfile.TemporaryDirectory() as td:
+                    root = Path(td).resolve()
+                    ctx = _build_fixture_context(root, worker_index=2)
+                    ctx["artifacts"]["correction_origin"] = origin
+                    ctx["artifacts"]["reviewer_path"] = None
+                    ctx["artifacts"]["final_reviewer_run_id"] = None
+                    ctx["evidence"]["correction_origin"] = origin
+                    ctx["evidence"].pop("reviewer_status", None)
+                    req = {"role": "worker", "request_id": "req-2"}
+
+                    lock_state = {"runner_calls": 0, "validate_checked": False}
+
+                    @contextmanager
+                    def mock_context(r: Path, q: dict):
+                        yield ctx
+
+                    expected_run_id = "cont-req-200-worker-2"
+                    run_dir = root / ".local/two-site-refactor/proposals" / expected_run_id
+
+                    def mock_runner(r, t_path, role, run_id, timeout, *, pre_provider_check=None, **kwargs):
+                        lock_state["runner_calls"] += 1
+                        self.assertIsNotNone(pre_provider_check)
+                        pre_provider_check()
+                        run_dir.mkdir(parents=True, exist_ok=True)
+                        return run_dir
+
+                    fake_history = {
+                        "complete": True,
+                        "conversation_ids": ["conv-work-0", "conv-work-1"],
+                        "ordered_conversation_ids": ["conv-work-0", "conv-work-1"],
+                    }
+
+                    def mock_validate_run(*args, **kwargs):
+                        lock_state["validate_checked"] = True
+                        new_res = {
+                            "status": "PROPOSAL_READY",
+                            "changes": [{"path": "a.py", "original_sha256": "0" * 64, "content": "v2", "replacements": []}],
+                        }
+                        new_status = {"status": "PROPOSAL_READY", "conversation_id": "conv-work-2"}
+                        return new_res, new_status, "2" * 64, '{"status": "PROPOSAL_READY"}'
+
+                    with patch("scripts.two_site_quota_resume_worker_two_once.worker_correction_continuation_context", side_effect=mock_context), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.validate_quota_continuation_request", return_value=(ctx["admitted_request"], ctx["admitted_task_path"], None)), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.read_terminal_quota_record", return_value=ctx["original_terminal_receipt"]), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.derive_worker_resume_artifacts", return_value=ctx["artifacts"]), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.load_worker_correction_evidence", return_value=ctx["evidence"]), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.check_state"), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.ref_snapshot", return_value={}), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.complete_worker_two_history", return_value=fake_history), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.runner_run", side_effect=mock_runner), \
+                         patch("scripts.two_site_quota_resume_worker_two_once.validate_run", side_effect=mock_validate_run):
+
+                        res = execute_worker_two_once(root, req)
+
+                    self.assertEqual(lock_state["runner_calls"], 1)
+                    self.assertTrue(lock_state["validate_checked"])
+                    self.assertEqual(res["state"], "WORKER_PROPOSAL_READY")
+                    self.assertEqual(res["correction_count"], 2)
+                    self.assertEqual(res["final_worker_run_id"], expected_run_id)
+
+    def test_forged_reviewer_negatives_rejected_before_runner(self) -> None:
+        for origin in ("BOOTSTRAP", "TEST_FAILED"):
+            bad_cases = [
+                ({"reviewer_path": ".local/two-site-refactor/proposals/orig-req-100-verifier-1/result.json"}, {}, "artifacts reviewer_path must be None"),
+                ({"final_reviewer_run_id": "orig-req-100-reviewer-1"}, {}, "artifacts final_reviewer_run_id must be None"),
+                ({}, {"reviewer_status": {"conversation_id": "conv-rev-1"}}, "evidence reviewer_status must be None"),
+                ({}, {"reviewer_result": {"status": "CHANGES_REQUIRED"}}, "evidence reviewer_result must be None"),
+                ({}, {"reviewer_sha": "a" * 64}, "evidence reviewer_sha must be None"),
+                ({}, {"reviewer_sha256": "b" * 64}, "evidence reviewer_sha256 must be None"),
+                ({}, {"reviewer_result_sha": "c" * 64}, "evidence reviewer_result_sha must be None"),
+            ]
+            for bad_art, bad_ev, expected_msg in bad_cases:
+                with self.subTest(origin=origin, bad_art=bad_art, bad_ev=bad_ev):
+                    with tempfile.TemporaryDirectory() as td:
+                        root = Path(td).resolve()
+                        ctx = _build_fixture_context(root, worker_index=2)
+                        ctx["artifacts"]["correction_origin"] = origin
+                        ctx["artifacts"]["reviewer_path"] = None
+                        ctx["artifacts"]["final_reviewer_run_id"] = None
+                        ctx["evidence"]["correction_origin"] = origin
+                        ctx["evidence"].pop("reviewer_status", None)
+                        ctx["artifacts"].update(bad_art)
+                        ctx["evidence"].update(bad_ev)
+                        req = {"role": "worker", "request_id": "req-2"}
+
+                        @contextmanager
+                        def mock_context(r: Path, q: dict):
+                            yield ctx
+
+                        runner_called = False
+
+                        def mock_runner(*args, **kwargs):
+                            nonlocal runner_called
+                            runner_called = True
+                            return root / "not_reached"
+
+                        with patch("scripts.two_site_quota_resume_worker_two_once.worker_correction_continuation_context", side_effect=mock_context), \
+                             patch("scripts.two_site_quota_resume_worker_two_once.runner_run", side_effect=mock_runner):
+
+                            with self.assertRaises(ProposalError) as exc_info:
+                                execute_worker_two_once(root, req)
+                            self.assertIn(expected_msg, str(exc_info.exception))
+
+                        self.assertFalse(runner_called)
+
+    def test_missing_evidence_origin_valid_canonical_loader(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            ctx = _build_fixture_context(root, worker_index=2)
+            ctx["artifacts"]["correction_origin"] = "REVIEWER"
+            ctx["evidence"].pop("correction_origin", None)
+            req = {"role": "worker", "request_id": "req-2"}
+
+            @contextmanager
+            def mock_context(r: Path, q: dict):
+                yield ctx
+
+            expected_run_id = "cont-req-200-worker-2"
+            run_dir = root / ".local/two-site-refactor/proposals" / expected_run_id
+
+            fake_history = {
+                "complete": True,
+                "conversation_ids": ["conv-work-0", "conv-rev-0", "conv-work-1", "conv-rev-1"],
+                "ordered_conversation_ids": ["conv-work-0", "conv-rev-0", "conv-work-1", "conv-rev-1"],
+            }
+
+            def mock_runner(r, t_path, role, run_id, timeout, *, pre_provider_check=None, **kwargs):
+                pre_provider_check()
+                run_dir.mkdir(parents=True, exist_ok=True)
+                return run_dir
+
+            def mock_validate_run(*args, **kwargs):
+                new_res = {
+                    "status": "PROPOSAL_READY",
+                    "changes": [{"path": "a.py", "original_sha256": "0" * 64, "content": "v2", "replacements": []}],
+                }
+                new_status = {"status": "PROPOSAL_READY", "conversation_id": "conv-work-2"}
+                return new_res, new_status, "2" * 64, '{"status": "PROPOSAL_READY"}'
+
+            with patch("scripts.two_site_quota_resume_worker_two_once.worker_correction_continuation_context", side_effect=mock_context), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.validate_quota_continuation_request", return_value=(ctx["admitted_request"], ctx["admitted_task_path"], None)), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.read_terminal_quota_record", return_value=ctx["original_terminal_receipt"]), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.derive_worker_resume_artifacts", return_value=ctx["artifacts"]), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.load_worker_correction_evidence", return_value=ctx["evidence"]), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.check_state"), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.ref_snapshot", return_value={}), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.complete_worker_two_history", return_value=fake_history), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.runner_run", side_effect=mock_runner), \
+                 patch("scripts.two_site_quota_resume_worker_two_once.validate_run", side_effect=mock_validate_run):
+
+                res = execute_worker_two_once(root, req)
+
+            self.assertEqual(res["state"], "WORKER_PROPOSAL_READY")
+
 
 if __name__ == "__main__":
     unittest.main()

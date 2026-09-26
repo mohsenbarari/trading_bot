@@ -177,25 +177,58 @@ def execute_worker_two_once(
                 f"prior result_sha mismatch: worker_info {prior_result_sha!r} != artifacts {prior_sha!r}"
             )
 
-        reviewer_status = evidence.get("reviewer_status")
-        if not isinstance(reviewer_status, dict):
-            raise ProposalError("missing or invalid reviewer_status in evidence")
-        reviewer_conv = reviewer_status.get("conversation_id")
-        if not isinstance(reviewer_conv, str) or not reviewer_conv.strip():
-            raise ProposalError("reviewer conversation_id missing or empty")
-        if reviewer_conv == prior_worker_conv:
-            raise ProposalError("reviewer conversation_id must differ from prior worker conversation_id")
+        raw_origin = artifacts.get("correction_origin")
+        if "correction_origin" in evidence and evidence.get("correction_origin") != raw_origin:
+            raise ProposalError(
+                f"correction_origin mismatch: artifacts {raw_origin!r} != evidence {evidence.get('correction_origin')!r}"
+            )
+        if raw_origin is None or raw_origin == "REVIEWER":
+            origin = "REVIEWER"
+        elif raw_origin in ("BOOTSTRAP", "TEST_FAILED"):
+            origin = raw_origin
+        else:
+            raise ProposalError(f"unknown correction_origin: {raw_origin!r}")
 
-        reviewer_path = artifacts.get("reviewer_path")
-        if not isinstance(reviewer_path, (str, Path)):
-            raise ProposalError("artifacts missing reviewer_path")
-        reviewer_status_path = Path(reviewer_path).with_name("status.json")
-        initial_reviewer_status_bytes = bounded_file_bytes(
-            root,
-            reviewer_status_path,
-            MAX_CONTEXT,
-            "prior reviewer status",
-        )
+        if origin == "REVIEWER":
+            reviewer_status = evidence.get("reviewer_status")
+            if not isinstance(reviewer_status, dict):
+                raise ProposalError("missing or invalid reviewer_status in evidence")
+            reviewer_conv = reviewer_status.get("conversation_id")
+            if not isinstance(reviewer_conv, str) or not reviewer_conv.strip():
+                raise ProposalError("reviewer conversation_id missing or empty")
+            if reviewer_conv == prior_worker_conv:
+                raise ProposalError("reviewer conversation_id must differ from prior worker conversation_id")
+
+            reviewer_path = artifacts.get("reviewer_path")
+            if not isinstance(reviewer_path, (str, Path)):
+                raise ProposalError("artifacts missing reviewer_path")
+            reviewer_status_path: Path | None = Path(reviewer_path).with_name("status.json")
+            initial_reviewer_status_bytes: bytes | None = bounded_file_bytes(
+                root,
+                reviewer_status_path,
+                MAX_CONTEXT,
+                "prior reviewer status",
+            )
+        else:
+            if artifacts.get("reviewer_path") is not None:
+                raise ProposalError(
+                    f"artifacts reviewer_path must be None for {origin}, got {artifacts.get('reviewer_path')!r}"
+                )
+            if artifacts.get("final_reviewer_run_id") is not None:
+                raise ProposalError(
+                    f"artifacts final_reviewer_run_id must be None for {origin}, got {artifacts.get('final_reviewer_run_id')!r}"
+                )
+            for key in (
+                "reviewer_status",
+                "reviewer_result",
+                "reviewer_sha",
+                "reviewer_sha256",
+                "reviewer_result_sha",
+            ):
+                if evidence.get(key) is not None:
+                    raise ProposalError(f"evidence {key} must be None for {origin}, got {evidence.get(key)!r}")
+            reviewer_status_path = None
+            initial_reviewer_status_bytes = None
 
         head = ctx["source_head"]
         task_path = ctx["admitted_task_path"]
@@ -229,14 +262,17 @@ def execute_worker_two_once(
             re_evidence = load_worker_correction_evidence(root, t_path, re_artifacts)
             if re_evidence != ctx["evidence"]:
                 raise ProposalError("worker correction evidence drifted in pre_provider_check")
-            curr_status_bytes = bounded_file_bytes(
-                root,
-                reviewer_status_path,
-                MAX_CONTEXT,
-                "prior reviewer status",
-            )
-            if curr_status_bytes != initial_reviewer_status_bytes:
-                raise ProposalError("prior reviewer status bytes drifted in pre_provider_check")
+            if origin == "REVIEWER":
+                if reviewer_status_path is None:
+                    raise ProposalError("missing reviewer_status_path in pre_provider_check")
+                curr_status_bytes = bounded_file_bytes(
+                    root,
+                    reviewer_status_path,
+                    MAX_CONTEXT,
+                    "prior reviewer status",
+                )
+                if curr_status_bytes != initial_reviewer_status_bytes:
+                    raise ProposalError("prior reviewer status bytes drifted in pre_provider_check")
             re_history = complete_worker_two_history(root, t_path, re_artifacts, re_evidence)
             if not isinstance(re_history, dict) or re_history.get("complete") is not True:
                 raise ProposalError("worker-2 history must be complete in pre_provider_check")
