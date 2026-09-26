@@ -7,16 +7,18 @@ This test establishes hermetic verification of same-lineage quota continuation:
 3. A known-reset claim is prepared via prepare_known_reset_resume_claim and published via
    publish_known_reset_resume_claim, bound to the exact wait record bytes.
 4. A continuation request is built via build_quota_resume_request and verified through real
-   validate_quota_continuation_request with unpatched wait/claim storage readers and pure validators.
+   validate_quota_continuation_request with unpatched wait/claim storage readers, real
+   file-backed pending rescope intent marker verification, and pure validators.
 5. Terminal quota record is read back using the admitted original_request_id, feeding real
    derive_worker_resume_artifacts and real load_worker_correction_evidence to verify exact
    W1/R1/receipt1/feedback2 file-backed lineage.
 
 Explicit boundaries:
 - No Provider/sandbox execution or Broker/Supervisor live daemon hooks.
-- No replay authority or claim of full real admission or C5d completion.
-- Repository, pending rescope intent, semantic attempt record, and common request validator are
-  explicitly isolated mock seams.
+- No replay authority or claim of full real common Broker request admission or C5d completion.
+- Mocked external seams are strictly isolated to: common request validator, Git repository
+  facts, expected wait source, and task snapshot; semantic attempt and intent are real
+  file-backed.
 """
 
 from __future__ import annotations
@@ -39,12 +41,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 try:
-    from scripts.two_site_codex_autopilot import exclusive_supervisor_lock
+    from scripts.two_site_assignment_scope import AssignmentScope
+    from scripts.two_site_codex_autopilot import (
+        CONTROL_PATHS,
+        PROTECTED_REFS,
+        ensure_rescope_epoch_dir,
+        exclusive_supervisor_lock,
+        publish_rescope_intent,
+        rescope_epoch_basename,
+        validate_accepted_repository,
+    )
     from scripts.two_site_provider_broker import (
         publish_terminal_quota_record,
         read_terminal_quota_record,
     )
     from scripts.two_site_quota_continuation_admission import (
+        ContinuationAdmissionError,
         validate_quota_continuation_request,
     )
     from scripts.two_site_quota_resume_claim_admission import (
@@ -63,6 +75,11 @@ try:
         load_worker_correction_evidence,
     )
     import scripts.two_site_quota_resume_worker_evidence as evidence_mod
+    from scripts.two_site_quota_wait_intent import (
+        RESCOPE_INTENT_FILENAMES,
+        WaitIntentError,
+        read_pending_rescope_intent,
+    )
     from scripts.two_site_quota_wait_record import validate_initial_wait_record
     from scripts.two_site_quota_wait_schedule import initial_wait_schedule
     from scripts.two_site_quota_wait_storage import (
@@ -75,12 +92,22 @@ try:
     )
     from scripts.two_site_semantic_task import build_identity
 except ImportError:
-    from two_site_codex_autopilot import exclusive_supervisor_lock  # type: ignore[no-redef]
+    from two_site_assignment_scope import AssignmentScope  # type: ignore[no-redef]
+    from two_site_codex_autopilot import (  # type: ignore[no-redef]
+        CONTROL_PATHS,
+        PROTECTED_REFS,
+        ensure_rescope_epoch_dir,
+        exclusive_supervisor_lock,
+        publish_rescope_intent,
+        rescope_epoch_basename,
+        validate_accepted_repository,
+    )
     from two_site_provider_broker import (  # type: ignore[no-redef]
         publish_terminal_quota_record,
         read_terminal_quota_record,
     )
     from two_site_quota_continuation_admission import (  # type: ignore[no-redef]
+        ContinuationAdmissionError,
         validate_quota_continuation_request,
     )
     from two_site_quota_resume_claim_admission import (  # type: ignore[no-redef]
@@ -99,6 +126,11 @@ except ImportError:
         load_worker_correction_evidence,
     )
     import two_site_quota_resume_worker_evidence as evidence_mod  # type: ignore[no-redef]
+    from two_site_quota_wait_intent import (  # type: ignore[no-redef]
+        RESCOPE_INTENT_FILENAMES,
+        WaitIntentError,
+        read_pending_rescope_intent,
+    )
     from two_site_quota_wait_record import validate_initial_wait_record  # type: ignore[no-redef]
     from two_site_quota_wait_schedule import initial_wait_schedule  # type: ignore[no-redef]
     from two_site_quota_wait_storage import (  # type: ignore[no-redef]
@@ -122,7 +154,6 @@ try:
         _FakeScope,
     )
     from tests.test_two_site_quota_resume_claim_admission import (
-        _build_valid_wait_fixtures,
         _step_iso_seconds,
     )
     from tests.test_two_site_quota_resume_worker_two_history_materialized import (
@@ -143,7 +174,6 @@ except ImportError:
         _FakeScope,
     )
     from test_two_site_quota_resume_claim_admission import (  # type: ignore[no-redef]
-        _build_valid_wait_fixtures,
         _step_iso_seconds,
     )
     from test_two_site_quota_resume_worker_two_history_materialized import (  # type: ignore[no-redef]
@@ -224,16 +254,25 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
         "status_sha256": orig_status_sha,
     }
 
-    approved_fixture, _ = _build_valid_wait_fixtures(known_reset=True)
-    rescope_epoch = approved_fixture["rescope_epoch"]
+    scope = AssignmentScope(
+        assignment_id=reservation["assignment_id"],
+        stage_id="P1-00b",
+        allowed_paths=("tests/test_two_site_quota_resume_worker_two_joined_admission_fileproof.py",),
+        forbidden_paths=(),
+        expires_at="2099-01-01T00:00:00Z",
+        sha256=reservation["assignment_sha256"],
+    )
+    repo_facts = {
+        "head": reservation["source_head"],
+        "status": "",
+        "protected_refs": {ref: reservation["source_head"] for ref in PROTECTED_REFS},
+        "control_blobs": {p.as_posix(): reservation["source_head"] for p in CONTROL_PATHS},
+        "assignment_scope": scope,
+    }
+    repo_norm = validate_accepted_repository(repo_facts)
+    rescope_epoch = rescope_epoch_basename(repo_norm)
     rescope_attempt = 1
-
-    repo = copy.deepcopy(approved_fixture["repository"])
-    repo["head"] = reservation["source_head"]
-    repo["protected_refs"] = {"refs/heads/main": reservation["source_head"]}
-    repo["control_blobs"] = {"config/rules.json": reservation["source_head"]}
-    repo["assignment_scope"]["assignment_id"] = reservation["assignment_id"]
-    repo["assignment_scope"]["sha256"] = reservation["assignment_sha256"]
+    repo = repo_norm
 
     created_at_utc = datetime.fromtimestamp(request["created_at"], tz=timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
@@ -289,6 +328,8 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
         assignment_sha256=request["assignment_sha256"],
     )
     autopilot_dir = root / ".local" / "two-site-refactor" / "autopilot"
+    autopilot_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    autopilot_dir.chmod(0o700)
     lock_file = autopilot_dir / "supervisor.lock"
 
     raw_wait_bytes = _canonical_bytes(wait_record)
@@ -300,6 +341,8 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
             orig_ctrl_run_id,
             raw_wait_bytes,
         )
+        epoch_dir = ensure_rescope_epoch_dir(autopilot_dir, repo_facts)
+        publish_rescope_intent(epoch_dir, 1)
     assert published_wait_bytes == raw_wait_bytes
 
     # 4. Prepare and publish known-reset claim with immutable file-backed semantic attempt
@@ -378,20 +421,27 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
     assert continuation_request["original_wait_sha256"] == wait_sha
     assert continuation_request["claim_sha256"] == claim_sha
 
-    # 6. Real admission validation with ONLY external Git/repo/intent/task seams patched
+    # 6. Real admission validation with real pending rescope intent; only Git repo facts, common request validator, expected wait source, and task snapshot patched
     fake_scope = _FakeScope(request["assignment_id"], request["assignment_sha256"])
     common_dict = {k: continuation_request[k] for k in continuation_request if k != "request_type"}
 
     with (
+        patch(
+            "scripts.two_site_quota_wait_intent.validate_repository",
+            side_effect=lambda *args, **kwargs: copy.deepcopy(repo_facts),
+        ),
         patch("scripts.two_site_quota_continuation_admission.validate_request") as mock_val,
-        patch("scripts.two_site_quota_continuation_admission.read_pending_rescope_intent") as mock_intent,
         patch("scripts.two_site_quota_continuation_admission.collect_initial_wait_source_expected") as mock_collect,
         patch("scripts.two_site_quota_continuation_admission.load_task") as mock_task,
     ):
         mock_val.return_value = (common_dict, canonical_task_path, fake_scope)
-        mock_intent.return_value = (rescope_epoch, rescope_attempt, repo)
         mock_collect.return_value = expected_wait
         mock_task.return_value = (task_obj, {})
+
+        intent_epoch_res, intent_attempt_res, intent_repo_res = read_pending_rescope_intent(root)
+        assert intent_epoch_res == rescope_epoch
+        assert intent_attempt_res == 1
+        assert intent_repo_res == repo_norm
 
         admitted_continuation, out_task_path, out_scope = validate_quota_continuation_request(
             root,
@@ -403,7 +453,57 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
     assert out_task_path == canonical_task_path
     assert out_scope == fake_scope
 
-    # 7. Real receipt readback on admitted original_request_id, derivation, and evidence loading
+    # 7. Bounded negative check: tampered marker metadata fails real admission read-only before Provider
+    marker_path = epoch_dir / RESCOPE_INTENT_FILENAMES[1]
+    wait_path = runs_dir / "quota-wait.json"
+    assert wait_path.is_file()
+    claim_path = runs_dir / "quota-resume-claim.json"
+    assert claim_path.is_file()
+    files_before_negative = set(root.rglob("*"))
+
+    wait_bytes_before = wait_path.read_bytes()
+    claim_bytes_before = claim_path.read_bytes()
+    receipt_bytes_before = receipt_file_path.read_bytes()
+    status_bytes_before = orig_status_path.read_bytes()
+
+    marker_path.chmod(0o644)
+    try:
+        with (
+            patch(
+                "scripts.two_site_quota_wait_intent.validate_repository",
+                side_effect=lambda *args, **kwargs: copy.deepcopy(repo_facts),
+            ),
+            patch("scripts.two_site_quota_continuation_admission.validate_request") as mock_val_neg,
+            patch("scripts.two_site_quota_continuation_admission.collect_initial_wait_source_expected") as mock_collect_neg,
+            patch("scripts.two_site_quota_continuation_admission.load_task") as mock_task_neg,
+        ):
+            mock_val_neg.return_value = (common_dict, canonical_task_path, fake_scope)
+            mock_collect_neg.return_value = expected_wait
+            mock_task_neg.return_value = (task_obj, {})
+
+            with pytest.raises(ContinuationAdmissionError) as exc_info:
+                validate_quota_continuation_request(
+                    root,
+                    continuation_request,
+                    now_epoch=effective_now,
+                )
+            assert "failed to read pending rescope intent" in str(exc_info.value)
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, WaitIntentError)
+            assert "mode must be 0600" in str(cause)
+
+            # Assert no paths were added or removed, and core wait/claim/receipt/status evidence remains byte-identical
+            assert set(root.rglob("*")) == files_before_negative
+            assert wait_path.read_bytes() == wait_bytes_before
+            assert claim_path.read_bytes() == claim_bytes_before
+            assert receipt_file_path.read_bytes() == receipt_bytes_before
+            assert orig_status_path.read_bytes() == status_bytes_before
+    finally:
+        marker_path.chmod(0o600)
+
+    assert (marker_path.stat().st_mode & 0o777) == 0o600
+
+    # 8. Real receipt readback on admitted original_request_id, derivation, and evidence loading
     admitted_orig_req_id = admitted_continuation["original_request_id"]
     terminal_receipt_readback = read_terminal_quota_record(root, admitted_orig_req_id)
     assert terminal_receipt_readback == published_receipt
@@ -440,7 +540,7 @@ def test_two_site_quota_resume_worker_two_joined_admission_fileproof(tmp_path: P
     assert loaded_evidence["reviewer_status"]["run_id"] == meta["r1_id"]
     assert loaded_evidence["reviewer_result"]["status"] == "CHANGES_REQUIRED"
 
-    # 8. Explicit verification of digest bindings and file-backed artifacts
+    # 9. Explicit verification of digest bindings and file-backed artifacts
     assert wait_record["terminal_receipt_sha256"] == hashlib.sha256(receipt_bytes).hexdigest()
     assert claim["original_wait_sha256"] == hashlib.sha256(raw_wait_bytes).hexdigest()
     assert continuation_request["original_wait_sha256"] == hashlib.sha256(raw_wait_bytes).hexdigest()
