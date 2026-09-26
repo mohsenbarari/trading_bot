@@ -27,7 +27,6 @@ try:
         MAX_CONTEXT,
         GEMINI_RUNTIME_CONTRACT_REL,
         MODEL as GEMINI_MODEL,
-        WORKER_MODEL as GEMINI_WORKER_MODEL,
         ProposalError,
         bounded_file_text,
         capture_bounded_process,
@@ -46,7 +45,6 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         MAX_CONTEXT,
         GEMINI_RUNTIME_CONTRACT_REL,
         MODEL as GEMINI_MODEL,
-        WORKER_MODEL as GEMINI_WORKER_MODEL,
         ProposalError,
         bounded_file_text,
         capture_bounded_process,
@@ -60,6 +58,10 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         validate_result as validate_proposal_result,
         write_json,
     )
+try:
+    from scripts.two_site_proposal_pipeline import expected_role_model
+except ModuleNotFoundError:  # Direct `python scripts/...` execution.
+    from two_site_proposal_pipeline import expected_role_model  # type: ignore[no-redef]
 try:
     from scripts.two_site_assignment_scope import (
         AssignmentScope,
@@ -2309,6 +2311,9 @@ def _validate_gemini_chain(
     sources = worker_snapshot.get("sources")
     if not isinstance(task, dict) or not isinstance(sources, dict):
         raise AutopilotError("Gemini Worker snapshot is incomplete")
+    task_id = task.get("task_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise AutopilotError("Gemini Worker snapshot is incomplete")
     if assignment_scope is not None:
         try:
             validate_task_scope(assignment_scope, task)
@@ -2335,7 +2340,7 @@ def _validate_gemini_chain(
             or worker_status.get("run_id") != result["gemini_worker_run_id"]
             or worker_status.get("role") != "worker"
             or worker_status.get("state") != "PROPOSAL_READY"
-            or worker_status.get("model") != GEMINI_WORKER_MODEL
+            or worker_status.get("model") != expected_role_model("worker", task_id)
             or worker_status.get("head") != source_head
             or worker_status.get("result_sha256") != proposal_sha256
             or reviewer_status.get("run_id") != result["gemini_reviewer_run_id"]
