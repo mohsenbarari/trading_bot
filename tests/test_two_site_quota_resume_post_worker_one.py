@@ -17,9 +17,7 @@ from scripts.two_site_quota_resume_post_worker_one import (
 from scripts.two_site_quota_resume_worker_one_result_contract import (
     bind_worker_one_result,
 )
-from tests.test_two_site_quota_resume_worker_one_result_contract import (
-    _make_valid_bundle,
-)
+import tests.test_two_site_quota_resume_worker_one_result_contract as contract_fixtures
 
 _EXPECTED_NINE_KEYS = frozenset({
     "base_context",
@@ -34,15 +32,29 @@ _EXPECTED_NINE_KEYS = frozenset({
 })
 
 
-def _setup_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    ctx, returned_state, validated = _make_valid_bundle()
+def _setup_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str = "REVIEWER",
+) -> dict:
+    if origin == "BOOTSTRAP":
+        ctx, returned_state, validated, _ = contract_fixtures._make_bootstrap_bundle()
+    elif origin == "TEST_FAILED":
+        ctx, returned_state, validated, _ = contract_fixtures._make_test_failed_bundle()
+    else:
+        ctx, returned_state, validated = contract_fixtures._make_valid_bundle()
     real_bound = bind_worker_one_result(ctx, returned_state, validated)
 
-    reviewer_dir = tmp_path / "reviewer"
-    reviewer_dir.mkdir(parents=True, exist_ok=True)
-    status_file = reviewer_dir / "status.json"
-    status_bytes = b'{"status": "ok"}'
-    status_file.write_bytes(status_bytes)
+    status_bytes = None
+    if origin == "REVIEWER":
+        reviewer_dir = tmp_path / "reviewer"
+        reviewer_dir.mkdir(parents=True, exist_ok=True)
+        status_file = reviewer_dir / "status.json"
+        status_bytes = b'{"status": "ok"}'
+        status_file.write_bytes(status_bytes)
+        ctx["artifacts"]["reviewer_path"] = str(reviewer_dir / "result.json")
+        ctx["artifacts"]["proposal_sha256"] = returned_state["proposal_sha256"]
+        ctx["evidence"]["feedback_sha"] = "0" * 64
 
     task_path = tmp_path / "task.json"
     task_path.write_text("{}", encoding="utf-8")
@@ -56,9 +68,6 @@ def _setup_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     ctx["initial_refs"] = {
         "refs/heads/main": "0123456789abcdef0123456789abcdef01234567"
     }
-    ctx["artifacts"]["reviewer_path"] = str(reviewer_dir / "result.json")
-    ctx["artifacts"]["proposal_sha256"] = returned_state["proposal_sha256"]
-    ctx["evidence"]["feedback_sha"] = "0" * 64
     ctx["sources"] = {}
 
     request = {"continuation": True}
@@ -244,3 +253,130 @@ def test_malformed_seven_key_binding_rejected_before_yield(
             tmp_path, env["request"], env["returned_state"]
         ):
             pass
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+def test_worker_one_post_result_context_test_gate_success(
+    tmp_path, monkeypatch, origin
+):
+    env = _setup_env(tmp_path, monkeypatch, origin=origin)
+    returned_state = env["returned_state"]
+    real_bound = env["real_bound"]
+    state = env["continuation_state"]
+
+    assert state["open"] is False
+
+    with worker_one_post_result_context(
+        tmp_path, env["request"], returned_state
+    ) as yielded:
+        assert state["open"] is True
+        assert set(yielded.keys()) == _EXPECTED_NINE_KEYS
+        assert set(real_bound.keys()) == _EXPECTED_BOUND_KEYS
+
+        if origin == "BOOTSTRAP":
+            assert len(yielded["seen_bootstrap_signatures"]) == 1
+            assert (
+                yielded["seen_bootstrap_signatures"]
+                == real_bound["seen_bootstrap_signatures"]
+            )
+            assert yielded["seen_test_signatures"] == set()
+        else:
+            assert len(yielded["seen_test_signatures"]) == 1
+            assert (
+                yielded["seen_test_signatures"]
+                == real_bound["seen_test_signatures"]
+            )
+            assert yielded["seen_bootstrap_signatures"] == set()
+        assert yielded["seen_norm_findings"] == set()
+
+        env["file_mock"].assert_not_called()
+        yielded["state_check"]()
+        env["file_mock"].assert_not_called()
+
+        assert yielded["base_context"] is not env["ctx"]
+        assert yielded["returned_state"] is not real_bound["returned_state"]
+        assert yielded["seen_convs"] is not real_bound["seen_convs"]
+
+    assert state["open"] is False
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+@pytest.mark.parametrize(
+    ("fake_field", "fake_value", "error_match"),
+    [
+        (
+            "reviewer_path",
+            "/tmp/reviewer/result.json",
+            "artifacts reviewer_path must be None",
+        ),
+        (
+            "reviewer_status",
+            {"conversation_id": "conv-rev"},
+            "evidence reviewer_status must be None",
+        ),
+        (
+            "reviewer_sha",
+            "0" * 64,
+            "evidence reviewer_sha must be None",
+        ),
+        (
+            "reviewer_sha256",
+            "0" * 64,
+            "evidence reviewer sha must be None",
+        ),
+    ],
+)
+def test_test_gate_rejects_fake_reviewer_at_entry(
+    tmp_path, monkeypatch, origin, fake_field, fake_value, error_match
+):
+    env = _setup_env(tmp_path, monkeypatch, origin=origin)
+    if fake_field == "reviewer_path":
+        env["ctx"]["artifacts"][fake_field] = fake_value
+    else:
+        env["ctx"]["evidence"][fake_field] = fake_value
+
+    with pytest.raises(ProposalError, match=error_match):
+        with worker_one_post_result_context(
+            tmp_path, env["request"], env["returned_state"]
+        ):
+            pass
+
+    env["file_mock"].assert_not_called()
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+@pytest.mark.parametrize(
+    ("drift_target", "error_match"),
+    [
+        ("origin", "correction origin drifted across recheck"),
+        ("evidence", "correction evidence drifted across recheck"),
+        ("bound_result", "worker-1 result binding drifted across recheck"),
+        ("check_state_error", "check_state failed"),
+    ],
+)
+def test_worker_one_test_gate_drift_fail_closed(
+    tmp_path, monkeypatch, origin, drift_target, error_match
+):
+    env = _setup_env(tmp_path, monkeypatch, origin=origin)
+    with worker_one_post_result_context(
+        tmp_path, env["request"], env["returned_state"]
+    ) as yielded:
+        if drift_target == "origin":
+            drifted_origin = "TEST_FAILED" if origin == "BOOTSTRAP" else "BOOTSTRAP"
+            drifted_art = dict(env["ctx"]["artifacts"], correction_origin=drifted_origin)
+            env["ctx"]["artifacts"] = drifted_art
+            env["art_mock"].return_value = drifted_art
+        elif drift_target == "evidence":
+            drifted_ev = dict(env["ctx"]["evidence"])
+            drifted_ev["feedback"] = {"reviewer": "test-gate", "findings": ["drifted"]}
+            env["ev_mock"].return_value = drifted_ev
+        elif drift_target == "bound_result":
+            drifted_bound = dict(env["real_bound"], seen_convs=set())
+            env["read_bind_mock"].return_value = drifted_bound
+        elif drift_target == "check_state_error":
+            env["check_mock"].side_effect = ProposalError("check_state failed")
+
+        with pytest.raises(ProposalError, match=error_match):
+            yielded["state_check"]()
+
+        env["file_mock"].assert_not_called()
