@@ -10,6 +10,7 @@ from scripts.two_site_quota_resume_execution import (
     ProposalError,
 )
 from scripts.two_site_quota_resume_worker_correction_context import (
+    pipeline_lock,
     prepare_worker_correction_continuation,
     worker_correction_continuation_context,
 )
@@ -799,3 +800,81 @@ def test_test_gate_second_pass_drift_refused(
         assert lock.locked is False
         assert lock.release_count == 1
         assert mock_bounded.call_count == 0
+
+
+@pytest.mark.parametrize("worker_index", [1])
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+def test_happy_test_gate_origin_real_lock_held(
+    tmp_path: Path, worker_index: int, origin: str
+):
+    req, admitted, receipt, artifacts, evidence, _, refs = _base_fixtures(
+        worker_index
+    )
+    artifacts.update({
+        "correction_origin": origin,
+        "reviewer_path": None,
+        "final_reviewer_run_id": None,
+    })
+    evidence.update({
+        "reviewer_status": None,
+        "reviewer_result": None,
+        "reviewer_sha": None,
+    })
+
+    with patch(
+        "scripts.two_site_quota_resume_worker_correction_context.validate_quota_continuation_request",
+        return_value=(admitted, "t.json", "res"),
+    ) as mock_admission, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.read_terminal_quota_record",
+        return_value=receipt,
+    ) as mock_read_record, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.derive_worker_resume_artifacts",
+        return_value=artifacts,
+    ) as mock_derive_artifacts, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.load_worker_correction_evidence",
+        return_value=evidence,
+    ) as mock_load_evidence, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.bounded_file_bytes",
+        side_effect=AssertionError("unexpected reviewer read"),
+    ) as mock_bounded_bytes, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.ref_snapshot",
+        return_value=refs,
+    ) as mock_ref_snapshot, patch(
+        "scripts.two_site_quota_resume_worker_correction_context.check_state",
+    ) as mock_check_state:
+        with worker_correction_continuation_context(tmp_path, req) as ctx:
+            assert ctx["continuation_run_prefix"] == f"run-w{worker_index}"
+            assert ctx["original_run_prefix"] == "run-orig"
+            assert ctx["source_head"] == "c44e63"
+            assert ctx["initial_refs"] == refs
+            assert ctx["original_receipt"] == receipt
+            assert ctx["original_terminal_receipt"] == receipt
+            assert ctx["admitted_request"] == admitted
+            assert ctx["admitted_task_path"] == "t.json"
+            assert ctx["artifacts"] == artifacts
+            assert ctx["evidence"] == evidence
+            assert ctx["task"] == evidence["task"]
+            assert ctx["sources"] == evidence["sources"]
+            assert ctx["artifacts"]["correction_origin"] == origin
+            assert ctx["artifacts"]["reviewer_path"] is None
+            assert ctx["artifacts"]["final_reviewer_run_id"] is None
+            assert ctx["evidence"]["reviewer_status"] is None
+            assert ctx["evidence"]["reviewer_result"] is None
+            assert ctx["evidence"]["reviewer_sha"] is None
+
+            with pytest.raises(
+                ProposalError, match="another proposal pipeline is already active"
+            ):
+                with pipeline_lock(tmp_path):
+                    pass
+
+        assert mock_admission.call_count == 2
+        assert mock_read_record.call_count == 2
+        assert mock_derive_artifacts.call_count == 2
+        assert mock_load_evidence.call_count == 2
+        assert mock_bounded_bytes.call_count == 0
+        assert mock_ref_snapshot.call_count == 1
+        assert mock_check_state.call_count == 2
+
+        with pipeline_lock(tmp_path) as pipeline_dir:
+            assert pipeline_dir.is_dir()
