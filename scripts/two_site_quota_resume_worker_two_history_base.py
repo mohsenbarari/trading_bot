@@ -54,6 +54,20 @@ def derive_worker_two_history_base(
 
     if not isinstance(artifacts, Mapping):
         raise ProposalError(f"artifacts must be Mapping, got {type(artifacts).__name__}")
+    if not isinstance(evidence, Mapping):
+        raise ProposalError(f"evidence must be Mapping, got {type(evidence).__name__}")
+
+    raw_origin = artifacts.get("correction_origin")
+    if "correction_origin" in evidence and evidence.get("correction_origin") != raw_origin:
+        raise ProposalError(
+            f"correction_origin mismatch: artifacts {raw_origin!r} != evidence {evidence.get('correction_origin')!r}"
+        )
+    if raw_origin is None or raw_origin == "REVIEWER":
+        origin = "REVIEWER"
+    elif raw_origin in ("BOOTSTRAP", "TEST_FAILED"):
+        origin = raw_origin
+    else:
+        raise ProposalError(f"unknown correction_origin: {raw_origin!r}")
 
     worker_index = artifacts.get("worker_index")
     if type(worker_index) is not int or type(worker_index) is bool or worker_index != 2:
@@ -70,19 +84,37 @@ def derive_worker_two_history_base(
     if not worker1_id_re.fullmatch(final_worker_run_id):
         raise ProposalError(f"invalid final_worker_run_id: {final_worker_run_id!r}")
 
-    final_reviewer_run_id = artifacts.get("final_reviewer_run_id")
-    if not isinstance(final_reviewer_run_id, str):
-        raise ProposalError(f"missing or non-string final_reviewer_run_id: {final_reviewer_run_id!r}")
-    reviewer1_id_re = re.compile(rf"^{re.escape(orig_prefix)}-reviewer-1(?:-retry-[12])?$")
-    if not reviewer1_id_re.fullmatch(final_reviewer_run_id):
-        raise ProposalError(f"invalid final_reviewer_run_id: {final_reviewer_run_id!r}")
+    final_reviewer_run_id: str | None = None
+    if origin == "REVIEWER":
+        final_reviewer_run_id = artifacts.get("final_reviewer_run_id")
+        if not isinstance(final_reviewer_run_id, str):
+            raise ProposalError(f"missing or non-string final_reviewer_run_id: {final_reviewer_run_id!r}")
+        reviewer1_id_re = re.compile(rf"^{re.escape(orig_prefix)}-reviewer-1(?:-retry-[12])?$")
+        if not reviewer1_id_re.fullmatch(final_reviewer_run_id):
+            raise ProposalError(f"invalid final_reviewer_run_id: {final_reviewer_run_id!r}")
+    else:
+        if artifacts.get("final_reviewer_run_id") is not None:
+            raise ProposalError(
+                f"artifacts final_reviewer_run_id must be None for {origin}, got {artifacts.get('final_reviewer_run_id')!r}"
+            )
+        if artifacts.get("reviewer_path") is not None:
+            raise ProposalError(
+                f"artifacts reviewer_path must be None for {origin}, got {artifacts.get('reviewer_path')!r}"
+            )
+        if evidence.get("reviewer_status") is not None:
+            raise ProposalError(f"evidence reviewer_status must be None for {origin}")
+        if evidence.get("reviewer_result") is not None:
+            raise ProposalError(f"evidence reviewer_result must be None for {origin}")
+        if (
+            evidence.get("reviewer_sha") is not None
+            or evidence.get("reviewer_sha256") is not None
+            or evidence.get("reviewer_result_sha") is not None
+        ):
+            raise ProposalError(f"evidence reviewer sha must be None for {origin}")
 
     proposal_sha256 = artifacts.get("proposal_sha256")
     if not isinstance(proposal_sha256, str) or not SHA_PATTERN.fullmatch(proposal_sha256):
         raise ProposalError(f"invalid proposal_sha256: {proposal_sha256!r}")
-
-    if not isinstance(evidence, Mapping):
-        raise ProposalError(f"evidence must be Mapping, got {type(evidence).__name__}")
 
     worker_info = evidence.get("worker_info")
     if not isinstance(worker_info, Mapping):
@@ -135,27 +167,34 @@ def derive_worker_two_history_base(
     ):
         raise ProposalError("mismatch between worker_info conversation_id and status conversation_id")
 
-    reviewer_status = evidence.get("reviewer_status")
-    if not isinstance(reviewer_status, Mapping):
-        raise ProposalError(f"evidence missing valid reviewer_status Mapping, got {type(reviewer_status).__name__}")
+    reviewer1_conv_id: str | None = None
+    if origin == "REVIEWER":
+        reviewer_status = evidence.get("reviewer_status")
+        if not isinstance(reviewer_status, Mapping):
+            raise ProposalError(f"evidence missing valid reviewer_status Mapping, got {type(reviewer_status).__name__}")
 
-    reviewer1_conv_id = reviewer_status.get("conversation_id")
-    if not isinstance(reviewer1_conv_id, str) or not reviewer1_conv_id.strip():
-        raise ProposalError(f"invalid Reviewer1 conversation_id: {reviewer1_conv_id!r}")
+        reviewer1_conv_id = reviewer_status.get("conversation_id")
+        if not isinstance(reviewer1_conv_id, str) or not reviewer1_conv_id.strip():
+            raise ProposalError(f"invalid Reviewer1 conversation_id: {reviewer1_conv_id!r}")
 
-    reviewer_status_run_id = reviewer_status.get("run_id")
-    if (
-        type(reviewer_status_run_id) is not str
-        or not reviewer_status_run_id.strip()
-        or reviewer_status_run_id != final_reviewer_run_id
-    ):
-        raise ProposalError(
-            f"Reviewer1 status run_id mismatch: {reviewer_status_run_id!r} != artifacts {final_reviewer_run_id!r}"
-        )
+        reviewer_status_run_id = reviewer_status.get("run_id")
+        if (
+            type(reviewer_status_run_id) is not str
+            or not reviewer_status_run_id.strip()
+            or reviewer_status_run_id != final_reviewer_run_id
+        ):
+            raise ProposalError(
+                f"Reviewer1 status run_id mismatch: {reviewer_status_run_id!r} != artifacts {final_reviewer_run_id!r}"
+            )
 
-    conv_ids = [worker0_conv_id, worker1_conv_id, reviewer1_conv_id]
-    if len(set(conv_ids)) != 3:
-        raise ProposalError(f"duplicate conversation IDs detected across Worker0, Worker1, Reviewer1: {conv_ids}")
+        conv_ids = [worker0_conv_id, worker1_conv_id, reviewer1_conv_id]
+        if len(set(conv_ids)) != 3:
+            raise ProposalError(f"duplicate conversation IDs detected across Worker0, Worker1, Reviewer1: {conv_ids}")
+    else:
+        if worker0_conv_id == worker1_conv_id:
+            raise ProposalError(
+                f"duplicate conversation IDs detected across Worker0 and Worker1: {[worker0_conv_id, worker1_conv_id]}"
+            )
 
     feedback1_rel = Path(".local/two-site-refactor/pipeline") / orig_prefix / "feedback-correction-1.json"
     raw_feedback1 = bounded_file_bytes(
@@ -183,12 +222,14 @@ def derive_worker_two_history_base(
         "worker1_id": str(final_worker_run_id),
         "worker1_run_id": str(final_worker_run_id),
         "worker1_conversation_id": str(worker1_conv_id),
-        "reviewer1_id": str(final_reviewer_run_id),
-        "reviewer1_run_id": str(final_reviewer_run_id),
-        "reviewer1_conversation_id": str(reviewer1_conv_id),
+        "reviewer1_id": str(final_reviewer_run_id) if origin == "REVIEWER" else None,
+        "reviewer1_run_id": str(final_reviewer_run_id) if origin == "REVIEWER" else None,
+        "reviewer1_conversation_id": str(reviewer1_conv_id) if origin == "REVIEWER" else None,
         "prior_worker0_sha": str(worker0_proposal_sha),
         "feedback1_kind": str(fb_reviewer),
         "feedback1_reviewer": str(fb_reviewer),
         "feedback1": copy.deepcopy(feedback1),
         "needs_reviewer0": needs_reviewer0,
+        "correction_origin": str(origin),
+        "needs_reviewer1": origin == "REVIEWER",
     }

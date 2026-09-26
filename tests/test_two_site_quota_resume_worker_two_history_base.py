@@ -17,6 +17,7 @@ def _create_valid_fixtures(
     tmp_path: Path,
     orig_prefix: str = "run-20260925-sample",
     reviewer_kind: str = "test-gate",
+    correction_origin: str | None = None,
 ) -> tuple[dict, dict, str, str]:
     worker0_sha = "0" * 64
     worker1_sha = "1" * 64
@@ -48,6 +49,12 @@ def _create_valid_fixtures(
             "conversation_id": "conv-r1",
         },
     }
+    if correction_origin is not None:
+        artifacts["correction_origin"] = correction_origin
+        evidence["correction_origin"] = correction_origin
+        if correction_origin in ("BOOTSTRAP", "TEST_FAILED"):
+            artifacts["final_reviewer_run_id"] = None
+            evidence.pop("reviewer_status", None)
     fb_dir = tmp_path / ".local" / "two-site-refactor" / "pipeline" / orig_prefix
     fb_dir.mkdir(parents=True, exist_ok=True)
     fb_path = fb_dir / "feedback-correction-1.json"
@@ -75,6 +82,8 @@ def test_test_gate_happy_path(tmp_path: Path) -> None:
     assert base["prior_worker0_sha"] == w0_sha
     assert base["feedback1_kind"] == "test-gate"
     assert base["needs_reviewer0"] is False
+    assert base["correction_origin"] == "REVIEWER"
+    assert base["needs_reviewer1"] is True
 
 
 def test_gemini_happy_path(tmp_path: Path) -> None:
@@ -84,6 +93,8 @@ def test_gemini_happy_path(tmp_path: Path) -> None:
     base = derive_worker_two_history_base(tmp_path, artifacts, evidence)
     assert base["feedback1_kind"] == "gemini"
     assert base["needs_reviewer0"] is True
+    assert base["correction_origin"] == "REVIEWER"
+    assert base["needs_reviewer1"] is True
 
 
 def test_duplicate_conversation_id_rejection(tmp_path: Path) -> None:
@@ -225,4 +236,135 @@ def test_reviewer1_status_run_id_negative(
     else:
         evidence["reviewer_status"]["run_id"] = bad_run_id
     with pytest.raises(ProposalError, match="Reviewer1 status run_id mismatch"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+
+def test_reviewer_explicit_origin_happy_path(tmp_path: Path) -> None:
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, reviewer_kind="test-gate", correction_origin="REVIEWER"
+    )
+    base = derive_worker_two_history_base(tmp_path, artifacts, evidence)
+    assert base["correction_origin"] == "REVIEWER"
+    assert base["needs_reviewer1"] is True
+    assert base["reviewer1_id"] == artifacts["final_reviewer_run_id"]
+    assert base["reviewer1_run_id"] == artifacts["final_reviewer_run_id"]
+    assert base["reviewer1_conversation_id"] == "conv-r1"
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+@pytest.mark.parametrize("reviewer_kind", ["test-gate", "gemini"])
+def test_non_reviewer_origins_matrix(
+    tmp_path: Path, origin: str, reviewer_kind: str
+) -> None:
+    artifacts, evidence, w0_sha, _ = _create_valid_fixtures(
+        tmp_path, reviewer_kind=reviewer_kind, correction_origin=origin
+    )
+    base = derive_worker_two_history_base(tmp_path, artifacts, evidence)
+    assert base["correction_origin"] == origin
+    assert base["needs_reviewer1"] is False
+    assert base["reviewer1_id"] is None
+    assert base["reviewer1_run_id"] is None
+    assert base["reviewer1_conversation_id"] is None
+    assert base["worker0_run_id"] == artifacts["original_run_prefix"] + "-worker-0"
+    assert base["worker1_run_id"] == artifacts["final_worker_run_id"]
+    assert base["worker0_conversation_id"] == "conv-w0"
+    assert base["worker1_conversation_id"] == "conv-w1"
+    assert base["prior_worker0_sha"] == w0_sha
+    assert base["feedback1_kind"] == reviewer_kind
+    assert base["needs_reviewer0"] is (reviewer_kind == "gemini")
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+def test_forged_reviewer_fields_rejected_for_non_reviewer(
+    tmp_path: Path, origin: str
+) -> None:
+    # 1. artifacts final_reviewer_run_id present
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, correction_origin=origin
+    )
+    artifacts["final_reviewer_run_id"] = f"{artifacts['original_run_prefix']}-reviewer-1"
+    with pytest.raises(ProposalError, match="artifacts final_reviewer_run_id must be None"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # 2. artifacts reviewer_path present
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, correction_origin=origin
+    )
+    artifacts["reviewer_path"] = "proposals/reviewer-1/result.json"
+    with pytest.raises(ProposalError, match="artifacts reviewer_path must be None"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # 3. evidence reviewer_status present
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, correction_origin=origin
+    )
+    evidence["reviewer_status"] = {"run_id": "rev-1", "conversation_id": "conv-r"}
+    with pytest.raises(ProposalError, match="evidence reviewer_status must be None"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # 4. evidence reviewer_result present
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, correction_origin=origin
+    )
+    evidence["reviewer_result"] = {"status": "PROPOSAL_READY"}
+    with pytest.raises(ProposalError, match="evidence reviewer_result must be None"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # 5. evidence reviewer_sha/sha256/result_sha present
+    for sha_key in ("reviewer_sha", "reviewer_sha256", "reviewer_result_sha"):
+        artifacts, evidence, _, _ = _create_valid_fixtures(
+            tmp_path, correction_origin=origin
+        )
+        evidence[sha_key] = "0" * 64
+        with pytest.raises(ProposalError, match="evidence reviewer sha must be None"):
+            derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+
+def test_missing_reviewer_metadata_for_reviewer_origin(tmp_path: Path) -> None:
+    # missing final_reviewer_run_id in artifacts
+    artifacts, evidence, _, _ = _create_valid_fixtures(tmp_path)
+    artifacts.pop("final_reviewer_run_id", None)
+    with pytest.raises(ProposalError, match="missing or non-string final_reviewer_run_id"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # missing reviewer_status in evidence
+    artifacts, evidence, _, _ = _create_valid_fixtures(tmp_path)
+    evidence.pop("reviewer_status", None)
+    with pytest.raises(ProposalError, match="evidence missing valid reviewer_status Mapping"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+
+def test_mismatched_and_unknown_correction_origin(tmp_path: Path) -> None:
+    # unknown origin in artifacts
+    artifacts, evidence, _, _ = _create_valid_fixtures(tmp_path)
+    artifacts["correction_origin"] = "UNKNOWN_ORIGIN"
+    with pytest.raises(ProposalError, match="unknown correction_origin"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # mismatch between artifacts and evidence
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, correction_origin="BOOTSTRAP"
+    )
+    evidence["correction_origin"] = "TEST_FAILED"
+    with pytest.raises(ProposalError, match="correction_origin mismatch"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+    # evidence has origin when artifacts does not
+    artifacts, evidence, _, _ = _create_valid_fixtures(tmp_path)
+    evidence["correction_origin"] = "REVIEWER"
+    with pytest.raises(ProposalError, match="correction_origin mismatch"):
+        derive_worker_two_history_base(tmp_path, artifacts, evidence)
+
+
+@pytest.mark.parametrize("origin", ["BOOTSTRAP", "TEST_FAILED"])
+def test_duplicate_w0_w1_conversations_rejected_non_reviewer(
+    tmp_path: Path, origin: str
+) -> None:
+    artifacts, evidence, _, _ = _create_valid_fixtures(
+        tmp_path, correction_origin=origin
+    )
+    evidence["worker_info"]["conversation_id"] = "same-conv"
+    evidence["worker_info"]["status"]["conversation_id"] = "same-conv"
+    evidence["worker_info"]["status"]["input_worker_conversation_id"] = "same-conv"
+    with pytest.raises(ProposalError, match="duplicate conversation IDs detected"):
         derive_worker_two_history_base(tmp_path, artifacts, evidence)
