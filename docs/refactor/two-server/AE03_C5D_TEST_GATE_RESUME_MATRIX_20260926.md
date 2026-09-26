@@ -8,8 +8,8 @@
 | **W1-BOOT** | Worker-1, bootstrap failure | yes | yes | yes | Code path UNHOOKED but materialized end-to-end fault proof pending |
 | **W1-FAIL** | Worker-1, candidate test FAILED | yes | yes | yes | Code path UNHOOKED but materialized end-to-end fault proof pending |
 | **W2-REV** | Worker-2, Reviewer-backed | yes | yes | no | Intermediate only (`WORKER_PROPOSAL_READY`; final dispatch absent) |
-| **W2-BOOT** | Worker-2, bootstrap failure | yes | no | no | Worker-2 execution/history requires Reviewer-1; final dispatch absent |
-| **W2-FAIL** | Worker-2, candidate test FAILED | yes | no | no | Worker-2 execution/history requires Reviewer-1; final dispatch absent |
+| **W2-BOOT** | Worker-2, bootstrap failure | yes | yes | no | Intermediate only (`WORKER_PROPOSAL_READY`; final dispatch absent) |
+| **W2-FAIL** | Worker-2, candidate test FAILED | yes | yes | no | Intermediate only (`WORKER_PROPOSAL_READY`; final dispatch absent) |
 
 > **Critical Reviewer Attestation**: Reviewer must explicitly attest that the literal sentinel `observational quota, no replay authority` remains, no false source or test completion claim is made, and the W2-REV final route is absent in `scripts/two_site_quota_resume_role_dispatch.py`. Current dispatcher for `worker_index == 2` calls `execute_worker_two_once` and directly returns intermediate `WORKER_PROPOSAL_READY`, with NO `execute_worker_two_post_result_remainder` or `READY_FOR_CODEX` final route. Any claim of full C5d completion must be rejected.
 
@@ -25,20 +25,20 @@ When `run_pipeline` halts with `QuotaBlockError`, `state['correction_count']` st
 
 ## 3. Exact Current Failing Guards for Non-Reviewer Cases
 
-Artifact derivation (`derive_worker_resume_artifacts`) and evidence loading (`load_worker_correction_evidence`) support non-Reviewer cases. Current codebase enforces guards blocking non-Reviewer cases for Worker-2:
-1. `execute_worker_two_once` (`scripts/two_site_quota_resume_worker_two_once.py`):
-   - Requires valid `reviewer_status` and reviewer artifacts, which are absent in non-Reviewer cases.
-2. Worker-2 History Lineage (`scripts/two_site_quota_resume_worker_two_history_base.py`):
-   - Worker-2 history derivation (`derive_worker_two_history_base`) requires Reviewer1 (`final_reviewer_run_id`, `reviewer_status`).
-3. Worker-2 Final Dispatch (`scripts/two_site_quota_resume_role_dispatch.py`):
+Artifact derivation (`derive_worker_resume_artifacts`) and evidence loading (`load_worker_correction_evidence`) support non-Reviewer cases. Those guards resolved in isolated helpers for BOOTSTRAP/TEST_FAILED, but W2 final dispatch absent, full materialized history/outer-lock/fault proof remains pending, Broker/Supervisor live hook absent:
+1. Worker-2 Final Dispatch (`scripts/two_site_quota_resume_role_dispatch.py`):
    - Final remainder execution and `READY_FOR_CODEX` route are absent for Worker-2.
+2. Materialized Proof:
+   - Full materialized history/outer-lock/fault proof remains pending.
+3. Live Hook:
+   - Broker/Supervisor live hook absent.
 
 Rejection is strict and fail-closed; non-supported cases must never be conflated with no-op support.
 
 ## 4. Ordered Implementation and Validation Steps
 
 1. **Step 1 - W1 Materialized Fault Proof**: Materialize end-to-end fault proof for Worker-1 non-reviewer (bootstrap and test-FAILED) code path.
-2. **Step 2 - W2 Test-Gate History / Once**: Extend `complete_worker_two_history` and `execute_worker_two_once` to support test-gate history and execution when Reviewer-1 is absent.
+2. **Step 2 - W2 Test-Gate History / Once**: Helper-level implemented while materialized proof remains; Step 3/4 still pending.
 3. **Step 3 - W2 Final Remainder**: Implement `execute_worker_two_post_result_remainder` and wire the `READY_FOR_CODEX` final route in `dispatch_quota_continuation_once` for `worker_index == 2`.
 4. **Step 4 - Broker / Supervisor Hook**: Wire continuation dispatcher into live Broker and Supervisor continuation handlers.
 5. **Step 5 - C5e Fault / Cohorts**: Hermetic fault-injection and cohort validation.
