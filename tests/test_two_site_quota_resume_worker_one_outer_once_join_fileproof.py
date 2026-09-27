@@ -18,7 +18,10 @@ import os
 
 os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
 
-from contextlib import contextmanager
+from contextlib import (
+    ExitStack,
+    contextmanager,
+)
 import hashlib
 import json
 from pathlib import Path
@@ -70,6 +73,127 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp_dir.cleanup()
+
+    @contextmanager
+    def _patched_dispatch_context(
+        self,
+        *,
+        env: dict[str, Any],
+        fake_continuation_ctx: Any,
+        runner_fn: Any,
+        candidate_fn: Any,
+        provider_fn: Any,
+    ):
+        ctx = env["ctx"]
+        admitted = env["admitted"]
+        task_path = env["task_path"]
+        initial_refs = ctx["initial_refs"]
+        patches = [
+            patch.object(
+                dispatch_mod,
+                "validate_quota_continuation_request",
+                return_value=(admitted, task_path, None),
+            ),
+            patch.object(
+                dispatch_mod,
+                "read_terminal_quota_record",
+                return_value=env["original_terminal_receipt"],
+            ),
+            patch.object(
+                dispatch_mod,
+                "derive_worker_resume_artifacts",
+                return_value=ctx["artifacts"],
+            ),
+            patch.object(
+                once_mod,
+                "worker_correction_continuation_context",
+                side_effect=fake_continuation_ctx,
+            ),
+            patch.object(
+                once_mod,
+                "validate_quota_continuation_request",
+                return_value=(admitted, task_path, None),
+            ),
+            patch.object(
+                once_mod,
+                "read_terminal_quota_record",
+                return_value=env["original_terminal_receipt"],
+            ),
+            patch.object(
+                once_mod,
+                "derive_worker_resume_artifacts",
+                return_value=ctx["artifacts"],
+            ),
+            patch.object(
+                once_mod,
+                "load_worker_correction_evidence",
+                return_value=ctx["evidence"],
+            ),
+            patch.object(
+                once_mod,
+                "ref_snapshot",
+                return_value=initial_refs,
+            ),
+            patch.object(
+                once_mod,
+                "check_state",
+                return_value=None,
+            ),
+            patch.object(
+                once_mod,
+                "runner_run",
+                side_effect=runner_fn,
+            ),
+            patch.object(
+                post_mod,
+                "worker_correction_continuation_context",
+                side_effect=fake_continuation_ctx,
+            ),
+            patch.object(
+                post_mod,
+                "validate_quota_continuation_request",
+                return_value=(admitted, task_path, None),
+            ),
+            patch.object(
+                post_mod,
+                "read_terminal_quota_record",
+                return_value=env["original_terminal_receipt"],
+            ),
+            patch.object(
+                post_mod,
+                "derive_worker_resume_artifacts",
+                return_value=ctx["artifacts"],
+            ),
+            patch.object(
+                post_mod,
+                "load_worker_correction_evidence",
+                return_value=ctx["evidence"],
+            ),
+            patch.object(
+                post_mod,
+                "check_state",
+                return_value=None,
+            ),
+            patch.object(
+                pipeline_mod,
+                "check_state",
+                return_value=None,
+            ),
+            patch.object(
+                pipeline_mod,
+                "run_candidate_tests",
+                side_effect=candidate_fn,
+            ),
+            patch.object(
+                pipeline_mod,
+                "run_provider_session",
+                side_effect=provider_fn,
+            ),
+        ]
+        with ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            yield
 
     def _run_positive_proof(self, origin: str) -> None:
         helper = outer_gate_mod.TestTwoSiteQuotaResumeWorkerOneOuterTestGateFileproof()
@@ -197,86 +321,12 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
             )
             return base_run_id, run_dir
 
-        with patch.object(
-            dispatch_mod,
-            "validate_quota_continuation_request",
-            return_value=(admitted, task_path, None),
-        ), patch.object(
-            dispatch_mod,
-            "read_terminal_quota_record",
-            return_value=env["original_terminal_receipt"],
-        ), patch.object(
-            dispatch_mod,
-            "derive_worker_resume_artifacts",
-            return_value=ctx["artifacts"],
-        ), patch.object(
-            once_mod,
-            "worker_correction_continuation_context",
-            side_effect=fake_worker_correction_continuation_context,
-        ), patch.object(
-            once_mod,
-            "validate_quota_continuation_request",
-            return_value=(admitted, task_path, None),
-        ), patch.object(
-            once_mod,
-            "read_terminal_quota_record",
-            return_value=env["original_terminal_receipt"],
-        ), patch.object(
-            once_mod,
-            "derive_worker_resume_artifacts",
-            return_value=ctx["artifacts"],
-        ), patch.object(
-            once_mod,
-            "load_worker_correction_evidence",
-            return_value=ctx["evidence"],
-        ), patch.object(
-            once_mod,
-            "ref_snapshot",
-            return_value=initial_refs,
-        ), patch.object(
-            once_mod,
-            "check_state",
-            return_value=None,
-        ), patch.object(
-            once_mod,
-            "runner_run",
-            side_effect=fake_once_runner,
-        ), patch.object(
-            post_mod,
-            "worker_correction_continuation_context",
-            side_effect=fake_worker_correction_continuation_context,
-        ), patch.object(
-            post_mod,
-            "validate_quota_continuation_request",
-            return_value=(admitted, task_path, None),
-        ), patch.object(
-            post_mod,
-            "read_terminal_quota_record",
-            return_value=env["original_terminal_receipt"],
-        ), patch.object(
-            post_mod,
-            "derive_worker_resume_artifacts",
-            return_value=ctx["artifacts"],
-        ), patch.object(
-            post_mod,
-            "load_worker_correction_evidence",
-            return_value=ctx["evidence"],
-        ), patch.object(
-            post_mod,
-            "check_state",
-            return_value=None,
-        ), patch.object(
-            pipeline_mod,
-            "check_state",
-            return_value=None,
-        ), patch.object(
-            pipeline_mod,
-            "run_candidate_tests",
-            side_effect=fake_run_candidate_tests,
-        ), patch.object(
-            pipeline_mod,
-            "run_provider_session",
-            side_effect=fake_run_provider_session,
+        with self._patched_dispatch_context(
+            env=env,
+            fake_continuation_ctx=fake_worker_correction_continuation_context,
+            runner_fn=fake_once_runner,
+            candidate_fn=fake_run_candidate_tests,
+            provider_fn=fake_run_provider_session,
         ):
             final_state = dispatch_quota_continuation_once(
                 self.root, env["request"]
@@ -387,6 +437,222 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
 
     def test_worker_one_outer_once_join_test_failed(self) -> None:
         self._run_positive_proof("TEST_FAILED")
+
+    def _run_negative_tamper_proof(self, origin: str) -> None:
+        helper = outer_gate_mod.TestTwoSiteQuotaResumeWorkerOneOuterTestGateFileproof()
+        helper.root = self.root
+        env = helper._setup_env(origin)
+
+        origin_lower = origin.lower()
+        old_prefix = f"proof-gate-{origin_lower}"
+        new_prefix = f"{origin_lower}-outer-once-join"
+
+        ctx = env["ctx"]
+        ctx["original_run_prefix"] = old_prefix
+        ctx["continuation_run_prefix"] = new_prefix
+
+        admitted = env["admitted"]
+        admitted["run_prefix"] = new_prefix
+
+        w0_run_id = ctx["artifacts"]["final_worker_run_id"]
+        w0_sha = ctx["artifacts"]["proposal_sha256"]
+
+        ctx["artifacts"]["proposal_path"] = (
+            f".local/two-site-refactor/proposals/{w0_run_id}/result.json"
+        )
+        ctx["evidence"]["feedback_path"] = f"feedback-{origin_lower}.json"
+
+        fb_sha = env["fb_sha"]
+        task_path = env["task_path"]
+        initial_refs = ctx["initial_refs"]
+
+        w0_dir = self.root / ".local/two-site-refactor/proposals" / w0_run_id
+        old_w0_result_bytes = (w0_dir / "result.json").read_bytes()
+        old_w0_status_path = w0_dir / "status.json"
+        old_w0_status_bytes = (
+            old_w0_status_path.read_bytes() if old_w0_status_path.exists() else None
+        )
+
+        old_w1_id = f"{old_prefix}-worker-1"
+        old_w1_dir = self.root / ".local/two-site-refactor/proposals" / old_w1_id
+        self.assertTrue(old_w1_dir.is_dir())
+        old_w1_result_bytes = (old_w1_dir / "result.json").read_bytes()
+        old_w1_status_bytes = (old_w1_dir / "status.json").read_bytes()
+
+        feedback_path = self.root / ctx["evidence"]["feedback_path"]
+        feedback_bytes = feedback_path.read_bytes()
+
+        @contextmanager
+        def fake_worker_correction_continuation_context(
+            r: Path, req: dict[str, Any]
+        ):
+            with pipeline_lock(r):
+                yield ctx
+
+        real_worker_runner, _ = make_runner(self.root, [{"content": "# v2\n"}])
+        worker_provider_entries: list[str] = []
+
+        def fake_once_runner(
+            root: Path,
+            t_path: Path,
+            role: str,
+            run_id: str,
+            timeout: int,
+            proposal: Path | None = None,
+            feedback: Path | None = None,
+            test_evidence: Path | None = None,
+            cli: Path | None = None,
+            pre_provider_check: Any = None,
+        ) -> Path:
+            if not callable(pre_provider_check):
+                raise AssertionError("pre_provider_check must be callable")
+            with self.assertRaises(ProposalError):
+                with pipeline_lock(root):
+                    pass
+            pre_provider_check()
+            worker_provider_entries.append(run_id)
+            run_dir = real_worker_runner(
+                root,
+                t_path,
+                role,
+                run_id,
+                timeout,
+                proposal=proposal,
+                feedback=feedback,
+                test_evidence=test_evidence,
+                cli=cli,
+            )
+            w1_status_path = run_dir / "status.json"
+            st_data = json.loads(w1_status_path.read_text(encoding="utf-8"))
+            st_data["input_feedback_sha256"] = "0" * 64
+            w1_status_path.write_text(json.dumps(st_data), encoding="utf-8")
+            return run_dir
+
+        with self.assertRaises(AssertionError):
+            fake_once_runner(
+                self.root,
+                task_path,
+                "worker",
+                "omitted-run",
+                300,
+                pre_provider_check=None,
+            )
+        self.assertEqual(worker_provider_entries, [])
+
+        candidate_calls: list[str] = []
+        reviewer_calls: list[str] = []
+
+        def bad_run_candidate_tests(
+            root: Path,
+            task: dict[str, Any],
+            worker_res: dict[str, Any],
+            worker_sha: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            candidate_calls.append(worker_sha)
+            raise AssertionError("run_candidate_tests must not be called on fault")
+
+        def bad_run_provider_session(
+            root: Path,
+            t_path: Path,
+            role: str,
+            base_run_id: str,
+            timeout: int,
+            state_check: Any,
+            **kwargs: Any,
+        ) -> tuple[str, Path]:
+            reviewer_calls.append(base_run_id)
+            raise AssertionError("run_provider_session must not be called on fault")
+
+        with self._patched_dispatch_context(
+            env=env,
+            fake_continuation_ctx=fake_worker_correction_continuation_context,
+            runner_fn=fake_once_runner,
+            candidate_fn=bad_run_candidate_tests,
+            provider_fn=bad_run_provider_session,
+        ):
+            with self.assertRaises(ProposalError):
+                dispatch_quota_continuation_once(
+                    self.root, env["request"]
+                )
+
+        self.assertEqual(candidate_calls, [])
+        self.assertEqual(reviewer_calls, [])
+
+        with pipeline_lock(self.root):
+            pass
+
+        expected_w1_id = f"{new_prefix}-worker-1"
+        self.assertEqual(worker_provider_entries, [expected_w1_id])
+        self.assertNotEqual(expected_w1_id, old_w1_id)
+
+        new_w1_dir = self.root / ".local/two-site-refactor/proposals" / expected_w1_id
+        self.assertTrue(new_w1_dir.is_dir())
+        new_w1_status_path = new_w1_dir / "status.json"
+        self.assertTrue(new_w1_status_path.is_file())
+        tampered_status = json.loads(new_w1_status_path.read_text(encoding="utf-8"))
+        self.assertEqual(tampered_status["input_feedback_sha256"], "0" * 64)
+
+        self.assertEqual((w0_dir / "result.json").read_bytes(), old_w0_result_bytes)
+        if old_w0_status_bytes is not None:
+            self.assertEqual((w0_dir / "status.json").read_bytes(), old_w0_status_bytes)
+        self.assertEqual((old_w1_dir / "result.json").read_bytes(), old_w1_result_bytes)
+        self.assertEqual((old_w1_dir / "status.json").read_bytes(), old_w1_status_bytes)
+        self.assertEqual(feedback_path.read_bytes(), feedback_bytes)
+
+        self.assertFalse(
+            (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{expected_w1_id}-retry-1"
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{expected_w1_id}-retry-2"
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{new_prefix}-reviewer-1"
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{new_prefix}-reviewer-0"
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                self.root
+                / ".local/two-site-refactor/proposals"
+                / f"{new_prefix}-worker-2"
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                self.root
+                / ".local/two-site-refactor/pipeline"
+                / new_prefix
+                / "feedback-correction-2.json"
+            ).exists()
+        )
+
+    def test_worker_one_outer_once_join_negative_feedback_sha_drift_bootstrap(
+        self,
+    ) -> None:
+        self._run_negative_tamper_proof("BOOTSTRAP")
+
+    def test_worker_one_outer_once_join_negative_feedback_sha_drift_test_failed(
+        self,
+    ) -> None:
+        self._run_negative_tamper_proof("TEST_FAILED")
 
 
 if __name__ == "__main__":
