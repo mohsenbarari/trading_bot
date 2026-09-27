@@ -93,7 +93,6 @@ Discover optional memory without loading it. Entries here are not default loads.
 - `areas/offer-price-control.md` — load for estimator-range offer rejection,
   price-control tolerances, or offer-price guard rollout work.
 - `areas/telegram-delivery.md` — load for Queue-v1, Telegram execution ownership, bot/API delivery boundaries, OTP delivery, or Telegram runtime cutover work.
-- `areas/automation-efficiency.md` — load for AE00–AE06, Gemini Worker/Reviewer automation, Broker/Supervisor quota recovery, or efficiency evidence and recurrence guards.
 
 ## Optional rules
 `rules/` files load only when listed above and the task clearly matches.
