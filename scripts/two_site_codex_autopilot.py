@@ -2290,13 +2290,13 @@ def _validate_gemini_chain(
         root, worker_result_path, MAX_CONTEXT, "Gemini Worker result"
     )
     worker_snapshot = unique_json(bounded_file_text(
-        root, worker_dir / "task.json", 2 * MAX_CONTEXT, "Gemini Worker snapshot"
+        root, worker_dir / "task.json", 3 * MAX_CONTEXT, "Gemini Worker snapshot"
     ))
     worker_status = unique_json(bounded_file_text(
         root, worker_dir / "status.json", MAX_CONTEXT, "Gemini Worker status"
     ))
     reviewer_snapshot = unique_json(bounded_file_text(
-        root, reviewer_dir / "task.json", 2 * MAX_CONTEXT, "Gemini Reviewer snapshot"
+        root, reviewer_dir / "task.json", 3 * MAX_CONTEXT, "Gemini Reviewer snapshot"
     ))
     reviewer_result = unique_json(bounded_file_text(
         root, reviewer_result_path, MAX_CONTEXT, "Gemini Reviewer result"
