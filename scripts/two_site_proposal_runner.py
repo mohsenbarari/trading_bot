@@ -2882,7 +2882,7 @@ def serialize_json(value: dict) -> bytes:
 
 
 def _validate_task_snapshot_budget(material: dict) -> None:
-    if len(serialize_json(material)) > 2 * MAX_CONTEXT:
+    if len(serialize_json(material)) > 3 * MAX_CONTEXT:
         raise ProposalError("task snapshot exceeds context budget")
 
 
