@@ -58,9 +58,13 @@ except ImportError:
 
 def _setup_materialized_worker_two_env(
     tmp_path: Path,
+    *,
+    source_head: str = HEAD,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     root = tmp_path.resolve()
-    artifacts, evidence, task_path, orig_prefix = _build_materialized_env(root)
+    artifacts, evidence, task_path, orig_prefix = _build_materialized_env(
+        root, source_head=source_head
+    )
 
     w1_id = artifacts["final_worker_run_id"]
     w1_sha = artifacts["proposal_sha256"]
@@ -82,7 +86,7 @@ def _setup_materialized_worker_two_env(
         "findings": r1_findings,
         "conv_id": f"conv-{r1_id}",
     }
-    r1_runner, _ = make_runner(root, [r1_response])
+    r1_runner, _ = make_runner(root, [r1_response], source_head=source_head)
     r1_dir = r1_runner(
         root,
         task_path,
@@ -114,7 +118,7 @@ def _setup_materialized_worker_two_env(
         "content": "# worker-2 materialized correction\n",
         "conv_id": w2_conv_id,
     }
-    w2_runner, _ = make_runner(root, [w2_response])
+    w2_runner, _ = make_runner(root, [w2_response], source_head=source_head)
     w2_dir = w2_runner(
         root,
         task_path,
@@ -141,7 +145,7 @@ def _setup_materialized_worker_two_env(
     ctx = {
         "continuation_run_prefix": continuation_run_prefix,
         "task": copy.deepcopy(task_data),
-        "source_head": HEAD,
+        "source_head": source_head,
         "sources": {"src.py": {"sha256": src_sha, "content": src_content}},
         "admitted_task_path": task_path,
         "artifacts": artifacts,
@@ -151,7 +155,7 @@ def _setup_materialized_worker_two_env(
     returned_state = {
         "state": "WORKER_PROPOSAL_READY",
         "task_id": task_data["task_id"],
-        "source_head": HEAD,
+        "source_head": source_head,
         "final_worker_run_id": w2_id,
         "proposal_sha256": w2_sha,
         "changed_paths": w2_changed_paths,

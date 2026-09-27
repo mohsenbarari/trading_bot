@@ -88,6 +88,8 @@ def _patch_load_task():
 def _build_materialized_env(
     tmp_path: Path,
     orig_prefix: str = "run-20260925-mat",
+    *,
+    source_head: str = HEAD,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
     src_file = tmp_path / "src.py"
     src_file.write_text("# orig\n", encoding="utf-8")
@@ -113,7 +115,7 @@ def _build_materialized_env(
         },
         {"content": "# worker-1\n", "conv_id": "conv-w1"},
     ]
-    runner, _ = make_runner(tmp_path, responses)
+    runner, _ = make_runner(tmp_path, responses, source_head=source_head)
 
     w0_id = f"{orig_prefix}-worker-0"
     w0_dir = runner(tmp_path, task_path, "worker", w0_id, 300)
@@ -162,7 +164,7 @@ def _build_materialized_env(
 
     w1_artifacts = {
         "task_id": "T1",
-        "source_head": HEAD,
+        "source_head": source_head,
         "original_run_prefix": orig_prefix,
         "final_worker_run_id": w1_id,
         "proposal_path": f".local/two-site-refactor/proposals/{w1_id}/result.json",
@@ -182,7 +184,7 @@ def _build_materialized_env(
         "final_reviewer_run_id": r1_id,
         "proposal_sha256": w1_sha,
         "task_id": "T1",
-        "source_head": HEAD,
+        "source_head": source_head,
     }
     evidence = {
         "worker_info": w1_info,

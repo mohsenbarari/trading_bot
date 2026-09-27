@@ -17,12 +17,16 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 from typing import Any
 from unittest.mock import patch
 import pytest
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -34,6 +38,7 @@ try:
         broker_paths,
         expected_role_model,
         publish_terminal_quota_record,
+        read_terminal_quota_bytes,
         read_terminal_quota_record,
     )
     from scripts.two_site_quota_resume_worker_artifacts import (
@@ -49,6 +54,7 @@ except ImportError:
         broker_paths,
         expected_role_model,
         publish_terminal_quota_record,
+        read_terminal_quota_bytes,
         read_terminal_quota_record,
     )
     from two_site_quota_resume_worker_artifacts import (  # type: ignore[no-redef]
@@ -95,8 +101,12 @@ except ImportError:
 
 def _setup_materialized_worker_two_terminal_scenario(
     tmp_path: Path,
+    *,
+    source_head: str = HEAD,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any], Path, Path, dict[str, Any]]:
-    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(tmp_path)
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        tmp_path, source_head=source_head
+    )
     broker_paths(root)
 
     orig_prefix = meta["orig_prefix"]
@@ -117,14 +127,14 @@ def _setup_materialized_worker_two_terminal_scenario(
     # Reconcile Broker request with materialized lineage
     request = copy.deepcopy(sample_receipt["request"])
     request["run_prefix"] = orig_prefix
-    request["source_head"] = HEAD
+    request["source_head"] = source_head
     request["task_path"] = canonical_task_rel
     request["task_sha256"] = task_sha
     request["created_at"] = time.time()
 
     # Reconcile admitted continuation request lineage
     admitted_request["task_id"] = task_id
-    admitted_request["source_head"] = HEAD
+    admitted_request["source_head"] = source_head
     admitted_request["semantic_task_fingerprint"] = returned_state["semantic_task_fingerprint"]
     admitted_request["original_request_id"] = request["request_id"]
     admitted_request["original_controller_run_id"] = request["controller_run_id"]
@@ -138,7 +148,7 @@ def _setup_materialized_worker_two_terminal_scenario(
     receipt1_sha = hashlib.sha256(receipt1_path.read_bytes()).hexdigest()
 
     pipeline_state["task_id"] = task_id
-    pipeline_state["source_head"] = HEAD
+    pipeline_state["source_head"] = source_head
     pipeline_state["semantic_task_fingerprint"] = returned_state["semantic_task_fingerprint"]
     pipeline_state["correction_count"] = 1
     pipeline_state["final_worker_run_id"] = meta["w1_id"]
@@ -166,7 +176,7 @@ def _setup_materialized_worker_two_terminal_scenario(
         root,
         orig_w2_id,
         role="worker",
-        head=HEAD,
+        head=source_head,
         model=model,
         task_id=task_id,
         quota_evidence=quota_evidence,
@@ -186,15 +196,49 @@ def _setup_materialized_worker_two_terminal_scenario(
 
 
 def test_materialized_worker_two_terminal_receipt_publish_read_and_derive(tmp_path: Path) -> None:
+    root = tmp_path.resolve()
+
+    # Focused test Git repository and fixture share the SAME root
+    subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "Test User"], check=True, capture_output=True)
+    (root / "fixture_seed.txt").write_text("harmless test fixture seed\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "fixture_seed.txt"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-m", "fixture seed"], check=True, capture_output=True)
+    actual_head = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert len(actual_head) == 40
+
     (
         root,
         request,
         response,
         admitted_request,
         canonical_task_path,
-        _orig_status_path,
+        orig_status_path,
         meta,
-    ) = _setup_materialized_worker_two_terminal_scenario(tmp_path)
+    ) = _setup_materialized_worker_two_terminal_scenario(root, source_head=actual_head)
+
+    # After fixture materialization assert git -C root rev-parse HEAD still equals actual_head
+    head_after_materialization = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    assert head_after_materialization == actual_head
+
+    # Parse response['stdout'] directly
+    parsed_stdout = json.loads(response["stdout"])
+    assert parsed_stdout["state"] == "TASK_BLOCKED"
+    assert parsed_stdout["blockers"] == ["observational quota, no replay authority"]
+    assert parsed_stdout["source_head"] == actual_head
+    assert parsed_stdout["task_id"] == admitted_request["task_id"]
+
+    # Bind pipeline quota_attempt.status_sha256 to original status bytes
+    orig_status_raw_bytes = orig_status_path.read_bytes()
+    expected_status_sha = hashlib.sha256(orig_status_raw_bytes).hexdigest()
+    assert parsed_stdout["quota_attempt"]["status_sha256"] == expected_status_sha
+    assert parsed_stdout["quota_attempt"]["role"] == "worker"
+    assert parsed_stdout["quota_attempt"]["run_id"] == f"{meta['orig_prefix']}-worker-2"
 
     # 1. Real Broker publication and validated readback
     published_receipt = publish_terminal_quota_record(root, request, response)
@@ -204,6 +248,19 @@ def test_materialized_worker_two_terminal_receipt_publish_read_and_derive(tmp_pa
     assert read_receipt["request"] == request
     assert read_receipt["response"] == response
     assert read_receipt["quota_evidence"] == published_receipt["quota_evidence"]
+
+    # Read raw receipt via read_terminal_quota_bytes, compare raw bytes with canonical serialized published/read-back receipt
+    raw_receipt_bytes = read_terminal_quota_bytes(root, request["request_id"])
+    raw_receipt_sha = hashlib.sha256(raw_receipt_bytes).hexdigest()
+    assert json.loads(raw_receipt_bytes.decode("utf-8")) == read_receipt == published_receipt
+    canonical_published_bytes = json.dumps(
+        published_receipt, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    canonical_read_bytes = json.dumps(
+        read_receipt, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert raw_receipt_bytes == canonical_published_bytes
+    assert raw_receipt_bytes == canonical_read_bytes
 
     # Verify original attempted W2 quota status is distinct from continuation W2 proposal
     orig_w2_id = f"{meta['orig_prefix']}-worker-2"
@@ -224,7 +281,7 @@ def test_materialized_worker_two_terminal_receipt_publish_read_and_derive(tmp_pa
     assert derived_artifacts["pre_review_test_path"] == f".local/two-site-refactor/pipeline/{meta['orig_prefix']}/pre-review-tests-1.json"
     assert derived_artifacts["expected_feedback_path"] == f".local/two-site-refactor/pipeline/{meta['orig_prefix']}/feedback-correction-2.json"
     assert derived_artifacts["task_id"] == admitted_request["task_id"]
-    assert derived_artifacts["source_head"] == HEAD
+    assert derived_artifacts["source_head"] == actual_head
     assert derived_artifacts["semantic_task_fingerprint"] == admitted_request["semantic_task_fingerprint"]
     assert derived_artifacts["attempted_run_id"] == orig_w2_id
     assert derived_artifacts["quota_evidence"] == read_receipt["quota_evidence"]
@@ -245,6 +302,39 @@ def test_materialized_worker_two_terminal_receipt_publish_read_and_derive(tmp_pa
     assert loaded_evidence["worker_info"]["result_sha"] == meta["w1_sha"]
     assert loaded_evidence["reviewer_status"]["run_id"] == meta["r1_id"]
     assert loaded_evidence["reviewer_result"]["status"] == "CHANGES_REQUIRED"
+
+    # Assert stable raw bytes/SHA after artifact derivation
+    receipt_bytes_post = read_terminal_quota_bytes(root, request["request_id"])
+    assert receipt_bytes_post == raw_receipt_bytes
+    assert hashlib.sha256(receipt_bytes_post).hexdigest() == raw_receipt_sha
+    assert orig_status_path.read_bytes() == orig_status_raw_bytes
+    assert hashlib.sha256(orig_status_path.read_bytes()).hexdigest() == expected_status_sha
+
+    # Assert each W0/R0/W1/R1/W2 task/status head equals same root HEAD
+    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+    w0_id = f"{meta['orig_prefix']}-worker-0"
+    r0_id = f"{meta['orig_prefix']}-reviewer-0"
+    w1_id = meta["w1_id"]
+    r1_id = meta["r1_id"]
+    w2_id = meta["w2_id"]
+
+    for run_id in (w0_id, r0_id, w1_id, r1_id, w2_id):
+        run_st = json.loads((proposals_dir / run_id / "status.json").read_text(encoding="utf-8"))
+        run_task = json.loads((proposals_dir / run_id / "task.json").read_text(encoding="utf-8"))
+        assert run_st["head"] == actual_head
+        assert run_task["source_head"] == actual_head
+
+    # Also check the attempted W2 quota-blocked status witness head
+    orig_w2_st = json.loads(orig_status_path.read_text(encoding="utf-8"))
+    assert orig_w2_st["head"] == actual_head
+
+    # Assert request/admitted/pipeline/read-receipt/derived artifacts same root HEAD
+    assert request["source_head"] == actual_head
+    assert admitted_request["source_head"] == actual_head
+    assert parsed_stdout["source_head"] == actual_head
+    assert read_receipt["request"]["source_head"] == actual_head
+    assert derived_artifacts["source_head"] == actual_head
+    assert loaded_evidence["artifacts"]["source_head"] == actual_head
 
 
 def test_materialized_worker_two_terminal_receipt_rejects_tampered_original_status(

@@ -68,7 +68,7 @@ def passed_receipt(worker_sha: str) -> dict:
     return pipeline.validate_test_receipt(raw, worker_sha, require_passed=True)
 
 
-def make_runner(root: Path, responses: list[dict]):
+def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
     calls = []
     src_sha = file_sha256(root / "src.py")
 
@@ -87,7 +87,7 @@ def make_runner(root: Path, responses: list[dict]):
         write_json(out / "result.json", result)
         res_sha = file_sha256(out / "result.json")
 
-        snapshot = {"source_head": HEAD, "task": json.loads((root / "task.json").read_text()),
+        snapshot = {"source_head": source_head, "task": json.loads((root / "task.json").read_text()),
                     "sources": {"src.py": {"sha256": src_sha, "content": "# orig\n"}}}
         if proposal is not None:
             snapshot["proposal"] = proposal.read_text()
@@ -97,7 +97,7 @@ def make_runner(root: Path, responses: list[dict]):
             snapshot.update(resp["task_override"])
         write_json(out / "task.json", snapshot)
 
-        st = {"run_id": run_id, "task_id": snapshot["task"].get("task_id"), "role": role, "head": HEAD,
+        st = {"run_id": run_id, "task_id": snapshot["task"].get("task_id"), "role": role, "head": source_head,
               "model": WORKER_MODEL if role == "worker" else MODEL,
               "result_sha256": res_sha, "conversation_id": resp.get("conv_id", f"conv-{run_id}"),
               "state": st_val}
