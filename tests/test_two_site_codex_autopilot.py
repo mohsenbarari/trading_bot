@@ -421,17 +421,27 @@ class AutopilotContracts(unittest.TestCase):
         worker_status["model"] = "claude-opus-4-6-thinking"
         proposal_runner.write_json(worker_dir / "status.json", worker_status)
 
-        with patch.object(autopilot, "expected_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+        worker_task = json.loads((worker_dir / "task.json").read_text())
+        with patch.object(autopilot, "expected_bound_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
             validated = autopilot.validate_gemini_chain(self.root, "a" * 40, result)
         self.assertEqual(validated, worker_result)
-        mock_expected.assert_called_once_with("worker", "CHAIN-001")
+        mock_expected.assert_called_once_with(
+            self.root, "worker", result["gemini_worker_run_id"], "a" * 40,
+            worker_task["task"], worker_task["sources"], worker_status,
+        )
 
     def test_gemini_chain_rejects_forged_gemini_worker_status_for_routed_opus_task(self):
         result, _, _ = self.gemini_chain()
-        with patch.object(autopilot, "expected_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+        worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
+        worker_task = json.loads((worker_dir / "task.json").read_text())
+        worker_status = json.loads((worker_dir / "status.json").read_text())
+        with patch.object(autopilot, "expected_bound_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
             with self.assertRaisesRegex(autopilot.AutopilotError, "evidence is not exactly bound"):
                 autopilot.validate_gemini_chain(self.root, "a" * 40, result)
-        mock_expected.assert_called_once_with("worker", "CHAIN-001")
+        mock_expected.assert_called_once_with(
+            self.root, "worker", result["gemini_worker_run_id"], "a" * 40,
+            worker_task["task"], worker_task["sources"], worker_status,
+        )
 
     def test_gemini_chain_rejects_opus_worker_with_forged_opus_reviewer_status(self):
         result, _, reviewer_dir = self.gemini_chain()
@@ -444,10 +454,14 @@ class AutopilotContracts(unittest.TestCase):
         reviewer_status["model"] = "claude-opus-4-6-thinking"
         proposal_runner.write_json(reviewer_dir / "status.json", reviewer_status)
 
-        with patch.object(autopilot, "expected_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+        worker_task = json.loads((worker_dir / "task.json").read_text())
+        with patch.object(autopilot, "expected_bound_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
             with self.assertRaisesRegex(autopilot.AutopilotError, "evidence is not exactly bound"):
                 autopilot.validate_gemini_chain(self.root, "a" * 40, result)
-        mock_expected.assert_called_once_with("worker", "CHAIN-001")
+        mock_expected.assert_called_once_with(
+            self.root, "worker", result["gemini_worker_run_id"], "a" * 40,
+            worker_task["task"], worker_task["sources"], worker_status,
+        )
 
     def test_gemini_chain_rejects_missing_or_invalid_snapshot_task_id_before_model_fallback(self):
         result, _, reviewer_dir = self.gemini_chain()
@@ -468,7 +482,7 @@ class AutopilotContracts(unittest.TestCase):
                 proposal_runner.write_json(worker_dir / "task.json", worker_task_data)
                 proposal_runner.write_json(reviewer_dir / "task.json", reviewer_task_data)
 
-                with patch.object(autopilot, "expected_role_model") as mock_expected:
+                with patch.object(autopilot, "expected_bound_role_model") as mock_expected:
                     with self.assertRaisesRegex(autopilot.AutopilotError, "snapshot is incomplete"):
                         autopilot.validate_gemini_chain(self.root, "a" * 40, result)
                     mock_expected.assert_not_called()

@@ -59,9 +59,9 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         write_json,
     )
 try:
-    from scripts.two_site_proposal_pipeline import expected_role_model
+    from scripts.two_site_proposal_pipeline import expected_bound_role_model
 except ModuleNotFoundError:  # Direct `python scripts/...` execution.
-    from two_site_proposal_pipeline import expected_role_model  # type: ignore[no-redef]
+    from two_site_proposal_pipeline import expected_bound_role_model  # type: ignore[no-redef]
 try:
     from scripts.two_site_assignment_scope import (
         AssignmentScope,
@@ -2340,7 +2340,7 @@ def _validate_gemini_chain(
             or worker_status.get("run_id") != result["gemini_worker_run_id"]
             or worker_status.get("role") != "worker"
             or worker_status.get("state") != "PROPOSAL_READY"
-            or worker_status.get("model") != expected_role_model("worker", task_id)
+            or worker_status.get("model") != expected_bound_role_model(root, "worker", result["gemini_worker_run_id"], source_head, task, sources, worker_status)
             or worker_status.get("head") != source_head
             or worker_status.get("result_sha256") != proposal_sha256
             or reviewer_status.get("run_id") != result["gemini_reviewer_run_id"]
