@@ -78,7 +78,14 @@
 - `tests/test_two_site_quota_common_wait_claim_join_fileproof.py` joins the real canonical Broker/Assignment/task and persisted semantic attempt to real pending-intent, wait-file, claim-file and continuation-admission readers. The positive case succeeds; a `0644` wait file fails closed after common validation, before claim acceptance.
 - The only patched sources are Autopilot repository-fact collection for the tiny fixture and `collect_initial_wait_source_expected`. Original terminal-receipt/response hashes are synthetic, **not** real receipt evidence. This is not a complete original-provider provenance proof.
 - Gemini Worker and independent Reviewer passed first try; Codex checked exact SHA/bytes and 1,034 quota-family tests passed.
-- Still open: real original wait-source collector and terminal receipt in this same chain, common→W2 outer join, candidate sandbox/Provider, Broker/Supervisor live hook, STOP/race/crash cohorts, replay authority and C5d completion. Sentinel: `observational quota, no replay authority`.
+- At this checkpoint the real original wait-source collector and terminal receipt were still open; Section 1.7 closes that hermetic storage/source join. Common→W2 outer join, candidate sandbox/Provider, Broker/Supervisor live hook, STOP/race/crash cohorts, replay authority and C5d completion remain open. Sentinel: `observational quota, no replay authority`.
+
+### 1.7 Real Terminal Receipt and Initial Source Collector Join (Commit c536f4ee)
+
+- `tests/test_two_site_quota_real_source_join_fileproof.py` connects the canonical Broker/Task/Assignment/semantic fixture to a real persisted cycle reservation, terminal-quota receipt, unpatched `collect_initial_wait_source_expected`, unpatched `admit_initial_quota_wait_locked`, persisted wait/claim, and unpatched continuation admission. A post-receipt status-witness tamper fails closed before wait/claim publication.
+- The original quota Provider payload is synthetic test data, not a live Provider run. Only the two module-local Autopilot `validate_repository` calls are patched to accepted facts because the tiny fixture lacks the full control-file tree. No terminal receipt, collector, Broker common validator, task/semantic/wait/claim reader or admission function is patched.
+- Gemini Worker needed two bounded test-gate corrections for nonexistent receipt keys; independent Reviewer then verified the exact proposal. Codex checked SHA/bytes and 1,036 quota-family tests passed.
+- Still open: real unpatched Autopilot repository facts on a full control tree, live Provider/candidate sandbox, common→W2 outer join, Broker/Supervisor live hook, STOP/race/crash cohorts, replay authority and C5d completion. Sentinel: `observational quota, no replay authority`.
 
 ## 2. Persisted State Fields at Pipeline Quota Block
 
