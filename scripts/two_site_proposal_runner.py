@@ -94,6 +94,17 @@ except ImportError:
     from two_site_pre_review_receipt import validate_test_receipt
 
 try:
+    from scripts.two_site_opus_fallback_receipt import (
+        OpusReceiptValidationError,
+        validate_opus_failure_receipt,
+    )
+except ImportError:
+    from two_site_opus_fallback_receipt import (
+        OpusReceiptValidationError,
+        validate_opus_failure_receipt,
+    )
+
+try:
     from scripts.two_site_readiness_contract import (
         _MODEL_CONTEXT_CODES,
         _READINESS_ISSUE_DETAILS,
@@ -2513,7 +2524,7 @@ def load_prior_worker(
 ) -> tuple[dict, dict, str]:
     """Bind a review/correction to one complete worker run and exact proposal bytes."""
     baseline = unique_json(bounded_file_text(
-        root, proposal_path.with_name("task.json"), 2 * MAX_CONTEXT, "worker snapshot"
+        root, proposal_path.with_name("task.json"), 3 * MAX_CONTEXT, "worker snapshot"
     ))
     worker_status = unique_json(bounded_file_text(
         root, proposal_path.with_name("status.json"), MAX_CONTEXT, "worker status"
@@ -2536,6 +2547,47 @@ def load_prior_worker(
     if candidate["status"] != "PROPOSAL_READY":
         raise ProposalError("review/correction requires a complete worker proposal")
     return candidate, worker_status, proposal_sha256
+
+
+def _load_bound_opus_fallback_receipt(
+    root: Path,
+    failed_id: str,
+    task: dict,
+    sources: dict,
+    head: str,
+    controller_id: str,
+) -> dict:
+    if (
+        not isinstance(failed_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", failed_id)
+    ):
+        raise ProposalError("invalid failed run ID")
+    if not isinstance(controller_id, str) or not controller_id.strip():
+        raise ProposalError("nonempty controller ID required for fallback")
+
+    failed_dir = root / ".local/two-site-refactor/proposals" / failed_id
+    status_raw = bounded_file_bytes(root, failed_dir / "status.json", MAX_CONTEXT, "failed status")
+    task_raw = bounded_file_bytes(root, failed_dir / "task.json", 3 * MAX_CONTEXT, "failed task")
+    stream_raw = bounded_file_bytes(root, failed_dir / "stream.jsonl", MAX_OUTPUT, "failed stream")
+
+    try:
+        receipt = validate_opus_failure_receipt(
+            status_raw,
+            task_raw,
+            stream_raw,
+            expected_run_id=failed_id,
+            expected_task=task,
+            expected_sources=sources,
+            expected_head=head,
+        )
+    except OpusReceiptValidationError as exc:
+        raise ProposalError(f"invalid Opus failure receipt: {exc}") from exc
+
+    status_obj = unique_json(status_raw.decode("utf-8"))
+    if not isinstance(status_obj, dict) or status_obj.get("controller_run_id") != controller_id:
+        raise ProposalError("failed run controller run ID does not match current controller")
+
+    return receipt
 
 
 def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
@@ -2918,7 +2970,8 @@ def write_json(path: Path, value: dict) -> None:
 def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         feedback: Path | None = None, proposal: Path | None = None,
         cli: Path | None = None, test_evidence: Path | None = None,
-        *, pre_provider_check: Callable[[], None] | None = None) -> Path:
+        *, pre_provider_check: Callable[[], None] | None = None,
+        fallback_from_run_id: str | None = None) -> Path:
     root = root.resolve(strict=True)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", run_id) or not 10 <= timeout <= 900:
         raise ProposalError("invalid run ID or timeout")
@@ -2956,6 +3009,28 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     )
     validate_task_readiness(prep_notes)
     head = git(root, "rev-parse", "HEAD")
+    fallback_receipt = None
+    if fallback_from_run_id is not None:
+        if role != "worker":
+            raise ProposalError("fallback is only supported for worker role")
+        if not policy.enabled:
+            raise ProposalError("worker routing policy is disabled")
+        if role_model != policy.model:
+            raise ProposalError("selected route model does not match policy model")
+        if not isinstance(autopilot_run_id, str) or not autopilot_run_id.strip():
+            raise ProposalError("nonempty controller ID required for fallback")
+        if (
+            not isinstance(fallback_from_run_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", fallback_from_run_id)
+        ):
+            raise ProposalError("invalid failed run ID")
+        if run_id != f"{fallback_from_run_id}-gf" or len(run_id) > 80:
+            raise ProposalError("fallback run ID must be exactly failed_id + '-gf' and at most 80 characters")
+        fallback_receipt = _load_bound_opus_fallback_receipt(
+            root, fallback_from_run_id, task, sources, head, autopilot_run_id
+        )
+        role_model = WORKER_MODEL
+        role_effort = WORKER_EFFORT
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
     material = {"task": task, "source_head": head, "sources": sources}
     input_hashes = {}
@@ -3072,6 +3147,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             meta["review_transport_sha256"] = review_transport_sha
         if candidate_sources_sha256 is not None:
             meta["candidate_sources_sha256"] = candidate_sources_sha256
+        if fallback_from_run_id is not None:
+            meta["fallback_from_run_id"] = fallback_from_run_id
+            meta["fallback_receipt"] = fallback_receipt
         write_json(out / "status.json", meta)
         active_sources = candidate_sources if candidate_sources is not None else sources
         effort_args = ["--effort", role_effort]
@@ -3151,6 +3229,17 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             current_task, current_sources = load_task(root, task_path)
             if current_task != task or current_sources != sources:
                 raise ProposalError("task or source bytes changed during generation")
+            if fallback_from_run_id is not None:
+                rechecked_receipt = _load_bound_opus_fallback_receipt(
+                    root,
+                    fallback_from_run_id,
+                    task,
+                    sources,
+                    head,
+                    autopilot_run_id,
+                )
+                if rechecked_receipt != fallback_receipt:
+                    raise ProposalError("Opus fallback receipt changed during execution")
             if candidate_sources is not None:
                 if result.get("status") != "PROPOSAL_READY":
                     raise ProposalError("correction delta proposal is not ready")
