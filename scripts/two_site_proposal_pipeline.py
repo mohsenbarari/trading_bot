@@ -616,7 +616,7 @@ def validate_run(
     expected_test_receipt: dict | None = None, expected_test_evidence_sha: str | None = None,
 ) -> tuple[dict, dict, str, str]:
     status = unique_json(bounded_file_text(root, run_dir / "status.json", MAX_CONTEXT, f"{role} status"))
-    snapshot = unique_json(bounded_file_text(root, run_dir / "task.json", 2 * MAX_CONTEXT, f"{role} task"))
+    snapshot = unique_json(bounded_file_text(root, run_dir / "task.json", 3 * MAX_CONTEXT, f"{role} task"))
     raw_result_bytes = bounded_file_bytes(root, run_dir / "result.json", MAX_CONTEXT, f"{role} result")
     result_text = raw_result_bytes.decode("utf-8")
     result = unique_json(result_text)
