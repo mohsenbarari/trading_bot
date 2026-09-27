@@ -36,7 +36,10 @@ try:
     from scripts.two_site_proposal_pipeline import ProposalError
     from scripts.two_site_proposal_runner import load_task
     from scripts.two_site_quota_resume_worker_reader import load_prior_worker_chain
-    from scripts.two_site_semantic_attempts import MARKER
+    from scripts.two_site_semantic_attempts import (
+        MARKER,
+        extract_semantic_identity,
+    )
     from scripts.two_site_semantic_task_builder import build_task_identity
 except ImportError:
     from two_site_proposal_pipeline import ProposalError  # type: ignore[no-redef]
@@ -44,9 +47,33 @@ except ImportError:
     from two_site_quota_resume_worker_reader import (  # type: ignore[no-redef]
         load_prior_worker_chain,
     )
-    from two_site_semantic_attempts import MARKER  # type: ignore[no-redef]
+    from two_site_semantic_attempts import (  # type: ignore[no-redef]
+        MARKER,
+        extract_semantic_identity,
+    )
     from two_site_semantic_task_builder import (  # type: ignore[no-redef]
         build_task_identity,
+    )
+
+try:
+    from scripts.two_site_provider_broker import BrokerError, validate_request
+except ImportError:
+    from two_site_provider_broker import (  # type: ignore[no-redef]
+        BrokerError,
+        validate_request,
+    )
+
+try:
+    from scripts.two_site_codex_autopilot import (
+        PROTECTED_REFS,
+        validate_accepted_repository,
+        validate_repository,
+    )
+except ImportError:
+    from two_site_codex_autopilot import (  # type: ignore[no-redef]
+        PROTECTED_REFS,
+        validate_accepted_repository,
+        validate_repository,
     )
 
 try:
@@ -73,6 +100,13 @@ from tests.test_two_site_assignment_scope_core import (
     _write_assignment,
     _write_worktrees,
     valid_repo,
+)
+from tests.test_two_site_provider_broker import broker_repo
+from tests.test_two_site_quota_full_tree_repository_facts import (
+    _populate_full_tree_repo,
+)
+from tests.test_two_site_quota_join_semantic_fixture import (
+    setup_two_site_quota_join_semantic_fixture,
 )
 from tests.test_two_site_quota_resume_worker_two_fileproof import (
     _setup_materialized_worker_two_env,
@@ -893,3 +927,174 @@ def test_real_source_join_unsafe_allowed_target_rejected_negative(
     assert list(valid_repo.glob("**/result.json")) == []
     assert list(valid_repo.glob("**/status.json")) == []
     assert not hasattr(load_task, "mock_calls")
+
+
+def test_two_site_quota_common_root_broker_worker_two_identity_positive(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    root, task, original_scope, original_environment = broker_repo
+
+    _populate_full_tree_repo(root)
+    fixture = setup_two_site_quota_join_semantic_fixture(
+        root, task, original_scope, original_environment
+    )
+
+    request = fixture["request"]
+    head = fixture["head"]
+    scope = fixture["actual_scope"]
+    loaded_task = fixture["loaded_task"]
+    persisted = fixture["persisted_attempt"]
+
+    for ref in PROTECTED_REFS:
+        subprocess.run(["git", "-C", str(root), "update-ref", ref, head], check=True)
+
+    val_req, val_task_path, val_scope = validate_request(root, request)
+    assert val_req == request
+    assert val_task_path == task
+    assert val_scope == scope
+
+    facts = validate_repository(root)
+    assert facts["head"] == head
+    assert facts["status"] == ""
+    accepted_facts = validate_accepted_repository(facts)
+    assert accepted_facts is None or isinstance(accepted_facts, dict)
+
+    canonical_task_bytes = task.read_bytes()
+    canonical_task_sha = hashlib.sha256(canonical_task_bytes).hexdigest()
+    assert request["task_sha256"] == canonical_task_sha
+
+    mat_root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        root,
+        task_data=loaded_task,
+        source_head=request["source_head"],
+        admitted_task_path=task,
+        original_run_prefix=request["run_prefix"],
+    )
+
+    res = read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    assert mat_root == root
+    assert ctx["admitted_task_path"] == task.resolve()
+    assert val_task_path.resolve() == task.resolve()
+
+    assert request["source_head"] == head
+    assert returned_state["source_head"] == head
+    assert ctx["source_head"] == head
+    assert facts["head"] == head
+
+    assert request["assignment_id"] == scope.assignment_id
+    assert request["assignment_sha256"] == scope.sha256
+    assert loaded_task["task_id"] == returned_state["task_id"]
+    assert persisted["task_id"] == loaded_task["task_id"]
+
+    assert request["task_sha256"] == canonical_task_sha
+    assert hashlib.sha256(task.read_bytes()).hexdigest() == canonical_task_sha
+    assert task.read_bytes() == canonical_task_bytes
+
+    assert meta["orig_prefix"] == request["run_prefix"]
+    assert meta["continuation_run_prefix"] == f"{request['run_prefix']}-cont"
+    assert ctx["continuation_run_prefix"] == f"{request['run_prefix']}-cont"
+    assert returned_state["final_worker_run_id"] == meta["w2_id"]
+    assert meta["w2_id"] == f"{request['run_prefix']}-cont-worker-2"
+
+    actual_identity = extract_semantic_identity(loaded_task)
+    expected_fingerprint = actual_identity["fingerprint"]
+    assert persisted["fingerprint"] == expected_fingerprint
+    assert returned_state["semantic_task_fingerprint"] == expected_fingerprint
+    assert ctx["artifacts"]["semantic_task_fingerprint"] == expected_fingerprint
+
+    assert task.read_bytes() == canonical_task_bytes
+    assert hashlib.sha256(task.read_bytes()).hexdigest() == canonical_task_sha
+
+    assert not (root / "task.json").exists()
+
+    real_task, real_sources = load_task(root, task)
+    assert ctx["task"] == real_task
+    assert ctx["sources"] == real_sources
+    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+    for run_id in (
+        f"{meta['orig_prefix']}-worker-0",
+        f"{meta['orig_prefix']}-reviewer-0",
+        meta["w1_id"],
+        meta["r1_id"],
+        meta["w2_id"],
+    ):
+        snap = json.loads((proposals_dir / run_id / "task.json").read_text(encoding="utf-8"))
+        assert snap["task"] == real_task
+        assert snap["sources"] == real_sources
+        assert snap["source_head"] == head
+
+    expected_target = "tests/test_new.py"
+    assert loaded_task["allowed_files"] == [expected_target]
+    assert expected_target != "src.py"
+    assert returned_state["changed_paths"] == [expected_target]
+    assert res["worker_info"]["result"]["changes"][0]["path"] == expected_target
+    for run_id in (
+        f"{meta['orig_prefix']}-worker-0",
+        meta["w1_id"],
+        meta["w2_id"],
+    ):
+        snap_res = json.loads((proposals_dir / run_id / "result.json").read_text(encoding="utf-8"))
+        assert len(snap_res["changes"]) == 1
+        assert snap_res["changes"][0]["path"] == expected_target
+        assert snap_res["changes"][0]["path"] != "src.py"
+
+
+def test_two_site_quota_common_root_post_materialization_task_tamper_rejected_negative(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    root, task, original_scope, original_environment = broker_repo
+
+    _populate_full_tree_repo(root)
+    fixture = setup_two_site_quota_join_semantic_fixture(
+        root, task, original_scope, original_environment
+    )
+
+    request = fixture["request"]
+    head = fixture["head"]
+    loaded_task = fixture["loaded_task"]
+
+    for ref in PROTECTED_REFS:
+        subprocess.run(["git", "-C", str(root), "update-ref", ref, head], check=True)
+
+    mat_root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        root,
+        task_data=loaded_task,
+        source_head=request["source_head"],
+        admitted_task_path=task,
+        original_run_prefix=request["run_prefix"],
+    )
+
+    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+    all_runs = [
+        f"{meta['orig_prefix']}-worker-0",
+        f"{meta['orig_prefix']}-reviewer-0",
+        meta["w1_id"],
+        meta["r1_id"],
+        meta["w2_id"],
+    ]
+    prior_snapshots = {
+        run_id: (
+            (proposals_dir / run_id / "result.json").read_bytes(),
+            (proposals_dir / run_id / "status.json").read_bytes(),
+            (proposals_dir / run_id / "task.json").read_bytes(),
+        )
+        for run_id in all_runs
+    }
+
+    orig_task_bytes = task.read_bytes()
+    tampered_bytes = orig_task_bytes + b"\n"
+    assert hashlib.sha256(tampered_bytes).hexdigest() != request["task_sha256"]
+    task.write_bytes(tampered_bytes)
+
+    with pytest.raises(BrokerError, match="broker task SHA drift"):
+        validate_request(root, request)
+
+    for run_id, (res_bytes, st_bytes, task_bytes) in prior_snapshots.items():
+        assert (proposals_dir / run_id / "result.json").read_bytes() == res_bytes
+        assert (proposals_dir / run_id / "status.json").read_bytes() == st_bytes
+        assert (proposals_dir / run_id / "task.json").read_bytes() == task_bytes
+
+    r2_id = f"{meta['continuation_run_prefix']}-reviewer-2"
+    assert not (proposals_dir / r2_id).exists()
+    assert not (root / "task.json").exists()

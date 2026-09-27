@@ -15,11 +15,15 @@ try:
     from scripts.two_site_quota_resume_worker_two_file_reader import (
         read_and_bind_worker_two_result,
     )
+    from scripts.two_site_semantic_attempts import extract_semantic_identity
 except ImportError:
     from two_site_proposal_pipeline import ProposalError  # type: ignore[no-redef]
     from two_site_proposal_runner import load_task  # type: ignore[no-redef]
     from two_site_quota_resume_worker_two_file_reader import (  # type: ignore[no-redef]
         read_and_bind_worker_two_result,
+    )
+    from two_site_semantic_attempts import (  # type: ignore[no-redef]
+        extract_semantic_identity,
     )
 
 try:
@@ -64,13 +68,19 @@ def _setup_materialized_worker_two_env(
     source_head: str = HEAD,
     task_data: dict[str, Any] | None = None,
     admitted_task_path: Path | str | None = None,
+    original_run_prefix: str | None = None,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     root = tmp_path.resolve()
+    build_kwargs: dict[str, Any] = {
+        "source_head": source_head,
+        "task_data": task_data,
+        "admitted_task_path": admitted_task_path,
+    }
+    if original_run_prefix is not None:
+        build_kwargs["orig_prefix"] = original_run_prefix
     artifacts, evidence, task_path, orig_prefix = _build_materialized_env(
         root,
-        source_head=source_head,
-        task_data=task_data,
-        admitted_task_path=admitted_task_path,
+        **build_kwargs,
     )
 
     if task_data is not None:
@@ -150,7 +160,11 @@ def _setup_materialized_worker_two_env(
     w2_result = json.loads(w2_result_raw.decode("utf-8"))
     w2_changed_paths = [c["path"] for c in w2_result.get("changes", [])]
 
-    sem_fingerprint = "ae03-c5d-w2-fingerprint-20260926"
+    if task_data is not None and actual_task is not None:
+        sem_identity = extract_semantic_identity(actual_task)
+        sem_fingerprint = sem_identity["fingerprint"]
+    else:
+        sem_fingerprint = "ae03-c5d-w2-fingerprint-20260926"
     artifacts["semantic_task_fingerprint"] = sem_fingerprint
     evidence["feedback_sha"] = fb2_sha
 
