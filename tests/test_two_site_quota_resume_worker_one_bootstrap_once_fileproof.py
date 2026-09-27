@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Proof of worker-1 BOOTSTRAP continuation under pipeline lock.
+"""Proof of worker-1 BOOTSTRAP and TEST_FAILED continuation under pipeline lock.
 
 Discloses mocked acquisition/receipt/artifact/evidence/state/ref/runner seams and
 bounded offline limits (observational quota, no replay authority; no outer, live,
@@ -54,13 +54,20 @@ class TestTwoSiteQuotaResumeWorkerOneBootstrapOnceFileproof(unittest.TestCase):
     def tearDown(self) -> None:
         self.helper.tearDown()
 
-    def test_worker_one_bootstrap_once_fileproof(self) -> None:
+    def _prove_origin(self, origin: str) -> None:
         ctx, _, _, _, fb_sha, _ = (
-            self.helper._setup_test_gate_scenario("BOOTSTRAP")
+            self.helper._setup_test_gate_scenario(origin)
         )
+        self.assertEqual(ctx["artifacts"]["correction_origin"], origin)
+        self.assertEqual(ctx["evidence"]["feedback"]["reviewer"], "test-gate")
+        if origin == "BOOTSTRAP":
+            self.assertIsNone(ctx["evidence"]["receipt"])
+        else:
+            self.assertEqual(ctx["evidence"]["receipt"]["state"], "FAILED")
 
-        new_prefix = "boot-once-resume"
-        ctx["original_run_prefix"] = "proof-gate-bootstrap"
+        origin_lower = origin.lower()
+        new_prefix = f"{origin_lower}-once-resume"
+        ctx["original_run_prefix"] = f"proof-gate-{origin_lower}"
         ctx["continuation_run_prefix"] = new_prefix
 
         w0_run_id = ctx["artifacts"]["final_worker_run_id"]
@@ -71,17 +78,17 @@ class TestTwoSiteQuotaResumeWorkerOneBootstrapOnceFileproof(unittest.TestCase):
         ctx["artifacts"]["proposal_path"] = (
             f".local/two-site-refactor/proposals/{w0_run_id}/result.json"
         )
-        ctx["evidence"]["feedback_path"] = "feedback-bootstrap.json"
+        ctx["evidence"]["feedback_path"] = f"feedback-{origin_lower}.json"
 
         task_path = self.root / "task.json"
         ctx["admitted_task_path"] = task_path
         ctx["admitted_request"] = {
             "role": "worker",
             "timeout": 300,
-            "original_request_id": "orig-bootstrap-req",
+            "original_request_id": f"orig-{origin_lower}-req",
         }
         ctx["original_terminal_receipt"] = {
-            "terminal_quota": "receipt-bootstrap"
+            "terminal_quota": f"receipt-{origin_lower}"
         }
         initial_refs = {
             "refs/heads/main": "0123456789abcdef0123456789abcdef01234567"
@@ -198,6 +205,12 @@ class TestTwoSiteQuotaResumeWorkerOneBootstrapOnceFileproof(unittest.TestCase):
         self.assertNotEqual(
             w1_status["conversation_id"], w0_status["conversation_id"]
         )
+
+    def test_worker_one_bootstrap_once_fileproof(self) -> None:
+        self._prove_origin("BOOTSTRAP")
+
+    def test_worker_one_test_failed_once_fileproof(self) -> None:
+        self._prove_origin("TEST_FAILED")
 
 
 if __name__ == "__main__":
