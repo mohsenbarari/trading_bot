@@ -47,8 +47,20 @@ except ImportError:
         build_task_identity,
     )
 
+try:
+    from scripts.two_site_assignment_scope import (
+        AssignmentScopeError,
+        load_active_assignment_scope,
+    )
+except ImportError:
+    from two_site_assignment_scope import (  # type: ignore[no-redef]
+        AssignmentScopeError,
+        load_active_assignment_scope,
+    )
+
 from tests.test_two_site_assignment_scope_core import (
     _write_assignment,
+    _write_worktrees,
     valid_repo,
 )
 from tests.test_two_site_quota_resume_worker_two_history_materialized import (
@@ -58,7 +70,19 @@ from tests.test_two_site_quota_resume_worker_two_history_materialized import (
 
 def _setup_repo_and_task(repo: Path) -> tuple[dict[str, Any], str]:
     assignment_id = "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
-    _write_assignment(repo, assignment_id=assignment_id)
+    _write_assignment(
+        repo,
+        assignment_id=assignment_id,
+        allowed_paths=["src.py", "output.py"],
+        forbidden_paths=["tests/test_bot_trade_execute_local_success.py"],
+    )
+    _write_worktrees(repo, active_assignment_id=assignment_id)
+    scope = load_active_assignment_scope(repo)
+    assert scope.assignment_id == assignment_id
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert scope.forbidden_paths == (
+        "tests/test_bot_trade_execute_local_success.py",
+    )
 
     (repo / ".gitignore").write_text(".local/\n", encoding="utf-8")
     (repo / "src.py").write_text("# real worker source\n", encoding="utf-8")
@@ -133,8 +157,21 @@ def _setup_repo_and_task(repo: Path) -> tuple[dict[str, Any], str]:
     return task_data, head
 
 
-def test_real_source_join_snapshots_positive(valid_repo: Path) -> None:
+def test_real_source_join_snapshots_positive(
+    valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", scope.sha256)
 
     task_path = valid_repo / "task.json"
     task_path.write_text(json.dumps(task_data), encoding="utf-8")
@@ -185,8 +222,19 @@ def test_real_source_join_snapshots_positive(valid_repo: Path) -> None:
 
 def test_real_source_join_tamper_w1_snapshot_rejected_negative(
     valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", scope.sha256)
 
     artifacts, _, task_path, orig_prefix = _build_materialized_env(
         valid_repo,
@@ -226,3 +274,34 @@ def test_real_source_join_tamper_w1_snapshot_rejected_negative(
     assert (w0_dir / "status.json").read_bytes() == w0_st_bytes
     assert (r0_dir / "result.json").read_bytes() == r0_res_bytes
     assert (r0_dir / "status.json").read_bytes() == r0_st_bytes
+
+
+def test_real_source_join_wrong_expected_scope_sha_rejected_negative(
+    valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    task_path = valid_repo / "task.json"
+    task_path.write_text(json.dumps(task_data), encoding="utf-8")
+
+    wrong_sha = "0" * 64
+    assert wrong_sha != scope.sha256
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", wrong_sha)
+
+    with pytest.raises((AssignmentScopeError, ProposalError)):
+        load_task(valid_repo, task_path)
+
+    proposals_dir = valid_repo / ".local" / "two-site-refactor" / "proposals"
+    assert not proposals_dir.exists()
+    assert list(valid_repo.glob("**/result.json")) == []
+    assert list(valid_repo.glob("**/status.json")) == []
