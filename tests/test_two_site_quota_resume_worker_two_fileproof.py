@@ -10,15 +10,31 @@ from typing import Any
 import pytest
 
 try:
-    from scripts.two_site_proposal_pipeline import ProposalError
-    from scripts.two_site_proposal_runner import load_task
+    from scripts.two_site_pre_review_receipt import validate_test_receipt
+    from scripts.two_site_proposal_pipeline import (
+        ProposalError,
+        test_gate_feedback as _test_gate_feedback,
+    )
+    from scripts.two_site_proposal_runner import (
+        load_task,
+        validate_correction_feedback,
+    )
     from scripts.two_site_quota_resume_worker_two_file_reader import (
         read_and_bind_worker_two_result,
     )
     from scripts.two_site_semantic_attempts import extract_semantic_identity
 except ImportError:
-    from two_site_proposal_pipeline import ProposalError  # type: ignore[no-redef]
-    from two_site_proposal_runner import load_task  # type: ignore[no-redef]
+    from two_site_pre_review_receipt import (  # type: ignore[no-redef]
+        validate_test_receipt,
+    )
+    from two_site_proposal_pipeline import (  # type: ignore[no-redef]
+        ProposalError,
+        test_gate_feedback as _test_gate_feedback,
+    )
+    from two_site_proposal_runner import (  # type: ignore[no-redef]
+        load_task,
+        validate_correction_feedback,
+    )
     from two_site_quota_resume_worker_two_file_reader import (  # type: ignore[no-redef]
         read_and_bind_worker_two_result,
     )
@@ -61,6 +77,8 @@ except ImportError:
         _patch_load_task,
     )
 
+_test_gate_feedback.__test__ = False
+
 
 def _setup_materialized_worker_two_env(
     tmp_path: Path,
@@ -69,6 +87,7 @@ def _setup_materialized_worker_two_env(
     task_data: dict[str, Any] | None = None,
     admitted_task_path: Path | str | None = None,
     original_run_prefix: str | None = None,
+    origin: str = "REVIEWER",
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     root = tmp_path.resolve()
     build_kwargs: dict[str, Any] = {
@@ -78,6 +97,8 @@ def _setup_materialized_worker_two_env(
     }
     if original_run_prefix is not None:
         build_kwargs["orig_prefix"] = original_run_prefix
+    if origin == "TEST_FAILED" and task_data is None:
+        build_kwargs["selector"] = "tests/test_a.py"
     artifacts, evidence, task_path, orig_prefix = _build_materialized_env(
         root,
         **build_kwargs,
@@ -98,43 +119,63 @@ def _setup_materialized_worker_two_env(
     pipe_dir.mkdir(parents=True, exist_ok=True)
 
     receipt1_path = pipe_dir / "pre-review-tests-1.json"
-    receipt1_data = passed_receipt(w1_sha)
-    receipt1_path.write_text(json.dumps(receipt1_data), encoding="utf-8")
-    receipt1_sha = hashlib.sha256(receipt1_path.read_bytes()).hexdigest()
+    if origin == "TEST_FAILED":
+        root_task = json.loads(task_path.read_text(encoding="utf-8"))
+        receipt1_data = dict(passed_receipt(w1_sha))
+        receipt1_data["state"] = "FAILED"
+        receipt1_data["returncode"] = 1
+        receipt1_data["selectors"] = list(root_task["test_selectors"])
+        receipt1_data["stderr_tail"] = "FAILED tests/test_a.py::test_fail - AssertionError: fail\n"
+        validate_test_receipt(receipt1_data, w1_sha)
+        receipt1_path.write_text(json.dumps(receipt1_data), encoding="utf-8")
+        receipt1_sha = hashlib.sha256(receipt1_path.read_bytes()).hexdigest()
 
-    r1_id = artifacts["final_reviewer_run_id"]
-    r1_findings = ["Worker1 proposal needs correction for edge cases"]
-    r1_response: dict[str, Any] = {
-        "status": "CHANGES_REQUIRED",
-        "findings": r1_findings,
-        "conv_id": f"conv-{r1_id}",
-    }
-    if task_data is not None and real_sources is not None:
-        r1_response["task_override"] = {"sources": real_sources}
-    r1_runner, _ = make_runner(root, [r1_response], source_head=source_head)
-    r1_dir = r1_runner(
-        root,
-        task_path,
-        "verifier",
-        r1_id,
-        300,
-        proposal=w1_result_path,
-        test_evidence=receipt1_path,
-    )
-    r1_status = json.loads((r1_dir / "status.json").read_text(encoding="utf-8"))
-    evidence["reviewer_status"] = r1_status
+        fb2_data = _test_gate_feedback(receipt1_data, w1_sha)
+        validate_correction_feedback(json.dumps(fb2_data), w1_sha)
+        fb2_path = pipe_dir / "feedback-correction-2.json"
+        fb2_path.write_text(json.dumps(fb2_data), encoding="utf-8")
+        fb2_sha = hashlib.sha256(fb2_path.read_bytes()).hexdigest()
+        r1_id = None
+        artifacts.pop("final_reviewer_run_id", None)
+        evidence.pop("reviewer_status", None)
+    else:
+        receipt1_data = passed_receipt(w1_sha)
+        receipt1_path.write_text(json.dumps(receipt1_data), encoding="utf-8")
+        receipt1_sha = hashlib.sha256(receipt1_path.read_bytes()).hexdigest()
 
-    fb2_data = {
-        "reviewer": "gemini",
-        "reviewed_proposal_sha256": w1_sha,
-        "findings": r1_findings,
-        "test_evidence": [
-            f"receipt_sha256={receipt1_sha} proposal_sha256={w1_sha} selector_count=1"
-        ],
-    }
-    fb2_path = pipe_dir / "feedback-correction-2.json"
-    fb2_path.write_text(json.dumps(fb2_data), encoding="utf-8")
-    fb2_sha = hashlib.sha256(fb2_path.read_bytes()).hexdigest()
+        r1_id = artifacts["final_reviewer_run_id"]
+        r1_findings = ["Worker1 proposal needs correction for edge cases"]
+        r1_response: dict[str, Any] = {
+            "status": "CHANGES_REQUIRED",
+            "findings": r1_findings,
+            "conv_id": f"conv-{r1_id}",
+        }
+        if task_data is not None and real_sources is not None:
+            r1_response["task_override"] = {"sources": real_sources}
+        r1_runner, _ = make_runner(root, [r1_response], source_head=source_head)
+        r1_dir = r1_runner(
+            root,
+            task_path,
+            "verifier",
+            r1_id,
+            300,
+            proposal=w1_result_path,
+            test_evidence=receipt1_path,
+        )
+        r1_status = json.loads((r1_dir / "status.json").read_text(encoding="utf-8"))
+        evidence["reviewer_status"] = r1_status
+
+        fb2_data = {
+            "reviewer": "gemini",
+            "reviewed_proposal_sha256": w1_sha,
+            "findings": r1_findings,
+            "test_evidence": [
+                f"receipt_sha256={receipt1_sha} proposal_sha256={w1_sha} selector_count=1"
+            ],
+        }
+        fb2_path = pipe_dir / "feedback-correction-2.json"
+        fb2_path.write_text(json.dumps(fb2_data), encoding="utf-8")
+        fb2_sha = hashlib.sha256(fb2_path.read_bytes()).hexdigest()
 
     continuation_run_prefix = f"{orig_prefix}-cont"
     w2_id = f"{continuation_run_prefix}-worker-2"
@@ -317,3 +358,74 @@ def test_materialized_worker_two_rejects_outside_root_admitted_task_path(
         )
 
     assert not outside_path.exists()
+
+
+def test_materialized_worker_two_test_failed_provenance(tmp_path: Path) -> None:
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        tmp_path, origin="TEST_FAILED"
+    )
+    root_task = json.loads((root / "task.json").read_text(encoding="utf-8"))
+    root_src = (root / "src.py").read_bytes()
+    root_src_sha = hashlib.sha256(root_src).hexdigest()
+    assert root_task["test_selectors"] == ["tests/test_a.py"]
+
+    w0_id = f"{meta['orig_prefix']}-worker-0"
+    r0_id = f"{meta['orig_prefix']}-reviewer-0"
+    w1_id = meta["w1_id"]
+    w2_id = meta["w2_id"]
+    prop_dir = root / ".local" / "two-site-refactor" / "proposals"
+
+    runs = [w0_id, r0_id, w1_id, w2_id]
+    for rid in runs:
+        snap = json.loads((prop_dir / rid / "task.json").read_text(encoding="utf-8"))
+        assert set(snap.keys()) >= {"source_head", "task", "sources"}
+        assert snap["task"] == root_task
+        assert snap["source_head"] == HEAD
+        assert snap["sources"]["src.py"]["sha256"] == root_src_sha
+        assert snap["sources"]["src.py"]["content"] == root_src.decode("utf-8")
+
+        st = json.loads((prop_dir / rid / "status.json").read_text(encoding="utf-8"))
+        assert "source_head" not in st
+        assert st["head"] == HEAD
+        res_bytes = (prop_dir / rid / "result.json").read_bytes()
+        assert st["result_sha256"] == hashlib.sha256(res_bytes).hexdigest()
+
+    assert "proposal" not in json.loads((prop_dir / w0_id / "task.json").read_text(encoding="utf-8"))
+    assert "test_evidence" not in json.loads((prop_dir / w0_id / "task.json").read_text(encoding="utf-8"))
+    assert "proposal" in json.loads((prop_dir / r0_id / "task.json").read_text(encoding="utf-8"))
+    assert "test_evidence" in json.loads((prop_dir / r0_id / "task.json").read_text(encoding="utf-8"))
+    assert "proposal" in json.loads((prop_dir / w1_id / "task.json").read_text(encoding="utf-8"))
+    assert "proposal" in json.loads((prop_dir / w2_id / "task.json").read_text(encoding="utf-8"))
+
+    w0_res_sha = json.loads((prop_dir / w0_id / "status.json").read_text(encoding="utf-8"))["result_sha256"]
+    w1_res_sha = json.loads((prop_dir / w1_id / "status.json").read_text(encoding="utf-8"))["result_sha256"]
+
+    r0_st = json.loads((prop_dir / r0_id / "status.json").read_text(encoding="utf-8"))
+    assert r0_st["input_proposal_sha256"] == w0_res_sha
+
+    fb1_bytes = (root / ".local" / "two-site-refactor" / "pipeline" / meta["orig_prefix"] / "feedback-correction-1.json").read_bytes()
+    w1_st = json.loads((prop_dir / w1_id / "status.json").read_text(encoding="utf-8"))
+    assert w1_st["input_proposal_sha256"] == w0_res_sha
+    assert w1_st["input_feedback_sha256"] == hashlib.sha256(fb1_bytes).hexdigest()
+
+    fb2_path = root / ".local" / "two-site-refactor" / "pipeline" / meta["orig_prefix"] / "feedback-correction-2.json"
+    fb2_bytes = fb2_path.read_bytes()
+    fb2_sha = hashlib.sha256(fb2_bytes).hexdigest()
+    w2_st = json.loads((prop_dir / w2_id / "status.json").read_text(encoding="utf-8"))
+    assert w2_st["input_proposal_sha256"] == w1_res_sha
+    assert w2_st["input_feedback_sha256"] == fb2_sha
+
+    rcpt_path = root / ".local" / "two-site-refactor" / "pipeline" / meta["orig_prefix"] / "pre-review-tests-1.json"
+    rcpt = json.loads(rcpt_path.read_text(encoding="utf-8"))
+    assert rcpt["state"] == "FAILED"
+    assert rcpt["selectors"] == root_task["test_selectors"]
+    assert rcpt["proposal_sha256"] == w1_res_sha
+
+    fb2 = json.loads(fb2_bytes.decode("utf-8"))
+    assert fb2["reviewer"] == "test-gate"
+    assert fb2["reviewed_proposal_sha256"] == w1_res_sha
+
+    r1_dir = prop_dir / f"{meta['orig_prefix']}-reviewer-1"
+    assert not r1_dir.exists()
+    assert not any("reviewer-1" in p.name for p in prop_dir.iterdir())
+    assert not any("worker-3" in p.name for p in prop_dir.iterdir())
