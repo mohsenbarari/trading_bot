@@ -414,6 +414,68 @@ class AutopilotContracts(unittest.TestCase):
         with self.assertRaisesRegex(autopilot.AutopilotError, "independent fresh"):
             autopilot.validate_gemini_chain(self.root, 'a' * 40, result)
 
+    def test_gemini_chain_accepts_canonical_opus_fallback_and_rejects_tampered_stream(self):
+        from scripts import two_site_proposal_pipeline as proposal_pipeline
+        from tests.test_two_site_opus_runner_fallback import (
+            ENABLED_POLICY,
+            TASK_ID_OPUS,
+            _write_evidence,
+        )
+
+        result, worker_result, reviewer_dir = self.gemini_chain()
+        proposals = self.root / ".local/two-site-refactor/proposals"
+        worker_dir = proposals / result["gemini_worker_run_id"]
+        worker_task = json.loads((worker_dir / "task.json").read_text())
+        task = dict(worker_task["task"])
+        task["task_id"] = TASK_ID_OPUS
+        sources = worker_task["sources"]
+        head = worker_task["source_head"]
+        controller_id = "ctrl-001"
+
+        worker_task["task"] = task
+        proposal_runner.write_json(worker_dir / "task.json", worker_task)
+
+        reviewer_task = json.loads((reviewer_dir / "task.json").read_text())
+        reviewer_task["task"] = task
+        proposal_runner.write_json(reviewer_dir / "task.json", reviewer_task)
+
+        failed_id = "failed-worker-001"
+        failed_dir = proposals / failed_id
+        _, _, stream_raw = _write_evidence(
+            failed_dir, failed_id, task, sources, head, controller_id,
+        )
+        canonical_receipt = proposal_pipeline._load_bound_opus_fallback_receipt(
+            self.root, failed_id, task, sources, head, controller_id,
+        )
+
+        fallback_run_id = f"{failed_id}-gf"
+        fallback_dir = proposals / fallback_run_id
+        worker_dir.rename(fallback_dir)
+
+        worker_status = json.loads((fallback_dir / "status.json").read_text())
+        worker_status.update({
+            "run_id": fallback_run_id,
+            "model": proposal_runner.WORKER_MODEL,
+            "controller_run_id": controller_id,
+            "fallback_from_run_id": failed_id,
+            "fallback_receipt": canonical_receipt,
+        })
+        proposal_runner.write_json(fallback_dir / "status.json", worker_status)
+
+        result["gemini_worker_run_id"] = fallback_run_id
+
+        reviewer_status = json.loads((reviewer_dir / "status.json").read_text())
+        reviewer_status["input_worker_run_id"] = fallback_run_id
+        proposal_runner.write_json(reviewer_dir / "status.json", reviewer_status)
+
+        with patch.object(proposal_pipeline, "load_worker_routing_policy", return_value=ENABLED_POLICY):
+            validated = autopilot.validate_gemini_chain(self.root, head, result)
+            self.assertEqual(validated, worker_result)
+
+            (failed_dir / "stream.jsonl").write_bytes(stream_raw + b"tampered\n")
+            with self.assertRaises(proposal_pipeline.ProposalError):
+                autopilot.validate_gemini_chain(self.root, head, result)
+
     def test_gemini_chain_accepts_routed_opus_worker_with_snapshot_task_id(self):
         result, worker_result, _ = self.gemini_chain()
         worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
