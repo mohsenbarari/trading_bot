@@ -221,6 +221,14 @@ def p1_00_characterization_bootstrap_findings(worker_result: Mapping[str, Any]) 
     return findings[:32]
 
 
+def _writes_name(node: ast.AST, name: str) -> bool:
+    return any(
+        (isinstance(c, ast.NamedExpr) and isinstance(c.target, ast.Name) and c.target.id == name)
+        or (isinstance(c, ast.Name) and isinstance(getattr(c, "ctx", None), (ast.Store, ast.Del)) and c.id == name)
+        for c in ast.walk(node)
+    )
+
+
 def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[str]:
     """Find deterministic no-op assertion defects in candidate two-site tests."""
     changes = worker_result.get("changes") if isinstance(worker_result, Mapping) else None
@@ -235,7 +243,6 @@ def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[
         content = change.get("content")
         if (
             not isinstance(path, str)
-            or change.get("original_sha256") is not None
             or not TWO_SITE_TEST.fullmatch(path)
         ):
             continue
@@ -246,33 +253,72 @@ def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[
         except SyntaxError:
             continue  # The existing Python syntax gate owns this diagnostic.
 
-        assert_nodes = [node for node in ast.walk(tree) if isinstance(node, ast.Assert)]
-        assert_nodes.sort(key=lambda n: (getattr(n, "lineno", 0), getattr(n, "col_offset", 0)))
-
-        for node in assert_nodes:
-            for expr in ast.walk(node.test):
-                if isinstance(expr, ast.IfExp):
-                    if isinstance(expr.test, ast.Constant) and (expr.test.value is True or expr.test.value is False):
-                        findings.append(f"{path}:{node.lineno}: constant-branch")
-                        break
-                elif isinstance(expr, ast.Compare):
-                    left = expr.left
-                    matched = False
-                    for op, right in zip(expr.ops, expr.comparators):
-                        if (
-                            isinstance(op, (ast.In, ast.NotIn))
-                            and isinstance(left, ast.Constant)
-                            and isinstance(right, ast.Set)
-                            and right.elts
-                            and all(isinstance(elt, ast.Constant) for elt in right.elts)
-                            and any(type(elt.value) is type(left.value) and elt.value == left.value for elt in right.elts)
-                        ):
-                            findings.append(f"{path}:{node.lineno}: constant-set")
-                            matched = True
+        file_findings: list[tuple[int, str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assert):
+                for expr in ast.walk(node.test):
+                    if isinstance(expr, ast.IfExp):
+                        if isinstance(expr.test, ast.Constant) and (expr.test.value is True or expr.test.value is False):
+                            file_findings.append((node.lineno, f"{path}:{node.lineno}: constant-branch"))
                             break
-                        left = right
-                    if matched:
-                        break
+                    elif isinstance(expr, ast.Compare):
+                        left = expr.left
+                        matched = False
+                        for op, right in zip(expr.ops, expr.comparators):
+                            if (
+                                isinstance(op, (ast.In, ast.NotIn))
+                                and isinstance(left, ast.Constant)
+                                and isinstance(right, ast.Set)
+                                and right.elts
+                                and all(isinstance(elt, ast.Constant) for elt in right.elts)
+                                and any(type(elt.value) is type(left.value) and elt.value == left.value for elt in right.elts)
+                            ):
+                                file_findings.append((node.lineno, f"{path}:{node.lineno}: constant-set"))
+                                matched = True
+                                break
+                            left = right
+                        if matched:
+                            break
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for s1, s2 in zip(node.body, node.body[1:]):
+                    if (
+                        isinstance(s1, ast.Assign)
+                        and len(s1.targets) == 1
+                        and isinstance(s1.targets[0], ast.Name)
+                        and isinstance(s1.value, ast.Constant)
+                        and isinstance(s2, ast.Assert)
+                    ):
+                        tname, lit = s1.targets[0].id, s1.value.value
+                        matched = False
+                        for cmp in ast.walk(s2.test):
+                            if isinstance(cmp, ast.Compare):
+                                cur_left = cmp.left
+                                for op, right in zip(cmp.ops, cmp.comparators):
+                                    if (
+                                        isinstance(op, ast.In)
+                                        and isinstance(cur_left, ast.Constant)
+                                        and type(cur_left.value) is type(lit)
+                                        and cur_left.value == lit
+                                        and isinstance(right, ast.Name)
+                                        and right.id == tname
+                                    ):
+                                        matched = True
+                                        break
+                                    cur_left = right
+                                if matched:
+                                    break
+                        if matched and not _writes_name(s2.test, tname):
+                            file_findings.append((s2.lineno, f"{path}:{s2.lineno}: self-proving"))
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+                if node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == "test_selectors":
+                    dflt = node.args[1] if len(node.args) >= 2 else next(
+                        (kw.value for kw in node.keywords if kw.arg == "default"), None
+                    )
+                    if dflt is not None and not (isinstance(dflt, ast.Constant) and dflt.value is None):
+                        file_findings.append((node.lineno, f"{path}:{node.lineno}: selector-default"))
+
+        file_findings.sort(key=lambda item: (item[0], item[1]))
+        findings.extend(item[1] for item in file_findings)
     return findings[:32]
 
 

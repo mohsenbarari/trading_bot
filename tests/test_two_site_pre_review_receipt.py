@@ -562,7 +562,7 @@ def test_meaningful():
 def test_candidate_test_assertion_findings_skips_modified_unrelated_and_syntax_error() -> None:
     assert candidate_test_assertion_findings(
         _two_site_worker("assert 'a' in {'a'}\n", original_sha256="a" * 64)
-    ) == []
+    ) == ["tests/test_two_site_example.py:1: constant-set"]
     assert candidate_test_assertion_findings(
         _two_site_worker("assert 'a' in {'a'}\n", path="tests/test_other.py")
     ) == []
@@ -586,3 +586,32 @@ def test_candidate_test_assertion_findings_deterministic_bound_32() -> None:
     findings = candidate_test_assertion_findings({"changes": changes})
     assert len(findings) == 32
     assert all("constant-" in f for f in findings)
+
+
+def test_candidate_test_assertion_findings_self_proving_and_selector_default() -> None:
+    sentinel_src = "def test_s():\n    x = 'sentinel'\n    assert 'sentinel' in x\n"
+    sel_src = "def test_sel():\n    sel = task.get('test_selectors', ['tests/default.py'])\n"
+    for src, expected_code in [(sentinel_src, "self-proving"), (sel_src, "selector-default")]:
+        for sha in (None, "b" * 64):
+            findings = candidate_test_assertion_findings(_two_site_worker(src, original_sha256=sha))
+            assert len(findings) == 1
+            assert expected_code in findings[0]
+            assert "tests/test_two_site_example.py:" in findings[0]
+
+
+def test_candidate_test_assertion_findings_negatives() -> None:
+    rebind_src = "def test_r():\n    x = 'sentinel'\n    if True:\n        x = 'other'\n    assert 'sentinel' in x\n"
+    walrus_src = "def test_w():\n    x = 'sentinel'\n    assert (x := 'other') and ('sentinel' in x)\n"
+    safe_sel_src = (
+        "def test_safe():\n"
+        "    a = task.get('test_selectors')\n"
+        "    b = task.get('test_selectors', None)\n"
+        "    c = task['test_selectors']\n"
+        "    d = task.get('other', ['fallback'])\n"
+    )
+    for src in (rebind_src, walrus_src, safe_sel_src):
+        assert candidate_test_assertion_findings(_two_site_worker(src)) == []
+    bad_sentinel = "def test_s():\n    x = 'sentinel'\n    assert 'sentinel' in x\n"
+    bad_sel = "def test_sel():\n    sel = task.get('test_selectors', ['default.py'])\n"
+    assert candidate_test_assertion_findings(_two_site_worker(bad_sentinel, path="tests/test_other.py")) == []
+    assert candidate_test_assertion_findings(_two_site_worker(bad_sel, path="tests/test_other.py")) == []
