@@ -33,6 +33,7 @@ except ImportError:
     )
 
 __all__ = [
+    "candidate_test_assertion_findings",
     "p1_00_characterization_bootstrap_findings",
     "run_candidate_tests",
     "validate_test_receipt",
@@ -54,6 +55,9 @@ EXPECTED_RECEIPT_KEYS = frozenset({
 })
 P1_00_CHARACTERIZATION_TEST = re.compile(
     r"^tests/test_p1_00b?_characterization_[a-z0-9_]+\.py$"
+)
+TWO_SITE_TEST = re.compile(
+    r"^tests/test_two_site_[A-Za-z0-9_]+\.py$"
 )
 NETWORK_FENCE_MODULE = "tests.test_p1_00_characterization_network_isolation"
 NETWORK_FENCE_NAME = "install_p1_00_network_fence"
@@ -214,6 +218,61 @@ def p1_00_characterization_bootstrap_findings(worker_result: Mapping[str, Any]) 
                 f"{path}: P1-00 characterization tests must not assign socket connection hooks; "
                 "reuse install_p1_00_network_fence()."
             )
+    return findings[:32]
+
+
+def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[str]:
+    """Find deterministic no-op assertion defects in candidate two-site tests."""
+    changes = worker_result.get("changes") if isinstance(worker_result, Mapping) else None
+    if not isinstance(changes, list):
+        return []
+
+    findings: list[str] = []
+    for change in changes:
+        if not isinstance(change, Mapping):
+            continue
+        path = change.get("path")
+        content = change.get("content")
+        if (
+            not isinstance(path, str)
+            or change.get("original_sha256") is not None
+            or not TWO_SITE_TEST.fullmatch(path)
+        ):
+            continue
+        if not isinstance(content, str):
+            continue
+        try:
+            tree = ast.parse(content, filename=path)
+        except SyntaxError:
+            continue  # The existing Python syntax gate owns this diagnostic.
+
+        assert_nodes = [node for node in ast.walk(tree) if isinstance(node, ast.Assert)]
+        assert_nodes.sort(key=lambda n: (getattr(n, "lineno", 0), getattr(n, "col_offset", 0)))
+
+        for node in assert_nodes:
+            for expr in ast.walk(node.test):
+                if isinstance(expr, ast.IfExp):
+                    if isinstance(expr.test, ast.Constant) and (expr.test.value is True or expr.test.value is False):
+                        findings.append(f"{path}:{node.lineno}: constant-branch")
+                        break
+                elif isinstance(expr, ast.Compare):
+                    left = expr.left
+                    matched = False
+                    for op, right in zip(expr.ops, expr.comparators):
+                        if (
+                            isinstance(op, (ast.In, ast.NotIn))
+                            and isinstance(left, ast.Constant)
+                            and isinstance(right, ast.Set)
+                            and right.elts
+                            and all(isinstance(elt, ast.Constant) for elt in right.elts)
+                            and any(type(elt.value) is type(left.value) and elt.value == left.value for elt in right.elts)
+                        ):
+                            findings.append(f"{path}:{node.lineno}: constant-set")
+                            matched = True
+                            break
+                        left = right
+                    if matched:
+                        break
     return findings[:32]
 
 

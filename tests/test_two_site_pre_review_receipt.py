@@ -9,6 +9,7 @@ import pytest
 from scripts.two_site_agent_sandbox import SandboxError
 from scripts.two_site_pre_review_receipt import (
     _bound_utf8_tail,
+    candidate_test_assertion_findings,
     p1_00_characterization_bootstrap_findings,
     run_candidate_tests,
     validate_test_receipt,
@@ -481,3 +482,107 @@ def test_run_candidate_tests_self_validation_fails_on_corrupt_tail(tmp_path: Pat
     ):
         with pytest.raises(SandboxError, match="receipt stdout_tail must be valid UTF-8"):
             run_candidate_tests(tmp_path, VALID_TASK, VALID_WORKER, VALID_SHA)
+
+
+def _two_site_worker(
+    content: str,
+    path: str = "tests/test_two_site_example.py",
+    original_sha256: str | None = None,
+) -> dict:
+    return {"changes": [{"path": path, "original_sha256": original_sha256, "content": content}]}
+
+
+def test_candidate_test_assertion_findings_ignores_assert_message_constant_ifexp() -> None:
+    content = """
+def test_valid():
+    real_condition = True
+    assert real_condition, 'left' if False else 'right'
+"""
+    assert candidate_test_assertion_findings(_two_site_worker(content)) == []
+
+
+def test_candidate_test_assertion_findings_ignores_assert_message_constant_set() -> None:
+    content = """
+def test_valid():
+    real_condition = True
+    assert real_condition, "task_id" in {"task_id", "status"}
+"""
+    assert candidate_test_assertion_findings(_two_site_worker(content)) == []
+
+
+def test_candidate_test_assertion_findings_detects_task_514_patterns() -> None:
+    content_ifexp = """
+def test_task_514_ifexp():
+    task_data = {"task_id": "123"}
+    assert task_data["task_id atmospheric" if False else "task_id"]
+"""
+    findings_ifexp = candidate_test_assertion_findings(_two_site_worker(content_ifexp))
+    assert len(findings_ifexp) == 1
+    assert "tests/test_two_site_example.py:4" in findings_ifexp[0]
+    assert "constant-branch" in findings_ifexp[0]
+    assert "task_id atmospheric" not in findings_ifexp[0]
+
+    content_set = """
+def test_task_514_set():
+    assert "task_id" in {"task_id", "status"}
+"""
+    findings_set = candidate_test_assertion_findings(_two_site_worker(content_set))
+    assert len(findings_set) == 1
+    assert "tests/test_two_site_example.py:3" in findings_set[0]
+    assert "constant-set" in findings_set[0]
+    assert "task_id" not in findings_set[0]
+
+
+def test_candidate_test_assertion_findings_detects_not_in_same_constant_set() -> None:
+    content = """
+def test_not_in():
+    assert "task_id" not in {"task_id", "status"}
+"""
+    findings = candidate_test_assertion_findings(_two_site_worker(content))
+    assert len(findings) == 1
+    assert "constant-set" in findings[0]
+
+
+def test_candidate_test_assertion_findings_ignores_meaningful_nonmatches() -> None:
+    content = """
+def test_meaningful():
+    x = 10
+    task_data = {"a": 1}
+    assert task_data["a" if x > 0 else "b"]
+    key = "task_id"
+    assert key in {"task_id", "status"}
+    valid = {"task_id", "status"}
+    assert "task_id" in valid
+    assert "task_id" in {"status", "other"}
+    assert "task_id" in {"task_id", str(x)}
+"""
+    assert candidate_test_assertion_findings(_two_site_worker(content)) == []
+
+
+def test_candidate_test_assertion_findings_skips_modified_unrelated_and_syntax_error() -> None:
+    assert candidate_test_assertion_findings(
+        _two_site_worker("assert 'a' in {'a'}\n", original_sha256="a" * 64)
+    ) == []
+    assert candidate_test_assertion_findings(
+        _two_site_worker("assert 'a' in {'a'}\n", path="tests/test_other.py")
+    ) == []
+    assert candidate_test_assertion_findings(
+        _two_site_worker("def broken_syntax(:\n")
+    ) == []
+    assert candidate_test_assertion_findings({}) == []
+    assert candidate_test_assertion_findings({"changes": "not-a-list"}) == []
+    assert candidate_test_assertion_findings({"changes": [{"path": None}]}) == []
+
+
+def test_candidate_test_assertion_findings_deterministic_bound_32() -> None:
+    changes = [
+        {
+            "path": f"tests/test_two_site_file_{i}.py",
+            "original_sha256": None,
+            "content": f"assert 'id' in {{'id', 'status'}}\nassert task['a' if False else 'b']\n",
+        }
+        for i in range(20)
+    ]
+    findings = candidate_test_assertion_findings({"changes": changes})
+    assert len(findings) == 32
+    assert all("constant-" in f for f in findings)
