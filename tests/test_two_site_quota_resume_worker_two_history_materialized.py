@@ -47,6 +47,11 @@ except ImportError:
         passed_receipt,
     )
 
+try:
+    from scripts.two_site_proposal_runner import load_task
+except ImportError:
+    from two_site_proposal_runner import load_task  # type: ignore[no-redef]
+
 
 def _fake_load_task(root: Path | str, task_path: Path | str) -> tuple[dict[str, Any], dict[str, Any]]:
     root_p = Path(root)
@@ -90,20 +95,28 @@ def _build_materialized_env(
     orig_prefix: str = "run-20260925-mat",
     *,
     source_head: str = HEAD,
+    task_data: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
-    src_file = tmp_path / "src.py"
-    src_file.write_text("# orig\n", encoding="utf-8")
-
     task_path = tmp_path / "task.json"
-    task_data = {
-        "task_id": "T1",
-        "goal": "Goal description",
-        "context_files": ["src.py"],
-        "allowed_files": ["src.py"],
-        "requirements": ["R1"],
-        "test_selectors": ["test.py"],
-    }
-    task_path.write_text(json.dumps(task_data), encoding="utf-8")
+    if task_data is None:
+        src_file = tmp_path / "src.py"
+        src_file.write_text("# orig\n", encoding="utf-8")
+        effective_task = {
+            "task_id": "T1",
+            "goal": "Goal description",
+            "context_files": ["src.py"],
+            "allowed_files": ["src.py"],
+            "requirements": ["R1"],
+            "test_selectors": ["test.py"],
+        }
+        task_path.write_text(json.dumps(effective_task), encoding="utf-8")
+        loaded_task_id = "T1"
+        real_sources = None
+    else:
+        effective_task = copy.deepcopy(task_data)
+        task_path.write_text(json.dumps(effective_task), encoding="utf-8")
+        loaded_task, real_sources = load_task(tmp_path, task_path)
+        loaded_task_id = loaded_task.get("task_id", "T1")
 
     findings = ["Worker0 proposal needs correction"]
     responses = [
@@ -115,6 +128,10 @@ def _build_materialized_env(
         },
         {"content": "# worker-1\n", "conv_id": "conv-w1"},
     ]
+    if task_data is not None and real_sources is not None:
+        for resp in responses:
+            resp["task_override"] = {"sources": real_sources}
+
     runner, _ = make_runner(tmp_path, responses, source_head=source_head)
 
     w0_id = f"{orig_prefix}-worker-0"
@@ -163,7 +180,7 @@ def _build_materialized_env(
     w1_sha = hashlib.sha256((w1_dir / "result.json").read_bytes()).hexdigest()
 
     w1_artifacts = {
-        "task_id": "T1",
+        "task_id": loaded_task_id,
         "source_head": source_head,
         "original_run_prefix": orig_prefix,
         "final_worker_run_id": w1_id,
@@ -171,7 +188,10 @@ def _build_materialized_env(
         "proposal_sha256": w1_sha,
         "correction_count": 1,
     }
-    with _patch_load_task():
+    if task_data is None:
+        with _patch_load_task():
+            w1_info = load_prior_worker_chain(tmp_path, task_path, w1_artifacts)
+    else:
         w1_info = load_prior_worker_chain(tmp_path, task_path, w1_artifacts)
 
     r1_id = f"{orig_prefix}-reviewer-1"
@@ -183,7 +203,7 @@ def _build_materialized_env(
         "final_worker_run_id": w1_id,
         "final_reviewer_run_id": r1_id,
         "proposal_sha256": w1_sha,
-        "task_id": "T1",
+        "task_id": loaded_task_id,
         "source_head": source_head,
     }
     evidence = {
