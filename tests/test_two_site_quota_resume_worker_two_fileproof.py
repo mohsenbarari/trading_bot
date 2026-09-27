@@ -11,11 +11,13 @@ import pytest
 
 try:
     from scripts.two_site_proposal_pipeline import ProposalError
+    from scripts.two_site_proposal_runner import load_task
     from scripts.two_site_quota_resume_worker_two_file_reader import (
         read_and_bind_worker_two_result,
     )
 except ImportError:
     from two_site_proposal_pipeline import ProposalError  # type: ignore[no-redef]
+    from two_site_proposal_runner import load_task  # type: ignore[no-redef]
     from two_site_quota_resume_worker_two_file_reader import (  # type: ignore[no-redef]
         read_and_bind_worker_two_result,
     )
@@ -60,11 +62,18 @@ def _setup_materialized_worker_two_env(
     tmp_path: Path,
     *,
     source_head: str = HEAD,
+    task_data: dict[str, Any] | None = None,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     root = tmp_path.resolve()
     artifacts, evidence, task_path, orig_prefix = _build_materialized_env(
-        root, source_head=source_head
+        root, source_head=source_head, task_data=task_data
     )
+
+    if task_data is not None:
+        actual_task, real_sources = load_task(root, task_path)
+    else:
+        actual_task = None
+        real_sources = None
 
     w1_id = artifacts["final_worker_run_id"]
     w1_sha = artifacts["proposal_sha256"]
@@ -81,11 +90,13 @@ def _setup_materialized_worker_two_env(
 
     r1_id = artifacts["final_reviewer_run_id"]
     r1_findings = ["Worker1 proposal needs correction for edge cases"]
-    r1_response = {
+    r1_response: dict[str, Any] = {
         "status": "CHANGES_REQUIRED",
         "findings": r1_findings,
         "conv_id": f"conv-{r1_id}",
     }
+    if task_data is not None and real_sources is not None:
+        r1_response["task_override"] = {"sources": real_sources}
     r1_runner, _ = make_runner(root, [r1_response], source_head=source_head)
     r1_dir = r1_runner(
         root,
@@ -114,10 +125,12 @@ def _setup_materialized_worker_two_env(
     continuation_run_prefix = f"{orig_prefix}-cont"
     w2_id = f"{continuation_run_prefix}-worker-2"
     w2_conv_id = f"conv-{w2_id}"
-    w2_response = {
+    w2_response: dict[str, Any] = {
         "content": "# worker-2 materialized correction\n",
         "conv_id": w2_conv_id,
     }
+    if task_data is not None and real_sources is not None:
+        w2_response["task_override"] = {"sources": real_sources}
     w2_runner, _ = make_runner(root, [w2_response], source_head=source_head)
     w2_dir = w2_runner(
         root,
@@ -137,16 +150,21 @@ def _setup_materialized_worker_two_env(
     artifacts["semantic_task_fingerprint"] = sem_fingerprint
     evidence["feedback_sha"] = fb2_sha
 
-    task_data = json.loads(task_path.read_text(encoding="utf-8"))
-    src_path = root / "src.py"
-    src_content = src_path.read_text(encoding="utf-8")
-    src_sha = hashlib.sha256(src_content.encode("utf-8")).hexdigest()
+    if task_data is None:
+        effective_task = json.loads(task_path.read_text(encoding="utf-8"))
+        src_path = root / "src.py"
+        src_content = src_path.read_text(encoding="utf-8")
+        src_sha = hashlib.sha256(src_content.encode("utf-8")).hexdigest()
+        effective_sources = {"src.py": {"sha256": src_sha, "content": src_content}}
+    else:
+        effective_task = copy.deepcopy(actual_task)
+        effective_sources = copy.deepcopy(real_sources)
 
     ctx = {
         "continuation_run_prefix": continuation_run_prefix,
-        "task": copy.deepcopy(task_data),
+        "task": copy.deepcopy(effective_task),
         "source_head": source_head,
-        "sources": {"src.py": {"sha256": src_sha, "content": src_content}},
+        "sources": copy.deepcopy(effective_sources),
         "admitted_task_path": task_path,
         "artifacts": artifacts,
         "evidence": evidence,
@@ -154,7 +172,7 @@ def _setup_materialized_worker_two_env(
 
     returned_state = {
         "state": "WORKER_PROPOSAL_READY",
-        "task_id": task_data["task_id"],
+        "task_id": effective_task["task_id"],
         "source_head": source_head,
         "final_worker_run_id": w2_id,
         "proposal_sha256": w2_sha,
