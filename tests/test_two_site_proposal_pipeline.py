@@ -296,6 +296,67 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(feedback["findings"], findings)
         self.assertEqual(feedback["test_evidence"][0], "gate=P1-00-characterization-bootstrap")
 
+    def test_assertion_gate_corrects_before_tests_or_reviewer(self):
+        runner, calls = make_runner(self.root, [
+            {"content": "# v1\n"},
+            {"content": "# v2\n"},
+            {"status": "VERIFIED"},
+        ])
+        findings = ["tests/test_two_site_example.py:10: constant-branch"]
+        with (
+            patch.object(pipeline, "git", side_effect=fake_git),
+            patch.object(pipeline, "runner_run", side_effect=runner),
+            patch.object(pipeline, "candidate_test_assertion_findings", side_effect=[findings, []]),
+        ):
+            res = run_pipeline(self.root, self.task_path, "run-assertions", 300, None, self.state)
+
+        self.assertEqual(res["state"], "READY_FOR_CODEX")
+        self.assertEqual([call[0] for call in calls], ["worker", "worker", "verifier"])
+        self.assertEqual(self.candidate_tests_mock.call_count, 1)
+        w0_dir = self.root / ".local/two-site-refactor/proposals/run-assertions-worker-0"
+        w0_sha = file_sha256(w0_dir / "result.json")
+        feedback = json.loads((
+            self.root / ".local/two-site-refactor/pipeline/run-assertions/feedback-correction-1.json"
+        ).read_text())
+        self.assertEqual(feedback["reviewer"], "test-gate")
+        self.assertEqual(feedback["reviewed_proposal_sha256"], w0_sha)
+        self.assertEqual(feedback["findings"], findings)
+        self.assertEqual(feedback["test_evidence"][0], "gate=two-site-test-assertions")
+        self.assertEqual(feedback["test_evidence"][1], f"proposal_sha256={w0_sha}")
+        self.assertEqual(feedback["test_evidence"][2], f"finding_count={len(findings)}")
+
+    def test_combined_bootstrap_and_assertion_gate_corrects_before_tests_or_reviewer(self):
+        runner, calls = make_runner(self.root, [
+            {"content": "# v1\n"},
+            {"content": "# v2\n"},
+            {"status": "VERIFIED"},
+        ])
+        bootstrap_findings = ["tests/test_p1_00b_characterization_example.py: canonical bootstrap required"]
+        assertion_findings = ["tests/test_two_site_example.py:10: constant-branch"]
+        combined_findings = bootstrap_findings + assertion_findings
+        with (
+            patch.object(pipeline, "git", side_effect=fake_git),
+            patch.object(pipeline, "runner_run", side_effect=runner),
+            patch.object(pipeline, "p1_00_characterization_bootstrap_findings", side_effect=[bootstrap_findings, []]),
+            patch.object(pipeline, "candidate_test_assertion_findings", side_effect=[assertion_findings, []]),
+        ):
+            res = run_pipeline(self.root, self.task_path, "run-combined", 300, None, self.state)
+
+        self.assertEqual(res["state"], "READY_FOR_CODEX")
+        self.assertEqual([call[0] for call in calls], ["worker", "worker", "verifier"])
+        self.assertEqual(self.candidate_tests_mock.call_count, 1)
+        w0_dir = self.root / ".local/two-site-refactor/proposals/run-combined-worker-0"
+        w0_sha = file_sha256(w0_dir / "result.json")
+        feedback = json.loads((
+            self.root / ".local/two-site-refactor/pipeline/run-combined/feedback-correction-1.json"
+        ).read_text())
+        self.assertEqual(feedback["reviewer"], "test-gate")
+        self.assertEqual(feedback["reviewed_proposal_sha256"], w0_sha)
+        self.assertEqual(feedback["findings"], combined_findings)
+        self.assertEqual(feedback["test_evidence"][0], "gate=pre-review-static-tests")
+        self.assertEqual(feedback["test_evidence"][1], f"proposal_sha256={w0_sha}")
+        self.assertEqual(feedback["test_evidence"][2], f"finding_count={len(combined_findings)}")
+
     def test_two_corrections_allowed_and_distinct_findings(self):
         runner, calls = make_runner(self.root, [
             {"content": "# v1\n"},

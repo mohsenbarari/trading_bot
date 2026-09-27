@@ -36,12 +36,14 @@ except ModuleNotFoundError:
 
 try:
     from scripts.two_site_pre_review_receipt import (
+        candidate_test_assertion_findings,
         p1_00_characterization_bootstrap_findings,
         run_candidate_tests,
         validate_test_receipt,
     )
 except ImportError:
     from two_site_pre_review_receipt import (
+        candidate_test_assertion_findings,
         p1_00_characterization_bootstrap_findings,
         run_candidate_tests,
         validate_test_receipt,
@@ -1137,9 +1139,17 @@ def _run_post_worker_remainder(
     while True:
         worker_result_path = worker_dir / "result.json"
         bootstrap_findings = p1_00_characterization_bootstrap_findings(worker_res)
-        if bootstrap_findings:
+        assertion_findings = candidate_test_assertion_findings(worker_res)
+        if bootstrap_findings or assertion_findings:
+            if bootstrap_findings and assertion_findings:
+                gate_name = "pre-review-static-tests"
+            elif bootstrap_findings:
+                gate_name = "P1-00-characterization-bootstrap"
+            else:
+                gate_name = "two-site-test-assertions"
+            static_findings = (bootstrap_findings + assertion_findings)[:32]
             signature = hashlib.sha256(
-                json.dumps(bootstrap_findings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                json.dumps(static_findings, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
             if signature in seen_bootstrap_signatures:
                 raise ProposalError(f"repeated test bootstrap failure signature: {signature}")
@@ -1147,11 +1157,11 @@ def _run_post_worker_remainder(
             feedback_payload = {
                 "reviewer": "test-gate",
                 "reviewed_proposal_sha256": current_worker[1],
-                "findings": bootstrap_findings,
+                "findings": static_findings,
                 "test_evidence": [
-                    "gate=P1-00-characterization-bootstrap",
+                    f"gate={gate_name}",
                     f"proposal_sha256={current_worker[1]}",
-                    f"finding_count={len(bootstrap_findings)}",
+                    f"finding_count={len(static_findings)}",
                 ],
             }
             validate_correction_feedback(json.dumps(feedback_payload), current_worker[1])
