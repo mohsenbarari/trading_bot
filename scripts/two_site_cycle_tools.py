@@ -300,7 +300,7 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
     head = runner.git(root, "rev-parse", "HEAD")
     worker_dir = autopilot.proposal_run_dir(root, worker)
     reviewer_dir = autopilot.proposal_run_dir(root, reviewer)
-    snapshot = runner.unique_json(runner.bounded_file_text(root, worker_dir / "task.json", 2 * runner.MAX_CONTEXT, "worker snapshot"))
+    snapshot = runner.unique_json(runner.bounded_file_text(root, worker_dir / "task.json", 3 * runner.MAX_CONTEXT, "worker snapshot"))
     if not applied:
         if runner.git(root, "status", "--porcelain=v1", "--untracked-files=all"):
             raise runner.ProposalError("pre-apply review requires clean Git")
@@ -321,7 +321,7 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
         prior_worker=prior,
     )
     reviewer_snapshot = runner.unique_json(runner.bounded_file_text(
-        root, reviewer_dir / "task.json", 2 * runner.MAX_CONTEXT, "reviewer snapshot"
+        root, reviewer_dir / "task.json", 3 * runner.MAX_CONTEXT, "reviewer snapshot"
     ))
     reviewer_status = runner.unique_json(runner.bounded_file_text(
         root, reviewer_dir / "status.json", runner.MAX_CONTEXT, "reviewer status"
