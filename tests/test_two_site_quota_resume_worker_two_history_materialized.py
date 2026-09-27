@@ -132,6 +132,13 @@ def _build_materialized_env(
         task_path.write_text(json.dumps(effective_task), encoding="utf-8")
         loaded_task_id = "T1"
         real_sources = None
+    elif admitted_task_path is not None and task_path.exists():
+        loaded_task, real_sources = load_task(root, task_path)
+        if loaded_task != task_data:
+            raise ProposalError(
+                f"admitted_task_path content does not match task_data: {task_path}"
+            )
+        loaded_task_id = loaded_task["task_id"]
     else:
         effective_task = copy.deepcopy(task_data)
         task_path.parent.mkdir(parents=True, exist_ok=True)
