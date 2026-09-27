@@ -87,7 +87,8 @@ def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
         write_json(out / "result.json", result)
         res_sha = file_sha256(out / "result.json")
 
-        snapshot = {"source_head": source_head, "task": json.loads((root / "task.json").read_text()),
+        task_path = Path(_t) if Path(_t).is_absolute() else (root / _t)
+        snapshot = {"source_head": source_head, "task": json.loads(task_path.read_text()),
                     "sources": {"src.py": {"sha256": src_sha, "content": "# orig\n"}}}
         if proposal is not None:
             snapshot["proposal"] = proposal.read_text()
@@ -927,6 +928,35 @@ class TestPipeline(unittest.TestCase):
                 task, sources, set(),
             )
         self.assertIn("metadata or snapshot mismatch", str(ctx.exception))
+
+    def test_runner_loads_canonical_nested_task_path(self):
+        self.task_path.unlink()
+        canonical_rel = Path(".local/two-site-refactor/tasks/canonical-task.json")
+        canonical_task_path = self.root / canonical_rel
+        canonical_task_path.parent.mkdir(parents=True, exist_ok=True)
+        nested_task = {
+            "task_id": "TASK-CANONICAL-NESTED",
+            "goal": "Canonical nested task regression",
+            "context_files": ["src.py"],
+            "allowed_files": ["src.py"],
+            "requirements": ["R1"],
+            "test_selectors": ["test.py"],
+        }
+        write_json(canonical_task_path, nested_task)
+
+        runner, _ = make_runner(self.root, [{"content": "# nested\n"}])
+        run_dir = runner(self.root, canonical_task_path, "worker", "run-nested-worker-0", 300)
+        persisted_task_snapshot = json.loads((run_dir / "task.json").read_text())["task"]
+        persisted_status = json.loads((run_dir / "status.json").read_text())
+        self.assertEqual(persisted_task_snapshot, nested_task)
+        self.assertEqual(persisted_status["task_id"], "TASK-CANONICAL-NESTED")
+
+        runner_rel, _ = make_runner(self.root, [{"content": "# nested rel\n"}])
+        run_dir_rel = runner_rel(self.root, canonical_rel, "worker", "run-nested-worker-rel", 300)
+        persisted_task_snapshot_rel = json.loads((run_dir_rel / "task.json").read_text())["task"]
+        persisted_status_rel = json.loads((run_dir_rel / "status.json").read_text())
+        self.assertEqual(persisted_task_snapshot_rel, nested_task)
+        self.assertEqual(persisted_status_rel["task_id"], "TASK-CANONICAL-NESTED")
 
 
 if __name__ == "__main__":
