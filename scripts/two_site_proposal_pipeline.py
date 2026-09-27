@@ -19,6 +19,7 @@ try:
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ProposalError,
         RetryableProviderOutputError, RetryableProviderSessionError,
+        _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
@@ -27,6 +28,7 @@ except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ProposalError,
         RetryableProviderOutputError, RetryableProviderSessionError,
+        _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
@@ -78,6 +80,7 @@ PROTECTED_REFS = (
 RUN_PREFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _CANONICAL_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
+_FALLBACK_FAILED_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,76}$")
 QUOTA_EVIDENCE_KEYS = frozenset({"kind", "provider", "model", "conversation_id", "reset_at_utc"})
 QUOTA_ATTEMPT_KEYS = frozenset({"role", "run_id", "status_sha256"})
 _QUOTA_CONTINUATION_KEYS = frozenset({
@@ -609,6 +612,99 @@ def expected_role_model(role: str, task_id: str) -> str:
     raise ProposalError(f"unsupported role: {role!r}")
 
 
+def expected_bound_role_model(
+    root: Path,
+    role: str,
+    run_id: str,
+    expected_head: str,
+    expected_task: dict,
+    expected_sources: dict,
+    status: dict,
+) -> str:
+    if not isinstance(status, dict):
+        raise ProposalError(f"status must be dict, got {type(status).__name__}")
+    has_fallback_id = "fallback_from_run_id" in status
+    has_fallback_receipt = "fallback_receipt" in status
+    if not has_fallback_id and not has_fallback_receipt:
+        task_id = expected_task.get("task_id") if isinstance(expected_task, dict) else None
+        if isinstance(task_id, str) and task_id.strip():
+            return expected_role_model(role, task_id)
+        if role == "verifier":
+            return expected_role_model(role, "")
+        if role == "worker":
+            policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+            if policy.enabled:
+                raise ProposalError("missing or invalid top-level task_id in expected_task")
+            return WORKER_MODEL
+        raise ProposalError(f"unsupported role: {role!r}")
+
+    if not (has_fallback_id and has_fallback_receipt):
+        raise ProposalError("asymmetric fallback keys in status")
+
+    failed_id = status.get("fallback_from_run_id")
+    status_receipt = status.get("fallback_receipt")
+    if failed_id is None or status_receipt is None:
+        raise ProposalError("fallback key values cannot be null")
+    if not isinstance(failed_id, str) or not isinstance(status_receipt, dict):
+        raise ProposalError("invalid fallback key value types")
+
+    if role != "worker":
+        raise ProposalError(f"fallback requires role 'worker', got {role!r}")
+
+    task_id = expected_task.get("task_id") if isinstance(expected_task, dict) else None
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ProposalError("missing or invalid top-level task_id in expected_task")
+
+    policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+    if not policy.enabled:
+        raise ProposalError("routing policy not enabled for fallback")
+
+    route = select_worker_model_route(
+        task_id,
+        policy=policy,
+        default_model=WORKER_MODEL,
+        default_effort=WORKER_EFFORT,
+    )
+    if route.model != policy.model:
+        raise ProposalError("fallback requires selected route model to match policy model exactly")
+
+    if not _FALLBACK_FAILED_ID_RE.fullmatch(failed_id) or failed_id.endswith("-gf"):
+        raise ProposalError(f"invalid fallback_from_run_id: {failed_id!r}")
+
+    expected_fallback_run_id = f"{failed_id}-gf"
+    if len(expected_fallback_run_id) > 80 or run_id != expected_fallback_run_id:
+        raise ProposalError(
+            f"run_id mismatch for fallback: expected {expected_fallback_run_id!r}, got {run_id!r}"
+        )
+
+    if status.get("run_id") != run_id:
+        raise ProposalError(
+            f"status run_id mismatch: expected {run_id!r}, got {status.get('run_id')!r}"
+        )
+
+    if status.get("model") != WORKER_MODEL:
+        raise ProposalError(
+            f"status model mismatch: expected {WORKER_MODEL!r}, got {status.get('model')!r}"
+        )
+
+    controller_id = status.get("controller_run_id")
+    if not isinstance(controller_id, str) or not controller_id.strip():
+        raise ProposalError("missing or empty controller_run_id in status")
+
+    canonical_receipt = _load_bound_opus_fallback_receipt(
+        root,
+        failed_id,
+        expected_task,
+        expected_sources,
+        expected_head,
+        controller_id,
+    )
+    if status_receipt != canonical_receipt:
+        raise ProposalError("status fallback_receipt does not match canonical receipt")
+
+    return WORKER_MODEL
+
+
 def validate_run(
     root: Path, run_dir: Path, role: str, expected_run_id: str, expected_head: str,
     expected_task: dict, expected_sources: dict, seen_convs: set[str],
@@ -622,18 +718,9 @@ def validate_run(
     result = unique_json(result_text)
     validate_result(result, expected_task, expected_sources, role, enforce_raw_transport=False)
     result_sha = hashlib.sha256(raw_result_bytes).hexdigest()
-    task_id = expected_task.get("task_id") if isinstance(expected_task, dict) else None
-    if isinstance(task_id, str) and task_id.strip():
-        expected_model = expected_role_model(role, task_id)
-    elif role == "verifier":
-        expected_model = expected_role_model(role, "")
-    elif role == "worker":
-        policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
-        if policy.enabled:
-            raise ProposalError("missing or invalid top-level task_id in expected_task")
-        expected_model = WORKER_MODEL
-    else:
-        raise ProposalError(f"unsupported role: {role!r}")
+    expected_model = expected_bound_role_model(
+        root, role, expected_run_id, expected_head, expected_task, expected_sources, status
+    )
     if (
         status.get("run_id") != expected_run_id or status.get("role") != role
         or status.get("head") != expected_head or status.get("model") != expected_model
