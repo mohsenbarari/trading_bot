@@ -214,3 +214,149 @@ class Ledger:
     assert by_field["state"]["enum_database_representation"] == "member_name"
     assert by_field["value_state"]["enum_database_representation"] == "value"
     assert by_field["value_state"]["required_without_declared_default"] is True
+
+
+def test_source_contract_hints_w2_admission_claim_scenario_shape():
+    code = (
+        "def _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt):\n"
+        "    sc = {'runs_dir': 'runs'}\n"
+        "    real_task = {'task_id': 't1'}\n"
+        "    return {\n"
+        "        'sc': sc,\n"
+        "        'real_task': real_task,\n"
+        "        'controller_run_id': 'c1',\n"
+        "    }\n"
+    )
+    task = make_task(
+        goal="Verify admission using _setup_w2_admission_claim_scenario helper.",
+        reqs=["Inspect sc and real_task fields."],
+    )
+    notes = preparation_notes(task, {"tests/test_admission.py": {"content": code}})
+    hints = notes["source_contract_hints"]
+    assert len(hints) == 1
+    hint = hints[0]
+    assert hint["path"] == "tests/test_admission.py"
+    assert hint["function"] == "_setup_w2_admission_claim_scenario"
+    assert "sc" in hint["keys"]
+    assert "real_task" in hint["keys"]
+    assert "sources" not in hint["keys"]
+    assert hint["keys"] == ["controller_run_id", "real_task", "sc"]
+    assert set(hint.keys()) == {"path", "function", "keys"}
+
+
+def test_source_contract_hints_fail_closed_cases():
+    task = make_task(
+        goal="Inspect fn_dynamic, fn_multi, fn_unknown, fn_syntax, fn_non_python",
+    )
+    sources = {
+        "scripts/dynamic.py": {"content": "def fn_dynamic(): return some_dict\n"},
+        "scripts/multi.py": {"content": "def fn_multi():\n    if True:\n        return {'a': 1}\n    return {'b': 2}\n"},
+        "scripts/syntax.py": {"content": "def fn_syntax(:\n"},
+        "scripts/non_python.txt": {"content": "def fn_non_python(): return {'a': 1}\n"},
+    }
+    notes = preparation_notes(task, sources)
+    assert notes["source_contract_hints"] == []
+    assert notes["omitted_source_contract_hint_count"] == 0
+
+
+def test_source_contract_hints_conditional_fallthrough_and_generator_fail_closed():
+    task = make_task(
+        goal="Inspect fn_cond_fallthrough, fn_loop, fn_generator, fn_yield_from",
+    )
+    sources = {
+        "scripts/fallthrough.py": {
+            "content": "def fn_cond_fallthrough(flag):\n    if flag:\n        return {'a': 1}\n"
+        },
+        "scripts/loop.py": {
+            "content": "def fn_loop(items):\n    for item in items:\n        return {'a': 1}\n"
+        },
+        "scripts/gen.py": {
+            "content": "def fn_generator():\n    yield 1\n    return {'a': 1}\n"
+        },
+        "scripts/yield_from.py": {
+            "content": "def fn_yield_from():\n    yield from [1]\n    return {'a': 1}\n"
+        },
+    }
+    notes = preparation_notes(task, sources)
+    assert notes["source_contract_hints"] == []
+    assert notes["omitted_source_contract_hint_count"] == 0
+
+
+def test_source_contract_hints_positive_direct_final_return():
+    code = (
+        "def direct_helper(x):\n"
+        "    def nested():\n"
+        "        yield 42\n"
+        "        return {'nested': 99}\n"
+        "    temp = x + 1\n"
+        "    return {'status': 'ok', 'result': temp}\n"
+    )
+    task = make_task(
+        goal="Call direct_helper to prepare record.",
+    )
+    notes = preparation_notes(task, {"scripts/service.py": {"content": code}})
+    hints = notes["source_contract_hints"]
+    assert len(hints) == 1
+    assert hints[0] == {
+        "path": "scripts/service.py",
+        "function": "direct_helper",
+        "keys": ["result", "status"],
+    }
+
+
+def test_source_contract_hints_ignores_unreferenced_functions():
+    code = "def unreferenced_fn(): return {'k1': 1, 'k2': 2}\n"
+    task = make_task(goal="Task about unrelated topic")
+    notes = preparation_notes(task, {"scripts/app.py": {"content": code}})
+    assert notes["source_contract_hints"] == []
+
+
+def test_source_contract_hints_byte_pressure_shedding():
+    funcs = "\n".join(f"def helper_{i}(): return {{'key_{i}': {i}}}" for i in range(20))
+    goal = "Call " + " ".join(f"helper_{i}" for i in range(20))
+    task = make_task(goal=goal)
+    notes = preparation_notes(task, {"scripts/helpers.py": {"content": funcs}})
+    assert len(notes["source_contract_hints"]) <= 16
+    assert notes["omitted_source_contract_hint_count"] >= 4
+    assert len(json.dumps(notes).encode("utf-8")) <= 8192
+
+
+def test_source_contract_hints_decorated_and_rebound_fail_closed():
+    task = make_task(
+        goal="Inspect fn_decorated, fn_rebound_assign, fn_rebound_del, fn_rebound_import",
+    )
+    sources = {
+        "scripts/decorated.py": {
+            "content": (
+                "def dec(f):\n"
+                "    return lambda: {'other': 1}\n"
+                "@dec\n"
+                "def fn_decorated():\n"
+                "    return {'a': 1}\n"
+            )
+        },
+        "scripts/rebound_assign.py": {
+            "content": (
+                "def fn_rebound_assign():\n"
+                "    return {'a': 1}\n"
+                "fn_rebound_assign = lambda: {'other': 1}\n"
+            )
+        },
+        "scripts/rebound_del.py": {
+            "content": (
+                "def fn_rebound_del():\n"
+                "    return {'a': 1}\n"
+                "del fn_rebound_del\n"
+            )
+        },
+        "scripts/rebound_import.py": {
+            "content": (
+                "from other import fn_rebound_import\n"
+                "def fn_rebound_import():\n"
+                "    return {'a': 1}\n"
+            )
+        },
+    }
+    notes = preparation_notes(task, sources)
+    assert notes["source_contract_hints"] == []
+    assert notes["omitted_source_contract_hint_count"] == 0

@@ -105,6 +105,150 @@ def _model_contract_hints(task, sources):
     return hints, omitted
 
 
+def _extract_direct_return_dict_keys(func_node) -> list[str] | None:
+    if getattr(func_node, "decorator_list", None):
+        return None
+    if not func_node.body or not isinstance(func_node.body[-1], ast.Return):
+        return None
+    ret = func_node.body[-1]
+    if ret.value is None or not isinstance(ret.value, ast.Dict):
+        return None
+    returns = []
+    stack = list(func_node.body)
+    while stack:
+        curr = stack.pop()
+        if isinstance(curr, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(curr, ast.Return):
+            returns.append(curr)
+        elif isinstance(curr, (ast.Yield, ast.YieldFrom)):
+            return None
+        stack.extend(ast.iter_child_nodes(curr))
+    if len(returns) != 1 or returns[0] is not ret:
+        return None
+    keys = []
+    for k in ret.value.keys:
+        if k is None or not isinstance(k, ast.Constant) or not isinstance(k.value, str):
+            return None
+        keys.append(k.value)
+    return sorted(set(keys))
+
+
+def _target_names(target) -> set[str]:
+    names = set()
+    if isinstance(target, ast.Name):
+        names.add(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            names.update(_target_names(elt))
+    elif isinstance(target, ast.Starred):
+        names.update(_target_names(target.value))
+    return names
+
+
+def _collect_top_level_bindings(nodes) -> list[str]:
+    names = []
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append(node.name)
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                names.extend(_target_names(t))
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            names.extend(_target_names(node.target))
+        elif isinstance(node, ast.Delete):
+            for t in node.targets:
+                names.extend(_target_names(t))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.append(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.append(alias.asname or alias.name)
+        elif isinstance(node, ast.If):
+            names.extend(_collect_top_level_bindings(node.body))
+            names.extend(_collect_top_level_bindings(node.orelse))
+        elif isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            names.extend(_collect_top_level_bindings(node.body))
+            for h in getattr(node, "handlers", []):
+                if h.name:
+                    names.append(h.name)
+                names.extend(_collect_top_level_bindings(h.body))
+            names.extend(_collect_top_level_bindings(getattr(node, "orelse", [])))
+            names.extend(_collect_top_level_bindings(getattr(node, "finalbody", [])))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars:
+                    names.extend(_target_names(item.optional_vars))
+            names.extend(_collect_top_level_bindings(node.body))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            names.extend(_target_names(node.target))
+            names.extend(_collect_top_level_bindings(node.body))
+            names.extend(_collect_top_level_bindings(node.orelse))
+    return names
+
+
+def _source_contract_hints(task, sources) -> tuple[list[dict], int]:
+    """Return compact direct dict return facts for top-level functions named in task."""
+    contract_text = _task_contract_text(task)
+    if not contract_text or not isinstance(sources, dict):
+        return [], 0
+
+    referenced_names = set(re.findall(r"(?<!\w)[A-Za-z_]\w*(?!\w)", contract_text))
+    if not referenced_names:
+        return [], 0
+
+    by_name = {}
+    for path, item in sorted(sources.items(), key=lambda pair: str(pair[0])):
+        if not isinstance(path, str) or not path.endswith(".py"):
+            continue
+        content = item.get("content") if isinstance(item, dict) else item
+        if not isinstance(content, str):
+            continue
+        try:
+            tree = ast.parse(content)
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            continue
+        top_bindings = _collect_top_level_bindings(tree.body)
+        binding_counts = {}
+        for name in top_bindings:
+            binding_counts[name] = binding_counts.get(name, 0) + 1
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name in referenced_names:
+                if binding_counts.get(node.name, 0) > 1:
+                    keys = None
+                else:
+                    keys = _extract_direct_return_dict_keys(node)
+                by_name.setdefault(node.name, []).append((path, keys))
+
+    candidates = []
+    for fn_name, occurrences in by_name.items():
+        if len(occurrences) != 1:
+            continue
+        path, keys = occurrences[0]
+        if keys is None:
+            continue
+        candidates.append({
+            "path": path,
+            "function": fn_name,
+            "keys": keys,
+        })
+
+    candidates.sort(key=lambda item: (item["path"], item["function"]))
+
+    hints = []
+    omitted = 0
+    for cand in candidates:
+        if len(hints) >= 16:
+            omitted += 1
+            continue
+        hints.append(cand)
+
+    return hints, omitted
+
+
 def _is_python_test_file(path: str) -> bool:
     if not isinstance(path, str):
         return False
@@ -446,15 +590,22 @@ def preparation_notes(task, sources):
             _add_warning("SOURCE_BLOCK_OMITTED")
             continue
 
+    source_contract_hints, omitted_source_contract_hint_count = _source_contract_hints(task, sources)
+
     res = {
         "schema_version": 1,
         "exact_blocker_ids": exact_blocker_ids,
         "warnings": warnings,
         "literal_hints": literal_hints,
         "omitted_literal_count": omitted_literal_count,
+        "source_contract_hints": source_contract_hints,
+        "omitted_source_contract_hint_count": omitted_source_contract_hint_count,
         "dependency_context": dep_ctx,
         "output_contract": out_contract,
     }
+    while res["source_contract_hints"] and len(json.dumps(res).encode("utf-8")) > 8192:
+        res["source_contract_hints"].pop()
+        res["omitted_source_contract_hint_count"] += 1
     while res["literal_hints"] and len(json.dumps(res).encode("utf-8")) > 8192:
         res["literal_hints"].pop()
         res["omitted_literal_count"] += 1

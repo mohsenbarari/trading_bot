@@ -23,6 +23,8 @@ Context precision applies to Worker and Verifier:
 - preparation_notes is bounded advisory metadata from ORIGINAL authoritative sources,
   never an approval, schema extension to task, or substitute for source review.
   Use its exact_blocker_ids and escaped json_literal hints; never invent missing IDs.
+  Treat source_contract_hints as advisory exact-key evidence, require authoritative source
+  inspection and forbid guessing absent keys; Reviewer remains independent.
 - A nonempty dependency_context.missing_full_model_paths requires concise BLOCKED
   instead of guessing field/status/nullability; obey output_contract; finish internal
   reasoning plus JSON within max_provider_output_tokens=60000; a newly generated test
