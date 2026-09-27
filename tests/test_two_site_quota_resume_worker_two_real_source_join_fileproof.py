@@ -760,3 +760,136 @@ def test_real_source_join_preexisting_canonical_task_mismatch_rejected_negative(
     assert list(valid_repo.glob("**/result.json")) == []
     assert list(valid_repo.glob("**/status.json")) == []
     assert not hasattr(load_task, "mock_calls")
+
+
+def test_real_source_join_worker_two_reordered_allowed_files_output_target_positive(
+    valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", scope.sha256)
+
+    reordered_task = copy.deepcopy(task_data)
+    reordered_task["allowed_files"] = ["output.py", "src.py"]
+
+    canonical_task_rel = Path(".local/two-site-refactor/tasks/canonical-task.json")
+    canonical_task_path = valid_repo / canonical_task_rel
+    canonical_task_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_task_path.write_text(
+        json.dumps(reordered_task, indent=2), encoding="utf-8"
+    )
+    raw_bytes = canonical_task_path.read_bytes()
+    raw_sha = hashlib.sha256(raw_bytes).hexdigest()
+
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        valid_repo,
+        source_head=head,
+        task_data=reordered_task,
+        admitted_task_path=canonical_task_rel,
+    )
+
+    assert canonical_task_path.read_bytes() == raw_bytes
+    assert hashlib.sha256(canonical_task_path.read_bytes()).hexdigest() == raw_sha
+    assert not (valid_repo / "task.json").exists()
+    assert ctx["admitted_task_path"] == canonical_task_path.resolve()
+    assert not hasattr(load_task, "mock_calls")
+
+    res = read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    assert res["returned_state"]["state"] == "WORKER_PROPOSAL_READY"
+    assert res["returned_state"]["correction_count"] == 2
+    assert res["returned_state"]["proposal_sha256"] == meta["w2_sha"]
+    assert res["returned_state"]["final_worker_run_id"] == meta["w2_id"]
+    assert res["returned_state"]["task_id"] == reordered_task["task_id"]
+    assert res["returned_state"]["source_head"] == head
+
+    expected_target = reordered_task["allowed_files"][0]
+    expected_sha = (
+        hashlib.sha256((root / expected_target).read_bytes()).hexdigest()
+        if (root / expected_target).exists()
+        else None
+    )
+    assert expected_target == "output.py"
+    assert expected_sha is None
+
+    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+    for run_id in (
+        f"{meta['orig_prefix']}-worker-0",
+        meta["w1_id"],
+        meta["w2_id"],
+    ):
+        snap = json.loads(
+            (proposals_dir / run_id / "result.json").read_text(encoding="utf-8")
+        )
+        assert len(snap["changes"]) == 1
+        assert snap["changes"][0]["path"] == expected_target
+        assert snap["changes"][0]["original_sha256"] is expected_sha
+
+    assert res["worker_info"]["result"]["changes"][0]["path"] == expected_target
+    assert res["worker_info"]["result"]["changes"][0]["original_sha256"] is expected_sha
+
+    assert canonical_task_path.read_bytes() == raw_bytes
+    assert hashlib.sha256(canonical_task_path.read_bytes()).hexdigest() == raw_sha
+    assert not (valid_repo / "task.json").exists()
+
+
+def test_real_source_join_unsafe_allowed_target_rejected_negative(
+    valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", scope.sha256)
+
+    canonical_task_rel = Path(".local/two-site-refactor/tasks/canonical-task.json")
+    canonical_task_path = valid_repo / canonical_task_rel
+    canonical_task_path.parent.mkdir(parents=True, exist_ok=True)
+
+    unsafe_task = copy.deepcopy(task_data)
+    unsafe_target = "../unsafe.py"
+    unsafe_task["allowed_files"] = [unsafe_target, "src.py"]
+    canonical_task_path.write_text(
+        json.dumps(unsafe_task, indent=2), encoding="utf-8"
+    )
+    raw_bytes = canonical_task_path.read_bytes()
+    raw_sha = hashlib.sha256(raw_bytes).hexdigest()
+
+    outside_file = valid_repo.parent / "unsafe.py"
+    assert not outside_file.exists()
+
+    with pytest.raises((ProposalError, SandboxError)):
+        _setup_materialized_worker_two_env(
+            valid_repo,
+            source_head=head,
+            task_data=unsafe_task,
+            admitted_task_path=canonical_task_rel,
+        )
+
+    assert canonical_task_path.read_bytes() == raw_bytes
+    assert hashlib.sha256(canonical_task_path.read_bytes()).hexdigest() == raw_sha
+    assert not (valid_repo / "task.json").exists()
+    assert not outside_file.exists()
+    assert not (valid_repo / unsafe_target).exists()
+
+    proposals_dir = valid_repo / ".local" / "two-site-refactor" / "proposals"
+    assert not proposals_dir.exists() or list(proposals_dir.glob("**/result.json")) == []
+    assert list(valid_repo.glob("**/result.json")) == []
+    assert list(valid_repo.glob("**/status.json")) == []
+    assert not hasattr(load_task, "mock_calls")

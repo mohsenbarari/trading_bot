@@ -70,15 +70,37 @@ def passed_receipt(worker_sha: str) -> dict:
 
 def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
     calls = []
-    src_sha = file_sha256(root / "src.py")
+    src_sha = file_sha256(root / "src.py") if (root / "src.py").exists() else None
 
     def mock_run(_r, _t, role, run_id, timeout, feedback=None, proposal=None, cli=None, test_evidence=None):
+        task_path = Path(_t) if Path(_t).is_absolute() else (root / _t)
+        task_data = json.loads(task_path.read_text())
+        allowed_files = task_data.get("allowed_files")
+        if not isinstance(allowed_files, list) or not allowed_files:
+            raise ProposalError("allowed_files must be a non-empty list")
+        target = allowed_files[0]
+        if not isinstance(target, str) or not target.strip():
+            raise ProposalError("allowed target cannot be empty")
+        target_path_obj = Path(target)
+        if target_path_obj.is_absolute() or os.path.isabs(target) or ".." in target_path_obj.parts:
+            raise ProposalError(f"unsafe allowed target: {target}")
+        try:
+            resolved_target = (root / target).resolve()
+            resolved_root = root.resolve()
+            resolved_target.relative_to(resolved_root)
+        except (ValueError, RuntimeError):
+            raise ProposalError(f"outside-root allowed target: {target}")
+        if resolved_target == resolved_root:
+            raise ProposalError(f"target cannot be root directory: {target}")
+
         calls.append((role, run_id, timeout, feedback, proposal, cli))
         resp = responses[len(calls) - 1]
         out = root / ".local/two-site-refactor/proposals" / run_id
         out.mkdir(parents=True, exist_ok=True)
         st_val = resp.get("status", "PROPOSAL_READY" if role == "worker" else "VERIFIED")
-        ch = ([{"path": "src.py", "original_sha256": src_sha, "content": resp.get("content", f"# c {run_id}\n")}]
+        target_file = root / target
+        target_sha = file_sha256(target_file) if target_file.is_file() else None
+        ch = ([{"path": target, "original_sha256": target_sha, "content": resp.get("content", f"# c {run_id}\n")}]
               if role == "worker" and st_val == "PROPOSAL_READY" else [])
         cov = [1] if st_val in ("PROPOSAL_READY", "VERIFIED") else []
         fnd = resp.get("findings", []) if st_val in ("CHANGES_REQUIRED", "BLOCKED") else []
@@ -87,8 +109,7 @@ def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
         write_json(out / "result.json", result)
         res_sha = file_sha256(out / "result.json")
 
-        task_path = Path(_t) if Path(_t).is_absolute() else (root / _t)
-        snapshot = {"source_head": source_head, "task": json.loads(task_path.read_text()),
+        snapshot = {"source_head": source_head, "task": task_data,
                     "sources": {"src.py": {"sha256": src_sha, "content": "# orig\n"}}}
         if proposal is not None:
             snapshot["proposal"] = proposal.read_text()
@@ -957,6 +978,31 @@ class TestPipeline(unittest.TestCase):
         persisted_status_rel = json.loads((run_dir_rel / "status.json").read_text())
         self.assertEqual(persisted_task_snapshot_rel, nested_task)
         self.assertEqual(persisted_status_rel["task_id"], "TASK-CANONICAL-NESTED")
+
+    def test_runner_derives_worker_change_target_from_task_allowed_files(self):
+        custom_task_path = self.root / "custom_task.json"
+        task = dict(self.task)
+        task["allowed_files"] = ["output.py", "src.py"]
+        write_json(custom_task_path, task)
+        runner, _ = make_runner(self.root, [{"content": "# custom\n"}])
+        run_dir = runner(self.root, custom_task_path, "worker", "run-custom-worker-0", 300)
+        res = json.loads((run_dir / "result.json").read_text())
+        self.assertEqual(len(res["changes"]), 1)
+        self.assertEqual(res["changes"][0]["path"], "output.py")
+        self.assertIsNone(res["changes"][0]["original_sha256"])
+
+    def test_runner_rejects_unsafe_allowed_target(self):
+        unsafe_task_path = self.root / "unsafe_task.json"
+        for bad_target in ["/etc/passwd", "../escape.py", "", "sub/../../escape.py"]:
+            with self.subTest(target=bad_target):
+                task = dict(self.task)
+                task["allowed_files"] = [bad_target]
+                write_json(unsafe_task_path, task)
+                runner, _ = make_runner(self.root, [{"content": "# v1\n"}])
+                with self.assertRaises(ProposalError):
+                    runner(self.root, unsafe_task_path, "worker", "run-unsafe-worker-0", 300)
+                w0_dir = self.root / ".local/two-site-refactor/proposals/run-unsafe-worker-0"
+                self.assertFalse(w0_dir.exists())
 
 
 if __name__ == "__main__":
