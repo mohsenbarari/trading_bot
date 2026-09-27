@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -275,7 +276,7 @@ def test_caps_encoding_and_duplicates():
 
     # Task size cap
     with pytest.raises(OpusReceiptValidationError, match="task_raw exceeds limit"):
-        validate_opus_failure_receipt(valid_status, b"{" + b" " * 160_001 + b"}", valid_stream, expected_run_id="run-opus-459", expected_task=task, expected_sources=sources, expected_head=head)
+        validate_opus_failure_receipt(valid_status, b"{" + b" " * 320_001 + b"}", valid_stream, expected_run_id="run-opus-459", expected_task=task, expected_sources=sources, expected_head=head)
 
     # Stream size cap
     with pytest.raises(OpusReceiptValidationError, match="stream_raw exceeds limit"):
@@ -299,3 +300,73 @@ def test_caps_encoding_and_duplicates():
     # Invalid UTF-8
     with pytest.raises(OpusReceiptValidationError, match="not valid UTF-8"):
         validate_opus_failure_receipt(b"\xff\xfe", valid_task, valid_stream, expected_run_id="run-opus-459", expected_task=task, expected_sources=sources, expected_head=head)
+
+
+def test_correction_snapshot_boundary_size_and_hash():
+    expected_run_id = "run-opus-corr-boundary"
+    expected_task = {"task_id": "task-opus-boundary", "allowed_files": ["b.py"]}
+    expected_sources = {"b.py": {"content": "# candidate"}}
+    expected_head = "0655392de0594432d41a73641e5134376b4c9e43"
+    session_id = "conv-opus-corr-boundary"
+
+    status_raw = json.dumps(
+        _make_status_dict(
+            run_id=expected_run_id,
+            task_id="task-opus-boundary",
+            head=expected_head,
+        )
+    ).encode("utf-8")
+    stream_raw = _make_stream_bytes(session_id=session_id, tool_name="run_command")
+
+    # Valid correction snapshot > 160000 and <= 320000 bytes
+    snap_valid = _make_snapshot_dict(
+        expected_task,
+        expected_sources,
+        expected_head,
+        feedback="f" * 100_000,
+        proposal="p" * 100_000,
+    )
+    task_raw_valid = json.dumps(snap_valid).encode("utf-8")
+    assert 160_000 < len(task_raw_valid) <= 320_000
+
+    receipt = validate_opus_failure_receipt(
+        status_raw,
+        task_raw_valid,
+        stream_raw,
+        expected_run_id=expected_run_id,
+        expected_task=expected_task,
+        expected_sources=expected_sources,
+        expected_head=expected_head,
+    )
+
+    full_sha = hashlib.sha256(task_raw_valid).hexdigest()
+    assert receipt["schema_version"] == 1
+    assert receipt["reason"] == "FORBIDDEN_TOOL_ATTEMPT"
+    assert receipt["run_id"] == expected_run_id
+    assert receipt["task_id"] == "task-opus-boundary"
+    assert receipt["head"] == expected_head
+    assert receipt["conversation_id"] == session_id
+    assert receipt["task_sha256"] == full_sha
+    assert receipt["snapshot_sha256"] == full_sha
+
+    # Correction snapshot > 320000 bytes rejected without truncation
+    snap_over = _make_snapshot_dict(
+        expected_task,
+        expected_sources,
+        expected_head,
+        feedback="f" * 160_000,
+        proposal="p" * 160_000,
+    )
+    task_raw_over = json.dumps(snap_over).encode("utf-8")
+    assert len(task_raw_over) > 320_000
+
+    with pytest.raises(OpusReceiptValidationError, match="task_raw exceeds limit"):
+        validate_opus_failure_receipt(
+            status_raw,
+            task_raw_over,
+            stream_raw,
+            expected_run_id=expected_run_id,
+            expected_task=expected_task,
+            expected_sources=expected_sources,
+            expected_head=expected_head,
+        )

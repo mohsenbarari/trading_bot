@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 MAX_STATUS_BYTES = 160_000
-MAX_TASK_BYTES = 160_000
+MAX_TASK_BYTES = 320_000
 MAX_STREAM_BYTES = 2_000_000
 EXPECTED_MODEL = "claude-opus-4-6-thinking"
 
