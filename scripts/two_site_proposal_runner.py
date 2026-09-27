@@ -403,6 +403,10 @@ class RetryableProviderSessionError(ProposalError):
     pass
 
 
+class ForbiddenToolAttemptError(RetryableProviderSessionError):
+    """Explicit non-finish tool or subagent evidence in a proposal-only run."""
+
+
 class RetryableProviderOutputError(RetryableProviderSessionError):
     """A bounded-retry failure attributable only to one provider response."""
 
@@ -2552,6 +2556,33 @@ def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
     return feedback
 
 
+def _is_explicit_forbidden_evidence(obj: object) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    tool_name = obj.get("tool_name")
+    if isinstance(tool_name, str) and tool_name and tool_name != "finish":
+        return True
+    tool_info = obj.get("tool_info")
+    if isinstance(tool_info, dict):
+        name = tool_info.get("name")
+        if isinstance(name, str) and name and name != "finish":
+            return True
+    return bool("subagent_info" in obj or obj.get("step_type") == "subagent")
+
+
+def _has_forbidden_stream_evidence(events: list) -> bool:
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if _is_explicit_forbidden_evidence(event):
+            return True
+        if event.get("event") == "step_update":
+            step = event.get("step_update")
+            if _is_explicit_forbidden_evidence(step):
+                return True
+    return False
+
+
 class _FinishLifecycleValidator:
     def __init__(self, session: str) -> None:
         self.session = session
@@ -2563,6 +2594,8 @@ class _FinishLifecycleValidator:
         self.current_params: dict | None = None
 
     def record_step(self, event: dict, step: dict) -> None:
+        if _is_explicit_forbidden_evidence(step):
+            raise ForbiddenToolAttemptError("tool attempt invalidates a proposal-only run")
         if (
             step.get("step_type") != "tool"
             or step.get("tool_name") != "finish"
@@ -2701,6 +2734,8 @@ def _parse_stream(
             or envelope.get("conversation_id") != session):
         raise ProposalError("CLI did not complete one successful session")
     if envelope.get("denied_actions"):
+        if _has_forbidden_stream_evidence(events):
+            raise ForbiddenToolAttemptError("tool attempt invalidates a proposal-only run")
         raise RetryableProviderSessionError("CLI did not complete one successful session")
     if envelope.get("status") != "SUCCESS":
         error = envelope.get("error")
@@ -2735,6 +2770,8 @@ def _parse_stream(
     for event in events:
         if "conversation_id" in event and event.get("conversation_id") != session:
             raise ProposalError("CLI did not complete one successful session")
+        if _is_explicit_forbidden_evidence(event):
+            raise ForbiddenToolAttemptError("tool attempt invalidates a proposal-only run")
         if (
             "tool_name" in event
             or "tool_info" in event
@@ -2756,6 +2793,8 @@ def _parse_stream(
         )
         if not is_tool_or_subagent:
             continue
+        if _is_explicit_forbidden_evidence(step):
+            raise ForbiddenToolAttemptError("tool attempt invalidates a proposal-only run")
         validator.record_step(event, step)
 
     # With --json-schema the documented machine payload is structured_output.
