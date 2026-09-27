@@ -151,14 +151,14 @@ def test_main_routing_check_arguments_and_pipeline_delegation(tmp_path: Path, mo
     pipe_err = runner.RetryableProviderSessionError("pipe-fail")
     with mock.patch.object(pipeline, "runner_run", side_effect=pipe_err) as mock_pipe_run:
         with pytest.raises(runner.ProposalError) as exc_info:
-            pipeline.run_provider_session(tmp_path, task_file, "worker", "pipe-id", 30, state_check=mock.Mock())
+            pipeline.run_provider_session(tmp_path, task_file, "worker", "pipe-id", 30, state_check=mock.Mock(), expected_head='a'*40)
         assert "provider session retry exhausted for pipe-id after 3 attempts" in str(exc_info.value)
         assert [c.args[3] for c in mock_pipe_run.call_args_list] == ["pipe-id", "pipe-id-retry-1", "pipe-id-retry-2"]
 
     # Recovery on attempt 2 in run_provider_session
     with mock.patch.object(pipeline, "runner_run", side_effect=[pipe_err, fake_out]) as mock_pipe_run:
         attempt_id, run_dir = pipeline.run_provider_session(
-            tmp_path, task_file, "verifier", "pipe-id", 30, state_check=mock.Mock()
+            tmp_path, task_file, "verifier", "pipe-id", 30, state_check=mock.Mock(), expected_head='a'*40
         )
         assert (attempt_id, run_dir) == ("pipe-id-retry-1", fake_out)
         assert [c.args[3] for c in mock_pipe_run.call_args_list] == ["pipe-id", "pipe-id-retry-1"]
@@ -168,7 +168,7 @@ def test_main_routing_check_arguments_and_pipeline_delegation(tmp_path: Path, mo
     pipe_out_err2 = runner.RetryableProviderOutputError("pipe-out-2")
     with mock.patch.object(pipeline, "runner_run", side_effect=[pipe_out_err1, pipe_out_err2]) as mock_pipe_run:
         with pytest.raises(runner.ProposalError) as exc_info:
-            pipeline.run_provider_session(tmp_path, task_file, "worker", "pipe-out", 30, state_check=mock.Mock())
+            pipeline.run_provider_session(tmp_path, task_file, "worker", "pipe-out", 30, state_check=mock.Mock(), expected_head='a'*40)
         assert type(exc_info.value) is runner.ProposalError
         assert not isinstance(exc_info.value, runner.RetryableProviderSessionError)
         assert "repeated provider output failure for pipe-out after 2 output attempts" in str(exc_info.value)
