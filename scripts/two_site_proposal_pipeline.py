@@ -72,6 +72,11 @@ except ImportError:
         select_worker_model_route,
     )
 
+try:
+    from scripts.two_site_retry_syntax_hint import extract_syntax_hint
+except ImportError:
+    from two_site_retry_syntax_hint import extract_syntax_hint
+
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
 PROTECTED_REFS = (
@@ -1035,6 +1040,7 @@ def run_provider_session(
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
     last_error: RetryableProviderSessionError | None = None
     output_errors = 0
+    next_hint: dict[str, str | int] | None = None
     label = "reviewer" if role == "verifier" else "worker"
     if expected_head is None:
         expected_head = git(root, "rev-parse", "HEAD")
@@ -1042,6 +1048,8 @@ def run_provider_session(
         state_check()
         if (proposals_dir / attempt_id).exists():
             raise ProposalError(f"{label} run ID already exists: {attempt_id}")
+        current_hint = next_hint
+        next_hint = None
         try:
             runner_kwargs = {
                 "feedback": feedback,
@@ -1050,6 +1058,8 @@ def run_provider_session(
             }
             if test_evidence is not None:
                 runner_kwargs["test_evidence"] = test_evidence
+            if current_hint is not None:
+                runner_kwargs["retry_hint"] = current_hint
             run_dir = runner_run(
                 root, task_path, role, attempt_id, timeout, **runner_kwargs
             )
@@ -1057,11 +1067,25 @@ def run_provider_session(
         except RetryableProviderOutputError as exc:
             output_errors += 1
             last_error = exc
+            next_hint = None
             if output_errors >= 2:
                 raise ProposalError(
                     f"repeated provider output failure for {base_run_id} after 2 output attempts"
                 ) from exc
+            if (
+                role == "worker"
+                and feedback is None
+                and proposal is None
+                and isinstance(exc.__cause__, ProposalError)
+            ):
+                cause_text = str(exc.__cause__)
+                if cause_text.startswith("generated Python syntax is invalid: "):
+                    task, _ = load_task(root, task_path)
+                    hint = extract_syntax_hint(cause_text, task["allowed_files"])
+                    if hint is not None:
+                        next_hint = hint
         except ForbiddenToolAttemptError:
+            next_hint = None
             state_check()
             if role != "worker":
                 raise
@@ -1084,12 +1108,14 @@ def run_provider_session(
             if len(fallback_id) > 80 or os.path.lexists(proposals_dir / fallback_id):
                 raise ProposalError(f"fallback run ID invalid or already exists: {fallback_id}")
             fallback_kwargs = dict(runner_kwargs)
+            fallback_kwargs.pop("retry_hint", None)
             fallback_kwargs["fallback_from_run_id"] = attempt_id
             fallback_dir = runner_run(
                 root, task_path, role, fallback_id, timeout, **fallback_kwargs
             )
             return fallback_id, fallback_dir
         except RetryableProviderSessionError as exc:
+            next_hint = None
             last_error = exc
         except ProposalError as exc:
             state_check()
