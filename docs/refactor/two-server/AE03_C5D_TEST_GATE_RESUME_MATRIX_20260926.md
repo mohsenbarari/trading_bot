@@ -83,9 +83,16 @@
 ### 1.7 Real Terminal Receipt and Initial Source Collector Join (Commit c536f4ee)
 
 - `tests/test_two_site_quota_real_source_join_fileproof.py` connects the canonical Broker/Task/Assignment/semantic fixture to a real persisted cycle reservation, terminal-quota receipt, unpatched `collect_initial_wait_source_expected`, unpatched `admit_initial_quota_wait_locked`, persisted wait/claim, and unpatched continuation admission. A post-receipt status-witness tamper fails closed before wait/claim publication.
-- The original quota Provider payload is synthetic test data, not a live Provider run. Only the two module-local Autopilot `validate_repository` calls are patched to accepted facts because the tiny fixture lacks the full control-file tree. No terminal receipt, collector, Broker common validator, task/semantic/wait/claim reader or admission function is patched.
+- The original quota Provider payload is synthetic test data, not a live Provider run. At commit `c536f4ee`, the two module-local Autopilot `validate_repository` calls were patched to accepted facts because the tiny fixture lacks the full control-file tree; commit `9772f65e` later removes those mocks from this same test (Section 1.8). No terminal receipt, collector, Broker common validator, task/semantic/wait/claim reader or admission function is patched.
 - Gemini Worker needed two bounded test-gate corrections for nonexistent receipt keys; independent Reviewer then verified the exact proposal. Codex checked SHA/bytes and 1,036 quota-family tests passed.
-- Still open: real unpatched Autopilot repository facts on a full control tree, live Provider/candidate sandbox, common→W2 outer join, Broker/Supervisor live hook, STOP/race/crash cohorts, replay authority and C5d completion. Sentinel: `observational quota, no replay authority`.
+- At that checkpoint, full-tree facts were still open; Section 1.8 closes only this common-chain test gap. The distinct W2 joined proof still patches common request validator, Git repo facts, expected wait source, task snapshot/load_task; live Provider/candidate sandbox, common→W2 outer join, Broker/Supervisor live hook, STOP/race/crash, replay authority and C5d completion remain open. Sentinel: `observational quota, no replay authority`.
+
+### 1.8 Real Full-Tree Repository Facts and Common Source Join Fileproof (Commits 2ef9ca50, 9772f65e)
+
+- Commit `2ef9ca50` proves standalone full-tree real `validate_repository`/`validate_accepted_repository` and hardlink rejection in `tests/test_two_site_quota_full_tree_repository_facts.py`.
+- Commit `9772f65e` proves common Broker receipt→initial wait→wait/claim→continuation positive and status-witness-tamper negative with real unpatched facts and real pending intent in `tests/test_two_site_quota_real_source_join_fileproof.py`; Gemini Worker/Reviewer verified, Codex byte-bound, 50 related tests passed for the latter.
+- Distinct W2 joined proof in `tests/test_two_site_quota_resume_worker_two_joined_admission_fileproof.py` STILL patches common request validator, Git facts, expected wait source, task snapshot/load_task.
+- Original Provider outcome synthetic; candidate sandbox, live Provider, W2 outer join, Broker/Supervisor hook, STOP/race/crash, replay authority and full C5d completion OPEN. Sentinel: `observational quota, no replay authority`.
 
 ## 2. Persisted State Fields at Pipeline Quota Block
 
