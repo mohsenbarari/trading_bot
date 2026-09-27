@@ -5,19 +5,17 @@ Explicit disclosures:
    synthetic test outcomes constructed via _make_quota_payload and _make_quota_response;
    they materialize an actual file-backed status witness and real Broker terminal
    quota receipt, but are not produced by live Provider execution.
-2. Only two module-local Autopilot external facts calls are patched:
-   - scripts.two_site_quota_wait_intent.validate_repository
-   - scripts.two_site_quota_wait_sources.validate_repository
-   Both return deep copies of the accepted repository facts from _setup_intent_marker
-   because the hermetic test repository lacks the full Autopilot control-file tree.
-3. Open W2 and live-replay gates: no claim that full live provenance, W2,
-   Provider execution, Broker/Supervisor live hook, replay authority, or C5d
-   completion is proven.
+2. Real unpatched Autopilot repository facts: repository facts are validated directly
+   from the temporary repository populated with complete tracked CONTROL_PATHS and
+   GEMINI_RUNTIME_REFERENCE_PATHS, with no mocks of validate_repository or
+   validate_accepted_repository, and a real pending RESCOPE intent is published.
+3. Open W2, candidate sandbox, live hooks, and replay gates: original Provider quota
+   response remains synthetic; candidate sandbox, W2 outer join, Broker/Supervisor live
+   hook, STOP/race/crash, replay authority and full C5d completion remain OPEN and unproven.
 """
 
 from __future__ import annotations
 
-import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -27,13 +25,20 @@ import stat
 import subprocess
 import time
 from typing import Any
-from unittest import mock
 
 import pytest
 
 os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
 
-from scripts.two_site_codex_autopilot import exclusive_supervisor_lock
+from scripts.two_site_codex_autopilot import (
+    PROTECTED_REFS,
+    ensure_rescope_epoch_dir,
+    exclusive_supervisor_lock,
+    publish_rescope_intent,
+    rescope_epoch_basename,
+    validate_accepted_repository,
+    validate_repository,
+)
 from scripts.two_site_provider_broker import (
     publish_cycle_reservation,
     publish_terminal_quota_record,
@@ -56,6 +61,7 @@ from scripts.two_site_quota_wait_admission import (
     WaitAdmissionError,
     admit_initial_quota_wait_locked,
 )
+from scripts.two_site_quota_wait_intent import RESCOPE_INTENT_FILENAMES
 from scripts.two_site_quota_wait_sources import (
     collect_initial_wait_source_expected,
 )
@@ -69,8 +75,8 @@ from tests.test_two_site_provider_broker_cycle_reservation_read import (
     _setup_cycle_root,
     _write_startup_json,
 )
-from tests.test_two_site_quota_continuation_common_intent_fileproof import (
-    _setup_intent_marker,
+from tests.test_two_site_quota_full_tree_repository_facts import (
+    _populate_full_tree_repo,
 )
 from tests.test_two_site_quota_join_semantic_fixture import (
     setup_two_site_quota_join_semantic_fixture,
@@ -92,6 +98,8 @@ def _setup_scenario_through_receipt(
     updated_env = dict(original_environment)
     updated_env["TWO_SITE_AUTOPILOT_RUN_ID"] = original_ctrl_id
 
+    _populate_full_tree_repo(root)
+
     fixture = setup_two_site_quota_join_semantic_fixture(
         root,
         task,
@@ -105,9 +113,25 @@ def _setup_scenario_through_receipt(
     head = fixture["head"]
     identity = fixture["identity"]
 
-    repo_facts, validated_repo, epoch_dir, marker_path, intent_epoch = (
-        _setup_intent_marker(root, actual_scope)
-    )
+    for ref in PROTECTED_REFS:
+        subprocess.run(["git", "-C", str(root), "update-ref", ref, head], check=True)
+
+    repo_facts = validate_repository(root)
+    validated_repo = validate_accepted_repository(repo_facts)
+
+    autopilot_dir = root / ".local" / "two-site-refactor" / "autopilot"
+    autopilot_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(autopilot_dir, 0o700)
+
+    epoch_dir = ensure_rescope_epoch_dir(autopilot_dir, validated_repo)
+    publish_rescope_intent(epoch_dir, 1)
+
+    marker_filename = RESCOPE_INTENT_FILENAMES[1]
+    marker_path = epoch_dir / marker_filename
+    assert marker_path.is_file()
+    assert (marker_path.stat().st_mode & 0o777) == 0o600
+
+    intent_epoch = rescope_epoch_basename(validated_repo)
 
     _, runs_dir = _setup_cycle_root(str(root), original_ctrl_id)
     startup_path = _write_startup_json(
@@ -199,8 +223,10 @@ def test_quota_real_source_join_fileproof_positive(
     Scope: observational quota, no replay authority.
     Validates that initial wait admission, receipt collector, wait record publication,
     known-reset claim preparation, claim publication, and continuation admission all succeed
-    with real unpatched readers and validators, patching only the two module-local repository
-    fact functions.
+    with real unpatched full-tree Autopilot repository facts and real pending intent.
+    Original Provider quota response remains synthetic; candidate sandbox, W2 outer join,
+    Broker/Supervisor live hook, STOP/race/crash, replay authority and full C5d completion
+    remain OPEN and unproven.
     """
     root, task, original_scope, original_environment = broker_repo
     sc = _setup_scenario_through_receipt(
@@ -209,7 +235,6 @@ def test_quota_real_source_join_fileproof_positive(
 
     now_utc = sc["now_utc"]
     autopilot_dir = sc["autopilot_dir"]
-    repo_facts = sc["repo_facts"]
     original_ctrl_id = sc["original_ctrl_id"]
     continuation_ctrl_id = sc["continuation_ctrl_id"]
     published_receipt = sc["published_receipt"]
@@ -226,17 +251,7 @@ def test_quota_real_source_join_fileproof_positive(
     head = sc["head"]
 
     clock_dt = now_utc - timedelta(seconds=120)
-    with (
-        exclusive_supervisor_lock(autopilot_dir / "supervisor.lock"),
-        mock.patch(
-            "scripts.two_site_quota_wait_intent.validate_repository",
-            side_effect=lambda *args, **kwargs: copy.deepcopy(repo_facts),
-        ),
-        mock.patch(
-            "scripts.two_site_quota_wait_sources.validate_repository",
-            side_effect=lambda *args, **kwargs: copy.deepcopy(repo_facts),
-        ),
-    ):
+    with exclusive_supervisor_lock(autopilot_dir / "supervisor.lock"):
         wait_record = admit_initial_quota_wait_locked(
             root,
             original_ctrl_id,
@@ -365,12 +380,14 @@ def test_quota_real_source_join_fileproof_negative_status_witness_tamper(
     """Post-receipt status-witness tamper fails closed in real collector.
 
     Scope: observational quota, no replay authority.
-    Discloses that the original quota Provider outcome is synthetic and that
-    only the two Autopilot external repository-fact functions are patched.
+    Discloses that the original quota Provider outcome is synthetic and uses
+    real unpatched full-tree Autopilot repository facts with real pending intent.
     Verifies that tampering the status witness after receipt publication causes
     admit_initial_quota_wait_locked to fail closed with WaitAdmissionError caused
     by collector/receipt witness rejection before wait or claim records are written,
     with no Provider execution and unchanged tracked Git.
+    Candidate sandbox, W2 outer join, Broker/Supervisor live hook, STOP/race/crash,
+    replay authority and full C5d completion remain OPEN and unproven.
     """
     root, task, original_scope, original_environment = broker_repo
     sc = _setup_scenario_through_receipt(
@@ -379,7 +396,6 @@ def test_quota_real_source_join_fileproof_negative_status_witness_tamper(
 
     status_path = sc["status_path"]
     original_ctrl_id = sc["original_ctrl_id"]
-    repo_facts = sc["repo_facts"]
     autopilot_dir = sc["autopilot_dir"]
     runs_dir = sc["runs_dir"]
     head = sc["head"]
@@ -388,17 +404,7 @@ def test_quota_real_source_join_fileproof_negative_status_witness_tamper(
     status_path.write_bytes(b'{"drifted": true, "tampered": true}')
 
     clock_dt = now_utc - timedelta(seconds=120)
-    with (
-        exclusive_supervisor_lock(autopilot_dir / "supervisor.lock"),
-        mock.patch(
-            "scripts.two_site_quota_wait_intent.validate_repository",
-            side_effect=lambda *args, **kwargs: copy.deepcopy(repo_facts),
-        ),
-        mock.patch(
-            "scripts.two_site_quota_wait_sources.validate_repository",
-            side_effect=lambda *args, **kwargs: copy.deepcopy(repo_facts),
-        ),
-    ):
+    with exclusive_supervisor_lock(autopilot_dir / "supervisor.lock"):
         with pytest.raises(WaitAdmissionError) as exc_info:
             admit_initial_quota_wait_locked(
                 root,
