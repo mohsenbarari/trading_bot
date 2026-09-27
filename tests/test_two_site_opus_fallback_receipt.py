@@ -276,7 +276,7 @@ def test_caps_encoding_and_duplicates():
 
     # Task size cap
     with pytest.raises(OpusReceiptValidationError, match="task_raw exceeds limit"):
-        validate_opus_failure_receipt(valid_status, b"{" + b" " * 320_001 + b"}", valid_stream, expected_run_id="run-opus-459", expected_task=task, expected_sources=sources, expected_head=head)
+        validate_opus_failure_receipt(valid_status, b"{" + b" " * 480_001 + b"}", valid_stream, expected_run_id="run-opus-459", expected_task=task, expected_sources=sources, expected_head=head)
 
     # Stream size cap
     with pytest.raises(OpusReceiptValidationError, match="stream_raw exceeds limit"):
@@ -318,16 +318,16 @@ def test_correction_snapshot_boundary_size_and_hash():
     ).encode("utf-8")
     stream_raw = _make_stream_bytes(session_id=session_id, tool_name="run_command")
 
-    # Valid correction snapshot > 160000 and <= 320000 bytes
+    # Valid correction snapshot > 320000 and <= 480000 bytes
     snap_valid = _make_snapshot_dict(
         expected_task,
         expected_sources,
         expected_head,
-        feedback="f" * 100_000,
-        proposal="p" * 100_000,
+        feedback="f" * 200_000,
+        proposal="p" * 200_000,
     )
     task_raw_valid = json.dumps(snap_valid).encode("utf-8")
-    assert 160_000 < len(task_raw_valid) <= 320_000
+    assert 320_000 < len(task_raw_valid) <= 480_000
 
     receipt = validate_opus_failure_receipt(
         status_raw,
@@ -349,16 +349,16 @@ def test_correction_snapshot_boundary_size_and_hash():
     assert receipt["task_sha256"] == full_sha
     assert receipt["snapshot_sha256"] == full_sha
 
-    # Correction snapshot > 320000 bytes rejected without truncation
+    # Correction snapshot > 480000 bytes rejected without truncation
     snap_over = _make_snapshot_dict(
         expected_task,
         expected_sources,
         expected_head,
-        feedback="f" * 160_000,
-        proposal="p" * 160_000,
+        feedback="f" * 240_000,
+        proposal="p" * 240_000,
     )
     task_raw_over = json.dumps(snap_over).encode("utf-8")
-    assert len(task_raw_over) > 320_000
+    assert len(task_raw_over) > 480_000
 
     with pytest.raises(OpusReceiptValidationError, match="task_raw exceeds limit"):
         validate_opus_failure_receipt(
