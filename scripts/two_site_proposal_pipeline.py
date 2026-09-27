@@ -17,8 +17,8 @@ from typing import Any, Callable, Mapping
 
 try:
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ProposalError,
-        RetryableProviderOutputError, RetryableProviderSessionError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
+        ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
@@ -26,8 +26,8 @@ try:
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ProposalError,
-        RetryableProviderOutputError, RetryableProviderSessionError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
+        ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
@@ -1059,6 +1059,34 @@ def run_provider_session(
                 raise ProposalError(
                     f"repeated provider output failure for {base_run_id} after 2 output attempts"
                 ) from exc
+        except ForbiddenToolAttemptError:
+            state_check()
+            if role != "worker":
+                raise
+            policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
+            if not policy.enabled:
+                raise
+            task, _ = load_task(root, task_path)
+            task_id = task.get("task_id") if isinstance(task, dict) else None
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise
+            route = select_worker_model_route(
+                task_id,
+                policy=policy,
+                default_model=WORKER_MODEL,
+                default_effort=WORKER_EFFORT,
+            )
+            if route.model != policy.model:
+                raise
+            fallback_id = f"{attempt_id}-gf"
+            if len(fallback_id) > 80 or os.path.lexists(proposals_dir / fallback_id):
+                raise ProposalError(f"fallback run ID invalid or already exists: {fallback_id}")
+            fallback_kwargs = dict(runner_kwargs)
+            fallback_kwargs["fallback_from_run_id"] = attempt_id
+            fallback_dir = runner_run(
+                root, task_path, role, fallback_id, timeout, **fallback_kwargs
+            )
+            return fallback_id, fallback_dir
         except RetryableProviderSessionError as exc:
             last_error = exc
         except ProposalError as exc:
