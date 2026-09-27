@@ -96,7 +96,7 @@ def _setup_w2_admission_claim_scenario(
         created_dt = datetime.fromtimestamp(sc["request"]["created_at"], tz=timezone.utc)
         next_check_str = wait_record["schedule"]["next_check_at_utc"]
         next_check_dt = datetime.fromisoformat(next_check_str.replace("Z", "+00:00"))
-        claimed_at_dt = (max(created_dt, next_check_dt) + timedelta(seconds=15)).replace(
+        claimed_at_dt = (max(created_dt, next_check_dt) + timedelta(seconds=1)).replace(
             microsecond=0
         )
         claimed_at_utc = claimed_at_dt.strftime("%Y-%m-%dT%H:%M:%SZ")

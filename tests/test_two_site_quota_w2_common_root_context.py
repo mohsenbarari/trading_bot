@@ -58,8 +58,9 @@ def test_two_site_quota_w2_common_root_context_positive(
         resume_request["claimed_at_utc"].replace("Z", "+00:00")
     ).timestamp()
     clock_delay = claim_epoch - time.time()
+    assert clock_delay <= 2.0
     if clock_delay > 0:
-        time.sleep(clock_delay + 0.25)
+        time.sleep(clock_delay + 0.05)
 
     with worker_correction_continuation_context(root, resume_request) as bound:
         assert bound["admitted_request"] == resume_request
@@ -181,8 +182,9 @@ def test_two_site_quota_w2_common_root_context_negative_tampered_feedback_sha(
         resume_request["claimed_at_utc"].replace("Z", "+00:00")
     ).timestamp()
     clock_delay = claim_epoch - time.time()
+    assert clock_delay <= 2.0
     if clock_delay > 0:
-        time.sleep(clock_delay + 0.25)
+        time.sleep(clock_delay + 0.05)
 
     with pytest.raises(ProposalError) as exc_info:
         with worker_correction_continuation_context(root, resume_request):
