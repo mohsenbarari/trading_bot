@@ -16,6 +16,7 @@ These gates remain open pending subsequent phase implementation.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -465,4 +466,168 @@ def test_real_source_join_worker_two_tamper_w2_source_snapshot_rejected_negative
 
     r2_id = f"{meta['continuation_run_prefix']}-reviewer-2"
     assert not (proposals_dir / r2_id).exists()
+    assert not hasattr(load_task, "mock_calls")
+
+
+def test_real_source_join_canonical_task_path_worker_two_positive(
+    valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", scope.sha256)
+
+    canonical_task_rel = Path("custom_tasks") / "canonical_task.json"
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        valid_repo,
+        source_head=head,
+        task_data=task_data,
+        admitted_task_path=canonical_task_rel,
+    )
+
+    assert not (root / "task.json").exists()
+    assert (root / canonical_task_rel).is_file()
+    assert ctx["admitted_task_path"] == (root / canonical_task_rel).resolve()
+
+    res = read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    expected_current_worker = (
+        meta["w2_id"],
+        meta["w2_sha"],
+        meta["w2_result_text"],
+        meta["w2_conv_id"],
+    )
+    assert res["current_worker"] == expected_current_worker
+
+    expected_ordered_history_convs = [
+        "conv-w0",
+        "conv-r0",
+        "conv-w1",
+        f"conv-{meta['r1_id']}",
+    ]
+    assert res["complete_history"]["complete"] is True
+    assert (
+        res["complete_history"]["ordered_conversation_ids"]
+        == expected_ordered_history_convs
+    )
+    expected_seen_convs = set(expected_ordered_history_convs) | {meta["w2_conv_id"]}
+    assert res["seen_convs"] == expected_seen_convs
+
+    assert res["returned_state"]["state"] == "WORKER_PROPOSAL_READY"
+    assert res["returned_state"]["correction_count"] == 2
+    assert res["returned_state"]["proposal_sha256"] == meta["w2_sha"]
+    assert res["returned_state"]["final_worker_run_id"] == meta["w2_id"]
+    assert res["returned_state"]["task_id"] == task_data["task_id"]
+    assert res["returned_state"]["source_head"] == head
+
+    worker_info = res["worker_info"]
+    assert worker_info["result_sha"] == meta["w2_sha"]
+    assert worker_info["conversation_id"] == meta["w2_conv_id"]
+    assert worker_info["result"]["status"] == "PROPOSAL_READY"
+    assert worker_info["status"]["state"] == "PROPOSAL_READY"
+    assert worker_info["status"]["run_id"] == meta["w2_id"]
+    assert worker_info["status"]["task_id"] == task_data["task_id"]
+    assert worker_info["status"]["head"] == head
+
+    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+    w2_run_dir = proposals_dir / meta["w2_id"]
+    w2_task_snapshot = json.loads(
+        (w2_run_dir / "task.json").read_text(encoding="utf-8")
+    )
+    assert w2_task_snapshot["sources"] == ctx["sources"]
+    assert w2_task_snapshot["source_head"] == head
+    assert ctx["source_head"] == head
+    assert ctx["task"]["task_id"] == task_data["task_id"]
+
+    src_bytes = (root / "src.py").read_bytes()
+    expected_src_sha = hashlib.sha256(src_bytes).hexdigest()
+    assert ctx["sources"]["src.py"]["sha256"] == expected_src_sha
+    assert w2_task_snapshot["sources"]["src.py"]["sha256"] == expected_src_sha
+    assert "output.py" in ctx["sources"]
+    assert ctx["sources"]["output.py"] == {"content": None, "sha256": None}
+
+    for run_id in (
+        f"{meta['orig_prefix']}-worker-0",
+        f"{meta['orig_prefix']}-reviewer-0",
+        meta["w1_id"],
+        meta["r1_id"],
+        meta["w2_id"],
+    ):
+        snap = json.loads(
+            (proposals_dir / run_id / "task.json").read_text(encoding="utf-8")
+        )
+        assert snap["sources"] == ctx["sources"]
+        assert snap["source_head"] == head
+        assert snap["task"]["task_id"] == task_data["task_id"]
+        assert snap["task"]["goal"] == task_data["goal"]
+
+    assert not (root / "task.json").exists()
+
+
+def test_real_source_join_canonical_task_content_tamper_rejected_negative(
+    valid_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task_data, head = _setup_repo_and_task(valid_repo)
+    scope = load_active_assignment_scope(valid_repo)
+    assert scope.assignment_id == "WA-P1-00B-QUOTA-W2-REALSOURCE-20260927-511"
+    assert scope.assignment_id == task_data["task_id"]
+    assert scope.allowed_paths == ("src.py", "output.py")
+    assert not hasattr(load_task, "mock_calls")
+    assert len(head) == 40
+
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED", "1")
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_ID", scope.assignment_id)
+    monkeypatch.setenv("TWO_SITE_ASSIGNMENT_SHA256", scope.sha256)
+
+    canonical_task_rel = Path("custom_tasks") / "canonical_task.json"
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        valid_repo,
+        source_head=head,
+        task_data=task_data,
+        admitted_task_path=canonical_task_rel,
+    )
+    assert not (root / "task.json").exists()
+
+    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+    all_runs = [
+        f"{meta['orig_prefix']}-worker-0",
+        f"{meta['orig_prefix']}-reviewer-0",
+        meta["w1_id"],
+        meta["r1_id"],
+        meta["w2_id"],
+    ]
+    prior_snapshots = {
+        run_id: (
+            (proposals_dir / run_id / "result.json").read_bytes(),
+            (proposals_dir / run_id / "status.json").read_bytes(),
+            (proposals_dir / run_id / "task.json").read_bytes(),
+        )
+        for run_id in all_runs
+    }
+
+    canonical_task_path = root / canonical_task_rel
+    tampered_task = copy.deepcopy(task_data)
+    tampered_task["requirements"] = ["R1: tampered requirement for negative proof"]
+    canonical_task_path.write_text(json.dumps(tampered_task), encoding="utf-8")
+
+    with pytest.raises((ProposalError, SandboxError)):
+        read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    for run_id, (res_bytes, st_bytes, task_bytes) in prior_snapshots.items():
+        assert (proposals_dir / run_id / "result.json").read_bytes() == res_bytes
+        assert (proposals_dir / run_id / "status.json").read_bytes() == st_bytes
+        assert (proposals_dir / run_id / "task.json").read_bytes() == task_bytes
+
+    r2_id = f"{meta['continuation_run_prefix']}-reviewer-2"
+    assert not (proposals_dir / r2_id).exists()
+    assert not (root / "task.json").exists()
     assert not hasattr(load_task, "mock_calls")

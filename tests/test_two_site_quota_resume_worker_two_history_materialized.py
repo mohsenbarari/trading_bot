@@ -96,10 +96,29 @@ def _build_materialized_env(
     *,
     source_head: str = HEAD,
     task_data: dict[str, Any] | None = None,
+    admitted_task_path: Path | str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
-    task_path = tmp_path / "task.json"
+    root = tmp_path.resolve()
+    if admitted_task_path is None:
+        task_path = root / "task.json"
+    else:
+        raw_task_path = Path(admitted_task_path)
+        if not raw_task_path.is_absolute():
+            candidate_task_path = (root / raw_task_path).resolve()
+        else:
+            candidate_task_path = raw_task_path.resolve()
+        try:
+            candidate_task_path.relative_to(root)
+        except ValueError as exc:
+            raise ProposalError(
+                f"admitted_task_path outside root: {candidate_task_path}"
+            ) from exc
+        if candidate_task_path == root:
+            raise ProposalError("admitted_task_path cannot be root directory itself")
+        task_path = candidate_task_path
+
     if task_data is None:
-        src_file = tmp_path / "src.py"
+        src_file = root / "src.py"
         src_file.write_text("# orig\n", encoding="utf-8")
         effective_task = {
             "task_id": "T1",
@@ -109,14 +128,16 @@ def _build_materialized_env(
             "requirements": ["R1"],
             "test_selectors": ["test.py"],
         }
+        task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(json.dumps(effective_task), encoding="utf-8")
         loaded_task_id = "T1"
         real_sources = None
     else:
         effective_task = copy.deepcopy(task_data)
+        task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(json.dumps(effective_task), encoding="utf-8")
-        loaded_task, real_sources = load_task(tmp_path, task_path)
-        loaded_task_id = loaded_task.get("task_id", "T1")
+        loaded_task, real_sources = load_task(root, task_path)
+        loaded_task_id = loaded_task["task_id"]
 
     findings = ["Worker0 proposal needs correction"]
     responses = [
@@ -132,13 +153,13 @@ def _build_materialized_env(
         for resp in responses:
             resp["task_override"] = {"sources": real_sources}
 
-    runner, _ = make_runner(tmp_path, responses, source_head=source_head)
+    runner, _ = make_runner(root, responses, source_head=source_head)
 
     w0_id = f"{orig_prefix}-worker-0"
-    w0_dir = runner(tmp_path, task_path, "worker", w0_id, 300)
+    w0_dir = runner(root, task_path, "worker", w0_id, 300)
     w0_sha = hashlib.sha256((w0_dir / "result.json").read_bytes()).hexdigest()
 
-    pipe_dir = tmp_path / ".local" / "two-site-refactor" / "pipeline" / orig_prefix
+    pipe_dir = root / ".local" / "two-site-refactor" / "pipeline" / orig_prefix
     pipe_dir.mkdir(parents=True, exist_ok=True)
     receipt0_path = pipe_dir / "pre-review-tests-0.json"
     receipt0_data = passed_receipt(w0_sha)
@@ -147,7 +168,7 @@ def _build_materialized_env(
 
     r0_id = f"{orig_prefix}-reviewer-0"
     runner(
-        tmp_path,
+        root,
         task_path,
         "verifier",
         r0_id,
@@ -169,7 +190,7 @@ def _build_materialized_env(
 
     w1_id = f"{orig_prefix}-worker-1"
     w1_dir = runner(
-        tmp_path,
+        root,
         task_path,
         "worker",
         w1_id,
@@ -190,9 +211,9 @@ def _build_materialized_env(
     }
     if task_data is None:
         with _patch_load_task():
-            w1_info = load_prior_worker_chain(tmp_path, task_path, w1_artifacts)
+            w1_info = load_prior_worker_chain(root, task_path, w1_artifacts)
     else:
-        w1_info = load_prior_worker_chain(tmp_path, task_path, w1_artifacts)
+        w1_info = load_prior_worker_chain(root, task_path, w1_artifacts)
 
     r1_id = f"{orig_prefix}-reviewer-1"
     r1_status = {"run_id": r1_id, "conversation_id": f"conv-{r1_id}"}
@@ -276,3 +297,18 @@ def test_materialized_gemini_rejects_tampered_feedback1_findings(tmp_path: Path)
     with _patch_load_task():
         with pytest.raises((ProposalError, SandboxError), match="Reviewer0 findings mismatch"):
             complete_worker_two_history(tmp_path, task_path, artifacts, evidence)
+
+
+def test_materialized_history_rejects_outside_root_admitted_task_path(
+    tmp_path: Path,
+) -> None:
+    outside_name = f"outside_{tmp_path.name}_task.json"
+    outside_path = tmp_path.parent / outside_name
+    if outside_path.exists():
+        pytest.fail(f"preexisting collision for outside path: {outside_path}")
+    assert not outside_path.exists()
+
+    with pytest.raises((ProposalError, SandboxError, ValueError)):
+        _build_materialized_env(tmp_path, admitted_task_path=outside_path)
+
+    assert not outside_path.exists()

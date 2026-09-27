@@ -63,10 +63,14 @@ def _setup_materialized_worker_two_env(
     *,
     source_head: str = HEAD,
     task_data: dict[str, Any] | None = None,
+    admitted_task_path: Path | str | None = None,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     root = tmp_path.resolve()
     artifacts, evidence, task_path, orig_prefix = _build_materialized_env(
-        root, source_head=source_head, task_data=task_data
+        root,
+        source_head=source_head,
+        task_data=task_data,
+        admitted_task_path=admitted_task_path,
     )
 
     if task_data is not None:
@@ -282,3 +286,20 @@ def test_materialized_worker_two_rejects_tampered_w2_feedback_sha(
     with _patch_load_task():
         with pytest.raises(ProposalError, match="feedback SHA mismatch"):
             read_and_bind_worker_two_result(root, ctx, returned_state)
+
+
+def test_materialized_worker_two_rejects_outside_root_admitted_task_path(
+    tmp_path: Path,
+) -> None:
+    outside_name = f"outside_{tmp_path.name}_task.json"
+    outside_path = tmp_path.parent / outside_name
+    if outside_path.exists():
+        pytest.fail(f"preexisting collision for outside path: {outside_path}")
+    assert not outside_path.exists()
+
+    with pytest.raises((ProposalError, SandboxError, ValueError)):
+        _setup_materialized_worker_two_env(
+            tmp_path, admitted_task_path=outside_path
+        )
+
+    assert not outside_path.exists()
