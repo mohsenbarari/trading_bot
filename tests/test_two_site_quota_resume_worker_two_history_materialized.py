@@ -97,6 +97,7 @@ def _build_materialized_env(
     source_head: str = HEAD,
     task_data: dict[str, Any] | None = None,
     admitted_task_path: Path | str | None = None,
+    selector: str = "test.py",
 ) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
     root = tmp_path.resolve()
     if admitted_task_path is None:
@@ -126,7 +127,7 @@ def _build_materialized_env(
             "context_files": ["src.py"],
             "allowed_files": ["src.py"],
             "requirements": ["R1"],
-            "test_selectors": ["test.py"],
+            "test_selectors": [selector],
         }
         task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(json.dumps(effective_task), encoding="utf-8")
@@ -319,3 +320,18 @@ def test_materialized_history_rejects_outside_root_admitted_task_path(
         _build_materialized_env(tmp_path, admitted_task_path=outside_path)
 
     assert not outside_path.exists()
+
+
+def test_materialized_env_custom_selector(tmp_path: Path) -> None:
+    _, _, task_path, orig_prefix = _build_materialized_env(
+        tmp_path, task_data=None, selector="tests/test_a.py"
+    )
+    root_task = json.loads(task_path.read_text(encoding="utf-8"))
+    assert root_task["test_selectors"] == ["tests/test_a.py"]
+    for run_suffix in ("worker-0", "reviewer-0", "worker-1"):
+        snap_path = (
+            tmp_path / ".local" / "two-site-refactor" / "proposals" / f"{orig_prefix}-{run_suffix}" / "task.json"
+        )
+        snapshot = json.loads(snap_path.read_text(encoding="utf-8"))
+        assert snapshot["task"]["test_selectors"] == ["tests/test_a.py"]
+        assert snapshot["source_head"] == HEAD
