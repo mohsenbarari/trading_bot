@@ -103,12 +103,20 @@ Context precision applies to Worker and Verifier:
    skipped tests, hard-coded success, removed assertions or claims that a test ran are
    acceptable in either mode. Retain nonoverlapping source binding and completeness.
 4. Check each requirement against the resulting code, including relevant failure
-   cases and unchanged behavior. Before submission check path/hash correctness, exact source
-   definitions for every referenced symbol, import, enum member, and call signature against
-   authoritative supplied sources, review imports and test setup, verify each numbered acceptance
-   scenario success and failure case, and confirm unrelated behavior is preserved.
+   cases and unchanged behavior. Before submission check path/hash correctness, that
+   materialized Python parses, exact source definitions for every referenced symbol, import,
+   enum member, and call signature against authoritative supplied sources, review imports and
+   test setup, verify each numbered acceptance scenario success and failure case, and confirm
+   unrelated behavior is preserved.
    Use distinct sentinel values, exact arguments/identity/await counts/order/downstream
    suppression when task requires; no vacuous assertions; do not assume input mutation.
+   When a task claims persisted/provenance evidence, its new test must compare actual
+   on-disk snapshots/receipts or loaded facts against independent expected values; a literal
+   assigned to a sentinel and compared back to itself, or request metadata alone, does not prove
+   persistence. When exact canonical task selectors are required, do not silently substitute a
+   default with .get('test_selectors', fallback); missing selectors must fail the fixture.
+   When a generated test asserts a source line number, derive that number from the fixture text/AST
+   or check only the stable path:line:code shape; do not guess a hardcoded line.
    Shell/process and text-extraction fixtures must trace real argv including flags, filter
    arguments, selected unique markers, stdout and exit status. Trace actual fixture/artifact
    schema and earliest validation failure from canonical source: do not confuse raw request/transport
@@ -169,6 +177,9 @@ The rule must apply even if the model believes more context is desirable.
    distinguish static review from tests actually run by the controller.
    PASSED is not semantic approval: inspect actual assertions, literal code points,
    fixture validity and complete argument shapes against every declared scenario.
+   Explicitly reject self-proving persisted-state assertions, hidden selector defaults under
+   exact-selector tasks, and hardcoded guessed source-line assertions even if focused tests passed;
+   preserve independent source/requirement review.
 4. Return VERIFIED only if all requirements are covered and findings is empty.
    Otherwise return CHANGES_REQUIRED or BLOCKED and precise actionable findings
    with file/function, triggering input and expected/actual behavior.
