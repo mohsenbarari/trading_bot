@@ -983,7 +983,22 @@ def _prune_orphan_responses(responses: Path, *, now: float | None = None) -> int
 
 
 def _validate_claimed_request_shape(request: object, expected_request_id: str) -> dict:
-    if not isinstance(request, dict) or set(request) != REQUEST_KEYS:
+    if not isinstance(request, dict):
+        raise BrokerError("claimed broker request does not match the exact contract")
+    if request.get("request_type") == "QUOTA_CONTINUATION":
+        try:
+            from scripts.two_site_quota_resume_submission_intent import (
+                compute_canonical_request_sha256,
+            )
+        except ModuleNotFoundError:
+            from two_site_quota_resume_submission_intent import (
+                compute_canonical_request_sha256,
+            )
+        try:
+            compute_canonical_request_sha256(request)
+        except Exception as exc:
+            raise BrokerError(f"invalid continuation request shape: {exc}") from exc
+    elif set(request) != REQUEST_KEYS:
         raise BrokerError("claimed broker request does not match the exact contract")
     if request.get("schema_version") != "1.0":
         raise BrokerError("claimed broker request schema version is invalid")
@@ -1085,6 +1100,9 @@ def _recover_interrupted_claims(
                 matching_receipt_present = True
 
         response_path = _response_path(responses, request_id)
+
+        if request.get("request_type") == "QUOTA_CONTINUATION" and matching_receipt_present:
+            raise BrokerError("unexpected terminal quota receipt for continuation request")
 
         if matching_receipt_present:
             receipt = read_terminal_quota_record(root, request_id)
