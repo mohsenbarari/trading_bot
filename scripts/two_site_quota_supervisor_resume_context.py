@@ -11,8 +11,8 @@ from scripts.two_site_proposal_runner import (
     MAX_CONTEXT,
     bounded_file_bytes,
     load_task,
-    relative_file,
 )
+from scripts.two_site_provider_broker import _task_relative_path
 from scripts.two_site_quota_wait_due import evaluate_initial_wait_check
 from scripts.two_site_quota_wait_intent import read_pending_rescope_intent
 from scripts.two_site_quota_wait_recovery import recover_durable_initial_wait_locked
@@ -105,7 +105,7 @@ def collect_known_reset_resume_context_locked(
         if not isinstance(run_prefix, str) or not run_prefix:
             raise ResumeContextError("reservation missing run_prefix")
 
-        task_path = relative_file(root, task_rel_path)
+        task_path = root / _task_relative_path(task_rel_path)
         task_bytes_initial = bounded_file_bytes(root, task_path, MAX_CONTEXT, "task file")
         if hashlib.sha256(task_bytes_initial).hexdigest() != task_sha256:
             raise ResumeContextError("task file sha256 mismatch with reservation")
