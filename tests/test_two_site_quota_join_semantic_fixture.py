@@ -8,9 +8,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 from typing import Any
+
+import pytest
 
 os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
 
@@ -31,13 +34,27 @@ from scripts.two_site_provider_broker import validate_request
 from tests.test_two_site_provider_broker import broker_repo, make_valid_request
 
 
+_SAFE_CHARACTERIZATION_TEST_PATH_RE = re.compile(
+    r"tests/test_p1_00_characterization_[a-z0-9_]+\.py"
+)
+
+
 def setup_two_site_quota_join_semantic_fixture(
     root: Path,
     task: Path,
     original_scope: Any,
     original_environment: dict[str, str],
+    *,
+    allowed_test_path: str = "tests/test_new.py",
 ) -> dict[str, Any]:
     """Hermetic setup helper for two-site quota join semantic fixture."""
+    if allowed_test_path != "tests/test_new.py":
+        if (
+            not isinstance(allowed_test_path, str)
+            or not _SAFE_CHARACTERIZATION_TEST_PATH_RE.fullmatch(allowed_test_path)
+        ):
+            raise ValueError(f"invalid allowed_test_path: {allowed_test_path!r}")
+
     _write_exec_order(root)
     gap_rel = "docs/refactor/two-server/ae03-fixture-gap.md"
     gap_file = root / gap_rel
@@ -81,7 +98,7 @@ def setup_two_site_quota_join_semantic_fixture(
         root,
         assignment_id="WA-BROKER-TEST",
         integration_branch="refactor/two-site-architecture",
-        allowed_paths=["tests/test_new.py"],
+        allowed_paths=[allowed_test_path],
         forbidden_paths=["scripts/**"],
     )
 
@@ -94,7 +111,7 @@ def setup_two_site_quota_join_semantic_fixture(
     gap = f"{gap_rel}#gap"
     scenario = "ae03.c5d.real-common-semantic-fixture-330"
     context_files = ["source.py"]
-    allowed_files = ["tests/test_new.py"]
+    allowed_files = [allowed_test_path]
 
     identity = build_task_identity(
         root,
@@ -119,6 +136,8 @@ def setup_two_site_quota_join_semantic_fixture(
     assert goal_prefix.startswith("WA-BROKER-TEST:")
 
     task_payload = dict(original_task_data)
+    task_payload["allowed_files"] = [allowed_test_path]
+    task_payload["test_selectors"] = [allowed_test_path]
     task_payload["goal"] = (
         goal_prefix + MARKER + json.dumps(package, separators=(",", ":"))
     )
@@ -247,3 +266,155 @@ def test_two_site_quota_join_semantic_fixture(
     assert persisted["scenario_key"] == "ae03.c5d.real-common-semantic-fixture-330"
     assert persisted["state"] == "RESERVED"
     assert stat.S_IMODE(fixture["attempt_file"].stat().st_mode) == 0o600
+
+
+def test_two_site_quota_join_semantic_fixture_characterization_variant(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    root, task, original_scope, original_environment = broker_repo
+
+    worktrees_file = root / ".local/two-site-refactor/worktrees.yaml"
+    gap_file = root / "docs/refactor/two-server/ae03-fixture-gap.md"
+    exec_order_file = root / "docs/refactor/two-server/execution-order.yaml"
+    assignment_doc = (
+        root / ".local/two-site-refactor/assignments/WA-BROKER-TEST.md"
+    )
+
+    invalid_paths = [
+        "/tests/test_p1_00_characterization_sample.py",
+        "../tests/test_p1_00_characterization_sample.py",
+        "tests/test_unrelated.py",
+        "tests/test_p1_00_characterization_sample.py\n",
+    ]
+    for bad_path in invalid_paths:
+        head_before = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        worktrees_before = worktrees_file.exists()
+        gap_before = gap_file.exists()
+        exec_before = exec_order_file.exists()
+        assignment_before = assignment_doc.exists()
+
+        with pytest.raises(ValueError) as exc_info:
+            setup_two_site_quota_join_semantic_fixture(
+                root,
+                task,
+                original_scope,
+                original_environment,
+                allowed_test_path=bad_path,
+            )
+        assert "invalid allowed_test_path" in str(exc_info.value)
+
+        head_after = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assert head_after == head_before
+        assert worktrees_file.exists() == worktrees_before
+        assert gap_file.exists() == gap_before
+        assert exec_order_file.exists() == exec_before
+        assert assignment_doc.exists() == assignment_before
+
+    variant_path = "tests/test_p1_00_characterization_sample.py"
+    fixture = setup_two_site_quota_join_semantic_fixture(
+        root,
+        task,
+        original_scope,
+        original_environment,
+        allowed_test_path=variant_path,
+    )
+
+    request = fixture["request"]
+    head = fixture["head"]
+    scope = fixture["actual_scope"]
+    loaded_task = fixture["loaded_task"]
+    identity = fixture["identity"]
+    package = fixture["package"]
+    persisted = fixture["persisted_attempt"]
+
+    task_result = load_task(root, task)
+    reloaded_task = task_result[0] if isinstance(task_result, tuple) else task_result
+    assert reloaded_task == loaded_task
+
+    validated_req, validated_task_path, validated_scope = validate_request(
+        root, request, scope_loader=lambda _: scope
+    )
+    assert validated_req == request
+    assert validated_task_path == task
+    assert validated_scope == scope
+
+    assert loaded_task["task_id"] == "BROKER-TEST-1"
+    assert loaded_task["context_files"] == ["source.py"]
+    assert loaded_task["allowed_files"] == [variant_path]
+    assert loaded_task["test_selectors"] == [variant_path]
+    assert MARKER in loaded_task["goal"]
+
+    assert scope.stage_id == "P1-00b"
+    assert scope.assignment_id == "WA-BROKER-TEST"
+    assert list(scope.allowed_paths) == [variant_path]
+    assert request["assignment_id"] == scope.assignment_id
+    assert request["assignment_sha256"] == scope.sha256
+
+    expected_source_sha = hashlib.sha256((root / "source.py").read_bytes()).hexdigest()
+    expected_gap_sha = hashlib.sha256(
+        (root / "docs/refactor/two-server/ae03-fixture-gap.md").read_bytes()
+    ).hexdigest()
+    assert identity["source_manifest"]["source.py"] == expected_source_sha
+    assert identity["source_manifest"][variant_path] is None
+    assert (
+        identity["source_manifest"]["docs/refactor/two-server/ae03-fixture-gap.md"]
+        == expected_gap_sha
+    )
+    assert set(identity["source_manifest"].keys()) == {
+        "docs/refactor/two-server/ae03-fixture-gap.md",
+        "source.py",
+        variant_path,
+    }
+
+    assert package["head"] == head
+    assert (
+        package["gap_reference"]
+        == "docs/refactor/two-server/ae03-fixture-gap.md#gap"
+    )
+    assert package["excerpts"] == []
+    assert package["semantic_identity"] == identity
+
+    package_json = loaded_task["goal"].split(MARKER, 1)[1]
+    parsed_package = json.loads(package_json)
+    assert set(parsed_package.keys()) == {
+        "head",
+        "gap_reference",
+        "excerpts",
+        "semantic_identity",
+    }
+    assert parsed_package["head"] == head
+    assert (
+        parsed_package["gap_reference"]
+        == "docs/refactor/two-server/ae03-fixture-gap.md#gap"
+    )
+    assert parsed_package["excerpts"] == []
+    assert (
+        parsed_package["semantic_identity"]["fingerprint"]
+        == identity["fingerprint"]
+    )
+
+    assert persisted["fingerprint"] == identity["fingerprint"]
+    assert persisted["task_id"] == "BROKER-TEST-1"
+    assert persisted["run_prefix"] == request["run_prefix"]
+    assert persisted["source_sha256"] == identity["source_sha256"]
+    assert persisted["stage_id"] == "P1-00b"
+    assert (
+        persisted["gap_reference"]
+        == "docs/refactor/two-server/ae03-fixture-gap.md#gap"
+    )
+    assert persisted["scenario_key"] == "ae03.c5d.real-common-semantic-fixture-330"
+    assert persisted["state"] == "RESERVED"
+    assert stat.S_IMODE(fixture["attempt_file"].stat().st_mode) == 0o600
+
+    expected_task_sha = hashlib.sha256(task.read_bytes()).hexdigest()
+    assert request["task_sha256"] == expected_task_sha
+    assert request["source_head"] == head
+
+    git_status = subprocess.check_output(
+        ["git", "-C", str(root), "status", "--porcelain=v1"], text=True
+    ).strip()
+    assert git_status == ""
