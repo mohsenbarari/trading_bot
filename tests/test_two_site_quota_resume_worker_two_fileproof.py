@@ -176,7 +176,9 @@ def _setup_materialized_worker_two_env(
             "reviewed_proposal_sha256": w1_sha,
             "findings": w1_bootstrap_findings,
             "test_evidence": [
-                f"proposal_sha256={w1_sha} bootstrap_findings_count={len(w1_bootstrap_findings)}"
+                "gate=P1-00-characterization-bootstrap",
+                f"proposal_sha256={w1_sha}",
+                f"finding_count={len(w1_bootstrap_findings)}",
             ],
         }
         validate_correction_feedback(json.dumps(fb2_data), w1_sha)
@@ -689,6 +691,11 @@ def test_materialized_worker_two_bootstrap_read_and_bind_success(
     assert fb2_data["reviewed_proposal_sha256"] == meta["w1_sha"]
     assert len(fb2_data["findings"]) > 0
     assert fb2_data["findings"] == p1_00_characterization_bootstrap_findings(w1_result)
+    assert fb2_data["test_evidence"] == [
+        "gate=P1-00-characterization-bootstrap",
+        f"proposal_sha256={meta['w1_sha']}",
+        f"finding_count={len(fb2_data['findings'])}",
+    ]
 
     w2_dir = prop_dir / meta["w2_id"]
     w2_status = json.loads((w2_dir / "status.json").read_text(encoding="utf-8"))
