@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import time
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -168,3 +169,76 @@ def test_submit_known_reset_resume_broker_not_ready(
     assert not intent_p.exists()
     assert not queue_p.exists()
     assert list(requests_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("crash_boundary", ["prequeue", "postqueue_fsync"])
+def test_submit_known_reset_resume_direct_bridge_faults(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    crash_boundary: str,
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc, req_id = env["sc"], env["req_id"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=True, updated_at=env["now_epoch"]
+    )
+    claim_p = sc["runs_dir"] / "quota-resume-claim.json"
+    intent_p = sc["runs_dir"] / "quota-resume-submission.json"
+    queue_p = requests_dir / f"{req_id}.json"
+    lock_path = sc["autopilot_dir"] / "supervisor.lock"
+
+    target = (
+        "_atomic_new_json"
+        if crash_boundary == "prequeue"
+        else "fsync_private_record_directory"
+    )
+    with exclusive_supervisor_lock(lock_path):
+        with patch.object(broker, target, side_effect=OSError(f"fault at {crash_boundary}")):
+            with pytest.raises(OSError, match=f"fault at {crash_boundary}"):
+                _call_submit(env)
+
+    assert claim_p.is_file()
+    st_c = claim_p.stat()
+    assert stat.S_IMODE(st_c.st_mode) == 0o600 and st_c.st_nlink == 1
+    claim_data = json.loads(claim_p.read_text(encoding="utf-8"))
+    assert claim_data["resume_request_id"] == req_id
+    assert claim_data["original_controller_run_id"] == sc["original_ctrl_id"]
+    assert claim_data["continuation_controller_run_id"] == sc["continuation_ctrl_id"]
+
+    assert intent_p.is_file()
+    st_i = intent_p.stat()
+    assert stat.S_IMODE(st_i.st_mode) == 0o600 and st_i.st_nlink == 1
+    intent_data = json.loads(intent_p.read_text(encoding="utf-8"))
+    assert intent_data["request_id"] == req_id
+
+    claim_bytes, claim_ino = claim_p.read_bytes(), st_c.st_ino
+    intent_bytes, intent_ino = intent_p.read_bytes(), st_i.st_ino
+
+    if crash_boundary == "prequeue":
+        assert not queue_p.exists()
+        assert list(requests_dir.iterdir()) == []
+        queue_bytes = queue_ino = None
+    else:
+        assert queue_p.is_file()
+        st_q = queue_p.stat()
+        assert stat.S_IMODE(st_q.st_mode) == 0o600 and st_q.st_nlink == 1
+        queue_data = json.loads(queue_p.read_text(encoding="utf-8"))
+        assert queue_data["request_id"] == req_id
+        queue_bytes, queue_ino = queue_p.read_bytes(), st_q.st_ino
+        assert [p.name for p in requests_dir.iterdir()] == [f"{req_id}.json"]
+
+    with exclusive_supervisor_lock(lock_path):
+        with pytest.raises(ClaimRequestError):
+            _call_submit(env)
+
+    assert claim_p.read_bytes() == claim_bytes
+    assert claim_p.stat().st_ino == claim_ino
+    assert intent_p.read_bytes() == intent_bytes
+    assert intent_p.stat().st_ino == intent_ino
+    if crash_boundary == "prequeue":
+        assert not queue_p.exists()
+        assert list(requests_dir.iterdir()) == []
+    else:
+        assert queue_p.read_bytes() == queue_bytes
+        assert queue_p.stat().st_ino == queue_ino
+        assert [p.name for p in requests_dir.iterdir()] == [f"{req_id}.json"]
