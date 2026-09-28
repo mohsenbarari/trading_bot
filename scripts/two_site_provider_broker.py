@@ -1209,7 +1209,10 @@ def serve(
         started_at = time.time()
         last_heartbeat = 0.0
         last_prune = time.time()
-        _write_status(status_path, "IDLE", started_at=started_at)
+        _write_status(
+            status_path, "IDLE", started_at=started_at,
+            quota_continuation_ready=quota_continuation_enabled,
+        )
         try:
             # A normal STOP is a supervisor boundary request, not a cancellation
             # of its active broker call.  Exit only after that supervisor has
@@ -1230,7 +1233,10 @@ def serve(
                         _prune_orphan_responses(responses)
                         last_prune = time.time()
                     if time.time() - last_heartbeat >= 10:
-                        _write_status(status_path, "IDLE", started_at=started_at)
+                        _write_status(
+                            status_path, "IDLE", started_at=started_at,
+                            quota_continuation_ready=quota_continuation_enabled,
+                        )
                         last_heartbeat = time.time()
                     time.sleep(POLL_SECONDS)
                     continue
@@ -1300,6 +1306,7 @@ def serve(
                     claimed_path.unlink(missing_ok=True)
                 _write_status(
                     status_path, "IDLE", started_at=started_at,
+                    quota_continuation_ready=quota_continuation_enabled,
                     last_request_id=response["request_id"],
                     last_run_prefix=response["run_prefix"],
                     last_exit_code=response["exit_code"],
