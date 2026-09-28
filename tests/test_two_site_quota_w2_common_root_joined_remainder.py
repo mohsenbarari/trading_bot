@@ -39,12 +39,16 @@ from tests.test_two_site_quota_w2_common_root_admission import (
 )
 
 
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
 def test_two_site_quota_w2_common_root_joined_remainder_positive(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     monkeypatch: pytest.MonkeyPatch,
+    origin: str,
 ) -> None:
     frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
-    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    ctx = _setup_w2_admission_claim_scenario(
+        broker_repo, frozen_clock_dt, origin=origin
+    )
 
     root: Path = ctx["root"]
     task: Path = ctx["task"]
@@ -345,7 +349,14 @@ def test_two_site_quota_w2_common_root_joined_remainder_positive(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    elif origin == "BOOTSTRAP":
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        assert sc["meta"].get("r1_id") is None
+    else:
+        pytest.fail(f"unsupported origin: {origin!r}")
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
@@ -367,6 +378,20 @@ def test_two_site_quota_w2_common_root_joined_remainder_positive(
     assert not (evidence_dir / "feedback-correction-3.json").exists()
     assert not (proposals_dir / f"{resume_request['run_prefix']}-worker-3").exists()
     assert not (proposals_dir / f"{resume_request['run_prefix']}-reviewer-3").exists()
+
+    if origin == "BOOTSTRAP":
+        assert not any("reviewer-1" in name for name in os.listdir(proposals_dir))
+        assert not (evidence_dir / "pre-review-tests-1.json").exists()
+        orig_evidence_dir = (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["meta"]["orig_prefix"]
+        )
+        assert not (orig_evidence_dir / "pre-review-tests-1.json").exists()
+        assert (proposals_dir / expected_reviewer_id).is_dir()
+        assert reviewer_st["state"] == "VERIFIED"
 
     with pipeline_lock(root):
         pass
