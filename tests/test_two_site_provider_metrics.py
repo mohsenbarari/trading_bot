@@ -5,8 +5,22 @@ from pathlib import Path
 
 import pytest
 
+import hashlib
+
 from scripts import two_site_provider_metrics as metrics
 from scripts import two_site_cycle_metrics as ledger
+try:
+    from scripts import two_site_proposal_runner as runner
+except ModuleNotFoundError:
+    import two_site_proposal_runner as runner
+try:
+    from scripts.two_site_pre_review_receipt import validate_test_receipt
+except ModuleNotFoundError:
+    from two_site_pre_review_receipt import validate_test_receipt
+try:
+    from scripts.two_site_semantic_task import build_identity, validate_identity
+except ModuleNotFoundError:
+    from two_site_semantic_task import build_identity, validate_identity
 
 HEAD = "a" * 40
 TOKENS = {"input_tokens": 10, "output_tokens": 4, "total_tokens": 14, "thinking_tokens": 3}
@@ -118,26 +132,166 @@ def test_limits_legacy_missing_and_impossible_duration(tmp_path):
     assert read(tmp_path)["state"] == "UNAVAILABLE"
 
 
-def test_task_metadata_accepts_runner_valid_snapshot_and_canonical_excerpt_limits(tmp_path):
-    worker, reviewer = pair(tmp_path)
-    canonical = json.dumps({"gap_reference": "GAP-TELEMETRY", "padding": "p" * 87_000})
+def _make_runner_materials():
+    gap_ref = "docs/refactor/two-server/AUTOMATION_EFFICIENCY_PLAN.md#7-بازیابی-هدفمند"
+    stage_id = "P1-00b"
+    scenario_key = "ae03.provider-metrics.bound-canonical-result-20260928-059"
+    source_path = "pkg/module.py"
+
+    source_content = (
+        "def compute_value():\n"
+        + ("    # " + ("x" * 70) + "\n") * 1950
+        + "    return 1\n"
+    )
+    source_bytes = source_content.encode("utf-8")
+    assert len(source_bytes) <= runner.MAX_CONTEXT
+    source_sha = hashlib.sha256(source_bytes).hexdigest()
+
+    sources = {
+        source_path: {
+            "sha256": source_sha,
+            "content": source_content,
+        }
+    }
+
+    identity = build_identity(
+        stage_id=stage_id,
+        gap_reference=gap_ref,
+        scenario_key=scenario_key,
+        symbol_groups=[{"path": source_path, "symbols": ["compute_value"]}],
+        source_manifest={source_path: source_sha},
+    )
+    assert validate_identity(identity) == identity
+
+    goal = (
+        "One bounded task.\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
+        + json.dumps({"gap_reference": gap_ref, "semantic_identity": identity}, ensure_ascii=False)
+    )
     task = {
         "task_id": "task",
-        "goal": "One bounded task.\nCANONICAL_SOURCE_EXCERPTS_JSON:" + canonical,
-        "requirements": ["a"],
-        "test_selectors": ["test"],
+        "goal": goal,
+        "requirements": ["R1: reader bound"],
+        "test_selectors": ["tests/test_mod.py"],
+        "context_files": [source_path],
+        "allowed_files": [source_path],
     }
-    snapshot = {"source_head": HEAD, "task": task, "sources": {"padding": "s" * 180_000}}
-    assert 256_000 < len(json.dumps(snapshot).encode("utf-8")) <= metrics.TASK_SNAPSHOT_LIMIT
-    (worker / "task.json").write_text(json.dumps(snapshot))
-    (reviewer / "task.json").write_text(json.dumps(snapshot))
+
+    base_bytes = json.dumps({"task": task, "sources": sources}, ensure_ascii=False).encode("utf-8")
+    assert len(base_bytes) <= runner.MAX_CONTEXT
+
+    candidate_content = (
+        "def compute_value():\n"
+        + ("    # " + ("x" * 70) + "\n") * 1950
+        + "    return 2\n"
+    )
+    candidate = {
+        "status": "PROPOSAL_READY",
+        "summary": "Fix compute_value return value.",
+        "covered_requirements": [1],
+        "findings": [],
+        "changes": [
+            {
+                "path": source_path,
+                "original_sha256": source_sha,
+                "content": candidate_content,
+            }
+        ],
+    }
+    validated_candidate = runner.validate_result(candidate, task, sources, role="worker")
+    assert validated_candidate == candidate
+
+    proposal_bytes = runner.serialize_json(candidate)
+    proposal_text = proposal_bytes.decode("utf-8")
+    assert len(proposal_bytes) <= runner.MAX_CONTEXT
+    proposal_sha256 = hashlib.sha256(proposal_bytes).hexdigest()
+
+    review_transport = runner.build_review_transport(candidate, sources, proposal_sha256)
+    assert review_transport["canonical_proposal_sha256"] == proposal_sha256
+    assert len(runner.serialize_json(review_transport)) <= 64_000
+
+    raw_receipt = {
+        "state": "PASSED",
+        "proposal_sha256": proposal_sha256,
+        "selectors": ["tests/test_mod.py"],
+        "unsupported_specs": [],
+        "returncode": 0,
+        "stdout_tail": "o" * 8192,
+        "stderr_tail": "e" * 8192,
+        "snapshot_files": 1,
+        "snapshot_bytes": 100,
+        "isolation": "hermetic",
+    }
+    normalized_receipt = validate_test_receipt(raw_receipt, proposal_sha256, require_passed=True)
+
+    worker_material = {
+        "task": task,
+        "source_head": HEAD,
+        "sources": sources,
+    }
+    reviewer_material = {
+        "task": task,
+        "source_head": HEAD,
+        "sources": sources,
+        "proposal": proposal_text,
+        "test_evidence": normalized_receipt,
+    }
+
+    runner._validate_task_snapshot_budget(worker_material)
+    runner._validate_task_snapshot_budget(reviewer_material)
+
+    worker_bytes = runner.serialize_json(worker_material)
+    reviewer_bytes = runner.serialize_json(reviewer_material)
+
+    assert len(worker_bytes) <= 3 * runner.MAX_CONTEXT
+    assert 2 * runner.MAX_CONTEXT < len(reviewer_bytes) <= 3 * runner.MAX_CONTEXT
+
+    return gap_ref, identity, worker_material, reviewer_material
+
+
+def test_task_metadata_accepts_runner_valid_snapshot_and_canonical_excerpt_limits(tmp_path):
+    worker, reviewer = pair(tmp_path)
+    gap_ref, identity, worker_mat, reviewer_mat = _make_runner_materials()
+
+    (worker / "task.json").write_bytes(runner.serialize_json(worker_mat))
+    (reviewer / "task.json").write_bytes(runner.serialize_json(reviewer_mat))
+
     result = read(tmp_path)
     assert result["state"] == "OBSERVED_MATCHING_ATTEMPTS"
     assert result["task_metadata"] is not None
     assert result["task_metadata"]["task_id"] == "task"
     assert result["task_metadata"]["declared_requirement_count"] == 1
     assert result["task_metadata"]["focused_selector_count"] == 1
-    assert result["task_metadata"]["gap_reference"] == "GAP-TELEMETRY"
+    assert result["task_metadata"]["gap_reference"] == gap_ref
+    assert result["semantic_identity"] is not None
+    assert result["semantic_identity"]["gap_reference"] == gap_ref
+    assert result["semantic_identity"]["fingerprint"] == identity["fingerprint"]
+    assert result["semantic_identity"]["stage_id"] == identity["stage_id"]
+    assert result["semantic_identity"]["scenario_key"] == identity["scenario_key"]
+    assert result["semantic_identity"]["source_sha256"] == identity["source_sha256"]
+
+
+@pytest.mark.parametrize("scenario", ["oversized", "head_mismatch"])
+def test_task_metadata_rejects_oversized_snapshot_and_head_mismatch(tmp_path, scenario):
+    worker, reviewer = pair(tmp_path)
+    _, _, worker_mat, reviewer_mat = _make_runner_materials()
+
+    (worker / "task.json").write_bytes(runner.serialize_json(worker_mat))
+
+    if scenario == "oversized":
+        oversized = dict(reviewer_mat)
+        current_len = len(runner.serialize_json(reviewer_mat))
+        pad_needed = (3 * runner.MAX_CONTEXT - current_len) + 4096
+        oversized["proposal"] = reviewer_mat["proposal"] + (" " * pad_needed)
+        oversized_bytes = runner.serialize_json(oversized)
+        assert len(oversized_bytes) > 3 * runner.MAX_CONTEXT
+        (reviewer / "task.json").write_bytes(oversized_bytes)
+    else:
+        mismatched = dict(reviewer_mat, source_head="b" * 40)
+        (reviewer / "task.json").write_bytes(runner.serialize_json(mismatched))
+
+    result = read(tmp_path)
+    assert result["task_metadata"] is None
+    assert result["semantic_identity"] is None
 
 
 @pytest.mark.parametrize("failure", [False, True])
