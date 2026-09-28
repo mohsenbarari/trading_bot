@@ -116,7 +116,6 @@ def _build_materialized_env(
     admitted_task_path: Path | str | None = None,
     selector: str = "test.py",
     worker1_content: str = "# worker-1\n",
-    w1_content: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
     root = tmp_path.resolve()
     if admitted_task_path is None:
@@ -166,7 +165,6 @@ def _build_materialized_env(
         loaded_task, real_sources = load_task(root, task_path)
         loaded_task_id = loaded_task["task_id"]
 
-    effective_w1_content = w1_content if w1_content is not None else worker1_content
     findings = ["Worker0 proposal needs correction"]
     responses = [
         {"content": "# worker-0\n", "conv_id": "conv-w0"},
@@ -175,7 +173,7 @@ def _build_materialized_env(
             "findings": findings,
             "conv_id": "conv-r0",
         },
-        {"content": effective_w1_content, "conv_id": "conv-w1"},
+        {"content": worker1_content, "conv_id": "conv-w1"},
     ]
     if task_data is not None and real_sources is not None:
         for resp in responses:
@@ -393,7 +391,6 @@ def test_materialized_worker_one_bootstrap_findings_from_broker_repo(
         admitted_task_path=task_path,
         selector=sample_path,
         worker1_content=w1_content,
-        w1_content=w1_content,
     )
 
     w1_run_id = artifacts["final_worker_run_id"]
