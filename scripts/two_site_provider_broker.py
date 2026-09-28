@@ -813,11 +813,11 @@ def _signal_stop(_signum: int, _frame: object) -> None:
 
 def _execute_with_heartbeat(
     status_path: Path,
-    executor: Callable[[Path, dict, Path, AssignmentScope], dict],
+    executor: Callable[..., dict],
     root: Path,
     request: dict,
-    task_path: Path,
-    scope: AssignmentScope,
+    task_path: Path | None = None,
+    scope: AssignmentScope | None = None,
 ) -> dict:
     stopped = threading.Event()
     heartbeat_errors: list[BaseException] = []
@@ -838,13 +838,28 @@ def _execute_with_heartbeat(
     )
     heartbeat_thread.start()
     try:
-        response = executor(root, request, task_path, scope)
+        if task_path is not None and scope is not None:
+            response = executor(root, request, task_path, scope)
+        else:
+            response = executor(root, request)
     finally:
         stopped.set()
         heartbeat_thread.join(timeout=HEARTBEAT_SECONDS + 1)
     if heartbeat_errors:
         raise BrokerError("provider broker heartbeat failed") from heartbeat_errors[0]
     return response
+
+
+def execute_intent_bound_continuation(root: Path, request: object) -> dict:
+    try:
+        from scripts.two_site_quota_broker_route import (
+            execute_intent_bound_continuation as _impl,
+        )
+    except ModuleNotFoundError:
+        from two_site_quota_broker_route import (  # type: ignore[no-redef]
+            execute_intent_bound_continuation as _impl,
+        )
+    return _impl(root, request)
 
 
 def _queue_names(path: Path) -> list[str]:
@@ -1176,7 +1191,10 @@ def serve(
     executor: Callable[[Path, dict, Path, AssignmentScope], dict] = execute_pipeline,
     scope_loader: Callable[[Path], AssignmentScope] = load_active_assignment_scope,
     install_signal_handlers: bool = True,
+    quota_continuation_enabled: bool = False,
 ) -> int:
+    if type(quota_continuation_enabled) is not bool:
+        raise BrokerError("quota_continuation_enabled must be an exact bool")
     global _STOP
     _STOP = False
     root = canonical_root(root)
@@ -1216,22 +1234,22 @@ def serve(
                         last_heartbeat = time.time()
                     time.sleep(POLL_SECONDS)
                     continue
+                is_continuation = False
                 request: object = {}
                 response: dict
                 try:
                     request = _read_json_file(
                         root, claimed_path, MAX_REQUEST_BYTES, "broker request"
                     )
-                    if request.get("request_id") != claimed_path.stem:
-                        raise BrokerError("broker request filename binding is invalid")
-                    maintenance = (
-                        isinstance(request.get("controller_run_id"), str)
-                        and MAINTENANCE_RUN_RE.fullmatch(request["controller_run_id"])
+                    is_continuation = (
+                        isinstance(request, dict)
+                        and request.get("request_type") == "QUOTA_CONTINUATION"
                     )
-                    lock = _exclusive_maintenance_supervisor_lock(root) if maintenance else nullcontext()
-                    with lock:
-                        validated, task_path, scope = validate_request(
-                            root, request, scope_loader=scope_loader
+                    if is_continuation:
+                        if not quota_continuation_enabled:
+                            raise BrokerError("quota continuation is disabled")
+                        validated = _validate_claimed_request_shape(
+                            request, claimed_path.stem
                         )
                         _write_status(
                             status_path, "RUNNING", request_id=validated["request_id"],
@@ -1239,19 +1257,47 @@ def serve(
                             source_head=validated["source_head"],
                         )
                         response = _execute_with_heartbeat(
-                            status_path, executor, root, validated, task_path, scope
+                            status_path, execute_intent_bound_continuation, root, validated
                         )
                         if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                             raise BrokerError("broker executor returned an invalid response")
+                        validate_response(validated, response)
+                    else:
+                        if request.get("request_id") != claimed_path.stem:
+                            raise BrokerError("broker request filename binding is invalid")
+                        maintenance = (
+                            isinstance(request.get("controller_run_id"), str)
+                            and MAINTENANCE_RUN_RE.fullmatch(request["controller_run_id"])
+                        )
+                        lock = _exclusive_maintenance_supervisor_lock(root) if maintenance else nullcontext()
+                        with lock:
+                            validated, task_path, scope = validate_request(
+                                root, request, scope_loader=scope_loader
+                            )
+                            _write_status(
+                                status_path, "RUNNING", request_id=validated["request_id"],
+                                run_prefix=validated["run_prefix"],
+                                source_head=validated["source_head"],
+                            )
+                            response = _execute_with_heartbeat(
+                                status_path, executor, root, validated, task_path, scope
+                            )
+                            if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
+                                raise BrokerError("broker executor returned an invalid response")
                 except Exception as exc:
                     response = _error_response(request, exc)
                 else:
-                    if detect_quota_response(root, validated, response) is not None:
+                    if not is_continuation and detect_quota_response(root, validated, response) is not None:
                         publish_terminal_quota_record(root, validated, response)
                 request_id = claimed_path.stem
                 response_path = _response_path(responses, request_id)
                 _atomic_new_json(response_path, response, MAX_RESPONSE_BYTES)
-                claimed_path.unlink(missing_ok=True)
+                if is_continuation:
+                    fsync_private_record_directory(responses)
+                    claimed_path.unlink(missing_ok=True)
+                    fsync_private_record_directory(claimed)
+                else:
+                    claimed_path.unlink(missing_ok=True)
                 _write_status(
                     status_path, "IDLE", started_at=started_at,
                     last_request_id=response["request_id"],
