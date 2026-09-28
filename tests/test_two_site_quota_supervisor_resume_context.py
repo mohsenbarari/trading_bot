@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
 import os
+import tempfile
 from typing import Any
 import unittest.mock
 
@@ -22,6 +24,11 @@ from scripts.two_site_quota_wait_storage import read_initial_wait_record_bytes
 from tests.test_two_site_provider_broker import broker_repo
 from tests.test_two_site_quota_real_source_join_fileproof import (
     _setup_scenario_through_receipt,
+)
+from tests.test_two_site_quota_supervisor_due_inspect import _setup_env_for_kind
+from tests.test_two_site_quota_wait_admission import (
+    _patch_repo_boundary,
+    fake_clock,
 )
 
 
@@ -96,7 +103,6 @@ def test_quota_supervisor_resume_context_stop(
     timestamp = (next_check + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     (sc["autopilot_dir"] / "STOP").write_text("STOP\n")
-    (sc["root"] / "STOP").write_text("STOP\n")
 
     mock_load = unittest.mock.MagicMock()
     mock_semantic = unittest.mock.MagicMock()
@@ -111,7 +117,7 @@ def test_quota_supervisor_resume_context_stop(
     with pytest.raises(ResumeContextError) as exc_info:
         _collect_locked(sc, timestamp)
 
-    assert "STOP" in str(exc_info.value)
+    assert "autopilot STOP sentinel exists" in str(exc_info.value)
     mock_load.assert_not_called()
     mock_semantic.assert_not_called()
 
@@ -139,3 +145,116 @@ def test_quota_supervisor_resume_context_not_due(
     assert "NOT_DUE" in str(exc_info.value)
     mock_load.assert_not_called()
     mock_semantic.assert_not_called()
+
+
+def test_quota_supervisor_resume_context_unknown_quota_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        env = _setup_env_for_kind(tmp_dir, "QUOTA_RESET_UNKNOWN")
+        root, cid = env["root"], env["request"]["controller_run_id"]
+        env["autopilot_dir"] = root / ".local" / "two-site-refactor" / "autopilot"
+        env["original_ctrl_id"] = cid
+
+        p_intent, p_sources = _patch_repo_boundary(env["facts"])
+        with p_intent, p_sources:
+            with exclusive_supervisor_lock(env["autopilot_dir"] / "supervisor.lock"):
+                rec = admit_initial_quota_wait_locked(root, cid, clock=fake_clock)
+            wait_file = env["autopilot_dir"] / "runs" / cid / "quota-wait.json"
+            assert json.loads(wait_file.read_text())["schedule"]["reset_kind"] == "QUOTA_RESET_UNKNOWN"
+            assert rec["schedule"]["reset_kind"] == "QUOTA_RESET_UNKNOWN"
+
+            mock_load, mock_sem = unittest.mock.MagicMock(), unittest.mock.MagicMock()
+            monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.load_task", mock_load)
+            monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.read_existing_semantic_attempt", mock_sem)
+
+            with pytest.raises(ResumeContextError) as exc_info:
+                _collect_locked(env, rec["schedule"]["next_check_at_utc"])
+
+            assert "UNKNOWN_BACKOFF_REVIEW_DUE" in str(exc_info.value)
+            mock_load.assert_not_called()
+            mock_sem.assert_not_called()
+
+
+def test_quota_supervisor_resume_context_task_byte_drift(
+    broker_repo: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sc = _setup_scenario_through_receipt(*broker_repo)
+    req_dir = broker_paths(sc["root"])[2]
+    initial_requests = sorted(os.listdir(req_dir))
+    claim_path = sc["runs_dir"] / "quota-resume-claim.json"
+    sub_path = sc["runs_dir"] / "quota-resume-submission.json"
+    wait_record = _admit_wait(sc)
+    next_check = datetime.fromisoformat(wait_record["schedule"]["next_check_at_utc"].replace("Z", "+00:00"))
+    timestamp = (next_check + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    task_path = sc.get("task_path") or (sc["root"] / wait_record["reservation"]["task_path"])
+    task_path.write_bytes(task_path.read_bytes() + b"\n# drift\n")
+
+    mock_load, mock_sem = unittest.mock.MagicMock(), unittest.mock.MagicMock()
+    monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.load_task", mock_load)
+    monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.read_existing_semantic_attempt", mock_sem)
+
+    with pytest.raises(ResumeContextError) as exc_info:
+        _collect_locked(sc, timestamp)
+
+    assert "terminal quota response not detected" in str(exc_info.value)
+    mock_load.assert_not_called()
+    mock_sem.assert_not_called()
+    assert not claim_path.exists() and not sub_path.exists()
+    assert sorted(os.listdir(req_dir)) == initial_requests
+
+
+def test_quota_supervisor_resume_context_semantic_attempt_drift(
+    broker_repo: Any,
+) -> None:
+    sc = _setup_scenario_through_receipt(*broker_repo)
+    req_dir = broker_paths(sc["root"])[2]
+    initial_requests = sorted(os.listdir(req_dir))
+    claim_path = sc["runs_dir"] / "quota-resume-claim.json"
+    sub_path = sc["runs_dir"] / "quota-resume-submission.json"
+    wait_record = _admit_wait(sc)
+    next_check = datetime.fromisoformat(wait_record["schedule"]["next_check_at_utc"].replace("Z", "+00:00"))
+    timestamp = (next_check + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    attempt_path = (
+        sc["root"] / ".local" / "two-site-refactor" / "semantic-attempts" / f"{sc['identity']['fingerprint']}.json"
+    )
+    data = json.loads(attempt_path.read_text(encoding="utf-8"))
+    data["task_id"] = "mutated-task-id"
+    attempt_path.write_text(json.dumps(data), encoding="utf-8")
+    os.chmod(attempt_path, 0o600)
+
+    with pytest.raises(ResumeContextError):
+        _collect_locked(sc, timestamp)
+
+    assert not claim_path.exists() and not sub_path.exists()
+    assert sorted(os.listdir(req_dir)) == initial_requests
+
+
+def test_quota_supervisor_resume_context_raw_wait_race(
+    broker_repo: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sc = _setup_scenario_through_receipt(*broker_repo)
+    req_dir = broker_paths(sc["root"])[2]
+    initial_requests = sorted(os.listdir(req_dir))
+    claim_path = sc["runs_dir"] / "quota-resume-claim.json"
+    sub_path = sc["runs_dir"] / "quota-resume-submission.json"
+    wait_record = _admit_wait(sc)
+    next_check = datetime.fromisoformat(wait_record["schedule"]["next_check_at_utc"].replace("Z", "+00:00"))
+    timestamp = (next_check + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    mock_load = unittest.mock.MagicMock()
+    monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.load_task", mock_load)
+    monkeypatch.setattr(
+        "scripts.two_site_quota_supervisor_resume_context.read_initial_wait_record_bytes",
+        lambda *args, **kwargs: b"tampered",
+    )
+
+    with pytest.raises(ResumeContextError) as exc_info:
+        _collect_locked(sc, timestamp)
+
+    assert "raw wait bytes do not match canonical wait record JSON" in str(exc_info.value)
+    mock_load.assert_not_called()
+    assert not claim_path.exists() and not sub_path.exists()
+    assert sorted(os.listdir(req_dir)) == initial_requests
