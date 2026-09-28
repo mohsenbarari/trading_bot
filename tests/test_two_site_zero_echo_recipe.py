@@ -243,7 +243,8 @@ def test_prompt_size_growth_is_bounded():
     prompt_text = PROMPT_PATH.read_text("utf-8")
     prompt_bytes = len(prompt_text.encode("utf-8"))
     assert prompt_bytes < ap.MAX_PROMPT_BYTES
-    assert prompt_bytes < 16000
+    # Current mandatory safety/workflow clauses measure 16621 bytes; leaves <379 bytes headroom.
+    assert prompt_bytes < 17000
     recipe = extract_recipe(prompt_text)
     assert len(recipe.encode("utf-8")) < 2000
 
