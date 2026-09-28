@@ -210,6 +210,7 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
             raise runner.ProposalError("invalid base task")
         validate_p1_00b_batch_spec(task, spec["scenario_key"])
+        validate_direct_script_tests(root, task)
         if not isinstance(spec["snippets"], list) or len(spec["snippets"]) > 32:
             raise runner.ProposalError("invalid snippets")
         for item in spec["snippets"]:

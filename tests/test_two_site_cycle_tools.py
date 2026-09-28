@@ -582,3 +582,41 @@ def test_validate_direct_script_tests_untracked_nonmatching_test_only_pass(repo,
     root, _ = repo
     (root / "tests/test_two_site_untracked.py").write_text("# untracked\n")
     ct.validate_direct_script_tests(root, {"allowed_files": allowed, "test_selectors": []})
+
+
+def test_build_enforces_direct_script_test_and_accepts_tracked_selector(repo):
+    root, git = repo
+    (root / "scripts").mkdir(exist_ok=True)
+    (root / "scripts/two_site_demo.py").write_text("# demo\n")
+    (root / "tests/test_two_site_demo.py").write_text("# demo test\n")
+    git("add", "--", "scripts/two_site_demo.py", "tests/test_two_site_demo.py")
+    git("commit", "-m", "tracked direct demo")
+
+    spec_data = {
+        "task": {
+            "task_id": "GAP-A-002",
+            "goal": "Test two-site demo script.",
+            "context_files": ["gap.md"],
+            "allowed_files": ["scripts/two_site_demo.py"],
+            "requirements": ["1. Characterize demo script"],
+            "test_selectors": [],
+        },
+        "gap_reference": "gap.md#gap-a",
+        "snippets": [{"path": "code.py", "symbols": ["f"]}],
+        "scenario_key": "scenario_a",
+    }
+    spec = root / "spec.json"
+    spec.write_text(json.dumps(spec_data))
+
+    output_missing = root / ".local/two-site-refactor/tasks/demo_missing.json"
+    with pytest.raises(runner.ProposalError, match="tests/test_two_site_demo.py"):
+        ct.build(root, spec, output_missing)
+    assert not output_missing.exists()
+
+    spec_data["task"]["test_selectors"] = ["tests/test_two_site_demo.py"]
+    spec.write_text(json.dumps(spec_data))
+
+    output_ready = root / ".local/two-site-refactor/tasks/demo_ready.json"
+    result = ct.build(root, spec, output_ready)
+    assert result["state"] == "TASK_READY"
+    assert output_ready.is_file()
