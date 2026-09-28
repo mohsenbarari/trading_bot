@@ -10,7 +10,11 @@ from typing import Any
 import pytest
 
 try:
-    from scripts.two_site_pre_review_receipt import validate_test_receipt
+    from scripts.two_site_pre_review_receipt import (
+        P1_00_CHARACTERIZATION_TEST,
+        p1_00_characterization_bootstrap_findings,
+        validate_test_receipt,
+    )
     from scripts.two_site_proposal_pipeline import (
         ProposalError,
         test_gate_feedback as _test_gate_feedback,
@@ -25,6 +29,8 @@ try:
     from scripts.two_site_semantic_attempts import extract_semantic_identity
 except ImportError:
     from two_site_pre_review_receipt import (  # type: ignore[no-redef]
+        P1_00_CHARACTERIZATION_TEST,
+        p1_00_characterization_bootstrap_findings,
         validate_test_receipt,
     )
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
@@ -40,6 +46,20 @@ except ImportError:
     )
     from two_site_semantic_attempts import (  # type: ignore[no-redef]
         extract_semantic_identity,
+    )
+
+try:
+    from tests.test_two_site_provider_broker import broker_repo
+except ImportError:
+    from test_two_site_provider_broker import broker_repo  # type: ignore[no-redef]
+
+try:
+    from tests.test_two_site_quota_join_semantic_fixture import (
+        setup_two_site_quota_join_semantic_fixture,
+    )
+except ImportError:
+    from test_two_site_quota_join_semantic_fixture import (  # type: ignore[no-redef]
+        setup_two_site_quota_join_semantic_fixture,
     )
 
 try:
@@ -99,6 +119,27 @@ def _setup_materialized_worker_two_env(
         build_kwargs["orig_prefix"] = original_run_prefix
     if origin == "TEST_FAILED" and task_data is None:
         build_kwargs["selector"] = "tests/test_a.py"
+    if origin == "BOOTSTRAP":
+        if not isinstance(task_data, dict):
+            raise ProposalError("BOOTSTRAP origin requires task_data dict")
+        allowed_files = task_data.get("allowed_files")
+        if (
+            not isinstance(allowed_files, list)
+            or len(allowed_files) != 1
+            or not isinstance(allowed_files[0], str)
+            or not P1_00_CHARACTERIZATION_TEST.fullmatch(allowed_files[0])
+            or allowed_files[0] == "tests/test_p1_00_characterization_network_isolation.py"
+        ):
+            raise ProposalError(
+                "BOOTSTRAP origin requires canonical P1-00 characterization allowed path"
+            )
+        build_kwargs["worker1_content"] = (
+            "import bot\n"
+            "import os\n"
+            "os.environ['APP_ENV_FILE'] = 'config/unit-test.env.example'\n"
+            "from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence\n"
+            "install_p1_00_network_fence()\n"
+        )
     artifacts, evidence, task_path, orig_prefix = _build_materialized_env(
         root,
         **build_kwargs,
@@ -119,7 +160,30 @@ def _setup_materialized_worker_two_env(
     pipe_dir.mkdir(parents=True, exist_ok=True)
 
     receipt1_path = pipe_dir / "pre-review-tests-1.json"
-    if origin == "TEST_FAILED":
+    if origin == "BOOTSTRAP":
+        w1_result = json.loads(w1_result_path.read_text(encoding="utf-8"))
+        w1_bootstrap_findings = p1_00_characterization_bootstrap_findings(w1_result)
+        if not w1_bootstrap_findings:
+            raise ProposalError(
+                "expected nonempty p1_00_characterization_bootstrap_findings for W1"
+            )
+        artifacts["correction_origin"] = "BOOTSTRAP"
+        r1_id = None
+        artifacts.pop("final_reviewer_run_id", None)
+        evidence.pop("reviewer_status", None)
+        fb2_data = {
+            "reviewer": "test-gate",
+            "reviewed_proposal_sha256": w1_sha,
+            "findings": w1_bootstrap_findings,
+            "test_evidence": [
+                f"proposal_sha256={w1_sha} bootstrap_findings_count={len(w1_bootstrap_findings)}"
+            ],
+        }
+        validate_correction_feedback(json.dumps(fb2_data), w1_sha)
+        fb2_path = pipe_dir / "feedback-correction-2.json"
+        fb2_path.write_text(json.dumps(fb2_data), encoding="utf-8")
+        fb2_sha = hashlib.sha256(fb2_path.read_bytes()).hexdigest()
+    elif origin == "TEST_FAILED":
         root_task = json.loads(task_path.read_text(encoding="utf-8"))
         receipt1_data = dict(passed_receipt(w1_sha))
         receipt1_data["state"] = "FAILED"
@@ -538,3 +602,109 @@ def test_materialized_worker_two_rejects_tampered_persisted_feedback_two(
 
     for (rid, fname), orig_bytes in before_bytes.items():
         assert (prop_dir / rid / fname).read_bytes() == orig_bytes
+
+
+def test_materialized_worker_two_bootstrap_read_and_bind_success(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    fixture = setup_two_site_quota_join_semantic_fixture(
+        *broker_repo,
+        allowed_test_path="tests/test_p1_00_characterization_sample.py",
+    )
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        fixture["root"],
+        source_head=fixture["head"],
+        task_data=fixture["loaded_task"],
+        admitted_task_path=fixture["task"],
+        original_run_prefix=fixture["request"]["run_prefix"],
+        origin="BOOTSTRAP",
+    )
+
+    res = read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    assert meta["r1_id"] is None
+    assert "reviewer_status" not in ctx["evidence"]
+    assert "final_reviewer_run_id" not in ctx["artifacts"]
+    assert not (
+        root
+        / ".local"
+        / "two-site-refactor"
+        / "proposals"
+        / f"{meta['orig_prefix']}-reviewer-1"
+    ).exists()
+
+    pipe_dir = root / ".local" / "two-site-refactor" / "pipeline" / meta["orig_prefix"]
+    assert not (pipe_dir / "pre-review-tests-1.json").exists()
+
+    assert res["complete_history"]["complete"] is True
+    assert res["complete_history"]["ordered_conversation_ids"] == [
+        "conv-w0",
+        "conv-r0",
+        "conv-w1",
+    ]
+    assert res["seen_convs"] == {
+        "conv-w0",
+        "conv-r0",
+        "conv-w1",
+        meta["w2_conv_id"],
+    }
+    assert res["current_worker"] == (
+        meta["w2_id"],
+        meta["w2_sha"],
+        meta["w2_result_text"],
+        meta["w2_conv_id"],
+    )
+
+    assert fixture["identity"]["fingerprint"] == fixture["persisted_attempt"]["fingerprint"]
+    assert res["returned_state"]["semantic_task_fingerprint"] == fixture["identity"]["fingerprint"]
+    assert ctx["artifacts"]["semantic_task_fingerprint"] == fixture["identity"]["fingerprint"]
+
+    prop_dir = root / ".local" / "two-site-refactor" / "proposals"
+    w1_dir = prop_dir / meta["w1_id"]
+    w1_result_bytes = (w1_dir / "result.json").read_bytes()
+    w1_result_sha = hashlib.sha256(w1_result_bytes).hexdigest()
+    assert w1_result_sha == meta["w1_sha"]
+
+    w1_status = json.loads((w1_dir / "status.json").read_text(encoding="utf-8"))
+    assert w1_status["head"] == fixture["head"]
+    assert w1_status["result_sha256"] == meta["w1_sha"]
+    assert "source_head" not in w1_status
+
+    w1_task = json.loads((w1_dir / "task.json").read_text(encoding="utf-8"))
+    assert w1_task["source_head"] == fixture["head"]
+    assert w1_task["task"]["task_id"] == fixture["loaded_task"]["task_id"]
+    assert w1_task["sources"] == ctx["sources"]
+
+    w1_result = json.loads(w1_result_bytes.decode("utf-8"))
+    assert w1_result["status"] == "PROPOSAL_READY"
+
+    fb2_path = pipe_dir / "feedback-correction-2.json"
+    assert fb2_path.exists()
+    fb2_bytes = fb2_path.read_bytes()
+    fb2_sha = hashlib.sha256(fb2_bytes).hexdigest()
+    assert fb2_sha == ctx["evidence"]["feedback_sha"]
+
+    fb2_data = json.loads(fb2_bytes.decode("utf-8"))
+    assert fb2_data["reviewer"] == "test-gate"
+    assert fb2_data["reviewed_proposal_sha256"] == meta["w1_sha"]
+    assert len(fb2_data["findings"]) > 0
+    assert fb2_data["findings"] == p1_00_characterization_bootstrap_findings(w1_result)
+
+    w2_dir = prop_dir / meta["w2_id"]
+    w2_status = json.loads((w2_dir / "status.json").read_text(encoding="utf-8"))
+    assert w2_status["input_proposal_sha256"] == meta["w1_sha"]
+    assert w2_status["input_feedback_sha256"] == fb2_sha
+    assert w2_status["head"] == fixture["head"]
+    assert w2_status["result_sha256"] == meta["w2_sha"]
+    assert "source_head" not in w2_status
+
+    w2_task = json.loads((w2_dir / "task.json").read_text(encoding="utf-8"))
+    assert w2_task["source_head"] == fixture["head"]
+    assert w2_task["task"]["task_id"] == fixture["loaded_task"]["task_id"]
+    assert w2_task["sources"] == ctx["sources"]
+    assert "feedback" not in w2_task
+
+    assert res["returned_state"]["state"] == "WORKER_PROPOSAL_READY"
+    assert res["returned_state"]["correction_count"] == 2
+    assert res["returned_state"]["proposal_sha256"] == meta["w2_sha"]
+    assert res["returned_state"]["final_worker_run_id"] == meta["w2_id"]
