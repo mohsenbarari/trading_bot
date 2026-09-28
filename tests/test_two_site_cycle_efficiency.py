@@ -76,21 +76,86 @@ def test_invalid_hints_are_omitted(change):
 
 
 def test_loop_propagates_only_success_and_clears_after_failure(tmp_path):
+    state_root = tmp_path / ".local/two-site-refactor/autopilot"
+    state_root.mkdir(parents=True, exist_ok=True)
+    os.chmod(state_root, 0o700)
+
+    current_head = ["a" * 40]
     calls = []
+
+    continue_result = success("c" * 40, "a" * 40)
+    assert ap.validate_result({key: continue_result[key] for key in ap.RESULT_KEYS}) == {
+        key: continue_result[key] for key in ap.RESULT_KEYS
+    }
+    assert continue_result["head_before"] == "a" * 40
+    assert continue_result["head_after"] == "c" * 40
+    assert continue_result["head_changed"] is True
+
+    blocked_result = {
+        "schema_version": "1.0",
+        "state": "BLOCKED",
+        "disposition": "HALT",
+        "category": "EXTERNAL_GATE",
+        "head_changed": False,
+        "head_before": "c" * 40,
+        "head_after": "c" * 40,
+        "commit": None,
+        "blockers": ["external gate requirement unmet"],
+        "summary": "External gate halted cycle",
+        "next_action": None,
+        "gemini_worker_run_id": None,
+        "gemini_reviewer_run_id": None,
+        "proposal_sha256": None,
+    }
+    assert ap.validate_result({key: blocked_result[key] for key in ap.RESULT_KEYS}) == {
+        key: blocked_result[key] for key in ap.RESULT_KEYS
+    }
+    assert blocked_result["head_before"] == "c" * 40
+    assert blocked_result["head_after"] == "c" * 40
+    assert blocked_result["head_changed"] is False
+
     def cycle(root, codex, state, number, timeout, recovery=None, **kwargs):
         calls.append(kwargs)
+        if number == 1:
+            kwargs["before_model"](canonical_repo(current_head[0]))
+            current_head[0] = "c" * 40
+            return state / "runs" / "fake-1", continue_result
         if number == 2:
             raise ap.AutopilotError("transient test error")
-        return state / "runs" / "fake", success()
-    with patch.object(ap, "git", side_effect=lambda *a: "" if "status" in a else "a" * 40), \
-         patch.object(ap, "ref_snapshot", return_value={}), \
+        kwargs["before_model"](canonical_repo(current_head[0]))
+        return state / "runs" / "fake-3", blocked_result
+
+    def fake_git(*args):
+        if "status" in args:
+            return ""
+        if "rev-parse" in args:
+            return current_head[0]
+        return ""
+
+    def fake_validate_repo(r=None, require_clean=True):
+        return canonical_repo(current_head[0])
+
+    with patch.object(ap, "git", side_effect=fake_git), \
+         patch.object(ap, "validate_repository", side_effect=fake_validate_repo), \
+         patch.object(ap, "ref_snapshot", return_value={ref: "0" * 40 for ref in ap.PROTECTED_REFS}), \
          patch.object(ap, "run_cycle", side_effect=cycle), \
          patch.object(ap, "prune_runs", return_value=[]), \
-         patch.object(ap.time, "sleep"):
-        ap.run_loop(tmp_path, Path("codex"), 3, 10, False)
-    assert calls[0] == {}
-    assert calls[1]["continuation"]["commit"] == "a" * 40
-    assert calls[2] == {}
+         patch.object(ap.time, "sleep") as mock_sleep:
+        exit_code = ap.run_loop(tmp_path, Path("codex"), 3, 10, False)
+
+    assert exit_code == 2
+    assert len(calls) == 3
+    assert "continuation" not in calls[0]
+    assert calls[0].get("continuation") is None
+    assert calls[1]["continuation"]["commit"] == "c" * 40
+    assert "continuation" not in calls[2]
+    assert calls[2].get("continuation") is None
+    mock_sleep.assert_called_once_with(15)
+
+    status_data = json.loads((state_root / "status.json").read_text())
+    assert status_data["state"] == "BLOCKED"
+    assert status_data["cycle"] == 3
+    assert status_data["blockers"] == ["external gate requirement unmet"]
 
 
 def write_stream(path, events):
@@ -297,39 +362,74 @@ def test_persisted_continuation_requires_exact_accepted_checkpoint(tmp_path):
 
 def test_loop_reuses_only_persisted_accepted_continuation(tmp_path):
     state = tmp_path / ".local/two-site-refactor/autopilot"
-    state.mkdir(parents=True)
+    state.mkdir(parents=True, exist_ok=True)
+    os.chmod(state, 0o700)
+
     repo = canonical_repo("a" * 40)
     accepted = success("a" * 40, "b" * 40)
     ap.publish_accepted_checkpoint(state, accepted, repo)
 
+    current_head = ["a" * 40]
     calls = []
     checkpoint_during_cycle = None
+
+    continue_result = success("c" * 40, "a" * 40)
+    assert ap.validate_result({key: continue_result[key] for key in ap.RESULT_KEYS}) == {
+        key: continue_result[key] for key in ap.RESULT_KEYS
+    }
+    assert continue_result["head_before"] == "a" * 40
+    assert continue_result["head_after"] == "c" * 40
+    assert continue_result["head_changed"] is True
+
+    complete_result = {
+        "schema_version": "1.0",
+        "state": "COMPLETE",
+        "disposition": "NONE",
+        "category": "NONE",
+        "head_changed": False,
+        "head_before": "c" * 40,
+        "head_after": "c" * 40,
+        "commit": None,
+        "blockers": [],
+        "summary": "Completed all refactor cycles",
+        "next_action": None,
+        "gemini_worker_run_id": None,
+        "gemini_reviewer_run_id": None,
+        "proposal_sha256": None,
+    }
+    assert ap.validate_result({key: complete_result[key] for key in ap.RESULT_KEYS}) == {
+        key: complete_result[key] for key in ap.RESULT_KEYS
+    }
+    assert complete_result["head_before"] == "c" * 40
+    assert complete_result["head_after"] == "c" * 40
+    assert complete_result["head_changed"] is False
 
     def cycle(root, codex, s_root, cycle_num, timeout, recovery=None, **kwargs):
         nonlocal checkpoint_during_cycle
         calls.append(kwargs)
         status_data = json.loads((s_root / "status.json").read_text())
         assert status_data["state"] == "RUNNING"
-        checkpoint_during_cycle = ap.persisted_continuation(root, s_root, "a" * 40)
+        kwargs["before_model"](canonical_repo(current_head[0]))
         if cycle_num == 1:
-            return s_root / "runs" / "cycle-0001", success("c" * 40, "a" * 40)
-        complete_result = dict(success("c" * 40, "a" * 40))
-        complete_result.update(
-            state="COMPLETE", next_action=None, commit=None, head_changed=False, head_before="c" * 40,
-        )
+            checkpoint_during_cycle = ap.persisted_continuation(root, s_root, "a" * 40)
+            current_head[0] = "c" * 40
+            return s_root / "runs" / "cycle-0001", continue_result
+        assert ap.persisted_continuation(root, s_root, "a" * 40) is None
+        assert ap.persisted_continuation(root, s_root, "c" * 40) is None
         return s_root / "runs" / "cycle-0002", complete_result
-
-    current_heads = ["a" * 40, "c" * 40, "c" * 40]
 
     def fake_git(*args):
         if "status" in args:
             return ""
         if "rev-parse" in args:
-            return current_heads.pop(0) if current_heads else "c" * 40
+            return current_head[0]
         return ""
 
+    def fake_validate_repo(r=None, require_clean=True):
+        return canonical_repo(current_head[0])
+
     with patch.object(ap, "git", side_effect=fake_git), \
-         patch.object(ap, "validate_repository", return_value=repo), \
+         patch.object(ap, "validate_repository", side_effect=fake_validate_repo), \
          patch.object(ap, "ref_snapshot", return_value={ref: "0" * 40 for ref in ap.PROTECTED_REFS}), \
          patch.object(ap, "run_cycle", side_effect=cycle), \
          patch.object(ap, "prune_runs", return_value=[]):
@@ -342,6 +442,9 @@ def test_loop_reuses_only_persisted_accepted_continuation(tmp_path):
     assert checkpoint_during_cycle is not None
     assert checkpoint_during_cycle["commit"] == "a" * 40
     assert (state / ap.ACCEPTED_CHECKPOINT_FILENAME).is_file()
+
+    status_data = json.loads((state / "status.json").read_text())
+    assert status_data["state"] == "COMPLETE"
 
 
 def test_heartbeat_is_source_free_best_effort_and_silent(tmp_path):
