@@ -299,6 +299,53 @@ def test_materialized_worker_two_read_and_bind_success(tmp_path: Path) -> None:
     assert worker_info["status"]["run_id"] == meta["w2_id"]
 
 
+def test_materialized_worker_two_test_failed_read_and_bind_success(
+    tmp_path: Path,
+) -> None:
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(
+        tmp_path, origin="TEST_FAILED"
+    )
+    ctx["artifacts"]["correction_origin"] = "TEST_FAILED"
+
+    with _patch_load_task():
+        res = read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    assert res["complete_history"]["complete"] is True
+    assert res["complete_history"]["ordered_conversation_ids"] == [
+        "conv-w0",
+        "conv-r0",
+        "conv-w1",
+    ]
+    assert res["seen_convs"] == {
+        "conv-w0",
+        "conv-r0",
+        "conv-w1",
+        meta["w2_conv_id"],
+    }
+    assert res["current_worker"] == (
+        meta["w2_id"],
+        meta["w2_sha"],
+        meta["w2_result_text"],
+        meta["w2_conv_id"],
+    )
+    assert res["returned_state"]["state"] == "WORKER_PROPOSAL_READY"
+    assert res["returned_state"]["correction_count"] == 2
+    assert res["returned_state"]["proposal_sha256"] == meta["w2_sha"]
+    assert res["returned_state"]["final_worker_run_id"] == meta["w2_id"]
+
+    pipe_dir = root / ".local" / "two-site-refactor" / "pipeline" / meta["orig_prefix"]
+    fb2_bytes = (pipe_dir / "feedback-correction-2.json").read_bytes()
+    assert hashlib.sha256(fb2_bytes).hexdigest() == ctx["evidence"]["feedback_sha"]
+
+    fb2_data = json.loads(fb2_bytes.decode("utf-8"))
+    assert fb2_data["reviewer"] == "test-gate"
+    assert fb2_data["reviewed_proposal_sha256"] == meta["w1_sha"]
+
+    rcpt_data = json.loads((pipe_dir / "pre-review-tests-1.json").read_text(encoding="utf-8"))
+    assert rcpt_data["state"] == "FAILED"
+    assert rcpt_data["proposal_sha256"] == meta["w1_sha"]
+
+
 def test_materialized_worker_two_rejects_tampered_r0_status_binding(
     tmp_path: Path,
 ) -> None:
