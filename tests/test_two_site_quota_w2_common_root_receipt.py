@@ -32,6 +32,7 @@ from scripts.two_site_quota_resume_worker_two_file_reader import (
     read_and_bind_worker_two_result,
 )
 from scripts.two_site_semantic_attempts import (
+    MARKER,
     extract_semantic_identity,
     read_existing_semantic_attempt,
 )
@@ -59,12 +60,17 @@ def setup_two_site_quota_w2_common_root_reservation(
     original_scope: Any,
     original_environment: dict[str, str],
     *,
+    allowed_test_path: str = "tests/test_new.py",
     publish: bool = False,
 ) -> dict[str, Any]:
     """Build hermetic root and prepare or publish cycle reservation for W2 receipt."""
     _populate_full_tree_repo(root)
     join_fixture = setup_two_site_quota_join_semantic_fixture(
-        root, task, original_scope, original_environment
+        root,
+        task,
+        original_scope,
+        original_environment,
+        allowed_test_path=allowed_test_path,
     )
     head = join_fixture["head"]
     for ref in PROTECTED_REFS:
@@ -431,3 +437,113 @@ def test_two_site_quota_w2_common_root_receipt(
     }
     assert set(os.listdir(proposals_dir)) == expected_runs
     assert not (proposals_dir / orig_w2_id / "result.json").exists()
+
+
+def test_two_site_quota_w2_common_root_reservation_variant(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    root, task, original_scope, original_environment = broker_repo
+    allowed_path = "tests/test_p1_00_characterization_sample.py"
+    fixture = setup_two_site_quota_w2_common_root_reservation(
+        root,
+        task,
+        original_scope,
+        original_environment,
+        allowed_test_path=allowed_path,
+        publish=True,
+    )
+    root = fixture["root"]
+    task = fixture["task"]
+    head = fixture["head"]
+    request = fixture["request"]
+    actual_scope = fixture["actual_scope"]
+    runs_dir = fixture["runs_dir"]
+    accepted_facts = fixture["accepted_facts"]
+    task_sha = fixture["task_sha"]
+    published = fixture["published"]
+    assert published is not None
+
+    task_result = load_task(root, task)
+    loaded_task = task_result[0] if isinstance(task_result, tuple) else task_result
+    assert loaded_task["allowed_files"] == [allowed_path]
+    assert loaded_task["test_selectors"] == [allowed_path]
+
+    assert list(actual_scope.allowed_paths) == [allowed_path]
+    assert actual_scope.assignment_id == "WA-BROKER-TEST"
+
+    assert MARKER in loaded_task["goal"]
+    _, raw_package = loaded_task["goal"].split(MARKER, 1)
+    package = json.loads(raw_package)
+    package_identity = package["semantic_identity"]
+    identity = extract_semantic_identity(loaded_task)
+
+    assert package_identity["fingerprint"] == identity["fingerprint"]
+    assert isinstance(identity["fingerprint"], str)
+    assert len(identity["fingerprint"]) == 64
+
+    assert package_identity["source_manifest"] == identity["source_manifest"]
+    assert isinstance(identity["source_manifest"], dict)
+    assert len(identity["source_manifest"]) > 0
+
+    persisted_attempt = read_existing_semantic_attempt(
+        root,
+        root / ".local" / "two-site-refactor",
+        loaded_task,
+        request["run_prefix"],
+    )
+    assert persisted_attempt["fingerprint"] == identity["fingerprint"]
+    assert persisted_attempt["task_id"] == loaded_task["task_id"]
+    assert persisted_attempt["run_prefix"] == request["run_prefix"]
+
+    assert request["source_head"] == head
+    assert request["task_sha256"] == task_sha
+    assert request["assignment_sha256"] == actual_scope.sha256
+    assert request["assignment_id"] == actual_scope.assignment_id
+
+    expected_protected_refs = {ref: head for ref in sorted(PROTECTED_REFS)}
+    assert accepted_facts["protected_refs"] == expected_protected_refs
+
+    expected_reservation = {
+        "controller_run_id": request["controller_run_id"],
+        "run_prefix": request["run_prefix"],
+        "task_path": request["task_path"],
+        "task_sha256": request["task_sha256"],
+        "source_head": request["source_head"],
+        "assignment_id": request["assignment_id"],
+        "assignment_sha256": request["assignment_sha256"],
+    }
+    assert published["reservation"] == expected_reservation
+    assert set(published["reservation"].keys()) == {
+        "controller_run_id",
+        "run_prefix",
+        "task_path",
+        "task_sha256",
+        "source_head",
+        "assignment_id",
+        "assignment_sha256",
+    }
+
+    expected_request_sha256 = hashlib.sha256(
+        json.dumps(
+            request,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert published["request_sha256"] == expected_request_sha256
+
+    controller_run_id = fixture["controller_run_id"]
+    read_record = read_cycle_reservation(root, controller_run_id)
+    assert read_record == published
+
+    assert sorted(os.listdir(runs_dir)) == [
+        "broker-reservation.json",
+        "preparation-startup.json",
+    ]
+    with pytest.raises(
+        BrokerError,
+        match=r"terminal quota (?:directory is unavailable|response not detected)",
+    ):
+        read_terminal_quota_record(root, request["request_id"])
