@@ -30,3 +30,42 @@ Publishing must walk path components with no-follow directory descriptors from t
 5. **C5e—Monitor and activation:** Monitor reads validated wait state but never grants retry authority. Run full existing Supervisor/RESCOPE and Broker suites; then a bounded synthetic fault matrix, one necessary live smoke, and comparable 1/3/10/20 cohorts. Restart long-lived Broker only after all code gates; no production/DNS/Web Writer action is part of this work.
 
 The old Broker process still runs pre-C1 code and Supervisor remains STOPPED. C5a alone does not authorize a live wait. The [retention contract](AE03_C4C_RETENTION_CONTRACT_20260924.md) allows pruning only after C5 has durable final acknowledgement and reference validation; C4c cleanup must remain disabled before then. If a proof is missing, the affected task stops visibly while dependency-independent work can proceed; a visible stop is safer than accidental duplicate Provider work.
+
+## Continuation terminal custody before live wake
+
+Status: **DOCUMENTED DESIGN ONLY / NO LIVE ROUTE ENABLED**. No live CLI, Supervisor, or Broker continuation route is activated.
+
+### 1. Broker-owned path and custody binding
+Terminal continuation receipts are stored under Broker-owned state at `.local/two-site-refactor/provider-broker/terminal-continuation/<request-id>.json` (under Broker `STATE_REL = .local/two-site-refactor/provider-broker`, never under `autopilot/`).
+The receipt binds:
+- Exact full admitted 20-key continuation request and its canonical SHA-256 (`request_sha256`).
+- Exact full 9-key `COMPLETED` response (`RESPONSE_KEYS`) and its canonical SHA-256 (`response_sha256`).
+- Claim and submission-intent linkage (`original_controller_run_id`, `claim_sha256`) and exact `request_id`.
+No `BROKER_ERROR` receipt is ever written; errors fail closed without terminal receipt creation.
+
+### 2. Descriptor-relative atomic I/O and derived capacity bounds
+The current `_atomic_new_json` helper in `scripts/two_site_provider_broker.py` operates on a `Path`, using a temporary file with `O_NOFOLLOW` and `os.link`, but **does not pin the parent directory with a directory file descriptor**. Terminal custody requires a new or adapted descriptor-relative, no-follow, parent-pinned atomic no-overwrite fsynced writer and reader (`openat`/`linkat` semantics from canonical root).
+
+Because `MAX_RESPONSE_BYTES = 2_200_000` (with `MAX_PIPELINE_OUTPUT_BYTES = 2_000_000`) and `MAX_REQUEST_BYTES = 64_000`, the terminal receipt cannot use a fixed 64 KiB cap. The size cap is derived as:
+`MAX_RESPONSE_BYTES + MAX_REQUEST_BYTES + 16_384` = 2,280,384 bytes (>2.264 MB).
+Directory entry count is bounded (e.g. 64 records); reaching capacity triggers an explicit capacity stop, rejecting new admissions rather than evicting receipts.
+
+### 3. Strict operational order and STOP custody
+Broker execution enforces strict serialization:
+1. Admit request, verify intent (`quota-resume-submission.json` bound to claim).
+2. Check STOP: if STOP arrives before dispatch, halt immediately without invoking Provider.
+3. Dispatch Provider continuation exactly once.
+4. Validate full 9-key `COMPLETED` response.
+5. If STOP arrives after completed Provider execution, persist and fsync the terminal receipt before honoring STOP.
+6. Publish and fsync queue response to `responses/`.
+7. Unlink claimed request from `claimed/` and fsync directory.
+
+If receipt publication crashes or fails after Provider dispatch, the state is recorded as ambiguous—never terminal and strictly forbidding automatic replay.
+
+### 4. Restart recovery, retention, and fault matrix
+- **Restart recovery:** `_recover_interrupted_claims` inspects claims against `terminal-continuation/`. An exact validated receipt restores missing `responses/` files without re-invoking the Provider. Absent or malformed receipts preserve visible ambiguity and forbid replay.
+- **Retention separation:** Queue responses in `responses/` expire after `ORPHAN_RESPONSE_RETENTION_SECONDS = 86_400`. Terminal continuation receipts remain intact until Supervisor logs final acknowledged Codex acceptance with unchanged refs, task, and assignment; thereafter, dormant C4c retention (reference-free >=10 days) governs pruning.
+- **Fault matrix:**
+  - *Crash boundaries:* Crash before receipt = ambiguous; crash after receipt before response = recovered from receipt; crash after response before unlink = claim unlinked cleanly on restart.
+  - *Integrity:* Symlink, non-regular file, wrong UID/mode (0600), corrupted JSON, hash mismatch, or oversized payload (>2.28MB) causes immediate fail-closed stop.
+  - *STOP / Drift:* STOP before dispatch stops execution; STOP after completed Provider preserves custody. Any ref, HEAD, or assignment drift halts execution without replay.
