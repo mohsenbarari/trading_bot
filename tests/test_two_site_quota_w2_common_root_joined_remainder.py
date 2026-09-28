@@ -39,7 +39,7 @@ from tests.test_two_site_quota_w2_common_root_admission import (
 )
 
 
-@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP", "TEST_FAILED"])
 def test_two_site_quota_w2_common_root_joined_remainder_positive(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     monkeypatch: pytest.MonkeyPatch,
@@ -351,7 +351,7 @@ def test_two_site_quota_w2_common_root_joined_remainder_positive(
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
     if origin == "REVIEWER":
         assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
-    elif origin == "BOOTSTRAP":
+    elif origin in ("BOOTSTRAP", "TEST_FAILED"):
         assert sc["r1_status_path"] is None
         assert sc["r1_bytes_snapshot"] is None
         assert sc["meta"].get("r1_id") is None
@@ -379,17 +379,31 @@ def test_two_site_quota_w2_common_root_joined_remainder_positive(
     assert not (proposals_dir / f"{resume_request['run_prefix']}-worker-3").exists()
     assert not (proposals_dir / f"{resume_request['run_prefix']}-reviewer-3").exists()
 
+    orig_evidence_dir = (
+        root
+        / ".local"
+        / "two-site-refactor"
+        / "pipeline"
+        / sc["meta"]["orig_prefix"]
+    )
     if origin == "BOOTSTRAP":
         assert not any("reviewer-1" in name for name in os.listdir(proposals_dir))
         assert not (evidence_dir / "pre-review-tests-1.json").exists()
-        orig_evidence_dir = (
-            root
-            / ".local"
-            / "two-site-refactor"
-            / "pipeline"
-            / sc["meta"]["orig_prefix"]
-        )
         assert not (orig_evidence_dir / "pre-review-tests-1.json").exists()
+        assert (proposals_dir / expected_reviewer_id).is_dir()
+        assert reviewer_st["state"] == "VERIFIED"
+    elif origin == "TEST_FAILED":
+        assert not any("reviewer-1" in name for name in os.listdir(proposals_dir))
+        assert not (evidence_dir / "pre-review-tests-1.json").exists()
+        w1_test_file = orig_evidence_dir / "pre-review-tests-1.json"
+        assert w1_test_file.is_file()
+        w1_receipt = json.loads(w1_test_file.read_text(encoding="utf-8"))
+        assert w1_receipt["state"] == "FAILED"
+        assert w1_receipt["returncode"] != 0
+        assert (
+            hashlib.sha256(w1_test_file.read_bytes()).hexdigest()
+            == json.loads(sc["response"]["stdout"])["pre_review_test_sha256"]
+        )
         assert (proposals_dir / expected_reviewer_id).is_dir()
         assert reviewer_st["state"] == "VERIFIED"
 
