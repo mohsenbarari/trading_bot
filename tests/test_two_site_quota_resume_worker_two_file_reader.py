@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -31,6 +33,19 @@ def _make_valid_test_context(root: Path) -> tuple[dict, dict]:
     result_file = run_dir / "result.json"
     result_file.write_text('{"changes": [{"path": "scripts/new.py"}], "status": "PROPOSAL_READY"}')
 
+    pipe_dir = root / ".local/two-site-refactor/pipeline" / prefix
+    pipe_dir.mkdir(parents=True, exist_ok=True)
+    fb2_file = pipe_dir / "feedback-correction-2.json"
+    fb2_data = {
+        "reviewer": "gemini",
+        "reviewed_proposal_sha256": prior_sha,
+        "findings": ["Worker-1 proposal needs correction for edge cases"],
+        "test_evidence": ["pre-review-tests-1 passed"],
+    }
+    fb2_bytes = json.dumps(fb2_data, indent=2).encode("utf-8")
+    fb2_file.write_bytes(fb2_bytes)
+    fb2_sha = hashlib.sha256(fb2_bytes).hexdigest()
+
     artifacts = {
         "worker_index": 2,
         "original_run_prefix": prefix,
@@ -46,7 +61,7 @@ def _make_valid_test_context(root: Path) -> tuple[dict, dict]:
         "conversation_id": "conv-w1",
     }
     evidence = {
-        "feedback_sha": "44" * 32,
+        "feedback_sha": fb2_sha,
         "worker_info": prior_worker_info,
     }
     ctx = {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,19 @@ except ImportError:
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         ProposalError,
         validate_run,
+    )
+
+try:
+    from scripts.two_site_proposal_runner import (
+        MAX_CONTEXT,
+        bounded_file_bytes,
+        validate_correction_feedback,
+    )
+except ImportError:
+    from two_site_proposal_runner import (  # type: ignore[no-redef]
+        MAX_CONTEXT,
+        bounded_file_bytes,
+        validate_correction_feedback,
     )
 
 try:
@@ -169,7 +183,7 @@ def read_and_bind_worker_two_result(
         raise ProposalError("artifacts missing or invalid proposal_sha256")
 
     expected_feedback_sha = evidence.get("feedback_sha")
-    if not isinstance(expected_feedback_sha, str) or not expected_feedback_sha.strip():
+    if not isinstance(expected_feedback_sha, str) or not _SHA_RE.fullmatch(expected_feedback_sha):
         raise ProposalError("evidence missing or invalid feedback_sha")
 
     prior_worker_info = evidence.get("worker_info")
@@ -249,6 +263,31 @@ def read_and_bind_worker_two_result(
             raise ProposalError("ordered_conversation_ids contains empty or invalid conversation_id")
     if len(set(ordered_convs)) != len(ordered_convs):
         raise ProposalError(f"duplicate conversation IDs in history: {ordered_convs}")
+
+    orig_prefix = artifacts.get("original_run_prefix")
+    if not isinstance(orig_prefix, str) or not orig_prefix.strip():
+        raise ProposalError("artifacts missing or invalid original_run_prefix")
+
+    feedback_rel_path = Path(f".local/two-site-refactor/pipeline/{orig_prefix}/feedback-correction-2.json")
+    raw_feedback_bytes = bounded_file_bytes(
+        root,
+        feedback_rel_path,
+        MAX_CONTEXT,
+        "persisted feedback-2",
+    )
+
+    actual_feedback_sha = hashlib.sha256(raw_feedback_bytes).hexdigest()
+    if actual_feedback_sha != expected_feedback_sha:
+        raise ProposalError(
+            f"persisted feedback-2 SHA mismatch: expected {expected_feedback_sha!r}, got {actual_feedback_sha!r}"
+        )
+
+    try:
+        feedback_text = raw_feedback_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ProposalError(f"persisted feedback-2 is not valid UTF-8: {exc}") from exc
+
+    validate_correction_feedback(feedback_text, prior_sha)
 
     initial_seen_convs: set[str] = set(ordered_convs)
     seen_convs: set[str] = set(ordered_convs)

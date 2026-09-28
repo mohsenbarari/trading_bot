@@ -429,3 +429,65 @@ def test_materialized_worker_two_test_failed_provenance(tmp_path: Path) -> None:
     assert not r1_dir.exists()
     assert not any("reviewer-1" in p.name for p in prop_dir.iterdir())
     assert not any("worker-3" in p.name for p in prop_dir.iterdir())
+
+
+def test_materialized_worker_two_rejects_tampered_persisted_feedback_two(
+    tmp_path: Path,
+) -> None:
+    root, ctx, returned_state, meta = _setup_materialized_worker_two_env(tmp_path)
+
+    prop_dir = root / ".local" / "two-site-refactor" / "proposals"
+    runs = [
+        f"{meta['orig_prefix']}-worker-0",
+        f"{meta['orig_prefix']}-reviewer-0",
+        meta["w1_id"],
+        meta["w2_id"],
+    ]
+    before_bytes = {
+        (rid, fname): (prop_dir / rid / fname).read_bytes()
+        for rid in runs
+        for fname in ("result.json", "status.json")
+    }
+
+    fb2_path = (
+        root
+        / ".local"
+        / "two-site-refactor"
+        / "pipeline"
+        / meta["orig_prefix"]
+        / "feedback-correction-2.json"
+    )
+    current_fb2 = json.loads(fb2_path.read_text(encoding="utf-8"))
+    tampered_fb2 = copy.deepcopy(current_fb2)
+    tampered_fb2["findings"] = ["Worker1 proposal needs correction for different edge cases"]
+    tampered_bytes = json.dumps(tampered_fb2, indent=2).encode("utf-8")
+    assert hashlib.sha256(tampered_bytes).hexdigest() != ctx["evidence"]["feedback_sha"]
+
+    fb2_path.write_bytes(tampered_bytes)
+
+    with _patch_load_task():
+        with pytest.raises(ProposalError, match="SHA mismatch"):
+            read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    for (rid, fname), orig_bytes in before_bytes.items():
+        assert (prop_dir / rid / fname).read_bytes() == orig_bytes
+
+    # Missing feedback-2 file
+    fb2_path.unlink()
+    with _patch_load_task():
+        with pytest.raises(ProposalError):
+            read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    for (rid, fname), orig_bytes in before_bytes.items():
+        assert (prop_dir / rid / fname).read_bytes() == orig_bytes
+
+    # Symlinked feedback-2 file
+    other_fb2 = tmp_path / "other_feedback.json"
+    other_fb2.write_bytes(json.dumps(current_fb2).encode("utf-8"))
+    fb2_path.symlink_to(other_fb2)
+    with _patch_load_task():
+        with pytest.raises(ProposalError):
+            read_and_bind_worker_two_result(root, ctx, returned_state)
+
+    for (rid, fname), orig_bytes in before_bytes.items():
+        assert (prop_dir / rid / fname).read_bytes() == orig_bytes
