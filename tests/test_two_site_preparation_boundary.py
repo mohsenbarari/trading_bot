@@ -278,11 +278,28 @@ def test_canonical_key_ignores_irrelevant_aliases(repo, monkeypatch):
 
 def test_real_run_loop_status_schema(repo, monkeypatch):
     ctx = _setup_valid_boundary(repo, monkeypatch)
-    root, state_root, run_dir = ctx["root"], ctx["state_root"], ctx["run_dir"]
+    root, state_root, run_dir, git = ctx["root"], ctx["state_root"], ctx["run_dir"], ctx["git"]
     raw_result = ctx["raw_result"]
     before_head = ctx["before_head"]
     after_head = ctx["after_head"]
     digest = ctx["digest"]
+
+    os.chmod(state_root, 0o700)
+    for ref in ap.PROTECTED_REFS:
+        git("update-ref", ref, after_head)
+
+    ref_snap = ap.ref_snapshot(root)
+    assert set(ref_snap.keys()) == set(ap.PROTECTED_REFS)
+    assert all(
+        isinstance(v, str) and len(v) == 40 and all(c in "0123456789abcdef" for c in v)
+        for v in ref_snap.values()
+    )
+
+    ctx["facts"]["protected_refs"] = ref_snap
+    ctx["facts"]["control_blobs"] = {p.as_posix(): "a" * 40 for p in ap.CONTROL_PATHS}
+
+    ctx["meta"]["protected_refs"] = ref_snap
+    (run_dir / "status.json").write_text(json.dumps(ctx["meta"], indent=2))
 
     fake_result = dict(
         raw_result,
@@ -291,7 +308,20 @@ def test_real_run_loop_status_schema(repo, monkeypatch):
         head_changed=True,
         advisories=[],
     )
-    monkeypatch.setattr(ap, "run_cycle", lambda *args, **kwargs: (run_dir, fake_result))
+
+    result_projection = {k: fake_result[k] for k in ap.RESULT_KEYS}
+    assert ap.validate_result(result_projection) == result_projection
+    assert fake_result["head_before"] == before_head
+    assert fake_result["head_after"] == after_head
+    assert fake_result["head_changed"] is True
+
+    def fake_run_cycle(*args, **kwargs):
+        before_model = kwargs.get("before_model")
+        if before_model is not None:
+            before_model(dict(ctx["facts"]))
+        return run_dir, fake_result
+
+    monkeypatch.setattr(ap, "run_cycle", fake_run_cycle)
 
     dummy_codex = root / "dummy_codex"
     ret = ap.run_loop(root, dummy_codex, max_cycles=1, timeout=300, once=True)
