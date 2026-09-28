@@ -168,6 +168,28 @@ def validate_excerpts(root: Path, task: dict) -> None:
     validate_p1_00b_batch_spec(task, identity["scenario_key"])
 
 
+_DIRECT_SCRIPT = re.compile(r"^scripts/two_site_[a-z0-9_]+\.py$")
+
+
+def validate_direct_script_tests(root: Path, task: dict) -> None:
+    """Ensure tracked direct tests are selected when modifying two-site scripts."""
+    if not isinstance(task, dict):
+        return
+    allowed = task.get("allowed_files")
+    if not isinstance(allowed, list):
+        return
+    selectors = task.get("test_selectors")
+    selected = {s.split("::", 1)[0] for s in (selectors if isinstance(selectors, list) else []) if isinstance(s, str)}
+    seen = set()
+    for entry in allowed:
+        if isinstance(entry, str) and entry not in seen:
+            seen.add(entry)
+            if _DIRECT_SCRIPT.fullmatch(entry):
+                direct = f"tests/test_{Path(entry).stem}.py"
+                if direct not in selected and runner._is_tracked_test(root, direct):
+                    raise runner.ProposalError(f"missing direct test selector: {direct}")
+
+
 def build(root: Path, spec_path: Path, output: Path) -> dict:
     t_start = None
     try:

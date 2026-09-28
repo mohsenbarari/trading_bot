@@ -554,3 +554,31 @@ def test_review_rejects_free_form_or_non_dict_test_evidence(repo):
 
     with pytest.raises(ValueError):
         ct.review(root, output, "w1", "r1", digest)
+
+
+def test_validate_direct_script_tests_missing_tracked_rejects_and_selectors_pass(repo):
+    root, git = repo
+    (root / "scripts").mkdir(exist_ok=True)
+    (root / "scripts/two_site_demo.py").write_text("# demo\n")
+    (root / "tests/test_two_site_demo.py").write_text("# demo test\n")
+    git("add", "--", "scripts/two_site_demo.py", "tests/test_two_site_demo.py")
+    git("commit", "-m", "tracked direct demo")
+    bad = {"allowed_files": ["scripts/two_site_demo.py"], "test_selectors": []}
+    with pytest.raises(runner.ProposalError, match="tests/test_two_site_demo.py"):
+        ct.validate_direct_script_tests(root, bad)
+    for sel in ["tests/test_two_site_demo.py", "tests/test_two_site_demo.py::test_case"]:
+        ct.validate_direct_script_tests(root, {"allowed_files": ["scripts/two_site_demo.py"], "test_selectors": [sel]})
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        ["scripts/two_site_untracked.py"],
+        ["scripts/other.py"],
+        ["tests/test_two_site_demo.py"],
+    ],
+)
+def test_validate_direct_script_tests_untracked_nonmatching_test_only_pass(repo, allowed):
+    root, _ = repo
+    (root / "tests/test_two_site_untracked.py").write_text("# untracked\n")
+    ct.validate_direct_script_tests(root, {"allowed_files": allowed, "test_selectors": []})
