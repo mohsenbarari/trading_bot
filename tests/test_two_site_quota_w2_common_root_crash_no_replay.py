@@ -42,12 +42,18 @@ class CrashAfterWorker(RuntimeError):
     """Private sentinel indicating crash injected after Worker-2 materialization before remainder."""
 
 
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP", "TEST_FAILED"])
 def test_two_site_quota_w2_common_root_crash_no_replay(
+    origin: str,
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
-    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    ctx = _setup_w2_admission_claim_scenario(
+        broker_repo,
+        frozen_clock_dt,
+        origin=origin,
+    )
 
     root: Path = ctx["root"]
     task: Path = ctx["task"]
@@ -87,14 +93,30 @@ def test_two_site_quota_w2_common_root_crash_no_replay(
         / sc["meta"]["w1_id"]
         / "result.json"
     )
-    expected_w2_feedback = (
+    orig_pipeline_dir = (
         root
         / ".local"
         / "two-site-refactor"
         / "pipeline"
         / sc["meta"]["orig_prefix"]
-        / "feedback-correction-2.json"
     )
+    expected_w2_feedback = orig_pipeline_dir / "feedback-correction-2.json"
+    w1_test_receipt_path = orig_pipeline_dir / "pre-review-tests-1.json"
+
+    w1_test_receipt_bytes: bytes | None = None
+    if origin == "TEST_FAILED":
+        assert w1_test_receipt_path.is_file()
+        w1_test_receipt_bytes = w1_test_receipt_path.read_bytes()
+        w1_test_receipt_data = json.loads(w1_test_receipt_bytes.decode("utf-8"))
+        assert w1_test_receipt_data["state"] == "FAILED"
+        assert int(w1_test_receipt_data["returncode"]) != 0
+        expected_test_sha = json.loads(sc["response"]["stdout"])["pre_review_test_sha256"]
+        assert hashlib.sha256(w1_test_receipt_bytes).hexdigest() == expected_test_sha
+    elif origin == "BOOTSTRAP":
+        assert not w1_test_receipt_path.exists()
+        w2_feedback_data = json.loads(expected_w2_feedback.read_text(encoding="utf-8"))
+        assert "test_evidence" in w2_feedback_data
+        assert w2_feedback_data["test_evidence"]
     expected_test_receipt_path = (
         root
         / ".local"
@@ -252,7 +274,15 @@ def test_two_site_quota_w2_common_root_crash_no_replay(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    else:
+        assert sc.get("r1_status_path") is None
+    if origin == "TEST_FAILED":
+        assert w1_test_receipt_bytes is not None
+        assert w1_test_receipt_path.read_bytes() == w1_test_receipt_bytes
+    elif origin == "BOOTSTRAP":
+        assert not w1_test_receipt_path.exists()
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
@@ -321,7 +351,15 @@ def test_two_site_quota_w2_common_root_crash_no_replay(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    else:
+        assert sc.get("r1_status_path") is None
+    if origin == "TEST_FAILED":
+        assert w1_test_receipt_bytes is not None
+        assert w1_test_receipt_path.read_bytes() == w1_test_receipt_bytes
+    elif origin == "BOOTSTRAP":
+        assert not w1_test_receipt_path.exists()
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
