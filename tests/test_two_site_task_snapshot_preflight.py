@@ -19,17 +19,17 @@ from scripts.two_site_proposal_runner import (
 
 def test_validate_task_snapshot_budget_boundaries():
     overhead = len(serialize_json({"k": ""}))
-    exact_pad = "a" * (2 * MAX_CONTEXT - overhead)
+    exact_pad = "a" * (3 * MAX_CONTEXT - overhead)
     _validate_task_snapshot_budget({"k": exact_pad})
 
     with pytest.raises(ProposalError, match="task snapshot exceeds context budget"):
         _validate_task_snapshot_budget({"k": exact_pad + "a"})
 
     with pytest.raises(ProposalError, match="task snapshot exceeds context budget"):
-        _validate_task_snapshot_budget({"k": "م" * 160_000})
+        _validate_task_snapshot_budget({"k": "م" * 240_000})
 
     with pytest.raises(ProposalError, match="task snapshot exceeds context budget"):
-        _validate_task_snapshot_budget({"k": "\\" * 160_000})
+        _validate_task_snapshot_budget({"k": "\\" * 240_000})
 
 
 def test_run_verifier_overbudget_snapshot_rejects_before_provider(tmp_path, monkeypatch):
@@ -140,6 +140,11 @@ def test_run_verifier_overbudget_snapshot_rejects_before_provider(tmp_path, monk
     monkeypatch.setattr(runner, "cli_identity", cli_id_mock)
     popen_mock = mock.Mock(side_effect=AssertionError("subprocess.Popen must not be called"))
     monkeypatch.setattr(runner.subprocess, "Popen", popen_mock)
+
+    monkeypatch.setattr(
+        runner, "MAX_CONTEXT", (len(serialize_json(material)) // 3) - 1
+    )
+    assert len(serialize_json(material)) > 3 * runner.MAX_CONTEXT
 
     with pytest.raises(ProposalError, match="task snapshot exceeds context budget"):
         run(
