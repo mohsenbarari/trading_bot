@@ -97,6 +97,11 @@ def test_quota_supervisor_resume_context_stop(
 ) -> None:
     sc = _setup_scenario_through_receipt(*broker_repo)
     wait_record = _admit_wait(sc)
+    req_dir = broker_paths(sc["root"])[2]
+    initial_requests = sorted(os.listdir(req_dir))
+    claim_path = sc["runs_dir"] / "quota-resume-claim.json"
+    sub_path = sc["runs_dir"] / "quota-resume-submission.json"
+    assert not claim_path.exists() and not sub_path.exists()
     next_check = datetime.fromisoformat(
         wait_record["schedule"]["next_check_at_utc"].replace("Z", "+00:00")
     )
@@ -120,6 +125,8 @@ def test_quota_supervisor_resume_context_stop(
     assert "autopilot STOP sentinel exists" in str(exc_info.value)
     mock_load.assert_not_called()
     mock_semantic.assert_not_called()
+    assert not claim_path.exists() and not sub_path.exists()
+    assert sorted(os.listdir(req_dir)) == initial_requests
 
 
 def test_quota_supervisor_resume_context_not_due(
@@ -127,6 +134,11 @@ def test_quota_supervisor_resume_context_not_due(
 ) -> None:
     sc = _setup_scenario_through_receipt(*broker_repo)
     wait_record = _admit_wait(sc)
+    req_dir = broker_paths(sc["root"])[2]
+    initial_requests = sorted(os.listdir(req_dir))
+    claim_path = sc["runs_dir"] / "quota-resume-claim.json"
+    sub_path = sc["runs_dir"] / "quota-resume-submission.json"
+    assert not claim_path.exists() and not sub_path.exists()
     created_at_utc = wait_record["schedule"]["created_at_utc"]
 
     mock_load = unittest.mock.MagicMock()
@@ -145,6 +157,8 @@ def test_quota_supervisor_resume_context_not_due(
     assert "NOT_DUE" in str(exc_info.value)
     mock_load.assert_not_called()
     mock_semantic.assert_not_called()
+    assert not claim_path.exists() and not sub_path.exists()
+    assert sorted(os.listdir(req_dir)) == initial_requests
 
 
 def test_quota_supervisor_resume_context_unknown_quota_due(
@@ -164,6 +178,13 @@ def test_quota_supervisor_resume_context_unknown_quota_due(
             assert json.loads(wait_file.read_text())["schedule"]["reset_kind"] == "QUOTA_RESET_UNKNOWN"
             assert rec["schedule"]["reset_kind"] == "QUOTA_RESET_UNKNOWN"
 
+            run_dir = root / ".local/two-site-refactor/autopilot/runs" / cid
+            req_dir = broker_paths(root)[2]
+            initial_requests = sorted(os.listdir(req_dir))
+            claim_path = run_dir / "quota-resume-claim.json"
+            sub_path = run_dir / "quota-resume-submission.json"
+            assert not claim_path.exists() and not sub_path.exists()
+
             mock_load, mock_sem = unittest.mock.MagicMock(), unittest.mock.MagicMock()
             monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.load_task", mock_load)
             monkeypatch.setattr("scripts.two_site_quota_supervisor_resume_context.read_existing_semantic_attempt", mock_sem)
@@ -174,6 +195,8 @@ def test_quota_supervisor_resume_context_unknown_quota_due(
             assert "UNKNOWN_BACKOFF_REVIEW_DUE" in str(exc_info.value)
             mock_load.assert_not_called()
             mock_sem.assert_not_called()
+            assert not claim_path.exists() and not sub_path.exists()
+            assert sorted(os.listdir(req_dir)) == initial_requests
 
 
 def test_quota_supervisor_resume_context_task_byte_drift(
@@ -188,7 +211,7 @@ def test_quota_supervisor_resume_context_task_byte_drift(
     next_check = datetime.fromisoformat(wait_record["schedule"]["next_check_at_utc"].replace("Z", "+00:00"))
     timestamp = (next_check + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    task_path = sc.get("task_path") or (sc["root"] / wait_record["reservation"]["task_path"])
+    task_path = sc["task"]
     task_path.write_bytes(task_path.read_bytes() + b"\n# drift\n")
 
     mock_load, mock_sem = unittest.mock.MagicMock(), unittest.mock.MagicMock()
