@@ -5,7 +5,6 @@ import subprocess
 
 import pytest
 
-from scripts import two_site_codex_autopilot as autopilot
 from scripts import two_site_cycle_tools as ct
 from scripts import two_site_proposal_pipeline as pipeline
 from scripts import two_site_proposal_runner as runner
@@ -348,7 +347,6 @@ def test_correction_worker_model_routing_and_forged_prior_gate(repo, monkeypatch
         return runner.MODEL
 
     monkeypatch.setattr(pipeline, "expected_role_model", fake_expected_role_model)
-    monkeypatch.setattr(autopilot, "expected_role_model", fake_expected_role_model)
 
     previous = {**result, "changes": [{**result["changes"][0], "content": "def test_new():\n    assert False\n"}]}
     runner.write_json(prior / "result.json", previous)
