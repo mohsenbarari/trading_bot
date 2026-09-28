@@ -21,6 +21,9 @@ def runner_env(tmp_path, monkeypatch):
     root = (tmp_path / "repo").resolve()
     root.mkdir(parents=True, exist_ok=True)
     (root / "docs/refactor/two-server/templates").mkdir(parents=True, exist_ok=True)
+    (root / "docs/refactor/two-server/templates/worker-model-routing.json").write_bytes(
+        (Path(__file__).resolve().parents[1] / "docs/refactor/two-server/templates/worker-model-routing.json").read_bytes()
+    )
     (root / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md").write_text("# Task\n")
     (root / "sample.py").write_text("def run():\n    return False\n")
 
