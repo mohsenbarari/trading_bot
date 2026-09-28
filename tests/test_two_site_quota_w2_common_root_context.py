@@ -34,11 +34,15 @@ from tests.test_two_site_quota_w2_common_root_admission import (
 )
 
 
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
 def test_two_site_quota_w2_common_root_context_positive(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    origin: str,
 ) -> None:
     frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
-    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    ctx = _setup_w2_admission_claim_scenario(
+        broker_repo, frozen_clock_dt, origin=origin
+    )
 
     root = ctx["root"]
     task = ctx["task"]
@@ -68,18 +72,24 @@ def test_two_site_quota_w2_common_root_context_positive(
 
         artifacts = bound["artifacts"]
         assert artifacts["worker_index"] == 2
-        assert artifacts["correction_origin"] == "REVIEWER"
+        assert artifacts["correction_origin"] == origin
         assert artifacts["final_worker_run_id"] == sc["meta"]["w1_id"]
-        assert artifacts["final_reviewer_run_id"] == sc["meta"]["r1_id"]
         assert artifacts["proposal_sha256"] == sc["meta"]["w1_sha"]
         assert artifacts["attempted_run_id"] == sc["orig_w2_id"]
         assert artifacts["original_run_prefix"] == sc["meta"]["orig_prefix"]
 
         evidence = bound["evidence"]
         assert evidence["feedback"]["reviewed_proposal_sha256"] == sc["meta"]["w1_sha"]
-        assert evidence["feedback"]["reviewer"] == "gemini"
         assert evidence["worker_info"]["status"]["run_id"] == sc["meta"]["w1_id"]
-        assert evidence["reviewer_status"]["run_id"] == sc["meta"]["r1_id"]
+
+        if origin == "REVIEWER":
+            assert artifacts["final_reviewer_run_id"] == sc["meta"]["r1_id"]
+            assert evidence["feedback"]["reviewer"] == "gemini"
+            assert evidence["reviewer_status"]["run_id"] == sc["meta"]["r1_id"]
+        else:
+            assert artifacts.get("final_reviewer_run_id") is None
+            assert evidence.get("reviewer_status") is None
+            assert evidence["feedback"]["reviewer"] == "test-gate"
 
         with pytest.raises(ProposalError) as exc_lock:
             with pipeline_lock(root):
@@ -99,9 +109,18 @@ def test_two_site_quota_w2_common_root_context_positive(
         assert history["worker0_conversation_id"] == conv_ids[0]
         assert history["reviewer0_conversation_id"] == conv_ids[1]
         assert history["worker1_conversation_id"] == conv_ids[2]
-        assert history["reviewer1_conversation_id"] == conv_ids[3]
         assert conv_ids[2] == evidence["worker_info"]["status"]["conversation_id"]
-        assert conv_ids[3] == evidence["reviewer_status"]["conversation_id"]
+
+        if origin == "REVIEWER":
+            assert history["reviewer1_conversation_id"] == conv_ids[3]
+            assert conv_ids[3] == evidence["reviewer_status"]["conversation_id"]
+        else:
+            assert history["correction_origin"] == "BOOTSTRAP"
+            assert history["needs_reviewer1"] is False
+            assert len(conv_ids) == 3
+            assert history["reviewer1_id"] is None
+            assert history["reviewer1_run_id"] is None
+            assert history["reviewer1_conversation_id"] is None
 
     with pipeline_lock(root):
         pass
@@ -125,7 +144,25 @@ def test_two_site_quota_w2_common_root_context_positive(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    else:
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        r1_id = sc["meta"].get("r1_id") or f"{sc['meta']['orig_prefix']}-reviewer-1"
+        assert not (root / ".local" / "two-site-refactor" / "proposals" / r1_id / "proposal.json").exists()
+        assert not (root / ".local" / "two-site-refactor" / "proposals" / r1_id / "result.json").exists()
+        assert not (root / ".local" / "two-site-refactor" / "proposals" / r1_id / "status.json").exists()
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["meta"]["orig_prefix"]
+            / "pre-review-tests-1.json"
+        ).exists()
+
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
@@ -141,11 +178,15 @@ def test_two_site_quota_w2_common_root_context_positive(
     assert set(os.listdir(runs_parent)) == {controller_run_id}
 
 
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
 def test_two_site_quota_w2_common_root_context_negative_tampered_feedback_sha(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    origin: str,
 ) -> None:
     frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
-    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    ctx = _setup_w2_admission_claim_scenario(
+        broker_repo, frozen_clock_dt, origin=origin
+    )
 
     root = ctx["root"]
     task = ctx["task"]
@@ -214,7 +255,25 @@ def test_two_site_quota_w2_common_root_context_negative_tampered_feedback_sha(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    else:
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        r1_id = sc["meta"].get("r1_id") or f"{sc['meta']['orig_prefix']}-reviewer-1"
+        assert not (root / ".local" / "two-site-refactor" / "proposals" / r1_id / "proposal.json").exists()
+        assert not (root / ".local" / "two-site-refactor" / "proposals" / r1_id / "result.json").exists()
+        assert not (root / ".local" / "two-site-refactor" / "proposals" / r1_id / "status.json").exists()
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["meta"]["orig_prefix"]
+            / "pre-review-tests-1.json"
+        ).exists()
+
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
