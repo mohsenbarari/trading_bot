@@ -41,6 +41,9 @@ def _make_canonical_repo(
     *,
     corrupt_counts: bool = False,
     corrupt_schema: bool = False,
+    second_tracked_file: bool = False,
+    duplicate_record: bool = False,
+    duplicate_same_path: bool = False,
 ) -> Path:
     repo.mkdir(parents=True, exist_ok=True)
     _run_git(repo, "init")
@@ -53,7 +56,15 @@ def _make_canonical_repo(
     sample_content = "def test_sample() -> None:\n    pass\n"
     sample_file.write_text(sample_content, encoding="utf-8")
     sample_sha = hashlib.sha256(sample_content.encode("utf-8")).hexdigest()
-    _run_git(repo, "add", "tests/test_sample.py")
+    tracked_files = ["tests/test_sample.py"]
+    sample2_sha = None
+    if second_tracked_file:
+        sample2_file = sample_dir / "test_sample_2.py"
+        sample2_content = "def test_sample_2() -> None:\n    pass\n"
+        sample2_file.write_text(sample2_content, encoding="utf-8")
+        sample2_sha = hashlib.sha256(sample2_content.encode("utf-8")).hexdigest()
+        tracked_files.append("tests/test_sample_2.py")
+    _run_git(repo, "add", *tracked_files)
     _run_git(repo, "commit", "-m", "commit 0: sample source")
     c0 = _run_git(repo, "rev-parse", "HEAD")
 
@@ -63,26 +74,48 @@ def _make_canonical_repo(
     inv_dir.mkdir(parents=True, exist_ok=True)
     scen_dir.mkdir(parents=True, exist_ok=True)
 
-    base_doc = {
-        "schema_version": 1,
-        "stage": "P1-00b",
-        "inspected_head": c0,
-        "records": [
+    base_records = [
+        {
+            "seed_ids": ["API-DEMO-SEED-PROVEN"],
+            "path": "tests/test_sample.py",
+            "sha256": sample_sha,
+            "last_commit": c0,
+            "test_selectors": ["tests/test_sample.py::test_sample"],
+        },
+        {
+            "seed_ids": ["WEB-DEMO-SEED-UNKNOWN"],
+            "path": "tests/test_sample.py",
+            "sha256": "0" * 64,
+            "last_commit": c0,
+            "test_selectors": ["tests/test_sample.py::test_sample"],
+        },
+    ]
+    if second_tracked_file:
+        base_records.append(
+            {
+                "seed_ids": ["API-DEMO-SEED-PROVEN"],
+                "path": "tests/test_sample_2.py",
+                "sha256": sample2_sha,
+                "last_commit": c0,
+                "test_selectors": ["tests/test_sample_2.py::test_sample_2"],
+            }
+        )
+    if duplicate_record or duplicate_same_path:
+        base_records.append(
             {
                 "seed_ids": ["API-DEMO-SEED-PROVEN"],
                 "path": "tests/test_sample.py",
                 "sha256": sample_sha,
                 "last_commit": c0,
                 "test_selectors": ["tests/test_sample.py::test_sample"],
-            },
-            {
-                "seed_ids": ["WEB-DEMO-SEED-UNKNOWN"],
-                "path": "tests/test_sample.py",
-                "sha256": "0" * 64,
-                "last_commit": c0,
-                "test_selectors": ["tests/test_sample.py::test_sample"],
-            },
-        ],
+            }
+        )
+
+    base_doc = {
+        "schema_version": 1,
+        "stage": "P1-00b",
+        "inspected_head": c0,
+        "records": base_records,
     }
     base_text = json.dumps(base_doc, indent=2) + "\n"
     (inv_dir / "base.json").write_text(base_text, encoding="utf-8")
@@ -307,5 +340,28 @@ def test_canonical_evidence_inconsistent_schema(tmp_path: Path) -> None:
     result = inspect_canonical_evidence(corrupt_repo, "API-DEMO-SEED-PROVEN")
     assert result["status"] == "INVENTORY_INCONSISTENT", result
     assert "invalid canonical manifest schema or stage" in result.get("reason", "")
+    assert "requested_coverage" not in result
+    assert "coverage" not in result
+
+
+def test_canonical_evidence_multi_scenario_distinct_paths_valid(tmp_path: Path) -> None:
+    multi_repo = _make_canonical_repo(tmp_path / "multi_repo", second_tracked_file=True)
+    result = inspect_canonical_evidence(multi_repo, "API-DEMO-SEED-PROVEN")
+    assert result["status"] == "VALID", result
+    assert result["expected_seed_count"] == 4
+    assert result["seed_count"] == 4
+    assert result["requested_coverage"] == "PROVEN_FOR_REQUESTED_SCENARIO"
+    assert result["coverage"] == {"API-DEMO-SEED-PROVEN": "PROVEN_FOR_REQUESTED_SCENARIO"}
+
+    full_result = inspect_canonical_evidence(multi_repo)
+    assert full_result["status"] == "VALID", full_result
+    assert full_result["coverage"]["API-DEMO-SEED-PROVEN"] == "PROVEN_FOR_REQUESTED_SCENARIO"
+
+
+def test_canonical_evidence_duplicate_same_seed_and_path_inconsistent(tmp_path: Path) -> None:
+    dup_repo = _make_canonical_repo(tmp_path / "dup_repo", duplicate_record=True)
+    result = inspect_canonical_evidence(dup_repo, "API-DEMO-SEED-PROVEN")
+    assert result["status"] == "INVENTORY_INCONSISTENT", result
+    assert "conflicting current evidence: API-DEMO-SEED-PROVEN" in result.get("reason", "")
     assert "requested_coverage" not in result
     assert "coverage" not in result

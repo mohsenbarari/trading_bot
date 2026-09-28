@@ -619,7 +619,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 raise runner.ProposalError(f"continuation {index} invalid")
             docs.append(current)
 
-        current_seen: set[str] = set()
+        current_seen: set[tuple[str, str]] = set()
         proven: set[str] = set()
         unknown: set[str] = set()
         for doc in docs:
@@ -660,9 +660,9 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
 
                 if last_commit == latest_touch:
                     for seed in seed_ids:
-                        if seed in current_seen:
+                        if (seed, path) in current_seen:
                             raise runner.ProposalError(f"conflicting current evidence: {seed}")
-                        current_seen.add(seed)
+                        current_seen.add((seed, path))
                     proof_sha = None
                     try:
                         proof_sha = git_blob_digest(head, path)
