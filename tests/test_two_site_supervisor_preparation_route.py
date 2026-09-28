@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+from typing import Callable
 
 import pytest
 
@@ -107,7 +108,9 @@ def test_fixed_route_and_default_compatibility(tmp_path: Path, monkeypatch: pyte
     repo = tmp_path / "repo"
     repo.mkdir(parents=True, exist_ok=True)
     state_root = repo / ".local/two-site-refactor/autopilot"
-    state_root.mkdir(parents=True, exist_ok=True)
+    state_root.parent.mkdir(parents=True, exist_ok=True)
+    state_root.mkdir(mode=0o700, exist_ok=True)
+    state_root.chmod(0o700)
     (state_root / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     codex = repo / "bin/codex"
     codex.parent.mkdir(parents=True, exist_ok=True)
@@ -122,6 +125,17 @@ def test_fixed_route_and_default_compatibility(tmp_path: Path, monkeypatch: pyte
     child_receipts = [r1, r2]
     observed_child_kwargs: list[dict[str, object]] = []
     events: list[str] = []
+    current_head = "1" * 40
+
+    def fake_git(_root: Path, *args: str) -> str:
+        if args and args[0] == "rev-parse":
+            return current_head
+        if args and args[0] == "status":
+            return ""
+        return current_head
+
+    def fake_validate_repo(_root: Path, require_clean: bool = True) -> dict[str, object]:
+        return _make_before(head=current_head)
 
     def fake_run_cycle(
         _root: Path,
@@ -131,13 +145,18 @@ def test_fixed_route_and_default_compatibility(tmp_path: Path, monkeypatch: pyte
         _timeout: int,
         recovery: dict[str, object] | None = None,
         continuation: dict | None = None,
+        before_model: Callable[[dict[str, object]], None] | None = None,
         **kwargs: object,
     ) -> tuple[Path, dict]:
+        nonlocal current_head
         events.append(f"cycle_{cycle}")
         observed_child_kwargs.append(dict(kwargs))
+        if before_model is not None:
+            before_model(_make_before(head=current_head))
         run_dir = s_root / "runs" / f"cycle-{cycle:04d}-20260923T000000Z-{os.getpid()}"
         run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         receipt = child_receipts[cycle - 1]
+        current_head = str(receipt["head_after"])
         return run_dir, receipt
 
     def spy_delegate(_root: Path, _state_root: Path) -> None:
@@ -155,9 +174,8 @@ def test_fixed_route_and_default_compatibility(tmp_path: Path, monkeypatch: pyte
             events.append("running")
         orig_write_state(s_root, state_name, *args, **kwargs)
 
-    heads = ["1" * 40, "b" * 40, "c" * 40]
-    head_iter = iter(heads)
-    monkeypatch.setattr(ap_mod, "git", lambda *args: next(head_iter, "c" * 40))
+    monkeypatch.setattr(ap_mod, "validate_repository", fake_validate_repo)
+    monkeypatch.setattr(ap_mod, "git", fake_git)
     monkeypatch.setattr(ap_mod, "ref_snapshot", lambda _root: {ref: "2" * 40 for ref in PROTECTED_REFS})
     monkeypatch.setattr(ap_mod, "persisted_continuation", lambda *args: None)
     monkeypatch.setattr(ap_mod, "prune_runs", lambda *args: [])
@@ -177,26 +195,58 @@ def test_fixed_route_and_default_compatibility(tmp_path: Path, monkeypatch: pyte
     assert len(observed_child_kwargs) == 2
     assert observed_child_kwargs[0] == {"preparation_route": "legacy"}
     assert observed_child_kwargs[1] == {"preparation_route": "legacy"}
+    status_legacy = json.loads((state_root / "status.json").read_text())
+    assert status_legacy["state"] == "COMPLETE"
+    assert status_legacy["head"] == "c" * 40
 
-    old_child_called = False
+    repo_default = tmp_path / "repo_default"
+    repo_default.mkdir(parents=True, exist_ok=True)
+    state_root_default = repo_default / ".local/two-site-refactor/autopilot"
+    state_root_default.parent.mkdir(parents=True, exist_ok=True)
+    state_root_default.mkdir(mode=0o700, exist_ok=True)
+    state_root_default.chmod(0o700)
+    (state_root_default / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
+    codex_default = repo_default / "bin/codex"
+    codex_default.parent.mkdir(parents=True, exist_ok=True)
+    codex_default.write_text("#!/bin/sh\nexit 0\n")
+    codex_default.chmod(0o755)
 
-    def old_fake_child(
-        _r: Path, _c: Path, s_root: Path, cycle: int, _t: int,
+    default_child_called = False
+    observed_default_kwargs: list[dict[str, object]] = []
+    current_head = "b" * 40
+
+    def default_fake_child(
+        _r: Path,
+        _c: Path,
+        s_root: Path,
+        cycle: int,
+        _t: int,
         recovery: dict[str, object] | None = None,
         continuation: dict | None = None,
+        before_model: Callable[[dict[str, object]], None] | None = None,
+        **kwargs: object,
     ) -> tuple[Path, dict]:
-        nonlocal old_child_called
-        old_child_called = True
-        run_dir = s_root / "runs" / f"cycle-{cycle:04d}-20260923T000000Z-{os.getpid()}"
+        nonlocal default_child_called, current_head
+        default_child_called = True
+        observed_default_kwargs.append(dict(kwargs))
+        if before_model is not None:
+            before_model(_make_before(head=current_head))
+        run_dir = s_root / "runs" / f"cycle-{cycle:04d}-default-20260923T000000Z-{os.getpid()}"
         run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        current_head = str(r2["head_after"])
         return run_dir, r2
 
     events.clear()
-    monkeypatch.setattr(ap_mod, "run_cycle", old_fake_child)
-    rc_default = run_loop(repo, codex, max_cycles=1, timeout=300, once=True)
+    monkeypatch.setattr(ap_mod, "run_cycle", default_fake_child)
+    rc_default = run_loop(repo_default, codex_default, max_cycles=1, timeout=300, once=True)
     assert rc_default == 0
-    assert old_child_called is True
+    assert default_child_called is True
     assert "delegate" not in events
+    assert len(observed_default_kwargs) == 1
+    assert "preparation_route" not in observed_default_kwargs[0]
+    status_default = json.loads((state_root_default / "status.json").read_text())
+    assert status_default["state"] == "COMPLETE"
+    assert status_default["head"] == "c" * 40
 
     with pytest.raises(AutopilotError, match="invalid preparation route"):
         run_loop(repo, codex, 1, 300, True, preparation_route="invalid_route")
@@ -320,7 +370,9 @@ def test_cli_canonical_state_check_and_stop(tmp_path: Path, monkeypatch: pytest.
     repo_dir = tmp_path / "canonical_repo"
     repo_dir.mkdir(parents=True, exist_ok=True)
     cli_state_root = repo_dir / ".local" / "two-site-refactor" / "autopilot"
-    cli_state_root.mkdir(parents=True, exist_ok=True)
+    cli_state_root.parent.mkdir(parents=True, exist_ok=True)
+    cli_state_root.mkdir(mode=0o700, exist_ok=True)
+    cli_state_root.chmod(0o700)
     (cli_state_root / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     codex_bin = repo_dir / "bin/codex"
     codex_bin.parent.mkdir(parents=True, exist_ok=True)
