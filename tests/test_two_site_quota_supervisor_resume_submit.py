@@ -1,0 +1,170 @@
+"""Real-file hermetic tests for supervisor resume submit bridge."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import time
+from typing import Any
+
+import pytest
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+
+from scripts import two_site_provider_broker as broker
+from scripts.two_site_codex_autopilot import exclusive_supervisor_lock
+from scripts.two_site_quota_resume_claim_request import ClaimRequestError
+from scripts.two_site_quota_supervisor_resume_submit import (
+    submit_known_reset_resume_once_locked,
+)
+from scripts.two_site_quota_wait_admission import admit_initial_quota_wait_locked
+from tests.test_two_site_provider_broker import broker_repo
+from tests.test_two_site_quota_real_source_join_fileproof import (
+    _setup_scenario_through_receipt,
+)
+
+
+def _setup_admitted_env(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> dict[str, Any]:
+    sc = _setup_scenario_through_receipt(*broker_repo)
+    with exclusive_supervisor_lock(sc["autopilot_dir"] / "supervisor.lock"):
+        wait_rec = admit_initial_quota_wait_locked(
+            sc["root"],
+            sc["original_ctrl_id"],
+            clock=lambda: sc["now_utc"] - timedelta(seconds=120),
+        )
+    next_check = datetime.fromisoformat(
+        wait_rec["schedule"]["next_check_at_utc"].replace("Z", "+00:00")
+    )
+    claimed_dt = next_check + timedelta(seconds=10)
+    claimed_utc = claimed_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_epoch = max(time.time(), claimed_dt.timestamp() + 1.0)
+    req_id = hashlib.sha256(b"two_site_resume_req_id_001").hexdigest()[:32]
+    assert req_id != sc["request"]["request_id"]
+    return {
+        "sc": sc,
+        "wait_rec": wait_rec,
+        "claimed_utc": claimed_utc,
+        "now_epoch": now_epoch,
+        "req_id": req_id,
+    }
+
+
+def _call_submit(env: dict[str, Any]) -> dict[str, Any]:
+    sc = env["sc"]
+    return submit_known_reset_resume_once_locked(
+        sc["root"],
+        sc["original_ctrl_id"],
+        sc["continuation_ctrl_id"],
+        env["req_id"],
+        env["claimed_utc"],
+        60,
+        env["now_epoch"],
+    )
+
+
+def test_submit_known_reset_resume_positive(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc, req_id = env["sc"], env["req_id"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=True, updated_at=env["now_epoch"]
+    )
+    claim_p = sc["runs_dir"] / "quota-resume-claim.json"
+    intent_p = sc["runs_dir"] / "quota-resume-submission.json"
+    queue_p = requests_dir / f"{req_id}.json"
+    wait_p = sc["runs_dir"] / "quota-wait.json"
+
+    with exclusive_supervisor_lock(sc["autopilot_dir"] / "supervisor.lock"):
+        res = _call_submit(env)
+
+    assert set(res.keys()) == {
+        "claim",
+        "request",
+        "submission_intent",
+        "original_wait_sha256",
+    }
+    assert res["original_wait_sha256"] == hashlib.sha256(wait_p.read_bytes()).hexdigest()
+    assert res["claim"]["resume_request_id"] == req_id
+    assert res["submission_intent"]["request_id"] == req_id
+    assert res["request"]["request_id"] == req_id
+
+    assert claim_p.is_file() and stat.S_IMODE(claim_p.stat().st_mode) == 0o600
+    assert json.loads(claim_p.read_text(encoding="utf-8")) == res["claim"]
+
+    assert intent_p.is_file() and stat.S_IMODE(intent_p.stat().st_mode) == 0o600
+    assert json.loads(intent_p.read_text(encoding="utf-8")) == res["submission_intent"]
+
+    assert queue_p.is_file()
+    st = queue_p.stat()
+    assert stat.S_IMODE(st.st_mode) == 0o600 and st.st_nlink == 1
+    assert json.loads(queue_p.read_text(encoding="utf-8")) == res["request"]
+
+
+def test_submit_known_reset_resume_duplicate(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc, req_id = env["sc"], env["req_id"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=True, updated_at=env["now_epoch"]
+    )
+    lock_path = sc["autopilot_dir"] / "supervisor.lock"
+    with exclusive_supervisor_lock(lock_path):
+        _call_submit(env)
+
+    claim_p = sc["runs_dir"] / "quota-resume-claim.json"
+    intent_p = sc["runs_dir"] / "quota-resume-submission.json"
+    queue_p = requests_dir / f"{req_id}.json"
+
+    claim_bytes = claim_p.read_bytes()
+    intent_bytes = intent_p.read_bytes()
+    queue_bytes = queue_p.read_bytes()
+    queue_ino = queue_p.stat().st_ino
+    initial_queued = sorted(requests_dir.iterdir())
+
+    with exclusive_supervisor_lock(lock_path):
+        with pytest.raises(ClaimRequestError):
+            _call_submit(env)
+
+    assert claim_p.read_bytes() == claim_bytes
+    assert intent_p.read_bytes() == intent_bytes
+    assert queue_p.read_bytes() == queue_bytes
+    assert queue_p.stat().st_ino == queue_ino
+    assert sorted(requests_dir.iterdir()) == initial_queued
+    assert len(initial_queued) == 1
+
+
+def test_submit_known_reset_resume_broker_not_ready(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc, req_id = env["sc"], env["req_id"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=False, updated_at=env["now_epoch"]
+    )
+    claim_p = sc["runs_dir"] / "quota-resume-claim.json"
+    intent_p = sc["runs_dir"] / "quota-resume-submission.json"
+    queue_p = requests_dir / f"{req_id}.json"
+
+    with exclusive_supervisor_lock(sc["autopilot_dir"] / "supervisor.lock"):
+        with pytest.raises(broker.BrokerError, match="broker status is not ready idle"):
+            _call_submit(env)
+
+    assert claim_p.is_file() and stat.S_IMODE(claim_p.stat().st_mode) == 0o600
+    claim_data = json.loads(claim_p.read_text(encoding="utf-8"))
+    assert claim_data["resume_request_id"] == req_id
+    assert claim_data["original_controller_run_id"] == sc["original_ctrl_id"]
+    assert claim_data["continuation_controller_run_id"] == sc["continuation_ctrl_id"]
+
+    assert not intent_p.exists()
+    assert not queue_p.exists()
+    assert list(requests_dir.iterdir()) == []
