@@ -659,15 +659,44 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             "head_changed": True,
         }
 
+        scope = AssignmentScope(
+            assignment_id="WA-P1-00B-AE03-POSTCOMMIT-REF-DRIFT-ORDER-20260921-038",
+            stage_id="P1-00b",
+            allowed_paths=["tests/test_two_site_autopilot_post_commit_ref_drift.py"],
+            forbidden_paths=[],
+            expires_at="2026-09-22T00:00:00Z",
+            sha256="c" * 64,
+        )
+        canonical_repo = {
+            "head": before_head,
+            "status": "",
+            "assignment_scope": scope,
+            "protected_refs": {
+                ref: "1" * 40 for ref in autopilot_module.PROTECTED_REFS
+            },
+            "control_blobs": {
+                p.as_posix(): "b" * 40 for p in autopilot_module.CONTROL_PATHS
+            },
+        }
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir).resolve()
             state_root = root / ".local/two-site-refactor/autopilot"
+            state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            state_root.chmod(0o700)
             fake_codex = root / "fake_codex"
             fake_run_dir = state_root / "runs" / "cycle-0001-20260921T180000Z-12345"
 
+            def fake_run_cycle(*_args, **kwargs):
+                before_model = kwargs.get("before_model")
+                if before_model is not None:
+                    before_model(canonical_repo)
+                return fake_run_dir, transition_result
+
             with patch.object(autopilot_module, "git", return_value=before_head), \
+                    patch.object(autopilot_module, "validate_repository", return_value=canonical_repo), \
                     patch.object(autopilot_module, "ref_snapshot", return_value={}), \
-                    patch.object(autopilot_module, "run_cycle", return_value=(fake_run_dir, transition_result)) as mock_run_cycle, \
+                    patch.object(autopilot_module, "run_cycle", side_effect=fake_run_cycle) as mock_run_cycle, \
                     patch.object(autopilot_module, "prune_runs") as mock_prune_runs, \
                     patch.object(autopilot_module, "write_supervisor_state") as mock_write_supervisor_state:
                 ret = autopilot_module.run_loop(root, fake_codex, max_cycles=10, timeout=300, once=False)
@@ -1015,7 +1044,8 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir).resolve()
             state_root = root / ".local/two-site-refactor/autopilot"
-            state_root.mkdir(parents=True, exist_ok=True)
+            state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            state_root.chmod(0o700)
             autopilot_module._persist_accepted_checkpoint(
                 state_root, valid_receipt, canonical_repo
             )
@@ -1095,7 +1125,8 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
             with tempfile.TemporaryDirectory() as sub_tmp_dir:
                 sub_root = Path(sub_tmp_dir).resolve()
                 sub_state_root = sub_root / ".local/two-site-refactor/autopilot"
-                sub_state_root.mkdir(parents=True, exist_ok=True)
+                sub_state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                sub_state_root.chmod(0o700)
                 sub_status_path = sub_state_root / "status.json"
                 sub_status_path.write_text(
                     json.dumps(status_advertising_continue, indent=2), encoding="utf-8"
@@ -1163,7 +1194,8 @@ class TestPostCommitAdvisoryRecoveryBoundary(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir).resolve()
             state_root = root / ".local/two-site-refactor/autopilot"
-            state_root.mkdir(parents=True, exist_ok=True)
+            state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            state_root.chmod(0o700)
             autopilot_module._persist_accepted_checkpoint(
                 state_root, valid_receipt, canonical_repo
             )
