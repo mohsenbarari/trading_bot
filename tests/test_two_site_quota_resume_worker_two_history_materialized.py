@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 from unittest.mock import patch
@@ -48,9 +49,25 @@ except ImportError:
     )
 
 try:
-    from scripts.two_site_proposal_runner import load_task
+    from scripts.two_site_proposal_runner import load_task, validate_result
 except ImportError:
-    from two_site_proposal_runner import load_task  # type: ignore[no-redef]
+    from two_site_proposal_runner import load_task, validate_result  # type: ignore[no-redef]
+
+try:
+    from scripts.two_site_pre_review_receipt import (
+        p1_00_characterization_bootstrap_findings,
+    )
+except ImportError:
+    from two_site_pre_review_receipt import (  # type: ignore[no-redef]
+        p1_00_characterization_bootstrap_findings,
+    )
+
+try:
+    from tests.test_two_site_provider_broker import broker_repo
+except ImportError:
+    from test_two_site_provider_broker import broker_repo  # type: ignore[no-redef]
+
+_ = broker_repo
 
 
 def _fake_load_task(root: Path | str, task_path: Path | str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -98,6 +115,8 @@ def _build_materialized_env(
     task_data: dict[str, Any] | None = None,
     admitted_task_path: Path | str | None = None,
     selector: str = "test.py",
+    worker1_content: str = "# worker-1\n",
+    w1_content: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
     root = tmp_path.resolve()
     if admitted_task_path is None:
@@ -147,6 +166,7 @@ def _build_materialized_env(
         loaded_task, real_sources = load_task(root, task_path)
         loaded_task_id = loaded_task["task_id"]
 
+    effective_w1_content = w1_content if w1_content is not None else worker1_content
     findings = ["Worker0 proposal needs correction"]
     responses = [
         {"content": "# worker-0\n", "conv_id": "conv-w0"},
@@ -155,7 +175,7 @@ def _build_materialized_env(
             "findings": findings,
             "conv_id": "conv-r0",
         },
-        {"content": "# worker-1\n", "conv_id": "conv-w1"},
+        {"content": effective_w1_content, "conv_id": "conv-w1"},
     ]
     if task_data is not None and real_sources is not None:
         for resp in responses:
@@ -335,3 +355,73 @@ def test_materialized_env_custom_selector(tmp_path: Path) -> None:
         snapshot = json.loads(snap_path.read_text(encoding="utf-8"))
         assert snapshot["task"]["test_selectors"] == ["tests/test_a.py"]
         assert snapshot["source_head"] == HEAD
+
+
+def test_materialized_worker_one_bootstrap_findings_from_broker_repo(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    repo_root, task_path, _scope, _env = broker_repo
+    sample_path = "tests/test_p1_00_characterization_sample.py"
+
+    task_payload = json.loads(task_path.read_text(encoding="utf-8"))
+    task_payload["allowed_files"] = [sample_path]
+    task_payload["test_selectors"] = [sample_path]
+    task_path.write_text(json.dumps(task_payload), encoding="utf-8")
+
+    loaded_task, loaded_sources = load_task(repo_root, task_path)
+    actual_head = (
+        subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        .stdout.strip()
+    )
+
+    w1_content = (
+        "\"\"\"Sample characterization test bootstrap fixture.\"\"\"\n\n"
+        "import bot\n\n\n"
+        "def test_sample() -> None:\n"
+        "    assert bot is not None\n"
+    )
+
+    artifacts, evidence, out_task_path, orig_prefix = _build_materialized_env(
+        repo_root,
+        source_head=actual_head,
+        task_data=loaded_task,
+        admitted_task_path=task_path,
+        selector=sample_path,
+        worker1_content=w1_content,
+        w1_content=w1_content,
+    )
+
+    w1_run_id = artifacts["final_worker_run_id"]
+    w1_dir = repo_root / ".local" / "two-site-refactor" / "proposals" / w1_run_id
+    result_bytes = (w1_dir / "result.json").read_bytes()
+    w1_proposal = json.loads(result_bytes.decode("utf-8"))
+    w1_status = json.loads((w1_dir / "status.json").read_text(encoding="utf-8"))
+    w1_task_snapshot = json.loads((w1_dir / "task.json").read_text(encoding="utf-8"))
+
+    assert w1_proposal["status"] == "PROPOSAL_READY"
+    validated = validate_result(w1_proposal, loaded_task, loaded_sources, "worker")
+    assert validated == w1_proposal
+
+    assert len(w1_proposal["changes"]) == 1
+    change = w1_proposal["changes"][0]
+    assert change["path"] in loaded_task["allowed_files"]
+    assert change["path"] == sample_path
+    assert change["original_sha256"] is None
+    assert change["content"] == w1_content
+
+    expected_sha = hashlib.sha256(result_bytes).hexdigest()
+    assert w1_status["result_sha256"] == expected_sha
+    assert artifacts["proposal_sha256"] == expected_sha
+
+    assert w1_task_snapshot["task"] == loaded_task
+    assert w1_task_snapshot["source_head"] == actual_head
+    assert w1_task_snapshot["sources"] == loaded_sources
+
+    findings = p1_00_characterization_bootstrap_findings(w1_proposal)
+    assert len(findings) > 0
+    assert any("P1-00 characterization bootstrap" in item for item in findings)
