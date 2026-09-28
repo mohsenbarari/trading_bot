@@ -39,10 +39,9 @@ def _make_task_payload(
     return {
         "task_id": "AE01-20A2-PREFLIGHT-001",
         "goal": goal,
-        "context_files": ["scripts/two_site_proposal_runner.py"],
+        "context_files": ["tests/test_two_site_selector_preflight.py"],
         "allowed_files": allowed_files
         or [
-            "scripts/two_site_proposal_runner.py",
             "tests/test_two_site_selector_preflight.py",
         ],
         "requirements": ["Requirement 1"],
