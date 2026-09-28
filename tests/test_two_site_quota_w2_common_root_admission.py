@@ -204,7 +204,7 @@ def _setup_w2_admission_claim_scenario(
     }
 
 
-@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP", "TEST_FAILED"])
 def test_two_site_quota_w2_common_root_admission_positive(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     origin: str,
@@ -267,7 +267,7 @@ def test_two_site_quota_w2_common_root_admission_positive(
         assert sc["r1_status_path"] is not None
         assert sc["r1_bytes_snapshot"] is not None
         assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
-    else:
+    elif origin == "BOOTSTRAP":
         assert sc["r1_status_path"] is None
         assert sc["r1_bytes_snapshot"] is None
         assert not (
@@ -285,6 +285,35 @@ def test_two_site_quota_w2_common_root_admission_positive(
             / sc["request"]["run_prefix"]
             / "pre-review-tests-1.json"
         ).exists()
+    elif origin == "TEST_FAILED":
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "proposals"
+            / f"{sc['request']['run_prefix']}-reviewer-1"
+        ).exists()
+        receipt1_path = (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["request"]["run_prefix"]
+            / "pre-review-tests-1.json"
+        )
+        assert receipt1_path.is_file()
+        receipt1_bytes = receipt1_path.read_bytes()
+        receipt1_data = json.loads(receipt1_bytes)
+        assert receipt1_data["state"] == "FAILED"
+        assert receipt1_data["returncode"] != 0
+        assert (
+            hashlib.sha256(receipt1_bytes).hexdigest()
+            == json.loads(sc["response"]["stdout"])["pre_review_test_sha256"]
+        )
+    else:
+        raise AssertionError(f"unexpected origin: {origin!r}")
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
@@ -300,7 +329,7 @@ def test_two_site_quota_w2_common_root_admission_positive(
     assert set(os.listdir(runs_parent)) == {controller_run_id}
 
 
-@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP", "TEST_FAILED"])
 def test_two_site_quota_w2_common_root_admission_negative_tampered_claim_sha(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     origin: str,
@@ -360,7 +389,7 @@ def test_two_site_quota_w2_common_root_admission_negative_tampered_claim_sha(
         assert sc["r1_status_path"] is not None
         assert sc["r1_bytes_snapshot"] is not None
         assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
-    else:
+    elif origin == "BOOTSTRAP":
         assert sc["r1_status_path"] is None
         assert sc["r1_bytes_snapshot"] is None
         assert not (
@@ -378,6 +407,35 @@ def test_two_site_quota_w2_common_root_admission_negative_tampered_claim_sha(
             / sc["request"]["run_prefix"]
             / "pre-review-tests-1.json"
         ).exists()
+    elif origin == "TEST_FAILED":
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "proposals"
+            / f"{sc['request']['run_prefix']}-reviewer-1"
+        ).exists()
+        receipt1_path = (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["request"]["run_prefix"]
+            / "pre-review-tests-1.json"
+        )
+        assert receipt1_path.is_file()
+        receipt1_bytes = receipt1_path.read_bytes()
+        receipt1_data = json.loads(receipt1_bytes)
+        assert receipt1_data["state"] == "FAILED"
+        assert receipt1_data["returncode"] != 0
+        assert (
+            hashlib.sha256(receipt1_bytes).hexdigest()
+            == json.loads(sc["response"]["stdout"])["pre_review_test_sha256"]
+        )
+    else:
+        raise AssertionError(f"unexpected origin: {origin!r}")
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
