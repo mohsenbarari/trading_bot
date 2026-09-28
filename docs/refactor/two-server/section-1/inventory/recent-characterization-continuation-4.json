@@ -32,6 +32,18 @@
         "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_invalid_queue_suppresses_stale_prompt_delete",
         "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_invalid_queue_suppresses_stale_prompt_delete"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py",
+      "sha256": "c5a8e2decfc9bbc905d43aa3468d8d651c4112b29110f782cdc04167aa3511f2",
+      "last_commit": "6474eaf7243e8ff9897fc17860c18a97b6a8a101",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_without_user_clears_state_suppresses_deletes_and_returns_fallback_panel",
+        "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_with_user_uses_navigation_panel_and_exact_callback_response"
+      ]
     }
   ]
 }
