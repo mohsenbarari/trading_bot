@@ -46,13 +46,20 @@ from tests.test_two_site_quota_w2_common_root_wait import (
 )
 
 
+# observational quota, no replay authority
 def _setup_w2_admission_claim_scenario(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     frozen_clock_dt: datetime,
+    origin: str = "REVIEWER",
 ) -> dict[str, Any]:
     root, task, original_scope, original_environment = broker_repo
     sc = _setup_w2_common_root_wait_scenario(
-        root, task, original_scope, original_environment, frozen_clock_dt
+        root,
+        task,
+        original_scope,
+        original_environment,
+        frozen_clock_dt,
+        origin=origin,
     )
 
     runs_dir = sc["runs_dir"]
@@ -164,10 +171,12 @@ def _setup_w2_admission_claim_scenario(
         f"{sc['request']['run_prefix']}-worker-0",
         f"{sc['request']['run_prefix']}-reviewer-0",
         sc["meta"]["w1_id"],
-        sc["meta"]["r1_id"],
         sc["meta"]["w2_id"],
         sc["orig_w2_id"],
     }
+    r1_id = sc["meta"].get("r1_id")
+    if isinstance(r1_id, str):
+        expected_runs.add(r1_id)
     runs_dir_entries = set(os.listdir(runs_dir))
 
     return {
@@ -195,11 +204,15 @@ def _setup_w2_admission_claim_scenario(
     }
 
 
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
 def test_two_site_quota_w2_common_root_admission_positive(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    origin: str,
 ) -> None:
     frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
-    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    ctx = _setup_w2_admission_claim_scenario(
+        broker_repo, frozen_clock_dt, origin=origin
+    )
 
     root = ctx["root"]
     task = ctx["task"]
@@ -250,7 +263,28 @@ def test_two_site_quota_w2_common_root_admission_positive(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"] is not None
+        assert sc["r1_bytes_snapshot"] is not None
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    else:
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "proposals"
+            / f"{sc['request']['run_prefix']}-reviewer-1"
+        ).exists()
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["request"]["run_prefix"]
+            / "pre-review-tests-1.json"
+        ).exists()
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
@@ -266,11 +300,15 @@ def test_two_site_quota_w2_common_root_admission_positive(
     assert set(os.listdir(runs_parent)) == {controller_run_id}
 
 
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
 def test_two_site_quota_w2_common_root_admission_negative_tampered_claim_sha(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    origin: str,
 ) -> None:
     frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
-    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    ctx = _setup_w2_admission_claim_scenario(
+        broker_repo, frozen_clock_dt, origin=origin
+    )
 
     root = ctx["root"]
     task = ctx["task"]
@@ -318,7 +356,28 @@ def test_two_site_quota_w2_common_root_admission_negative_tampered_claim_sha(
         == sc["receipt_sha_snapshot"]
     )
     assert sc["w1_status_path"].read_bytes() == sc["w1_bytes_snapshot"]
-    assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    if origin == "REVIEWER":
+        assert sc["r1_status_path"] is not None
+        assert sc["r1_bytes_snapshot"] is not None
+        assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
+    else:
+        assert sc["r1_status_path"] is None
+        assert sc["r1_bytes_snapshot"] is None
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "proposals"
+            / f"{sc['request']['run_prefix']}-reviewer-1"
+        ).exists()
+        assert not (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "pipeline"
+            / sc["request"]["run_prefix"]
+            / "pre-review-tests-1.json"
+        ).exists()
     assert (
         hashlib.sha256(sc["orig_w2_status_path"].read_bytes()).hexdigest()
         == sc["orig_w2_status_sha"]
