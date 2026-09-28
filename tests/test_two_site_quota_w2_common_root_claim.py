@@ -39,7 +39,7 @@ from tests.test_two_site_quota_w2_common_root_wait import (
 )
 
 
-@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP", "TEST_FAILED"])
 def test_two_site_quota_w2_common_root_claim_positive(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     origin: str,
@@ -205,6 +205,33 @@ def test_two_site_quota_w2_common_root_claim_positive(
                 / f"{sc['request']['run_prefix']}-reviewer-1"
             ).exists()
             assert sc["meta"].get("r1_id") is None
+        elif origin == "TEST_FAILED":
+            assert sc["r1_status_path"] is None
+            assert sc["r1_bytes_snapshot"] is None
+            assert not (
+                root
+                / ".local"
+                / "two-site-refactor"
+                / "proposals"
+                / f"{sc['request']['run_prefix']}-reviewer-1"
+            ).exists()
+            assert sc["meta"].get("r1_id") is None
+            receipt1_path = (
+                root
+                / ".local"
+                / "two-site-refactor"
+                / "pipeline"
+                / sc["request"]["run_prefix"]
+                / "pre-review-tests-1.json"
+            )
+            assert receipt1_path.is_file()
+            receipt1_data = json.loads(receipt1_path.read_text(encoding="utf-8"))
+            assert receipt1_data["state"] == "FAILED"
+            assert receipt1_data["returncode"] != 0
+            assert (
+                hashlib.sha256(receipt1_path.read_bytes()).hexdigest()
+                == json.loads(sc["response"]["stdout"])["pre_review_test_sha256"]
+            )
         else:
             assert sc["r1_status_path"] is not None
             assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
@@ -215,7 +242,7 @@ def test_two_site_quota_w2_common_root_claim_positive(
         assert task.read_bytes() == sc["task_bytes_snapshot"]
 
 
-@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP"])
+@pytest.mark.parametrize("origin", ["REVIEWER", "BOOTSTRAP", "TEST_FAILED"])
 def test_two_site_quota_w2_common_root_claim_negative_tampered_wait(
     broker_repo: tuple[Path, Path, Any, dict[str, str]],
     origin: str,
@@ -300,6 +327,33 @@ def test_two_site_quota_w2_common_root_claim_negative_tampered_wait(
                 / f"{sc['request']['run_prefix']}-reviewer-1"
             ).exists()
             assert sc["meta"].get("r1_id") is None
+        elif origin == "TEST_FAILED":
+            assert sc["r1_status_path"] is None
+            assert sc["r1_bytes_snapshot"] is None
+            assert not (
+                root
+                / ".local"
+                / "two-site-refactor"
+                / "proposals"
+                / f"{sc['request']['run_prefix']}-reviewer-1"
+            ).exists()
+            assert sc["meta"].get("r1_id") is None
+            receipt1_path = (
+                root
+                / ".local"
+                / "two-site-refactor"
+                / "pipeline"
+                / sc["request"]["run_prefix"]
+                / "pre-review-tests-1.json"
+            )
+            assert receipt1_path.is_file()
+            receipt1_data = json.loads(receipt1_path.read_text(encoding="utf-8"))
+            assert receipt1_data["state"] == "FAILED"
+            assert receipt1_data["returncode"] != 0
+            assert (
+                hashlib.sha256(receipt1_path.read_bytes()).hexdigest()
+                == json.loads(sc["response"]["stdout"])["pre_review_test_sha256"]
+            )
         else:
             assert sc["r1_status_path"] is not None
             assert sc["r1_status_path"].read_bytes() == sc["r1_bytes_snapshot"]
