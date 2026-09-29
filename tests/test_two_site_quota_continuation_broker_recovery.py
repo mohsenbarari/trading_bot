@@ -660,3 +660,195 @@ def test_serve_continuation_response_write_failure_recovers_from_receipt_without
         assert not claim_path.exists()
         assert term_file.is_file()
         _assert_runs_unchanged(data)
+
+
+@pytest.mark.parametrize("stop_kind", ["regular_file", "broken_symlink"])
+def test_serve_continuation_pre_dispatch_stop_fails_closed(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    stop_kind: str,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    req_id = data["req_id"]
+    claim_path = data["claim_path"]
+    response_path = data["response_path"]
+    claimed_dir = data["claimed_dir"]
+    responses_dir = data["responses_dir"]
+
+    _, _, requests_dir, _, _ = broker_paths(root)
+    req_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, req_path)
+    claim_bytes_before = req_path.read_bytes()
+    assert req_path.is_file()
+    assert not claim_path.exists()
+
+    stop_path = root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+    stop_path.parent.mkdir(parents=True, exist_ok=True)
+    secret_marker = f"pre_dispatch_stop_secret_{stop_kind}_7e3a9c"
+    if stop_kind == "regular_file":
+        stop_path.write_text(f"STOP\n{secret_marker}\n", encoding="utf-8")
+        assert stop_path.is_file()
+    else:
+        target_path = root / f"nonexistent_target_{secret_marker}"
+        stop_path.symlink_to(target_path)
+        assert stop_path.is_symlink()
+        assert not stop_path.exists()
+        assert os.path.lexists(stop_path)
+
+    mock_provider = mock.MagicMock()
+
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        mock_provider,
+    ):
+        with pytest.raises(BrokerError) as exc_info:
+            serve(
+                root,
+                once=True,
+                quota_continuation_enabled=True,
+                install_signal_handlers=False,
+            )
+
+        broker_err = exc_info.value
+        assert str(broker_err) == "stop requested before continuation dispatch"
+        assert broker_err.__cause__ is None
+        assert secret_marker not in str(broker_err)
+        tb_formatted = "".join(
+            traceback.format_exception(
+                type(broker_err), broker_err, broker_err.__traceback__
+            )
+        )
+        assert secret_marker not in tb_formatted
+
+        assert mock_provider.call_count == 0
+
+        term_file = _terminal_file(root, req_id)
+        assert not term_file.exists()
+        assert not response_path.exists()
+        assert not req_path.exists()
+        assert claim_path.is_file()
+        assert claim_path.read_bytes() == claim_bytes_before
+        assert stat.S_IMODE(claim_path.stat().st_mode) == 0o600
+
+        with pytest.raises(
+            BrokerError, match="continuation terminal receipt is missing or invalid"
+        ):
+            _recover_interrupted_claims(root, claimed_dir, responses_dir)
+
+        assert mock_provider.call_count == 0
+        assert claim_path.is_file()
+        assert claim_path.read_bytes() == claim_bytes_before
+        assert not response_path.exists()
+        assert not term_file.exists()
+        _assert_runs_unchanged(data)
+
+
+def test_serve_continuation_post_dispatch_stop_preserves_terminal_custody_and_response(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    req_id = data["req_id"]
+    claim_path = data["claim_path"]
+    response = data["response"]
+    response_path = data["response_path"]
+    claimed_dir = data["claimed_dir"]
+
+    _, _, requests_dir, _, _ = broker_paths(root)
+    req_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, req_path)
+    assert req_path.is_file()
+    assert not claim_path.exists()
+
+    stop_path = root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+    events: list[str] = []
+
+    def fake_provider(root_arg: Path, req_arg: dict) -> dict:
+        events.append("provider_call")
+        stop_path.parent.mkdir(parents=True, exist_ok=True)
+        stop_path.write_text("STOP\n", encoding="utf-8")
+        return response
+
+    mock_provider = mock.MagicMock(side_effect=fake_provider)
+
+    orig_publish = publish_terminal_continuation_record
+
+    def spy_publish(root_arg: Path, req_arg: dict, resp_arg: dict) -> dict:
+        res = orig_publish(root_arg, req_arg, resp_arg)
+        assert _terminal_file(root_arg, req_id).is_file()
+        events.append("publish_done")
+        return res
+
+    orig_atomic = _atomic_new_json
+
+    def spy_atomic(path_arg: Path, obj_arg: Any, max_bytes_arg: int) -> None:
+        if path_arg == response_path:
+            events.append("response_write")
+        orig_atomic(path_arg, obj_arg, max_bytes_arg)
+
+    orig_unlink = Path.unlink
+
+    def spy_unlink(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == claim_path or (
+            self.name == f"{req_id}.json" and self.parent == claimed_dir
+        ):
+            events.append("claim_unlink")
+        return orig_unlink(self, *args, **kwargs)
+
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        mock_provider,
+    ), mock.patch(
+        "scripts.two_site_quota_continuation_terminal_storage.publish_terminal_continuation_record",
+        side_effect=spy_publish,
+    ), mock.patch(
+        "scripts.two_site_provider_broker._atomic_new_json",
+        side_effect=spy_atomic,
+    ), mock.patch.object(
+        Path,
+        "unlink",
+        spy_unlink,
+    ):
+        ret = serve(
+            root,
+            once=True,
+            quota_continuation_enabled=True,
+            install_signal_handlers=False,
+        )
+
+    assert ret == 0
+    assert mock_provider.call_count == 1
+    mock_provider.assert_called_once_with(root, resume_request)
+    assert stop_path.is_file()
+
+    term_file = _terminal_file(root, req_id)
+    assert term_file.is_file()
+    validated_record = read_terminal_continuation_record(
+        root, req_id, expected_request=resume_request
+    )
+    assert validated_record["request_id"] == req_id
+    assert validated_record["response"] == response
+
+    assert "provider_call" in events
+    assert "publish_done" in events
+    assert "response_write" in events
+    assert "claim_unlink" in events
+    provider_idx = events.index("provider_call")
+    pub_idx = events.index("publish_done")
+    resp_idx = events.index("response_write")
+    unlink_idx = events.index("claim_unlink")
+    assert provider_idx < pub_idx < resp_idx < unlink_idx
+
+    assert response_path.is_file()
+    st = response_path.stat()
+    assert stat.S_IMODE(st.st_mode) == 0o600
+    assert json.loads(response_path.read_text(encoding="utf-8")) == response
+    canonical_resp = json.dumps(
+        response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert response_path.read_bytes() == canonical_resp
+
+    assert not claim_path.exists()
+    assert not req_path.exists()
+    _assert_runs_unchanged(data)
