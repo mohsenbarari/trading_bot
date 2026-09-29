@@ -33,7 +33,27 @@ The old Broker process still runs pre-C1 code and Supervisor remains STOPPED. C5
 
 ## Continuation terminal custody before live wake
 
-Status: **DOCUMENTED DESIGN ONLY / NO LIVE ROUTE ENABLED**. No live CLI, Supervisor, or Broker continuation route is activated.
+Status: **PARTIALLY IMPLEMENTED / NO LIVE WAKE**. No live CLI, Supervisor, or Broker continuation route is activated.
+
+### Implementation checkpoints and evidence
+
+| Checkpoint | Commit | Path | Verified evidence / bounded interpretation |
+| --- | --- | --- | --- |
+| Accepted Broker fail-closed post-dispatch | `b53ef895` | `scripts/two_site_provider_broker.py`, `tests/test_two_site_quota_broker_serve_gate.py` | Scoped to observable Broker hard-stop, no-response, and retained-claim behavior when continuation dispatch fails or raises an exception: exceptions during or after provider call suppress replay, emit no response file, retain claimed file, and fail closed. |
+| Synthetic test preparation | `a7db86b5` / `19efa9d9` | `tests/test_two_site_quota_broker_serve_gate.py` (`a7db86b5`), `tests/test_two_site_quota_broker_serve_fsync.py` (`19efa9d9`) | Narrow synthetic publisher mocks added in serve gate and serve fsync tests to verify Broker continuation execution without invoking live terminal storage. |
+| Receipt-first source | `6103b91d` | `scripts/two_site_provider_broker.py` | Broker `serve()` invokes the previously existing storage publisher (`publish_terminal_continuation_record`) after COMPLETED validation and before queue response emission and claim unlink (receipt-first ordering). |
+| Real terminal receipt & cold recovery tests | `cb17037f` | `tests/test_two_site_quota_continuation_broker_recovery.py` | Passing unit tests: `test_serve_continuation_success_receipt_persisted_before_response_and_unlink`, `test_serve_continuation_terminal_publisher_failure_fails_closed_without_replay`, and `test_serve_continuation_response_write_failure_recovers_from_receipt_without_replay`. |
+| Observed STOP-before-dispatch guard | `38b2b341` | `scripts/two_site_provider_broker.py` | Guard in `serve()` checks `_STOP or os.path.lexists(stop_path)` prior to continuation execution, raising `BrokerError("stop requested before continuation dispatch")`. |
+| Real-fixture STOP tests | `3b1ff8b0` | `tests/test_two_site_quota_continuation_broker_recovery.py` | Passing unit tests: `test_serve_continuation_pre_dispatch_stop_fails_closed` (verifying zero provider calls on pre-dispatch STOP) and `test_serve_continuation_post_dispatch_stop_preserves_terminal_custody_and_response` (verifying receipt publication and response write when STOP arrives during execution). |
+
+### Still open / remaining gates
+
+The following items remain strictly open and unverified; NO LIVE WAKE is permitted:
+- **Atomic race semantics of concurrent STOP vs actual Provider start:** Window where STOP file appears or signal fires concurrently with Provider process spawn requires formal race resolution.
+- **Supervisor durable final acknowledgement/wake integration:** Supervisor integration to read terminal continuation receipts, log final acknowledged Codex acceptance, and trigger safe wake remains unintegrated.
+- **Full synthetic fault matrix plus necessary bounded live smoke/cohorts:** Comprehensive fault-injection matrix across all failure boundaries and bounded live 1/3/10/20 cohort verification are not yet run.
+- **C4c retention:** Retention pruning remains dormant; terminal continuation receipts must remain reference-free for >=10 days and await durable final acknowledgement before any cleanup.
+- **No authority for auto replay/production activation:** Automatic replay remains strictly forbidden; no production/DNS/Web Writer action or live route authorization is granted. AE03/C5 is not complete.
 
 ### 1. Broker-owned path and custody binding
 Terminal continuation receipts are stored under Broker-owned state at `.local/two-site-refactor/provider-broker/terminal-continuation/<request-id>.json` (under Broker `STATE_REL = .local/two-site-refactor/provider-broker`, never under `autopilot/`).
