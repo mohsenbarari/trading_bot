@@ -6,8 +6,10 @@ import json
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from scripts import two_site_proposal_runner as runner
-from scripts.two_site_source_excerpts import extract_bundle
+if __package__:
+    import scripts.two_site_proposal_runner as runner
+else:
+    import two_site_proposal_runner as runner
 
 HEX_DIGITS = set("0123456789abcdef")
 
@@ -189,6 +191,11 @@ def build_one_file_compact_review_material(
     symbol_list = list(symbols)
     if len(set(symbol_list)) != len(symbol_list):
         raise CompactReviewError("symbols must be unique")
+
+    if __package__:
+        from scripts.two_site_source_excerpts import extract_bundle
+    else:
+        from two_site_source_excerpts import extract_bundle
 
     try:
         records, _ = extract_bundle(root_path, [{"path": path, "symbols": symbol_list}])

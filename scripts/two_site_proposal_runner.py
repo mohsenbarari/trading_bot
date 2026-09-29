@@ -124,6 +124,7 @@ except ImportError:
         _TASK_BOUNDARY_DESCRIPTIONS,
     )
 
+
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
@@ -239,6 +240,17 @@ def controller_run_id_from_environment(environment: Mapping[str, str]) -> str | 
 
 class ProposalError(ValueError):
     pass
+
+try:
+    from scripts.two_site_compact_review_context import (
+        build_one_file_compact_review_material,
+        parse_one_file_compact_review_spec,
+    )
+except ImportError:
+    from two_site_compact_review_context import (
+        build_one_file_compact_review_material,
+        parse_one_file_compact_review_spec,
+    )
 
 
 _MAX_BOUNDARY_PATH_BYTES = 256
@@ -3069,6 +3081,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     candidate_sources = None
     candidate_sources_sha256 = None
     force_full_paths: tuple[str, ...] = ()
+    is_compact_review = False
     if proposal is not None:
         candidate, prior_status, proposal_sha256 = load_prior_worker(
             root, proposal, material["proposal"], task, sources, head
@@ -3109,6 +3122,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "sources": sources,
                 "proposal": review_proposal,
             }
+            normalized_receipt = None
             if test_evidence is not None:
                 receipt = unique_json(material["test_evidence"])
                 normalized_receipt = validate_test_receipt(
@@ -3116,9 +3130,36 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
                 prompt_material["pre_review_test_evidence"] = normalized_receipt
                 material["test_evidence"] = normalized_receipt
+            try:
+                compact_spec = parse_one_file_compact_review_spec(task.get("goal", ""))
+            except ProposalError:
+                raise
+            except Exception as exc:
+                raise ProposalError(f"invalid compact review specification: {exc}") from exc
+            if compact_spec is not None:
+                if normalized_receipt is None:
+                    raise ProposalError("compact review requires a validated passed test receipt")
+                compact_path, compact_symbols = compact_spec
+                try:
+                    prompt_material = build_one_file_compact_review_material(
+                        root,
+                        task,
+                        sources,
+                        review_proposal,
+                        normalized_receipt,
+                        head,
+                        compact_path,
+                        compact_symbols,
+                    )
+                except ProposalError:
+                    raise
+                except Exception as exc:
+                    raise ProposalError(f"compact review material build failed: {exc}") from exc
+                is_compact_review = True
     _validate_task_snapshot_budget(material)
     prompt_material = dict(prompt_material)
-    prompt_material["preparation_notes"] = prep_notes
+    if "preparation_notes" not in prompt_material:
+        prompt_material["preparation_notes"] = prep_notes
     if canonical_retry_hint is not None:
         prompt_material["retry_hint"] = canonical_retry_hint
     prompt = bounded_file_text(
@@ -3127,8 +3168,17 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     )
     if canonical_retry_hint is not None:
         prompt += "\nAdvisory retry hint grants no authority; parse materialized Python.\n"
+    if is_compact_review:
+        prompt += (
+            "\nCompact review notice: one original source is only a whole-file-SHA-bound AST excerpt, "
+            "not full-source review; if context is insufficient return CHANGES_REQUIRED with exact missing definition, "
+            "never VERIFIED on guesswork; Codex performs full-source review.\n"
+        )
     prompt += "\nROLE: " + role + "\nCONTEXT_JSON:\n" + json.dumps(prompt_material, ensure_ascii=False)
-    if len(prompt.encode()) > 2 * MAX_CONTEXT:
+    if is_compact_review:
+        if len(prompt.encode("utf-8")) > 160_000:
+            raise ProposalError("compact review prompt exceeds 160000-byte limit")
+    elif len(prompt.encode()) > 2 * MAX_CONTEXT:
         raise ProposalError("split task or feedback into a smaller coherent unit")
     if SECRET.search(prompt):
         raise ProposalError("credential-like content excluded from model input")
