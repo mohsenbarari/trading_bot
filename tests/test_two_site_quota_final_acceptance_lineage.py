@@ -30,7 +30,11 @@ from scripts.two_site_quota_continuation_terminal_storage import (
 )
 from scripts.two_site_quota_final_acceptance_lineage import (
     FinalAcceptanceLineageError,
+    collect_final_acceptance_upstream_lineage_from_snapshot_locked,
     collect_final_acceptance_upstream_lineage_locked,
+)
+from scripts.two_site_quota_resume_lineage_snapshot_storage import (
+    publish_expected_lineage_snapshot,
 )
 from scripts.two_site_quota_resume_submission_intent import (
     compute_canonical_request_sha256,
@@ -431,3 +435,115 @@ def test_keyboard_interrupt_and_system_exit_propagate(
                     expected_claim=data["expected_claim"],
                     expected_request=data["expected_request"],
                 )
+
+
+def test_two_site_quota_final_acceptance_from_snapshot_positive(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    data = _setup_lineage_scenario(broker_repo)
+    ctx = data["ctx"]
+    claim = ctx["claim"]
+    wait_record = ctx["wait_record"]
+
+    with exclusive_supervisor_lock(data["lock_path"]):
+        published_snapshot = publish_expected_lineage_snapshot(
+            root=data["root"],
+            original_controller_run_id=data["controller_run_id"],
+            wait_record=wait_record,
+            expected_wait=data["expected_wait"],
+            claim_record=claim,
+            expected_claim=data["expected_claim"],
+            request=data["expected_request"],
+        )
+
+    expected_snap_sha256 = hashlib.sha256(
+        _canonical_bytes(published_snapshot)
+    ).hexdigest()
+
+    snapshot_file = ctx["runs_dir"] / "quota-resume-lineage-snapshot.json"
+    evidence_files = (
+        data["reservation_file"],
+        data["wait_file"],
+        data["claim_file"],
+        data["submission_file"],
+        data["terminal_file"],
+        snapshot_file,
+    )
+    snapshots = {f: f.read_bytes() for f in evidence_files}
+
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        side_effect=AssertionError("provider continuation dispatch must not be called"),
+    ) as spy_dispatch:
+        with exclusive_supervisor_lock(data["lock_path"]):
+            lineage = collect_final_acceptance_upstream_lineage_from_snapshot_locked(
+                root=data["root"],
+                original_controller_run_id=data["controller_run_id"],
+            )
+
+    expected_keys = _EXPECTED_LINEAGE_KEYS | {"expected_lineage_snapshot_sha256"}
+    assert set(lineage.keys()) == expected_keys
+    assert lineage["expected_lineage_snapshot_sha256"] == expected_snap_sha256
+
+    assert lineage["original_controller_run_id"] == data["controller_run_id"]
+    assert lineage["continuation_controller_run_id"] == data["ctx"]["continuation_controller_run_id"]
+    assert lineage["original_request_id"] == data["ctx"]["wait_record"]["request_id"]
+    assert lineage["resume_request_id"] == data["expected_request"]["request_id"]
+    assert lineage["task_id"] == data["ctx"]["real_task"]["task_id"]
+    assert lineage["assignment_id"] == data["expected_claim"]["assignment_id"]
+    assert lineage["source_head"] == data["expected_claim"]["source_head"]
+    assert lineage["task_sha256"] == data["expected_claim"]["task_sha256"]
+    assert lineage["assignment_sha256"] == data["expected_claim"]["assignment_sha256"]
+    assert lineage["semantic_task_fingerprint"] == data["expected_claim"]["semantic_task_fingerprint"]
+    assert lineage["original_wait_sha256"] == data["ctx"]["orig_wait_sha256"]
+    assert lineage["claim_sha256"] == data["ctx"]["claim_sha256"]
+    assert lineage["request_sha256"] == compute_canonical_request_sha256(data["expected_request"])
+    assert lineage["submission_intent_sha256"] == hashlib.sha256(snapshots[data["submission_file"]]).hexdigest()
+    assert lineage["terminal_receipt_sha256"] == hashlib.sha256(snapshots[data["terminal_file"]]).hexdigest()
+
+    canonical_resp_bytes = _canonical_bytes(data["response"])
+    assert lineage["response_sha256"] == hashlib.sha256(canonical_resp_bytes).hexdigest()
+    assert lineage["response_state"] == "COMPLETED"
+    assert lineage["exit_code"] == 0
+
+    for f in evidence_files:
+        assert f.read_bytes() == snapshots[f]
+    assert spy_dispatch.call_count == 0
+
+
+def test_cold_collector_missing_or_tampered_snapshot_fails_closed(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    data = _setup_lineage_scenario(broker_repo)
+
+    with exclusive_supervisor_lock(data["lock_path"]):
+        with pytest.raises(FinalAcceptanceLineageError):
+            collect_final_acceptance_upstream_lineage_from_snapshot_locked(
+                root=data["root"],
+                original_controller_run_id=data["controller_run_id"],
+            )
+
+    ctx = data["ctx"]
+    claim = ctx["claim"]
+    with exclusive_supervisor_lock(data["lock_path"]):
+        publish_expected_lineage_snapshot(
+            root=data["root"],
+            original_controller_run_id=data["controller_run_id"],
+            wait_record=ctx["wait_record"],
+            expected_wait=data["expected_wait"],
+            claim_record=claim,
+            expected_claim=data["expected_claim"],
+            request=data["expected_request"],
+        )
+
+    snapshot_file = ctx["runs_dir"] / "quota-resume-lineage-snapshot.json"
+    snap_obj = json.loads(snapshot_file.read_bytes())
+    snap_obj["request_sha256"] = "0" * 64
+    _write_canonical_record(snapshot_file, snap_obj)
+
+    with exclusive_supervisor_lock(data["lock_path"]):
+        with pytest.raises(FinalAcceptanceLineageError):
+            collect_final_acceptance_upstream_lineage_from_snapshot_locked(
+                root=data["root"],
+                original_controller_run_id=data["controller_run_id"],
+            )

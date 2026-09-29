@@ -25,6 +25,10 @@ from scripts.two_site_quota_resume_submission_intent import (
     compute_canonical_request_sha256,
     read_quota_resume_submission_intent,
 )
+from scripts.two_site_quota_resume_lineage_snapshot_storage import (
+    read_expected_lineage_snapshot,
+    read_untrusted_expected_lineage_snapshot_candidate,
+)
 from scripts.two_site_quota_wait_storage import (
     read_initial_wait_record,
     read_initial_wait_record_bytes,
@@ -32,6 +36,7 @@ from scripts.two_site_quota_wait_storage import (
 
 __all__ = [
     "FinalAcceptanceLineageError",
+    "collect_final_acceptance_upstream_lineage_from_snapshot_locked",
     "collect_final_acceptance_upstream_lineage_locked",
 ]
 
@@ -66,6 +71,20 @@ def _canonical_json_bytes(payload: Any) -> bytes:
         raise FinalAcceptanceLineageError(
             f"record cannot be serialized to canonical JSON: {exc}"
         ) from exc
+
+
+def _type_sensitive_equal(a: Any, b: Any) -> bool:
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(_type_sensitive_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return False
+        return all(_type_sensitive_equal(x, y) for x, y in zip(a, b))
+    return bool(a == b)
 
 
 def collect_final_acceptance_upstream_lineage_locked(
@@ -369,3 +388,126 @@ def collect_final_acceptance_upstream_lineage_locked(
         "response_state": resp_state,
         "exit_code": exit_code,
     }
+
+
+def collect_final_acceptance_upstream_lineage_from_snapshot_locked(
+    root: Path,
+    original_controller_run_id: str,
+) -> dict[str, Any]:
+    """Collect and cross-bind read-only upstream lineage starting from prequeue snapshot.
+
+    The caller MUST hold the Supervisor lock. The candidate snapshot is first read
+    without semantic trust, checked for required dictionary envelopes, and verified
+    against independent persisted wait and known-reset claim records before
+    strict snapshot reread and type-sensitive equality checks.
+    """
+    if not isinstance(root, Path):
+        raise FinalAcceptanceLineageError("root must be a Path")
+    if type(original_controller_run_id) is not str or not CYCLE_RUN_RE.fullmatch(
+        original_controller_run_id
+    ):
+        raise FinalAcceptanceLineageError(
+            f"original_controller_run_id must match cycle run pattern: {original_controller_run_id!r}"
+        )
+
+    # 1. Read prequeue snapshot candidate
+    try:
+        candidate_snapshot = read_untrusted_expected_lineage_snapshot_candidate(
+            root, original_controller_run_id
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise FinalAcceptanceLineageError(
+            f"failed to read untrusted lineage snapshot candidate for {original_controller_run_id}: {exc}"
+        ) from exc
+
+    if type(candidate_snapshot) is not dict:
+        raise FinalAcceptanceLineageError("lineage snapshot candidate must be a dict")
+
+    # 2. Require exact dict expected_wait/expected_claim/expected_request
+    candidate_expected_wait = candidate_snapshot.get("expected_wait")
+    candidate_expected_claim = candidate_snapshot.get("expected_claim")
+    candidate_expected_request = candidate_snapshot.get("expected_request")
+
+    if type(candidate_expected_wait) is not dict:
+        raise FinalAcceptanceLineageError("snapshot expected_wait must be dict")
+    if type(candidate_expected_claim) is not dict:
+        raise FinalAcceptanceLineageError("snapshot expected_claim must be dict")
+    if type(candidate_expected_request) is not dict:
+        raise FinalAcceptanceLineageError("snapshot expected_request must be dict")
+
+    # 3. Independently read and validate persisted wait and known-reset claim
+    try:
+        wait_record = read_initial_wait_record(
+            root, original_controller_run_id, candidate_expected_wait
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise FinalAcceptanceLineageError(
+            f"failed to read initial wait record for {original_controller_run_id}: {exc}"
+        ) from exc
+
+    try:
+        claim_record = read_known_reset_resume_claim(
+            root, original_controller_run_id, candidate_expected_claim
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise FinalAcceptanceLineageError(
+            f"failed to read known-reset resume claim for {original_controller_run_id}: {exc}"
+        ) from exc
+
+    # 4. Strict readback and validation of expected lineage snapshot
+    try:
+        strict_snapshot = read_expected_lineage_snapshot(
+            root=root,
+            original_controller_run_id=original_controller_run_id,
+            wait_record=wait_record,
+            claim_record=claim_record,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise FinalAcceptanceLineageError(
+            f"strict read_expected_lineage_snapshot failed for {original_controller_run_id}: {exc}"
+        ) from exc
+
+    # 5. Type-sensitive equality between candidate and strict reread
+    if not _type_sensitive_equal(candidate_snapshot, strict_snapshot):
+        raise FinalAcceptanceLineageError(
+            "candidate lineage snapshot does not match strict reread snapshot"
+        )
+
+    # 6. Cross-bind full lineage using candidate expected_*
+    lineage = collect_final_acceptance_upstream_lineage_locked(
+        root=root,
+        original_controller_run_id=original_controller_run_id,
+        expected_wait=candidate_expected_wait,
+        expected_claim=candidate_expected_claim,
+        expected_request=candidate_expected_request,
+    )
+
+    # 7. Check snapshot original_wait_sha256/claim_sha256/request_sha256 and IDs against collector return
+    for check_field in (
+        "original_controller_run_id",
+        "resume_request_id",
+        "original_wait_sha256",
+        "claim_sha256",
+        "request_sha256",
+    ):
+        snap_val = strict_snapshot.get(check_field)
+        lineage_val = lineage.get(check_field)
+        if snap_val != lineage_val:
+            raise FinalAcceptanceLineageError(
+                f"snapshot {check_field} ({snap_val!r}) does not match lineage ({lineage_val!r})"
+            )
+
+    # 8. Return exact bounded lineage plus verified canonical snapshot digest
+    result = dict(lineage)
+    result["expected_lineage_snapshot_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(strict_snapshot)
+    ).hexdigest()
+    return result
