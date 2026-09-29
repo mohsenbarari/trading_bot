@@ -1296,6 +1296,7 @@ def serve(
                     continue
                 is_continuation = False
                 continuation_dispatch_attempted = False
+                pre_dispatch_stop = False
                 request: object = {}
                 response: dict
                 try:
@@ -1317,6 +1318,11 @@ def serve(
                             run_prefix=validated["run_prefix"],
                             source_head=validated["source_head"],
                         )
+                        if _STOP or os.path.lexists(stop_path):
+                            pre_dispatch_stop = True
+                            raise BrokerError(
+                                "stop requested before continuation dispatch"
+                            ) from None
                         continuation_dispatch_attempted = True
                         response = _execute_with_heartbeat(
                             status_path, execute_intent_bound_continuation, root, validated
@@ -1358,6 +1364,8 @@ def serve(
                             if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                                 raise BrokerError("broker executor returned an invalid response")
                 except Exception as exc:
+                    if pre_dispatch_stop:
+                        raise
                     if continuation_dispatch_attempted:
                         raise BrokerError(
                             "continuation dispatch failed or returned invalid response"
