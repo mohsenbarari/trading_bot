@@ -361,3 +361,133 @@ def test_submit_known_reset_resume_snapshot_failure_prevents_enqueue(
     assert not intent_p.exists()
     assert not queue_p.exists()
     assert list(requests_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "stop_kind",
+    ["regular_file", "broken_symlink", "broker_stop_true", "broker_stop_malformed"],
+)
+def test_submit_known_reset_resume_rejects_stop_before_claim(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    stop_kind: str,
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc, req_id = env["sc"], env["req_id"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=True, updated_at=env["now_epoch"]
+    )
+    claim_p = sc["runs_dir"] / "quota-resume-claim.json"
+    intent_p = sc["runs_dir"] / "quota-resume-submission.json"
+    queue_p = requests_dir / f"{req_id}.json"
+    wait_p = sc["runs_dir"] / "quota-wait.json"
+    snap_p = sc["runs_dir"] / QUOTA_RESUME_LINEAGE_SNAPSHOT_FILENAME
+    lock_path = sc["autopilot_dir"] / "supervisor.lock"
+    stop_path = sc["root"] / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+    stop_path.parent.mkdir(parents=True, exist_ok=True)
+
+    wait_bytes = wait_p.read_bytes()
+    patcher = None
+    orig_collect = submit_mod.collect_known_reset_resume_context_locked
+
+    def inject_stop_after_collect(*args: Any, **kwargs: Any) -> Any:
+        nonlocal patcher
+        res = orig_collect(*args, **kwargs)
+        if stop_kind == "regular_file":
+            stop_path.write_text("STOP\n", encoding="utf-8")
+        elif stop_kind == "broken_symlink":
+            stop_path.symlink_to(sc["root"] / "nonexistent-target")
+        elif stop_kind == "broker_stop_true":
+            patcher = patch.object(broker, "_STOP", True)
+            patcher.start()
+        elif stop_kind == "broker_stop_malformed":
+            patcher = patch.object(broker, "_STOP", "malformed-flag")
+            patcher.start()
+        return res
+
+    try:
+        with patch.object(
+            submit_mod,
+            "collect_known_reset_resume_context_locked",
+            side_effect=inject_stop_after_collect,
+        ):
+            with exclusive_supervisor_lock(lock_path):
+                with pytest.raises(
+                    broker.BrokerError, match="^stop requested before continuation dispatch$"
+                ):
+                    _call_submit(env)
+    finally:
+        if patcher is not None:
+            patcher.stop()
+        if os.path.lexists(stop_path):
+            stop_path.unlink()
+
+    assert not claim_p.exists()
+    assert not snap_p.exists()
+    assert not intent_p.exists()
+    assert not queue_p.exists()
+    assert list(requests_dir.iterdir()) == []
+    assert wait_p.read_bytes() == wait_bytes
+
+
+def test_submit_known_reset_resume_stop_after_claim_retains_custody_and_no_replay(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc, req_id = env["sc"], env["req_id"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=True, updated_at=env["now_epoch"]
+    )
+    claim_p = sc["runs_dir"] / "quota-resume-claim.json"
+    intent_p = sc["runs_dir"] / "quota-resume-submission.json"
+    queue_p = requests_dir / f"{req_id}.json"
+    snap_p = sc["runs_dir"] / QUOTA_RESUME_LINEAGE_SNAPSHOT_FILENAME
+    lock_path = sc["autopilot_dir"] / "supervisor.lock"
+    stop_path = sc["root"] / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+    stop_path.parent.mkdir(parents=True, exist_ok=True)
+
+    orig_snap = submit_mod.publish_expected_lineage_snapshot
+
+    def inject_stop_after_snap(*args: Any, **kwargs: Any) -> Any:
+        res = orig_snap(*args, **kwargs)
+        stop_path.write_text("STOP\n", encoding="utf-8")
+        return res
+
+    with patch.object(
+        submit_mod, "publish_expected_lineage_snapshot", side_effect=inject_stop_after_snap
+    ):
+        with exclusive_supervisor_lock(lock_path):
+            with pytest.raises(
+                broker.BrokerError, match="^stop requested before continuation dispatch$"
+            ):
+                _call_submit(env)
+
+    assert claim_p.is_file()
+    st_c = claim_p.stat()
+    assert stat.S_IMODE(st_c.st_mode) == 0o600
+    claim_bytes, claim_ino = claim_p.read_bytes(), st_c.st_ino
+
+    assert snap_p.is_file()
+    st_s = snap_p.stat()
+    assert stat.S_IMODE(st_s.st_mode) == 0o600 and st_s.st_nlink == 1
+    snap_bytes, snap_ino = snap_p.read_bytes(), st_s.st_ino
+
+    assert not intent_p.exists()
+    assert not queue_p.exists()
+    assert list(requests_dir.iterdir()) == []
+
+    if os.path.lexists(stop_path):
+        stop_path.unlink()
+
+    with exclusive_supervisor_lock(lock_path):
+        with pytest.raises(ClaimRequestError):
+            _call_submit(env)
+
+    assert claim_p.read_bytes() == claim_bytes
+    assert claim_p.stat().st_ino == claim_ino
+    assert snap_p.read_bytes() == snap_bytes
+    assert snap_p.stat().st_ino == snap_ino
+    assert not intent_p.exists()
+    assert not queue_p.exists()
+    assert list(requests_dir.iterdir()) == []

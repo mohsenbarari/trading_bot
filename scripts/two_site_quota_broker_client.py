@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 
 from scripts import two_site_provider_broker as broker
+from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
 from scripts.two_site_quota_resume_submission_intent import (
     publish_quota_resume_submission_intent,
 )
@@ -48,6 +49,8 @@ def enqueue_quota_continuation_locked(
         age = current_time - updated_at
         if not (0 <= age <= broker.STATUS_MAX_AGE_SECONDS):
             raise broker.BrokerError("broker status is not fresh")
+
+        _check_pre_dispatch_stop(root)
 
         if now_epoch is None:
             intent = publish_quota_resume_submission_intent(root, request)

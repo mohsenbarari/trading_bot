@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.two_site_quota_broker_client import enqueue_quota_continuation_locked
+from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
 from scripts.two_site_quota_resume_claim_request import (
     compose_and_publish_known_reset_resume_request_locked,
 )
@@ -35,6 +36,7 @@ def submit_known_reset_resume_once_locked(
         original_controller_run_id,
         claimed_at_utc,
     )
+    _check_pre_dispatch_stop(root)
     composed = compose_and_publish_known_reset_resume_request_locked(
         root,
         original_controller_run_id,
