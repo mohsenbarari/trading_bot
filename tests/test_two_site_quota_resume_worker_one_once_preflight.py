@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.two_site_proposal_pipeline import ProposalError
+from scripts.two_site_provider_broker import BrokerError
 from scripts.two_site_quota_resume_worker_one_once import execute_worker_one_once
 
 
@@ -92,6 +93,8 @@ class TestTwoSiteQuotaResumeWorkerOneOncePreflight(unittest.TestCase):
             ("evidence_drift", "worker correction evidence drifted in pre_provider_check"),
             ("reviewer_status_bytes_drift", "prior reviewer status bytes drifted in pre_provider_check"),
             ("check_state_drift", "state ref drifted during preflight"),
+            ("late_file_stop", "stop requested before continuation dispatch"),
+            ("late_broker_flag_stop", "stop requested before continuation dispatch"),
         ]
 
         for case_name, expected_err in drift_scenarios:
@@ -126,7 +129,15 @@ class TestTwoSiteQuotaResumeWorkerOneOncePreflight(unittest.TestCase):
                             runner_state["callback_invoked"] = True
                             if lock_state["held"]:
                                 lock_state["held_during_preflight"] = True
-                            pre_provider_check()
+                            if case_name == "late_file_stop":
+                                stop_path = root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+                                stop_path.parent.mkdir(parents=True, exist_ok=True)
+                                stop_path.write_text("stop")
+                            if case_name == "late_broker_flag_stop":
+                                with patch("scripts.two_site_provider_broker._STOP", True):
+                                    pre_provider_check()
+                            else:
+                                pre_provider_check()
                         runner_state["simulated_popen_called"] = True
                         return root / "not_reached"
 
@@ -189,12 +200,17 @@ class TestTwoSiteQuotaResumeWorkerOneOncePreflight(unittest.TestCase):
                         with self.assertRaises(ProposalError) as exc_info:
                             execute_worker_one_once(root, req)
                         self.assertIn(expected_err, str(exc_info.exception))
+                        if expected_err == "stop requested before continuation dispatch":
+                            self.assertIsInstance(exc_info.exception, BrokerError)
 
                     self.assertTrue(runner_state["callback_invoked"])
                     self.assertFalse(runner_state["simulated_popen_called"])
                     self.assertEqual(runner_state["runner_calls"], 1)
                     self.assertTrue(lock_state["held_during_preflight"])
                     self.assertFalse(lock_state["held"])
+                    proposals_dir = root / ".local" / "two-site-refactor" / "proposals"
+                    if proposals_dir.exists():
+                        self.assertEqual(list(proposals_dir.glob("*retry*")), [])
 
     def test_preexisting_run_id_rejects_runner_entirely(self) -> None:
         """Preexisting canonical and retry candidate run IDs reject runner invocation."""

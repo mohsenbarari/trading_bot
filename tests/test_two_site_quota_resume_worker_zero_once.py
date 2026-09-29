@@ -16,6 +16,12 @@ try:
     from scripts.two_site_proposal_runner import WORKER_MODEL
 except ImportError:
     from two_site_proposal_runner import WORKER_MODEL  # type: ignore[no-redef]
+try:
+    from scripts.two_site_provider_broker import BrokerError
+    import scripts.two_site_provider_broker as broker_mod
+except ImportError:
+    from two_site_provider_broker import BrokerError  # type: ignore[no-redef]
+    import two_site_provider_broker as broker_mod  # type: ignore[no-redef]
 from scripts.two_site_quota_continuation_admission import ContinuationAdmissionError
 import scripts.two_site_quota_resume_worker_zero_once as worker_zero_mod
 from scripts.two_site_quota_resume_worker_zero_once import execute_worker_zero_once
@@ -538,3 +544,93 @@ def test_invalid_run_dir_symlink_or_mismatch(tmp_path: Path, accepted_ctx: dict[
     monkeypatch.setattr(worker_zero_mod, "runner_run", lambda *a, **kw: "not-a-path")
     with pytest.raises(ProposalError, match="run_dir must be Path"):
         execute_worker_zero_once(tmp_path, {"role": "worker"})
+
+
+@pytest.mark.parametrize(
+    ("stop_kind", "stop_arg"),
+    [
+        ("file", "regular"),
+        ("file", "broken_symlink"),
+        ("signal", True),
+        ("signal", "malformed"),
+    ],
+)
+def test_pre_provider_check_rejects_late_stop(
+    tmp_path: Path, accepted_ctx: dict[str, Any], monkeypatch, stop_kind: str, stop_arg: Any
+):
+    _setup_common(monkeypatch, accepted_ctx)
+    monkeypatch.setattr(broker_mod, "_STOP", False)
+    run_dir = tmp_path / ".local/two-site-refactor/proposals/cont-run-worker-0"
+    runner_calls: list[str] = []
+    simulated_provider_calls: list[str] = []
+
+    def fake_runner(root, task_path, role, run_id, timeout, **kwargs):
+        runner_calls.append(run_id)
+        if stop_kind == "file":
+            stop_file = tmp_path / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+            stop_file.parent.mkdir(parents=True, exist_ok=True)
+            if stop_arg == "broken_symlink":
+                stop_file.symlink_to(tmp_path / "nonexistent_sentinel_target")
+            else:
+                stop_file.write_text("STOP\n", encoding="utf-8")
+        elif stop_kind == "signal":
+            monkeypatch.setattr(broker_mod, "_STOP", stop_arg)
+
+        if kwargs.get("pre_provider_check"):
+            kwargs["pre_provider_check"]()
+
+        simulated_provider_calls.append(run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+
+    monkeypatch.setattr(worker_zero_mod, "runner_run", fake_runner)
+
+    with pytest.raises(BrokerError, match="^stop requested before continuation dispatch$") as exc_info:
+        execute_worker_zero_once(tmp_path, {"role": "worker"})
+
+    assert str(exc_info.value) == "stop requested before continuation dispatch"
+    assert runner_calls == ["cont-run-worker-0"]
+    assert len(simulated_provider_calls) == 0
+    assert not run_dir.exists()
+    proposals_dir = tmp_path / ".local/two-site-refactor/proposals"
+    assert not (proposals_dir / "cont-run-worker-0-retry-1").exists()
+    assert not (proposals_dir / "cont-run-worker-0-retry-2").exists()
+
+
+def test_pre_provider_check_no_stop_success_control(
+    tmp_path: Path, accepted_ctx: dict[str, Any], monkeypatch
+):
+    _setup_common(monkeypatch, accepted_ctx)
+    monkeypatch.setattr(broker_mod, "_STOP", False)
+    stop_file = tmp_path / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+    if stop_file.exists():
+        stop_file.unlink()
+    run_dir = tmp_path / ".local/two-site-refactor/proposals/cont-run-worker-0"
+    runner_calls: list[str] = []
+    simulated_provider_calls: list[str] = []
+
+    def fake_runner(root, task_path, role, run_id, timeout, **kwargs):
+        runner_calls.append(run_id)
+        if kwargs.get("pre_provider_check"):
+            kwargs["pre_provider_check"]()
+        simulated_provider_calls.append(run_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+
+    monkeypatch.setattr(worker_zero_mod, "runner_run", fake_runner)
+    monkeypatch.setattr(
+        worker_zero_mod,
+        "validate_run",
+        lambda **kw: (
+            {"status": "PROPOSAL_READY", "changes": [{"path": "pkg/mod.py"}]},
+            {"conversation_id": "w-conv"},
+            "res_sha_123",
+            "{}",
+        ),
+    )
+    res = execute_worker_zero_once(tmp_path, {"role": "worker"})
+    assert runner_calls == ["cont-run-worker-0"]
+    assert simulated_provider_calls == ["cont-run-worker-0"]
+    assert res["state"] == "WORKER_PROPOSAL_READY"
+    assert res["final_worker_run_id"] == "cont-run-worker-0"
+    assert run_dir.exists()

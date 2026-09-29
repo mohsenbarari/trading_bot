@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-29 | Owner again confirmed that necessary refactor/optimization-cycle transfers to Gemini must not wait for individual approval. Continue bounded, relevant non-secret transfers automatically; retain independent environment-permission checks, scoped safety gates, and no-replay/STOP rules. A failed sandbox-only CLI or isolated-test invocation is an execution-permission issue, not a reason to request user reapproval of the same transfer; use the authorized execution path with a fresh run ID and preserve the failed attempt's evidence.
+
 - 2026-09-20 | Temporary emergency Iran standby is independent of the two-site refactor: stage the exact running production image/revision, frontend, encrypted runtime environment, database, uploads and runtime data via Object Storage only. Keep bot/sync worker and background jobs off, but leave web/API serving-ready; emergency cutover is only the human DNS A-record change. DNS and writer changes remain human-controlled.
 
 - 2026-09-16 | A newly added P1-00 characterization test that imports application code must establish the canonical hermetic bootstrap before candidate tests: `APP_ENV_FILE=config/unit-test.env.example` and the standard network fence precede application imports; direct socket-hook assignments are rejected. A bounded SHA-bound `test-gate` correction returns only those defects to Worker and skips sandbox pytest, Gemini Reviewer, and final Codex review until fixed. This narrows a proven repeated error without weakening any quality gate.

@@ -108,6 +108,8 @@ def execute_worker_zero_once(
             if re_artifacts != ctx["artifacts"]:
                 raise ProposalError("worker resume artifacts drifted in pre_provider_check")
             check_state(root, head, initial_refs, task_path, task, sources)
+            from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
+            _check_pre_dispatch_stop(root)
 
         timeout = int(ctx["admitted_request"]["timeout"])
 

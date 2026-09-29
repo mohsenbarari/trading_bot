@@ -279,6 +279,8 @@ def execute_worker_two_once(
             if re_history != history:
                 raise ProposalError("worker-2 history drifted in pre_provider_check")
             check_state(root, head, initial_refs, task_path, task, sources)
+            from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
+            _check_pre_dispatch_stop(root)
 
         proposal_arg = root / artifacts["proposal_path"]
         feedback_arg = root / evidence["feedback_path"]

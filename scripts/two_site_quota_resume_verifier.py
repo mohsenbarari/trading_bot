@@ -115,6 +115,8 @@ def execute_verifier_once(
             wchain = load_prior_worker_chain(root, task_path, ctx["artifacts"])
             if wchain != ctx["validated_worker"]:
                 raise ProposalError("prior worker chain drifted in pre_provider_check")
+            from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
+            _check_pre_dispatch_stop(root)
 
         proposal_file = root / ctx["proposal_path"]
         test_evidence_file = root / ctx["pre_review_test_path"]

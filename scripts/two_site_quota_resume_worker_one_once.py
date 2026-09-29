@@ -263,6 +263,8 @@ def execute_worker_one_once(
                 if curr_status_bytes != initial_reviewer_status_bytes:
                     raise ProposalError("prior reviewer status bytes drifted in pre_provider_check")
             check_state(root, head, initial_refs, task_path, task, sources)
+            from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
+            _check_pre_dispatch_stop(root)
 
         proposal_arg = root / artifacts["proposal_path"]
         feedback_arg = root / evidence["feedback_path"]
