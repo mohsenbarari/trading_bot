@@ -2931,6 +2931,13 @@ def prune_runs(state_root: Path, keep: int = KEEP_RUNS) -> list[str]:
             continue
         if not isinstance(status, dict) or status.get("state") not in PRUNABLE_RUN_STATES:
             continue
+        try:
+            os.lstat(path / "accepted-lineage.json")
+            continue
+        except FileNotFoundError:
+            pass
+        except OSError:
+            continue
         shutil.rmtree(path)
         removed.append(path.name)
     return removed
