@@ -2019,12 +2019,15 @@ def publish_next_rescope_receipt(
 def validate_rescope_epoch_startup(
     state_root: Path,
     repository: object,
+    *,
+    root: Path | None = None,
 ) -> None:
-    """Fail-closed startup gate verifying epoch directories and accepted checkpoint."""
+    """Fail-closed startup gate; cold adoption needs an explicit locked root."""
     if not isinstance(state_root, Path):
         raise AutopilotError("state_root must be a Path")
     current_epoch = rescope_epoch_basename(repository)
-    has_prior_epoch = False
+    prior_epoch_names: list[str] = []
+    current_epoch_exists = False
     total_entries = 0
     try:
         with os.scandir(state_root) as scanner:
@@ -2047,17 +2050,45 @@ def validate_rescope_epoch_startup(
                         raise AutopilotError(f"unsafe rescope epoch owner: {entry.name}")
                     if (st.st_mode & 0o777) != 0o700:
                         raise AutopilotError(f"unsafe rescope epoch mode: {entry.name}")
-                    if entry.name != current_epoch:
-                        has_prior_epoch = True
+                    if entry.name == current_epoch:
+                        current_epoch_exists = True
+                    else:
+                        prior_epoch_names.append(entry.name)
     except (KeyboardInterrupt, SystemExit, AutopilotError):
         raise
     except OSError as exc:
         raise AutopilotError(f"cannot scan state_root: {exc}") from exc
 
-    if has_prior_epoch:
+    if prior_epoch_names:
         checkpoint = _load_accepted_checkpoint(state_root)
-        if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repository):
+        if checkpoint is not None and _accepted_checkpoint_matches_repository(checkpoint, repository):
+            return
+        if root is None or len(prior_epoch_names) != 1 or current_epoch_exists:
             raise AutopilotError("prior epoch requires matching accepted checkpoint")
+        try:
+            try:
+                from scripts.two_site_cold_start_startup_read import (
+                    require_terminal_cold_adoption_startup_locked,
+                )
+            except ModuleNotFoundError:
+                from two_site_cold_start_startup_read import (
+                    require_terminal_cold_adoption_startup_locked,
+                )
+            normalized = validate_accepted_repository(repository)
+            require_terminal_cold_adoption_startup_locked(
+                root, state_root, normalized, prior_epoch_names[0]
+            )
+            refreshed = validate_accepted_repository(
+                validate_repository(root, require_clean=True)
+            )
+            if refreshed != normalized:
+                raise AutopilotError("repository facts changed during cold adoption startup")
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise AutopilotError(
+                "prior epoch requires matching accepted checkpoint or valid cold adoption"
+            ) from exc
 
 
 _validate_rescope_epoch_startup = validate_rescope_epoch_startup
@@ -3071,7 +3102,7 @@ def run_loop(
         try:
             repo_facts = validate_repository(root, require_clean=True)
             expected_repository = repo_facts
-            validate_rescope_epoch_startup(state_root, repo_facts)
+            validate_rescope_epoch_startup(state_root, repo_facts, root=root)
             epoch_dir, next_attempt, startup_recovery = prepare_rescope_attempt(state_root, expected_repository)
         except (KeyboardInterrupt, SystemExit):
             raise
