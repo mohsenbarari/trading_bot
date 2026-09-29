@@ -68,7 +68,8 @@ class TwoSiteQuotaBrokerServeGateTest(unittest.TestCase):
             expected_resp = _valid_response(req)
             with mock.patch.object(broker, "execute_intent_bound_continuation", return_value=expected_resp) as mock_adapter, \
                     mock.patch.object(broker, "detect_quota_response", side_effect=AssertionError("detect called")) as mock_detect, \
-                    mock.patch.object(broker, "publish_terminal_quota_record", side_effect=AssertionError("publish called")) as mock_publish:
+                    mock.patch.object(broker, "publish_terminal_quota_record", side_effect=AssertionError("publish called")) as mock_publish, \
+                    mock.patch('scripts.two_site_quota_continuation_terminal_storage.publish_terminal_continuation_record'):
                 exit_code = broker.serve(
                     root,
                     once=True,
