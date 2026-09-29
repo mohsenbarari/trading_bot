@@ -947,6 +947,12 @@ def _claim_next(
             if os.path.lexists(terminal_quota / name):
                 raise BrokerError("terminal quota record already exists for request")
 
+        terminal_continuation = requests.parent / "terminal-continuation"
+        if os.path.lexists(terminal_continuation):
+            continuation_entries = scan_private_record_directory(terminal_continuation)
+            if name in continuation_entries:
+                raise BrokerError("terminal continuation record already exists for request")
+
         os.replace(source, destination)
         try:
             claimed_stat = os.lstat(destination)
