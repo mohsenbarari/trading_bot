@@ -1,0 +1,282 @@
+"""Hermetic characterization tests for broker continuation recovery."""
+
+from __future__ import annotations
+
+import os
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+
+from tests.test_p1_00_characterization_network_isolation import (
+    install_p1_00_network_fence,
+)
+
+install_p1_00_network_fence()
+
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
+import stat
+from typing import Any
+from unittest import mock
+
+import pytest
+
+from scripts.two_site_codex_autopilot import exclusive_supervisor_lock
+from scripts.two_site_provider_broker import (
+    BrokerError,
+    MAX_REQUEST_BYTES,
+    MAX_RESPONSE_BYTES,
+    _atomic_new_json,
+    _recover_interrupted_claims,
+    broker_paths,
+)
+from scripts.two_site_quota_continuation_response import (
+    build_continuation_broker_response,
+)
+from scripts.two_site_quota_continuation_terminal_storage import (
+    TERMINAL_DIR_NAME,
+    publish_terminal_continuation_record,
+    read_terminal_continuation_record,
+)
+from scripts.two_site_quota_resume_submission_intent import (
+    publish_quota_resume_submission_intent,
+)
+from tests.test_two_site_provider_broker import broker_repo
+from tests.test_two_site_quota_w2_common_root_admission import (
+    _setup_w2_admission_claim_scenario,
+)
+
+
+@pytest.fixture
+def spy_dispatch():
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        side_effect=AssertionError("provider continuation dispatch must not be called"),
+    ) as spy:
+        yield spy
+    assert spy.call_count == 0
+
+
+def _terminal_file(root: Path, req_id: str) -> Path:
+    return (
+        root
+        / ".local"
+        / "two-site-refactor"
+        / "provider-broker"
+        / TERMINAL_DIR_NAME
+        / f"{req_id}.json"
+    )
+
+
+def _setup_recovery_test_case(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> dict[str, Any]:
+    frozen_clock_dt = datetime.now(timezone.utc) - timedelta(minutes=2)
+    ctx = _setup_w2_admission_claim_scenario(broker_repo, frozen_clock_dt)
+    root = ctx["root"]
+    resume_request = ctx["resume_request"]
+    now_epoch = ctx["now_epoch"]
+
+    with exclusive_supervisor_lock(ctx["sc"]["lock_path"]):
+        publish_quota_resume_submission_intent(
+            root, resume_request, now_epoch=now_epoch
+        )
+
+    _, _, _, claimed_dir, responses_dir = broker_paths(root)
+    req_id = resume_request["request_id"]
+    claim_path = claimed_dir / f"{req_id}.json"
+    _atomic_new_json(claim_path, resume_request, MAX_REQUEST_BYTES)
+
+    response = build_continuation_broker_response(
+        resume_request, {"state": "READY_FOR_CODEX"}, now_epoch=now_epoch
+    )
+    runs_dir = ctx["runs_dir"]
+    runs_snapshot = {p: p.read_bytes() for p in runs_dir.glob("*.json")}
+
+    return {
+        "root": root,
+        "resume_request": resume_request,
+        "claimed_dir": claimed_dir,
+        "responses_dir": responses_dir,
+        "req_id": req_id,
+        "claim_path": claim_path,
+        "response": response,
+        "response_path": responses_dir / f"{req_id}.json",
+        "runs_snapshot": runs_snapshot,
+    }
+
+
+def _assert_runs_unchanged(data: dict[str, Any]) -> None:
+    for p, content in data["runs_snapshot"].items():
+        assert p.read_bytes() == content
+
+
+def test_continuation_recovery_matching_receipt_and_absent_response(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    req_id = data["req_id"]
+    resume_request = data["resume_request"]
+    response = data["response"]
+    claim_path = data["claim_path"]
+    response_path = data["response_path"]
+
+    published = publish_terminal_continuation_record(root, resume_request, response)
+    term_file = _terminal_file(root, req_id)
+    assert term_file.is_file()
+    receipt_bytes_before = term_file.read_bytes()
+    assert not response_path.exists()
+    assert claim_path.is_file()
+
+    _recover_interrupted_claims(root, data["claimed_dir"], data["responses_dir"])
+
+    assert not claim_path.exists()
+    assert response_path.is_file()
+    st = response_path.stat()
+    assert stat.S_IMODE(st.st_mode) == 0o600
+    assert json.loads(response_path.read_text(encoding="utf-8")) == response
+
+    canonical_written = json.dumps(
+        response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert response_path.read_bytes() == canonical_written
+    assert term_file.read_bytes() == receipt_bytes_before
+
+    readback = read_terminal_continuation_record(
+        root, req_id, expected_request=resume_request
+    )
+    assert readback == published
+    _assert_runs_unchanged(data)
+
+
+def test_continuation_recovery_matching_receipt_and_existing_response(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    response = data["response"]
+    claim_path = data["claim_path"]
+    response_path = data["response_path"]
+
+    publish_terminal_continuation_record(root, resume_request, response)
+    _atomic_new_json(response_path, response, MAX_RESPONSE_BYTES)
+    resp_bytes_before = response_path.read_bytes()
+    resp_stat_before = response_path.stat()
+    assert claim_path.is_file()
+
+    _recover_interrupted_claims(root, data["claimed_dir"], data["responses_dir"])
+
+    assert not claim_path.exists()
+    assert response_path.read_bytes() == resp_bytes_before
+    resp_stat_after = response_path.stat()
+    assert (resp_stat_after.st_ino, resp_stat_after.st_size) == (
+        resp_stat_before.st_ino,
+        resp_stat_before.st_size,
+    )
+    _assert_runs_unchanged(data)
+
+
+def test_continuation_recovery_missing_receipt_fails_closed(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    claim_path = data["claim_path"]
+    response_path = data["response_path"]
+
+    assert not _terminal_file(root, data["req_id"]).exists()
+    claim_bytes_before = claim_path.read_bytes()
+    assert not response_path.exists()
+
+    with pytest.raises(
+        BrokerError, match="continuation terminal receipt is missing or invalid"
+    ):
+        _recover_interrupted_claims(root, data["claimed_dir"], data["responses_dir"])
+
+    assert claim_path.is_file()
+    assert claim_path.read_bytes() == claim_bytes_before
+    assert not response_path.exists()
+    _assert_runs_unchanged(data)
+
+
+def test_continuation_recovery_divergent_existing_response_fails_closed(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    response = data["response"]
+    claim_path = data["claim_path"]
+    response_path = data["response_path"]
+
+    publish_terminal_continuation_record(root, resume_request, response)
+    term_file = _terminal_file(root, data["req_id"])
+    receipt_bytes_before = term_file.read_bytes()
+
+    divergent_response = dict(response, stderr="divergent error output recorded")
+    _atomic_new_json(response_path, divergent_response, MAX_RESPONSE_BYTES)
+    resp_bytes_before = response_path.read_bytes()
+    claim_bytes_before = claim_path.read_bytes()
+
+    with pytest.raises(
+        BrokerError, match="existing response does not match receipt response"
+    ):
+        _recover_interrupted_claims(root, data["claimed_dir"], data["responses_dir"])
+
+    assert claim_path.is_file()
+    assert claim_path.read_bytes() == claim_bytes_before
+    assert response_path.read_bytes() == resp_bytes_before
+    assert term_file.read_bytes() == receipt_bytes_before
+    _assert_runs_unchanged(data)
+
+
+@pytest.mark.parametrize("corrupt_mode", ["corrupt_json", "symlink"])
+def test_continuation_recovery_corrupt_or_symlink_receipt_fails_closed(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    corrupt_mode: str,
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    response = data["response"]
+    claim_path = data["claim_path"]
+    response_path = data["response_path"]
+
+    publish_terminal_continuation_record(root, resume_request, response)
+    term_file = _terminal_file(root, data["req_id"])
+    assert term_file.is_file()
+
+    if corrupt_mode == "corrupt_json":
+        term_file.write_bytes(b'{"corrupt": invalid json')
+        os.chmod(term_file, 0o600)
+        expected_bytes: bytes | None = term_file.read_bytes()
+    else:
+        term_file.unlink()
+        target = root / "symlink_target.json"
+        target.write_text("{}", encoding="utf-8")
+        term_file.symlink_to(target)
+        expected_bytes = None
+
+    claim_bytes_before = claim_path.read_bytes()
+    assert not response_path.exists()
+
+    with pytest.raises(
+        BrokerError, match="continuation terminal receipt is missing or invalid"
+    ):
+        _recover_interrupted_claims(root, data["claimed_dir"], data["responses_dir"])
+
+    assert claim_path.is_file()
+    assert claim_path.read_bytes() == claim_bytes_before
+    assert not response_path.exists()
+    if corrupt_mode == "corrupt_json":
+        assert term_file.read_bytes() == expected_bytes
+    else:
+        assert term_file.is_symlink()
+    _assert_runs_unchanged(data)
