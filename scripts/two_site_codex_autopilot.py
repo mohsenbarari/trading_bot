@@ -226,6 +226,10 @@ class AutopilotError(ProposalError):
     pass
 
 
+class QuotaFinalizationHardStopError(AutopilotError):
+    pass
+
+
 @contextmanager
 def exclusive_supervisor_lock(lock_path: Path):
     """Own one symlink/hardlink-safe nonblocking supervisor lock."""
@@ -2669,9 +2673,15 @@ def run_cycle(
     *,
     preparation_route: str = "one_shot",
     before_model: Callable[[dict[str, object]], None] | None = None,
+    quota_original_controller_run_id: str | None = None,
 ) -> tuple[Path, dict]:
     if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
         raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
+    if quota_original_controller_run_id is not None and not (
+        type(quota_original_controller_run_id) is str
+        and RUN_ID.fullmatch(quota_original_controller_run_id)
+    ):
+        raise QuotaFinalizationHardStopError("invalid quota_original_controller_run_id")
     global _ACTIVE_PROCESS
     heartbeat_stop: threading.Event | None = None
     heartbeat_thread: threading.Thread | None = None
@@ -2828,6 +2838,35 @@ def run_cycle(
             else:
                 raise
         result = validate_transition(root, before, validated_receipt)
+        if quota_original_controller_run_id is not None:
+            try:
+                if result["state"] not in {"CONTINUE", "COMPLETE"}:
+                    raise AutopilotError(
+                        f"quota continuation requires state CONTINUE or COMPLETE, got {result['state']!r}"
+                    )
+                quota_repo = validate_repository(root, require_clean=True)
+                if quota_repo["protected_refs"] != before["protected_refs"]:
+                    raise AutopilotError("protected_refs changed before quota finalization")
+                if quota_repo["assignment_scope"] != before["assignment_scope"]:
+                    raise AutopilotError("assignment_scope changed before quota finalization")
+                from scripts.two_site_quota_supervisor_finalization import (
+                    finalize_accepted_quota_continuation_locked,
+                )
+
+                finalize_accepted_quota_continuation_locked(
+                    root=root,
+                    original_controller_run_id=quota_original_controller_run_id,
+                    continuation_controller_run_id=run_dir.name,
+                    before_repository=before,
+                    expected_transition_result=result,
+                    acknowledged_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                )
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                raise QuotaFinalizationHardStopError(
+                    f"quota finalization failed: {exc}"
+                ) from exc
         if result["state"] == "CONTINUE":
             final_repository = validate_repository(root, require_clean=True)
             if final_repository["protected_refs"] != before["protected_refs"]:
@@ -3347,6 +3386,13 @@ def run_loop(
                 current_head = git(root, "rev-parse", "HEAD")
                 dirty = bool(git(root, "status", "--porcelain=v1", "--untracked-files=all"))
                 ambiguous_change = current_head != cycle_start_head or ref_snapshot(root) != cycle_start_refs
+                if isinstance(exc, QuotaFinalizationHardStopError):
+                    write_supervisor_state(
+                        state_root, "BLOCKED", cycle=cycle, head=current_head,
+                        blockers=[type(exc).__name__ + ": " + str(exc)], dirty=dirty,
+                        ambiguous_change=True,
+                    )
+                    return 2
                 if callback_entered:
                     write_supervisor_state(
                         state_root, "BLOCKED", cycle=cycle, head=current_head,
