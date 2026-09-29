@@ -262,10 +262,11 @@ def read_untrusted_codex_result_candidate(
                 return raw_bytes, exact_sha256, copy.deepcopy(payload)
             finally:
                 if file_fd is not None:
+                    prior_exc = sys.exc_info()[1]
                     try:
                         os.close(file_fd)
                     except OSError as exc:
-                        if sys.exc_info()[1] is None:
+                        if prior_exc is None:
                             raise CodexResultCustodyError(
                                 f"cannot safely close {target_name} descriptor: {exc}"
                             ) from exc
