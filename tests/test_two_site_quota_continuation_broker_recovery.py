@@ -27,6 +27,7 @@ from scripts.two_site_provider_broker import (
     MAX_REQUEST_BYTES,
     MAX_RESPONSE_BYTES,
     _atomic_new_json,
+    _claim_next,
     _recover_interrupted_claims,
     broker_paths,
 )
@@ -280,3 +281,118 @@ def test_continuation_recovery_corrupt_or_symlink_receipt_fails_closed(
     else:
         assert term_file.is_symlink()
     _assert_runs_unchanged(data)
+
+
+def test_claim_next_duplicate_queued_request_with_terminal_receipt_blocks_claim(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    req_id = data["req_id"]
+    resume_request = data["resume_request"]
+    response = data["response"]
+    claim_path = data["claim_path"]
+    claimed_dir = data["claimed_dir"]
+
+    _, _, requests_dir, _, responses_dir = broker_paths(root)
+    publish_terminal_continuation_record(root, resume_request, response)
+
+    queued_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, queued_path)
+
+    queued_bytes_before = queued_path.read_bytes()
+    queued_stat_before = queued_path.stat()
+
+    term_file = _terminal_file(root, req_id)
+    assert term_file.is_file()
+    receipt_bytes_before = term_file.read_bytes()
+    receipt_stat_before = term_file.stat()
+
+    response_path = responses_dir / f"{req_id}.json"
+    assert not response_path.exists()
+    assert not claim_path.exists()
+
+    with pytest.raises(
+        BrokerError, match="terminal continuation record already exists"
+    ):
+        _claim_next(requests_dir, claimed_dir, responses_dir)
+
+    assert queued_path.is_file()
+    assert queued_path.read_bytes() == queued_bytes_before
+    queued_stat_after = queued_path.stat()
+    assert stat.S_IMODE(queued_stat_after.st_mode) == 0o600
+    assert (queued_stat_after.st_dev, queued_stat_after.st_ino) == (
+        queued_stat_before.st_dev,
+        queued_stat_before.st_ino,
+    )
+
+    assert not claim_path.exists()
+    assert not response_path.exists()
+    assert term_file.is_file()
+    assert term_file.read_bytes() == receipt_bytes_before
+    receipt_stat_after = term_file.stat()
+    assert (receipt_stat_after.st_dev, receipt_stat_after.st_ino) == (
+        receipt_stat_before.st_dev,
+        receipt_stat_before.st_ino,
+    )
+    _assert_runs_unchanged(data)
+    assert spy_dispatch.call_count == 0
+
+
+def test_claim_next_symlinked_terminal_continuation_directory_fails_closed(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+    spy_dispatch: mock.MagicMock,
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    req_id = data["req_id"]
+    claim_path = data["claim_path"]
+    claimed_dir = data["claimed_dir"]
+
+    _, _, requests_dir, _, responses_dir = broker_paths(root)
+    queued_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, queued_path)
+
+    queued_bytes_before = queued_path.read_bytes()
+    queued_stat_before = queued_path.stat()
+
+    canary_dir = root / "outside_canary_dir"
+    canary_dir.mkdir(mode=0o700, exist_ok=True)
+    canary_file = canary_dir / f"{req_id}.json"
+    canary_bytes = b"canary-terminal-receipt"
+    canary_file.write_bytes(canary_bytes)
+    canary_stat_before = canary_file.stat()
+
+    term_continuation_dir = requests_dir.parent / "terminal-continuation"
+    assert not os.path.lexists(term_continuation_dir)
+    term_continuation_dir.symlink_to(canary_dir)
+
+    response_path = responses_dir / f"{req_id}.json"
+    assert not response_path.exists()
+    assert not claim_path.exists()
+
+    with pytest.raises(BrokerError):
+        _claim_next(requests_dir, claimed_dir, responses_dir)
+
+    assert queued_path.is_file()
+    assert queued_path.read_bytes() == queued_bytes_before
+    queued_stat_after = queued_path.stat()
+    assert stat.S_IMODE(queued_stat_after.st_mode) == 0o600
+    assert (queued_stat_after.st_dev, queued_stat_after.st_ino) == (
+        queued_stat_before.st_dev,
+        queued_stat_before.st_ino,
+    )
+
+    assert not claim_path.exists()
+    assert not response_path.exists()
+
+    assert canary_file.is_file()
+    assert canary_file.read_bytes() == canary_bytes
+    canary_stat_after = canary_file.stat()
+    assert (canary_stat_after.st_dev, canary_stat_after.st_ino) == (
+        canary_stat_before.st_dev,
+        canary_stat_before.st_ino,
+    )
+    _assert_runs_unchanged(data)
+    assert spy_dispatch.call_count == 0
