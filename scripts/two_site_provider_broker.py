@@ -1295,6 +1295,7 @@ def serve(
                     time.sleep(POLL_SECONDS)
                     continue
                 is_continuation = False
+                continuation_dispatch_attempted = False
                 request: object = {}
                 response: dict
                 try:
@@ -1316,6 +1317,7 @@ def serve(
                             run_prefix=validated["run_prefix"],
                             source_head=validated["source_head"],
                         )
+                        continuation_dispatch_attempted = True
                         response = _execute_with_heartbeat(
                             status_path, execute_intent_bound_continuation, root, validated
                         )
@@ -1345,6 +1347,10 @@ def serve(
                             if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                                 raise BrokerError("broker executor returned an invalid response")
                 except Exception as exc:
+                    if continuation_dispatch_attempted:
+                        raise BrokerError(
+                            "continuation dispatch failed or returned invalid response"
+                        ) from None
                     response = _error_response(request, exc)
                 else:
                     if not is_continuation and detect_quota_response(root, validated, response) is not None:

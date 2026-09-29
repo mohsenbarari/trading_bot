@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
+import traceback
 from typing import Any
 import unittest
 from unittest import mock
@@ -93,22 +94,31 @@ class TwoSiteQuotaBrokerServeGateTest(unittest.TestCase):
             req_id = req["request_id"]
             broker._atomic_new_json(requests / f"{req_id}.json", req, broker.MAX_REQUEST_BYTES)
             with mock.patch.object(broker, "execute_intent_bound_continuation", side_effect=RuntimeError("simulated adapter failure")) as mock_adapter:
-                exit_code = broker.serve(
-                    root,
-                    once=True,
-                    install_signal_handlers=False,
-                    quota_continuation_enabled=True,
+                with self.assertRaises(broker.BrokerError) as cm:
+                    broker.serve(
+                        root,
+                        once=True,
+                        install_signal_handlers=False,
+                        quota_continuation_enabled=True,
+                    )
+                self.assertNotIn("simulated adapter failure", str(cm.exception))
+                self.assertIsNone(cm.exception.__cause__)
+                self.assertNotIn(
+                    "simulated adapter failure",
+                    "".join(traceback.format_exception(cm.exception)),
                 )
-            self.assertEqual(exit_code, 0)
-            mock_adapter.assert_called_once()
-            resp_path = responses / f"{req_id}.json"
-            self.assertTrue(resp_path.is_file())
-            self.assertFalse((claimed / f"{req_id}.json").exists())
-            with resp_path.open("r", encoding="utf-8") as f:
-                resp = json.load(f)
-            self.assertEqual(resp["state"], "BROKER_ERROR")
-            self.assertEqual(resp["request_id"], req_id)
-            self.assertIn("RuntimeError: simulated adapter failure", resp["stderr"])
+                mock_adapter.assert_called_once()
+                resp_path = responses / f"{req_id}.json"
+                self.assertFalse(resp_path.exists())
+                claim_path = claimed / f"{req_id}.json"
+                self.assertTrue(claim_path.is_file())
+                claimed_bytes_before = claim_path.read_bytes()
+                with self.assertRaises(broker.BrokerError):
+                    broker._recover_interrupted_claims(root, claimed, responses)
+                self.assertEqual(mock_adapter.call_count, 1)
+                self.assertTrue(claim_path.is_file())
+                self.assertEqual(claim_path.read_bytes(), claimed_bytes_before)
+                self.assertFalse(resp_path.exists())
 
 
 if __name__ == "__main__":
