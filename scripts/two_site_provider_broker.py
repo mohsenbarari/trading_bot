@@ -1324,6 +1324,17 @@ def serve(
                         if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                             raise BrokerError("broker executor returned an invalid response")
                         validate_response(validated, response)
+                        if response.get("state") != "COMPLETED":
+                            raise BrokerError("continuation response state must be COMPLETED")
+                        try:
+                            from scripts.two_site_quota_continuation_terminal_storage import (
+                                publish_terminal_continuation_record,
+                            )
+                        except ModuleNotFoundError:
+                            from two_site_quota_continuation_terminal_storage import (  # type: ignore[no-redef]
+                                publish_terminal_continuation_record,
+                            )
+                        publish_terminal_continuation_record(root, validated, response)
                     else:
                         if request.get("request_id") != claimed_path.stem:
                             raise BrokerError("broker request filename binding is invalid")
