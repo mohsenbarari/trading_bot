@@ -241,17 +241,6 @@ def controller_run_id_from_environment(environment: Mapping[str, str]) -> str | 
 class ProposalError(ValueError):
     pass
 
-try:
-    from scripts.two_site_compact_review_context import (
-        build_one_file_compact_review_material,
-        parse_one_file_compact_review_spec,
-    )
-except ImportError:
-    from two_site_compact_review_context import (
-        build_one_file_compact_review_material,
-        parse_one_file_compact_review_spec,
-    )
-
 
 _MAX_BOUNDARY_PATH_BYTES = 256
 
@@ -3130,6 +3119,16 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
                 prompt_material["pre_review_test_evidence"] = normalized_receipt
                 material["test_evidence"] = normalized_receipt
+            try:
+                from scripts.two_site_compact_review_context import (
+                    build_one_file_compact_review_material,
+                    parse_one_file_compact_review_spec,
+                )
+            except ImportError:
+                from two_site_compact_review_context import (
+                    build_one_file_compact_review_material,
+                    parse_one_file_compact_review_spec,
+                )
             try:
                 compact_spec = parse_one_file_compact_review_spec(task.get("goal", ""))
             except ProposalError:
