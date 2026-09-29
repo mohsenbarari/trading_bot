@@ -222,6 +222,7 @@ def compose_and_publish_known_reset_resume_request_locked(
 
     return {
         "claim": copy.deepcopy(validated_published_claim),
+        "expected_claim": copy.deepcopy(expected_claim),
         "claim_sha256": claim_sha256,
         "request": copy.deepcopy(validated_request),
         "original_wait_sha256": wait_sha256,

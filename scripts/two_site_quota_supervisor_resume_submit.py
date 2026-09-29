@@ -10,6 +10,9 @@ from scripts.two_site_quota_broker_client import enqueue_quota_continuation_lock
 from scripts.two_site_quota_resume_claim_request import (
     compose_and_publish_known_reset_resume_request_locked,
 )
+from scripts.two_site_quota_resume_lineage_snapshot_storage import (
+    publish_expected_lineage_snapshot,
+)
 from scripts.two_site_quota_supervisor_resume_context import (
     collect_known_reset_resume_context_locked,
 )
@@ -45,6 +48,15 @@ def submit_known_reset_resume_once_locked(
         claimed_at_utc,
         timeout,
         now_epoch,
+    )
+    publish_expected_lineage_snapshot(
+        root,
+        original_controller_run_id,
+        ctx["wait_record"],
+        ctx["expected_wait"],
+        composed["claim"],
+        composed["expected_claim"],
+        composed["request"],
     )
     intent = enqueue_quota_continuation_locked(
         root,

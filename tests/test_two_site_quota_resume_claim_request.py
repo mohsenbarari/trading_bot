@@ -5,9 +5,23 @@ from __future__ import annotations
 import copy
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 from typing import Any
 import pytest
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+
+try:
+    from tests.test_p1_00_characterization_network_isolation import (
+        install_p1_00_network_fence,
+    )
+except ImportError:
+    from test_p1_00_characterization_network_isolation import (  # type: ignore
+        install_p1_00_network_fence,
+    )
+
+install_p1_00_network_fence()
 
 try:
     import scripts.two_site_quota_resume_claim_request as req_mod
@@ -97,8 +111,16 @@ def test_valid_roundtrip_publisher_called_once_and_detached(
     assert pub["claim"]["resume_request_id"] == ctx["resume_request_id"]
     assert pub["expected"]["resume_request_id"] == ctx["resume_request_id"]
 
-    assert set(result.keys()) == {"claim", "claim_sha256", "request", "original_wait_sha256"}
+    assert set(result.keys()) == {
+        "claim",
+        "expected_claim",
+        "claim_sha256",
+        "request",
+        "original_wait_sha256",
+    }
     assert result["claim"]["state"] == "RESUME_CLAIMED"
+    assert result["expected_claim"] == pub["expected"]
+    assert result["expected_claim"]["resume_request_id"] == ctx["resume_request_id"]
     assert result["request"]["request_type"] == "QUOTA_CONTINUATION"
     assert result["request"]["claim_sha256"] == result["claim_sha256"]
     assert result["request"]["original_wait_sha256"] == result["original_wait_sha256"]
@@ -109,7 +131,9 @@ def test_valid_roundtrip_publisher_called_once_and_detached(
 
     result["claim"]["state"] = "MUTATED"
     result["request"]["request_type"] = "MUTATED"
+    result["expected_claim"]["resume_request_id"] = "MUTATED"
     assert pub["claim"]["state"] == "RESUME_CLAIMED"
+    assert pub["expected"]["resume_request_id"] == ctx["resume_request_id"]
 
 
 @pytest.mark.parametrize(
