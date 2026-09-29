@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import stat
+import traceback
 from typing import Any
 from unittest import mock
 
@@ -30,12 +31,14 @@ from scripts.two_site_provider_broker import (
     _claim_next,
     _recover_interrupted_claims,
     broker_paths,
+    serve,
 )
 from scripts.two_site_quota_continuation_response import (
     build_continuation_broker_response,
 )
 from scripts.two_site_quota_continuation_terminal_storage import (
     TERMINAL_DIR_NAME,
+    TerminalContinuationStorageError,
     publish_terminal_continuation_record,
     read_terminal_continuation_record,
 )
@@ -396,3 +399,264 @@ def test_claim_next_symlinked_terminal_continuation_directory_fails_closed(
     )
     _assert_runs_unchanged(data)
     assert spy_dispatch.call_count == 0
+
+
+def test_serve_continuation_success_receipt_persisted_before_response_and_unlink(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    req_id = data["req_id"]
+    claim_path = data["claim_path"]
+    response = data["response"]
+    response_path = data["response_path"]
+    claimed_dir = data["claimed_dir"]
+
+    _, _, requests_dir, _, _ = broker_paths(root)
+    req_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, req_path)
+    assert req_path.is_file()
+    assert not claim_path.exists()
+
+    events: list[str] = []
+
+    orig_publish = publish_terminal_continuation_record
+
+    def spy_publish(root_arg: Path, req_arg: dict, resp_arg: dict) -> dict:
+        events.append("publish_start")
+        res = orig_publish(root_arg, req_arg, resp_arg)
+        events.append("publish_done")
+        return res
+
+    orig_atomic = _atomic_new_json
+
+    def spy_atomic(path_arg: Path, obj_arg: Any, max_bytes_arg: int) -> None:
+        if path_arg == response_path:
+            events.append("response_write")
+        orig_atomic(path_arg, obj_arg, max_bytes_arg)
+
+    orig_unlink = Path.unlink
+
+    def spy_unlink(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == claim_path or (
+            self.name == f"{req_id}.json" and self.parent == claimed_dir
+        ):
+            events.append("claim_unlink")
+        return orig_unlink(self, *args, **kwargs)
+
+    mock_provider = mock.MagicMock(return_value=response)
+
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        mock_provider,
+    ), mock.patch(
+        "scripts.two_site_quota_continuation_terminal_storage.publish_terminal_continuation_record",
+        side_effect=spy_publish,
+    ), mock.patch(
+        "scripts.two_site_provider_broker._atomic_new_json",
+        side_effect=spy_atomic,
+    ), mock.patch.object(
+        Path,
+        "unlink",
+        spy_unlink,
+    ):
+        ret = serve(
+            root,
+            once=True,
+            quota_continuation_enabled=True,
+            install_signal_handlers=False,
+        )
+
+    assert ret == 0
+    assert mock_provider.call_count == 1
+    mock_provider.assert_called_once_with(root, resume_request)
+
+    term_file = _terminal_file(root, req_id)
+    assert term_file.is_file()
+    validated_record = read_terminal_continuation_record(
+        root, req_id, expected_request=resume_request
+    )
+    assert validated_record["request_id"] == req_id
+    assert validated_record["response"] == response
+
+    assert "publish_done" in events
+    assert "response_write" in events
+    assert "claim_unlink" in events
+    pub_idx = events.index("publish_done")
+    resp_idx = events.index("response_write")
+    unlink_idx = events.index("claim_unlink")
+    assert pub_idx < resp_idx
+    assert pub_idx < unlink_idx
+    assert resp_idx < unlink_idx
+
+    assert response_path.is_file()
+    assert json.loads(response_path.read_text(encoding="utf-8")) == response
+    canonical_resp = json.dumps(
+        response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert response_path.read_bytes() == canonical_resp
+
+    assert not claim_path.exists()
+    assert not req_path.exists()
+    _assert_runs_unchanged(data)
+
+
+def test_serve_continuation_terminal_publisher_failure_fails_closed_without_replay(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    req_id = data["req_id"]
+    claim_path = data["claim_path"]
+    response = data["response"]
+    response_path = data["response_path"]
+    claimed_dir = data["claimed_dir"]
+    responses_dir = data["responses_dir"]
+
+    _, _, requests_dir, _, _ = broker_paths(root)
+    req_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, req_path)
+    claim_bytes_before = req_path.read_bytes()
+
+    mock_provider = mock.MagicMock(return_value=response)
+    injected_marker = "injected_terminal_publisher_failure_secret_marker_7f9a"
+
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        mock_provider,
+    ):
+        with mock.patch(
+            "scripts.two_site_quota_continuation_terminal_storage.publish_terminal_continuation_record",
+            side_effect=TerminalContinuationStorageError(injected_marker),
+        ):
+            with pytest.raises(BrokerError) as exc_info:
+                serve(
+                    root,
+                    once=True,
+                    quota_continuation_enabled=True,
+                    install_signal_handlers=False,
+                )
+
+        broker_err = exc_info.value
+        assert str(broker_err) == "continuation dispatch failed or returned invalid response"
+        assert broker_err.__cause__ is None
+        assert injected_marker not in str(broker_err)
+        tb_formatted = "".join(
+            traceback.format_exception(
+                type(broker_err), broker_err, broker_err.__traceback__
+            )
+        )
+        assert injected_marker not in tb_formatted
+
+        assert mock_provider.call_count == 1
+
+        term_dir = (
+            root
+            / ".local"
+            / "two-site-refactor"
+            / "provider-broker"
+            / TERMINAL_DIR_NAME
+        )
+        term_file = _terminal_file(root, req_id)
+        assert not term_file.exists()
+        if term_dir.exists():
+            markers = [
+                p
+                for p in term_dir.iterdir()
+                if p.name.startswith(f".{req_id}") or p.name.startswith(req_id)
+            ]
+            assert markers == []
+
+        assert not response_path.exists()
+        assert claim_path.is_file()
+        assert claim_path.read_bytes() == claim_bytes_before
+        assert not req_path.exists()
+
+        with pytest.raises(
+            BrokerError, match="continuation terminal receipt is missing or invalid"
+        ):
+            _recover_interrupted_claims(root, claimed_dir, responses_dir)
+
+        assert mock_provider.call_count == 1
+        assert claim_path.is_file()
+        assert claim_path.read_bytes() == claim_bytes_before
+        assert not response_path.exists()
+        _assert_runs_unchanged(data)
+
+
+def test_serve_continuation_response_write_failure_recovers_from_receipt_without_replay(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    data = _setup_recovery_test_case(broker_repo)
+    root = data["root"]
+    resume_request = data["resume_request"]
+    req_id = data["req_id"]
+    claim_path = data["claim_path"]
+    response = data["response"]
+    response_path = data["response_path"]
+    claimed_dir = data["claimed_dir"]
+    responses_dir = data["responses_dir"]
+
+    _, _, requests_dir, _, _ = broker_paths(root)
+    req_path = requests_dir / f"{req_id}.json"
+    os.replace(claim_path, req_path)
+    claim_bytes_before = req_path.read_bytes()
+
+    mock_provider = mock.MagicMock(return_value=response)
+    orig_atomic = _atomic_new_json
+
+    def failing_atomic_new_json(
+        path_arg: Path, obj_arg: Any, max_bytes_arg: int
+    ) -> None:
+        if path_arg == response_path:
+            raise OSError("injected response queue write failure")
+        orig_atomic(path_arg, obj_arg, max_bytes_arg)
+
+    with mock.patch(
+        "scripts.two_site_provider_broker.execute_intent_bound_continuation",
+        mock_provider,
+    ):
+        with mock.patch(
+            "scripts.two_site_provider_broker._atomic_new_json",
+            side_effect=failing_atomic_new_json,
+        ):
+            with pytest.raises(OSError, match="injected response queue write failure"):
+                serve(
+                    root,
+                    once=True,
+                    quota_continuation_enabled=True,
+                    install_signal_handlers=False,
+                )
+
+        assert mock_provider.call_count == 1
+
+        term_file = _terminal_file(root, req_id)
+        assert term_file.is_file()
+        readback = read_terminal_continuation_record(
+            root, req_id, expected_request=resume_request
+        )
+        assert readback["request_id"] == req_id
+        assert readback["response"] == response
+
+        assert claim_path.is_file()
+        assert claim_path.read_bytes() == claim_bytes_before
+        assert not req_path.exists()
+        assert not response_path.exists()
+
+        _recover_interrupted_claims(root, claimed_dir, responses_dir)
+
+        assert mock_provider.call_count == 1
+        assert response_path.is_file()
+        st = response_path.stat()
+        assert stat.S_IMODE(st.st_mode) == 0o600
+        assert json.loads(response_path.read_text(encoding="utf-8")) == response
+        canonical_resp = json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        assert response_path.read_bytes() == canonical_resp
+
+        assert not claim_path.exists()
+        assert term_file.is_file()
+        _assert_runs_unchanged(data)
