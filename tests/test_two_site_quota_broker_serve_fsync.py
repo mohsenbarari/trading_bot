@@ -55,6 +55,8 @@ class TestTwoSiteQuotaBrokerServeFsync(unittest.TestCase):
                 broker, "_atomic_new_json", side_effect=spy_atomic
             ), mock.patch.object(
                 broker, "fsync_private_record_directory", side_effect=spy_fsync
+            ), mock.patch(
+                "scripts.two_site_quota_continuation_terminal_storage.publish_terminal_continuation_record"
             ):
                 exit_code = broker.serve(
                     root,
@@ -97,6 +99,8 @@ class TestTwoSiteQuotaBrokerServeFsync(unittest.TestCase):
             ) as mock_adapter:
                 with mock.patch.object(
                     broker, "fsync_private_record_directory", side_effect=fail_response_fsync
+                ), mock.patch(
+                    "scripts.two_site_quota_continuation_terminal_storage.publish_terminal_continuation_record"
                 ):
                     with self.assertRaises(OSError) as cm:
                         broker.serve(
