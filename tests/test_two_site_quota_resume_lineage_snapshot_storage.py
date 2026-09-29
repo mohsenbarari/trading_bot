@@ -18,17 +18,12 @@ try:
     from tests.test_p1_00_characterization_network_isolation import (
         install_p1_00_network_fence,
     )
-
-    install_p1_00_network_fence()
 except ImportError:
-    try:
-        from test_p1_00_characterization_network_isolation import (
-            install_p1_00_network_fence,
-        )
+    from test_p1_00_characterization_network_isolation import (
+        install_p1_00_network_fence,
+    )
 
-        install_p1_00_network_fence()
-    except ImportError:
-        pass
+install_p1_00_network_fence()
 
 from scripts.two_site_codex_autopilot import exclusive_supervisor_lock
 from scripts.two_site_provider_broker import BrokerError
@@ -43,6 +38,7 @@ from scripts.two_site_quota_resume_lineage_snapshot_storage import (
     SnapshotStorageError,
     publish_expected_lineage_snapshot,
     read_expected_lineage_snapshot,
+    read_untrusted_expected_lineage_snapshot_candidate,
 )
 from scripts.two_site_quota_wait_sources import (
     collect_initial_wait_source_expected,
@@ -147,6 +143,10 @@ def test_two_site_quota_resume_lineage_snapshot_storage_real_broker_cycle(
             wait_record,
             claim,
         )
+        candidate = read_untrusted_expected_lineage_snapshot_candidate(
+            root,
+            controller_run_id,
+        )
 
     assert published["schema_version"] == "1.0"
     assert published["original_controller_run_id"] == controller_run_id
@@ -154,6 +154,10 @@ def test_two_site_quota_resume_lineage_snapshot_storage_real_broker_cycle(
     assert readback is not published
     readback["mutated"] = True
     assert "mutated" not in published
+    assert candidate == published
+    assert candidate is not published
+    candidate["mutated_candidate"] = True
+    assert "mutated_candidate" not in published
 
     target_file = runs_dir / QUOTA_RESUME_LINEAGE_SNAPSHOT_FILENAME
     assert target_file.is_file()
@@ -214,6 +218,7 @@ def test_two_site_quota_resume_lineage_snapshot_storage_real_broker_cycle(
         "SnapshotStorageError",
         "publish_expected_lineage_snapshot",
         "read_expected_lineage_snapshot",
+        "read_untrusted_expected_lineage_snapshot_candidate",
     }
 
 
@@ -656,3 +661,47 @@ def test_reader_descriptor_closed_on_failure(tmp_path: Path) -> None:
                     read_expected_lineage_snapshot(tmp_path, cid, wait_rec, claim_rec)
 
     assert len(closed_fds) >= 1
+
+
+def test_untrusted_candidate_reader_argument_validation(tmp_path: Path) -> None:
+    for args, match_str in [
+        (("not_path", "run_id"), "root must be a Path"),
+        ((tmp_path, 123), "original_controller_run_id must be exact str"),
+        ((tmp_path, ""), "original_controller_run_id must be a non-empty string"),
+    ]:
+        with pytest.raises(SnapshotStorageError, match=match_str):
+            read_untrusted_expected_lineage_snapshot_candidate(*args)
+
+
+def test_untrusted_candidate_reader_detached_without_semantic_validation(tmp_path: Path) -> None:
+    wait_rec, exp_wait, claim_rec, exp_claim, req = _build_valid_lineage_fixtures()
+    cid = wait_rec["controller_run_id"]
+    run_dir = tmp_path / cid
+    run_dir.mkdir(parents=True, mode=0o700)
+    target_file = run_dir / QUOTA_RESUME_LINEAGE_SNAPSHOT_FILENAME
+
+    snap = build_expected_lineage_snapshot(
+        wait_rec, exp_wait, claim_rec, exp_claim, req
+    )
+    tampered = copy.deepcopy(snap)
+    tampered["claim_sha256"] = "0" * 64
+    target_file.write_bytes(canonical_json_bytes(tampered))
+    os.chmod(target_file, 0o600)
+
+    with mock.patch.object(
+        storage_mod,
+        "_open_existing_cycle_run_directory",
+        side_effect=lambda r, c: _mock_open_cycle_dir(run_dir),
+    ):
+        with pytest.raises(
+            SnapshotStorageError, match="expected lineage snapshot validation failed"
+        ):
+            read_expected_lineage_snapshot(tmp_path, cid, wait_rec, claim_rec)
+
+        candidate = read_untrusted_expected_lineage_snapshot_candidate(tmp_path, cid)
+        assert candidate["claim_sha256"] == "0" * 64
+        candidate["mutated"] = True
+        assert "mutated" not in tampered
+
+        second = read_untrusted_expected_lineage_snapshot_candidate(tmp_path, cid)
+        assert "mutated" not in second

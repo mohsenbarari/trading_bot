@@ -73,6 +73,7 @@ __all__ = [
     "SnapshotStorageError",
     "publish_expected_lineage_snapshot",
     "read_expected_lineage_snapshot",
+    "read_untrusted_expected_lineage_snapshot_candidate",
 ]
 
 
@@ -376,16 +377,11 @@ def publish_expected_lineage_snapshot(
     return copy.deepcopy(readback_snapshot)
 
 
-def read_expected_lineage_snapshot(
+def _read_canonical_lineage_snapshot_object(
     root: Path,
     original_controller_run_id: str,
-    wait_record: object,
-    claim_record: object,
 ) -> dict[str, Any]:
-    """Read and validate version 1.0 expected lineage snapshot against wait and claim records.
-
-    READ-ONLY custody. Never grants wake, execution, replay, or cleanup authority.
-    """
+    """Read canonical JSON object bytes from run directory under descriptor validation."""
     if not isinstance(root, Path):
         raise SnapshotStorageError("root must be a Path")
     if type(original_controller_run_id) is not str:
@@ -394,21 +390,6 @@ def read_expected_lineage_snapshot(
         )
     if not original_controller_run_id:
         raise SnapshotStorageError("original_controller_run_id must be a non-empty string")
-    if type(wait_record) is not dict:
-        raise SnapshotStorageError(f"wait_record must be exact dict, got {type(wait_record).__name__}")
-    if type(claim_record) is not dict:
-        raise SnapshotStorageError(f"claim_record must be exact dict, got {type(claim_record).__name__}")
-
-    wait_orig_cid = wait_record.get("controller_run_id")
-    if type(wait_orig_cid) is not str or wait_orig_cid != original_controller_run_id:
-        raise SnapshotStorageError(
-            f"wait_record controller_run_id {wait_orig_cid!r} does not match {original_controller_run_id!r}"
-        )
-    claim_orig_cid = claim_record.get("original_controller_run_id")
-    if type(claim_orig_cid) is not str or claim_orig_cid != original_controller_run_id:
-        raise SnapshotStorageError(
-            f"claim_record original_controller_run_id {claim_orig_cid!r} does not match {original_controller_run_id!r}"
-        )
 
     target_name = QUOTA_RESUME_LINEAGE_SNAPSHOT_FILENAME
 
@@ -541,26 +522,7 @@ def read_expected_lineage_snapshot(
                 if data != canonical_bytes:
                     raise SnapshotStorageError(f"{target_name} is not canonical JSON bytes")
 
-                try:
-                    validated = validate_expected_lineage_snapshot(
-                        snapshot=payload,
-                        wait_record=wait_record,
-                        claim_record=claim_record,
-                    )
-                except (KeyboardInterrupt, SystemExit):
-                    raise
-                except LineageSnapshotRecordError as exc:
-                    raise SnapshotStorageError(f"expected lineage snapshot validation failed: {exc}") from exc
-                except Exception as exc:
-                    raise SnapshotStorageError(f"unexpected error validating expected lineage snapshot: {exc}") from exc
-
-                snap_orig_cid = validated.get("original_controller_run_id")
-                if type(snap_orig_cid) is not str or snap_orig_cid != original_controller_run_id:
-                    raise SnapshotStorageError(
-                        f"snapshot original_controller_run_id {snap_orig_cid!r} does not match {original_controller_run_id!r}"
-                    )
-
-                return copy.deepcopy(validated)
+                return copy.deepcopy(payload)
             finally:
                 try:
                     os.close(file_fd)
@@ -573,3 +535,78 @@ def read_expected_lineage_snapshot(
         raise
     except BrokerError as exc:
         raise SnapshotStorageError(f"cannot safely open cycle run directory: {exc}") from exc
+
+
+def read_untrusted_expected_lineage_snapshot_candidate(
+    root: Path,
+    original_controller_run_id: str,
+) -> dict[str, Any]:
+    """Read untrusted expected lineage snapshot candidate as detached canonical JSON object.
+
+    READ-ONLY detached reader without semantic lineage validation or wake/ack/replay authority.
+    """
+    return _read_canonical_lineage_snapshot_object(
+        root=root,
+        original_controller_run_id=original_controller_run_id,
+    )
+
+
+def read_expected_lineage_snapshot(
+    root: Path,
+    original_controller_run_id: str,
+    wait_record: object,
+    claim_record: object,
+) -> dict[str, Any]:
+    """Read and validate version 1.0 expected lineage snapshot against wait and claim records.
+
+    READ-ONLY custody. Never grants wake, execution, replay, or cleanup authority.
+    """
+    if not isinstance(root, Path):
+        raise SnapshotStorageError("root must be a Path")
+    if type(original_controller_run_id) is not str:
+        raise SnapshotStorageError(
+            f"original_controller_run_id must be exact str, got {type(original_controller_run_id).__name__}"
+        )
+    if not original_controller_run_id:
+        raise SnapshotStorageError("original_controller_run_id must be a non-empty string")
+    if type(wait_record) is not dict:
+        raise SnapshotStorageError(f"wait_record must be exact dict, got {type(wait_record).__name__}")
+    if type(claim_record) is not dict:
+        raise SnapshotStorageError(f"claim_record must be exact dict, got {type(claim_record).__name__}")
+
+    wait_orig_cid = wait_record.get("controller_run_id")
+    if type(wait_orig_cid) is not str or wait_orig_cid != original_controller_run_id:
+        raise SnapshotStorageError(
+            f"wait_record controller_run_id {wait_orig_cid!r} does not match {original_controller_run_id!r}"
+        )
+    claim_orig_cid = claim_record.get("original_controller_run_id")
+    if type(claim_orig_cid) is not str or claim_orig_cid != original_controller_run_id:
+        raise SnapshotStorageError(
+            f"claim_record original_controller_run_id {claim_orig_cid!r} does not match {original_controller_run_id!r}"
+        )
+
+    payload = _read_canonical_lineage_snapshot_object(
+        root=root,
+        original_controller_run_id=original_controller_run_id,
+    )
+
+    try:
+        validated = validate_expected_lineage_snapshot(
+            snapshot=payload,
+            wait_record=wait_record,
+            claim_record=claim_record,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except LineageSnapshotRecordError as exc:
+        raise SnapshotStorageError(f"expected lineage snapshot validation failed: {exc}") from exc
+    except Exception as exc:
+        raise SnapshotStorageError(f"unexpected error validating expected lineage snapshot: {exc}") from exc
+
+    snap_orig_cid = validated.get("original_controller_run_id")
+    if type(snap_orig_cid) is not str or snap_orig_cid != original_controller_run_id:
+        raise SnapshotStorageError(
+            f"snapshot original_controller_run_id {snap_orig_cid!r} does not match {original_controller_run_id!r}"
+        )
+
+    return copy.deepcopy(validated)
