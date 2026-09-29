@@ -50,7 +50,10 @@ case "${1:-}" in
     command -v tmux >/dev/null || { printf 'ERROR: tmux is unavailable\n' >&2; exit 2; }
     APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
       /usr/bin/python3 scripts/two_site_codex_autopilot.py --root "$root" --check
-    /usr/bin/rm -f -- "$state_root/STOP"
+    if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$root/STOP" || -L "$root/STOP" ]]; then
+      printf 'ERROR: STOP file present\n' >&2
+      exit 2
+    fi
     if ! tmux has-session -t "=$broker_session" 2>/dev/null; then
       printf -v broker_command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
@@ -73,6 +76,10 @@ case "${1:-}" in
       printf 'PROVIDER_BROKER=RUNNING session=%s\n' "$broker_session"
       printf 'AUTOPILOT=ALREADY_RUNNING session=%s\n' "$session"
     else
+      if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$root/STOP" || -L "$root/STOP" ]]; then
+        printf 'ERROR: STOP file present\n' >&2
+        exit 2
+      fi
       printf -v command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
         /usr/bin/python3 "$root/scripts/two_site_codex_autopilot.py" --root "$root"
