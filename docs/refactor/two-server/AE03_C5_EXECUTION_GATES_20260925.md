@@ -50,7 +50,7 @@ Status: **PARTIALLY IMPLEMENTED / NO LIVE WAKE**. No live CLI, Supervisor, or Br
 
 The following items remain strictly open and unverified; NO LIVE WAKE is permitted:
 - **Atomic race semantics of concurrent STOP vs actual Provider start:** Window where STOP file appears or signal fires concurrently with Provider process spawn requires formal race resolution.
-- **Supervisor durable final acknowledgement/wake integration:** Supervisor integration to read terminal continuation receipts, log final acknowledged Codex acceptance, and trigger safe wake remains unintegrated.
+- **Supervisor durable final acknowledgement/wake integration:** The dormant accepted-lineage and `final-ack.json` storage/bridge units are implemented and hermetically tested, but `run_cycle` does not yet invoke them, recover interrupted publication, or trigger a safe wake. This live integration remains OPEN.
 - **Full synthetic fault matrix plus necessary bounded live smoke/cohorts:** Comprehensive fault-injection matrix across all failure boundaries and bounded live 1/3/10/20 cohort verification are not yet run.
 - **C4c retention:** Retention pruning remains dormant; terminal continuation receipts must remain reference-free for >=10 days and await durable final acknowledgement before any cleanup.
 - **No authority for auto replay/production activation:** Automatic replay remains strictly forbidden; no production/DNS/Web Writer action or live route authorization is granted. AE03/C5 is not complete.
@@ -95,20 +95,20 @@ If receipt publication crashes or fails after Provider dispatch, the state is re
   - `run_loop` implements the locked `WAITING_QUOTA` path (`accept_cycle_quota_disposition_locked`), while `scripts/two_site_quota_supervisor_resume_submit.py` provides a dormant one-shot submission bridge.
   - Broker separately persists durable terminal continuation receipts (`read_terminal_continuation_record` in `.local/.../terminal-continuation/<request-id>.json`).
   - `run_cycle` executes the Codex child (which may commit), reads `result.json`, validates the repository transition, and updates mutable `status.json`.
-  - *Missing proof:* No independent immutable record binds Codex final acceptance back to the original wait record, claim, one-shot submission intent (`quota-resume-submission.json`), and Broker terminal receipt. Mutable `status.json` cannot serve as an authoritative audit witness.
+  - *Missing live proof:* Dormant file-bound accepted lineage and `final-ack.json` primitives can bind Codex acceptance to the original wait, claim, submission intent and Broker terminal receipt; `run_cycle` still lacks the caller/recovery wiring that would establish this in a live continuation. Mutable `status.json` cannot serve as an authoritative audit witness.
 - **Crash ambiguity and hard-stop semantics:**
   - A crash occurring after Codex commit but before any future acknowledgement is strictly AMBIGUOUS and MUST hard-stop.
   - Current code cannot safely reconstruct/publish an ack or replay automatically without risking duplicate dispatch or divergent state.
-- **Open design dependencies (not implemented facts):**
-  - Exact ack storage path, schema, and retention policy (must await C4c retention alignment).
+- **Open live-integration dependencies (not implemented facts):**
+  - Dormant path and schema are implemented as `<continuation-run-dir>/final-ack.json` version 1.0. Live publication/recovery and C4c retention policy remain OPEN.
   - Supervisor vs Broker lock ordering and file-descriptor isolation.
   - STOP vs dispatch concurrency race resolution.
   - Wake hook integration (preserving NO LIVE WAKE).
   - Supervisor crash recovery and restart validation.
 - **Smallest next implementation order:**
-  1. Prove immutable accepted-result/lineage source binding Codex acceptance back to wait/claim/submission/receipt lineage.
-  2. Design and unit test durable ack record from that source.
-  3. Wire Supervisor acceptance and recovery logic under Supervisor lock.
+  1. Immutable accepted-result/lineage source binding Codex acceptance back to wait/claim/submission/receipt lineage: dormant implementation and tests accepted; live call remains OPEN.
+  2. Durable ack record and one-shot storage from that source: dormant implementation and tests accepted.
+  3. Wire Supervisor acceptance and recovery logic under Supervisor lock: OPEN.
   4. Execute full synthetic fault matrix and controlled live gate before any activation.
 
 ### 6. Implementation prerequisite 1: immutable accepted-result lineage
@@ -121,9 +121,9 @@ If receipt publication crashes or fails after Provider dispatch, the state is re
   - Revalidation gate: explicit `validate_repository(require_clean=True)` and protected_refs/assignment_scope verification currently run only for `CONTINUE`; this is a REQUIRED new gate for both eligible acceptance states (`CONTINUE` and `COMPLETE`) before lineage publication.
   - Pruning protection: `run_dir` can be deleted by `prune_runs`; `accepted-lineage.json` must be explicitly protected from pruning until durable final ack and C4c reference-free retention (>=10 days).
 - **Implementation ordering and OPEN linkage gaps:**
-  - Order: (1) bind lineage, (2) publish immutable record, (3) publish durable ack.
+  - Order: (1) bind lineage, (2) publish immutable record, (3) publish durable ack. Dormant storage and bridges for these steps exist; live `run_cycle` publication/recovery remains OPEN.
   - Gate: do NOT publish `accepted-lineage.json` before independently verified original wait/claim/submission/terminal-receipt linkage is available; otherwise it is only a single-cycle checkpoint.
-  - OPEN gaps: `run_cycle` and Codex `result.json` currently lack parameters/fields linking to original wait record, `quota-resume-claim.json` SHA, `quota-resume-submission.json` SHA, and Broker terminal receipt (`<request-id>.json`). Schemas cannot be guessed and ack cannot be published while OPEN.
+  - OPEN gaps: `run_cycle` and Codex `result.json` currently lack parameters/fields linking to original wait record, `quota-resume-claim.json` SHA, `quota-resume-submission.json` SHA, and Broker terminal receipt (`<request-id>.json`). The dormant schemas do not supply those live bindings; live ack publication remains forbidden while this gap is OPEN.
 - **Record semantics:**
   - Canonical, descriptor-pinned, single-link 0600 no-overwrite record (`accepted-lineage.json` in `run_dir`) binding `result.json` SHA-256, repository `head_before`/`head_after`, protected refs, assignment SHA, and verified upstream lineage hashes.
 - **Crash ambiguity and hard-stop semantics:**
