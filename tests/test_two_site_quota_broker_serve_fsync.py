@@ -72,7 +72,7 @@ class TestTwoSiteQuotaBrokerServeFsync(unittest.TestCase):
             self.assertTrue(response_path.exists())
             self.assertFalse(claim_path.exists())
 
-    def test_serve_fsync_failure_on_response_preserves_claim_and_recovers(self) -> None:
+    def test_serve_fsync_failure_on_response_preserves_claim_and_recovery_hard_stops(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             _, _, requests, claimed, responses = broker.broker_paths(root)
@@ -111,13 +111,14 @@ class TestTwoSiteQuotaBrokerServeFsync(unittest.TestCase):
                 self.assertTrue(claim_path.exists())
                 mock_adapter.assert_called_once()
 
-                broker._recover_interrupted_claims(root, claimed, responses)
+                with self.assertRaises(broker.BrokerError):
+                    broker._recover_interrupted_claims(root, claimed, responses)
 
                 self.assertTrue(response_path.exists())
                 saved_resp = json.loads(response_path.read_text(encoding="utf-8"))
                 self.assertEqual(saved_resp["request_id"], req_id)
                 self.assertEqual(saved_resp["state"], "COMPLETED")
-                self.assertFalse(claim_path.exists())
+                self.assertTrue(claim_path.exists())
                 mock_adapter.assert_called_once()
 
 

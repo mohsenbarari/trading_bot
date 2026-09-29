@@ -1116,8 +1116,56 @@ def _recover_interrupted_claims(
 
         response_path = _response_path(responses, request_id)
 
-        if request.get("request_type") == "QUOTA_CONTINUATION" and matching_receipt_present:
-            raise BrokerError("unexpected terminal quota receipt for continuation request")
+        if request.get("request_type") == "QUOTA_CONTINUATION":
+            if matching_receipt_present:
+                raise BrokerError("unexpected terminal quota receipt for continuation request")
+            terminal_continuation = claimed.parent / "terminal-continuation"
+            try:
+                continuation_entries = scan_private_record_directory(terminal_continuation)
+                if name not in continuation_entries:
+                    raise BrokerError("continuation terminal receipt is missing or invalid")
+                try:
+                    from scripts.two_site_quota_continuation_terminal_storage import (
+                        read_terminal_continuation_record,
+                    )
+                except ModuleNotFoundError:
+                    from two_site_quota_continuation_terminal_storage import (  # type: ignore[no-redef]
+                        read_terminal_continuation_record,
+                    )
+                receipt = read_terminal_continuation_record(
+                    root, request_id, expected_request=request
+                )
+                if not isinstance(receipt, dict) or "response" not in receipt:
+                    raise BrokerError("continuation terminal receipt is missing or invalid")
+                recorded_response = receipt["response"]
+                validate_response(request, recorded_response)
+            except Exception:
+                raise BrokerError("continuation terminal receipt is missing or invalid") from None
+
+            if not os.path.lexists(response_path):
+                _atomic_new_json(response_path, recorded_response, MAX_RESPONSE_BYTES)
+                fsync_private_record_directory(responses)
+            else:
+                existing_resp = _safe_read_existing_response(root, response_path)
+                validate_response(request, existing_resp)
+                try:
+                    existing_resp_canonical = json.dumps(
+                        existing_resp, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode("utf-8")
+                    receipt_resp_canonical = json.dumps(
+                        recorded_response, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode("utf-8")
+                except (ValueError, TypeError):
+                    raise BrokerError("response contains non-finite numbers") from None
+
+                if existing_resp_canonical != receipt_resp_canonical:
+                    raise BrokerError("existing response does not match receipt response")
+
+                fsync_private_record_directory(responses)
+
+            path.unlink()
+            fsync_private_record_directory(claimed)
+            continue
 
         if matching_receipt_present:
             receipt = read_terminal_quota_record(root, request_id)
