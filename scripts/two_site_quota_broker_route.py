@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,18 @@ from scripts.two_site_quota_resume_role_dispatch import (
 from scripts.two_site_quota_resume_submission_intent import (
     read_quota_resume_submission_intent,
 )
+
+
+def _check_pre_dispatch_stop(root: Path) -> None:
+    from scripts import two_site_provider_broker as broker
+
+    stop_val = getattr(broker, "_STOP", None)
+    if type(stop_val) is not bool or stop_val is not False:
+        raise broker.BrokerError("stop requested before continuation dispatch")
+
+    stop_path = root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+    if os.path.lexists(stop_path):
+        raise broker.BrokerError("stop requested before continuation dispatch")
 
 
 def execute_intent_bound_continuation(
@@ -35,5 +48,6 @@ def execute_intent_bound_continuation(
         admitted["original_controller_run_id"],
         admitted,
     )
+    _check_pre_dispatch_stop(root)
     result = dispatch_quota_continuation_once(root, admitted)
     return build_continuation_broker_response(admitted, result)

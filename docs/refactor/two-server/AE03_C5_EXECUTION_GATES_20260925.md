@@ -49,7 +49,7 @@ Status: **PARTIALLY IMPLEMENTED / NO LIVE WAKE**. No live CLI, Supervisor, or Br
 ### Still open / remaining gates
 
 The following items remain strictly open and unverified; NO LIVE WAKE is permitted:
-- **Atomic race semantics of concurrent STOP vs actual Provider start:** Window where STOP file appears or signal fires concurrently with Provider process spawn requires formal race resolution.
+- **Atomic race semantics of concurrent STOP vs actual Provider start:** A second route-level check now rejects STOP file, broken symlink, signal flag, or invalid flag state arriving during continuation admission/intent read, before role dispatch. Focused hermetic tests and existing Broker recovery tests pass. This proves the logical pre-dispatch boundary and conservative claim retention, **not** wall-clock atomicity between an uncoordinated external STOP creation and actual Provider process spawn; that remaining race still requires formal resolution before live wake.
 - **Supervisor durable final acknowledgement/wake integration:** The dormant accepted-lineage and `final-ack.json` storage/bridge units are implemented and hermetically tested, but `run_cycle` does not yet invoke them, recover interrupted publication, or trigger a safe wake. This live integration remains OPEN.
 - **Full synthetic fault matrix plus necessary bounded live smoke/cohorts:** Comprehensive fault-injection matrix across all failure boundaries and bounded live 1/3/10/20 cohort verification are not yet run.
 - **C4c retention:** Retention pruning remains dormant; terminal continuation receipts must remain reference-free for >=10 days and await durable final acknowledgement before any cleanup.
