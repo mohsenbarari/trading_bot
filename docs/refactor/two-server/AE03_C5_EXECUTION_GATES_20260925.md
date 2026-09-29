@@ -89,3 +89,24 @@ If receipt publication crashes or fails after Provider dispatch, the state is re
   - *Crash boundaries:* Crash before receipt = ambiguous; crash after receipt before response = recovered from receipt; crash after response before unlink = claim unlinked cleanly on restart.
   - *Integrity:* Symlink, non-regular file, wrong UID/mode (0600), corrupted JSON, hash mismatch, or oversized payload (>2.28MB) causes immediate fail-closed stop.
   - *STOP / Drift:* STOP before dispatch stops execution; STOP after completed Provider preserves custody. Any ref, HEAD, or assignment drift halts execution without replay.
+
+### 5. Supervisor acknowledgement prerequisite audit
+- **Existing code facts vs missing lineage proof:**
+  - `run_loop` implements the locked `WAITING_QUOTA` path (`accept_cycle_quota_disposition_locked`), while `scripts/two_site_quota_supervisor_resume_submit.py` provides a dormant one-shot submission bridge.
+  - Broker separately persists durable terminal continuation receipts (`read_terminal_continuation_record` in `.local/.../terminal-continuation/<request-id>.json`).
+  - `run_cycle` executes the Codex child (which may commit), reads `result.json`, validates the repository transition, and updates mutable `status.json`.
+  - *Missing proof:* No independent immutable record binds Codex final acceptance back to the original wait record, claim, one-shot submission intent (`quota-resume-submission.json`), and Broker terminal receipt. Mutable `status.json` cannot serve as an authoritative audit witness.
+- **Crash ambiguity and hard-stop semantics:**
+  - A crash occurring after Codex commit but before any future acknowledgement is strictly AMBIGUOUS and MUST hard-stop.
+  - Current code cannot safely reconstruct/publish an ack or replay automatically without risking duplicate dispatch or divergent state.
+- **Open design dependencies (not implemented facts):**
+  - Exact ack storage path, schema, and retention policy (must await C4c retention alignment).
+  - Supervisor vs Broker lock ordering and file-descriptor isolation.
+  - STOP vs dispatch concurrency race resolution.
+  - Wake hook integration (preserving NO LIVE WAKE).
+  - Supervisor crash recovery and restart validation.
+- **Smallest next implementation order:**
+  1. Prove immutable accepted-result/lineage source binding Codex acceptance back to wait/claim/submission/receipt lineage.
+  2. Design and unit test durable ack record from that source.
+  3. Wire Supervisor acceptance and recovery logic under Supervisor lock.
+  4. Execute full synthetic fault matrix and controlled live gate before any activation.
