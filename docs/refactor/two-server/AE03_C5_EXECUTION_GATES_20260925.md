@@ -110,3 +110,25 @@ If receipt publication crashes or fails after Provider dispatch, the state is re
   2. Design and unit test durable ack record from that source.
   3. Wire Supervisor acceptance and recovery logic under Supervisor lock.
   4. Execute full synthetic fault matrix and controlled live gate before any activation.
+
+### 6. Implementation prerequisite 1: immutable accepted-result lineage
+- **Existing evidence vs non-authority hints:**
+  - `accepted_checkpoint.json` is an atomic replaceable (`os.replace`) CONTINUE cache hint, not an immutable audit journal.
+  - `status.json` in `run_dir` is mutable heartbeat telemetry updated across phases, never final proof.
+  - Codex `result.json` and git repository facts provide single-cycle execution output, but lack durable lineage.
+- **Earliest safe publication boundary and required gates:**
+  - Boundary: in `run_cycle` immediately after `validate_transition`.
+  - Revalidation gate: explicit `validate_repository(require_clean=True)` and protected_refs/assignment_scope verification currently run only for `CONTINUE`; this is a REQUIRED new gate for both eligible acceptance states (`CONTINUE` and `COMPLETE`) before lineage publication.
+  - Pruning protection: `run_dir` can be deleted by `prune_runs`; `accepted-lineage.json` must be explicitly protected from pruning until durable final ack and C4c reference-free retention (>=10 days).
+- **Implementation ordering and OPEN linkage gaps:**
+  - Order: (1) bind lineage, (2) publish immutable record, (3) publish durable ack.
+  - Gate: do NOT publish `accepted-lineage.json` before independently verified original wait/claim/submission/terminal-receipt linkage is available; otherwise it is only a single-cycle checkpoint.
+  - OPEN gaps: `run_cycle` and Codex `result.json` currently lack parameters/fields linking to original wait record, `quota-resume-claim.json` SHA, `quota-resume-submission.json` SHA, and Broker terminal receipt (`<request-id>.json`). Schemas cannot be guessed and ack cannot be published while OPEN.
+- **Record semantics:**
+  - Canonical, descriptor-pinned, single-link 0600 no-overwrite record (`accepted-lineage.json` in `run_dir`) binding `result.json` SHA-256, repository `head_before`/`head_after`, protected refs, assignment SHA, and verified upstream lineage hashes.
+- **Crash ambiguity and hard-stop semantics:**
+  - A crash occurring after Codex commit but before durable publication of `accepted-lineage.json` remains strictly AMBIGUOUS and MUST hard-stop.
+  - No automated Codex retry, no Provider replay, and NO LIVE WAKE are authorized.
+- **Hermetic test matrix & sequencing:**
+  - Hermetic tests: missing/conflicting receipt, dirty/ref/assignment drift, duplicate record collision (`EEXIST`), crash before publication (remains ambiguous), crash after publication (lineage preserved), and pruning protection.
+  - Only after acceptance-lineage unit passes hermetic tests may a subsequent Supervisor ack unit be designed.
