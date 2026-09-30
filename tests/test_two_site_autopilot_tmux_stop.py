@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -137,6 +138,129 @@ exit 0
             self.assertIn("STOP file present", res.stderr)
             root_stop.unlink()
 
+    def test_stop_source_safety_invariants(self) -> None:
+        """Assert source-level invariants for STOP in scripts/two_site_autopilot_tmux.sh."""
+        stop_match = re.search(r"\n\s*stop\)(.*?);;", self.script_content, re.DOTALL)
+        self.assertIsNotNone(stop_match, "Could not find stop) branch in script")
+        stop_block = stop_match.group(1)
 
-if __name__ == "__main__":
-    unittest.main()
+        self.assertNotRegex(stop_block, r"\btouch\b", "stop) must not use touch")
+        self.assertNotRegex(stop_block, r"\brm\b|\bunlink\b", "stop) must not unlink")
+        self.assertIn("/usr/bin/python3", stop_block)
+        self.assertNotRegex(stop_block, r"\$\{?PYTHON", "stop) must never use caller-controlled PYTHON")
+        self.assertRegex(
+            stop_block,
+            r'/usr/bin/python3\s+"\$root/scripts/two_site_controlled_stop\.py"\s+--root\s+"\$root"',
+        )
+        self.assertIn("AUTOPILOT=STOP_REQUESTED", stop_block)
+
+    def test_copied_temp_git_root_launcher_success(self) -> None:
+        """Hermetic execution of stop in a copied temporary Git root succeeds and creates STOP."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = Path(tmpdir).resolve()
+            os.chmod(repo_dir, 0o700)
+            _setup_temp_git_repo(repo_dir)
+
+            res = subprocess.run(
+                ["bash", "scripts/two_site_autopilot_tmux.sh", "stop"],
+                cwd=str(repo_dir),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0, f"stop failed: {res.stderr}")
+            self.assertIn("AUTOPILOT=STOP_REQUESTED session=two-site-autopilot", res.stdout)
+
+            stop_path = repo_dir / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+            self.assertTrue(stop_path.is_file(), "STOP file must exist after successful stop")
+            self.assertEqual(stop_path.read_bytes(), b"STOP\n")
+            self.assertEqual(stat.S_IMODE(os.lstat(stop_path).st_mode), 0o600)
+
+    def test_copied_temp_git_root_python_true_bypass_rejection(self) -> None:
+        """PYTHON=/bin/true cannot bypass controlled stop helper or fake STOP_REQUESTED."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = Path(tmpdir).resolve()
+            os.chmod(repo_dir, 0o700)
+            _setup_temp_git_repo(repo_dir)
+
+            env = os.environ.copy()
+            env["PYTHON"] = "/bin/true"
+            res = subprocess.run(
+                ["bash", "scripts/two_site_autopilot_tmux.sh", "stop"],
+                cwd=str(repo_dir),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0, f"stop failed: {res.stderr}")
+            self.assertIn("AUTOPILOT=STOP_REQUESTED session=two-site-autopilot", res.stdout)
+
+            stop_path = repo_dir / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+            self.assertTrue(
+                stop_path.is_file(),
+                "STOP file must be created by fixed /usr/bin/python3 even with PYTHON=/bin/true",
+            )
+            self.assertEqual(stop_path.read_bytes(), b"STOP\n")
+
+    def test_copied_temp_git_root_helper_failure_no_success(self) -> None:
+        """When controlled stop helper fails, stop launcher fails closed with no false success."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = Path(tmpdir).resolve()
+            os.chmod(repo_dir, 0o700)
+            _setup_temp_git_repo(repo_dir)
+
+            lock_dir = repo_dir / ".local" / "two-site-refactor" / "proposals" / ".runner.lock"
+            lock_dir.mkdir(parents=True, mode=0o700)
+
+            res = subprocess.run(
+                ["bash", "scripts/two_site_autopilot_tmux.sh", "stop"],
+                cwd=str(repo_dir),
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(res.returncode, 0, "stop must fail when helper fails")
+            self.assertNotIn("STOP_REQUESTED", res.stdout)
+            self.assertIn("ERROR: controlled stop failed", res.stderr)
+
+            stop_path = repo_dir / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+            self.assertFalse(stop_path.exists(), "STOP marker must not be created on helper failure")
+
+
+def _setup_temp_git_repo(repo_dir: Path) -> None:
+    subprocess.run(["git", "init", str(repo_dir)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "checkout", "-b", "refactor/two-site-architecture"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "config", "user.name", "Test User"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    scripts_dir = repo_dir / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    sh_src = SCRIPT_PATH.read_text(encoding="utf-8")
+    py_src = (REPO_ROOT / "scripts" / "two_site_controlled_stop.py").read_text(encoding="utf-8")
+    (scripts_dir / "two_site_autopilot_tmux.sh").write_text(sh_src, encoding="utf-8")
+    (scripts_dir / "two_site_controlled_stop.py").write_text(py_src, encoding="utf-8")
+    (scripts_dir / "two_site_autopilot_tmux.sh").chmod(0o755)
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "add", "."],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "commit", "-m", "Initial test commit"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_dir), "checkout", "-B", "refactor/two-site-architecture"],
+        check=True,
+        capture_output=True,
+    )

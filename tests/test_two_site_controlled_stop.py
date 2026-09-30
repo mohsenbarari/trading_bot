@@ -5,11 +5,14 @@ from __future__ import annotations
 import errno
 import fcntl
 import inspect
+import io
 import math
 import multiprocessing as mp
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -20,7 +23,9 @@ os.environ.setdefault("APP_ENV_FILE", "config/unit-test.env.example")
 from scripts.two_site_controlled_stop import (
     ControlledStopError,
     DEFAULT_LOCK_WAIT_SECONDS,
+    GENERIC_CLI_ERROR_MESSAGE,
     STOP_MARKER,
+    main,
     publish_controlled_stop,
 )
 
@@ -340,6 +345,69 @@ class TestTwoSiteControlledStop(unittest.TestCase):
 
         self.assertTrue(published.is_file(), "Existing STOP must remain intact after fsync failure")
         self.assertEqual(published.read_bytes(), STOP_MARKER)
+
+    def test_cli_main_success(self) -> None:
+        """CLI main publishes STOP marker and returns 0."""
+        ret = main(["--root", str(self.root)])
+        self.assertEqual(ret, 0)
+        stop_path = self.root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+        self.assertTrue(stop_path.is_file())
+        self.assertEqual(stop_path.read_bytes(), STOP_MARKER)
+        self.assertEqual(stat.S_IMODE(os.lstat(stop_path).st_mode), 0o600)
+
+    def test_cli_main_failure_fixed_generic_error_redaction(self) -> None:
+        """All CLI main failure cases emit only fixed generic error text with no raw details."""
+        nonexistent_root = self.root / "nonexistent_sub_dir_12345"
+        failure_cases = [
+            [],
+            ["--root"],
+            ["--unknown-flag"],
+            ["--root", str(nonexistent_root)],
+            ["--root", "relative/path/not/absolute"],
+            ["--root", str(self.root), "--lock-wait-seconds", "-10"],
+            ["--root", str(self.root), "--lock-wait-seconds", "not_a_number"],
+            ["--root", str(self.root), "extra_positional_arg"],
+        ]
+        for argv in failure_cases:
+            with self.subTest(argv=argv):
+                stderr_buf = io.StringIO()
+                orig_stderr = sys.stderr
+                try:
+                    sys.stderr = stderr_buf
+                    ret = main(argv)
+                finally:
+                    sys.stderr = orig_stderr
+                self.assertEqual(ret, 1)
+                stderr_output = stderr_buf.getvalue()
+                self.assertEqual(stderr_output, GENERIC_CLI_ERROR_MESSAGE)
+                self.assertNotIn(str(nonexistent_root), stderr_output)
+                self.assertNotIn("ControlledStopError", stderr_output)
+                self.assertNotIn("Traceback", stderr_output)
+
+    def test_cli_subprocess_execution(self) -> None:
+        """Direct subprocess invocation matches expected success and error redaction."""
+        repo_root = Path(__file__).resolve().parent.parent
+        script_file = repo_root / "scripts" / "two_site_controlled_stop.py"
+
+        res_ok = subprocess.run(
+            ["/usr/bin/python3", str(script_file), "--root", str(self.root)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res_ok.returncode, 0)
+        self.assertEqual(res_ok.stderr, "")
+        stop_path = self.root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
+        self.assertTrue(stop_path.is_file())
+
+        bogus_dir = self.root / "sub_nonexistent_secret_dir"
+        res_fail = subprocess.run(
+            ["/usr/bin/python3", str(script_file), "--root", str(bogus_dir)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res_fail.returncode, 1)
+        self.assertEqual(res_fail.stderr, GENERIC_CLI_ERROR_MESSAGE)
+        self.assertNotIn(str(bogus_dir), res_fail.stderr)
 
 
 if __name__ == "__main__":

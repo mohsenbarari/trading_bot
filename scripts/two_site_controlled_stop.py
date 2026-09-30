@@ -7,17 +7,20 @@ exclusive proposal runner lock.
 
 from __future__ import annotations
 
+import argparse
 import errno
 import fcntl
 import math
 import os
 from pathlib import Path
 import stat
+import sys
 import time
 from typing import Union
 
 DEFAULT_LOCK_WAIT_SECONDS: float = 1200.0
 STOP_MARKER: bytes = b"STOP\n"
+GENERIC_CLI_ERROR_MESSAGE: str = "ERROR: controlled stop failed\n"
 
 _OPEN_DIR_FLAGS: int = (
     os.O_RDONLY
@@ -443,11 +446,49 @@ def publish_controlled_stop(
 request_controlled_stop = publish_controlled_stop
 write_controlled_stop = publish_controlled_stop
 
+
+class _ControlledStopArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ControlledStopError(message)
+
+    def exit(self, status: int = 0, message: str | None = None) -> None:
+        raise ControlledStopError(message or "argument parsing failed")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for publishing controlled STOP marker."""
+    parser = _ControlledStopArgumentParser(
+        prog="two_site_controlled_stop",
+        description="Controlled STOP publication helper",
+        add_help=False,
+    )
+    parser.add_argument("--root", required=True)
+    parser.add_argument(
+        "--lock-wait-seconds",
+        type=float,
+        default=DEFAULT_LOCK_WAIT_SECONDS,
+    )
+    try:
+        if argv is None:
+            argv = sys.argv[1:]
+        args = parser.parse_args(argv)
+        publish_controlled_stop(args.root, lock_wait_seconds=args.lock_wait_seconds)
+        return 0
+    except (ControlledStopError, Exception, SystemExit):
+        sys.stderr.write(GENERIC_CLI_ERROR_MESSAGE)
+        return 1
+
+
 __all__ = [
     "ControlledStopError",
     "DEFAULT_LOCK_WAIT_SECONDS",
+    "GENERIC_CLI_ERROR_MESSAGE",
     "STOP_MARKER",
+    "main",
     "publish_controlled_stop",
     "request_controlled_stop",
     "write_controlled_stop",
 ]
+
+if __name__ == "__main__":
+    sys.exit(main())

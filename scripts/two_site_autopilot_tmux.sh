@@ -105,8 +105,7 @@ case "${1:-}" in
     fi
     ;;
   stop)
-    mkdir -p -- "$state_root"
-    /usr/bin/touch "$state_root/STOP"
+    /usr/bin/python3 "$root/scripts/two_site_controlled_stop.py" --root "$root"
     printf 'AUTOPILOT=STOP_REQUESTED session=%s\n' "$session"
     ;;
   stop-now)
