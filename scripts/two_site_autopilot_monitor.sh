@@ -7,9 +7,7 @@ state_root="$integration_root/.local/two-site-refactor/autopilot"
 report_root="$integration_root/.local/two-site-refactor/monitor"
 status_file="$state_root/status.json"
 session="two-site-autopilot"
-expected_main="cd86fb928dac3755fd25bd2af2245345d7979d7d"
-expected_origin_main="4fcb319820986438f159635a339aec649aea371c"
-expected_candidate="c3fe6ae72038c0059ef04474d908e819785bef07"
+broker_session="two-site-provider-broker"
 recovery_file="$report_root/recovery.json"
 antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.1.27-93eb2118b778a400.pin"
 expected_antigravity_sha256="93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
@@ -110,12 +108,6 @@ fi
 short_status_head="${status_head:0:8}"
 
 protected_refs_ok=false
-current_main="$(/usr/bin/timeout 20 /usr/bin/git -C "$integration_root" show-ref --verify --hash refs/heads/main 2>/dev/null || true)"
-current_origin_main="$(/usr/bin/timeout 20 /usr/bin/git -C "$integration_root" show-ref --verify --hash refs/remotes/origin/main 2>/dev/null || true)"
-current_candidate="$(/usr/bin/timeout 20 /usr/bin/git -C "$integration_root" show-ref --verify --hash refs/heads/candidate/wa-ir-standby-v1 2>/dev/null || true)"
-if [[ "$current_main" == "$expected_main" && "$current_origin_main" == "$expected_origin_main" && "$current_candidate" == "$expected_candidate" ]]; then
-  protected_refs_ok=true
-fi
 
 health="DEGRADED"
 liveness="UNKNOWN"
@@ -185,8 +177,9 @@ elif [[ "$state" == "BLOCKED" && "$status_head" == "-"
 fi
 if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0
       && "$git_clean" == true && "$git_branch" == "refactor/two-site-architecture"
-      && "$status_head_compatible" == true && "$protected_refs_ok" == true
-      && ! -e "$state_root/STOP" ]]; then
+      && "$status_head_compatible" == true
+      && ! -e "$state_root/STOP" && ! -L "$state_root/STOP"
+      && ! -e "$integration_root/STOP" && ! -L "$integration_root/STOP" ]]; then
   if [[ "$state" == "RUNNING" || "$state" == "RETRYABLE_FAILURE" ]]; then
     restart_eligible=true
     recovery_reason="unexpected_process_exit"
@@ -224,90 +217,152 @@ fi
 if [[ "$restart_eligible" == false && "$tmux_observation" == "present"
       && "$supervisor_count" -gt 0 && "$broker_count" -eq 0
       && "$git_clean" == true && "$git_branch" == "refactor/two-site-architecture"
-      && "$protected_refs_ok" == true && ! -e "$state_root/STOP" ]]; then
+      && ! -e "$state_root/STOP" && ! -L "$state_root/STOP"
+      && ! -e "$integration_root/STOP" && ! -L "$integration_root/STOP" ]]; then
   restart_eligible=true
   recovery_reason="provider_broker_missing"
 fi
 
 if [[ "$supervisor_count" -eq 0 && "$restart_eligible" == true ]]; then
-  if [[ -e "$state_root/STOP" ]]; then
+  if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
     restart_eligible=false
     provider_probe=false
-  elif [[ ! -d "$state_root" || -L "$state_root" ]]; then
-    restart_eligible=false
-    provider_probe=false
-    action="unresolved_model_intent_scan_failed"
+    action="stop_present"
   else
-    scan_status=0
-    /usr/bin/timeout 5 /usr/bin/python3 -c '
-import os, re, stat, sys
+    preflight_stdout_target="$report_root/preflight.latest.log"
+    preflight_stderr_target="$report_root/preflight.latest.stderr.log"
+    preflight_stdout_tmp="$(/usr/bin/mktemp "$report_root/.preflight.stdout.XXXXXX")"
+    preflight_stderr_tmp="$(/usr/bin/mktemp "$report_root/.preflight.stderr.XXXXXX")"
+    /usr/bin/chmod 0600 "$preflight_stdout_tmp" "$preflight_stderr_tmp" 2>/dev/null || true
+    preflight_exit=0
+    (ulimit -f 1024; /usr/bin/timeout 20 /usr/bin/python3 "$integration_root/scripts/two_site_autopilot_monitor_preflight.py" --root "$integration_root" >"$preflight_stdout_tmp" 2>"$preflight_stderr_tmp") || preflight_exit="$?"
 
-root_limit = 512
-epoch_limit = 16
-state_root = sys.argv[1]
+    publish_ok=true
+    stdout_size="$(/usr/bin/stat -c %s -- "$preflight_stdout_tmp" 2>/dev/null || printf '65537')"
+    stderr_size="$(/usr/bin/stat -c %s -- "$preflight_stderr_tmp" 2>/dev/null || printf '65537')"
+    if [[ ! "$stdout_size" =~ ^[0-9]+$ || "$stdout_size" -gt 65536 || ! "$stderr_size" =~ ^[0-9]+$ || "$stderr_size" -gt 65536 ]]; then
+      publish_ok=false
+    fi
+    if [[ -L "$preflight_stdout_target" || -L "$preflight_stderr_target" ]]; then
+      publish_ok=false
+    fi
+    if [[ -e "$preflight_stdout_target" && "$(/usr/bin/stat -c %h -- "$preflight_stdout_target" 2>/dev/null || printf '2')" -gt 1 ]]; then
+      publish_ok=false
+    fi
+    if [[ -e "$preflight_stderr_target" && "$(/usr/bin/stat -c %h -- "$preflight_stderr_target" 2>/dev/null || printf '2')" -gt 1 ]]; then
+      publish_ok=false
+    fi
 
-def check_dir(p):
-    st = os.lstat(p)
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-        sys.exit(20)
-    if st.st_uid != os.geteuid():
-        sys.exit(20)
-    if (st.st_mode & 0o500) != 0o500:
-        sys.exit(20)
+    if [[ "$publish_ok" == true ]]; then
+      if ! /usr/bin/mv -f -- "$preflight_stdout_tmp" "$preflight_stdout_target" 2>/dev/null; then
+        publish_ok=false
+      fi
+      if ! /usr/bin/mv -f -- "$preflight_stderr_tmp" "$preflight_stderr_target" 2>/dev/null; then
+        publish_ok=false
+      fi
+      if ! /usr/bin/chmod 0600 "$preflight_stdout_target" "$preflight_stderr_target" 2>/dev/null; then
+        publish_ok=false
+      fi
+      if [[ ! -f "$preflight_stdout_target" || -L "$preflight_stdout_target" ]] \
+          || [[ "$(/usr/bin/stat -c %h -- "$preflight_stdout_target" 2>/dev/null || printf '2')" != "1" ]] \
+          || [[ "$(/usr/bin/stat -c %a -- "$preflight_stdout_target" 2>/dev/null || printf '0')" != "600" ]] \
+          || [[ "$(/usr/bin/stat -c %s -- "$preflight_stdout_target" 2>/dev/null || printf '65537')" -gt 65536 ]]; then
+        publish_ok=false
+      fi
+      if [[ ! -f "$preflight_stderr_target" || -L "$preflight_stderr_target" ]] \
+          || [[ "$(/usr/bin/stat -c %h -- "$preflight_stderr_target" 2>/dev/null || printf '2')" != "1" ]] \
+          || [[ "$(/usr/bin/stat -c %a -- "$preflight_stderr_target" 2>/dev/null || printf '0')" != "600" ]] \
+          || [[ "$(/usr/bin/stat -c %s -- "$preflight_stderr_target" 2>/dev/null || printf '65537')" -gt 65536 ]]; then
+        publish_ok=false
+      fi
+    fi
+    /usr/bin/unlink -- "$preflight_stdout_tmp" 2>/dev/null || true
+    /usr/bin/unlink -- "$preflight_stderr_tmp" 2>/dev/null || true
 
-try:
-    check_dir(state_root)
-
-    intent_found = False
-    root_count = 0
-    with os.scandir(state_root) as it:
-        for entry in it:
-            root_count += 1
-            if root_count > root_limit:
-                sys.exit(20)
-            name = entry.name
-            if any(ord(c) < 32 or ord(c) > 126 for c in name):
-                sys.exit(20)
-            if name in ("rescope_intent_1", "rescope_intent_2", "rescope_intent_3"):
-                intent_found = True
-            elif name.startswith("rescope_intent_"):
-                sys.exit(20)
-            elif name.startswith("rescope"):
-                if not re.fullmatch(r"rescope-[0-9a-f]{64}", name):
-                    sys.exit(20)
-                if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
-                    sys.exit(20)
-                check_dir(entry.path)
-                epoch_count = 0
-                with os.scandir(entry.path) as epoch_it:
-                    for leaf in epoch_it:
-                        epoch_count += 1
-                        if epoch_count > epoch_limit:
-                            sys.exit(20)
-                        leaf_name = leaf.name
-                        if any(ord(c) < 32 or ord(c) > 126 for c in leaf_name):
-                            sys.exit(20)
-                        if leaf_name in ("rescope_intent_1", "rescope_intent_2", "rescope_intent_3"):
-                            intent_found = True
-                        elif leaf_name.startswith("rescope_intent_"):
-                            sys.exit(20)
-                        elif leaf.is_symlink() or not leaf.is_file(follow_symlinks=False):
-                            sys.exit(20)
-    if intent_found:
-        sys.exit(10)
-    sys.exit(0)
-except Exception:
-    sys.exit(20)
-' "$state_root" >/dev/null 2>&1 || scan_status="$?"
-
-    if [[ "$scan_status" -eq 10 ]]; then
+    if [[ "$publish_ok" == true && "$preflight_exit" -eq 0 ]] \
+        && /usr/bin/printf 'READY\n' | /usr/bin/cmp -s - "$preflight_stdout_target" \
+        && ! [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
+      protected_refs_ok=true
+    else
       restart_eligible=false
       provider_probe=false
-      action="unresolved_model_intent_no_restart"
-    elif [[ "$scan_status" -ne 0 ]]; then
+      if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
+        action="stop_present"
+      else
+        action="preflight_failed"
+      fi
+    fi
+  fi
+fi
+
+if [[ "$supervisor_count" -gt 0 && "$broker_count" -eq 0 && "$restart_eligible" == true ]]; then
+  if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
+    restart_eligible=false
+    provider_probe=false
+    action="stop_present"
+  else
+    broker_stdout_target="$report_root/broker-preflight.latest.log"
+    broker_stderr_target="$report_root/broker-preflight.latest.stderr.log"
+    broker_stdout_tmp="$(/usr/bin/mktemp "$report_root/.broker-preflight.stdout.XXXXXX")"
+    broker_stderr_tmp="$(/usr/bin/mktemp "$report_root/.broker-preflight.stderr.XXXXXX")"
+    /usr/bin/chmod 0600 "$broker_stdout_tmp" "$broker_stderr_tmp" 2>/dev/null || true
+    broker_preflight_exit=0
+    (ulimit -f 1024; /usr/bin/timeout 20 /usr/bin/python3 "$integration_root/scripts/two_site_autopilot_monitor_broker_preflight.py" --root "$integration_root" >"$broker_stdout_tmp" 2>"$broker_stderr_tmp") || broker_preflight_exit="$?"
+
+    broker_publish_ok=true
+    broker_stdout_size="$(/usr/bin/stat -c %s -- "$broker_stdout_tmp" 2>/dev/null || printf '65537')"
+    broker_stderr_size="$(/usr/bin/stat -c %s -- "$broker_stderr_tmp" 2>/dev/null || printf '65537')"
+    if [[ ! "$broker_stdout_size" =~ ^[0-9]+$ || "$broker_stdout_size" -gt 65536 || ! "$broker_stderr_size" =~ ^[0-9]+$ || "$broker_stderr_size" -gt 65536 ]]; then
+      broker_publish_ok=false
+    fi
+    if [[ -L "$broker_stdout_target" || -L "$broker_stderr_target" ]]; then
+      broker_publish_ok=false
+    fi
+    if [[ -e "$broker_stdout_target" && "$(/usr/bin/stat -c %h -- "$broker_stdout_target" 2>/dev/null || printf '2')" -gt 1 ]]; then
+      broker_publish_ok=false
+    fi
+    if [[ -e "$broker_stderr_target" && "$(/usr/bin/stat -c %h -- "$broker_stderr_target" 2>/dev/null || printf '2')" -gt 1 ]]; then
+      broker_publish_ok=false
+    fi
+
+    if [[ "$broker_publish_ok" == true ]]; then
+      if ! /usr/bin/mv -f -- "$broker_stdout_tmp" "$broker_stdout_target" 2>/dev/null; then
+        broker_publish_ok=false
+      fi
+      if ! /usr/bin/mv -f -- "$broker_stderr_tmp" "$broker_stderr_target" 2>/dev/null; then
+        broker_publish_ok=false
+      fi
+      if ! /usr/bin/chmod 0600 "$broker_stdout_target" "$broker_stderr_target" 2>/dev/null; then
+        broker_publish_ok=false
+      fi
+      if [[ ! -f "$broker_stdout_target" || -L "$broker_stdout_target" ]] \
+          || [[ "$(/usr/bin/stat -c %h -- "$broker_stdout_target" 2>/dev/null || printf '2')" != "1" ]] \
+          || [[ "$(/usr/bin/stat -c %a -- "$broker_stdout_target" 2>/dev/null || printf '0')" != "600" ]] \
+          || [[ "$(/usr/bin/stat -c %s -- "$broker_stdout_target" 2>/dev/null || printf '65537')" -gt 65536 ]]; then
+        broker_publish_ok=false
+      fi
+      if [[ ! -f "$broker_stderr_target" || -L "$broker_stderr_target" ]] \
+          || [[ "$(/usr/bin/stat -c %h -- "$broker_stderr_target" 2>/dev/null || printf '2')" != "1" ]] \
+          || [[ "$(/usr/bin/stat -c %a -- "$broker_stderr_target" 2>/dev/null || printf '0')" != "600" ]] \
+          || [[ "$(/usr/bin/stat -c %s -- "$broker_stderr_target" 2>/dev/null || printf '65537')" -gt 65536 ]]; then
+        broker_publish_ok=false
+      fi
+    fi
+    /usr/bin/unlink -- "$broker_stdout_tmp" 2>/dev/null || true
+    /usr/bin/unlink -- "$broker_stderr_tmp" 2>/dev/null || true
+
+    if [[ "$broker_publish_ok" == true && "$broker_preflight_exit" -eq 0 && "$broker_count" -eq 0 ]] \
+        && /usr/bin/printf 'READY\n' | /usr/bin/cmp -s - "$broker_stdout_target" \
+        && ! [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
+      protected_refs_ok=true
+    else
       restart_eligible=false
       provider_probe=false
-      action="unresolved_model_intent_scan_failed"
+      if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
+        action="stop_present"
+      else
+        action="preflight_failed"
+      fi
     fi
   fi
 fi
@@ -388,14 +443,53 @@ if [[ "$restart_eligible" == true ]]; then
     fi
     if [[ "$recovery_ok" == true ]]; then
       restart_tmp="$(/usr/bin/mktemp "$report_root/.restart.XXXXXX")"
-      if /usr/bin/timeout 45 "$integration_root/scripts/two_site_autopilot_tmux.sh" start >"$restart_tmp" 2>&1; then
-        action="restart_started"
-        health="RECOVERING"
+      if [[ "$recovery_reason" == "provider_broker_missing" ]]; then
+        recheck_supervisor="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_codex_autopilot.py --root $integration_root" 2>/dev/null || true)"
+        recheck_broker="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py --root $integration_root serve" 2>/dev/null || true)"
+        if [[ "$recheck_supervisor" -gt 0 && "$recheck_broker" -eq 0 ]] \
+            && /usr/bin/timeout 5 /usr/bin/tmux has-session -t "=$session" 2>/dev/null \
+            && ! /usr/bin/timeout 5 /usr/bin/tmux has-session -t "=$broker_session" 2>/dev/null \
+            && ! [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
+          printf -v broker_command '%q ' \
+            /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+            /usr/bin/python3 "$integration_root/scripts/two_site_provider_broker.py" --root "$integration_root" serve
+          if /usr/bin/timeout 15 /usr/bin/tmux new-session -d -s "$broker_session" -c "$integration_root" "$broker_command" >"$restart_tmp" 2>&1; then
+            broker_ready=false
+            for _attempt in {1..20}; do
+              if /usr/bin/python3 "$integration_root/scripts/two_site_provider_broker.py" --root "$integration_root" status >/dev/null 2>&1; then
+                broker_ready=true
+                break
+              fi
+              /usr/bin/sleep 0.25
+            done
+            if [[ "$broker_ready" == true ]]; then
+              action="restart_started"
+              health="RECOVERING"
+            else
+              action="restart_failed"
+            fi
+          else
+            action="restart_failed"
+          fi
+        else
+          action="broker_recheck_failed"
+        fi
       else
-        action="restart_failed"
+        if /usr/bin/timeout 45 "$integration_root/scripts/two_site_autopilot_tmux.sh" start >"$restart_tmp" 2>&1; then
+          action="restart_started"
+          health="RECOVERING"
+        else
+          action="restart_failed"
+        fi
       fi
-      /usr/bin/mv -f -- "$restart_tmp" "$report_root/restart.latest.log"
-      /usr/bin/chmod 600 "$report_root/restart.latest.log"
+      if [[ -f "$restart_tmp" ]]; then
+        if [[ "$action" == "restart_started" || "$action" == "restart_failed" ]]; then
+          /usr/bin/mv -f -- "$restart_tmp" "$report_root/restart.latest.log"
+          /usr/bin/chmod 600 "$report_root/restart.latest.log"
+        else
+          /usr/bin/unlink -- "$restart_tmp" 2>/dev/null || true
+        fi
+      fi
     else
       action="provider_preflight_failed"
     fi
