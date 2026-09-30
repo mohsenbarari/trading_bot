@@ -162,7 +162,9 @@ await tools.apply_patch(result.output);
    Rerun python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>
    --reviewer <id> --sha <sha> --applied BEFORE staging. BYTES_VALID is not test/semantic approval.
    Run actual focused tests plus proportional regression; use bounded status/wait while tests run
-   rather than broad source rediscovery.
+   rather than broad source rediscovery. For test subprocesses only, use the exact command pattern:
+   env -u TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED -u TWO_SITE_ASSIGNMENT_ID -u TWO_SITE_ASSIGNMENT_SHA256 APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m pytest -q <focused selectors>.
+   Adapt selectors to the task. Assignment scope still applies to every non-test operation and the environment override is confined to hermetic pytest subprocesses; do not weaken any existing security or review instruction. Do not prescribe unsetting any scope variable for Runner, Broker, Supervisor, task validation, review, staging, commit or transition.
    Once applied bytes are proven exact by the existing review --applied guard and required tests pass,
    inspect git diff --stat / --name-status / --check and exact staged paths/modes, without reprinting
    the same full source (reread full diff only if source, SHA, paths or task change). Never claim tests not run. On test failure, check clean
