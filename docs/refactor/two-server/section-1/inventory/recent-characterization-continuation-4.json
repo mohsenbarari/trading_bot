@@ -68,6 +68,19 @@
         "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_mixed_visible_direct_and_room_rows_aggregate_exact_response",
         "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_zero_unread_attribute_row_retains_muted_ids_and_room_mentions"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_list_active_sessions.py",
+      "sha256": "1dc4d947424977a1aa0c522e55a8f22490de61a4d24f97fe77a0fbf2c18a4fda",
+      "last_commit": "48865b90ac007a0e60f6b97f9056730a204cdcd6",
+      "seed_ids": [
+        "API-AUTH-GET-SESSIONS-LIST-ACTIVE-SESSIONS-L1046"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_valid_bearer_token_marks_current_session",
+        "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_missing_authorization_header",
+        "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_undecodable_bearer_token"
+      ]
     }
   ]
 }
