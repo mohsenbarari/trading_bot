@@ -96,7 +96,10 @@ def run_preflight(root: Path) -> tuple[bool, str]:
             try:
                 checkpoint = _load_accepted_checkpoint(state_root)
                 if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repo):
-                    return False, "STALE_CHECKPOINT"
+                    from scripts.two_site_maintenance_transition_startup import (
+                        require_reviewed_maintenance_transition_locked,
+                    )
+                    require_reviewed_maintenance_transition_locked(root, state_root, repo)
             except Exception:
                 return False, "STALE_CHECKPOINT"
 
@@ -207,7 +210,10 @@ def run_preflight(root: Path) -> tuple[bool, str]:
             try:
                 cp_recheck = _load_accepted_checkpoint(state_root)
                 if cp_recheck is None or not _accepted_checkpoint_matches_repository(cp_recheck, repo_recheck):
-                    return False, "STALE_CHECKPOINT"
+                    from scripts.two_site_maintenance_transition_startup import (
+                        require_reviewed_maintenance_transition_locked,
+                    )
+                    require_reviewed_maintenance_transition_locked(root, state_root, repo_recheck)
             except Exception:
                 return False, "STALE_CHECKPOINT"
 

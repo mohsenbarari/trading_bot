@@ -2063,8 +2063,21 @@ def validate_rescope_epoch_startup(
         checkpoint = _load_accepted_checkpoint(state_root)
         if checkpoint is not None and _accepted_checkpoint_matches_repository(checkpoint, repository):
             return
-        if root is None or len(prior_epoch_names) != 1 or current_epoch_exists:
+        if root is None:
             raise AutopilotError("prior epoch requires matching accepted checkpoint")
+        if len(prior_epoch_names) > 1 or current_epoch_exists:
+            try:
+                from scripts.two_site_maintenance_transition_startup import (
+                    require_reviewed_maintenance_transition_locked,
+                )
+                require_reviewed_maintenance_transition_locked(root, state_root, repository)
+                return
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                raise AutopilotError(
+                    "prior epoch requires matching accepted checkpoint"
+                ) from exc
         try:
             try:
                 from scripts.two_site_cold_start_startup_read import (
