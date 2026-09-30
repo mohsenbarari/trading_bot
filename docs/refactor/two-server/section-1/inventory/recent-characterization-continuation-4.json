@@ -81,6 +81,20 @@
         "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_missing_authorization_header",
         "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_undecodable_bearer_token"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py",
+      "sha256": "7c980046bac48cce58c31ce11059710a357e4700b277453e3858ee4870451ba7",
+      "last_commit": "0a10332571afea72348e43f507e8d0f5fbadd4e2",
+      "seed_ids": [
+        "API-AUTH-GET-SESSIONS-GET-PENDING-REQUESTS-L619"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_decode_failure_falls_back_to_query",
+        "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_missing_caller_session_short_circuits",
+        "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_no_authorization_header_queries_pending",
+        "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_malformed_token_sid_raises_value_error_before_db"
+      ]
     }
   ]
 }
