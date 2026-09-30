@@ -92,9 +92,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 245)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 380)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 85)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 246)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 381)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 84)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -609,15 +609,15 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         )
 
         continuation_4_records = continuation_4_data.get("records", [])
-        self.assertEqual(len(continuation_4_records), 6)
+        self.assertEqual(len(continuation_4_records), 7)
 
         continuation_4_seed_ids = []
         continuation_4_selectors = []
         for record in continuation_4_records:
             continuation_4_seed_ids.extend(record.get("seed_ids", []))
             continuation_4_selectors.extend(record.get("test_selectors", []))
-        self.assertEqual(len(continuation_4_seed_ids), 8)
-        self.assertEqual(len(continuation_4_selectors), 13)
+        self.assertEqual(len(continuation_4_seed_ids), 9)
+        self.assertEqual(len(continuation_4_selectors), 17)
 
         expected_continuation_4_selectors = [
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
@@ -633,6 +633,10 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_valid_bearer_token_marks_current_session",
             "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_missing_authorization_header",
             "tests/test_p1_00b_characterization_list_active_sessions.py::ListActiveSessionsCharacterizationTests::test_list_active_sessions_undecodable_bearer_token",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_decode_failure_falls_back_to_query",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_missing_caller_session_short_circuits",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_no_authorization_header_queries_pending",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_malformed_token_sid_raises_value_error_before_db",
         ]
         self.assertEqual(continuation_4_selectors, expected_continuation_4_selectors)
 
@@ -645,10 +649,11 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "API-MSG-GET-CHAT-SEARCH-MESSAGES-L800",
             "API-MSG-GET-CHAT-POLL-MESSAGES-L2225",
             "API-AUTH-GET-SESSIONS-LIST-ACTIVE-SESSIONS-L1046",
+            "API-AUTH-GET-SESSIONS-GET-PENDING-REQUESTS-L619",
         ]
         self.assertEqual(continuation_4_seed_ids, expected_continuation_4_seed_ids)
         continuation_4_seed_set = set(continuation_4_seed_ids)
-        self.assertEqual(len(continuation_4_seed_set), 6)
+        self.assertEqual(len(continuation_4_seed_set), 7)
         self.assertTrue(continuation_4_seed_set.issubset(inventory_seed_set))
 
         first_three_seed_ids = []
@@ -792,6 +797,69 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue({expected_list_active_sessions_seed}.isdisjoint(prior_379_evidenced_set))
         self.assertTrue({expected_list_active_sessions_seed}.isdisjoint(baseline_seed_set))
 
+        # Exact checks for get pending requests session gates record (record 6)
+        get_pending_requests_record = continuation_4_records[6]
+        expected_get_pending_requests_path = (
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py"
+        )
+        expected_get_pending_requests_sha = (
+            "7c980046bac48cce58c31ce11059710a357e4700b277453e3858ee4870451ba7"
+        )
+        expected_get_pending_requests_commit = (
+            "0a10332571afea72348e43f507e8d0f5fbadd4e2"
+        )
+        expected_get_pending_requests_seed = (
+            "API-AUTH-GET-SESSIONS-GET-PENDING-REQUESTS-L619"
+        )
+        expected_get_pending_requests_selectors = [
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_decode_failure_falls_back_to_query",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_missing_caller_session_short_circuits",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_no_authorization_header_queries_pending",
+            "tests/test_p1_00b_characterization_get_pending_requests_session_gates.py::CharacterizationGetPendingRequestsSessionGatesTests::test_get_pending_requests_malformed_token_sid_raises_value_error_before_db",
+        ]
+        self.assertEqual(
+            get_pending_requests_record["path"], expected_get_pending_requests_path
+        )
+        self.assertEqual(
+            get_pending_requests_record["sha256"], expected_get_pending_requests_sha
+        )
+        self.assertEqual(
+            get_pending_requests_record["last_commit"],
+            expected_get_pending_requests_commit,
+        )
+        self.assertEqual(
+            get_pending_requests_record["seed_ids"], [expected_get_pending_requests_seed]
+        )
+        self.assertEqual(
+            get_pending_requests_record["test_selectors"],
+            expected_get_pending_requests_selectors,
+        )
+
+        get_pending_requests_file_path = repo_root / expected_get_pending_requests_path
+        self.assertTrue(
+            get_pending_requests_file_path.is_file(),
+            f"Get pending requests test file not found at {get_pending_requests_file_path}",
+        )
+        get_pending_requests_bytes = get_pending_requests_file_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(get_pending_requests_bytes).hexdigest(),
+            expected_get_pending_requests_sha,
+        )
+        get_pending_requests_text = get_pending_requests_bytes.decode("utf-8")
+        for selector in expected_get_pending_requests_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(f"def {method_name}(", get_pending_requests_text)
+
+        prior_380_evidenced_set = (
+            prior_379_evidenced_set | {expected_list_active_sessions_seed}
+        )
+        self.assertEqual(len(prior_380_evidenced_set), 380)
+
+        # Prove the new seed is in the 465 inventory and absent from all 380 previously evidenced seeds and baseline before union
+        self.assertTrue({expected_get_pending_requests_seed}.issubset(inventory_seed_set))
+        self.assertTrue({expected_get_pending_requests_seed}.isdisjoint(prior_380_evidenced_set))
+        self.assertTrue({expected_get_pending_requests_seed}.isdisjoint(baseline_seed_set))
+
         all_flattened_recent_ids = (
             flattened_recent_ids
             + continuation_3_seed_ids
@@ -800,19 +868,19 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         all_recent_seed_set = set(all_flattened_recent_ids)
         self.assertTrue(all_recent_seed_set.issubset(inventory_seed_set))
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
-        self.assertEqual(len(reconciled_new_beyond_baseline), 245)
+        self.assertEqual(len(reconciled_new_beyond_baseline), 246)
 
         final_evidenced_set = (
             prior_356_evidenced_set
             | continuation_3_seed_set
             | continuation_4_seed_set
         )
-        self.assertEqual(len(final_evidenced_set), 380)
+        self.assertEqual(len(final_evidenced_set), 381)
 
         remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 85)
+        self.assertEqual(len(remaining_seed_set), 84)
         self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
-        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 380)
+        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 381)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(reconciled_new_beyond_baseline))
