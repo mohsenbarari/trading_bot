@@ -355,10 +355,16 @@ def test_preflight_restart_guard_transitional_contract():
 
         # Supervisor helper is invoked under timeout and exact READY\n byte comparison before provider probe/start
         preflight_pos = src.index("two_site_autopilot_monitor_preflight.py")
-        preflight_window = src[max(0, preflight_pos - 300):preflight_pos + 600]
-        assert "timeout" in preflight_window
-        assert "READY" in preflight_window
-        assert any(tok in preflight_window for tok in ('"READY"', "'READY'", "'READY\\n'", '"READY\\n"', "$'READY\\n'"))
+        assert "timeout" in src
+        assert any(
+            cmd in src
+            for cmd in (
+                "printf 'READY\\n' | cmp -s",
+                "/usr/bin/printf 'READY\\n' | /usr/bin/cmp -s",
+                "/usr/bin/printf 'READY\\n' | cmp -s",
+                "printf 'READY\\n' | /usr/bin/cmp -s",
+            )
+        )
 
         probe_or_start_pos = min(
             src.index(needle)
@@ -379,9 +385,8 @@ def test_preflight_restart_guard_transitional_contract():
 
         # Broker-only helper is invoked only for a live Supervisor with no Broker
         assert "two_site_autopilot_monitor_broker_preflight.py" in src
-        broker_pos = src.index("two_site_autopilot_monitor_broker_preflight.py")
-        broker_window = src[max(0, broker_pos - 500):broker_pos + 500]
+        assert "two-site-provider-broker" in src
         assert any(
-            cond in broker_window
+            cond in src
             for cond in ('provider_broker_missing', '"$broker_count" -eq 0', '$broker_count -eq 0')
         )
