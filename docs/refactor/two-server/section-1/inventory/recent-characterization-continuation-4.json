@@ -56,6 +56,18 @@
         "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_allowed_customer_target_search_uses_scoped_query_and_preserves_order",
         "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_disallowed_customer_target_returns_404_before_query"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_poll_nonempty.py",
+      "sha256": "4c984d1bf37b52320063c41850c486c9ace353ba5a0ea6b15629386a7a7c5127",
+      "last_commit": "7f87a32c7eb08e01472e4d78329c7592e3e8c11a",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-POLL-MESSAGES-L2225"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_mixed_visible_direct_and_room_rows_aggregate_exact_response",
+        "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_zero_unread_attribute_row_retains_muted_ids_and_room_mentions"
+      ]
     }
   ]
 }
