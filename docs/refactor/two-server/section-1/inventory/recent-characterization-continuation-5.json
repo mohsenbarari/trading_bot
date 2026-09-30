@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json",
+    "sha256": "38fa121e4b18991360acfae077c2d1f81b925e921e3005ceb95cfe5fb018aac5",
+    "last_commit": "bcf435472e73b916a9555650f99af948eb257004"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_get_single_session_recovery_status_missing_refresh.py",
+      "sha256": "24cdecb61baff66b49a8985b984c28eed4cbca87f4a6e2004a44f1713b822e93",
+      "last_commit": "e5ef2655414d83e775fc707dc535311e630c0f1d",
+      "seed_ids": [
+        "API-AUTH-GET-SESSIONS-GET-SINGLE-SESSION-RECOVERY-STATUS-L749"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_get_single_session_recovery_status_missing_refresh.py::RecoveryStatusMissingRefreshCharacterizationTests::test_approved_active_session_without_refresh_token_returns_access_only"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_pending_recovery_prompts_admin_empty.py",
+      "sha256": "4b995d7a3cc395391b63d64ec8667d855bf6d4d0ae80c630fd83574c9eb6796f",
+      "last_commit": "6056eb8e3da7b98d4cdebe3ae94d619852a8ae47",
+      "seed_ids": [
+        "API-AUTH-GET-SESSIONS-GET-PENDING-SINGLE-SESSION-RECOVERY-PROMPTS-L788"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_pending_recovery_prompts_admin_empty.py::PendingRecoveryPromptsAdminEmptyCharacterizationTests::test_authorized_admin_empty_lookup_returns_empty_without_serialization"
+      ]
+    }
+  ]
+}

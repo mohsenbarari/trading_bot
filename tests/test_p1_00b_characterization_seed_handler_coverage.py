@@ -57,6 +57,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "continuation_2_path",
             "continuation_3_path",
             "continuation_4_path",
+            "continuation_5_path",
         }
         self.assertEqual(set(manifest["evidence_sources"].keys()), expected_evidence_keys)
         self.assertEqual(
@@ -83,6 +84,10 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             manifest["evidence_sources"]["continuation_4_path"],
             "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json",
         )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_5_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
+        )
 
         expected_counts_keys = {
             "baseline_evidenced_seed_count",
@@ -92,9 +97,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 246)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 381)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 84)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 248)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 383)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 82)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -860,27 +865,81 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue({expected_get_pending_requests_seed}.isdisjoint(prior_380_evidenced_set))
         self.assertTrue({expected_get_pending_requests_seed}.isdisjoint(baseline_seed_set))
 
+        continuation_5_file_path = repo_root / manifest["evidence_sources"]["continuation_5_path"]
+        self.assertTrue(
+            continuation_5_file_path.is_file(),
+            f"Continuation 5 evidence file not found at {continuation_5_file_path}",
+        )
+        continuation_5_bytes = continuation_5_file_path.read_bytes()
+        continuation_5_data = json.loads(continuation_5_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_5_data.get("stage"), "P1-00b")
+
+        continuation_5_predecessor = continuation_5_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_5_predecessor["path"],
+            manifest["evidence_sources"]["continuation_4_path"],
+        )
+        self.assertEqual(
+            continuation_5_predecessor["sha256"],
+            hashlib.sha256(continuation_4_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_5_predecessor["last_commit"],
+            "bcf435472e73b916a9555650f99af948eb257004",
+        )
+
+        continuation_5_records = continuation_5_data.get("records", [])
+        self.assertEqual(len(continuation_5_records), 2)
+
+        continuation_5_seed_ids = []
+        continuation_5_selectors = []
+        for record in continuation_5_records:
+            continuation_5_seed_ids.extend(record.get("seed_ids", []))
+            continuation_5_selectors.extend(record.get("test_selectors", []))
+        self.assertEqual(len(continuation_5_seed_ids), 2)
+        self.assertEqual(len(continuation_5_selectors), 2)
+
+        expected_continuation_5_seed_ids = [
+            "API-AUTH-GET-SESSIONS-GET-SINGLE-SESSION-RECOVERY-STATUS-L749",
+            "API-AUTH-GET-SESSIONS-GET-PENDING-SINGLE-SESSION-RECOVERY-PROMPTS-L788",
+        ]
+        self.assertEqual(continuation_5_seed_ids, expected_continuation_5_seed_ids)
+        continuation_5_seed_set = set(continuation_5_seed_ids)
+        self.assertEqual(len(continuation_5_seed_set), 2)
+        self.assertTrue(continuation_5_seed_set.issubset(inventory_seed_set))
+
+        prior_381_evidenced_set = (
+            prior_380_evidenced_set | {expected_get_pending_requests_seed}
+        )
+        self.assertEqual(len(prior_381_evidenced_set), 381)
+
+        self.assertTrue(continuation_5_seed_set.isdisjoint(prior_381_evidenced_set))
+        self.assertTrue(continuation_5_seed_set.isdisjoint(baseline_seed_set))
+
         all_flattened_recent_ids = (
             flattened_recent_ids
             + continuation_3_seed_ids
             + continuation_4_seed_ids
+            + continuation_5_seed_ids
         )
         all_recent_seed_set = set(all_flattened_recent_ids)
         self.assertTrue(all_recent_seed_set.issubset(inventory_seed_set))
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
-        self.assertEqual(len(reconciled_new_beyond_baseline), 246)
+        self.assertEqual(len(reconciled_new_beyond_baseline), 248)
 
         final_evidenced_set = (
             prior_356_evidenced_set
             | continuation_3_seed_set
             | continuation_4_seed_set
+            | continuation_5_seed_set
         )
-        self.assertEqual(len(final_evidenced_set), 381)
+        self.assertEqual(len(final_evidenced_set), 383)
 
         remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 84)
+        self.assertEqual(len(remaining_seed_set), 82)
         self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
-        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 381)
+        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 383)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(reconciled_new_beyond_baseline))
