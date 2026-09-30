@@ -609,21 +609,23 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         )
 
         continuation_4_records = continuation_4_data.get("records", [])
-        self.assertEqual(len(continuation_4_records), 2)
+        self.assertEqual(len(continuation_4_records), 3)
 
         continuation_4_seed_ids = []
         continuation_4_selectors = []
         for record in continuation_4_records:
             continuation_4_seed_ids.extend(record.get("seed_ids", []))
             continuation_4_selectors.extend(record.get("test_selectors", []))
-        self.assertEqual(len(continuation_4_seed_ids), 4)
-        self.assertEqual(len(continuation_4_selectors), 4)
+        self.assertEqual(len(continuation_4_seed_ids), 5)
+        self.assertEqual(len(continuation_4_selectors), 6)
 
         expected_continuation_4_selectors = [
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_valid_queue_suppresses_stale_delete_and_advances",
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_invalid_queue_suppresses_stale_prompt_delete",
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_invalid_queue_suppresses_stale_prompt_delete",
+            "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_without_user_clears_state_suppresses_deletes_and_returns_fallback_panel",
+            "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_with_user_uses_navigation_panel_and_exact_callback_response",
         ]
         self.assertEqual(continuation_4_selectors, expected_continuation_4_selectors)
 
@@ -632,15 +634,31 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402",
         ]
         self.assertEqual(continuation_4_seed_ids, expected_continuation_4_seed_ids)
         continuation_4_seed_set = set(continuation_4_seed_ids)
-        self.assertEqual(len(continuation_4_seed_set), 2)
+        self.assertEqual(len(continuation_4_seed_set), 3)
         self.assertTrue(continuation_4_seed_set.issubset(inventory_seed_set))
 
-        # Reconciled seeds are already present in prior recent evidence; assert prior membership, never disjointness
-        self.assertTrue(continuation_4_seed_set.issubset(prior_recent_seed_set))
-        self.assertEqual(len(continuation_4_seed_set - prior_recent_seed_set), 0)
+        # Cancellation seed is in baseline seed set and absent from prior recent evidence
+        cancellation_seed_id = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402"
+        self.assertIn(cancellation_seed_id, baseline_seed_set)
+        self.assertNotIn(cancellation_seed_id, prior_recent_seed_set)
+
+        # Invitation-input seeds are already present in prior recent evidence
+        invitation_input_seed_ids = {
+            "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+            "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
+        }
+        self.assertTrue(invitation_input_seed_ids.issubset(prior_recent_seed_set))
+
+        # Continuation 4 adds zero net new seeds to final evidenced coverage
+        prior_377_evidenced_set = prior_356_evidenced_set | continuation_3_seed_set
+        self.assertEqual(len(prior_377_evidenced_set), 377)
+        self.assertTrue(continuation_4_seed_set.issubset(prior_377_evidenced_set))
+        self.assertEqual(len(continuation_4_seed_set - prior_377_evidenced_set), 0)
+        self.assertEqual(len(continuation_4_seed_set - (baseline_seed_set | prior_recent_seed_set)), 0)
 
         all_flattened_recent_ids = (
             flattened_recent_ids
