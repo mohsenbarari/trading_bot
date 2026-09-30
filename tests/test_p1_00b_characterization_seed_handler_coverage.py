@@ -58,6 +58,7 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "continuation_3_path",
             "continuation_4_path",
             "continuation_5_path",
+            "continuation_6_path",
         }
         self.assertEqual(set(manifest["evidence_sources"].keys()), expected_evidence_keys)
         self.assertEqual(
@@ -88,6 +89,10 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             manifest["evidence_sources"]["continuation_5_path"],
             "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
         )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_6_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json",
+        )
 
         expected_counts_keys = {
             "baseline_evidenced_seed_count",
@@ -97,9 +102,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 248)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 383)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 82)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 250)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 385)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 80)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -917,29 +922,88 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertTrue(continuation_5_seed_set.isdisjoint(prior_381_evidenced_set))
         self.assertTrue(continuation_5_seed_set.isdisjoint(baseline_seed_set))
 
+        prior_383_evidenced_set = prior_381_evidenced_set | continuation_5_seed_set
+        self.assertEqual(len(prior_383_evidenced_set), 383)
+
+        continuation_6_file_path = repo_root / manifest["evidence_sources"]["continuation_6_path"]
+        self.assertTrue(
+            continuation_6_file_path.is_file(),
+            f"Continuation 6 evidence file not found at {continuation_6_file_path}",
+        )
+        continuation_6_bytes = continuation_6_file_path.read_bytes()
+        continuation_6_data = json.loads(continuation_6_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_6_data.get("schema_version"), 1)
+        self.assertEqual(continuation_6_data.get("stage"), "P1-00b")
+
+        continuation_6_predecessor = continuation_6_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_6_predecessor["path"],
+            manifest["evidence_sources"]["continuation_5_path"],
+        )
+        self.assertEqual(
+            continuation_6_predecessor["sha256"],
+            hashlib.sha256(continuation_5_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_6_predecessor["last_commit"],
+            "f9c21b3bfc04e3711ad5882ce112f6abdcf582b9",
+        )
+
+        continuation_6_records = continuation_6_data.get("records", [])
+        self.assertEqual(len(continuation_6_records), 3)
+
+        continuation_6_paths = [r.get("path") for r in continuation_6_records]
+        self.assertEqual(len(continuation_6_paths), 3)
+        self.assertEqual(len(set(continuation_6_paths)), 3)
+
+        continuation_6_seed_ids = []
+        continuation_6_selectors = []
+        for record in continuation_6_records:
+            continuation_6_seed_ids.extend(record.get("seed_ids", []))
+            continuation_6_selectors.extend(record.get("test_selectors", []))
+        self.assertEqual(len(continuation_6_seed_ids), 3)
+        self.assertEqual(len(continuation_6_selectors), 7)
+        self.assertEqual(len(set(continuation_6_selectors)), 7)
+
+        expected_continuation_6_seed_ids = [
+            "API-AUTH-POST-SESSIONS-REQUEST-SINGLE-SESSION-RECOVERY-IDENTITY-L807",
+            "API-AUTH-POST-SESSIONS-CANCEL-SINGLE-SESSION-RECOVERY-L717",
+            "API-AUTH-POST-SESSIONS-CANCEL-SINGLE-SESSION-RECOVERY-L717",
+        ]
+        self.assertEqual(continuation_6_seed_ids, expected_continuation_6_seed_ids)
+        continuation_6_seed_set = set(continuation_6_seed_ids)
+        self.assertEqual(len(continuation_6_seed_set), 2)
+        self.assertTrue(continuation_6_seed_set.issubset(inventory_seed_set))
+
+        self.assertTrue(continuation_6_seed_set.isdisjoint(prior_383_evidenced_set))
+        self.assertTrue(continuation_6_seed_set.isdisjoint(baseline_seed_set))
+
         all_flattened_recent_ids = (
             flattened_recent_ids
             + continuation_3_seed_ids
             + continuation_4_seed_ids
             + continuation_5_seed_ids
+            + continuation_6_seed_ids
         )
         all_recent_seed_set = set(all_flattened_recent_ids)
         self.assertTrue(all_recent_seed_set.issubset(inventory_seed_set))
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
-        self.assertEqual(len(reconciled_new_beyond_baseline), 248)
+        self.assertEqual(len(reconciled_new_beyond_baseline), 250)
 
         final_evidenced_set = (
             prior_356_evidenced_set
             | continuation_3_seed_set
             | continuation_4_seed_set
             | continuation_5_seed_set
+            | continuation_6_seed_set
         )
-        self.assertEqual(len(final_evidenced_set), 383)
+        self.assertEqual(len(final_evidenced_set), 385)
 
         remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 82)
+        self.assertEqual(len(remaining_seed_set), 80)
         self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
-        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 383)
+        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 385)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(reconciled_new_beyond_baseline))

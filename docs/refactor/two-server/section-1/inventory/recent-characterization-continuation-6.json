@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
+    "sha256": "6ed554a3261009905d4364397199bcf01ec902de55c6b09b33d0770141dea806",
+    "last_commit": "f9c21b3bfc04e3711ad5882ce112f6abdcf582b9"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_request_single_session_recovery_identity.py",
+      "sha256": "c08d70948e71e6bfccd56fcafe45d9263cf8119e3370f5f2bc71067202730520",
+      "last_commit": "af3f0bc88111ad373a92759419e6708a96a9e74c",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-REQUEST-SINGLE-SESSION-RECOVERY-IDENTITY-L807"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_request_single_session_recovery_identity.py::TestRequestSingleSessionRecoveryIdentityCharacterization::test_invalid_uuid_aborts_after_non_accountant_guard",
+        "tests/test_p1_00b_characterization_request_single_session_recovery_identity.py::TestRequestSingleSessionRecoveryIdentityCharacterization::test_valid_uuid_non_pending_status_rejected_after_admin_access",
+        "tests/test_p1_00b_characterization_request_single_session_recovery_identity.py::TestRequestSingleSessionRecoveryIdentityCharacterization::test_pending_review_success_transitions_state_commits_warns_sms_and_serializes",
+        "tests/test_p1_00b_characterization_request_single_session_recovery_identity.py::TestRequestSingleSessionRecoveryIdentityCharacterization::test_pending_review_sms_success_after_commit_and_publishes",
+        "tests/test_p1_00b_characterization_request_single_session_recovery_identity.py::TestRequestSingleSessionRecoveryIdentityCharacterization::test_pending_review_publish_failure_propagates_after_commit"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_cancel_recovery_malformed_uuid.py",
+      "sha256": "642c9a960a4a20d021995a41ddb4681cf3471674da0025073018bc19e48dad39",
+      "last_commit": "647f10d37f2298336a8ca41d052bded46c68e668",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-CANCEL-SINGLE-SESSION-RECOVERY-L717"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_cancel_recovery_malformed_uuid.py::CancelRecoveryMalformedUuidCharacterizationTests::test_malformed_uuid_rejects_before_lookup_or_db_work"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_cancel_recovery_no_active.py",
+      "sha256": "22c801bc4848a261bf53a14a02d1c679ead7c7f47d35dedbebdaf303d9f49846",
+      "last_commit": "4dcd6e2bfb57d5d1015d00a909afdfc8eaf3356e",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-CANCEL-SINGLE-SESSION-RECOVERY-L717"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_cancel_recovery_no_active.py::CancelRecoveryNoActiveCharacterizationTests::test_valid_uuid_without_active_recovery_stops_before_mutation_or_delivery"
+      ]
+    }
+  ]
+}

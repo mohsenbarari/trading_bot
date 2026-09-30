@@ -79,3 +79,24 @@ Residual items that do not reopen `P1-00`:
 3. Supporting human labels in some inventory docs still mention the superseded
    Assignment; Codex recorded this as MEDIUM for the next authorized
    documentation change (`P1-00b`).
+
+## `P1-00b` execution status
+
+### 2026-09-30 UTC — Five-unit recovery characterization evidence checkpoint
+
+Assignment `WA-P1-00B-EVIDENCE-RECONCILE-20260930-051` completes reconciliation for the five accepted recovery behavior units across two continuation packets:
+- First two units reconciled in `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json`:
+  - `tests/test_p1_00b_characterization_get_single_session_recovery_status_missing_refresh.py`
+  - `tests/test_p1_00b_characterization_pending_recovery_prompts_admin_empty.py`
+- Remaining three units reconciled in `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json`:
+  - `tests/test_p1_00b_characterization_request_single_session_recovery_identity.py`
+  - `tests/test_p1_00b_characterization_cancel_recovery_malformed_uuid.py`
+  - `tests/test_p1_00b_characterization_cancel_recovery_no_active.py`
+
+Current seed coverage stands at 385 of 465 total seeds evidenced (135 baseline + 250 reconciled new), with 80 seeds remaining.
+
+Canonical High blockers remain open:
+- `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`
+- `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
+
+The five-unit reconciliation is complete, but `P1-00b` remains `IN_PROGRESS`; channel rejection, other seed handlers and origin-matrix cells remain pending. Historical Stage entries are preserved and Stage closure is not claimed.

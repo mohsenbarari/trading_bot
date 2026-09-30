@@ -18,13 +18,14 @@
     "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json",
     "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json",
     "continuation_4_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json",
-    "continuation_5_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json"
+    "continuation_5_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
+    "continuation_6_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 248,
-    "evidenced_seed_count": 383,
-    "remaining_seed_count": 82
+    "reconciled_new_seed_count": 250,
+    "evidenced_seed_count": 385,
+    "remaining_seed_count": 80
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [
