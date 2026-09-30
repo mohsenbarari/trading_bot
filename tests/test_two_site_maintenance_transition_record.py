@@ -8,6 +8,7 @@ import unittest
 from typing import Any
 
 from scripts.two_site_maintenance_transition_record import (
+    ALLOWED_MAINTENANCE_CONTROL_PATHS,
     ASSIGNMENT_SCOPE_KEYS_ORDER,
     MAX_MAINTENANCE_COMMITS,
     MAX_MAINTENANCE_TRANSITION_RECORD_BYTES,
@@ -305,6 +306,10 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         self.assertTrue(hasattr(mod, "PROTECTED_REFS"))
         self.assertTrue(hasattr(mod, "REPOSITORY_FACT_KEYS"))
         self.assertTrue(callable(mod.unique_json))
+        self.assertEqual(
+            mod.ALLOWED_MAINTENANCE_CONTROL_PATHS,
+            frozenset({"scripts/two_site_codex_autopilot.py"}),
+        )
 
     def test_codex_finding_2_before_traversal_caps_and_byte_limit(self) -> None:
         record, _, _ = _make_valid_record(commits_count=1)
@@ -465,6 +470,93 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
             parse_maintenance_transition_record(b"[1, 2, 3]\n")
         self.assertEqual(str(ctx.exception), "Parsed JSON root must be an object")
+
+    def test_codex_autopilot_control_path_allowlist_and_rejections(self) -> None:
+        autopilot_path = "scripts/two_site_codex_autopilot.py"
+        record, prior_head, repo_head = _make_valid_record(commits_count=1)
+        record["new_repository"]["control_blobs"][autopilot_path] = "c" * 40
+        record["maintenance_commits"][0]["paths"] = [autopilot_path]
+
+        validated = validate_maintenance_transition_record(record)
+        self.assertEqual(validated["kind"], MAINTENANCE_TRANSITION_KIND)
+        self.assertIn(autopilot_path, validated["new_repository"]["control_blobs"])
+        self.assertEqual(validated["maintenance_commits"][0]["paths"], [autopilot_path])
+
+        raw = serialize_maintenance_transition_record(record)
+        self.assertTrue(raw.endswith(b"\n"))
+        self.assertLessEqual(len(raw), MAX_MAINTENANCE_TRANSITION_RECORD_BYTES)
+
+        parsed = parse_maintenance_transition_record(raw)
+        self.assertEqual(parsed, validated)
+
+        built = build_maintenance_transition_record(
+            prior_checkpoint_sha256=record["prior_checkpoint_sha256"],
+            prior_head=prior_head,
+            new_repository=record["new_repository"],
+            maintenance_commits=record["maintenance_commits"],
+        )
+        self.assertEqual(built, validated)
+
+        # Different control path in control_blobs remains rejected
+        record_diff, _, _ = _make_valid_record(commits_count=1)
+        record_diff["new_repository"]["control_blobs"][autopilot_path] = "c" * 40
+        record_diff["maintenance_commits"][0]["paths"] = [
+            "scripts/two_site_autopilot_control.py"
+        ]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_diff)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        other_ctrl = "scripts/two_site_other_control.py"
+        record_diff["new_repository"]["control_blobs"][other_ctrl] = "d" * 40
+        record_diff["maintenance_commits"][0]["paths"] = [other_ctrl]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_diff)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        # Spoof path matching grammar but in control_blobs rejected as control path
+        spoof_ctrl = "scripts/two_site_codex_autopilot_spoof.py"
+        record_spoof, _, _ = _make_valid_record(commits_count=1)
+        record_spoof["new_repository"]["control_blobs"][spoof_ctrl] = "e" * 40
+        record_spoof["maintenance_commits"][0]["paths"] = [spoof_ctrl]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_spoof)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        # Spoof path with valid grammar and NOT in control_blobs accepted as normal path
+        normal_spoof = "scripts/two_site_codex_autopilot_sub.py"
+        record_normal, _, _ = _make_valid_record(commits_count=1)
+        record_normal["maintenance_commits"][0]["paths"] = [normal_spoof]
+        validated_normal = validate_maintenance_transition_record(record_normal)
+        self.assertEqual(
+            validated_normal["maintenance_commits"][0]["paths"], [normal_spoof]
+        )
+
+        # Suffix/prefix spoof path with invalid grammar is rejected by path validator
+        for bad_spoof in [
+            "scripts/two_site_codex_autopilot.py.bak",
+            "prefix_scripts/two_site_codex_autopilot.py",
+            "scripts/two_site_codex_autopilot.py/extra",
+            "scripts/two_site_codex_autopilot.py2",
+        ]:
+            rec_bad, _, _ = _make_valid_record(commits_count=1)
+            rec_bad["maintenance_commits"][0]["paths"] = [bad_spoof]
+            with self.assertRaises(MaintenanceTransitionRecordError):
+                validate_maintenance_transition_record(rec_bad)
+
+        # Malformed path still rejected
+        for malformed in [
+            "/scripts/two_site_codex_autopilot.py",
+            "../scripts/two_site_codex_autopilot.py",
+            "scripts/../scripts/two_site_codex_autopilot.py",
+            "scripts\\two_site_codex_autopilot.py",
+            "scripts/two_site_codex_autopilot.py\x00",
+            "scripts/two_site_codex_autopilot.py ",
+        ]:
+            rec_mal, _, _ = _make_valid_record(commits_count=1)
+            rec_mal["maintenance_commits"][0]["paths"] = [malformed]
+            with self.assertRaises(MaintenanceTransitionRecordError):
+                validate_maintenance_transition_record(rec_mal)
 
 
 if __name__ == "__main__":

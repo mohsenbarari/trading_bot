@@ -52,6 +52,11 @@ MAX_FORBIDDEN_PATHS: int = 256
 MAX_PATH_LEN: int = 1024
 MAX_FIELD_LEN: int = 1024
 
+ALLOWED_MAINTENANCE_CONTROL_PATHS: frozenset[str] = frozenset({
+    "scripts/two_site_codex_autopilot.py",
+})
+ALLOWED_CONTROL_PATHS: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS
+
 _HEX_40_RE = re.compile(r"^[0-9a-f]{40}$")
 _HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -84,6 +89,8 @@ class MaintenanceTransitionRecordError(ValueError):
 
 
 __all__ = [
+    "ALLOWED_CONTROL_PATHS",
+    "ALLOWED_MAINTENANCE_CONTROL_PATHS",
     "ASSIGNMENT_SCOPE_KEYS_ORDER",
     "MAX_MAINTENANCE_COMMITS",
     "MAX_MAINTENANCE_TRANSITION_RECORD_BYTES",
@@ -190,7 +197,10 @@ def _validate_commit_paths(paths: Any, control_blob_paths: set[str]) -> list[str
     seen: set[str] = set()
     for p in paths:
         norm_p = _validate_commit_path(p)
-        if norm_p in control_blob_paths:
+        if (
+            norm_p in control_blob_paths
+            and norm_p not in ALLOWED_MAINTENANCE_CONTROL_PATHS
+        ):
             raise MaintenanceTransitionRecordError(
                 "commit path cannot be a control path"
             )
