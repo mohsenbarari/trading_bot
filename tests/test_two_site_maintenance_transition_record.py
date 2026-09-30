@@ -116,6 +116,19 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         self.assertEqual(len(parsed["maintenance_commits"]), 8)
         self.assertEqual(parsed["schema_version"], "1.0")
 
+    def test_twelve_commits_roundtrip(self) -> None:
+        record, _, _ = _make_valid_record(commits_count=12)
+        raw = serialize_maintenance_transition_record(record)
+        parsed = parse_maintenance_transition_record(raw)
+        self.assertEqual(len(parsed["maintenance_commits"]), 12)
+        self.assertEqual(parsed["schema_version"], "1.0")
+
+    def test_thirteen_commits_negative(self) -> None:
+        record, _, _ = _make_valid_record(commits_count=13)
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record)
+        self.assertEqual(str(ctx.exception), "maintenance_commits count out of bounds")
+
     def test_build_record_helper(self) -> None:
         repo = _make_valid_repo(head="b" * 40)
         commits = [_make_commit(head="b" * 40, parent="0" * 40)]
@@ -165,8 +178,8 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
             validate_maintenance_transition_record(record)
         self.assertEqual(str(ctx.exception), "maintenance_commits count out of bounds")
 
-        # 9 commits
-        heads = [f"{i:040x}" for i in range(1, 10)]
+        # 13 commits
+        heads = [f"{i:040x}" for i in range(1, 14)]
         repo = _make_valid_repo(head=heads[-1])
         commits = [
             _make_commit(
@@ -175,7 +188,7 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
                 worker_run_id=f"w-{i}",
                 reviewer_run_id=f"r-{i}",
             )
-            for i in range(9)
+            for i in range(13)
         ]
         record["new_repository"] = repo
         record["maintenance_commits"] = commits

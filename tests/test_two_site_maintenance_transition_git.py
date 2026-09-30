@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import unittest.mock
 from pathlib import Path
 from typing import Any
 
@@ -313,3 +314,173 @@ def test_root_validation_guards(tmp_path: Path) -> None:
     regular_file = repo / maint_path
     with pytest.raises(MaintenanceGitProofError, match="root must be a directory"):
         verify_declared_maintenance_git_chain(regular_file, rec)
+
+
+def test_real_twelve_commit_chain_accepted(tmp_path: Path) -> None:
+    repo = (tmp_path / "twelve_repo").resolve()
+    repo.mkdir(mode=0o755)
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "Test Committer")
+    _git(repo, "config", "user.email", "committer@example.com")
+
+    # Prior root commit
+    base_file = repo / "scripts" / "two_site_base.py"
+    base_file.parent.mkdir(mode=0o755, exist_ok=True)
+    base_file.write_text("# base\n", encoding="utf-8")
+    _git(repo, "add", "scripts/two_site_base.py")
+    _git(repo, "commit", "-m", "prior commit")
+    prior_head = _git(repo, "rev-parse", "HEAD")
+
+    # 12 real single-parent commits
+    commits: list[dict[str, Any]] = []
+    all_paths: list[str] = []
+    prev_head = prior_head
+    for i in range(1, 13):
+        maint_path = f"scripts/two_site_worker_{i:02d}.py"
+        all_paths.append(maint_path)
+        maint_file = repo / maint_path
+        maint_file.write_text(f"# worker {i}\n", encoding="utf-8")
+        _git(repo, "add", maint_path)
+        _git(repo, "commit", "-m", f"maint commit {i}")
+        curr_head = _git(repo, "rev-parse", "HEAD")
+        commits.append({
+            "head": curr_head,
+            "parent": prev_head,
+            "paths": [maint_path],
+            "worker_run_id": f"worker-run-{i}",
+            "reviewer_run_id": f"reviewer-run-{i}",
+            "proposal_sha256": f"{(i % 9) + 1}" * 64,
+            "test_evidence_sha256": f"{(i % 9) + 1}" * 64,
+        })
+        prev_head = curr_head
+
+    new_head = commits[-1]["head"]
+    protected_refs = {ref: new_head for ref in sorted(PROTECTED_REFS)}
+    scope = {
+        "assignment_id": "assignment-ae03-12",
+        "stage_id": "P1-00b",
+        "sha256": "0" * 64,
+        "expires_at": "2026-10-01T00:00:00Z",
+        "allowed_paths": sorted(all_paths),
+        "forbidden_paths": [],
+    }
+    new_repo = {
+        "assignment_scope": scope,
+        "control_blobs": {"scripts/two_site_control.py": "c" * 40},
+        "head": new_head,
+        "protected_refs": protected_refs,
+        "status": "",
+    }
+    rec = build_maintenance_transition_record(
+        prior_checkpoint_sha256="a" * 64,
+        prior_head=prior_head,
+        new_repository=new_repo,
+        maintenance_commits=commits,
+    )
+    verify_declared_maintenance_git_chain(repo, rec)
+
+    raw_bytes = serialize_maintenance_transition_record(rec)
+    verify_declared_maintenance_git_chain(repo, raw_bytes)
+
+
+def test_thirteen_commits_rejected_before_traversal_queries(tmp_path: Path) -> None:
+    repo, prior_head, new_head, maint_path = _init_test_repo(tmp_path)
+    heads = [f"{i:040x}" for i in range(1, 14)]
+    commits = [
+        {
+            "head": heads[i],
+            "parent": prior_head if i == 0 else heads[i - 1],
+            "paths": [maint_path],
+            "worker_run_id": f"worker-{i}",
+            "reviewer_run_id": f"reviewer-{i}",
+            "proposal_sha256": "1" * 64,
+            "test_evidence_sha256": "2" * 64,
+        }
+        for i in range(13)
+    ]
+    protected_refs = {ref: heads[-1] for ref in sorted(PROTECTED_REFS)}
+    record13 = {
+        "schema_version": "1.0",
+        "kind": "REVIEWED_MAINTENANCE_TRANSITION",
+        "prior_checkpoint_sha256": "a" * 64,
+        "prior_head": prior_head,
+        "new_repository": {
+            "assignment_scope": {
+                "assignment_id": "assignment-ae03-test",
+                "stage_id": "P1-00b",
+                "sha256": "0" * 64,
+                "expires_at": "2026-10-01T00:00:00Z",
+                "allowed_paths": [maint_path],
+                "forbidden_paths": [],
+            },
+            "control_blobs": {"scripts/two_site_control.py": "c" * 40},
+            "head": heads[-1],
+            "protected_refs": protected_refs,
+            "status": "",
+        },
+        "maintenance_commits": commits,
+    }
+    with unittest.mock.patch(
+        "scripts.two_site_maintenance_transition_git._run_git_query"
+    ) as mock_git:
+        with pytest.raises(
+            MaintenanceGitProofError,
+            match="record failed codec validation: maintenance_commits count out of bounds",
+        ):
+            verify_declared_maintenance_git_chain(repo, record13)
+        mock_git.assert_not_called()
+
+
+def test_thirteen_commits_overcap_guard_without_commit_queries(tmp_path: Path) -> None:
+    repo, prior_head, new_head, maint_path = _init_test_repo(tmp_path)
+    heads = [f"{i:040x}" for i in range(1, 14)]
+    commits = [
+        {
+            "head": heads[i],
+            "parent": prior_head if i == 0 else heads[i - 1],
+            "paths": [maint_path],
+            "worker_run_id": f"worker-{i}",
+            "reviewer_run_id": f"reviewer-{i}",
+            "proposal_sha256": "1" * 64,
+            "test_evidence_sha256": "2" * 64,
+        }
+        for i in range(13)
+    ]
+    protected_refs = {ref: heads[-1] for ref in sorted(PROTECTED_REFS)}
+    record13 = {
+        "schema_version": "1.0",
+        "kind": "REVIEWED_MAINTENANCE_TRANSITION",
+        "prior_checkpoint_sha256": "a" * 64,
+        "prior_head": prior_head,
+        "new_repository": {
+            "assignment_scope": {
+                "assignment_id": "assignment-ae03-test",
+                "stage_id": "P1-00b",
+                "sha256": "0" * 64,
+                "expires_at": "2026-10-01T00:00:00Z",
+                "allowed_paths": [maint_path],
+                "forbidden_paths": [],
+            },
+            "control_blobs": {"scripts/two_site_control.py": "c" * 40},
+            "head": heads[-1],
+            "protected_refs": protected_refs,
+            "status": "",
+        },
+        "maintenance_commits": commits,
+    }
+    with unittest.mock.patch(
+        "scripts.two_site_maintenance_transition_git.validate_maintenance_transition_record",
+        return_value=record13,
+    ), unittest.mock.patch(
+        "scripts.two_site_maintenance_transition_git._run_git_query"
+    ) as mock_git:
+        mock_git.side_effect = [
+            str(repo).encode("utf-8"),
+            heads[-1].encode("utf-8"),
+        ]
+        with pytest.raises(
+            MaintenanceGitProofError,
+            match=r"maintenance_commits count out of bounds \(1\.\.12\)",
+        ):
+            verify_declared_maintenance_git_chain(repo, record13)
+        assert mock_git.call_count == 2

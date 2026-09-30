@@ -36,6 +36,7 @@ except ImportError:
 
 try:
     from scripts.two_site_maintenance_transition_record import (
+        MAX_MAINTENANCE_COMMITS,
         MAX_MAINTENANCE_TRANSITION_RECORD_BYTES,
         MaintenanceTransitionRecordError,
         parse_maintenance_transition_record,
@@ -43,6 +44,7 @@ try:
     )
 except ImportError:
     from two_site_maintenance_transition_record import (  # type: ignore[no-redef]
+        MAX_MAINTENANCE_COMMITS,
         MAX_MAINTENANCE_TRANSITION_RECORD_BYTES,
         MaintenanceTransitionRecordError,
         parse_maintenance_transition_record,
@@ -235,8 +237,10 @@ def verify_declared_maintenance_git_chain(
         )
 
     commits = norm_record["maintenance_commits"]
-    if not (1 <= len(commits) <= 8):
-        raise MaintenanceGitProofError("maintenance_commits count out of bounds (1..8)")
+    if not (1 <= len(commits) <= MAX_MAINTENANCE_COMMITS):
+        raise MaintenanceGitProofError(
+            f"maintenance_commits count out of bounds (1..{MAX_MAINTENANCE_COMMITS})"
+        )
 
     prior_head = norm_record["prior_head"]
 
