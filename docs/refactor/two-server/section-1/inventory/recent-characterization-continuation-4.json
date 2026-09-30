@@ -44,6 +44,18 @@
         "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_without_user_clears_state_suppresses_deletes_and_returns_fallback_panel",
         "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_with_user_uses_navigation_panel_and_exact_callback_response"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_search_messages_scoped.py",
+      "sha256": "8ac7d8e5e7012ccd4a65272d70cf69984922ecbbd033de438804e579fc5aee36",
+      "last_commit": "6b9ed96828a3fbf5e85bde014c345dbdd652abd4",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-SEARCH-MESSAGES-L800"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_allowed_customer_target_search_uses_scoped_query_and_preserves_order",
+        "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_disallowed_customer_target_returns_404_before_query"
+      ]
     }
   ]
 }
