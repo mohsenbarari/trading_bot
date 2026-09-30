@@ -29,6 +29,7 @@ from scripts.two_site_maintenance_transition_file import (
 import scripts.two_site_maintenance_transition_git as trans_git_mod
 import scripts.two_site_maintenance_transition_record as record_mod
 from scripts.two_site_maintenance_transition_record import (
+    ALLOWED_MAINTENANCE_CONTROL_PATHS,
     build_maintenance_transition_record,
     serialize_maintenance_transition_record,
 )
@@ -39,6 +40,7 @@ from scripts.two_site_maintenance_transition_storage import (
 )
 
 _AUTOPILOT_CONTROL_PATH = "scripts/two_site_codex_autopilot.py"
+_LAUNCHER_CONTROL_PATH = "scripts/two_site_autopilot_tmux.sh"
 
 
 class TestMaintenanceTransitionStorage(unittest.TestCase):
@@ -64,15 +66,24 @@ class TestMaintenanceTransitionStorage(unittest.TestCase):
             self.broker_exited = True
 
     def _make_sample_payload(
-        self, *, autopilot_changed: bool = False
+        self,
+        *,
+        autopilot_changed: bool = False,
+        launcher_changed: bool = False,
     ) -> tuple[dict, bytes, dict, str, dict, dict]:
         prior_chk_sha = "a" * 64
         prior_head, new_head = "1" * 40, "2" * 40
         refs = {r: "3" * 40 for r in sorted(PROTECTED_REFS)}
         ctrl = {p.as_posix(): "4" * 40 for p in sorted(CONTROL_PATHS, key=lambda p: p.as_posix())}
         new_ctrl = dict(ctrl)
+        paths = ["scripts/two_site_test.py"]
         if autopilot_changed:
             new_ctrl[_AUTOPILOT_CONTROL_PATH] = "b" * 40
+            paths.append(_AUTOPILOT_CONTROL_PATH)
+        if launcher_changed:
+            new_ctrl[_LAUNCHER_CONTROL_PATH] = "c" * 40
+            paths.append(_LAUNCHER_CONTROL_PATH)
+        paths = sorted(paths)
 
         scope_prior = {
             "assignment_id": "assign-001",
@@ -104,9 +115,6 @@ class TestMaintenanceTransitionStorage(unittest.TestCase):
             "protected_refs": refs,
             "status": "",
         }
-        paths = ["scripts/two_site_test.py"]
-        if autopilot_changed:
-            paths = sorted(["scripts/two_site_test.py", _AUTOPILOT_CONTROL_PATH])
 
         record = build_maintenance_transition_record(
             prior_checkpoint_sha256=prior_chk_sha,
@@ -220,6 +228,7 @@ class TestMaintenanceTransitionStorage(unittest.TestCase):
         self.assertIs(storage_mod.open_maintenance_transitions_dir, trans_dir_mod.open_maintenance_transitions_dir)
         self.assertIs(storage_mod.read_maintenance_transition_bytes, trans_file_mod.read_maintenance_transition_bytes)
         self.assertIs(storage_mod.verify_declared_maintenance_git_chain, trans_git_mod.verify_declared_maintenance_git_chain)
+        self.assertIs(storage_mod.ALLOWED_MAINTENANCE_CONTROL_PATHS, record_mod.ALLOWED_MAINTENANCE_CONTROL_PATHS)
         self.assertIs(storage_mod.parse_maintenance_transition_record, record_mod.parse_maintenance_transition_record)
         self.assertIs(storage_mod._validate_persisted_repository, autopilot_mod._validate_persisted_repository)
         self.assertIs(storage_mod.rescope_epoch_basename, autopilot_mod.rescope_epoch_basename)
@@ -343,9 +352,9 @@ class TestMaintenanceTransitionStorage(unittest.TestCase):
             with self.assertRaises(MaintenanceTransitionStorageError):
                 read_maintenance_transition_locked(self.root, self.state_root)
 
-        non_auto = [k for k in sorted(chk_repo["control_blobs"]) if k != _AUTOPILOT_CONTROL_PATH][0]
+        unrelated = [k for k in sorted(chk_repo["control_blobs"]) if k not in ALLOWED_MAINTENANCE_CONTROL_PATHS][0]
         hash_mismatch_chk = copy.deepcopy(chk_repo)
-        hash_mismatch_chk["control_blobs"][non_auto] = "f" * 40
+        hash_mismatch_chk["control_blobs"][unrelated] = "f" * 40
         with self._mock_env(raw_repo=raw_repo, chk_repo=hash_mismatch_chk, chk_sha=chk_sha):
             with self.assertRaises(MaintenanceTransitionStorageError):
                 read_maintenance_transition_locked(self.root, self.state_root)
@@ -384,6 +393,68 @@ class TestMaintenanceTransitionStorage(unittest.TestCase):
             ):
                 with self.assertRaises(MaintenanceTransitionStorageError):
                     read_maintenance_transition_locked(self.root, self.state_root)
+
+    def test_launcher_control_change_and_git_chain(self) -> None:
+        record, raw_bytes, chk_repo, chk_sha, norm_repo, raw_repo = self._make_sample_payload(launcher_changed=True)
+        epoch_leaf = f"{rescope_epoch_basename(norm_repo)}.json"
+
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with self.assertRaises(MaintenanceTransitionStorageError):
+                read_maintenance_transition_locked(self.root, self.state_root)
+
+        undeclared_record = copy.deepcopy(record)
+        undeclared_record["maintenance_commits"][0]["paths"] = ["scripts/two_site_test.py"]
+        self._publish_valid_record(epoch_leaf, serialize_maintenance_transition_record(undeclared_record))
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with self.assertRaises(MaintenanceTransitionStorageError):
+                read_maintenance_transition_locked(self.root, self.state_root)
+
+        trans_dir = self._get_transitions_dir()
+        (trans_dir / epoch_leaf).unlink(missing_ok=True)
+        self._publish_valid_record(epoch_leaf, raw_bytes)
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            loaded = read_maintenance_transition_locked(self.root, self.state_root)
+        self.assertEqual(loaded, record)
+
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with mock.patch.object(
+                storage_mod, "verify_declared_maintenance_git_chain", side_effect=RuntimeError("git failure")
+            ):
+                with self.assertRaises(MaintenanceTransitionStorageError):
+                    read_maintenance_transition_locked(self.root, self.state_root)
+
+    def test_both_allowed_controls_change_success(self) -> None:
+        record, raw_bytes, chk_repo, chk_sha, norm_repo, raw_repo = self._make_sample_payload(
+            autopilot_changed=True, launcher_changed=True
+        )
+        epoch_leaf = f"{rescope_epoch_basename(norm_repo)}.json"
+
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with self.assertRaises(MaintenanceTransitionStorageError):
+                read_maintenance_transition_locked(self.root, self.state_root)
+
+        partial_record = copy.deepcopy(record)
+        partial_record["maintenance_commits"][0]["paths"] = sorted(["scripts/two_site_test.py", _AUTOPILOT_CONTROL_PATH])
+        self._publish_valid_record(epoch_leaf, serialize_maintenance_transition_record(partial_record))
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with self.assertRaises(MaintenanceTransitionStorageError):
+                read_maintenance_transition_locked(self.root, self.state_root)
+
+        trans_dir = self._get_transitions_dir()
+        (trans_dir / epoch_leaf).unlink(missing_ok=True)
+        self._publish_valid_record(epoch_leaf, raw_bytes)
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            loaded = read_maintenance_transition_locked(self.root, self.state_root)
+        self.assertEqual(loaded, record)
+
+    def test_old_v1_0_record_remains_valid(self) -> None:
+        record, raw_bytes, chk_repo, chk_sha, norm_repo, raw_repo = self._make_sample_payload(autopilot_changed=False)
+        self.assertEqual(record["schema_version"], "1.0")
+        epoch_leaf = f"{rescope_epoch_basename(norm_repo)}.json"
+        self._publish_valid_record(epoch_leaf, raw_bytes)
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            loaded = read_maintenance_transition_locked(self.root, self.state_root)
+        self.assertEqual(loaded, record)
 
     def test_leaf_negative_fixtures_and_postread_drift(self) -> None:
         record, raw_bytes, chk_repo, chk_sha, norm_repo, raw_repo = self._make_sample_payload()

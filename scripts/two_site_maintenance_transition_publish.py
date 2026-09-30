@@ -39,6 +39,7 @@ from scripts.two_site_maintenance_transition_git import (
     verify_declared_maintenance_git_chain,
 )
 from scripts.two_site_maintenance_transition_record import (
+    ALLOWED_MAINTENANCE_CONTROL_PATHS,
     build_maintenance_transition_record,
     serialize_maintenance_transition_record,
 )
@@ -180,22 +181,25 @@ def publish_maintenance_transition_locked(
                     raise MaintenanceTransitionPublishError("Control blobs keys mismatch")
 
                 for k, v in chk_ctrl.items():
-                    if k != _AUTOPILOT_CONTROL_PATH and curr_ctrl.get(k) != v:
+                    if k not in ALLOWED_MAINTENANCE_CONTROL_PATHS and curr_ctrl.get(k) != v:
                         raise MaintenanceTransitionPublishError("Control blob hash mismatch")
 
-                autopilot_differs = (curr_ctrl.get(_AUTOPILOT_CONTROL_PATH) != chk_ctrl.get(_AUTOPILOT_CONTROL_PATH))
+                changed_controls = {
+                    k for k in ALLOWED_MAINTENANCE_CONTROL_PATHS
+                    if curr_ctrl.get(k) != chk_ctrl.get(k)
+                }
 
                 if _type_sensitive_equal(norm_repo.get("assignment_scope"), chk_repo.get("assignment_scope")):
                     raise MaintenanceTransitionPublishError("Current assignment scope matches checkpoint scope")
 
-                if autopilot_differs:
+                for ctrl_path in sorted(changed_controls):
                     declared = any(
-                        _AUTOPILOT_CONTROL_PATH in c.get("paths", [])
+                        ctrl_path in c.get("paths", [])
                         for c in maintenance_commits
                         if isinstance(c, dict)
                     )
                     if not declared:
-                        raise MaintenanceTransitionPublishError("Autopilot control change not declared in commits")
+                        raise MaintenanceTransitionPublishError("Control change not declared in commits")
 
                 try:
                     record = build_maintenance_transition_record(

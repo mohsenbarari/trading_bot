@@ -36,6 +36,7 @@ from scripts.two_site_maintenance_transition_git import (
     verify_declared_maintenance_git_chain,
 )
 from scripts.two_site_maintenance_transition_record import (
+    ALLOWED_MAINTENANCE_CONTROL_PATHS,
     parse_maintenance_transition_record,
 )
 from scripts.two_site_codex_autopilot import (
@@ -320,10 +321,14 @@ def read_maintenance_transition_locked(
                         raise MaintenanceTransitionStorageError("Control blobs keys mismatch")
 
                     for k, v in chk_ctrl.items():
-                        if k != _AUTOPILOT_CONTROL_PATH and curr_ctrl.get(k) != v:
+                        if k not in ALLOWED_MAINTENANCE_CONTROL_PATHS and curr_ctrl.get(k) != v:
                             raise MaintenanceTransitionStorageError("Control blob hash mismatch")
 
-                    autopilot_differs = (curr_ctrl.get(_AUTOPILOT_CONTROL_PATH) != chk_ctrl.get(_AUTOPILOT_CONTROL_PATH))
+                    changed_controls = {
+                        k for k in ALLOWED_MAINTENANCE_CONTROL_PATHS
+                        if curr_ctrl.get(k) != chk_ctrl.get(k)
+                    }
+                    controls_differ = bool(changed_controls)
 
                     if _type_sensitive_equal(norm_repo.get("assignment_scope"), chk_repo.get("assignment_scope")):
                         raise MaintenanceTransitionStorageError("Current assignment scope matches checkpoint scope")
@@ -346,8 +351,8 @@ def read_maintenance_transition_locked(
                         raise MaintenanceTransitionStorageError("Failed to open transitions directory") from None
 
                     if transitions_fd is None:
-                        if autopilot_differs:
-                            raise MaintenanceTransitionStorageError("Autopilot control changed without transition record")
+                        if controls_differ:
+                            raise MaintenanceTransitionStorageError("Control changed without transition record")
                         _check_stop_and_pending(root_fd, state_root_fd, state_root)
                         _recheck_repository(root, norm_repo)
                         _recheck_checkpoint(state_root_fd, state_root, chk_sha, chk_repo)
@@ -362,8 +367,8 @@ def read_maintenance_transition_locked(
                             raise MaintenanceTransitionStorageError("Failed to list maintenance transition leaves") from None
 
                         if len(leaves) == 0:
-                            if autopilot_differs:
-                                raise MaintenanceTransitionStorageError("Autopilot control changed without transition record")
+                            if controls_differ:
+                                raise MaintenanceTransitionStorageError("Control changed without transition record")
                             _check_stop_and_pending(root_fd, state_root_fd, state_root)
                             _recheck_repository(root, norm_repo)
                             _recheck_checkpoint(state_root_fd, state_root, chk_sha, chk_repo)
@@ -399,14 +404,15 @@ def read_maintenance_transition_locked(
                         if not _type_sensitive_equal(record.get("new_repository"), norm_repo):
                             raise MaintenanceTransitionStorageError("Record new_repository does not match current repository")
 
-                        if autopilot_differs:
-                            declared = any(
-                                _AUTOPILOT_CONTROL_PATH in c.get("paths", [])
-                                for c in record.get("maintenance_commits", [])
-                                if isinstance(c, dict)
-                            )
-                            if not declared:
-                                raise MaintenanceTransitionStorageError("Autopilot control change not declared in commits")
+                        if controls_differ:
+                            for ctrl_path in sorted(changed_controls):
+                                declared = any(
+                                    ctrl_path in c.get("paths", [])
+                                    for c in record.get("maintenance_commits", [])
+                                    if isinstance(c, dict)
+                                )
+                                if not declared:
+                                    raise MaintenanceTransitionStorageError("Control change not declared in commits")
 
                         try:
                             verify_declared_maintenance_git_chain(root, record)
