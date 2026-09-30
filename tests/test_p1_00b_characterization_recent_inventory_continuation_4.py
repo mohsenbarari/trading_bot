@@ -47,7 +47,7 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         )
 
         records = continuation_4_data.get("records", [])
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 5)
 
         record = records[0]
         expected_record_keys = {
@@ -154,7 +154,7 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         records = continuation_4_data.get("records", [])
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 5)
 
         record = records[1]
         expected_record_keys = {
@@ -283,6 +283,202 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         self.assertTrue(record_seed_set.issubset(all_base_seeds))
         self.assertEqual(len(record_seed_set - all_base_seeds), 0)
         self.assertEqual(len(record_seed_set.intersection(all_base_seeds)), 2)
+
+    def test_chat_search_messages_scoped_provenance_and_selector_definitions(self):
+        repo_root = Path(__file__).resolve().parent.parent
+
+        continuation_4_rel_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json"
+        )
+        continuation_4_path = repo_root / continuation_4_rel_path
+        self.assertTrue(
+            continuation_4_path.is_file(),
+            f"Continuation 4 file not found at {continuation_4_path}",
+        )
+
+        continuation_4_bytes = continuation_4_path.read_bytes()
+        continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
+
+        records = continuation_4_data.get("records", [])
+        self.assertEqual(len(records), 5)
+
+        record = records[3]
+        expected_record_keys = {
+            "path",
+            "sha256",
+            "last_commit",
+            "seed_ids",
+            "test_selectors",
+        }
+        self.assertEqual(set(record.keys()), expected_record_keys)
+
+        expected_test_path = (
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py"
+        )
+        expected_test_sha = (
+            "8ac7d8e5e7012ccd4a65272d70cf69984922ecbbd033de438804e579fc5aee36"
+        )
+        expected_last_commit = "6b9ed96828a3fbf5e85bde014c345dbdd652abd4"
+        self.assertEqual(record["path"], expected_test_path)
+        self.assertEqual(record["sha256"], expected_test_sha)
+        self.assertEqual(record["last_commit"], expected_last_commit)
+
+        live_test_path = repo_root / expected_test_path
+        self.assertTrue(live_test_path.is_file())
+        live_test_bytes = live_test_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(live_test_bytes).hexdigest(),
+            expected_test_sha,
+        )
+
+        expected_selectors = [
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_allowed_customer_target_search_uses_scoped_query_and_preserves_order",
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_disallowed_customer_target_returns_404_before_query",
+        ]
+        self.assertEqual(record["test_selectors"], expected_selectors)
+
+        live_test_text = live_test_bytes.decode("utf-8")
+        for selector in expected_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(f"def {method_name}(", live_test_text)
+
+        import ast
+        tree = ast.parse(live_test_text)
+        class_node = next(
+            (
+                n
+                for n in tree.body
+                if isinstance(n, ast.ClassDef)
+                and n.name == "CharacterizeChatSearchMessagesScopedTests"
+            ),
+            None,
+        )
+        self.assertIsNotNone(class_node)
+        live_methods = [
+            n.name
+            for n in class_node.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        for selector in expected_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(method_name, live_methods)
+
+        expected_seed_ids = [
+            "API-MSG-GET-CHAT-SEARCH-MESSAGES-L800",
+        ]
+        self.assertEqual(record["seed_ids"], expected_seed_ids)
+
+        surface_api_path = (
+            repo_root / "docs/refactor/two-server/section-1/inventory/surface-api.json"
+        )
+        self.assertTrue(surface_api_path.is_file())
+        surface_api_data = json.loads(surface_api_path.read_bytes().decode("utf-8"))
+        surface_api_seed_set = {
+            entry["behavior_id"] for entry in surface_api_data.get("entries", [])
+        }
+        for seed_id in expected_seed_ids:
+            self.assertIn(seed_id, surface_api_seed_set)
+
+    def test_chat_poll_nonempty_provenance_and_selector_definitions(self):
+        repo_root = Path(__file__).resolve().parent.parent
+
+        continuation_4_rel_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json"
+        )
+        continuation_4_path = repo_root / continuation_4_rel_path
+        self.assertTrue(
+            continuation_4_path.is_file(),
+            f"Continuation 4 file not found at {continuation_4_path}",
+        )
+
+        continuation_4_bytes = continuation_4_path.read_bytes()
+        continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
+
+        records = continuation_4_data.get("records", [])
+        self.assertEqual(len(records), 5)
+
+        record = records[4]
+        expected_record_keys = {
+            "path",
+            "sha256",
+            "last_commit",
+            "seed_ids",
+            "test_selectors",
+        }
+        self.assertEqual(set(record.keys()), expected_record_keys)
+
+        expected_test_path = (
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py"
+        )
+        expected_test_sha = (
+            "4c984d1bf37b52320063c41850c486c9ace353ba5a0ea6b15629386a7a7c5127"
+        )
+        expected_last_commit = "7f87a32c7eb08e01472e4d78329c7592e3e8c11a"
+        self.assertEqual(record["path"], expected_test_path)
+        self.assertEqual(record["sha256"], expected_test_sha)
+        self.assertEqual(record["last_commit"], expected_last_commit)
+
+        live_test_path = repo_root / expected_test_path
+        self.assertTrue(live_test_path.is_file())
+        live_test_bytes = live_test_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(live_test_bytes).hexdigest(),
+            expected_test_sha,
+        )
+
+        expected_selectors = [
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_mixed_visible_direct_and_room_rows_aggregate_exact_response",
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_zero_unread_attribute_row_retains_muted_ids_and_room_mentions",
+        ]
+        self.assertEqual(record["test_selectors"], expected_selectors)
+
+        live_test_text = live_test_bytes.decode("utf-8")
+        for selector in expected_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(f"def {method_name}(", live_test_text)
+
+        import ast
+        tree = ast.parse(live_test_text)
+        class_node = next(
+            (
+                n
+                for n in tree.body
+                if isinstance(n, ast.ClassDef)
+                and n.name == "ChatPollNonemptyCharacterizationTests"
+            ),
+            None,
+        )
+        self.assertIsNotNone(class_node)
+        live_methods = [
+            n.name
+            for n in class_node.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        for selector in expected_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(method_name, live_methods)
+
+        expected_seed_ids = [
+            "API-MSG-GET-CHAT-POLL-MESSAGES-L2225",
+        ]
+        self.assertEqual(record["seed_ids"], expected_seed_ids)
+
+        surface_api_path = (
+            repo_root / "docs/refactor/two-server/section-1/inventory/surface-api.json"
+        )
+        self.assertTrue(surface_api_path.is_file())
+        surface_api_data = json.loads(surface_api_path.read_bytes().decode("utf-8"))
+        surface_api_seed_set = {
+            entry["behavior_id"] for entry in surface_api_data.get("entries", [])
+        }
+        for seed_id in expected_seed_ids:
+            self.assertIn(seed_id, surface_api_seed_set)
 
 
 if __name__ == "__main__":

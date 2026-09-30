@@ -92,9 +92,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 242)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 377)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 88)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 244)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 379)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 86)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -609,15 +609,15 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         )
 
         continuation_4_records = continuation_4_data.get("records", [])
-        self.assertEqual(len(continuation_4_records), 3)
+        self.assertEqual(len(continuation_4_records), 5)
 
         continuation_4_seed_ids = []
         continuation_4_selectors = []
         for record in continuation_4_records:
             continuation_4_seed_ids.extend(record.get("seed_ids", []))
             continuation_4_selectors.extend(record.get("test_selectors", []))
-        self.assertEqual(len(continuation_4_seed_ids), 5)
-        self.assertEqual(len(continuation_4_selectors), 6)
+        self.assertEqual(len(continuation_4_seed_ids), 7)
+        self.assertEqual(len(continuation_4_selectors), 10)
 
         expected_continuation_4_selectors = [
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_account_name_valid_queue_suppresses_stale_delete_and_advances",
@@ -626,6 +626,10 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "tests/test_p1_00b_characterization_admin_invitation_inputs_batch.py::AdminInvitationInputsCharacterizationTests::test_mobile_invalid_queue_suppresses_stale_prompt_delete",
             "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_without_user_clears_state_suppresses_deletes_and_returns_fallback_panel",
             "tests/test_p1_00b_characterization_admin_invitation_cancel_queue.py::AdminInvitationCancelQueueCharacterizationTests::test_cancel_queue_with_user_uses_navigation_panel_and_exact_callback_response",
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_allowed_customer_target_search_uses_scoped_query_and_preserves_order",
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_disallowed_customer_target_returns_404_before_query",
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_mixed_visible_direct_and_room_rows_aggregate_exact_response",
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_zero_unread_attribute_row_retains_muted_ids_and_room_mentions",
         ]
         self.assertEqual(continuation_4_selectors, expected_continuation_4_selectors)
 
@@ -635,11 +639,19 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
             "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
             "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402",
+            "API-MSG-GET-CHAT-SEARCH-MESSAGES-L800",
+            "API-MSG-GET-CHAT-POLL-MESSAGES-L2225",
         ]
         self.assertEqual(continuation_4_seed_ids, expected_continuation_4_seed_ids)
         continuation_4_seed_set = set(continuation_4_seed_ids)
-        self.assertEqual(len(continuation_4_seed_set), 3)
+        self.assertEqual(len(continuation_4_seed_set), 5)
         self.assertTrue(continuation_4_seed_set.issubset(inventory_seed_set))
+
+        first_three_seed_ids = []
+        for r in continuation_4_records[:3]:
+            first_three_seed_ids.extend(r.get("seed_ids", []))
+        first_three_seed_set = set(first_three_seed_ids)
+        self.assertEqual(len(first_three_seed_set), 3)
 
         # Cancellation seed is in baseline seed set and absent from prior recent evidence
         cancellation_seed_id = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402"
@@ -653,12 +665,70 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertTrue(invitation_input_seed_ids.issubset(prior_recent_seed_set))
 
-        # Continuation 4 adds zero net new seeds to final evidenced coverage
+        # First three records add zero net new seeds to prior 377 evidenced coverage
         prior_377_evidenced_set = prior_356_evidenced_set | continuation_3_seed_set
         self.assertEqual(len(prior_377_evidenced_set), 377)
-        self.assertTrue(continuation_4_seed_set.issubset(prior_377_evidenced_set))
-        self.assertEqual(len(continuation_4_seed_set - prior_377_evidenced_set), 0)
-        self.assertEqual(len(continuation_4_seed_set - (baseline_seed_set | prior_recent_seed_set)), 0)
+        self.assertTrue(first_three_seed_set.issubset(prior_377_evidenced_set))
+        self.assertEqual(len(first_three_seed_set - prior_377_evidenced_set), 0)
+        self.assertEqual(len(first_three_seed_set - (baseline_seed_set | prior_recent_seed_set)), 0)
+
+        # Exact checks for chat search record (record 3)
+        chat_search_record = continuation_4_records[3]
+        expected_chat_search_path = "tests/test_p1_00b_characterization_chat_search_messages_scoped.py"
+        expected_chat_search_sha = "8ac7d8e5e7012ccd4a65272d70cf69984922ecbbd033de438804e579fc5aee36"
+        expected_chat_search_commit = "6b9ed96828a3fbf5e85bde014c345dbdd652abd4"
+        expected_chat_search_seed = "API-MSG-GET-CHAT-SEARCH-MESSAGES-L800"
+        expected_chat_search_selectors = [
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_allowed_customer_target_search_uses_scoped_query_and_preserves_order",
+            "tests/test_p1_00b_characterization_chat_search_messages_scoped.py::CharacterizeChatSearchMessagesScopedTests::test_disallowed_customer_target_returns_404_before_query",
+        ]
+        self.assertEqual(chat_search_record["path"], expected_chat_search_path)
+        self.assertEqual(chat_search_record["sha256"], expected_chat_search_sha)
+        self.assertEqual(chat_search_record["last_commit"], expected_chat_search_commit)
+        self.assertEqual(chat_search_record["seed_ids"], [expected_chat_search_seed])
+        self.assertEqual(chat_search_record["test_selectors"], expected_chat_search_selectors)
+
+        chat_search_file_path = repo_root / expected_chat_search_path
+        self.assertTrue(chat_search_file_path.is_file(), f"Chat search test file not found at {chat_search_file_path}")
+        chat_search_bytes = chat_search_file_path.read_bytes()
+        self.assertEqual(hashlib.sha256(chat_search_bytes).hexdigest(), expected_chat_search_sha)
+        chat_search_text = chat_search_bytes.decode("utf-8")
+        for selector in expected_chat_search_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(f"def {method_name}(", chat_search_text)
+
+        # Exact checks for chat poll record (record 4)
+        chat_poll_record = continuation_4_records[4]
+        expected_chat_poll_path = "tests/test_p1_00b_characterization_chat_poll_nonempty.py"
+        expected_chat_poll_sha = "4c984d1bf37b52320063c41850c486c9ace353ba5a0ea6b15629386a7a7c5127"
+        expected_chat_poll_commit = "7f87a32c7eb08e01472e4d78329c7592e3e8c11a"
+        expected_chat_poll_seed = "API-MSG-GET-CHAT-POLL-MESSAGES-L2225"
+        expected_chat_poll_selectors = [
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_mixed_visible_direct_and_room_rows_aggregate_exact_response",
+            "tests/test_p1_00b_characterization_chat_poll_nonempty.py::ChatPollNonemptyCharacterizationTests::test_zero_unread_attribute_row_retains_muted_ids_and_room_mentions",
+        ]
+        self.assertEqual(chat_poll_record["path"], expected_chat_poll_path)
+        self.assertEqual(chat_poll_record["sha256"], expected_chat_poll_sha)
+        self.assertEqual(chat_poll_record["last_commit"], expected_chat_poll_commit)
+        self.assertEqual(chat_poll_record["seed_ids"], [expected_chat_poll_seed])
+        self.assertEqual(chat_poll_record["test_selectors"], expected_chat_poll_selectors)
+
+        chat_poll_file_path = repo_root / expected_chat_poll_path
+        self.assertTrue(chat_poll_file_path.is_file(), f"Chat poll test file not found at {chat_poll_file_path}")
+        chat_poll_bytes = chat_poll_file_path.read_bytes()
+        self.assertEqual(hashlib.sha256(chat_poll_bytes).hexdigest(), expected_chat_poll_sha)
+        chat_poll_text = chat_poll_bytes.decode("utf-8")
+        for selector in expected_chat_poll_selectors:
+            method_name = selector.split("::")[-1]
+            self.assertIn(f"def {method_name}(", chat_poll_text)
+
+        # Prove these two seeds are members of the 465-seed source inventory, absent from prior 377, disjoint from each other and from baseline
+        continuation_4_new_seeds = {expected_chat_search_seed, expected_chat_poll_seed}
+        self.assertEqual(len(continuation_4_new_seeds), 2)
+        self.assertTrue(continuation_4_new_seeds.issubset(inventory_seed_set))
+        self.assertTrue(continuation_4_new_seeds.isdisjoint(prior_377_evidenced_set))
+        self.assertTrue(continuation_4_new_seeds.isdisjoint(baseline_seed_set))
+        self.assertNotEqual(expected_chat_search_seed, expected_chat_poll_seed)
 
         all_flattened_recent_ids = (
             flattened_recent_ids
@@ -668,19 +738,19 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         all_recent_seed_set = set(all_flattened_recent_ids)
         self.assertTrue(all_recent_seed_set.issubset(inventory_seed_set))
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
-        self.assertEqual(len(reconciled_new_beyond_baseline), 242)
+        self.assertEqual(len(reconciled_new_beyond_baseline), 244)
 
         final_evidenced_set = (
             prior_356_evidenced_set
             | continuation_3_seed_set
             | continuation_4_seed_set
         )
-        self.assertEqual(len(final_evidenced_set), 377)
+        self.assertEqual(len(final_evidenced_set), 379)
 
         remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 88)
+        self.assertEqual(len(remaining_seed_set), 86)
         self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
-        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 377)
+        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 379)
 
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
         self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(reconciled_new_beyond_baseline))
