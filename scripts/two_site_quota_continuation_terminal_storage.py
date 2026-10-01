@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import errno
 import json
 import os
 from pathlib import Path
@@ -59,8 +60,13 @@ class TerminalContinuationStorageError(BrokerError):
     """Raised when terminal continuation storage publish, read, or validation fails."""
 
 
+class TerminalContinuationRecordAbsentError(TerminalContinuationStorageError):
+    """Raised when terminal continuation record or terminal directory is genuinely absent."""
+
+
 __all__ = [
     "MAX_TERMINAL_CONTINUATION_RECORD_BYTES",
+    "TerminalContinuationRecordAbsentError",
     "TerminalContinuationStorageError",
     "publish_terminal_continuation_record",
     "read_terminal_continuation_record",
@@ -162,25 +168,69 @@ def _open_terminal_directory(
         ):
             raise TerminalContinuationStorageError("root directory invalid, descriptor mismatch, or owner mismatch")
         records.append((c_root, root_fd, root_fstat.st_dev, root_fstat.st_ino, root_fstat.st_uid, root_fstat.st_mode))
+
+        def verify_identity() -> None:
+            for path, fd, exp_dev, exp_ino, exp_uid, exp_mode in records:
+                lbl = path.name or "root"
+                try:
+                    st = os.lstat(path)
+                    fst = os.fstat(fd)
+                except OSError as exc:
+                    raise TerminalContinuationStorageError(
+                        f"directory verification failed for {lbl}: errno={exc.errno}"
+                    ) from None
+                if stat.S_ISLNK(st.st_mode) or stat.S_ISLNK(fst.st_mode):
+                    raise TerminalContinuationStorageError(f"directory path component is a symlink: {lbl}")
+                if not stat.S_ISDIR(st.st_mode) or not stat.S_ISDIR(fst.st_mode):
+                    raise TerminalContinuationStorageError(f"directory path component is not a directory: {lbl}")
+                if (st.st_dev, st.st_ino, st.st_uid, st.st_mode) != (exp_dev, exp_ino, exp_uid, exp_mode):
+                    raise TerminalContinuationStorageError(f"directory path identity changed: {lbl}")
+                if (fst.st_dev, fst.st_ino, fst.st_uid, fst.st_mode) != (exp_dev, exp_ino, exp_uid, exp_mode):
+                    raise TerminalContinuationStorageError(f"directory descriptor identity changed: {lbl}")
+
         current_fd, current_path = root_fd, c_root
         for comp in list(STATE_REL.parts) + [TERMINAL_DIR_NAME]:
             is_broker = (comp == "provider-broker")
             is_term = (comp == TERMINAL_DIR_NAME)
             child_path = current_path / comp
-            if is_term and create_if_absent:
+            if is_term and not create_if_absent:
+                verify_identity()
+                path_enoent = False
                 try:
-                    os.stat(comp, dir_fd=current_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    try:
-                        os.mkdir(comp, 0o700, dir_fd=current_fd)
-                    except OSError as exc:
-                        raise TerminalContinuationStorageError(f"cannot create {comp}: errno={exc.errno}") from None
+                    p_stat = os.lstat(child_path)
                 except OSError as exc:
-                    raise TerminalContinuationStorageError(f"cannot inspect {comp}: errno={exc.errno}") from None
-            try:
-                p_stat = os.lstat(child_path)
-            except OSError as exc:
-                raise TerminalContinuationStorageError(f"cannot lstat {comp}: errno={exc.errno}") from None
+                    if exc.errno == errno.ENOENT:
+                        path_enoent = True
+                    else:
+                        raise TerminalContinuationStorageError(f"cannot lstat {comp}: errno={exc.errno}") from None
+                dirfd_enoent = False
+                try:
+                    d_stat = os.stat(comp, dir_fd=current_fd, follow_symlinks=False)
+                except OSError as exc:
+                    if exc.errno == errno.ENOENT:
+                        dirfd_enoent = True
+                    else:
+                        raise TerminalContinuationStorageError(f"cannot stat {comp}: errno={exc.errno}") from None
+                if path_enoent and dirfd_enoent:
+                    verify_identity()
+                    raise TerminalContinuationRecordAbsentError(f"cannot lstat {comp}: errno={errno.ENOENT}")
+                if path_enoent != dirfd_enoent:
+                    raise TerminalContinuationStorageError(f"disagreement on presence of {comp}")
+            else:
+                if is_term and create_if_absent:
+                    try:
+                        os.stat(comp, dir_fd=current_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        try:
+                            os.mkdir(comp, 0o700, dir_fd=current_fd)
+                        except OSError as exc:
+                            raise TerminalContinuationStorageError(f"cannot create {comp}: errno={exc.errno}") from None
+                    except OSError as exc:
+                        raise TerminalContinuationStorageError(f"cannot inspect {comp}: errno={exc.errno}") from None
+                try:
+                    p_stat = os.lstat(child_path)
+                except OSError as exc:
+                    raise TerminalContinuationStorageError(f"cannot lstat {comp}: errno={exc.errno}") from None
             if not stat.S_ISDIR(p_stat.st_mode) or stat.S_ISLNK(p_stat.st_mode):
                 raise TerminalContinuationStorageError(f"{comp} is not a directory or is a symlink")
             if p_stat.st_uid != os.geteuid():
@@ -208,26 +258,6 @@ def _open_terminal_directory(
             current_fd, current_path = child_fd, child_path
 
         term_path, term_fd = current_path, current_fd
-
-        def verify_identity() -> None:
-            for path, fd, exp_dev, exp_ino, exp_uid, exp_mode in records:
-                lbl = path.name or "root"
-                try:
-                    st = os.lstat(path)
-                    fst = os.fstat(fd)
-                except OSError as exc:
-                    raise TerminalContinuationStorageError(
-                        f"directory verification failed for {lbl}: errno={exc.errno}"
-                    ) from None
-                if stat.S_ISLNK(st.st_mode) or stat.S_ISLNK(fst.st_mode):
-                    raise TerminalContinuationStorageError(f"directory path component is a symlink: {lbl}")
-                if not stat.S_ISDIR(st.st_mode) or not stat.S_ISDIR(fst.st_mode):
-                    raise TerminalContinuationStorageError(f"directory path component is not a directory: {lbl}")
-                if (st.st_dev, st.st_ino, st.st_uid, st.st_mode) != (exp_dev, exp_ino, exp_uid, exp_mode):
-                    raise TerminalContinuationStorageError(f"directory path identity changed: {lbl}")
-                if (fst.st_dev, fst.st_ino, fst.st_uid, fst.st_mode) != (exp_dev, exp_ino, exp_uid, exp_mode):
-                    raise TerminalContinuationStorageError(f"directory descriptor identity changed: {lbl}")
-
         yield term_path, term_fd, verify_identity
     finally:
         for fd in reversed(open_fds):
@@ -250,11 +280,27 @@ def read_terminal_continuation_record(
     with _open_terminal_directory(root, create_if_absent=False) as (term_path, term_fd, verify_identity):
         verify_identity()
         target_path = term_path / target_name
+        path_enoent = False
         try:
             lstat_before = os.lstat(target_path)
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                path_enoent = True
+            else:
+                raise TerminalContinuationStorageError(f"cannot stat receipt: errno={exc.errno}") from None
+        dirfd_enoent = False
+        try:
             dirfd_stat_before = os.stat(target_name, dir_fd=term_fd, follow_symlinks=False)
         except OSError as exc:
-            raise TerminalContinuationStorageError(f"cannot stat receipt: errno={exc.errno}") from None
+            if exc.errno == errno.ENOENT:
+                dirfd_enoent = True
+            else:
+                raise TerminalContinuationStorageError(f"cannot stat receipt: errno={exc.errno}") from None
+        if path_enoent and dirfd_enoent:
+            verify_identity()
+            raise TerminalContinuationRecordAbsentError(f"cannot stat receipt: errno={errno.ENOENT}")
+        if path_enoent != dirfd_enoent:
+            raise TerminalContinuationStorageError("disagreement on presence of receipt")
         _validate_receipt_stat(lstat_before, "receipt path before open")
         _validate_receipt_stat(dirfd_stat_before, "receipt via dir_fd before open")
         initial_fp = _stat_fp(lstat_before)
