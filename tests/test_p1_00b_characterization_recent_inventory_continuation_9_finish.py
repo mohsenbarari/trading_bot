@@ -1,0 +1,138 @@
+import ast
+import hashlib
+import json
+import os
+from pathlib import Path
+import unittest
+
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+
+from tests.test_p1_00_characterization_network_isolation import (
+    install_p1_00_network_fence,
+)
+
+install_p1_00_network_fence()
+
+
+class RecentInventoryContinuationNineFinishContractTests(unittest.TestCase):
+    def test_finish_selected_record_exact_provenance_and_seed_entry(self):
+        repo_root = Path(__file__).resolve().parent.parent
+
+        continuation_9_rel_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json"
+        )
+        continuation_9_path = repo_root / continuation_9_rel_path
+        self.assertTrue(
+            continuation_9_path.is_file(),
+            f"Continuation 9 not found at {continuation_9_path}",
+        )
+
+        continuation_9_bytes = continuation_9_path.read_bytes()
+        continuation_9_data = json.loads(continuation_9_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_9_data.get("schema_version"), 1)
+        self.assertEqual(continuation_9_data.get("stage"), "P1-00b")
+        self.assertEqual(
+            set(continuation_9_data.keys()),
+            {"schema_version", "stage", "predecessor_inventory", "records"},
+        )
+
+        predecessor_binding = continuation_9_data.get("predecessor_inventory", {})
+        expected_predecessor_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json"
+        )
+        expected_predecessor_sha = (
+            "ef26e77bb8fca502b0fd3bacc5b2676c53652ad5ba5c160495de2c05d0fdb688"
+        )
+        expected_predecessor_commit = "8d4bd2a4bbfd8647a52f33717e881fa962c0aca5"
+
+        self.assertEqual(predecessor_binding.get("path"), expected_predecessor_path)
+        self.assertEqual(predecessor_binding.get("sha256"), expected_predecessor_sha)
+        self.assertEqual(predecessor_binding.get("last_commit"), expected_predecessor_commit)
+
+        continuation_8_path = repo_root / expected_predecessor_path
+        self.assertTrue(
+            continuation_8_path.is_file(),
+            f"Continuation 8 not found at {continuation_8_path}",
+        )
+        continuation_8_bytes = continuation_8_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(continuation_8_bytes).hexdigest(),
+            expected_predecessor_sha,
+        )
+
+        records = continuation_9_data.get("records", [])
+        self.assertEqual(len(records), 1)
+        record = records[0]
+
+        expected_record_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
+        self.assertEqual(set(record.keys()), expected_record_keys)
+
+        expected_test_path = "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py"
+        expected_test_sha = "77defed1ed10d923b7d32d89a44a5f20ebc380496f1021ebeb299dd45af340fe"
+        expected_last_commit = "b48ae0bf6ef28731e070a0e016ae40daac6cdffa"
+        expected_seed_id = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395"
+        expected_test_selectors = [
+            "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_empty_selection_alerts_without_transition_or_edit",
+            "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_nonempty_selection_prompts_then_acknowledges",
+        ]
+
+        self.assertEqual(record["path"], expected_test_path)
+        self.assertEqual(record["sha256"], expected_test_sha)
+        self.assertEqual(record["last_commit"], expected_last_commit)
+        self.assertEqual(record["seed_ids"], [expected_seed_id])
+        self.assertEqual(record["test_selectors"], expected_test_selectors)
+
+        test_file_path = repo_root / expected_test_path
+        self.assertTrue(test_file_path.is_file(), f"Test file not found at {test_file_path}")
+        test_file_bytes = test_file_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(test_file_bytes).hexdigest(),
+            expected_test_sha,
+            f"SHA256 mismatch for {expected_test_path}",
+        )
+
+        test_file_text = test_file_bytes.decode("utf-8")
+        parsed_ast = ast.parse(test_file_text, filename=str(test_file_path))
+        class_nodes = {
+            node.name: node
+            for node in parsed_ast.body
+            if isinstance(node, ast.ClassDef)
+        }
+
+        for selector in expected_test_selectors:
+            parts = selector.split("::")
+            self.assertEqual(len(parts), 3)
+            self.assertEqual(parts[0], expected_test_path)
+            cls_name = parts[1]
+            method_name = parts[2]
+            self.assertIn(cls_name, class_nodes, f"Class {cls_name} not found in AST")
+            cls_node = class_nodes[cls_name]
+            method_names = {
+                subnode.name
+                for subnode in cls_node.body
+                if isinstance(subnode, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            self.assertIn(method_name, method_names, f"Method {method_name} not found in {cls_name}")
+
+        surface_bot_path = repo_root / "docs/refactor/two-server/section-1/inventory/surface-bot.json"
+        self.assertTrue(surface_bot_path.is_file(), f"surface-bot.json not found at {surface_bot_path}")
+        surface_bot_data = json.loads(surface_bot_path.read_bytes().decode("utf-8"))
+        matching_entries = [
+            entry
+            for entry in surface_bot_data.get("entries", [])
+            if entry.get("behavior_id") == expected_seed_id
+        ]
+        self.assertEqual(
+            len(matching_entries),
+            1,
+            f"Expected exactly one entry for seed {expected_seed_id}, found {len(matching_entries)}",
+        )
+
+        target_entry = matching_entries[0]
+        self.assertEqual(target_entry["handler"], "admin_broadcast.finish_selected_recipients")
+        self.assertEqual(target_entry["source"], "bot/handlers/admin_broadcast.py:395")
+
+
+if __name__ == "__main__":
+    unittest.main()

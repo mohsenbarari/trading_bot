@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json",
+    "sha256": "ef26e77bb8fca502b0fd3bacc5b2676c53652ad5ba5c160495de2c05d0fdb688",
+    "last_commit": "8d4bd2a4bbfd8647a52f33717e881fa962c0aca5"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py",
+      "sha256": "77defed1ed10d923b7d32d89a44a5f20ebc380496f1021ebeb299dd45af340fe",
+      "last_commit": "b48ae0bf6ef28731e070a0e016ae40daac6cdffa",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_empty_selection_alerts_without_transition_or_edit",
+        "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_nonempty_selection_prompts_then_acknowledges"
+      ]
+    }
+  ]
+}
