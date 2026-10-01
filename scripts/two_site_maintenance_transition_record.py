@@ -55,6 +55,7 @@ MAX_FIELD_LEN: int = 1024
 ALLOWED_MAINTENANCE_CONTROL_PATHS: frozenset[str] = frozenset({
     "scripts/two_site_autopilot_tmux.sh",
     "scripts/two_site_codex_autopilot.py",
+    "scripts/two_site_cycle_tools.py",
 })
 ALLOWED_CONTROL_PATHS: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS
 

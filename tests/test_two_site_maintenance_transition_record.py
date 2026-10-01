@@ -324,6 +324,7 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
             frozenset({
                 "scripts/two_site_autopilot_tmux.sh",
                 "scripts/two_site_codex_autopilot.py",
+                "scripts/two_site_cycle_tools.py",
             }),
         )
 
@@ -678,6 +679,54 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         old_raw = serialize_maintenance_transition_record(old_record)
         old_parsed = parse_maintenance_transition_record(old_raw)
         self.assertEqual(old_parsed, validate_maintenance_transition_record(old_record))
+
+    def test_cycle_tools_control_path_allowlist_and_rejections(self) -> None:
+        cycle_tools_path = "scripts/two_site_cycle_tools.py"
+        test_path = "tests/test_two_site_cycle_tools.py"
+        record, prior_head, repo_head = _make_valid_record(commits_count=1)
+        record["new_repository"]["control_blobs"][cycle_tools_path] = "c" * 40
+        record["maintenance_commits"][0]["paths"] = [cycle_tools_path, test_path]
+
+        validated = validate_maintenance_transition_record(record)
+        self.assertEqual(validated["kind"], MAINTENANCE_TRANSITION_KIND)
+        self.assertIn(cycle_tools_path, validated["new_repository"]["control_blobs"])
+        self.assertEqual(
+            validated["maintenance_commits"][0]["paths"],
+            [cycle_tools_path, test_path],
+        )
+
+        raw = serialize_maintenance_transition_record(record)
+        self.assertTrue(raw.endswith(b"\n"))
+        self.assertLessEqual(len(raw), MAX_MAINTENANCE_TRANSITION_RECORD_BYTES)
+
+        parsed = parse_maintenance_transition_record(raw)
+        self.assertEqual(parsed, validated)
+
+        built = build_maintenance_transition_record(
+            prior_checkpoint_sha256=record["prior_checkpoint_sha256"],
+            prior_head=prior_head,
+            new_repository=record["new_repository"],
+            maintenance_commits=record["maintenance_commits"],
+        )
+        self.assertEqual(built, validated)
+
+        # Different control path in control_blobs remains rejected
+        broker_ctrl = "scripts/two_site_provider_broker.py"
+        record_diff, _, _ = _make_valid_record(commits_count=1)
+        record_diff["new_repository"]["control_blobs"][cycle_tools_path] = "c" * 40
+        record_diff["new_repository"]["control_blobs"][broker_ctrl] = "d" * 40
+        record_diff["maintenance_commits"][0]["paths"] = sorted([broker_ctrl, test_path])
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_diff)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        # Unsorted commit paths rejected
+        record_unsorted, _, _ = _make_valid_record(commits_count=1)
+        record_unsorted["new_repository"]["control_blobs"][cycle_tools_path] = "c" * 40
+        record_unsorted["maintenance_commits"][0]["paths"] = [test_path, cycle_tools_path]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_unsorted)
+        self.assertEqual(str(ctx.exception), "commit paths must be sorted")
 
 
 if __name__ == "__main__":
