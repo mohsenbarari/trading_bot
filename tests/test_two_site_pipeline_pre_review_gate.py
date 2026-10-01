@@ -541,6 +541,288 @@ class TestPipelinePreReviewGate(unittest.TestCase):
         self.assertNotIn("warnings summary", serialized)
         self.assertLess(len(serialized.encode("utf-8")), 4096)
 
+    def test_failure_signature_fact_order_is_invariant(self):
+        sha_a = "a" * 64
+        sha_b = "b" * 64
+        stdout1 = (
+            "FAILED tests/test_retry.py::test_a\n"
+            "FAILED tests/test_retry.py::test_b\n"
+            "E KeyError: 'reservation_file'\n"
+            "E ValueError: mismatch\n"
+            "> self.assertEqual(before['outbox'], 0)\n"
+            "> self.assertEqual(before['sent'], 1)\n"
+        )
+        stdout2 = (
+            "FAILED tests/test_retry.py::test_b\n"
+            "FAILED tests/test_retry.py::test_a\n"
+            "E ValueError: mismatch\n"
+            "E KeyError: 'reservation_file'\n"
+            "> self.assertEqual(before['sent'], 1)\n"
+            "> self.assertEqual(before['outbox'], 0)\n"
+        )
+        receipt1 = build_test_receipt(
+            proposal_sha=sha_a,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=stdout1,
+            stderr_tail="",
+            selectors=[DEFAULT_SELECTOR],
+        )
+        receipt2 = build_test_receipt(
+            proposal_sha=sha_b,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=stdout2,
+            stderr_tail="",
+            selectors=[DEFAULT_SELECTOR],
+        )
+
+        receipt1_snap = json.loads(json.dumps(receipt1))
+        receipt2_snap = json.loads(json.dumps(receipt2))
+
+        facts1 = pipeline.test_failure_facts(receipt1)
+        facts2 = pipeline.test_failure_facts(receipt2)
+
+        # Independently pin expected counts and exact set contents
+        self.assertEqual(len(facts1["tests"]), 2)
+        self.assertEqual(len(facts1["exceptions"]), 2)
+        self.assertEqual(len(facts1["statements"]), 2)
+        self.assertEqual(
+            set(facts1["tests"]),
+            {"FAILED tests/test_retry.py::test_a", "FAILED tests/test_retry.py::test_b"},
+        )
+        self.assertEqual(
+            set(facts1["exceptions"]),
+            {"KeyError: 'reservation_file'", "ValueError: mismatch"},
+        )
+        self.assertEqual(len(set(facts1["statements"])), 2)
+
+        # Real test_failure_facts yields same sets and different list order across all buckets
+        self.assertEqual(set(facts1["tests"]), set(facts2["tests"]))
+        self.assertEqual(set(facts1["exceptions"]), set(facts2["exceptions"]))
+        self.assertEqual(set(facts1["statements"]), set(facts2["statements"]))
+        self.assertNotEqual(facts1["tests"], facts2["tests"])
+        self.assertNotEqual(facts1["exceptions"], facts2["exceptions"])
+        self.assertNotEqual(facts1["statements"], facts2["statements"])
+
+        facts1_snap = json.loads(json.dumps(facts1))
+        facts2_snap = json.loads(json.dumps(facts2))
+
+        sig1 = pipeline.test_failure_signature(receipt1)
+        sig2 = pipeline.test_failure_signature(receipt2)
+        self.assertEqual(sig1, sig2)
+
+        # Repeated calls verify determinism and absence of receipt/fact mutation
+        self.assertEqual(pipeline.test_failure_signature(receipt1), sig1)
+        self.assertEqual(pipeline.test_failure_signature(receipt2), sig2)
+        self.assertEqual(receipt1, receipt1_snap)
+        self.assertEqual(receipt2, receipt2_snap)
+        self.assertEqual(facts1, facts1_snap)
+        self.assertEqual(facts2, facts2_snap)
+
+    def test_failure_signature_keeps_distinct_roots_and_validation(self):
+        base_sha = "c" * 64
+        base_stdout = (
+            "FAILED tests/test_retry.py::test_a\n"
+            "E KeyError: 'reservation_file'\n"
+            "> self.assertEqual(before['outbox'], 0)\n"
+        )
+        base_receipt = build_test_receipt(
+            proposal_sha=base_sha,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=base_stdout,
+            selectors=["tests/test_retry.py"],
+        )
+        base_sig = pipeline.test_failure_signature(base_receipt)
+
+        # Changing one exception independently yields different signature
+        diff_exc_stdout = (
+            "FAILED tests/test_retry.py::test_a\n"
+            "E ValueError: 'reservation_file'\n"
+            "> self.assertEqual(before['outbox'], 0)\n"
+        )
+        diff_exc_receipt = build_test_receipt(
+            proposal_sha=base_sha,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=diff_exc_stdout,
+            selectors=["tests/test_retry.py"],
+        )
+        self.assertNotEqual(pipeline.test_failure_signature(diff_exc_receipt), base_sig)
+
+        # Changing an asserted constant independently yields different signature
+        diff_const_stdout = (
+            "FAILED tests/test_retry.py::test_a\n"
+            "E KeyError: 'reservation_file'\n"
+            "> self.assertEqual(before['outbox'], 999)\n"
+        )
+        diff_const_receipt = build_test_receipt(
+            proposal_sha=base_sha,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=diff_const_stdout,
+            selectors=["tests/test_retry.py"],
+        )
+        self.assertNotEqual(pipeline.test_failure_signature(diff_const_receipt), base_sig)
+
+        # Changing a selector independently yields different signature
+        diff_sel_receipt = build_test_receipt(
+            proposal_sha=base_sha,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=base_stdout,
+            selectors=["tests/test_other.py"],
+        )
+        self.assertNotEqual(pipeline.test_failure_signature(diff_sel_receipt), base_sig)
+
+        # Changing proposal SHA preserves signature (proposal-SHA independence)
+        diff_sha_receipt = build_test_receipt(
+            proposal_sha="d" * 64,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=base_stdout,
+            selectors=["tests/test_retry.py"],
+        )
+        self.assertEqual(pipeline.test_failure_signature(diff_sha_receipt), base_sig)
+
+        # Local-name collapse preserves signature
+        diff_name_stdout = (
+            "FAILED tests/test_retry.py::test_a\n"
+            "E KeyError: 'reservation_file'\n"
+            "> self.assertEqual(renamed_snapshot_var['outbox'], 0)\n"
+        )
+        diff_name_receipt = build_test_receipt(
+            proposal_sha=base_sha,
+            state="FAILED",
+            returncode=1,
+            stdout_tail=diff_name_stdout,
+            selectors=["tests/test_retry.py"],
+        )
+        self.assertEqual(pipeline.test_failure_signature(diff_name_receipt), base_sig)
+
+        # Raw fallback when no standard lines present
+        raw_receipt = build_test_receipt(
+            proposal_sha=base_sha,
+            state="FAILED",
+            returncode=1,
+            stdout_tail="fatal unformatted runtime abort\n",
+            selectors=["tests/test_retry.py"],
+        )
+        raw_facts = pipeline.test_failure_facts(raw_receipt)
+        self.assertEqual(raw_facts["tests"], [])
+        self.assertEqual(raw_facts["statements"], [])
+        self.assertEqual(raw_facts["exceptions"], ["fatal unformatted runtime abort"])
+        self.assertEqual(len(pipeline.test_failure_signature(raw_receipt)), 64)
+
+        # Invalid/PASSED rejection behavior
+        passed_receipt = build_test_receipt(state="PASSED", returncode=0)
+        with self.assertRaises(ProposalError):
+            pipeline.test_failure_signature(passed_receipt)
+
+        with self.assertRaises(Exception):
+            pipeline.test_failure_signature({"state": "UNKNOWN"})
+
+        # Independently computed historical single-fact hash equality
+        canonical_singleton_payload = {
+            "facts": {
+                "exceptions": [],
+                "statements": [],
+                "tests": ["FAILED tests/test_a.py::test_one"],
+            },
+            "returncode": 1,
+            "selectors": ["tests/test_a.py"],
+        }
+        canonical_raw_bytes = json.dumps(
+            canonical_singleton_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        canonical_expected_sha = hashlib.sha256(canonical_raw_bytes).hexdigest().lower()
+
+        singleton_receipt = build_test_receipt(
+            proposal_sha="e" * 64,
+            state="FAILED",
+            returncode=1,
+            stdout_tail="FAILED tests/test_a.py::test_one\n",
+            selectors=["tests/test_a.py"],
+        )
+        self.assertEqual(
+            pipeline.test_failure_signature(singleton_receipt),
+            canonical_expected_sha,
+        )
+
+    def test_reordered_failure_stops_before_third_worker(self):
+        stdout0 = (
+            "FAILED tests/test_retry.py::test_a\n"
+            "FAILED tests/test_retry.py::test_b\n"
+            "E KeyError: 'reservation_file'\n"
+            "E ValueError: mismatch\n"
+            "> self.assertEqual(before['outbox'], 0)\n"
+            "> self.assertEqual(before['sent'], 1)\n"
+        )
+        stdout1 = (
+            "FAILED tests/test_retry.py::test_b\n"
+            "FAILED tests/test_retry.py::test_a\n"
+            "E ValueError: mismatch\n"
+            "E KeyError: 'reservation_file'\n"
+            "> self.assertEqual(before['sent'], 1)\n"
+            "> self.assertEqual(before['outbox'], 0)\n"
+        )
+        rcpt0 = build_test_receipt(
+            state="FAILED",
+            returncode=1,
+            stdout_tail=stdout0,
+            stderr_tail="",
+        )
+        rcpt1 = build_test_receipt(
+            state="FAILED",
+            returncode=1,
+            stdout_tail=stdout1,
+            stderr_tail="",
+        )
+        runner, runner_calls = make_runner(self.root, [
+            {"content": "# v1\n"},
+            {"content": "# v2\n"},
+        ])
+        candidate_tester, candidate_calls = make_candidate_tester([rcpt0, rcpt1])
+
+        with patch.object(pipeline, "git", side_effect=fake_git), \
+             patch.object(pipeline, "runner_run", side_effect=runner), \
+             patch.object(pipeline, "run_candidate_tests", side_effect=candidate_tester):
+            with self.assertRaises(ProposalError) as ctx:
+                run_pipeline(self.root, self.task_path, "run-reorder", 300, None, self.state)
+
+        err_msg = str(ctx.exception)
+        self.assertIn("repeated test failure signature", err_msg)
+        expected_sig = pipeline.test_failure_signature(rcpt0)
+        self.assertIn(expected_sig, err_msg)
+
+        # Require repeated-test-failure-signature ProposalError after exactly TWO Worker/candidate-test invocations,
+        # NO third Worker, NO Reviewer
+        self.assertEqual(len(runner_calls), 2)
+        self.assertEqual(runner_calls[0][:2], ("worker", "run-reorder-worker-0"))
+        self.assertEqual(runner_calls[1][:2], ("worker", "run-reorder-worker-1"))
+        self.assertFalse(any(c[0] == "verifier" for c in runner_calls))
+        self.assertFalse(any(c[1] == "run-reorder-worker-2" for c in runner_calls))
+        self.assertEqual(len(candidate_calls), 2)
+
+        # Require receipt0/1 and feedback1 exist, receipt2/feedback2 absent; state never READY_FOR_CODEX
+        rcpt0_path = self.root / ".local/two-site-refactor/pipeline/run-reorder/pre-review-tests-0.json"
+        rcpt1_path = self.root / ".local/two-site-refactor/pipeline/run-reorder/pre-review-tests-1.json"
+        rcpt2_path = self.root / ".local/two-site-refactor/pipeline/run-reorder/pre-review-tests-2.json"
+        self.assertTrue(rcpt0_path.exists())
+        self.assertTrue(rcpt1_path.exists())
+        self.assertFalse(rcpt2_path.exists())
+
+        fb1_path = self.root / ".local/two-site-refactor/pipeline/run-reorder/feedback-correction-1.json"
+        fb2_path = self.root / ".local/two-site-refactor/pipeline/run-reorder/feedback-correction-2.json"
+        self.assertTrue(fb1_path.exists())
+        self.assertFalse(fb2_path.exists())
+
+        self.assertNotEqual(self.state["state"], "READY_FOR_CODEX")
+
 
 if __name__ == "__main__":
     unittest.main()

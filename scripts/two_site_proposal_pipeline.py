@@ -964,10 +964,11 @@ def test_failure_signature(receipt: Mapping[str, Any]) -> str:
     validated = validate_test_receipt(receipt, proposal_sha)
     if validated["state"] != "FAILED":
         raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+    facts = test_failure_facts(validated)
     payload = {
         "returncode": validated["returncode"],
         "selectors": validated["selectors"],
-        "facts": test_failure_facts(validated),
+        "facts": {k: sorted(v) for k, v in facts.items()},
     }
     canonical_json = json.dumps(
         payload,
