@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json",
+    "sha256": "782407b237098640fffa0ce1c011d80406ce0b1707b9b06428a5e911e0487554",
+    "last_commit": "540dc1cba9e2efed477cd81b71b946a69b47fcde"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_users_read_all_empty_http.py",
+      "sha256": "83151fbafaa7953fbad50136ad564a0bdd2f5d39c1e5943c75a40b3364cf7faa",
+      "last_commit": "f564bf674a6c5f7ab38be28a2ad92f69ff886ab8",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_all_empty_http.py::UsersReadAllEmptyHttpCharacterizationTests::test_empty_list_returns_http_200_without_relation_queries"
+      ]
+    }
+  ]
+}
