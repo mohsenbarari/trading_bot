@@ -323,6 +323,7 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
             mod.ALLOWED_MAINTENANCE_CONTROL_PATHS,
             frozenset({
                 "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md",
+                "scripts/two_site_autopilot_monitor.sh",
                 "scripts/two_site_autopilot_tmux.sh",
                 "scripts/two_site_codex_autopilot.py",
                 "scripts/two_site_cycle_tools.py",
@@ -827,6 +828,113 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
             validate_maintenance_transition_record(record_unrelated)
         self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+    def test_autopilot_monitor_control_path_allowlist_and_rejections(self) -> None:
+        monitor_path = "scripts/two_site_autopilot_monitor.sh"
+        launcher_path = "scripts/two_site_autopilot_tmux.sh"
+
+        # 1. Monitor-only in control_blobs and paths
+        record, prior_head, repo_head = _make_valid_record(commits_count=1)
+        record["new_repository"]["control_blobs"][monitor_path] = "c" * 40
+        record["maintenance_commits"][0]["paths"] = [monitor_path]
+
+        validated = validate_maintenance_transition_record(record)
+        self.assertEqual(validated["kind"], MAINTENANCE_TRANSITION_KIND)
+        self.assertIn(monitor_path, validated["new_repository"]["control_blobs"])
+        self.assertEqual(validated["maintenance_commits"][0]["paths"], [monitor_path])
+
+        raw = serialize_maintenance_transition_record(record)
+        self.assertTrue(raw.endswith(b"\n"))
+        self.assertLessEqual(len(raw), MAX_MAINTENANCE_TRANSITION_RECORD_BYTES)
+
+        parsed = parse_maintenance_transition_record(raw)
+        self.assertEqual(parsed, validated)
+
+        built = build_maintenance_transition_record(
+            prior_checkpoint_sha256=record["prior_checkpoint_sha256"],
+            prior_head=prior_head,
+            new_repository=record["new_repository"],
+            maintenance_commits=record["maintenance_commits"],
+        )
+        self.assertEqual(built, validated)
+
+        # 2. Both monitor and launcher in control_blobs and paths (alone and together)
+        record_both, p_head, r_head = _make_valid_record(commits_count=1)
+        record_both["new_repository"]["control_blobs"][monitor_path] = "c" * 40
+        record_both["new_repository"]["control_blobs"][launcher_path] = "d" * 40
+        record_both["maintenance_commits"][0]["paths"] = sorted([monitor_path, launcher_path])
+
+        validated_both = validate_maintenance_transition_record(record_both)
+        self.assertEqual(
+            validated_both["maintenance_commits"][0]["paths"],
+            [monitor_path, launcher_path],
+        )
+        raw_both = serialize_maintenance_transition_record(record_both)
+        self.assertEqual(parse_maintenance_transition_record(raw_both), validated_both)
+
+        # 3. Contiguous commits with monitor and launcher
+        record_multi, _, _ = _make_valid_record(commits_count=3)
+        record_multi["new_repository"]["control_blobs"][monitor_path] = "c" * 40
+        record_multi["new_repository"]["control_blobs"][launcher_path] = "d" * 40
+        record_multi["maintenance_commits"][0]["paths"] = [monitor_path]
+        record_multi["maintenance_commits"][1]["paths"] = [launcher_path]
+        record_multi["maintenance_commits"][2]["paths"] = sorted([monitor_path, launcher_path])
+        raw_multi = serialize_maintenance_transition_record(record_multi)
+        parsed_multi = parse_maintenance_transition_record(raw_multi)
+        self.assertEqual(len(parsed_multi["maintenance_commits"]), 3)
+
+        # 4. Unrelated control path in control_blobs rejected
+        unrelated_ctrl = "scripts/two_site_autopilot_control.py"
+        record_diff, _, _ = _make_valid_record(commits_count=1)
+        record_diff["new_repository"]["control_blobs"][monitor_path] = "c" * 40
+        record_diff["new_repository"]["control_blobs"][unrelated_ctrl] = "d" * 40
+        record_diff["maintenance_commits"][0]["paths"] = [unrelated_ctrl]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_diff)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        # 5. Neighboring names, suffixes, casing, shell globs and unrelated .sh scripts rejected
+        for bad_sh in [
+            "scripts/two_site_autopilot_monitor*.sh",
+            "scripts/two_site_*.sh",
+            "scripts/*.sh",
+            "scripts/two_site_autopilot_monitor.sh.bak",
+            "scripts/two_site_autopilot_monitor.sh2",
+            "scripts/two_site_autopilot_monitor.SH",
+            "scripts/TWO_SITE_AUTOPILOT_MONITOR.sh",
+            "Scripts/two_site_autopilot_monitor.sh",
+            "prefix_scripts/two_site_autopilot_monitor.sh",
+            "scripts/two_site_autopilot_monitor.sh/child",
+            "scripts/two_site_monitor.sh",
+            "scripts/two_site_autopilot_monitor_other.sh",
+            "tests/test_two_site_autopilot_monitor.sh",
+        ]:
+            rec_bad, _, _ = _make_valid_record(commits_count=1)
+            rec_bad["maintenance_commits"][0]["paths"] = [bad_sh]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_bad)
+            self.assertIn("commit path", str(ctx.exception))
+
+        for malformed in [
+            "/scripts/two_site_autopilot_monitor.sh",
+            "../scripts/two_site_autopilot_monitor.sh",
+            "scripts/../scripts/two_site_autopilot_monitor.sh",
+            "scripts/./two_site_autopilot_monitor.sh",
+            "scripts\\two_site_autopilot_monitor.sh",
+            "scripts/two_site_autopilot_monitor.sh" + chr(0),
+            "scripts/two_site_autopilot_monitor.sh ",
+            " scripts/two_site_autopilot_monitor.sh",
+        ]:
+            rec_mal, _, _ = _make_valid_record(commits_count=1)
+            rec_mal["maintenance_commits"][0]["paths"] = [malformed]
+            with self.assertRaises(MaintenanceTransitionRecordError):
+                validate_maintenance_transition_record(rec_mal)
+
+        # 6. Old record roundtrip preserved
+        old_record, _, _ = _make_valid_record(commits_count=2)
+        old_raw = serialize_maintenance_transition_record(old_record)
+        old_parsed = parse_maintenance_transition_record(old_raw)
+        self.assertEqual(old_parsed, validate_maintenance_transition_record(old_record))
 
 
 if __name__ == "__main__":
