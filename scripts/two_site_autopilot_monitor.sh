@@ -14,6 +14,7 @@ expected_antigravity_sha256="93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e
 running_heartbeat_max_age_seconds=90
 
 cd "$integration_root" || exit 1
+export PYTHONPATH="$integration_root"
 
 mkdir -p -- "$report_root"
 exec 9>"$report_root/monitor.lock"
@@ -452,6 +453,7 @@ if [[ "$restart_eligible" == true ]]; then
             && ! [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
           printf -v broker_command '%q ' \
             /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+            PYTHONPATH="$integration_root" \
             /usr/bin/python3 "$integration_root/scripts/two_site_provider_broker.py" --root "$integration_root" serve
           if /usr/bin/timeout 15 /usr/bin/tmux new-session -d -s "$broker_session" -c "$integration_root" "$broker_command" >"$restart_tmp" 2>&1; then
             broker_ready=false

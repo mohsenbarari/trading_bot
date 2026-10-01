@@ -40,6 +40,7 @@ fi
 
 cd "$root"
 state_root="$root/.local/two-site-refactor/autopilot"
+export PYTHONPATH="$root"
 
 usage() {
   printf 'Usage: %s {start|status|stop|stop-now|logs}\n' "$0"
@@ -57,6 +58,7 @@ case "${1:-}" in
     if ! tmux has-session -t "=$broker_session" 2>/dev/null; then
       printf -v broker_command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+        PYTHONPATH="$root" \
         /usr/bin/python3 "$root/scripts/two_site_provider_broker.py" --root "$root" serve
       tmux new-session -d -s "$broker_session" -c "$root" "$broker_command"
     fi
@@ -82,6 +84,7 @@ case "${1:-}" in
       fi
       printf -v command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+        PYTHONPATH="$root" \
         /usr/bin/python3 "$root/scripts/two_site_codex_autopilot.py" --root "$root"
       tmux new-session -d -s "$session" -c "$root" "$command"
       printf 'PROVIDER_BROKER=RUNNING session=%s\n' "$broker_session"
