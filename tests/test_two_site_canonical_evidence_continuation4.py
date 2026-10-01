@@ -441,7 +441,10 @@ def test_negative_extra_seventh_source_key(tmp_path: Path) -> None:
     )
     result = inspect_canonical_evidence(repo, "API-DEMO-SEED-PROVEN")
     assert result["status"] == "INVENTORY_INCONSISTENT", result
-    assert "canonical manifest inventory or sources invalid" in result.get("reason", "")
+    assert any(
+        phrase in result.get("reason", "")
+        for phrase in ("continuation-5.json", "ls-files", "canonical file read failed", "non-zero exit status")
+    )
 
 
 def test_negative_continuation4_oversized(tmp_path: Path) -> None:
@@ -452,3 +455,138 @@ def test_negative_continuation4_oversized(tmp_path: Path) -> None:
     result = inspect_canonical_evidence(repo, "API-DEMO-SEED-PROVEN")
     assert result["status"] == "INVENTORY_INCONSISTENT", result
     assert "canonical file read failed" in result.get("reason", "")
+
+
+def _make_continuation6_repo(
+    repo: Path,
+    *,
+    c6_predecessor_sha: str | None = None,
+) -> tuple[Path, str]:
+    repo, c0, c0_sha, c4, c4_sha = _make_continuation4_repo(repo)
+
+    c4_rel = "docs/refactor/two-server/section-1/inventory/continuation-4.json"
+    c4_bytes = (repo / c4_rel).read_bytes()
+    c4_file_sha = hashlib.sha256(c4_bytes).hexdigest()
+    c4_commit = _run_git(repo, "log", "-1", "--format=%H", "HEAD", "--", c4_rel)
+
+    c5_doc = {
+        "schema_version": 1,
+        "stage": "P1-00b",
+        "predecessor_inventory": {
+            "path": c4_rel,
+            "sha256": c4_file_sha,
+            "last_commit": c4_commit,
+        },
+        "records": [],
+    }
+    c5_rel = "docs/refactor/two-server/section-1/inventory/continuation-5.json"
+    (repo / c5_rel).write_text(json.dumps(c5_doc, indent=2) + "\n", encoding="utf-8")
+    _run_git(repo, "add", c5_rel)
+    _run_git(repo, "commit", "-m", "commit 6: continuation-5")
+
+    c5_bytes = (repo / c5_rel).read_bytes()
+    c5_file_sha = hashlib.sha256(c5_bytes).hexdigest()
+    c5_commit = _run_git(repo, "log", "-1", "--format=%H", "HEAD", "--", c5_rel)
+
+    c6_link_sha = c6_predecessor_sha if c6_predecessor_sha is not None else c5_file_sha
+    c6_doc = {
+        "schema_version": 1,
+        "stage": "P1-00b",
+        "predecessor_inventory": {
+            "path": c5_rel,
+            "sha256": c6_link_sha,
+            "last_commit": c5_commit,
+        },
+        "records": [
+            {
+                "seed_ids": ["BOT-DEMO-SEED-PARTIAL"],
+                "path": "tests/test_sample.py",
+                "sha256": c4_sha,
+                "last_commit": c4,
+                "test_selectors": ["tests/test_sample.py::test_sample"],
+            }
+        ],
+    }
+    c6_rel = "docs/refactor/two-server/section-1/inventory/continuation-6.json"
+    (repo / c6_rel).write_text(json.dumps(c6_doc, indent=2) + "\n", encoding="utf-8")
+
+    manifest_file = repo / "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+    manifest_doc = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest_doc["evidence_sources"]["continuation_5_path"] = c5_rel
+    manifest_doc["evidence_sources"]["continuation_6_path"] = c6_rel
+    manifest_file.write_text(json.dumps(manifest_doc, indent=2) + "\n", encoding="utf-8")
+
+    _run_git(
+        repo,
+        "add",
+        c6_rel,
+        "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    )
+    _run_git(repo, "commit", "-m", "commit 7: continuation-6 and manifest update")
+
+    return repo, c4_sha
+
+
+def test_continuation6_synthetic_current_proof(tmp_path: Path) -> None:
+    repo, _ = _make_continuation6_repo(tmp_path / "c6_repo")
+    result = inspect_canonical_evidence(repo, "BOT-DEMO-SEED-PARTIAL")
+    assert result["status"] == "VALID", result
+    assert result["expected_seed_count"] == 4
+    assert result["seed_count"] == 4
+    assert result["requested_coverage"] == "PROVEN_FOR_REQUESTED_SCENARIO"
+    assert result["coverage"] == {"BOT-DEMO-SEED-PARTIAL": "PROVEN_FOR_REQUESTED_SCENARIO"}
+
+
+def test_negative_c6_tampered_predecessor_sha(tmp_path: Path) -> None:
+    repo, _ = _make_continuation6_repo(
+        tmp_path / "tampered_c6_pred_sha_repo",
+        c6_predecessor_sha="0" * 64,
+    )
+    result = inspect_canonical_evidence(repo, "BOT-DEMO-SEED-PARTIAL")
+    assert result["status"] == "INVENTORY_INCONSISTENT", result
+    assert "continuation 6 invalid" in result.get("reason", "")
+
+
+def test_negative_manifest_gap_and_unknown_key(tmp_path: Path) -> None:
+    repo, _ = _make_continuation6_repo(tmp_path / "manifest_defect_repo")
+    manifest_file = repo / "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+    manifest_doc = json.loads(manifest_file.read_text(encoding="utf-8"))
+
+    # Manifest gap: missing continuation_5_path while continuation_6_path is present
+    gapped_sources = dict(manifest_doc["evidence_sources"])
+    del gapped_sources["continuation_5_path"]
+    manifest_doc["evidence_sources"] = gapped_sources
+    manifest_file.write_text(json.dumps(manifest_doc, indent=2) + "\n", encoding="utf-8")
+    _run_git(repo, "add", str(manifest_file))
+    _run_git(repo, "commit", "-m", "commit 8: manifest gap")
+
+    result_gap = inspect_canonical_evidence(repo, "BOT-DEMO-SEED-PARTIAL")
+    assert result_gap["status"] == "INVENTORY_INCONSISTENT", result_gap
+    assert "canonical manifest inventory or sources invalid" in result_gap.get("reason", "")
+
+    # Unknown key: unrecognized manifest source key
+    unknown_sources = dict(gapped_sources)
+    unknown_sources["continuation_5_path"] = "docs/refactor/two-server/section-1/inventory/continuation-5.json"
+    unknown_sources["unknown_manifest_key"] = "docs/refactor/two-server/section-1/inventory/continuation-extra.json"
+    manifest_doc["evidence_sources"] = unknown_sources
+    manifest_file.write_text(json.dumps(manifest_doc, indent=2) + "\n", encoding="utf-8")
+    _run_git(repo, "add", str(manifest_file))
+    _run_git(repo, "commit", "-m", "commit 9: unknown key")
+
+    result_unknown = inspect_canonical_evidence(repo, "BOT-DEMO-SEED-PARTIAL")
+    assert result_unknown["status"] == "INVENTORY_INCONSISTENT", result_unknown
+    assert "canonical manifest inventory or sources invalid" in result_unknown.get("reason", "")
+
+    # Leading-zero key: continuation_05_path
+    lz_sources = dict(manifest_doc["evidence_sources"])
+    del lz_sources["unknown_manifest_key"]
+    del lz_sources["continuation_5_path"]
+    lz_sources["continuation_05_path"] = "docs/refactor/two-server/section-1/inventory/continuation-5.json"
+    manifest_doc["evidence_sources"] = lz_sources
+    manifest_file.write_text(json.dumps(manifest_doc, indent=2) + "\n", encoding="utf-8")
+    _run_git(repo, "add", str(manifest_file))
+    _run_git(repo, "commit", "-m", "commit 10: leading zero key")
+
+    result_lz = inspect_canonical_evidence(repo, "BOT-DEMO-SEED-PARTIAL")
+    assert result_lz["status"] == "INVENTORY_INCONSISTENT", result_lz
+    assert "canonical manifest inventory or sources invalid" in result_lz.get("reason", "")

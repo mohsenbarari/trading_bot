@@ -543,9 +543,18 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             raise runner.ProposalError("canonical manifest sections missing")
         expected = inventory.get("expected_seed_count")
         surfaces = inventory.get("paths")
-        known_5_sources = {"baseline_path", "base_path", "continuation_path", "continuation_2_path", "continuation_3_path"}
-        known_6_sources = known_5_sources | {"continuation_4_path"}
-        if type(expected) is not int or not isinstance(surfaces, list) or len(surfaces) != 4 or set(sources) not in (known_5_sources, known_6_sources):
+        n_sources = len(sources) - 2
+        expected_source_keys = {"baseline_path", "base_path", "continuation_path"} | {
+            f"continuation_{i}_path" for i in range(2, n_sources + 1)
+        }
+        if (
+            type(expected) is not int
+            or not isinstance(surfaces, list)
+            or len(surfaces) != 4
+            or not (3 <= n_sources <= 64)
+            or set(sources) != expected_source_keys
+            or any(type(k) is not str or type(v) is not str for k, v in sources.items())
+        ):
             raise runner.ProposalError("canonical manifest inventory or sources invalid")
         values = [counts.get(key) for key in ("baseline_evidenced_seed_count", "reconciled_new_seed_count", "evidenced_seed_count", "remaining_seed_count")]
         if any(type(value) is not int or value < 0 for value in values) or values[0] + values[1] != values[2] or values[2] + values[3] != expected:
@@ -603,11 +612,13 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             raise runner.ProposalError("continuation 1 invalid")
 
         continuations = [
-            (sources["continuation_2_path"], sources["continuation_path"], c1_sha),
-            (sources["continuation_3_path"], sources["continuation_2_path"], None),
+            (
+                sources[f"continuation_{index}_path"],
+                sources["continuation_path"] if index == 2 else sources[f"continuation_{index - 1}_path"],
+                c1_sha if index == 2 else None,
+            )
+            for index in range(2, n_sources + 1)
         ]
-        if "continuation_4_path" in sources:
-            continuations.append((sources["continuation_4_path"], sources["continuation_3_path"], None))
         docs = [base, c1]
         for index, (path, predecessor, predecessor_sha) in enumerate(continuations, start=2):
             current, current_sha = load(path)
