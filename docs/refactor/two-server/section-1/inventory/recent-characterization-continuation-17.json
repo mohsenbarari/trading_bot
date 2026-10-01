@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+    "sha256": "22e2c7c921ee8e20a2335a1ce1f32e0224f4b1403f2597ef6a11e36d4930fe3a",
+    "last_commit": "0eebdb41c0300ae0d92a16d5cd0aa8db75ad2b9f"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_users_read_missing_http.py",
+      "sha256": "7ae68ea6d3239cf6ab844b3087efe45a56a38b068308316861362b1ff71c8dfb",
+      "last_commit": "0f3deb613251c7c5f39822b2a1f0e5532e5e140f",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-USER-L440"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_missing_http.py::UsersReadMissingHttpCharacterizationTests::test_authorized_missing_target_returns_http_404_after_single_get"
+      ]
+    }
+  ]
+}
