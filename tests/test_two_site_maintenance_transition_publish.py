@@ -43,6 +43,8 @@ from scripts.two_site_maintenance_transition_storage import (
 
 _AUTOPILOT_CONTROL_PATH = "scripts/two_site_codex_autopilot.py"
 _LAUNCHER_CONTROL_PATH = "scripts/two_site_autopilot_tmux.sh"
+_PROMPT_CONTROL_PATH = "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md"
+_PROPOSAL_DOC_PATH = "docs/refactor/two-server/PROPOSAL_AUTOMATION.md"
 
 
 class TestMaintenanceTransitionPublish(unittest.TestCase):
@@ -72,11 +74,15 @@ class TestMaintenanceTransitionPublish(unittest.TestCase):
         *,
         autopilot_changed: bool = False,
         launcher_changed: bool = False,
+        prompt_changed: bool = False,
+        doc_changed: bool = False,
     ) -> tuple[dict, bytes, dict, str, dict, dict, list[dict]]:
         prior_chk_sha = "a" * 64
         prior_head, new_head = "1" * 40, "2" * 40
         refs = {r: "3" * 40 for r in sorted(PROTECTED_REFS)}
         ctrl = {p.as_posix(): "4" * 40 for p in sorted(CONTROL_PATHS, key=lambda p: p.as_posix())}
+        if _PROMPT_CONTROL_PATH not in ctrl:
+            ctrl[_PROMPT_CONTROL_PATH] = "4" * 40
         new_ctrl = dict(ctrl)
         paths = ["scripts/two_site_test.py"]
         if autopilot_changed:
@@ -85,6 +91,11 @@ class TestMaintenanceTransitionPublish(unittest.TestCase):
         if launcher_changed:
             new_ctrl[_LAUNCHER_CONTROL_PATH] = "c" * 40
             paths.append(_LAUNCHER_CONTROL_PATH)
+        if prompt_changed:
+            new_ctrl[_PROMPT_CONTROL_PATH] = "d" * 40
+            paths.append(_PROMPT_CONTROL_PATH)
+        if doc_changed:
+            paths.append(_PROPOSAL_DOC_PATH)
         paths = sorted(paths)
 
         scope_prior = {
@@ -429,6 +440,51 @@ class TestMaintenanceTransitionPublish(unittest.TestCase):
         bad_ctrl_repo["control_blobs"][unrelated] = "f" * 40
         bad_commits = copy.deepcopy(commits)
         bad_commits[0]["paths"] = sorted(["scripts/two_site_test.py", unrelated])
+        with self._mock_env(raw_repo=bad_ctrl_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with self.assertRaises(MaintenanceTransitionPublishError):
+                publish_maintenance_transition_locked(self.root, self.state_root, bad_commits)
+
+    def test_prompt_control_change_declared_success(self) -> None:
+        record, _, chk_repo, chk_sha, norm_repo, raw_repo, commits = self._make_sample_payload(
+            prompt_changed=True
+        )
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            published = publish_maintenance_transition_locked(self.root, self.state_root, commits)
+        self.assertEqual(published, record)
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            loaded = read_maintenance_transition_locked(self.root, self.state_root)
+        self.assertEqual(loaded, record)
+
+    def test_prompt_control_change_undeclared_fails(self) -> None:
+        _, _, chk_repo, chk_sha, _, raw_repo, commits = self._make_sample_payload(
+            prompt_changed=True
+        )
+        undeclared_commits = copy.deepcopy(commits)
+        undeclared_commits[0]["paths"] = ["scripts/two_site_test.py"]
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            with self.assertRaises(MaintenanceTransitionPublishError):
+                publish_maintenance_transition_locked(self.root, self.state_root, undeclared_commits)
+
+    def test_prompt_and_proposal_docs_commit_paths_success(self) -> None:
+        record, _, chk_repo, chk_sha, norm_repo, raw_repo, commits = self._make_sample_payload(
+            prompt_changed=True, doc_changed=True
+        )
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            published = publish_maintenance_transition_locked(self.root, self.state_root, commits)
+        self.assertEqual(published, record)
+        with self._mock_env(raw_repo=raw_repo, chk_repo=chk_repo, chk_sha=chk_sha):
+            loaded = read_maintenance_transition_locked(self.root, self.state_root)
+        self.assertEqual(loaded, record)
+
+    def test_unrelated_control_change_fails_when_prompt_changed(self) -> None:
+        _, _, chk_repo, chk_sha, _, raw_repo, commits = self._make_sample_payload(
+            prompt_changed=True
+        )
+        unrelated = [k for k in sorted(chk_repo["control_blobs"]) if k not in ALLOWED_MAINTENANCE_CONTROL_PATHS][0]
+        bad_ctrl_repo = copy.deepcopy(raw_repo)
+        bad_ctrl_repo["control_blobs"][unrelated] = "f" * 40
+        bad_commits = copy.deepcopy(commits)
+        bad_commits[0]["paths"] = sorted(commits[0]["paths"] + [unrelated])
         with self._mock_env(raw_repo=bad_ctrl_repo, chk_repo=chk_repo, chk_sha=chk_sha):
             with self.assertRaises(MaintenanceTransitionPublishError):
                 publish_maintenance_transition_locked(self.root, self.state_root, bad_commits)

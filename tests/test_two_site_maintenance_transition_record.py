@@ -322,6 +322,7 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         self.assertEqual(
             mod.ALLOWED_MAINTENANCE_CONTROL_PATHS,
             frozenset({
+                "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md",
                 "scripts/two_site_autopilot_tmux.sh",
                 "scripts/two_site_codex_autopilot.py",
                 "scripts/two_site_cycle_tools.py",
@@ -727,6 +728,105 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
             validate_maintenance_transition_record(record_unsorted)
         self.assertEqual(str(ctx.exception), "commit paths must be sorted")
+
+    def test_codex_prompt_and_docs_maintenance_paths_and_rejections(self) -> None:
+        prompt_path = "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md"
+        doc_path = "docs/refactor/two-server/PROPOSAL_AUTOMATION.md"
+
+        # 1. Prompt-only in control_blobs and commit paths
+        record, prior_head, repo_head = _make_valid_record(commits_count=1)
+        record["new_repository"]["control_blobs"][prompt_path] = "c" * 40
+        record["maintenance_commits"][0]["paths"] = [prompt_path]
+
+        validated = validate_maintenance_transition_record(record)
+        self.assertEqual(validated["kind"], MAINTENANCE_TRANSITION_KIND)
+        self.assertIn(prompt_path, validated["new_repository"]["control_blobs"])
+        self.assertEqual(validated["maintenance_commits"][0]["paths"], [prompt_path])
+
+        raw = serialize_maintenance_transition_record(record)
+        self.assertTrue(raw.endswith(b"\n"))
+        self.assertLessEqual(len(raw), MAX_MAINTENANCE_TRANSITION_RECORD_BYTES)
+
+        parsed = parse_maintenance_transition_record(raw)
+        self.assertEqual(parsed, validated)
+
+        # 2. Both documentation paths in commit paths (sorted)
+        record_both, _, _ = _make_valid_record(commits_count=1)
+        record_both["new_repository"]["control_blobs"][prompt_path] = "c" * 40
+        record_both["maintenance_commits"][0]["paths"] = sorted([doc_path, prompt_path])
+
+        validated_both = validate_maintenance_transition_record(record_both)
+        self.assertEqual(
+            validated_both["maintenance_commits"][0]["paths"],
+            sorted([doc_path, prompt_path]),
+        )
+        raw_both = serialize_maintenance_transition_record(record_both)
+        self.assertEqual(parse_maintenance_transition_record(raw_both), validated_both)
+
+        # 3. Documentation path (PROPOSAL_AUTOMATION.md) only in commit paths (not in control_blobs)
+        record_doc, _, _ = _make_valid_record(commits_count=1)
+        record_doc["maintenance_commits"][0]["paths"] = [doc_path]
+        validated_doc = validate_maintenance_transition_record(record_doc)
+        self.assertEqual(validated_doc["maintenance_commits"][0]["paths"], [doc_path])
+
+        # 4. PROPOSAL_AUTOMATION.md in control_blobs is rejected (immutable control)
+        record_doc_ctrl, _, _ = _make_valid_record(commits_count=1)
+        record_doc_ctrl["new_repository"]["control_blobs"][doc_path] = "d" * 40
+        record_doc_ctrl["maintenance_commits"][0]["paths"] = [doc_path]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_doc_ctrl)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        # 5. Neighboring doc paths and globs rejected in commit paths
+        for bad_doc in [
+            "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.txt",
+            "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md.bak",
+            "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md2",
+            "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.MD",
+            "docs/refactor/two-server/CODEX_AUTOPILOT_PROMPT.md",
+            "docs/refactor/two-server/PROPOSAL_AUTOMATION.txt",
+            "docs/refactor/two-server/PROPOSAL_AUTOMATION.md.bak",
+            "docs/refactor/two-server/PROPOSAL_AUTOMATION.md2",
+            "docs/refactor/two-server/PROPOSAL_AUTOMATION.MD",
+            "docs/refactor/PROPOSAL_AUTOMATION.md",
+            "docs/PROPOSAL_AUTOMATION.md",
+            "docs/refactor/two-server/templates/other.md",
+            "docs/refactor/two-server/other.md",
+            "docs/refactor/two-server/**",
+            "docs/**",
+        ]:
+            rec_bad, _, _ = _make_valid_record(commits_count=1)
+            rec_bad["maintenance_commits"][0]["paths"] = [bad_doc]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_bad)
+            self.assertIn("commit path", str(ctx.exception))
+
+        # 6. Unsorted commit paths rejected
+        record_unsorted, _, _ = _make_valid_record(commits_count=1)
+        record_unsorted["maintenance_commits"][0]["paths"] = [
+            prompt_path,
+            doc_path,
+        ]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_unsorted)
+        self.assertEqual(str(ctx.exception), "commit paths must be sorted")
+
+        # 7. Duplicate commit paths rejected
+        record_dup, _, _ = _make_valid_record(commits_count=1)
+        record_dup["maintenance_commits"][0]["paths"] = [prompt_path, prompt_path]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_dup)
+        self.assertEqual(str(ctx.exception), "duplicate commit path detected")
+
+        # 8. Unrelated control path in control_blobs rejected
+        unrelated_ctrl = "scripts/two_site_autopilot_control.py"
+        record_unrelated, _, _ = _make_valid_record(commits_count=1)
+        record_unrelated["new_repository"]["control_blobs"][prompt_path] = "c" * 40
+        record_unrelated["new_repository"]["control_blobs"][unrelated_ctrl] = "d" * 40
+        record_unrelated["maintenance_commits"][0]["paths"] = [unrelated_ctrl]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(record_unrelated)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
 
 
 if __name__ == "__main__":
