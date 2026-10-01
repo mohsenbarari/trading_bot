@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json",
+    "sha256": "d824f0ba5f2683150fca2e5a690bd0e7c67d9a4e73b8fd2d5a44c35dba78e6b3",
+    "last_commit": "534e6a419f415f4f208b8621bd37b800941636f1"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_broadcast_search_state.py",
+      "sha256": "27fbe303758d108f2e30c1ac0d407126a74641b7d51d65b20864ca0e1e15d295",
+      "last_commit": "b6ced906adf8a1847bd8962263d1006af55baa62",
+      "seed_ids": [
+        "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_matched_recipients_preserve_selected_marker_and_search_delivery",
+        "tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_empty_results_preserve_selected_count_and_no_match_delivery",
+        "tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_malformed_selected_id_fails_before_session_or_delivery"
+      ]
+    }
+  ]
+}
