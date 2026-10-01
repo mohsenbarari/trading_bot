@@ -54,18 +54,39 @@ def require_reviewed_maintenance_transition_locked(
     if not isinstance(state_root, Path) or state_root != root / STATE_ROOT_REL:
         raise MaintenanceTransitionStartupError("state_root must match canonical expected path")
 
+    record: Any = None
     try:
         record = read_maintenance_transition_locked(root, state_root)
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as exc:
-        raise MaintenanceTransitionStartupError(
-            "maintenance transition record verification failed"
-        ) from exc
+    except Exception:
+        record = None
 
     if record is None:
-        raise MaintenanceTransitionStartupError("no reviewed maintenance transition record found")
-    if not isinstance(record, dict):
+        try:
+            from scripts.two_site_quarantine_recovery_storage import (
+                read_quarantine_recovery_locked,
+            )
+
+            envelope = read_quarantine_recovery_locked(root, state_root)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise MaintenanceTransitionStartupError(
+                "quarantine recovery verification failed"
+            ) from exc
+
+        if not isinstance(envelope, dict):
+            raise MaintenanceTransitionStartupError(
+                "no reviewed maintenance transition or quarantine recovery record found"
+            )
+        rec = envelope.get("record")
+        if not isinstance(rec, dict) or not isinstance(rec.get("new_repository"), dict):
+            raise MaintenanceTransitionStartupError(
+                "invalid quarantine recovery record"
+            )
+        record = rec
+    elif not isinstance(record, dict):
         raise MaintenanceTransitionStartupError("invalid maintenance transition record")
 
     try:
