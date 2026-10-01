@@ -486,7 +486,17 @@ def sandbox_argv(snapshot: Path, selected_tests: list[str], bwrap: str = "/usr/b
     for value in ("/etc/ld.so.cache", "/etc/localtime", "/etc/passwd", "/etc/group"):
         if Path(value).is_file():
             args += ["--ro-bind", value, value]
-    return args + ["/usr/bin/python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests]
+    return args + [
+        "/usr/bin/python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        "scripts.two_site_pre_review_pytest_gate",
+        *tests,
+    ]
 
 
 def _validate_overlay_path(value: str) -> PurePosixPath:
@@ -567,6 +577,8 @@ def run_tests(worktree: Path, selected_tests: list[str], extra_paths: list[str] 
                 raise SandboxError("test selector not in authorized source snapshot")
         if not (snapshot / "config/unit-test.env.example").is_file():
             raise SandboxError("hermetic unit-test environment example missing")
+        if not (snapshot / "scripts/two_site_pre_review_pytest_gate.py").is_file():
+            raise SandboxError("pre-review pytest gate missing from authorized source snapshot")
         ancestry = None
         if git_ancestry is not None:
             ancestry = materialize_git_ancestry(
