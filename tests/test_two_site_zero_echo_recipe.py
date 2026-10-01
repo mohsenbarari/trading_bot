@@ -232,7 +232,7 @@ def test_prompt_contains_coordinator_guidance_and_preserves_gates():
     assert "inspect git diff --stat / --name-status / --check and exact staged paths/modes, without reprinting" in prompt_text
     assert "Run actual focused tests plus proportional regression" in prompt_text
     assert "Never claim tests not run" in prompt_text
-    assert "Use gpt-6-sol/xhigh" in prompt_text
+    assert "Use gpt-6.1-sol/xhigh" in prompt_text
 
     assert "Use final Git metadata escalation only for narrowly scoped git add -- <exact accepted proposal paths>" in prompt_text
     assert "Prohibit git add -A, git add ., globs, unrelated paths" in prompt_text
@@ -243,8 +243,8 @@ def test_prompt_size_growth_is_bounded():
     prompt_text = PROMPT_PATH.read_text("utf-8")
     prompt_bytes = len(prompt_text.encode("utf-8"))
     assert prompt_bytes < ap.MAX_PROMPT_BYTES
-    # Current mandatory safety/workflow clauses measure 16621 bytes; leaves <379 bytes headroom.
-    assert prompt_bytes < 17000
+    # Current mandatory safety/workflow clauses measure 17262 bytes; leaves <738 bytes headroom.
+    assert prompt_bytes < 18000
     recipe = extract_recipe(prompt_text)
     assert len(recipe.encode("utf-8")) < 2000
 
@@ -267,7 +267,7 @@ def test_codex_command_enables_code_mode_and_preserves_arguments(tmp_path):
     model_idx = cmd.index("--model")
     assert cmd[model_idx + 1] == ap.MODEL
     assert f'model_reasoning_effort="{ap.REASONING}"' in cmd
-    assert ap.MODEL == "gpt-6-sol"
+    assert ap.MODEL == "gpt-6.1-sol"
     assert ap.REASONING == "xhigh"
 
     assert "--approve-for-me" in cmd

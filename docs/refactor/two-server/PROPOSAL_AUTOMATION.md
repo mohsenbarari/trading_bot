@@ -7,7 +7,7 @@ Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
 مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
-مدل جاری Supervisor: `gpt-6-sol` با `xhigh`.
+مدل جاری Supervisor: `gpt-6.1-sol` با `xhigh`.
 مدل‌های Gemini از `templates/gemini-runtime-contract.json` می‌آیند:
 Worker=`gemini-3.8-flash-medium/medium` و Reviewer=`gemini-3.8-flash-high/high`.
 این تفکیک از خروجی‌های غیرقابل‌تحویل
@@ -285,8 +285,8 @@ Antigravity CLI نسخهٔ 1.1.27 و SHA از runtime contract می‌آید. م
 AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا بررسی می‌شوند.
 کپی موقت قبل از آزادشدن lock در موفقیت/خطا/timeout جمع می‌شود؛ adapter 1.1.26 قدیمی است.
 
-Codex CLI نسخهٔ 0.156.1 با SHA ثبت‌شده در Supervisor، از مسیر مستقل این integration:
-`.local/tools/codex-0.156.1-0b2e9301d6100ddd/codex`.
+Codex CLI نسخهٔ 0.159.2 با SHA ثبت‌شده در Supervisor، از مسیر مستقل این integration:
+`.local/tools/codex-0.159.2-1748767b230ebfc3/codex`.
 این مسیر به پوشهٔ نسخه‌دار افزونه وابسته نیست؛ fallback به PATH یا نسخهٔ تأییدنشده ندارد.
 نسخه/SHA/login پیش از اجرا و SHA پس از اجرا کنترل می‌شوند.
 این تغییر خطر حذف مسیر توسط update افزونه را رفع می‌کند، نه همهٔ خطاهای احتمالی میزبان.

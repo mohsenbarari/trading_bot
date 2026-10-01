@@ -27,12 +27,12 @@ def synthetic_scope() -> autopilot.AssignmentScope:
 
 class TestStableCliPin(unittest.TestCase):
     def test_constants_and_model_effort_exact(self) -> None:
-        self.assertEqual(autopilot.EXPECTED_CODEX_CLI_VERSION, "codex-cli 0.156.1")
+        self.assertEqual(autopilot.EXPECTED_CODEX_CLI_VERSION, "codex-cli 0.159.2")
         self.assertEqual(
             autopilot.EXPECTED_CODEX_CLI_SHA256,
-            "0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f",
+            "1748767b230ebfc3d4ab7e4e254920d0c0ad9691fd8c11f190e7d44511a4a92e",
         )
-        self.assertEqual(autopilot.MODEL, "gpt-6-sol")
+        self.assertEqual(autopilot.MODEL, "gpt-6.1-sol")
         self.assertEqual(autopilot.REASONING, "xhigh")
 
     @patch.object(autopilot, "codex_identity")
@@ -51,7 +51,7 @@ class TestStableCliPin(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            derived = root.resolve() / ".local/tools/codex-0.156.1-0b2e9301d6100ddd/codex"
+            derived = root.resolve() / ".local/tools/codex-0.159.2-1748767b230ebfc3/codex"
             with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}):
                 with patch("sys.argv", ["two_site_codex_autopilot.py", "--check", "--root", str(root)]):
                     self.assertEqual(autopilot.main(), 0)
@@ -86,7 +86,7 @@ class TestStableCliPin(unittest.TestCase):
         mock_validate.return_value = {"head": "0" * 40}
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            missing = root.resolve() / ".local/tools/codex-0.156.1-0b2e9301d6100ddd/codex"
+            missing = root.resolve() / ".local/tools/codex-0.159.2-1748767b230ebfc3/codex"
             with tempfile.TemporaryDirectory() as scratch:
                 with self.assertRaises(FileNotFoundError):
                     autopilot.codex_identity(missing, Path(scratch))
