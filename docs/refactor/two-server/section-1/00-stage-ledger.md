@@ -121,3 +121,17 @@ Canonical High blockers remain open:
 - `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
 
 Stage `P1-00b` remains `IN_PROGRESS`; origin matrix remains open, and no Stage closure, origin-cell acceptance, product change, or new behavior unit is claimed.
+
+### 2026-10-01 UTC — Terminate session characterization evidence checkpoint
+
+Assignment `WA-P1-00B-EVIDENCE-RECONCILE-20261001-079` reconciles the two existing accepted `terminate_session` characterization units into `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-11.json`:
+- `tests/test_p1_00b_characterization_terminate_session_malformed_guard.py` (commit `e7f957d7900e9cfc5150b6cad83e1daf7c29bb81`, SHA256 `ea75b1cd5f9f341608dd039acc24a81714067bd0fa2e0d2dd1bd47fafa21c4d0`, seed `API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075`, selectors `tests/test_p1_00b_characterization_terminate_session_malformed_guard.py::TerminateSessionMalformedGuardCharacterizationTests::test_valid_bearer_and_real_guard_precede_malformed_uuid_rejection`, `tests/test_p1_00b_characterization_terminate_session_malformed_guard.py::TerminateSessionMalformedGuardCharacterizationTests::test_accountant_guard_rejects_before_malformed_uuid_path`): validates ordinary guard execution and 400 rejection on malformed UUID, as well as accountant guard 403 before UUID parsing, without claiming mutation or successful termination.
+- `tests/test_p1_00b_characterization_terminate_session_missing_target.py` (commit `03659a9ff3af3c1efeb7e97ab1ce9d782109c257`, SHA256 `672a23ece8460a17aa2d9766c472d8fc6035a87e3a2f4e17acccdd6da128eab9`, seed `API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075`, selector `tests/test_p1_00b_characterization_terminate_session_missing_target.py::TerminateSessionMissingTargetCharacterizationTests::test_valid_uuid_missing_target_returns_404`): validates 404 response on valid UUID with missing target session after exactly one target `UserSession` query through real `AsyncSession` without double-counting the seed.
+
+Both units execute the single seed `API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075`, which is counted once only. Distinct seed coverage updates to 387 of 465 total seeds evidenced (135 baseline + 252 reconciled new), with 78 seeds remaining.
+
+Canonical High blockers remain open:
+- `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`
+- `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
+
+Stage `P1-00b` remains `IN_PROGRESS`; successful termination, mutation, origin-matrix cells, policy/notification/retry closure, and seed siblings are excluded, and no Stage closure or product change is claimed.

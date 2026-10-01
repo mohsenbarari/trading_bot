@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json",
+    "sha256": "b4675c7c04facd4f6f22e9aa60dd2d0e7f3c2b3e08f1dabcd25f78b3f186c4db",
+    "last_commit": "3f7933fc134303fdc09837550be931eafac4c0a2"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_terminate_session_malformed_guard.py",
+      "sha256": "ea75b1cd5f9f341608dd039acc24a81714067bd0fa2e0d2dd1bd47fafa21c4d0",
+      "last_commit": "e7f957d7900e9cfc5150b6cad83e1daf7c29bb81",
+      "seed_ids": [
+        "API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_terminate_session_malformed_guard.py::TerminateSessionMalformedGuardCharacterizationTests::test_valid_bearer_and_real_guard_precede_malformed_uuid_rejection",
+        "tests/test_p1_00b_characterization_terminate_session_malformed_guard.py::TerminateSessionMalformedGuardCharacterizationTests::test_accountant_guard_rejects_before_malformed_uuid_path"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_terminate_session_missing_target.py",
+      "sha256": "672a23ece8460a17aa2d9766c472d8fc6035a87e3a2f4e17acccdd6da128eab9",
+      "last_commit": "03659a9ff3af3c1efeb7e97ab1ce9d782109c257",
+      "seed_ids": [
+        "API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_terminate_session_missing_target.py::TerminateSessionMissingTargetCharacterizationTests::test_valid_uuid_missing_target_returns_404"
+      ]
+    }
+  ]
+}
