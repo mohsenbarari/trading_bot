@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json",
+    "sha256": "a9e3aa8d0ee7ccb51ceb070b17a47e3d61d816f69ebfe2c514417039019ffa7c",
+    "last_commit": "5a0b45537b750020152833b17dd127b5665af798"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py",
+      "sha256": "c8c7858a246565c52a0a267e4e47a2374cbb8652031faf0b4de356c11f69838f",
+      "last_commit": "431a5da5ef1c987c72eabd3571534e7843d1c5fd",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py::AdminUsersToggleBlockUnlinkedCharacterizationTests::test_toggle_block_without_user_stops_before_parse_session_or_delivery"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py",
+      "sha256": "fe8ff44778f49517a437f05a7a6cc7697cfb154bbaf736a09d05867ca699c6f1",
+      "last_commit": "6b76cb3c23b3507e3048d71b6e6b9817ec058a4a",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py::TradeExpireOfferDbEntryFailureCharacterizationTests::test_db_factory_failure_propagates_and_releases_lease_without_delivery"
+      ]
+    }
+  ]
+}

@@ -100,3 +100,22 @@ Canonical High blockers remain open:
 - `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
 
 The five-unit reconciliation is complete, but `P1-00b` remains `IN_PROGRESS`; channel rejection, other seed handlers and origin-matrix cells remain pending. Historical Stage entries are preserved and Stage closure is not claimed.
+
+### 2026-10-01 UTC — Partial recovery characterization evidence checkpoint (packet 1 of 2)
+
+Assignment `WA-P1-00B-EVIDENCE-RECONCILE-20261001-064` records a bounded partial checkpoint for the first two of five accepted recovery behavior units in `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json`:
+- `tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py` (commit `431a5da5ef1c987c72eabd3571534e7843d1c5fd`, seed `BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649`)
+- `tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py` (commit `6b76cb3c23b3507e3048d71b6e6b9817ec058a4a`, seed `BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118`)
+
+The remaining three accepted commits remain pending until the second non-overlapping packet:
+- `3f7933fc134303fdc09837550be931eafac4c0a2`
+- `b6ced906adf8a1847bd8962263d1006af55baa62`
+- `b48ae0bf6ef28731e070a0e016ae40daac6cdffa`
+
+All five units remain pending in the overall seed accounting; seed coverage is preserved at 385 of 465 total seeds evidenced (135 baseline + 250 reconciled new), with 80 seeds remaining.
+
+Canonical High blockers remain open:
+- `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`
+- `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
+
+Stage `P1-00b` remains `IN_PROGRESS`; no Stage closure or origin-matrix proof is claimed.
