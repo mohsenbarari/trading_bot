@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-EVIDENCE-RECONCILE-20261001-116",
+  "inspected_head": "67931e960a1361ddb49f1be603eb1553cd1a0687",
+  "status": "PARTIAL_RECONCILIATION",
+  "source_inventories": [
+    {
+      "last_commit": "e0ed45e87a45f32d19de19e2227f3af1eb969193",
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json",
+      "sha256": "ebe8e3c3189f8961a61d256ed5cc690864c2e4d7f5c6d1cc91e3554060769071"
+    },
+    {
+      "last_commit": "540dc1cba9e2efed477cd81b71b946a69b47fcde",
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json",
+      "sha256": "782407b237098640fffa0ce1c011d80406ce0b1707b9b06428a5e911e0487554"
+    }
+  ],
+  "records": [
+    {
+      "last_commit": "98c98e93e94aa426ebae7502a67a5d5053a3a31a",
+      "path": "tests/test_p1_00b_characterization_trade_export_self_delegation.py",
+      "seed_ids": [
+        "API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797"
+      ],
+      "sha256": "b8db918415014c2fbaec56888bdc37e6be53f329829a6a1af9dd0ba72b5856d1",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_export_self_delegation.py::TradeExportSelfDelegationCharacterizationTests::test_self_target_delegates_exact_filters_and_returns_export_response"
+      ]
+    },
+    {
+      "last_commit": "d175d215f83631a98a1a9fefea7c27cef6d88936",
+      "path": "tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+      ],
+      "sha256": "1fd0fe0e19768903c6fd2e921b63238c2af0ceba5b6331210ce6e1e1494e0623",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py::UsersReadAllExecuteFailureHttpCharacterizationTests::test_list_query_failure_returns_http_500_before_relation_context"
+      ]
+    }
+  ],
+  "units_since_reconciliation": 5,
+  "total_behavior_units": 5,
+  "reconciled_behavior_units": 2,
+  "remaining_behavior_units": 3,
+  "remaining_inventory_paths": [
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json"
+  ],
+  "remaining_behavior_descriptions": {
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json": "empty-list HTTP200",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json": "manager-peer HTTP403",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json": "missing-target HTTP404"
+  },
+  "reconciliation_policy": {
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "deferred_continuations": [
+      "continuation-12"
+    ],
+    "global_reconciliation_complete": false
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 252,
+    "evidenced_seed_count": 387,
+    "remaining_seed_count": 78,
+    "expected_seed_count": 465
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "seed_accounting": {
+    "prospective_distinct_seeds": [
+      "API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797"
+    ],
+    "pre_reconciled_distinct_seeds": [
+      "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+    ]
+  },
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "closures_authorized": false
+}

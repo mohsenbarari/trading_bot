@@ -135,3 +135,46 @@ Canonical High blockers remain open:
 - `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
 
 Stage `P1-00b` remains `IN_PROGRESS`; successful termination, mutation, origin-matrix cells, policy/notification/retry closure, and seed siblings are excluded, and no Stage closure or product change is claimed.
+
+### 2026-10-01 UTC — Partial reconciliation checkpoint (continuations 13 and 14)
+
+Assignment `WA-P1-00B-EVIDENCE-RECONCILE-20261001-116` (parent `WA-P1-00B-FREEZE-20260904-001`, inspected head `67931e960a1361ddb49f1be603eb1553cd1a0687`) records one documentation-only partial reconciliation checkpoint for exactly the two accepted behavior units indexed in continuations 13 and 14:
+- Continuation 13 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json`):
+  - `tests/test_p1_00b_characterization_trade_export_self_delegation.py` (commit `98c98e93e94aa426ebae7502a67a5d5053a3a31a`, SHA256 `b8db918415014c2fbaec56888bdc37e6be53f329829a6a1af9dd0ba72b5856d1`, seed `API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797`, selector `tests/test_p1_00b_characterization_trade_export_self_delegation.py::TradeExportSelfDelegationCharacterizationTests::test_self_target_delegates_exact_filters_and_returns_export_response`): self-target export forwards filters and exact db/context and returns delegated response with zero DB access. Self-export is one prospective new distinct seed.
+- Continuation 14 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json`):
+  - `tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py` (commit `d175d215f83631a98a1a9fefea7c27cef6d88936`, SHA256 `1fd0fe0e19768903c6fd2e921b63238c2af0ceba5b6331210ce6e1e1494e0623`, seed `API-IDENTITY-GET-USERS-READ-ALL-USERS-L407`, selector `tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py::UsersReadAllExecuteFailureHttpCharacterizationTests::test_list_query_failure_returns_http_500_before_relation_context`): HTTP list query execute failure returns default 500 after strict pagination/query validation, before enrichment/serialization. Adds zero seeds because the read_all_users seed is already reconciled (in `recent-characterization.json` via direct execute-failure test commit `0d9141891441c5dbacbe66b8dcc480418c21fe0d`). Scenarios or files are not counted as distinct seeds.
+
+Behavior unit tracking:
+- `units_since_reconciliation=5`
+- `total_behavior_units=5`
+- `reconciled_behavior_units=2`
+- `remaining_behavior_units=3`
+
+The remaining inventory paths in the five-unit pending group are exactly:
+- `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json` (empty-list HTTP200)
+- `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json` (manager-peer HTTP403)
+- `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json` (missing-target HTTP404)
+
+Reconciliation policy constraints:
+- No sixth behavior may be accepted before complete reconciliation.
+- Rejected continuation-12 stays deferred.
+- Global reconciliation remains incomplete until the remaining three behavior units are actually reconciled.
+
+Canonical coverage and manifest remain unchanged:
+- `baseline_evidenced_seed_count`: 135
+- `reconciled_new_seed_count`: 252
+- `evidenced_seed_count`: 387
+- `remaining_seed_count`: 78
+- `expected_seed_count`: 465
+- `coverage_status`: `PARTIAL`
+- Seed acceptance status: `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`
+
+Canonical High blockers retained:
+- `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`
+- `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
+
+Stage status:
+- `P1-00`: `COMPLETE`
+- `P1-00b`: `IN_PROGRESS`
+
+No Stage/seed/blocker/origin-cell closure is authorized; no product, runtime, retry, or persistence modification is made.
