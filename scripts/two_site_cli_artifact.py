@@ -47,9 +47,11 @@ def prepare_disposable_cli(
             raise CliArtifactError("expected_sha256 must be a non-empty string")
         expected_hex = expected_sha256.strip().lower()
 
+    _CANCEL_EXCS = (KeyboardInterrupt, SystemExit, GeneratorExit)
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     disposable_path: pathlib.Path | None = None
-    active_exc: BaseException | None = None
+    yielded = False
+    body_exc: BaseException | None = None
 
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -149,16 +151,36 @@ def prepare_disposable_cli(
         finally:
             os.close(source_fd)
 
-        yield disposable_path, evidence
-    except BaseException as exc:
-        active_exc = exc
-        raise
-    finally:
+        yielded = True
         try:
-            if disposable_path is not None and os.path.lexists(disposable_path):
+            yield disposable_path, evidence
+        except BaseException as exc:
+            body_exc = exc
+    finally:
+        unlink_exc: BaseException | None = None
+        if disposable_path is not None:
+            try:
                 os.unlink(disposable_path)
-            if temp_dir is not None:
+            except FileNotFoundError:
+                pass
+            except BaseException as exc:
+                unlink_exc = exc
+
+        td_exc: BaseException | None = None
+        if temp_dir is not None:
+            try:
                 temp_dir.cleanup()
-        except Exception:
-            if active_exc is None:
-                raise
+            except BaseException as exc:
+                td_exc = exc
+
+        if yielded:
+            if body_exc is not None and isinstance(body_exc, _CANCEL_EXCS):
+                raise body_exc
+            if isinstance(unlink_exc, _CANCEL_EXCS):
+                raise unlink_exc
+            if isinstance(td_exc, _CANCEL_EXCS):
+                raise td_exc
+            if unlink_exc is not None or td_exc is not None:
+                raise CliArtifactError("Disposable CLI cleanup failed")
+            if body_exc is not None:
+                raise body_exc
