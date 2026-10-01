@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-11.json",
+    "sha256": "75fd2ee23c469393d7ad197ed697671179a3670a145ddbd7f7ea62e247fb8392",
+    "last_commit": "3e8fd101e41697b6ed8cc53c8f19f11fb3cf591c"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_trade_export_self_delegation.py",
+      "sha256": "b8db918415014c2fbaec56888bdc37e6be53f329829a6a1af9dd0ba72b5856d1",
+      "last_commit": "98c98e93e94aa426ebae7502a67a5d5053a3a31a",
+      "seed_ids": [
+        "API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_export_self_delegation.py::TradeExportSelfDelegationCharacterizationTests::test_self_target_delegates_exact_filters_and_returns_export_response"
+      ]
+    }
+  ]
+}
