@@ -101,21 +101,23 @@ Canonical High blockers remain open:
 
 The five-unit reconciliation is complete, but `P1-00b` remains `IN_PROGRESS`; channel rejection, other seed handlers and origin-matrix cells remain pending. Historical Stage entries are preserved and Stage closure is not claimed.
 
-### 2026-10-01 UTC — Partial recovery characterization evidence checkpoint (packet 1 of 2)
+### 2026-10-01 UTC — Five-unit recovery characterization evidence checkpoint
 
-Assignment `WA-P1-00B-EVIDENCE-RECONCILE-20261001-064` records a bounded partial checkpoint for the first two of five accepted recovery behavior units in `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json`:
-- `tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py` (commit `431a5da5ef1c987c72eabd3571534e7843d1c5fd`, seed `BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649`)
-- `tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py` (commit `6b76cb3c23b3507e3048d71b6e6b9817ec058a4a`, seed `BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118`)
+Assignment `WA-P1-00B-EVIDENCE-RECONCILE-20261001-075` completes the non-overlapping five-unit reconciliation across continuations 7 through 10:
+- Continuation 7 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json`):
+  - `tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py` (commit `431a5da5ef1c987c72eabd3571534e7843d1c5fd`, pre-evidenced baseline seed `BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649`, selector `tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py::AdminUsersToggleBlockUnlinkedCharacterizationTests::test_toggle_block_without_user_stops_before_parse_session_or_delivery`)
+  - `tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py` (commit `6b76cb3c23b3507e3048d71b6e6b9817ec058a4a`, newly counted seed `BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118`, selector `tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py::TradeExpireOfferDbEntryFailureCharacterizationTests::test_db_factory_failure_propagates_and_releases_lease_without_delivery`)
+- Continuation 8 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json`):
+  - `tests/test_p1_00b_characterization_admin_broadcast_search_state.py` (commit `b6ced906adf8a1847bd8962263d1006af55baa62`, pre-evidenced baseline seed `BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308`, selectors `tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_matched_recipients_preserve_selected_marker_and_search_delivery`, `tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_empty_results_preserve_selected_count_and_no_match_delivery`, `tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_malformed_selected_id_fails_before_session_or_delivery`)
+- Continuation 9 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json`):
+  - `tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py` (commit `b48ae0bf6ef28731e070a0e016ae40daac6cdffa`, pre-evidenced baseline seed `BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395`, selectors `tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_empty_selection_alerts_without_transition_or_edit`, `tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_nonempty_selection_prompts_then_acknowledges`)
+- Continuation 10 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json`):
+  - `tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py` (commit `3f7933fc134303fdc09837550be931eafac4c0a2`, pre-evidenced baseline seed `BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334`, selectors `tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py::AdminBroadcastSelectedUserRejectionCharacterizationTests::test_malformed_target_alerts_without_state_or_delivery`, `tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py::AdminBroadcastSelectedUserRejectionCharacterizationTests::test_new_target_at_cap_alerts_without_mutation_or_delivery`)
 
-The remaining three accepted commits remain pending until the second non-overlapping packet:
-- `3f7933fc134303fdc09837550be931eafac4c0a2`
-- `b6ced906adf8a1847bd8962263d1006af55baa62`
-- `b48ae0bf6ef28731e070a0e016ae40daac6cdffa`
-
-All five units remain pending in the overall seed accounting; seed coverage is preserved at 385 of 465 total seeds evidenced (135 baseline + 250 reconciled new), with 80 seeds remaining.
+Seed coverage distinct accounting distinguishes four pre-evidenced baseline seeds (`BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649`, `BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308`, `BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395`, `BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334`) from the one newly counted trade expiry seed (`BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118`). Current seed coverage stands at 386 of 465 total seeds evidenced (135 baseline + 251 reconciled new), with 79 seeds remaining.
 
 Canonical High blockers remain open:
 - `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`
 - `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`
 
-Stage `P1-00b` remains `IN_PROGRESS`; no Stage closure or origin-matrix proof is claimed.
+Stage `P1-00b` remains `IN_PROGRESS`; origin matrix remains open, and no Stage closure, origin-cell acceptance, product change, or new behavior unit is claimed.

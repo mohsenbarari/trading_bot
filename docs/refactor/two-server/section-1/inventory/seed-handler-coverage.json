@@ -19,13 +19,17 @@
     "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json",
     "continuation_4_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json",
     "continuation_5_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
-    "continuation_6_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json"
+    "continuation_6_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json",
+    "continuation_7_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json",
+    "continuation_8_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json",
+    "continuation_9_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json",
+    "continuation_10_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 250,
-    "evidenced_seed_count": 385,
-    "remaining_seed_count": 80
+    "reconciled_new_seed_count": 251,
+    "evidenced_seed_count": 386,
+    "remaining_seed_count": 79
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [

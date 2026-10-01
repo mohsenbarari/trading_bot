@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "predecessor_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json",
+    "sha256": "7dd8751b91e53fb47161197a16401df8872446aad1f272c0aaa01b3e0efb82d6",
+    "last_commit": "d90a545db84dc5d3d2cc8ab6f0b4cd3243ade0a8"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py",
+      "sha256": "874fd169c5bd5931e61c32696762b9c1cc3ea6daf6cb76dce2164b97308a930b",
+      "last_commit": "3f7933fc134303fdc09837550be931eafac4c0a2",
+      "seed_ids": [
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py::AdminBroadcastSelectedUserRejectionCharacterizationTests::test_malformed_target_alerts_without_state_or_delivery",
+        "tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py::AdminBroadcastSelectedUserRejectionCharacterizationTests::test_new_target_at_cap_alerts_without_mutation_or_delivery"
+      ]
+    }
+  ]
+}
