@@ -1,3 +1,4 @@
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -59,6 +60,11 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             "continuation_4_path",
             "continuation_5_path",
             "continuation_6_path",
+            "continuation_7_path",
+            "continuation_8_path",
+            "continuation_9_path",
+            "continuation_10_path",
+            "continuation_11_path",
         }
         self.assertEqual(set(manifest["evidence_sources"].keys()), expected_evidence_keys)
         self.assertEqual(
@@ -93,6 +99,26 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
             manifest["evidence_sources"]["continuation_6_path"],
             "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json",
         )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_7_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json",
+        )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_8_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json",
+        )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_9_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json",
+        )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_10_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json",
+        )
+        self.assertEqual(
+            manifest["evidence_sources"]["continuation_11_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-11.json",
+        )
 
         expected_counts_keys = {
             "baseline_evidenced_seed_count",
@@ -102,9 +128,9 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         }
         self.assertEqual(set(manifest["counts"].keys()), expected_counts_keys)
         self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], 135)
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 250)
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 385)
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], 80)
+        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], 252)
+        self.assertEqual(manifest["counts"]["evidenced_seed_count"], 387)
+        self.assertEqual(manifest["counts"]["remaining_seed_count"], 78)
 
         expected_per_file_counts = [217, 203, 30, 15]
         inventory_behavior_ids = []
@@ -991,24 +1017,483 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         reconciled_new_beyond_baseline = all_recent_seed_set - baseline_seed_set
         self.assertEqual(len(reconciled_new_beyond_baseline), 250)
 
-        final_evidenced_set = (
+        continuation_6_checkpoint_evidenced_set = (
             prior_356_evidenced_set
             | continuation_3_seed_set
             | continuation_4_seed_set
             | continuation_5_seed_set
             | continuation_6_seed_set
         )
-        self.assertEqual(len(final_evidenced_set), 385)
+        self.assertEqual(len(continuation_6_checkpoint_evidenced_set), 385)
 
-        remaining_seed_set = inventory_seed_set - final_evidenced_set
-        self.assertEqual(len(remaining_seed_set), 80)
-        self.assertEqual(len(final_evidenced_set) + len(remaining_seed_set), 465)
-        self.assertEqual(len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 385)
+        continuation_6_remaining_seed_set = (
+            inventory_seed_set - continuation_6_checkpoint_evidenced_set
+        )
+        self.assertEqual(len(continuation_6_remaining_seed_set), 80)
+        self.assertEqual(
+            len(continuation_6_checkpoint_evidenced_set)
+            + len(continuation_6_remaining_seed_set),
+            465,
+        )
+        self.assertEqual(
+            len(baseline_seed_set) + len(reconciled_new_beyond_baseline), 385
+        )
 
-        self.assertEqual(manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set))
-        self.assertEqual(manifest["counts"]["reconciled_new_seed_count"], len(reconciled_new_beyond_baseline))
-        self.assertEqual(manifest["counts"]["evidenced_seed_count"], len(final_evidenced_set))
-        self.assertEqual(manifest["counts"]["remaining_seed_count"], len(remaining_seed_set))
+        continuation_7_file_path = repo_root / manifest["evidence_sources"]["continuation_7_path"]
+        self.assertTrue(
+            continuation_7_file_path.is_file(),
+            f"Continuation 7 evidence file not found at {continuation_7_file_path}",
+        )
+        continuation_7_bytes = continuation_7_file_path.read_bytes()
+        continuation_7_data = json.loads(continuation_7_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_7_data.get("schema_version"), 1)
+        self.assertEqual(continuation_7_data.get("stage"), "P1-00b")
+
+        continuation_7_predecessor = continuation_7_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_7_predecessor["path"],
+            manifest["evidence_sources"]["continuation_6_path"],
+        )
+        self.assertEqual(
+            continuation_7_predecessor["sha256"],
+            hashlib.sha256(continuation_6_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_7_predecessor["last_commit"],
+            "5a0b45537b750020152833b17dd127b5665af798",
+        )
+
+        continuation_7_records = continuation_7_data.get("records", [])
+        self.assertEqual(len(continuation_7_records), 2)
+
+        continuation_8_file_path = repo_root / manifest["evidence_sources"]["continuation_8_path"]
+        self.assertTrue(
+            continuation_8_file_path.is_file(),
+            f"Continuation 8 evidence file not found at {continuation_8_file_path}",
+        )
+        continuation_8_bytes = continuation_8_file_path.read_bytes()
+        continuation_8_data = json.loads(continuation_8_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_8_data.get("schema_version"), 1)
+        self.assertEqual(continuation_8_data.get("stage"), "P1-00b")
+
+        continuation_8_predecessor = continuation_8_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_8_predecessor["path"],
+            manifest["evidence_sources"]["continuation_7_path"],
+        )
+        self.assertEqual(
+            continuation_8_predecessor["sha256"],
+            hashlib.sha256(continuation_7_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_8_predecessor["last_commit"],
+            "534e6a419f415f4f208b8621bd37b800941636f1",
+        )
+
+        continuation_8_records = continuation_8_data.get("records", [])
+        self.assertEqual(len(continuation_8_records), 1)
+
+        continuation_9_file_path = repo_root / manifest["evidence_sources"]["continuation_9_path"]
+        self.assertTrue(
+            continuation_9_file_path.is_file(),
+            f"Continuation 9 evidence file not found at {continuation_9_file_path}",
+        )
+        continuation_9_bytes = continuation_9_file_path.read_bytes()
+        continuation_9_data = json.loads(continuation_9_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_9_data.get("schema_version"), 1)
+        self.assertEqual(continuation_9_data.get("stage"), "P1-00b")
+
+        continuation_9_predecessor = continuation_9_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_9_predecessor["path"],
+            manifest["evidence_sources"]["continuation_8_path"],
+        )
+        self.assertEqual(
+            continuation_9_predecessor["sha256"],
+            hashlib.sha256(continuation_8_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_9_predecessor["last_commit"],
+            "8d4bd2a4bbfd8647a52f33717e881fa962c0aca5",
+        )
+
+        continuation_9_records = continuation_9_data.get("records", [])
+        self.assertEqual(len(continuation_9_records), 1)
+
+        continuation_10_file_path = repo_root / manifest["evidence_sources"]["continuation_10_path"]
+        self.assertTrue(
+            continuation_10_file_path.is_file(),
+            f"Continuation 10 evidence file not found at {continuation_10_file_path}",
+        )
+        continuation_10_bytes = continuation_10_file_path.read_bytes()
+        continuation_10_data = json.loads(continuation_10_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_10_data.get("schema_version"), 1)
+        self.assertEqual(continuation_10_data.get("stage"), "P1-00b")
+
+        continuation_10_predecessor = continuation_10_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_10_predecessor["path"],
+            manifest["evidence_sources"]["continuation_9_path"],
+        )
+        self.assertEqual(
+            continuation_10_predecessor["sha256"],
+            hashlib.sha256(continuation_9_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_10_predecessor["last_commit"],
+            "d90a545db84dc5d3d2cc8ab6f0b4cd3243ade0a8",
+        )
+
+        continuation_10_records = continuation_10_data.get("records", [])
+        self.assertEqual(len(continuation_10_records), 1)
+
+        continuation_11_file_path = repo_root / manifest["evidence_sources"]["continuation_11_path"]
+        self.assertTrue(
+            continuation_11_file_path.is_file(),
+            f"Continuation 11 evidence file not found at {continuation_11_file_path}",
+        )
+        continuation_11_bytes = continuation_11_file_path.read_bytes()
+        continuation_11_data = json.loads(continuation_11_bytes.decode("utf-8"))
+
+        self.assertEqual(continuation_11_data.get("schema_version"), 1)
+        self.assertEqual(continuation_11_data.get("stage"), "P1-00b")
+
+        continuation_11_predecessor = continuation_11_data["predecessor_inventory"]
+        self.assertEqual(
+            continuation_11_predecessor["path"],
+            manifest["evidence_sources"]["continuation_10_path"],
+        )
+        self.assertEqual(
+            continuation_11_predecessor["sha256"],
+            hashlib.sha256(continuation_10_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            continuation_11_predecessor["last_commit"],
+            "6d4ad41d24afd7451157ebe724a1418d4050e22e",
+        )
+
+        continuation_11_records = continuation_11_data.get("records", [])
+        self.assertEqual(len(continuation_11_records), 2)
+
+        expected_records_7_11 = [
+            {
+                "path": "tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py",
+                "sha256": "c8c7858a246565c52a0a267e4e47a2374cbb8652031faf0b4de356c11f69838f",
+                "last_commit": "431a5da5ef1c987c72eabd3571534e7843d1c5fd",
+                "seed_ids": [
+                    "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_admin_users_toggle_block_unlinked.py::AdminUsersToggleBlockUnlinkedCharacterizationTests::test_toggle_block_without_user_stops_before_parse_session_or_delivery"
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py",
+                "sha256": "fe8ff44778f49517a437f05a7a6cc7697cfb154bbaf736a09d05867ca699c6f1",
+                "last_commit": "6b76cb3c23b3507e3048d71b6e6b9817ec058a4a",
+                "seed_ids": [
+                    "BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_trade_expire_offer_db_entry_failure.py::TradeExpireOfferDbEntryFailureCharacterizationTests::test_db_factory_failure_propagates_and_releases_lease_without_delivery"
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_admin_broadcast_search_state.py",
+                "sha256": "27fbe303758d108f2e30c1ac0d407126a74641b7d51d65b20864ca0e1e15d295",
+                "last_commit": "b6ced906adf8a1847bd8962263d1006af55baa62",
+                "seed_ids": [
+                    "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_matched_recipients_preserve_selected_marker_and_search_delivery",
+                    "tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_empty_results_preserve_selected_count_and_no_match_delivery",
+                    "tests/test_p1_00b_characterization_admin_broadcast_search_state.py::AdminBroadcastSearchStateCharacterizationTests::test_malformed_selected_id_fails_before_session_or_delivery",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py",
+                "sha256": "77defed1ed10d923b7d32d89a44a5f20ebc380496f1021ebeb299dd45af340fe",
+                "last_commit": "b48ae0bf6ef28731e070a0e016ae40daac6cdffa",
+                "seed_ids": [
+                    "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_empty_selection_alerts_without_transition_or_edit",
+                    "tests/test_p1_00b_characterization_admin_broadcast_finish_selected_linked.py::AdminBroadcastFinishSelectedLinkedCharacterizationTests::test_nonempty_selection_prompts_then_acknowledges",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py",
+                "sha256": "874fd169c5bd5931e61c32696762b9c1cc3ea6daf6cb76dce2164b97308a930b",
+                "last_commit": "3f7933fc134303fdc09837550be931eafac4c0a2",
+                "seed_ids": [
+                    "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py::AdminBroadcastSelectedUserRejectionCharacterizationTests::test_malformed_target_alerts_without_state_or_delivery",
+                    "tests/test_p1_00b_characterization_admin_broadcast_selected_user_rejection.py::AdminBroadcastSelectedUserRejectionCharacterizationTests::test_new_target_at_cap_alerts_without_mutation_or_delivery",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_terminate_session_malformed_guard.py",
+                "sha256": "ea75b1cd5f9f341608dd039acc24a81714067bd0fa2e0d2dd1bd47fafa21c4d0",
+                "last_commit": "e7f957d7900e9cfc5150b6cad83e1daf7c29bb81",
+                "seed_ids": [
+                    "API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_terminate_session_malformed_guard.py::TerminateSessionMalformedGuardCharacterizationTests::test_valid_bearer_and_real_guard_precede_malformed_uuid_rejection",
+                    "tests/test_p1_00b_characterization_terminate_session_malformed_guard.py::TerminateSessionMalformedGuardCharacterizationTests::test_accountant_guard_rejects_before_malformed_uuid_path",
+                ],
+            },
+            {
+                "path": "tests/test_p1_00b_characterization_terminate_session_missing_target.py",
+                "sha256": "672a23ece8460a17aa2d9766c472d8fc6035a87e3a2f4e17acccdd6da128eab9",
+                "last_commit": "03659a9ff3af3c1efeb7e97ab1ce9d782109c257",
+                "seed_ids": [
+                    "API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075"
+                ],
+                "test_selectors": [
+                    "tests/test_p1_00b_characterization_terminate_session_missing_target.py::TerminateSessionMissingTargetCharacterizationTests::test_valid_uuid_missing_target_returns_404"
+                ],
+            },
+        ]
+
+        all_records_7_11 = (
+            continuation_7_records
+            + continuation_8_records
+            + continuation_9_records
+            + continuation_10_records
+            + continuation_11_records
+        )
+        self.assertEqual(len(all_records_7_11), 7)
+
+        seen_record_paths = [r["path"] for r in all_records_7_11]
+        self.assertEqual(len(seen_record_paths), 7)
+        self.assertEqual(len(set(seen_record_paths)), 7, "Duplicate record paths found in continuations 7-11")
+
+        all_selectors_7_11 = []
+        for r in all_records_7_11:
+            all_selectors_7_11.extend(r.get("test_selectors", []))
+        self.assertEqual(len(all_selectors_7_11), 12)
+        self.assertEqual(len(set(all_selectors_7_11)), 12, "Duplicate selectors found in continuations 7-11")
+
+        for record, expected_data in zip(all_records_7_11, expected_records_7_11):
+            self.assertEqual(record["path"], expected_data["path"])
+            self.assertEqual(record["sha256"], expected_data["sha256"])
+            self.assertEqual(record["last_commit"], expected_data["last_commit"])
+            self.assertEqual(record["seed_ids"], expected_data["seed_ids"])
+            self.assertEqual(record["test_selectors"], expected_data["test_selectors"])
+
+            record_file_path = repo_root / expected_data["path"]
+            self.assertTrue(record_file_path.is_file(), f"Record file not found at {record_file_path}")
+            record_bytes = record_file_path.read_bytes()
+            self.assertEqual(
+                hashlib.sha256(record_bytes).hexdigest(),
+                expected_data["sha256"],
+                f"SHA256 mismatch for {record_file_path}",
+            )
+
+            tree = ast.parse(record_bytes.decode("utf-8"), filename=str(record_file_path))
+            classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+
+            for selector in expected_data["test_selectors"]:
+                parts = selector.split("::")
+                self.assertEqual(len(parts), 3, f"Malformed selector: {selector}")
+                selector_path, class_name, test_name = parts
+                self.assertEqual(
+                    selector_path,
+                    expected_data["path"],
+                    f"Selector path does not match record path: {selector}",
+                )
+                self.assertIn(
+                    class_name,
+                    classes,
+                    f"Class {class_name} not found in AST of {record_file_path}",
+                )
+                class_node = classes[class_name]
+                methods = {
+                    node.name
+                    for node in class_node.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                }
+                self.assertIn(
+                    test_name,
+                    methods,
+                    f"Method {test_name} not found in {class_name} in AST of {record_file_path}",
+                )
+
+        # Distinct terminate-session records intentionally share a seed
+        term_record_1 = continuation_11_records[0]
+        term_record_2 = continuation_11_records[1]
+        self.assertNotEqual(term_record_1["path"], term_record_2["path"])
+        self.assertEqual(term_record_1["seed_ids"], term_record_2["seed_ids"])
+        self.assertEqual(
+            term_record_1["seed_ids"],
+            ["API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075"],
+        )
+
+        # Continuation 7 seed-set accounting
+        continuation_7_seed_ids = []
+        for r in continuation_7_records:
+            continuation_7_seed_ids.extend(r.get("seed_ids", []))
+        self.assertEqual(len(continuation_7_seed_ids), 2)
+        admin_toggle_seed = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649"
+        trade_expiry_seed = "BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118"
+        self.assertEqual(continuation_7_seed_ids, [admin_toggle_seed, trade_expiry_seed])
+        self.assertIn(admin_toggle_seed, baseline_seed_set)
+        self.assertIn(admin_toggle_seed, continuation_6_checkpoint_evidenced_set)
+        self.assertIn(admin_toggle_seed, inventory_seed_set)
+        self.assertIn(trade_expiry_seed, inventory_seed_set)
+        self.assertNotIn(trade_expiry_seed, baseline_seed_set)
+        self.assertNotIn(trade_expiry_seed, continuation_6_checkpoint_evidenced_set)
+
+        continuation_7_evidenced_set = (
+            continuation_6_checkpoint_evidenced_set | {trade_expiry_seed}
+        )
+        self.assertEqual(len(continuation_7_evidenced_set), 386)
+
+        # Continuation 8 seed-set accounting
+        continuation_8_seed_ids = []
+        for r in continuation_8_records:
+            continuation_8_seed_ids.extend(r.get("seed_ids", []))
+        self.assertEqual(len(continuation_8_seed_ids), 1)
+        broadcast_search_seed = (
+            "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308"
+        )
+        self.assertEqual(continuation_8_seed_ids, [broadcast_search_seed])
+        self.assertIn(broadcast_search_seed, baseline_seed_set)
+        self.assertIn(broadcast_search_seed, continuation_6_checkpoint_evidenced_set)
+        self.assertIn(broadcast_search_seed, inventory_seed_set)
+        continuation_8_evidenced_set = (
+            continuation_7_evidenced_set | set(continuation_8_seed_ids)
+        )
+        self.assertEqual(len(continuation_8_evidenced_set), 386)
+
+        # Continuation 9 seed-set accounting
+        continuation_9_seed_ids = []
+        for r in continuation_9_records:
+            continuation_9_seed_ids.extend(r.get("seed_ids", []))
+        self.assertEqual(len(continuation_9_seed_ids), 1)
+        broadcast_finish_seed = (
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395"
+        )
+        self.assertEqual(continuation_9_seed_ids, [broadcast_finish_seed])
+        self.assertIn(broadcast_finish_seed, baseline_seed_set)
+        self.assertIn(broadcast_finish_seed, continuation_6_checkpoint_evidenced_set)
+        self.assertIn(broadcast_finish_seed, inventory_seed_set)
+        continuation_9_evidenced_set = (
+            continuation_8_evidenced_set | set(continuation_9_seed_ids)
+        )
+        self.assertEqual(len(continuation_9_evidenced_set), 386)
+
+        # Continuation 10 seed-set accounting
+        continuation_10_seed_ids = []
+        for r in continuation_10_records:
+            continuation_10_seed_ids.extend(r.get("seed_ids", []))
+        self.assertEqual(len(continuation_10_seed_ids), 1)
+        broadcast_toggle_seed = (
+            "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334"
+        )
+        self.assertEqual(continuation_10_seed_ids, [broadcast_toggle_seed])
+        self.assertIn(broadcast_toggle_seed, baseline_seed_set)
+        self.assertIn(broadcast_toggle_seed, continuation_6_checkpoint_evidenced_set)
+        self.assertIn(broadcast_toggle_seed, inventory_seed_set)
+        continuation_10_evidenced_set = (
+            continuation_9_evidenced_set | set(continuation_10_seed_ids)
+        )
+        self.assertEqual(len(continuation_10_evidenced_set), 386)
+
+        # Four-baseline-family reconciliation overlap checks
+        four_baseline_reconciliation_seeds = {
+            admin_toggle_seed,
+            broadcast_search_seed,
+            broadcast_finish_seed,
+            broadcast_toggle_seed,
+        }
+        self.assertEqual(len(four_baseline_reconciliation_seeds), 4)
+        self.assertTrue(four_baseline_reconciliation_seeds.issubset(baseline_seed_set))
+        self.assertTrue(
+            four_baseline_reconciliation_seeds.issubset(
+                continuation_6_checkpoint_evidenced_set
+            )
+        )
+
+        all_flattened_recent_ids_through_10 = (
+            all_flattened_recent_ids
+            + continuation_7_seed_ids
+            + continuation_8_seed_ids
+            + continuation_9_seed_ids
+            + continuation_10_seed_ids
+        )
+        reconciled_new_through_10 = (
+            set(all_flattened_recent_ids_through_10) - baseline_seed_set
+        )
+        self.assertEqual(len(reconciled_new_through_10), 251)
+        self.assertEqual(len(continuation_10_evidenced_set), 386)
+        self.assertEqual(
+            len(baseline_seed_set) + len(reconciled_new_through_10), 386
+        )
+
+        # Continuation 11 seed-set accounting
+        continuation_11_seed_ids = []
+        for r in continuation_11_records:
+            continuation_11_seed_ids.extend(r.get("seed_ids", []))
+        self.assertEqual(len(continuation_11_seed_ids), 2)
+        terminate_session_seed = "API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075"
+        self.assertEqual(
+            continuation_11_seed_ids,
+            [terminate_session_seed, terminate_session_seed],
+        )
+        continuation_11_seed_set = set(continuation_11_seed_ids)
+        self.assertEqual(len(continuation_11_seed_set), 1)
+        self.assertIn(terminate_session_seed, inventory_seed_set)
+        self.assertNotIn(terminate_session_seed, baseline_seed_set)
+        self.assertNotIn(terminate_session_seed, continuation_10_evidenced_set)
+
+        all_flattened_recent_ids_through_11 = (
+            all_flattened_recent_ids_through_10 + continuation_11_seed_ids
+        )
+        final_recent_seed_set = set(all_flattened_recent_ids_through_11)
+        self.assertTrue(final_recent_seed_set.issubset(inventory_seed_set))
+
+        final_reconciled_new_beyond_baseline = (
+            final_recent_seed_set - baseline_seed_set
+        )
+        self.assertEqual(len(final_reconciled_new_beyond_baseline), 252)
+
+        final_evidenced_set = (
+            continuation_10_evidenced_set | continuation_11_seed_set
+        )
+        self.assertEqual(len(final_evidenced_set), 387)
+
+        final_remaining_seed_set = inventory_seed_set - final_evidenced_set
+        self.assertEqual(len(final_remaining_seed_set), 78)
+        self.assertEqual(
+            len(final_evidenced_set) + len(final_remaining_seed_set), 465
+        )
+        self.assertEqual(
+            len(baseline_seed_set) + len(final_reconciled_new_beyond_baseline), 387
+        )
+
+        self.assertEqual(
+            manifest["counts"]["baseline_evidenced_seed_count"], len(baseline_seed_set)
+        )
+        self.assertEqual(
+            manifest["counts"]["reconciled_new_seed_count"],
+            len(final_reconciled_new_beyond_baseline),
+        )
+        self.assertEqual(
+            manifest["counts"]["evidenced_seed_count"], len(final_evidenced_set)
+        )
+        self.assertEqual(
+            manifest["counts"]["remaining_seed_count"], len(final_remaining_seed_set)
+        )
 
 
 if __name__ == "__main__":
