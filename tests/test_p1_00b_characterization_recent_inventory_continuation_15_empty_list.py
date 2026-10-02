@@ -59,9 +59,10 @@ def validate_continuation_fifteen_provenance(
             f"Invalid inventory top-level keys: expected {expected_top_keys}, got {set(inventory.keys())}"
         )
 
-    if inventory["schema_version"] != EXPECTED_SCHEMA_VERSION:
+    schema_version = inventory["schema_version"]
+    if type(schema_version) is not int or schema_version != 1:
         raise ValueError(
-            f"Invalid schema_version: expected {EXPECTED_SCHEMA_VERSION}, got {inventory['schema_version']}"
+            f"Invalid schema_version: expected {EXPECTED_SCHEMA_VERSION}, got {schema_version}"
         )
     if inventory["stage"] != EXPECTED_STAGE:
         raise ValueError(
@@ -191,6 +192,66 @@ class ContinuationFifteenEmptyListProvenanceTests(unittest.TestCase):
         self.predecessor_bytes = self.predecessor_path.read_bytes()
         self.source_bytes = self.source_path.read_bytes()
 
+        self.assertEqual(
+            hashlib.sha256(self.inventory_bytes).hexdigest(),
+            "11bc150e1d9e1e92fd317b90078a38b6e28819d7f8b8f812ad19399dc91369b5",
+        )
+        self.assertEqual(
+            hashlib.sha256(self.predecessor_bytes).hexdigest(),
+            "782407b237098640fffa0ce1c011d80406ce0b1707b9b06428a5e911e0487554",
+        )
+        self.assertEqual(
+            hashlib.sha256(self.source_bytes).hexdigest(),
+            "83151fbafaa7953fbad50136ad564a0bdd2f5d39c1e5943c75a40b3364cf7faa",
+        )
+
+        self.assertIs(type(self.inventory.get("schema_version")), int)
+        self.assertEqual(self.inventory.get("schema_version"), 1)
+        self.assertEqual(self.inventory.get("stage"), "P1-00b")
+
+        pred = self.inventory.get("predecessor_inventory")
+        self.assertIsInstance(pred, dict)
+        self.assertEqual(
+            pred.get("path"),
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json",
+        )
+        self.assertEqual(
+            pred.get("sha256"),
+            "782407b237098640fffa0ce1c011d80406ce0b1707b9b06428a5e911e0487554",
+        )
+        self.assertEqual(
+            pred.get("last_commit"),
+            "540dc1cba9e2efed477cd81b71b946a69b47fcde",
+        )
+
+        records = self.inventory.get("records")
+        self.assertIsInstance(records, list)
+        self.assertEqual(len(records), 1)
+        rec = records[0]
+        self.assertIsInstance(rec, dict)
+        self.assertEqual(
+            rec.get("path"),
+            "tests/test_p1_00b_characterization_users_read_all_empty_http.py",
+        )
+        self.assertEqual(
+            rec.get("sha256"),
+            "83151fbafaa7953fbad50136ad564a0bdd2f5d39c1e5943c75a40b3364cf7faa",
+        )
+        self.assertEqual(
+            rec.get("last_commit"),
+            "f564bf674a6c5f7ab38be28a2ad92f69ff886ab8",
+        )
+        self.assertEqual(
+            rec.get("seed_ids"),
+            ["API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"],
+        )
+        self.assertEqual(
+            rec.get("test_selectors"),
+            [
+                "tests/test_p1_00b_characterization_users_read_all_empty_http.py::UsersReadAllEmptyHttpCharacterizationTests::test_empty_list_returns_http_200_without_relation_queries"
+            ],
+        )
+
     def test_exact_empty_list_provenance(self) -> None:
         """Verify that real inventory, predecessor, and source bytes satisfy all provenance checks."""
         validate_continuation_fifteen_provenance(
@@ -201,6 +262,39 @@ class ContinuationFifteenEmptyListProvenanceTests(unittest.TestCase):
         self.assertEqual(
             self.inventory["records"][0]["test_selectors"],
             EXPECTED_TEST_SELECTORS,
+        )
+
+    def test_schema_version_wrong_types_rejected(self) -> None:
+        """Verify that wrong schema_version types and non-1 values are rejected."""
+        wrong_raw_json_cases = [
+            ("true", "true"),
+            ("false", "false"),
+            ("float_one", "1.0"),
+            ("integer_two", "2"),
+            ("integer_zero", "0"),
+            ("string_one", '"1"'),
+            ("null", "null"),
+            ("list", "[1]"),
+            ("object", '{"v": 1}'),
+        ]
+
+        for case_label, raw_json_literal in wrong_raw_json_cases:
+            with self.subTest(case=case_label):
+                mutated = copy.deepcopy(self.inventory)
+                mutated["schema_version"] = json.loads(raw_json_literal)
+                with self.assertRaisesRegex(ValueError, r"^Invalid schema_version:"):
+                    validate_continuation_fifteen_provenance(
+                        mutated,
+                        self.predecessor_bytes,
+                        self.source_bytes,
+                    )
+
+        valid_fixture = copy.deepcopy(self.inventory)
+        valid_fixture["schema_version"] = json.loads("1")
+        validate_continuation_fifteen_provenance(
+            valid_fixture,
+            self.predecessor_bytes,
+            self.source_bytes,
         )
 
     def test_changed_source_bytes_rejected(self) -> None:
