@@ -61,9 +61,10 @@ def validate_continuation_sixteen_provenance(
             f"Invalid inventory top-level keys: expected {expected_top_keys}, got {set(inventory.keys())}"
         )
 
-    if inventory["schema_version"] != EXPECTED_SCHEMA_VERSION:
+    schema_version = inventory["schema_version"]
+    if type(schema_version) is not int or schema_version != EXPECTED_SCHEMA_VERSION:
         raise ValueError(
-            f"Invalid schema_version: expected {EXPECTED_SCHEMA_VERSION}, got {inventory['schema_version']}"
+            f"Invalid schema_version: expected int {EXPECTED_SCHEMA_VERSION}, got {schema_version!r}"
         )
     if inventory["stage"] != EXPECTED_STAGE:
         raise ValueError(
@@ -349,6 +350,48 @@ class ContinuationSixteenManagerPeerProvenanceTests(unittest.TestCase):
                     self.predecessor_bytes,
                     self.source_bytes,
                 )
+
+    def test_schema_version_wrong_types_rejected(self) -> None:
+        """Verify that schema_version must be exact int 1 and rejects wrong types/values."""
+        cases = [
+            ("true", "true", bool),
+            ("false", "false", bool),
+            ("float_one", "1.0", float),
+            ("float_one_point_five", "1.5", float),
+            ("string_one", '"1"', str),
+            ("null", "null", type(None)),
+            ("empty_list", "[]", list),
+            ("empty_dict", "{}", dict),
+            ("integer_zero", "0", int),
+            ("integer_two", "2", int),
+        ]
+        for case_name, raw_json, expected_type in cases:
+            with self.subTest(case=case_name):
+                decoded_val = json.loads(raw_json)
+                self.assertIs(type(decoded_val), expected_type)
+                fresh_inventory = json.loads(self.inventory_bytes.decode("utf-8"))
+                fresh_inventory["schema_version"] = decoded_val
+                with self.assertRaisesRegex(ValueError, r"schema_version"):
+                    validate_continuation_sixteen_provenance(
+                        fresh_inventory,
+                        self.predecessor_bytes,
+                        self.source_bytes,
+                    )
+
+        # Independently pin the canonical positive fixture exact int 1 and successfully validate it
+        canonical_schema_version = json.loads("1")
+        self.assertIs(type(canonical_schema_version), int)
+        self.assertEqual(canonical_schema_version, 1)
+
+        positive_inventory = json.loads(self.inventory_bytes.decode("utf-8"))
+        self.assertIs(type(positive_inventory["schema_version"]), int)
+        self.assertEqual(positive_inventory["schema_version"], 1)
+        positive_inventory["schema_version"] = canonical_schema_version
+        validate_continuation_sixteen_provenance(
+            positive_inventory,
+            self.predecessor_bytes,
+            self.source_bytes,
+        )
 
 
 if __name__ == "__main__":
