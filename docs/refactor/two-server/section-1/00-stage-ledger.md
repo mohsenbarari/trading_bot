@@ -239,3 +239,32 @@ Seed accounting, blockers, and Stage status:
 - Both canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`.
 - Add zero distinct seeds and do not claim complete five-unit reconciliation.
 - Explicitly exclude read_user self-success, super-admin rejection, other successful reads, mutation, persistence/retry/reload, origin cells and seed/cell/blocker/Stage closure.
+
+### 2026-10-02 UTC — Continuation 17 partial reconciliation checkpoint (missing-target HTTP404)
+
+Assignment `WA-P1-00B-AFTER-OBSERVER-PROJECTION-20261002-161` (digest `b2dbac223995215c207ba881b3eea2673bb6b428a7962cb9beb9562c69156883`, inspected HEAD `171c3d3cad480cf33bbe62232ac2fff75b21d3ff`) records one bounded partial reconciliation checkpoint for accepted continuation 17 missing-target HTTP404 characterization under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Receipt artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-17.json` as an incremental successor binding prior checkpoint `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-13-14.json` (commit `5cbd4670983759b1f68b5c0fd78b77955b694e1f`, SHA256 `80e23877c849688cddb567b88898ee1440adee0a65a07237b5325d36dcab0a6d`).
+- Source inventory artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json` (SHA256 `f3d6f12ade5bb8933472a727ba3e880070bdca758148b2a98ce81e404c18bd15`, last commit `67931e960a1361ddb49f1be603eb1553cd1a0687`).
+- Accepted C17 behavior test: `tests/test_p1_00b_characterization_users_read_missing_http.py` (accepted commit `0f3deb613251c7c5f39822b2a1f0e5532e5e140f`, SHA256 `7ae68ea6d3239cf6ab844b3087efe45a56a38b068308316861362b1ff71c8dfb`, seed `API-IDENTITY-GET-USERS-READ-USER-L440`, selector `tests/test_p1_00b_characterization_users_read_missing_http.py::UsersReadMissingHttpCharacterizationTests::test_authorized_missing_target_returns_http_404_after_single_get`).
+
+Reconciliation status and unit tracking:
+- Incremental C17 reconciliation advances reconciled units from historical prior 2/5 to current 3/5:
+  - `units_since_reconciliation`: 5
+  - `total_behavior_units`: 5
+  - `pending_five`: 5
+  - `delta_reconciled_behavior_units`: 1
+  - `historical_prior_reconciled_units`: 2
+  - `reconciled_behavior_units`: 3
+  - `remaining_behavior_units`: 2
+- Cumulative reconciled inventories: continuations 13, 14, and 17 (`cumulative_inventory_paths`).
+- Remaining inventory paths in pending-five group remain exactly 2:
+  - `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json` (empty-list HTTP200)
+  - `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json` (manager-peer HTTP403)
+- Policy: `global_reconciliation_complete=false`; `no_sixth_behavior_accepted_before_complete_reconciliation=true`; continuation-12, 153/154/155/157-C001, normal159 C1/C2 (including rejected C15 machine checkpoint and policy/seed proposals) remain deferred.
+
+Seed accounting, blockers, and Stage status:
+- C17 seed `API-IDENTITY-GET-USERS-READ-USER-L440` is prospective distinct (count 1), not in canonical 387 set, and overlaps with pending continuation-16 (overlapping C16 must never increment prospective distinct count again).
+- Canonical coverage counts remain unchanged at 387 of 465 total seeds (135 baseline + 252 reconciled new, 78 remaining); seed acceptance status remains `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 origin cells unresolved).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`; `closures_authorized=false`.
+- Exclusions: read_user self-success, super-admin rejection, authorization-policy coverage, mutation, persistence, retry, reload, origin cells, seed/blocker/Stage closure.
