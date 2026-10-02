@@ -7,8 +7,9 @@ import hashlib
 import os
 import pathlib
 import stat
+import sys
 import tempfile
-from typing import Iterator
+from typing import Callable, Iterator, Mapping
 
 from scripts.two_site_cli_exit_pin import (
     CliExitPin,
@@ -21,6 +22,65 @@ __all__ = ["CliArtifactError", "prepare_disposable_cli"]
 
 class CliArtifactError(ValueError):
     """Raised when a CLI source artifact cannot be safely validated or prepared."""
+
+
+def _resolve_caller_version_contract(
+    digest: str,
+) -> tuple[str | None, Callable[[pathlib.Path], Mapping[str, str]] | None]:
+    _CANCEL_EXCS = (KeyboardInterrupt, SystemExit, GeneratorExit)
+    sibling_path = (pathlib.Path(__file__).parent / "two_site_proposal_runner.py").resolve()
+    candidate_names = (
+        "scripts.two_site_proposal_runner",
+        "two_site_proposal_runner",
+        "__main__",
+    )
+    matching_contracts: list[tuple[str, Callable[[pathlib.Path], Mapping[str, str]]]] = []
+
+    for name in candidate_names:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        if name == "__main__":
+            mod_file = getattr(mod, "__file__", None)
+            if not mod_file:
+                continue
+            try:
+                if pathlib.Path(mod_file).resolve() != sibling_path:
+                    continue
+            except _CANCEL_EXCS:
+                raise
+            except BaseException:
+                continue
+
+        if not hasattr(mod, "EXPECTED_CLI_SHA256"):
+            continue
+
+        candidate_sha = getattr(mod, "EXPECTED_CLI_SHA256")
+        if not isinstance(candidate_sha, str):
+            continue
+        if candidate_sha.strip().lower() != digest:
+            continue
+
+        candidate_ver = getattr(mod, "EXPECTED_CLI_VERSION", None)
+        candidate_cb = getattr(mod, "cli_identity", None)
+
+        if (
+            not isinstance(candidate_ver, str)
+            or not candidate_ver.strip()
+            or not callable(candidate_cb)
+        ):
+            raise CliArtifactError("Disposable CLI identity validation failed")
+
+        matching_contracts.append((candidate_ver.strip(), candidate_cb))
+
+    if matching_contracts:
+        first_ver, first_cb = matching_contracts[0]
+        for ver, cb in matching_contracts[1:]:
+            if ver != first_ver or cb != first_cb:
+                raise CliArtifactError("Disposable CLI identity validation failed")
+        return first_ver, first_cb
+
+    return None, None
 
 
 @contextlib.contextmanager
@@ -57,6 +117,7 @@ def prepare_disposable_cli(
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     disposable_path: pathlib.Path | None = None
     pin: CliExitPin | None = None
+    version_probe: Callable[[pathlib.Path], Mapping[str, str]] | None = None
     yielded = False
     body_exc: BaseException | None = None
 
@@ -159,10 +220,11 @@ def prepare_disposable_cli(
             os.close(source_fd)
 
         try:
+            expected_ver, version_probe = _resolve_caller_version_contract(digest)
             pin = _capture_cli_exit_pin(
                 disposable_path,
                 expected_sha256=digest,
-                expected_version=None,
+                expected_version=expected_ver,
             )
         except _CANCEL_EXCS:
             raise
@@ -178,7 +240,7 @@ def prepare_disposable_cli(
         verify_exc: BaseException | None = None
         if yielded and pin is not None:
             try:
-                _verify_cli_exit_pin(pin, version_probe=None)
+                _verify_cli_exit_pin(pin, version_probe=version_probe)
             except BaseException as exc:
                 verify_exc = exc
 
