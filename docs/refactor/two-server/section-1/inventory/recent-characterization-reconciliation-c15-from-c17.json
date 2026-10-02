@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-GATE-FIRST-RECONCILIATION-20261002-169",
+  "inspected_head": "117cc9ea12197f767c41b7f3d4db6ab1ab728570",
+  "status": "PARTIAL_RECONCILIATION",
+  "historical_checkpoint": {
+    "last_commit": "6087add7b3d706456ad866ed686eafb12d233c12",
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-17.json",
+    "sha256": "66c4ff5427b2e831dc386c663151113e52e1c40fda845b741a1eae84cf5f1295"
+  },
+  "source_inventory": {
+    "last_commit": "8cabfffc4622d88bf006ed9ec050e0dc0b8e211c",
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json",
+    "sha256": "11bc150e1d9e1e92fd317b90078a38b6e28819d7f8b8f812ad19399dc91369b5"
+  },
+  "records": [
+    {
+      "last_commit": "f564bf674a6c5f7ab38be28a2ad92f69ff886ab8",
+      "path": "tests/test_p1_00b_characterization_users_read_all_empty_http.py",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+      ],
+      "sha256": "83151fbafaa7953fbad50136ad564a0bdd2f5d39c1e5943c75a40b3364cf7faa",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_all_empty_http.py::UsersReadAllEmptyHttpCharacterizationTests::test_empty_list_returns_http_200_without_relation_queries"
+      ]
+    }
+  ],
+  "delta_distinct_seed_count": 0,
+  "pre_reconciled_delta_seed_ids": [
+    "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+  ],
+  "units_since_reconciliation": 5,
+  "total_behavior_units": 5,
+  "pending_five": 5,
+  "delta_reconciled_behavior_units": 1,
+  "historical_prior_reconciled_units": 3,
+  "reconciled_behavior_units": 4,
+  "remaining_behavior_units": 1,
+  "cumulative_inventory_paths": [
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json"
+  ],
+  "remaining_inventory_paths": [
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json"
+  ],
+  "remaining_behavior_descriptions": {
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json": "manager-peer HTTP403"
+  },
+  "reconciliation_policy": {
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "deferred_continuations": [
+      "continuation-12"
+    ],
+    "deferred_proposals": [
+      "153/154/155/157-C001",
+      "normal159 C1/C2",
+      "rejected C15 machine checkpoint",
+      "rejected policy/seed proposals",
+      "normal161-c5 C16 incremental reconciliation",
+      "subsequent recorded deferrals"
+    ],
+    "global_reconciliation_complete": false
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 252,
+    "evidenced_seed_count": 387,
+    "remaining_seed_count": 78,
+    "expected_seed_count": 465
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "seed_accounting": {
+    "prospective_distinct_seed_count": 1,
+    "prospective_distinct_seeds": [
+      "API-IDENTITY-GET-USERS-READ-USER-L440"
+    ],
+    "overlapping_pending_seeds": [
+      {
+        "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+        "note": "overlapping C16 must never increment prospective distinct seed count again",
+        "seed_id": "API-IDENTITY-GET-USERS-READ-USER-L440"
+      }
+    ]
+  },
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "closures_authorized": false,
+  "exclusions": [
+    "read_user self-success",
+    "super-admin rejection",
+    "authorization policy coverage",
+    "mutation",
+    "persistence",
+    "retry",
+    "reload",
+    "origin matrix cells",
+    "seed-blocker closure",
+    "Stage closure"
+  ]
+}
