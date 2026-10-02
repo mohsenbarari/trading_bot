@@ -219,3 +219,23 @@ Reconciliation status and machine aggregate tracking:
 Seed accounting, blockers, and Stage status:
 - Retain coverage 387/465 (135 baseline + 252 reconciled new), 78 remaining, FULL_SEED_ACCEPTANCE_NOT_ASSESSED, both canonical High blockers open (`P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`), P1-00 COMPLETE and P1-00b IN_PROGRESS.
 - Exclude read_user self-success, super-admin rejection, success/mutation/persistence/retry/reload, origin cells and all seed/cell/blocker/Stage closure.
+
+### 2026-10-02 UTC — Continuation 17 documentation linkage checkpoint (missing-target HTTP404)
+
+Assignment `WA-P1-00B-AFTER-AE00-WORK-PRODUCER-20261002-153` (sha256 `42cf318ef79e18fa02c30dc927178832dcd1adb91fbb4cced713cac348f52f86`, inspected HEAD `13098a05c56241a7a433f5a8f383fe333702cbca`) records one bounded documentation-only continuation-17 evidence-linkage entry for open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Inventory artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json` (SHA256 `f3d6f12ade5bb8933472a727ba3e880070bdca758148b2a98ce81e404c18bd15`, last commit `67931e960a1361ddb49f1be603eb1553cd1a0687`).
+- Existing accepted behavior test: `tests/test_p1_00b_characterization_users_read_missing_http.py` (accepted commit `0f3deb613251c7c5f39822b2a1f0e5532e5e140f`, SHA256 `7ae68ea6d3239cf6ab844b3087efe45a56a38b068308316861362b1ff71c8dfb`, seed `API-IDENTITY-GET-USERS-READ-USER-L440`, exact selector `tests/test_p1_00b_characterization_users_read_missing_http.py::UsersReadMissingHttpCharacterizationTests::test_authorized_missing_target_returns_http_404_after_single_get`): describes only observed authorized missing-target HTTP404 JSON detail `User not found` after exactly one target `db.get(models.user.User, 404)` returning `None`. Characterization overrides authorization; do not claim authorization-policy coverage or full handler acceptance.
+- Provenance test: `tests/test_p1_00b_characterization_recent_inventory_continuation_17_missing_target.py` (last commit `67931e960a1361ddb49f1be603eb1553cd1a0687`, SHA256 `07d8cb0582b2afa110997a254fd6ed560777ecff1a86224413b03dbb66f97578`, exact selector `tests/test_p1_00b_characterization_recent_inventory_continuation_17_missing_target.py::ContinuationSeventeenMissingTargetProvenanceTests::test_exact_missing_target_provenance`): validates existing provenance schema version `schema_version=1`, stage `P1-00b`, predecessor linkage to continuation-16, single record hash, and AST selector resolution using existing evidence only. Do not invent test receipts or claim proposal tests passed; acceptance and test evidence are separate.
+
+Reconciliation status and machine aggregate tracking:
+- This is documentation linkage for already accepted evidence only, not aggregate reconciliation or new behavior acceptance.
+- Keep aggregate reconciliation exactly 2/5 with pending-five=5: `units_since_reconciliation=5`, `total_behavior_units=5`, `reconciled_behavior_units=2`, `remaining_behavior_units=3`.
+- Explicitly retain continuations 15 empty-list HTTP200, 16 manager-peer HTTP403, and 17 missing-target HTTP404 pending, as recorded in `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-13-14.json`.
+- Reconciliation policy: linkage is existing evidence only and does not reconcile the aggregate; no sixth behavior before complete reconciliation; continuation-12 and all prior rejected ledger proposals remain deferred.
+- No inventory, counter, seed-coverage, test, source, or previously accepted evidence edits.
+
+Seed accounting, blockers, and Stage status:
+- Retain distinct coverage 387/465 (135 baseline + 252 reconciled new), 78 remaining, `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`, `P1-00` `COMPLETE` and `P1-00b` `IN_PROGRESS`.
+- Both canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`.
+- Add zero distinct seeds and do not claim complete five-unit reconciliation.
+- Explicitly exclude read_user self-success, super-admin rejection, other successful reads, mutation, persistence/retry/reload, origin cells and seed/cell/blocker/Stage closure.
