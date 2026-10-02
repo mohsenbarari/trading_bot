@@ -16,6 +16,17 @@ install_p1_00_network_fence()
 
 
 class RecentCharacterizationContinuationFiveContractTests(unittest.TestCase):
+    def _assert_schema_version(self, mapping: dict) -> None:
+        if "schema_version" not in mapping:
+            raise AssertionError("schema_version: missing required field")
+        value = mapping["schema_version"]
+        if type(value) is not int:
+            raise AssertionError(
+                f"schema_version: exact builtin int required, got {type(value).__name__}"
+            )
+        if value != 1:
+            raise AssertionError(f"schema_version: wrong value, expected 1, got {value}")
+
     def test_first_two_recovery_records_exact_provenance_and_seed_membership(self):
         repo_root = Path(__file__).resolve().parent.parent
 
@@ -26,7 +37,7 @@ class RecentCharacterizationContinuationFiveContractTests(unittest.TestCase):
         continuation_5_bytes = continuation_5_path.read_bytes()
         continuation_5_data = json.loads(continuation_5_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_5_data.get("schema_version"), 1)
+        self._assert_schema_version(continuation_5_data)
         self.assertEqual(continuation_5_data.get("stage"), "P1-00b")
 
         predecessor = continuation_5_data.get("predecessor_inventory", {})
@@ -143,6 +154,49 @@ class RecentCharacterizationContinuationFiveContractTests(unittest.TestCase):
         self.assertTrue(continuation_5_seed_set.isdisjoint(baseline_seed_set))
         self.assertTrue(continuation_5_seed_set.isdisjoint(prior_recent_seeds))
         self.assertTrue(continuation_5_seed_set.isdisjoint(prior_evidenced_seed_set))
+
+    def test_schema_version_rejects_invalid_types_and_values_with_specific_failure(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        continuation_5_rel_path = "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json"
+        continuation_5_path = repo_root / continuation_5_rel_path
+        self.assertTrue(continuation_5_path.is_file(), f"Continuation 5 not found at {continuation_5_path}")
+
+        canonical_bytes = continuation_5_path.read_bytes()
+        continuation_5_data = json.loads(canonical_bytes.decode("utf-8"))
+
+        self._assert_schema_version(continuation_5_data)
+
+        valid_copy = dict(continuation_5_data)
+        valid_copy["schema_version"] = 1
+        self._assert_schema_version(valid_copy)
+
+        class IntSubclass(int):
+            pass
+
+        cases = [
+            ("missing_field", None, "schema_version: missing required field"),
+            ("bool_true", True, "schema_version: exact builtin int required, got bool"),
+            ("bool_false", False, "schema_version: exact builtin int required, got bool"),
+            ("float_1_0", 1.0, "schema_version: exact builtin int required, got float"),
+            ("str_1", "1", "schema_version: exact builtin int required, got str"),
+            ("none", None, "schema_version: exact builtin int required, got NoneType"),
+            ("int_subclass_1", IntSubclass(1), "schema_version: exact builtin int required, got IntSubclass"),
+            ("int_0", 0, "schema_version: wrong value, expected 1, got 0"),
+            ("int_2", 2, "schema_version: wrong value, expected 1, got 2"),
+        ]
+
+        for label, val, expected_msg in cases:
+            with self.subTest(case=label):
+                mutated = dict(continuation_5_data)
+                if label == "missing_field":
+                    mutated.pop("schema_version", None)
+                else:
+                    mutated["schema_version"] = val
+                with self.assertRaises(AssertionError) as ctx:
+                    self._assert_schema_version(mutated)
+                self.assertEqual(str(ctx.exception), expected_msg)
+
+        self.assertEqual(continuation_5_path.read_bytes(), canonical_bytes)
 
 
 if __name__ == "__main__":
