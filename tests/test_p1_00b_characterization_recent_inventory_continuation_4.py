@@ -5,6 +5,23 @@ import unittest
 
 
 class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
+    def _assert_schema_version(self, payload: dict, check_name: str) -> None:
+        self.assertIn(
+            "schema_version",
+            payload,
+            f"{check_name}: missing schema_version",
+        )
+        val = payload["schema_version"]
+        self.assertTrue(
+            type(val) is int,
+            f"{check_name}: schema_version type must be exact int, got {type(val).__name__}",
+        )
+        self.assertEqual(
+            val,
+            1,
+            f"{check_name}: schema_version value must equal 1, got {val!r}",
+        )
+
     def test_valid_invitation_inputs_provenance_and_prior_seed_membership(self):
         repo_root = Path(__file__).resolve().parent.parent
 
@@ -20,7 +37,10 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         continuation_4_bytes = continuation_4_path.read_bytes()
         continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self._assert_schema_version(
+            continuation_4_data,
+            "test_valid_invitation_inputs_provenance_and_prior_seed_membership",
+        )
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         expected_predecessor_path = (
@@ -150,7 +170,10 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         continuation_4_bytes = continuation_4_path.read_bytes()
         continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self._assert_schema_version(
+            continuation_4_data,
+            "test_historical_invalid_invitation_inputs_provenance_and_prior_seed_membership",
+        )
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         records = continuation_4_data.get("records", [])
@@ -299,7 +322,10 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         continuation_4_bytes = continuation_4_path.read_bytes()
         continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self._assert_schema_version(
+            continuation_4_data,
+            "test_chat_search_messages_scoped_provenance_and_selector_definitions",
+        )
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         records = continuation_4_data.get("records", [])
@@ -397,7 +423,10 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         continuation_4_bytes = continuation_4_path.read_bytes()
         continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self._assert_schema_version(
+            continuation_4_data,
+            "test_chat_poll_nonempty_provenance_and_selector_definitions",
+        )
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         records = continuation_4_data.get("records", [])
@@ -495,7 +524,10 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         continuation_4_bytes = continuation_4_path.read_bytes()
         continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self._assert_schema_version(
+            continuation_4_data,
+            "test_list_active_sessions_provenance_and_selector_definitions",
+        )
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         records = continuation_4_data.get("records", [])
@@ -594,7 +626,10 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         continuation_4_bytes = continuation_4_path.read_bytes()
         continuation_4_data = json.loads(continuation_4_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_4_data.get("schema_version"), 1)
+        self._assert_schema_version(
+            continuation_4_data,
+            "test_get_pending_requests_session_gates_provenance_and_selector_definitions",
+        )
         self.assertEqual(continuation_4_data.get("stage"), "P1-00b")
 
         records = continuation_4_data.get("records", [])
@@ -678,6 +713,137 @@ class RecentCharacterizationContinuationFourContractTests(unittest.TestCase):
         }
         for seed_id in expected_seed_ids:
             self.assertIn(seed_id, surface_api_seed_set)
+
+    def test_schema_version_canonical_int_is_accepted_by_all_six_checks(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        continuation_4_path = (
+            repo_root
+            / "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json"
+        )
+        canonical_raw_bytes = continuation_4_path.read_bytes()
+        canonical_raw_text = canonical_raw_bytes.decode("utf-8")
+        canonical_fixture = json.loads(canonical_raw_text)
+
+        self.assertIs(type(canonical_fixture["schema_version"]), int)
+        self.assertEqual(canonical_fixture["schema_version"], 1)
+
+        original_loads = json.loads
+        original_methods = [
+            "test_valid_invitation_inputs_provenance_and_prior_seed_membership",
+            "test_historical_invalid_invitation_inputs_provenance_and_prior_seed_membership",
+            "test_chat_search_messages_scoped_provenance_and_selector_definitions",
+            "test_chat_poll_nonempty_provenance_and_selector_definitions",
+            "test_list_active_sessions_provenance_and_selector_definitions",
+            "test_get_pending_requests_session_gates_provenance_and_selector_definitions",
+        ]
+
+        def mock_loads(s, *args, **kwargs):
+            if s == canonical_raw_text:
+                fresh = original_loads(canonical_raw_text)
+                fresh["schema_version"] = 1
+                return fresh
+            return original_loads(s, *args, **kwargs)
+
+        from unittest.mock import patch
+
+        with patch.object(json, "loads", side_effect=mock_loads):
+            for method_name in original_methods:
+                with self.subTest(method=method_name):
+                    getattr(self, method_name)()
+
+    def test_schema_version_invalid_inputs_are_rejected_by_all_six_checks(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        continuation_4_path = (
+            repo_root
+            / "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json"
+        )
+        canonical_raw_bytes = continuation_4_path.read_bytes()
+        canonical_raw_text = canonical_raw_bytes.decode("utf-8")
+
+        original_loads = json.loads
+        original_methods = [
+            "test_valid_invitation_inputs_provenance_and_prior_seed_membership",
+            "test_historical_invalid_invitation_inputs_provenance_and_prior_seed_membership",
+            "test_chat_search_messages_scoped_provenance_and_selector_definitions",
+            "test_chat_poll_nonempty_provenance_and_selector_definitions",
+            "test_list_active_sessions_provenance_and_selector_definitions",
+            "test_get_pending_requests_session_gates_provenance_and_selector_definitions",
+        ]
+
+        class _SchemaVersionIntSubclass(int):
+            pass
+
+        from unittest.mock import patch
+
+        for method_name in original_methods:
+            corruptions = [
+                (
+                    "missing",
+                    lambda d: d.pop("schema_version", None),
+                    f"{method_name}: missing schema_version",
+                ),
+                (
+                    "True",
+                    lambda d: d.__setitem__("schema_version", True),
+                    f"{method_name}: schema_version type must be exact int, got bool",
+                ),
+                (
+                    "False",
+                    lambda d: d.__setitem__("schema_version", False),
+                    f"{method_name}: schema_version type must be exact int, got bool",
+                ),
+                (
+                    "1.0",
+                    lambda d: d.__setitem__("schema_version", 1.0),
+                    f"{method_name}: schema_version type must be exact int, got float",
+                ),
+                (
+                    '"1"',
+                    lambda d: d.__setitem__("schema_version", "1"),
+                    f"{method_name}: schema_version type must be exact int, got str",
+                ),
+                (
+                    "None",
+                    lambda d: d.__setitem__("schema_version", None),
+                    f"{method_name}: schema_version type must be exact int, got NoneType",
+                ),
+                (
+                    "int_subclass",
+                    lambda d: d.__setitem__("schema_version", _SchemaVersionIntSubclass(1)),
+                    f"{method_name}: schema_version type must be exact int, got _SchemaVersionIntSubclass",
+                ),
+                (
+                    "0",
+                    lambda d: d.__setitem__("schema_version", 0),
+                    f"{method_name}: schema_version value must equal 1, got 0",
+                ),
+                (
+                    "2",
+                    lambda d: d.__setitem__("schema_version", 2),
+                    f"{method_name}: schema_version value must equal 1, got 2",
+                ),
+            ]
+
+            for label, mutator, expected_err in corruptions:
+                with self.subTest(method=method_name, corruption=label):
+                    fresh_candidate = original_loads(canonical_raw_text)
+                    mutator(fresh_candidate)
+
+                    def mock_loads(s, *args, **kwargs):
+                        if s == canonical_raw_text:
+                            return fresh_candidate
+                        return original_loads(s, *args, **kwargs)
+
+                    with patch.object(json, "loads", side_effect=mock_loads):
+                        with self.assertRaises(AssertionError) as ctx:
+                            getattr(self, method_name)()
+
+                    err_msg = str(ctx.exception)
+                    self.assertIn(
+                        expected_err,
+                        err_msg,
+                        f"Expected {expected_err!r} in {err_msg!r}",
+                    )
 
 
 if __name__ == "__main__":
