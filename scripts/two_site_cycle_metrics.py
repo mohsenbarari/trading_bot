@@ -420,6 +420,27 @@ def semantic_identity(value: object) -> dict[str, str] | None:
     }
 
 
+_COMPLETE_PROVIDER_STATES = frozenset({"OBSERVED_CONTROLLER_ATTEMPTS", "OBSERVED_MATCHING_ATTEMPTS"})
+
+
+def work_lineage(value: object) -> dict[str, object] | None:
+    """Validate and project work lineage telemetry."""
+    if not isinstance(value, dict):
+        return None
+    if set(value.keys()) != {"schema_version", "fingerprint"}:
+        return None
+    schema_version = value["schema_version"]
+    if type(schema_version) is not int or isinstance(schema_version, bool) or schema_version != 1:
+        return None
+    fingerprint = value["fingerprint"]
+    if not isinstance(fingerprint, str) or not _HEX_64_RE.fullmatch(fingerprint):
+        return None
+    return {
+        "schema_version": schema_version,
+        "fingerprint": fingerprint,
+    }
+
+
 def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                  model: str, effort: str) -> dict:
     """Called under supervisor lock before pruning, on both success and failure."""
@@ -477,6 +498,10 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
             identity = semantic_identity(prov.get("semantic_identity"))
             if identity is not None:
                 record["semantic_identity"] = identity
+            if prov.get("state") in _COMPLETE_PROVIDER_STATES and identity is not None:
+                work = work_lineage(prov.get("work_lineage"))
+                if work is not None:
+                    record["work_lineage"] = work
     except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
         record["provider_metrics"] = _unavailable_provider_metrics(type(exc).__name__)
 
@@ -502,12 +527,24 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                 fallback_prov = _call_provider_metrics(
                     root, task_id, meta.get("head_before"), valid_worker_id, meta.get("duration_seconds"))
                 record["provider_metrics"] = fallback_prov
-                if "semantic_identity" not in record and isinstance(fallback_prov, dict):
+                if isinstance(fallback_prov, dict):
                     fallback_ident = semantic_identity(fallback_prov.get("semantic_identity"))
                     if fallback_ident is not None:
                         record["semantic_identity"] = fallback_ident
+                    else:
+                        record.pop("semantic_identity", None)
+                    if fallback_prov.get("state") in _COMPLETE_PROVIDER_STATES and fallback_ident is not None:
+                        fallback_work = work_lineage(fallback_prov.get("work_lineage"))
+                        if fallback_work is not None:
+                            record["work_lineage"] = fallback_work
+                        else:
+                            record.pop("work_lineage", None)
+                    else:
+                        record.pop("work_lineage", None)
             except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
                 record["provider_metrics"] = _unavailable_provider_metrics(type(exc).__name__)
+                record.pop("semantic_identity", None)
+                record.pop("work_lineage", None)
             marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
             if marker in task["goal"]:
                 gap = unique_json(task["goal"].split(marker, 1)[1])["gap_reference"]
@@ -516,6 +553,8 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                 record["gap_reference"] = gap
         except (OSError, ValueError, KeyError, TypeError):
             record["task_metadata_state"] = "UNAVAILABLE"
+            record.pop("semantic_identity", None)
+            record.pop("work_lineage", None)
     atomic_json(root, run_dir / "metrics.json", record, 8000)
     ledger_path = state_root / "metrics.json"
     ledger = []
