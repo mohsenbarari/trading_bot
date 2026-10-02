@@ -77,6 +77,11 @@ try:
 except ImportError:
     from two_site_retry_syntax_hint import extract_syntax_hint
 
+try:
+    from scripts.two_site_required_test_gate import required_selector_gate_feedback
+except ImportError:
+    from two_site_required_test_gate import required_selector_gate_feedback
+
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
 PROTECTED_REFS = (
@@ -1197,7 +1202,17 @@ def _run_post_worker_remainder(
                 root, evidence_dir, task, worker_res, current_worker[1],
                 correction_count, state_check, state,
             )
-            if receipt["state"] == "FAILED":
+            req_feedback = required_selector_gate_feedback(receipt, current_worker[1])
+            if req_feedback is not None:
+                validate_correction_feedback(json.dumps(req_feedback), current_worker[1])
+                sig = hashlib.sha256(
+                    json.dumps(req_feedback["findings"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                if sig in seen_bootstrap_signatures:
+                    raise ProposalError(f"repeated test bootstrap failure signature: {sig}")
+                seen_bootstrap_signatures.add(sig)
+                feedback_payload = req_feedback
+            elif receipt["state"] == "FAILED":
                 sig = test_failure_signature(receipt)
                 if sig in seen_test_signatures:
                     raise ProposalError(f"repeated test failure signature: {sig}")

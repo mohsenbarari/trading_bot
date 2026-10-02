@@ -1,6 +1,6 @@
 """Required-test coverage gate feedback module.
 
-Controller wiring and live Reviewer-admission proof remain OPEN/dependent.
+Pure module does not itself authorize Reviewer; pipeline owns admission, and live acceptance needs separate receipts.
 """
 from __future__ import annotations
 
