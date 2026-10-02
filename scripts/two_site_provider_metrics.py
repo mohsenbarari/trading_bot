@@ -164,6 +164,27 @@ def _stream_usage(root: Path, path: Path) -> dict | None:
     return found[0] if len(found) == 1 else None
 
 
+def _extract_canonical_payload(goal: str) -> dict | None:
+    if not isinstance(goal, str) or len(goal.encode("utf-8")) > TASK_GOAL_LIMIT:
+        return None
+    canonical_marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
+    if goal.count(canonical_marker) != 1:
+        return None
+    preamble, payload_str = goal.split(canonical_marker, 1)
+    if "CANONICAL_SOURCE_EXCERPTS_JSON:" in preamble:
+        return None
+    payload_str = payload_str.strip()
+    if not payload_str or len(payload_str.encode("utf-8")) > CANONICAL_EXCERPTS_LIMIT:
+        return None
+    try:
+        payload = unique_json(payload_str)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
 def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: str) -> tuple[str, dict] | None:
     task_file = path / "task.json"
     try:
@@ -188,15 +209,19 @@ def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: st
         goal = task_dict.get("goal")
         if not isinstance(goal, str) or len(goal.encode("utf-8")) > TASK_GOAL_LIMIT:
             return None
-        marker = "CANONICAL_SOURCE_EXCERPTS_JSON:"
-        if goal.count(marker) != 1:
-            return None
-        payload_str = goal.split(marker, 1)[1].strip()
-        if not payload_str or len(payload_str.encode("utf-8")) > CANONICAL_EXCERPTS_LIMIT:
-            return None
-        payload = unique_json(payload_str)
-        if not isinstance(payload, dict):
-            return None
+        payload = _extract_canonical_payload(goal)
+        if payload is None:
+            if "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" in goal:
+                return None
+            marker = "CANONICAL_SOURCE_EXCERPTS_JSON:"
+            if goal.count(marker) != 1:
+                return None
+            payload_str = goal.split(marker, 1)[1].strip()
+            if not payload_str or len(payload_str.encode("utf-8")) > CANONICAL_EXCERPTS_LIMIT:
+                return None
+            payload = unique_json(payload_str)
+            if not isinstance(payload, dict):
+                return None
         gap_ref = payload.get("gap_reference")
         if not gap_ref and isinstance(payload.get("semantic_identity"), dict):
             gap_ref = payload["semantic_identity"].get("gap_reference")
@@ -260,16 +285,8 @@ def _extract_identity_bundle(root: Path, path: Path, task_id: str, head_before: 
             return None
 
         goal = task_dict.get("goal")
-        if not isinstance(goal, str) or len(goal.encode("utf-8")) > TASK_GOAL_LIMIT:
-            return None
-        canonical_marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
-        if goal.count(canonical_marker) != 1 or goal.count("CANONICAL_SOURCE_EXCERPTS_JSON:") != 1:
-            return None
-        payload_str = goal.split(canonical_marker, 1)[1].strip()
-        if not payload_str or len(payload_str.encode("utf-8")) > CANONICAL_EXCERPTS_LIMIT:
-            return None
-        payload = unique_json(payload_str)
-        if not isinstance(payload, dict):
+        payload = _extract_canonical_payload(goal)
+        if payload is None:
             return None
 
         if validate_identity is None or not callable(validate_identity):

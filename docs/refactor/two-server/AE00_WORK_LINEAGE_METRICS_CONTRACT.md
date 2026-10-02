@@ -47,11 +47,11 @@ The following dimensions are deliberately excluded from `work_lineage`:
 Empty canonical symbol groups (`"symbol_groups": []`) are legal and hash deterministically.
 
 ## 3. Marker, Readers, Link Safety, and Caps
-- **Unique Canonical Marker**: `goal` in `task.json` must contain exactly one `\nCANONICAL_SOURCE_EXCERPTS_JSON:\n` marker. Inline, unanchored, or duplicate markers cause fail-closed rejection.
+- **Unique Canonical Marker**: `goal` in `task.json` must contain exactly one `\nCANONICAL_SOURCE_EXCERPTS_JSON:\n` marker. Harmless escaped marker substrings within valid source excerpt JSON strings are accepted; inline, unanchored, or duplicate canonical delimiter occurrences cause fail-closed rejection. Legacy single-inline metadata reading remains unchanged and permissive.
 - **Link Safety**: Symlinks and hardlinks in `status.json` or `task.json` are rejected by link-safe snapshot readers.
-- **Resource Bounds**: Directory scanning is capped at 8,192 entries; matching attempts are capped at 32; task snapshots are capped at 600,000 bytes (`3 * MAX_CONTEXT`); goal text is capped at 200,000 bytes (`MAX_CONTEXT`).
+- **Resource Bounds**: Directory scanning is capped at 8,192 entries; matching attempts are capped at 32; task snapshots are capped at 480,000 bytes (`3 * MAX_CONTEXT`); goal text is capped at 160,000 bytes (`MAX_CONTEXT`).
 - **Token & Usage Fidelity**: A complete BLOCKED controller attempt retains its exact observed usage (e.g. 14 tokens) and its valid `work_lineage`, while setting `first_pass: null`. Genuine partial attempts discard `work_lineage` and keep full usage null with an honest observed subtotal.
-- **Privacy**: Only the 64-hex SHA-256 fingerprint and schema version are emitted; no raw symbols, source bodies, prompt tokens, findings, or error traces leak into telemetry.
+- **Privacy**: Only the 64-hex SHA-256 fingerprint and schema version are emitted; no raw symbols, source bodies, prompt tokens, findings, or error traces leak into telemetry. Sentinel tokens in status prompts or source excerpts do not leak, and task/status files remain immutable before and after reading.
 - **Legacy Compatibility**: `unavailable()` retains its exact 8-field shape without `work_lineage`. `_extract_semantic_identity` preserves its exact 5-field projection wrapper signature.
 
 ## 4. Source A -> Source B Invariance Scenario
@@ -60,13 +60,8 @@ When product code evolves from revision A to revision B (modifying files and upd
 - Because `gap_reference`, `stage_id`, `scenario_key`, and `symbol_groups` remain identical, the computed `work_lineage.fingerprint` remains exactly identical across revisions A and B.
 
 ## 5. Verification & Test Selectors
-Implemented in `tests/test_two_site_work_identity_producer.py` (strictly byte-gated: target <= 18,000 UTF-8 bytes, hard cap <= 24,000 bytes):
-1. `test_new_candidate_file_respects_utf8_byte_cap`: Dynamically measures actual `__file__` byte count and asserts <= 24,000.
-2. `test_actual_work_hash_changes_only_logical_dimensions`: Asserts changes to stage, gap, scenario, symbols, or path modify the work hash against frozen expected SHA values.
-3. `test_actual_collector_source_revision_and_task_run_rename_invariance`: Proves identical work hash across source revisions, commit heads, task IDs, and run renames.
-4. `test_actual_collector_canonical_order_and_empty_symbols`: Verifies canonical sorting of paths/symbols, acceptance of empty groups, and rejection of unsorted markers.
-5. `test_actual_legacy_and_controller_exact_work_projection`: Proves exact schema/hash output and zero sentinel token leakage on both legacy and controller routes.
-6. `test_actual_collector_task_head_gap_marker_and_identity_rejection`: Proves fail-closed rejection for corrupted task IDs, HEADs, gap refs, duplicate/loose markers, tampered manifests, and worker/reviewer identity mismatches.
-7. `test_actual_collector_link_and_byte_bound_rejection`: Proves rejection of symlinks, hardlinks, and limit+1 oversized snapshots with baseline restoration.
-8. `test_actual_controller_failed_attempt_work_cost_and_partial_rejection`: Validates BLOCKED 14-token retention without first pass, and partial cost discarding.
-9. `test_legacy_projection_and_unavailable_exact_backward_compatibility`: Validates exact 5-field wrapper projection, exact unavailable shape, and rejection of projected-only identities.
+Implemented in `tests/test_two_site_work_lineage_marker_ingress.py` (strictly byte-gated: drafting target <= 18,000 UTF-8 bytes, hard cap <= 24,000 bytes):
+1. `test_actual_collector_accepts_embedded_marker_with_one_canonical_delimiter`: Verifies both actual legacy prefix and actual controller routes accept valid embedded markers with harmless escaped occurrences, producing identical 28-token totals, first_pass, exact work lineage, and 5-key semantic projections; controller BLOCKED retains 14 tokens without first pass.
+2. `test_actual_collector_preserves_rejected_delimiters_and_bindings`: Verifies fail-closed rejection for loose/inline delimiters, duplicates, malformed envelopes, incomplete identities, and manifest tampering, while preserving legacy permissive single-inline metadata with independently frozen task SHA.
+3. `test_guard_mutation_same_collector_witness_and_source_free_usage`: Executes the same independent `_assert_complete` witness oracle before mutation, asserts it raises `AssertionError` under mutation using `pytest.raises`, and verifies restoration. Verifies absence of sentinel tokens from telemetry and immutability of task/status files. Tests exact 480,000 byte snapshot limit acceptance and 480,001 byte limit+1 rejection.
+4. `test_candidate_utf8_cap_and_legacy_schema`: Verifies candidate test file byte bounds (drafting target <= 18,000 bytes, hard cap <= 24,000 bytes) and exact 8-field legacy unavailable schema.
