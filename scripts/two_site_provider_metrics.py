@@ -215,7 +215,36 @@ def _extract_task_metadata(root: Path, path: Path, task_id: str, head_before: st
         return None
 
 
-def _extract_semantic_identity(root: Path, path: Path, task_id: str, head_before: str) -> dict[str, str] | None:
+def _compute_work_lineage(validated: dict) -> dict[str, object] | None:
+    try:
+        keys = ("stage_id", "gap_reference", "scenario_key", "symbol_groups")
+        for k in keys:
+            if k not in validated:
+                return None
+        work_payload = {
+            "gap_reference": validated["gap_reference"],
+            "kind": "two-site-logical-work",
+            "scenario_key": validated["scenario_key"],
+            "schema_version": 1,
+            "stage_id": validated["stage_id"],
+            "symbol_groups": validated["symbol_groups"],
+        }
+        raw_work_json = json.dumps(
+            work_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        return {
+            "schema_version": 1,
+            "fingerprint": hashlib.sha256(raw_work_json).hexdigest(),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_identity_bundle(root: Path, path: Path, task_id: str, head_before: str) -> tuple[dict[str, str], dict[str, object]] | None:
     task_file = path / "task.json"
     try:
         raw = bounded_file_text(root, task_file, TASK_SNAPSHOT_LIMIT, "task snapshot")
@@ -269,9 +298,19 @@ def _extract_semantic_identity(root: Path, path: Path, task_id: str, head_before
             if not isinstance(val, str) or not val:
                 return None
             projected[k] = val
-        return projected
+
+        work_lineage = _compute_work_lineage(validated)
+        if work_lineage is None:
+            return None
+
+        return projected, work_lineage
     except (OSError, ValueError, TypeError):
         return None
+
+
+def _extract_semantic_identity(root: Path, path: Path, task_id: str, head_before: str) -> dict[str, str] | None:
+    bundle = _extract_identity_bundle(root, path, task_id, head_before)
+    return bundle[0] if bundle is not None else None
 
 
 def _rework_taxonomy(
@@ -404,6 +443,7 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
     attempts, complete = [], True
     task_metadata = None
     semantic_identity = None
+    work_lineage = None
 
     if not controller_mode:
         paths = []
@@ -449,13 +489,16 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
         if task_snaps and all(s is not None for s in task_snaps) and len({s[0] for s in task_snaps}) == 1:
             task_metadata = task_snaps[0][1]
         if complete and paths:
-            identities = [_extract_semantic_identity(root, path, task_id, head_before) for path in sorted(paths)]
-            if all(ident is not None for ident in identities) and len(identities) > 0 and all(ident == identities[0] for ident in identities):
-                semantic_identity = identities[0]
+            bundles = [_extract_identity_bundle(root, path, task_id, head_before) for path in sorted(paths)]
+            if all(b is not None for b in bundles) and len(bundles) > 0 and all(b == bundles[0] for b in bundles):
+                semantic_identity = bundles[0][0]
+                work_lineage = bundles[0][1]
             else:
                 semantic_identity = None
+                work_lineage = None
         else:
             semantic_identity = None
+            work_lineage = None
     else:
         matched_entries = []
         seen_names = set()
@@ -546,13 +589,20 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
             else:
                 task_metadata = task_snaps[0][1]
             if complete and matched_entries:
-                identities = [_extract_semantic_identity(root, path, effective_task_id, head_before) for path, _ in matched_entries]
-                if all(ident is not None for ident in identities) and len(identities) > 0 and all(ident == identities[0] for ident in identities):
-                    semantic_identity = identities[0]
+                bundles = [_extract_identity_bundle(root, path, effective_task_id, head_before) for path, _ in matched_entries]
+                if all(b is not None for b in bundles) and len(bundles) > 0 and all(b == bundles[0] for b in bundles):
+                    semantic_identity = bundles[0][0]
+                    work_lineage = bundles[0][1]
                 else:
                     semantic_identity = None
+                    work_lineage = None
+            else:
+                semantic_identity = None
+                work_lineage = None
         else:
             task_metadata = None
+            semantic_identity = None
+            work_lineage = None
             if len(task_ids) != 1 or (task_id is not None and (not task_ids or next(iter(task_ids)) != task_id)):
                 complete = False
 
@@ -630,4 +680,6 @@ def provider_metrics(root: Path, task_id: str | None = None, head_before: str = 
             attempts, complete=complete, first_pass=first_pass, verified_chain=verified_chain,
         ),
     })
+    if complete and semantic_identity is not None and work_lineage is not None:
+        result["work_lineage"] = work_lineage
     return result
