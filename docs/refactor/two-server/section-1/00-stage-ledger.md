@@ -178,3 +178,27 @@ Stage status:
 - `P1-00b`: `IN_PROGRESS`
 
 No Stage/seed/blocker/origin-cell closure is authorized; no product, runtime, retry, or persistence modification is made.
+
+### 2026-10-02 UTC — Continuation 15 documentation linkage checkpoint (empty-list HTTP200)
+
+Assignment `WA-P1-00B-AFTER-AE00-WORK-PRODUCER-20261002-153` (sha256 `42cf318ef79e18fa02c30dc927178832dcd1adb91fbb4cced713cac348f52f86`, inspected HEAD `c1ad7a81f1f3ace1ecd7745be6a735ed2b1b1123`) records one bounded documentation-only continuation-15 evidence-linkage entry for open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Inventory artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json` (SHA256 `11bc150e1d9e1e92fd317b90078a38b6e28819d7f8b8f812ad19399dc91369b5`, last commit `8cabfffc4622d88bf006ed9ec050e0dc0b8e211c`).
+- Existing accepted behavior test: `tests/test_p1_00b_characterization_users_read_all_empty_http.py` (commit `f564bf674a6c5f7ab38be28a2ad92f69ff886ab8`, SHA256 `83151fbafaa7953fbad50136ad564a0bdd2f5d39c1e5943c75a40b3364cf7faa`, seed `API-IDENTITY-GET-USERS-READ-ALL-USERS-L407`, selector `tests/test_p1_00b_characterization_users_read_all_empty_http.py::UsersReadAllEmptyHttpCharacterizationTests::test_empty_list_returns_http_200_without_relation_queries`): characterizes observed empty-list boundary with HTTP200 JSON `[]`, one validated list query, counted `scalars().all()`, real relation helper `attach_user_management_relation_context` returning empty list `[]` without relation queries, and suppression of serializer invocations.
+- Repaired provenance test: `tests/test_p1_00b_characterization_recent_inventory_continuation_15_empty_list.py` (commit `c1ad7a81f1f3ace1ecd7745be6a735ed2b1b1123`, SHA256 `703bbeaafc74b200570714f811303a2a1d06b9402e4030a582a76fe81b6602ec`, selector `tests/test_p1_00b_characterization_recent_inventory_continuation_15_empty_list.py::ContinuationFifteenEmptyListProvenanceTests::test_schema_version_wrong_types_rejected`): establishes exact-integer `schema_version=1` and rejection of non-integer/wrong JSON types and values. Tests for this cycle are independently run after generation and not claimed as passed.
+
+Reconciliation status and machine aggregate tracking:
+- This is documentation linkage for already accepted evidence only, not aggregate reconciliation or a sixth behavior.
+- Pending-five total remains 5 (`units_since_reconciliation=5`, `total_behavior_units=5`), with 2 reconciled (`reconciled_behavior_units=2`) and 3 pending (`remaining_behavior_units=3`):
+  - `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json` (empty-list HTTP200)
+  - `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json` (manager-peer HTTP403)
+  - `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json` (missing-target HTTP404)
+  as recorded in existing `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-13-14.json`.
+- Reconciliation policy: no sixth behavior accepted before full reconciliation; continuation-12 and all prior rejected ledger proposals remain deferred.
+- No edits to inventories, provenance sources, behavior tests, or `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json`.
+
+Seed accounting, blockers, and Stage status:
+- Distinct-seed accounting remains unchanged at 387 of 465 total seeds evidenced (135 baseline + 252 reconciled new), 78 remaining; the `API-IDENTITY-GET-USERS-READ-ALL-USERS-L407` seed is already evidenced and adds zero distinct seeds.
+- Stage status: `P1-00` remains `COMPLETE`; `P1-00b` remains `IN_PROGRESS`.
+- Both canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`.
+- Origin matrix remains open; seed acceptance status remains `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Explicit exclusions: nonempty lists, search, include_deleted, middle-manager policy, read_user self-success or super-admin rejection, mutation, persistence, retry, reload, origin cells, seed/blocker/Stage closure. No unit, seed, cell, or blocker is newly accepted or marked closed, and full five-unit reconciliation is not claimed.
