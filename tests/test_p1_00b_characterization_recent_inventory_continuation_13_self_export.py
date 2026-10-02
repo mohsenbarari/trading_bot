@@ -44,21 +44,56 @@ EXPECTED_TEST_SELECTORS = [
 ]
 
 
+class _StrSubclass(str):
+    """String subclass for exact type validation checks."""
+
+
+class _DictSubclass(dict):
+    """Dict subclass for exact type validation checks."""
+
+
+class _IntSubclass(int):
+    """Int subclass for exact type validation checks."""
+
+
+class _ListSubclass(list):
+    """List subclass for exact type validation checks."""
+
+
 def validate_continuation_thirteen_provenance(
     inventory: dict,
     predecessor_bytes: bytes,
     source_bytes: bytes,
 ) -> None:
     """Validate exact continuation 13 schema, hashes, and AST selector resolution."""
+    if type(inventory) is not dict:
+        raise ValueError(
+            f"Invalid inventory container: expected dict, got {type(inventory)}"
+        )
+
+    if not all(type(k) is str for k in inventory.keys()):
+        raise ValueError(
+            "Invalid inventory top-level key type: all keys must be exact builtin str"
+        )
+
     expected_top_keys = {"schema_version", "stage", "predecessor_inventory", "records"}
     if set(inventory.keys()) != expected_top_keys:
         raise ValueError(
             f"Invalid inventory top-level keys: expected {expected_top_keys}, got {set(inventory.keys())}"
         )
 
+    if type(inventory["schema_version"]) is not int:
+        raise ValueError(
+            f"Invalid schema_version type: expected int, got {type(inventory['schema_version'])}"
+        )
     if inventory["schema_version"] != EXPECTED_SCHEMA_VERSION:
         raise ValueError(
             f"Invalid schema_version: expected {EXPECTED_SCHEMA_VERSION}, got {inventory['schema_version']}"
+        )
+
+    if type(inventory["stage"]) is not str:
+        raise ValueError(
+            f"Invalid stage type: expected str, got {type(inventory['stage'])}"
         )
     if inventory["stage"] != EXPECTED_STAGE:
         raise ValueError(
@@ -66,17 +101,39 @@ def validate_continuation_thirteen_provenance(
         )
 
     pred = inventory["predecessor_inventory"]
+    if type(pred) is not dict:
+        raise ValueError(
+            f"Invalid predecessor_inventory structure: expected dict, got {type(pred)}"
+        )
+    if not all(type(k) is str for k in pred.keys()):
+        raise ValueError(
+            "Invalid predecessor_inventory key type: all keys must be exact builtin str"
+        )
     expected_pred_keys = {"path", "sha256", "last_commit"}
-    if not isinstance(pred, dict) or set(pred.keys()) != expected_pred_keys:
+    if set(pred.keys()) != expected_pred_keys:
         raise ValueError(f"Invalid predecessor_inventory structure or keys: {pred}")
 
+    if type(pred["path"]) is not str:
+        raise ValueError(
+            f"Invalid predecessor path type: expected str, got {type(pred['path'])}"
+        )
     if pred["path"] != EXPECTED_PREDECESSOR_PATH:
         raise ValueError(
             f"Invalid predecessor path: expected {EXPECTED_PREDECESSOR_PATH}, got {pred['path']}"
         )
+
+    if type(pred["sha256"]) is not str:
+        raise ValueError(
+            f"Invalid predecessor sha256 type: expected str, got {type(pred['sha256'])}"
+        )
     if pred["sha256"] != EXPECTED_PREDECESSOR_SHA:
         raise ValueError(
             f"Invalid predecessor sha256: expected {EXPECTED_PREDECESSOR_SHA}, got {pred['sha256']}"
+        )
+
+    if type(pred["last_commit"]) is not str:
+        raise ValueError(
+            f"Invalid predecessor last_commit type: expected str, got {type(pred['last_commit'])}"
         )
     if pred["last_commit"] != EXPECTED_PREDECESSOR_LAST_COMMIT:
         raise ValueError(
@@ -90,27 +147,56 @@ def validate_continuation_thirteen_provenance(
         )
 
     records = inventory["records"]
-    if not isinstance(records, list) or len(records) != 1:
+    if type(records) is not list or len(records) != 1:
         raise ValueError(
-            f"Expected exactly one record in records list, got {len(records) if isinstance(records, list) else type(records)}"
+            f"Expected exactly one record in records list, got {len(records) if type(records) is list else type(records)}"
         )
 
     rec = records[0]
+    if type(rec) is not dict:
+        raise ValueError(f"Invalid record structure: expected dict, got {type(rec)}")
+    if not all(type(k) is str for k in rec.keys()):
+        raise ValueError(
+            "Invalid record key type: all keys must be exact builtin str"
+        )
     expected_rec_keys = {"path", "sha256", "last_commit", "seed_ids", "test_selectors"}
-    if not isinstance(rec, dict) or set(rec.keys()) != expected_rec_keys:
+    if set(rec.keys()) != expected_rec_keys:
         raise ValueError(f"Invalid record structure or keys: {rec}")
 
+    if type(rec["path"]) is not str:
+        raise ValueError(
+            f"Invalid record path type: expected str, got {type(rec['path'])}"
+        )
     if rec["path"] != EXPECTED_RECORD_PATH:
         raise ValueError(
             f"Invalid record path: expected {EXPECTED_RECORD_PATH}, got {rec['path']}"
+        )
+
+    if type(rec["sha256"]) is not str:
+        raise ValueError(
+            f"Invalid record sha256 type: expected str, got {type(rec['sha256'])}"
         )
     if rec["sha256"] != EXPECTED_RECORD_SHA:
         raise ValueError(
             f"Invalid record sha256: expected {EXPECTED_RECORD_SHA}, got {rec['sha256']}"
         )
+
+    if type(rec["last_commit"]) is not str:
+        raise ValueError(
+            f"Invalid record last_commit type: expected str, got {type(rec['last_commit'])}"
+        )
     if rec["last_commit"] != EXPECTED_RECORD_LAST_COMMIT:
         raise ValueError(
             f"Invalid record last_commit: expected {EXPECTED_RECORD_LAST_COMMIT}, got {rec['last_commit']}"
+        )
+
+    if (
+        type(rec["seed_ids"]) is not list
+        or len(rec["seed_ids"]) != 1
+        or type(rec["seed_ids"][0]) is not str
+    ):
+        raise ValueError(
+            f"Invalid seed_ids: expected list containing exactly one str, got {rec.get('seed_ids') if type(rec) is dict else rec}"
         )
     if rec["seed_ids"] != EXPECTED_SEED_IDS:
         raise ValueError(
@@ -124,9 +210,17 @@ def validate_continuation_thirteen_provenance(
         )
 
     selectors = rec["test_selectors"]
-    if not isinstance(selectors, list) or len(selectors) != 1 or not isinstance(selectors[0], str):
+    if (
+        type(selectors) is not list
+        or len(selectors) != 1
+        or type(selectors[0]) is not str
+    ):
         raise ValueError(
             "Selector metadata check failed: test_selectors must be a list containing exactly one string selector"
+        )
+    if selectors != EXPECTED_TEST_SELECTORS:
+        raise ValueError(
+            f"Invalid test_selectors: expected {EXPECTED_TEST_SELECTORS}, got {selectors}"
         )
 
     selector = selectors[0]
@@ -213,13 +307,368 @@ class ContinuationThirteenSelfExportProvenanceTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(
             ValueError,
-            r"Selector metadata check failed: async method 'test_nonexistent_method_drift' not found",
+            r"Invalid test_selectors",
         ):
             validate_continuation_thirteen_provenance(
                 drifted_inventory,
                 self.predecessor_bytes,
                 self.source_bytes,
             )
+
+    def test_reproduced_defects_rejected(self) -> None:
+        """Verify explicit rejection of the four reproduced baseline validator defects."""
+        # 1. schema_version = True (bool subclass of int)
+        mut_bool_ver = copy.deepcopy(self.inventory)
+        mut_bool_ver["schema_version"] = True
+        with self.assertRaisesRegex(ValueError, r"Invalid schema_version type"):
+            validate_continuation_thirteen_provenance(
+                mut_bool_ver, self.predecessor_bytes, self.source_bytes
+            )
+
+        # 2. str-subclass top-level key
+        mut_str_key = {_StrSubclass(k): v for k, v in self.inventory.items()}
+        with self.assertRaisesRegex(ValueError, r"Invalid inventory top-level key type"):
+            validate_continuation_thirteen_provenance(
+                mut_str_key, self.predecessor_bytes, self.source_bytes
+            )
+
+        # 3. dict-subclass predecessor
+        mut_dict_pred = copy.deepcopy(self.inventory)
+        mut_dict_pred["predecessor_inventory"] = _DictSubclass(
+            mut_dict_pred["predecessor_inventory"]
+        )
+        with self.assertRaisesRegex(
+            ValueError, r"Invalid predecessor_inventory structure"
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_dict_pred, self.predecessor_bytes, self.source_bytes
+            )
+
+        # 4. str-subclass record path
+        mut_str_path = copy.deepcopy(self.inventory)
+        mut_str_path["records"][0]["path"] = _StrSubclass(
+            mut_str_path["records"][0]["path"]
+        )
+        with self.assertRaisesRegex(ValueError, r"Invalid record path type"):
+            validate_continuation_thirteen_provenance(
+                mut_str_path, self.predecessor_bytes, self.source_bytes
+            )
+
+    def test_subclasses_and_strict_container_types_rejected(self) -> None:
+        """Verify that subclasses of int, list, dict, and str are strictly rejected."""
+        # schema_version int subclass
+        mut_int_sub = copy.deepcopy(self.inventory)
+        mut_int_sub["schema_version"] = _IntSubclass(1)
+        with self.assertRaisesRegex(ValueError, r"Invalid schema_version type"):
+            validate_continuation_thirteen_provenance(
+                mut_int_sub, self.predecessor_bytes, self.source_bytes
+            )
+
+        # records list subclass
+        mut_list_sub = copy.deepcopy(self.inventory)
+        mut_list_sub["records"] = _ListSubclass(mut_list_sub["records"])
+        with self.assertRaisesRegex(
+            ValueError, r"Expected exactly one record in records list"
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_list_sub, self.predecessor_bytes, self.source_bytes
+            )
+
+        # record dict subclass
+        mut_rec_sub = copy.deepcopy(self.inventory)
+        mut_rec_sub["records"][0] = _DictSubclass(mut_rec_sub["records"][0])
+        with self.assertRaisesRegex(ValueError, r"Invalid record structure"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_sub, self.predecessor_bytes, self.source_bytes
+            )
+
+        # predecessor key str subclass
+        mut_pred_key_sub = copy.deepcopy(self.inventory)
+        mut_pred_key_sub["predecessor_inventory"] = {
+            _StrSubclass(k): v
+            for k, v in mut_pred_key_sub["predecessor_inventory"].items()
+        }
+        with self.assertRaisesRegex(
+            ValueError, r"Invalid predecessor_inventory key type"
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_pred_key_sub, self.predecessor_bytes, self.source_bytes
+            )
+
+        # record key str subclass
+        mut_rec_key_sub = copy.deepcopy(self.inventory)
+        mut_rec_key_sub["records"][0] = {
+            _StrSubclass(k): v
+            for k, v in mut_rec_key_sub["records"][0].items()
+        }
+        with self.assertRaisesRegex(ValueError, r"Invalid record key type"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_key_sub, self.predecessor_bytes, self.source_bytes
+            )
+
+    def test_nested_container_and_leaf_types_rejected(self) -> None:
+        """Verify that non-builtin types at container and leaf locations raise specific ValueErrors."""
+        # top container not dict
+        with self.assertRaisesRegex(ValueError, r"Invalid inventory container"):
+            validate_continuation_thirteen_provenance(
+                [], self.predecessor_bytes, self.source_bytes  # type: ignore[arg-type]
+            )
+
+        # type check cases: (mutation_lambda, expected_regex)
+        cases = [
+            (lambda inv: inv.update({"schema_version": "1"}), r"Invalid schema_version type"),
+            (lambda inv: inv.update({"stage": 123}), r"Invalid stage type"),
+            (lambda inv: inv.update({"predecessor_inventory": "not_dict"}), r"Invalid predecessor_inventory structure"),
+            (lambda inv: inv["predecessor_inventory"].update({"path": 123}), r"Invalid predecessor path type"),
+            (lambda inv: inv["predecessor_inventory"].update({"sha256": 123}), r"Invalid predecessor sha256 type"),
+            (lambda inv: inv["predecessor_inventory"].update({"last_commit": 123}), r"Invalid predecessor last_commit type"),
+            (lambda inv: inv.update({"records": {}}), r"Expected exactly one record in records list"),
+            (lambda inv: inv.update({"records": ["not_dict"]}), r"Invalid record structure"),
+            (lambda inv: inv["records"][0].update({"path": 123}), r"Invalid record path type"),
+            (lambda inv: inv["records"][0].update({"sha256": 123}), r"Invalid record sha256 type"),
+            (lambda inv: inv["records"][0].update({"last_commit": 123}), r"Invalid record last_commit type"),
+            (lambda inv: inv["records"][0].update({"seed_ids": "not_list"}), r"Invalid seed_ids"),
+            (lambda inv: inv["records"][0].update({"seed_ids": [123]}), r"Invalid seed_ids"),
+            (lambda inv: inv["records"][0].update({"test_selectors": "not_list"}), r"Selector metadata check failed: test_selectors must be a list"),
+            (lambda inv: inv["records"][0].update({"test_selectors": [123]}), r"Selector metadata check failed: test_selectors must be a list"),
+        ]
+        for mutate_fn, expected_regex in cases:
+            with self.subTest(expected_regex=expected_regex):
+                mut = copy.deepcopy(self.inventory)
+                mutate_fn(mut)
+                with self.assertRaisesRegex(ValueError, expected_regex):
+                    validate_continuation_thirteen_provenance(
+                        mut, self.predecessor_bytes, self.source_bytes
+                    )
+
+    def test_missing_and_extra_keys_rejected(self) -> None:
+        """Verify that missing and extra keys at all schema levels raise specific ValueErrors."""
+        # Top-level missing
+        for key in ["schema_version", "stage", "predecessor_inventory", "records"]:
+            with self.subTest(top_missing=key):
+                mut = copy.deepcopy(self.inventory)
+                del mut[key]
+                with self.assertRaisesRegex(ValueError, r"Invalid inventory top-level keys"):
+                    validate_continuation_thirteen_provenance(
+                        mut, self.predecessor_bytes, self.source_bytes
+                    )
+
+        # Top-level extra
+        mut_top_extra = copy.deepcopy(self.inventory)
+        mut_top_extra["unexpected_extra_key"] = "extra_value"
+        with self.assertRaisesRegex(ValueError, r"Invalid inventory top-level keys"):
+            validate_continuation_thirteen_provenance(
+                mut_top_extra, self.predecessor_bytes, self.source_bytes
+            )
+
+        # Predecessor missing
+        for key in ["path", "sha256", "last_commit"]:
+            with self.subTest(pred_missing=key):
+                mut = copy.deepcopy(self.inventory)
+                del mut["predecessor_inventory"][key]
+                with self.assertRaisesRegex(
+                    ValueError, r"Invalid predecessor_inventory structure or keys"
+                ):
+                    validate_continuation_thirteen_provenance(
+                        mut, self.predecessor_bytes, self.source_bytes
+                    )
+
+        # Predecessor extra
+        mut_pred_extra = copy.deepcopy(self.inventory)
+        mut_pred_extra["predecessor_inventory"]["unexpected_extra_key"] = "extra"
+        with self.assertRaisesRegex(
+            ValueError, r"Invalid predecessor_inventory structure or keys"
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_pred_extra, self.predecessor_bytes, self.source_bytes
+            )
+
+        # Record missing
+        for key in ["path", "sha256", "last_commit", "seed_ids", "test_selectors"]:
+            with self.subTest(record_missing=key):
+                mut = copy.deepcopy(self.inventory)
+                del mut["records"][0][key]
+                with self.assertRaisesRegex(ValueError, r"Invalid record structure or keys"):
+                    validate_continuation_thirteen_provenance(
+                        mut, self.predecessor_bytes, self.source_bytes
+                    )
+
+        # Record extra
+        mut_rec_extra = copy.deepcopy(self.inventory)
+        mut_rec_extra["records"][0]["unexpected_extra_key"] = "extra"
+        with self.assertRaisesRegex(ValueError, r"Invalid record structure or keys"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_extra, self.predecessor_bytes, self.source_bytes
+            )
+
+    def test_list_cardinalities_rejected(self) -> None:
+        """Verify that cardinality violations in records, seed_ids, and test_selectors raise ValueError."""
+        # records empty
+        mut_rec_empty = copy.deepcopy(self.inventory)
+        mut_rec_empty["records"] = []
+        with self.assertRaisesRegex(
+            ValueError, r"Expected exactly one record in records list"
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_rec_empty, self.predecessor_bytes, self.source_bytes
+            )
+
+        # records > 1
+        mut_rec_two = copy.deepcopy(self.inventory)
+        mut_rec_two["records"].append(copy.deepcopy(mut_rec_two["records"][0]))
+        with self.assertRaisesRegex(
+            ValueError, r"Expected exactly one record in records list"
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_rec_two, self.predecessor_bytes, self.source_bytes
+            )
+
+        # seed_ids empty
+        mut_seeds_empty = copy.deepcopy(self.inventory)
+        mut_seeds_empty["records"][0]["seed_ids"] = []
+        with self.assertRaisesRegex(ValueError, r"Invalid seed_ids"):
+            validate_continuation_thirteen_provenance(
+                mut_seeds_empty, self.predecessor_bytes, self.source_bytes
+            )
+
+        # seed_ids > 1
+        mut_seeds_two = copy.deepcopy(self.inventory)
+        mut_seeds_two["records"][0]["seed_ids"] = [
+            EXPECTED_SEED_IDS[0],
+            "API-EXTRA-SEED-ID-L9999",
+        ]
+        with self.assertRaisesRegex(ValueError, r"Invalid seed_ids"):
+            validate_continuation_thirteen_provenance(
+                mut_seeds_two, self.predecessor_bytes, self.source_bytes
+            )
+
+        # test_selectors empty
+        mut_sel_empty = copy.deepcopy(self.inventory)
+        mut_sel_empty["records"][0]["test_selectors"] = []
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Selector metadata check failed: test_selectors must be a list containing exactly one string selector",
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_sel_empty, self.predecessor_bytes, self.source_bytes
+            )
+
+        # test_selectors > 1
+        mut_sel_two = copy.deepcopy(self.inventory)
+        mut_sel_two["records"][0]["test_selectors"] = [
+            EXPECTED_TEST_SELECTORS[0],
+            EXPECTED_TEST_SELECTORS[0],
+        ]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Selector metadata check failed: test_selectors must be a list containing exactly one string selector",
+        ):
+            validate_continuation_thirteen_provenance(
+                mut_sel_two, self.predecessor_bytes, self.source_bytes
+            )
+
+    def test_independently_wrong_pinned_identities_rejected(self) -> None:
+        """Verify that mutations to each pinned field and byte SHA are independently rejected."""
+        # schema_version wrong int
+        mut_ver = copy.deepcopy(self.inventory)
+        mut_ver["schema_version"] = 2
+        with self.assertRaisesRegex(ValueError, r"Invalid schema_version: expected 1"):
+            validate_continuation_thirteen_provenance(
+                mut_ver, self.predecessor_bytes, self.source_bytes
+            )
+
+        # stage wrong str
+        mut_stage = copy.deepcopy(self.inventory)
+        mut_stage["stage"] = "P1-00"
+        with self.assertRaisesRegex(ValueError, r"Invalid stage: expected P1-00b"):
+            validate_continuation_thirteen_provenance(
+                mut_stage, self.predecessor_bytes, self.source_bytes
+            )
+
+        # predecessor path
+        mut_pred_path = copy.deepcopy(self.inventory)
+        mut_pred_path["predecessor_inventory"]["path"] = "docs/refactor/two-server/section-1/inventory/wrong.json"
+        with self.assertRaisesRegex(ValueError, r"Invalid predecessor path"):
+            validate_continuation_thirteen_provenance(
+                mut_pred_path, self.predecessor_bytes, self.source_bytes
+            )
+
+        # predecessor sha256
+        mut_pred_sha = copy.deepcopy(self.inventory)
+        mut_pred_sha["predecessor_inventory"]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, r"Invalid predecessor sha256"):
+            validate_continuation_thirteen_provenance(
+                mut_pred_sha, self.predecessor_bytes, self.source_bytes
+            )
+
+        # predecessor last_commit
+        mut_pred_commit = copy.deepcopy(self.inventory)
+        mut_pred_commit["predecessor_inventory"]["last_commit"] = "0" * 40
+        with self.assertRaisesRegex(ValueError, r"Invalid predecessor last_commit"):
+            validate_continuation_thirteen_provenance(
+                mut_pred_commit, self.predecessor_bytes, self.source_bytes
+            )
+
+        # predecessor bytes hash mismatch
+        corrupted_pred_bytes = self.predecessor_bytes + b"\n"
+        with self.assertRaisesRegex(ValueError, r"Predecessor-SHA check failed"):
+            validate_continuation_thirteen_provenance(
+                self.inventory, corrupted_pred_bytes, self.source_bytes
+            )
+
+        # record path
+        mut_rec_path = copy.deepcopy(self.inventory)
+        mut_rec_path["records"][0]["path"] = "tests/test_wrong_path.py"
+        with self.assertRaisesRegex(ValueError, r"Invalid record path"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_path, self.predecessor_bytes, self.source_bytes
+            )
+
+        # record sha256
+        mut_rec_sha = copy.deepcopy(self.inventory)
+        mut_rec_sha["records"][0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, r"Invalid record sha256"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_sha, self.predecessor_bytes, self.source_bytes
+            )
+
+        # record last_commit
+        mut_rec_commit = copy.deepcopy(self.inventory)
+        mut_rec_commit["records"][0]["last_commit"] = "0" * 40
+        with self.assertRaisesRegex(ValueError, r"Invalid record last_commit"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_commit, self.predecessor_bytes, self.source_bytes
+            )
+
+        # record seed_ids identity
+        mut_rec_seeds = copy.deepcopy(self.inventory)
+        mut_rec_seeds["records"][0]["seed_ids"] = ["API-DIFFERENT-SEED-ID-L1234"]
+        with self.assertRaisesRegex(ValueError, r"Invalid seed_ids"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_seeds, self.predecessor_bytes, self.source_bytes
+            )
+
+        # record test_selectors identity
+        mut_rec_sel = copy.deepcopy(self.inventory)
+        mut_rec_sel["records"][0]["test_selectors"] = [
+            f"{EXPECTED_RECORD_PATH}::TradeExportSelfDelegationCharacterizationTests::test_different_selector"
+        ]
+        with self.assertRaisesRegex(ValueError, r"Invalid test_selectors"):
+            validate_continuation_thirteen_provenance(
+                mut_rec_sel, self.predecessor_bytes, self.source_bytes
+            )
+
+    def test_canonical_pass_after_negative_cases(self) -> None:
+        """Demonstrate that canonical inventory and original bytes pass cleanly after negative test runs."""
+        validate_continuation_thirteen_provenance(
+            self.inventory,
+            self.predecessor_bytes,
+            self.source_bytes,
+        )
+        self.assertEqual(
+            self.inventory["records"][0]["test_selectors"],
+            EXPECTED_TEST_SELECTORS,
+        )
 
 
 if __name__ == "__main__":
