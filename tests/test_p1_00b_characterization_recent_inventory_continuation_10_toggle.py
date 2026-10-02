@@ -15,6 +15,20 @@ install_p1_00_network_fence()
 
 
 class RecentInventoryContinuationTenToggleContractTests(unittest.TestCase):
+    def _assert_schema_version(self, data: dict) -> None:
+        self.assertIn("schema_version", data, "schema_version is missing")
+        schema_version = data["schema_version"]
+        self.assertIs(
+            type(schema_version),
+            int,
+            f"schema_version must be exact builtin int, got {type(schema_version).__name__}",
+        )
+        self.assertEqual(
+            schema_version,
+            1,
+            f"schema_version must equal 1, got {schema_version!r}",
+        )
+
     def test_toggle_selected_record_exact_provenance_and_coverage(self):
         repo_root = Path(__file__).resolve().parent.parent
 
@@ -30,7 +44,7 @@ class RecentInventoryContinuationTenToggleContractTests(unittest.TestCase):
         continuation_10_bytes = continuation_10_path.read_bytes()
         continuation_10_data = json.loads(continuation_10_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_10_data.get("schema_version"), 1)
+        self._assert_schema_version(continuation_10_data)
         self.assertEqual(continuation_10_data.get("stage"), "P1-00b")
         self.assertEqual(
             set(continuation_10_data.keys()),
@@ -136,6 +150,48 @@ class RecentInventoryContinuationTenToggleContractTests(unittest.TestCase):
         target_entry = matching_entries[0]
         self.assertEqual(target_entry["handler"], "admin_broadcast.toggle_selected_user")
         self.assertEqual(target_entry["source"], "bot/handlers/admin_broadcast.py:334")
+
+    def test_schema_version_rejects_invalid_types_and_values_with_specific_failure(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        continuation_10_rel_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json"
+        )
+        continuation_10_path = repo_root / continuation_10_rel_path
+        canonical_data = json.loads(continuation_10_path.read_bytes().decode("utf-8"))
+
+        self._assert_schema_version(canonical_data)
+        self._assert_schema_version(dict(canonical_data, schema_version=1))
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must be exact builtin int"):
+            self._assert_schema_version(dict(canonical_data, schema_version=True))
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must be exact builtin int"):
+            self._assert_schema_version(dict(canonical_data, schema_version=False))
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must be exact builtin int"):
+            self._assert_schema_version(dict(canonical_data, schema_version=1.0))
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must be exact builtin int"):
+            self._assert_schema_version(dict(canonical_data, schema_version="1"))
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must be exact builtin int"):
+            self._assert_schema_version(dict(canonical_data, schema_version=None))
+
+        missing_data = {k: v for k, v in canonical_data.items() if k != "schema_version"}
+        with self.assertRaisesRegex(AssertionError, "schema_version is missing"):
+            self._assert_schema_version(missing_data)
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must equal 1"):
+            self._assert_schema_version(dict(canonical_data, schema_version=0))
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must equal 1"):
+            self._assert_schema_version(dict(canonical_data, schema_version=2))
+
+        class IntSubclass(int):
+            pass
+
+        with self.assertRaisesRegex(AssertionError, "schema_version must be exact builtin int"):
+            self._assert_schema_version(dict(canonical_data, schema_version=IntSubclass(1)))
 
 
 if __name__ == "__main__":
