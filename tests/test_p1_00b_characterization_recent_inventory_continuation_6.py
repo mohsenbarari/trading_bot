@@ -16,6 +16,20 @@ except ImportError:
 
 
 class RecentCharacterizationContinuationSixContractTests(unittest.TestCase):
+    def _assert_schema_version(self, data, expected: int = 1):
+        if isinstance(data, dict):
+            if "schema_version" not in data:
+                self.fail("schema_version: missing required field")
+            val = data["schema_version"]
+        else:
+            val = data
+        if type(val) is not int:
+            self.fail(
+                f"schema_version: exact builtin int required, got {type(val).__name__}"
+            )
+        if val != expected:
+            self.fail(f"schema_version: wrong value, expected {expected}, got {val}")
+
     def test_remaining_three_recovery_records_exact_provenance_and_seed_membership(self):
         repo_root = Path(__file__).resolve().parent.parent
 
@@ -28,7 +42,7 @@ class RecentCharacterizationContinuationSixContractTests(unittest.TestCase):
         continuation_6_bytes = continuation_6_path.read_bytes()
         continuation_6_data = json.loads(continuation_6_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_6_data.get("schema_version"), 1)
+        self._assert_schema_version(continuation_6_data)
         self.assertEqual(continuation_6_data.get("stage"), "P1-00b")
 
         predecessor_binding = continuation_6_data.get("predecessor_inventory", {})
@@ -210,6 +224,66 @@ class RecentCharacterizationContinuationSixContractTests(unittest.TestCase):
             distinct_new_seeds.isdisjoint(all_prior_383_seeds),
             f"Distinct new seeds {distinct_new_seeds} overlap with prior 383 evidenced seeds",
         )
+
+    def test_schema_version_rejects_invalid_types_and_values_with_specific_failure(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        continuation_6_path = (
+            repo_root
+            / "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json"
+        )
+        self.assertTrue(
+            continuation_6_path.is_file(),
+            f"Continuation 6 not found at {continuation_6_path}",
+        )
+
+        canonical_bytes = continuation_6_path.read_bytes()
+        canonical_data = json.loads(canonical_bytes.decode("utf-8"))
+
+        # Positively validate canonical JSON and builtin int 1
+        self._assert_schema_version(canonical_data)
+        canonical_with_builtin_int_1 = dict(canonical_data)
+        canonical_with_builtin_int_1["schema_version"] = int(1)
+        self._assert_schema_version(canonical_with_builtin_int_1)
+        self._assert_schema_version(1)
+
+        # Missing field
+        missing_field_data = dict(canonical_data)
+        del missing_field_data["schema_version"]
+        with self.assertRaisesRegex(AssertionError, r"schema_version: missing required field"):
+            self._assert_schema_version(missing_field_data)
+
+        # Non-exact builtin integer types
+        class _IntSubclass(int):
+            pass
+
+        invalid_type_cases = [
+            (True, "bool"),
+            (False, "bool"),
+            (1.0, "float"),
+            ("1", "str"),
+            (None, "NoneType"),
+            (_IntSubclass(1), "_IntSubclass"),
+        ]
+        for bad_val, type_name in invalid_type_cases:
+            corrupt_data = dict(canonical_data)
+            corrupt_data["schema_version"] = bad_val
+            with self.assertRaisesRegex(
+                AssertionError,
+                rf"schema_version: exact builtin int required, got {type_name}",
+            ):
+                self._assert_schema_version(corrupt_data)
+
+        # Wrong builtin integer values
+        for wrong_val in (0, 2):
+            corrupt_data = dict(canonical_data)
+            corrupt_data["schema_version"] = wrong_val
+            with self.assertRaisesRegex(
+                AssertionError,
+                rf"schema_version: wrong value, expected 1, got {wrong_val}",
+            ):
+                self._assert_schema_version(corrupt_data)
+
+        self.assertEqual(continuation_6_path.read_bytes(), canonical_bytes)
 
 
 if __name__ == "__main__":
