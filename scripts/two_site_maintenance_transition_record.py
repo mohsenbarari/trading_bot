@@ -10,6 +10,7 @@ Boundary and authority constraints:
 2. Does NOT authorize startup or replay: verification of actual checkpoint,
    Git repo, Broker, STOP file, and locks remain later storage/reader obligations.
 3. Fixed error strings: error text is constant and does not echo untrusted payloads.
+4. Narrow path compatibility only, never startup/replay authorization.
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ ALLOWED_MAINTENANCE_CONTROL_PATHS: frozenset[str] = frozenset({
     "scripts/two_site_autopilot_monitor.sh",
     "scripts/two_site_autopilot_tmux.sh",
     "scripts/two_site_codex_autopilot.py",
+    "scripts/two_site_cycle_metrics.py",
     "scripts/two_site_cycle_tools.py",
 })
 ALLOWED_CONTROL_PATHS: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS
@@ -65,7 +67,7 @@ _HEX_40_RE = re.compile(r"^[0-9a-f]{40}$")
 _HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _COMMIT_PATH_RE = re.compile(
-    r"^(?:scripts/two_site_[A-Za-z0-9_]+\.py|tests/test_two_site_[A-Za-z0-9_]+\.py|scripts/two_site_autopilot_monitor\.sh|scripts/two_site_autopilot_tmux\.sh|docs/refactor/two-server/PROPOSAL_AUTOMATION\.md|docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT\.md)$"
+    r"^(?:scripts/two_site_[A-Za-z0-9_]+\.py|tests/test_two_site_[A-Za-z0-9_]+\.py|scripts/two_site_autopilot_monitor\.sh|scripts/two_site_autopilot_tmux\.sh|docs/refactor/two-server/PROPOSAL_AUTOMATION\.md|docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT\.md|docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT\.md)$"
 )
 
 _RECORD_KEYS = frozenset({

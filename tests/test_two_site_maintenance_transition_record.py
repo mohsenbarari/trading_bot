@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import unittest
 from typing import Any
@@ -91,6 +92,36 @@ def _make_valid_record(
         "maintenance_commits": commits,
     }
     return record, prior_head, repo_head
+
+
+def _assert_raw_legacy_codec_parity(record: dict[str, Any]) -> None:
+    frozen_input = copy.deepcopy(record)
+    frozen_bytes = (
+        json.dumps(
+            frozen_input,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    if validate_maintenance_transition_record(record) != frozen_input:
+        raise AssertionError("validate result does not match frozen input")
+    if serialize_maintenance_transition_record(record) != frozen_bytes:
+        raise AssertionError("serialized bytes do not match frozen bytes")
+    if parse_maintenance_transition_record(frozen_bytes) != frozen_input:
+        raise AssertionError("parsed record does not match frozen input")
+    built = build_maintenance_transition_record(
+        prior_checkpoint_sha256=record["prior_checkpoint_sha256"],
+        prior_head=record["prior_head"],
+        new_repository=record["new_repository"],
+        maintenance_commits=record["maintenance_commits"],
+    )
+    if built != frozen_input:
+        raise AssertionError("build result does not match frozen input")
+    if record != frozen_input:
+        raise AssertionError("record mutated during codec operations")
 
 
 class TestMaintenanceTransitionRecord(unittest.TestCase):
@@ -326,6 +357,7 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
                 "scripts/two_site_autopilot_monitor.sh",
                 "scripts/two_site_autopilot_tmux.sh",
                 "scripts/two_site_codex_autopilot.py",
+                "scripts/two_site_cycle_metrics.py",
                 "scripts/two_site_cycle_tools.py",
             }),
         )
@@ -935,6 +967,311 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
         old_raw = serialize_maintenance_transition_record(old_record)
         old_parsed = parse_maintenance_transition_record(old_raw)
         self.assertEqual(old_parsed, validate_maintenance_transition_record(old_record))
+
+    _assert_raw_legacy_codec_parity = staticmethod(_assert_raw_legacy_codec_parity)
+
+    def test_ae00_doc_exact_path_roundtrip_and_rejections(self) -> None:
+        doc = "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md"
+        src = "scripts/two_site_worker.py"
+        tst = "tests/test_two_site_worker.py"
+        for paths in ([doc], sorted([doc, src, tst])):
+            rec, p_head, _ = _make_valid_record(commits_count=1)
+            rec["maintenance_commits"][0]["paths"] = paths
+            frozen = copy.deepcopy(rec)
+            val = validate_maintenance_transition_record(rec)
+            self.assertEqual(val["maintenance_commits"][0]["paths"], paths)
+            raw = serialize_maintenance_transition_record(rec)
+            self.assertEqual(parse_maintenance_transition_record(raw), val)
+            self.assertEqual(
+                build_maintenance_transition_record(
+                    rec["prior_checkpoint_sha256"], p_head, rec["new_repository"], rec["maintenance_commits"]
+                ),
+                val,
+            )
+            self.assertEqual(rec, frozen)
+
+        rec_ctrl, _, _ = _make_valid_record(commits_count=1)
+        rec_ctrl["new_repository"]["control_blobs"][doc] = "c" * 40
+        rec_ctrl["maintenance_commits"][0]["paths"] = [doc]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_ctrl)
+        self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        for bad_p in [
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS.md",
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md.bak",
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md2",
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.txt",
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.MD",
+            "docs/refactor/two-server/ae00_work_lineage_metrics_contract.md",
+            "Docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md",
+            "prefix/docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md",
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md/child",
+            "docs/refactor/two-server/other.md",
+        ]:
+            rec_bad, _, _ = _make_valid_record(commits_count=1)
+            rec_bad["maintenance_commits"][0]["paths"] = [bad_p]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_bad)
+            self.assertEqual(str(ctx.exception), "commit path does not match allowed pattern")
+
+        for bad_glob in [
+            "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.*",
+            "docs/refactor/two-server/AE00_*.md",
+        ]:
+            rec_glob, _, _ = _make_valid_record(commits_count=1)
+            rec_glob["maintenance_commits"][0]["paths"] = [bad_glob]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_glob)
+            self.assertEqual(str(ctx.exception), "commit path must not contain glob characters")
+
+        for bad_dot in [
+            "../docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md",
+            "docs/../docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md",
+            "docs/refactor/two-server/./AE00_WORK_LINEAGE_METRICS_CONTRACT.md",
+        ]:
+            rec_dot, _, _ = _make_valid_record(commits_count=1)
+            rec_dot["maintenance_commits"][0]["paths"] = [bad_dot]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_dot)
+            self.assertEqual(str(ctx.exception), "commit path must not contain dot segments or empty components")
+
+        rec_abs, _, _ = _make_valid_record(commits_count=1)
+        rec_abs["maintenance_commits"][0]["paths"] = ["/" + doc]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_abs)
+        self.assertEqual(str(ctx.exception), "commit path must be a relative path")
+
+        rec_bs, _, _ = _make_valid_record(commits_count=1)
+        rec_bs["maintenance_commits"][0]["paths"] = [doc.replace("/", "\\")]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_bs)
+        self.assertEqual(str(ctx.exception), "commit path must not contain backslashes")
+
+        rec_dup, _, _ = _make_valid_record(commits_count=1)
+        rec_dup["maintenance_commits"][0]["paths"] = [doc, doc]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_dup)
+        self.assertEqual(str(ctx.exception), "duplicate commit path detected")
+
+        rec_unsorted, _, _ = _make_valid_record(commits_count=1)
+        rec_unsorted["maintenance_commits"][0]["paths"] = [src, doc]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_unsorted)
+        self.assertEqual(str(ctx.exception), "commit paths must be sorted")
+
+    def test_cycle_metrics_exact_control_roundtrip_and_rejections(self) -> None:
+        metrics = "scripts/two_site_cycle_metrics.py"
+        tst = "tests/test_two_site_cycle_metrics.py"
+        src = "scripts/two_site_worker.py"
+        for paths in ([metrics], sorted([metrics, src, tst])):
+            rec, p_head, _ = _make_valid_record(commits_count=1)
+            rec["new_repository"]["control_blobs"][metrics] = "c" * 40
+            rec["maintenance_commits"][0]["paths"] = paths
+            frozen = copy.deepcopy(rec)
+            val = validate_maintenance_transition_record(rec)
+            self.assertEqual(val["maintenance_commits"][0]["paths"], paths)
+            self.assertIn(metrics, val["new_repository"]["control_blobs"])
+            raw = serialize_maintenance_transition_record(rec)
+            self.assertEqual(parse_maintenance_transition_record(raw), val)
+            self.assertEqual(
+                build_maintenance_transition_record(
+                    rec["prior_checkpoint_sha256"], p_head, rec["new_repository"], rec["maintenance_commits"]
+                ),
+                val,
+            )
+            self.assertEqual(rec, frozen)
+
+        for forbidden in [
+            "scripts/two_site_provider_broker.py",
+            "scripts/two_site_proposal_runner.py",
+            "scripts/two_site_cycle_metrics_spoof.py",
+        ]:
+            rec_dis, _, _ = _make_valid_record(commits_count=1)
+            rec_dis["new_repository"]["control_blobs"][metrics] = "c" * 40
+            rec_dis["new_repository"]["control_blobs"][forbidden] = "d" * 40
+            rec_dis["maintenance_commits"][0]["paths"] = sorted([metrics, forbidden])
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_dis)
+            self.assertEqual(str(ctx.exception), "commit path cannot be a control path")
+
+        spoof = "scripts/two_site_cycle_metrics_spoof.py"
+        rec_sp, _, _ = _make_valid_record(commits_count=1)
+        rec_sp["maintenance_commits"][0]["paths"] = [spoof]
+        self.assertEqual(validate_maintenance_transition_record(rec_sp)["maintenance_commits"][0]["paths"], [spoof])
+
+        for bad_p in [
+            "scripts/two_site_cycle_metrics.py.bak",
+            "scripts/two_site_cycle_metrics.py2",
+            "scripts/two_site_cycle_metrics.PY",
+            "scripts/TWO_SITE_CYCLE_METRICS.py",
+            "Scripts/two_site_cycle_metrics.py",
+        ]:
+            rec_bad, _, _ = _make_valid_record(commits_count=1)
+            rec_bad["maintenance_commits"][0]["paths"] = [bad_p]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_bad)
+            self.assertEqual(str(ctx.exception), "commit path does not match allowed pattern")
+
+        for bad_glob in ["scripts/two_site_cycle_metrics*.py", "scripts/two_site_cycle_metrics?.py"]:
+            rec_glob, _, _ = _make_valid_record(commits_count=1)
+            rec_glob["maintenance_commits"][0]["paths"] = [bad_glob]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_glob)
+            self.assertEqual(str(ctx.exception), "commit path must not contain glob characters")
+
+        for bad_dot in [
+            "../scripts/two_site_cycle_metrics.py",
+            "scripts/../scripts/two_site_cycle_metrics.py",
+            "scripts/./two_site_cycle_metrics.py",
+        ]:
+            rec_dot, _, _ = _make_valid_record(commits_count=1)
+            rec_dot["maintenance_commits"][0]["paths"] = [bad_dot]
+            with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+                validate_maintenance_transition_record(rec_dot)
+            self.assertEqual(str(ctx.exception), "commit path must not contain dot segments or empty components")
+
+        rec_abs, _, _ = _make_valid_record(commits_count=1)
+        rec_abs["maintenance_commits"][0]["paths"] = ["/" + metrics]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_abs)
+        self.assertEqual(str(ctx.exception), "commit path must be a relative path")
+
+        rec_bs, _, _ = _make_valid_record(commits_count=1)
+        rec_bs["maintenance_commits"][0]["paths"] = [metrics.replace("/", "\\")]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_bs)
+        self.assertEqual(str(ctx.exception), "commit path must not contain backslashes")
+
+        rec_dup, _, _ = _make_valid_record(commits_count=1)
+        rec_dup["new_repository"]["control_blobs"][metrics] = "c" * 40
+        rec_dup["maintenance_commits"][0]["paths"] = [metrics, metrics]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_dup)
+        self.assertEqual(str(ctx.exception), "duplicate commit path detected")
+
+        rec_unsorted, _, _ = _make_valid_record(commits_count=1)
+        rec_unsorted["new_repository"]["control_blobs"][metrics] = "c" * 40
+        rec_unsorted["maintenance_commits"][0]["paths"] = [tst, metrics]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_unsorted)
+        self.assertEqual(str(ctx.exception), "commit paths must be sorted")
+
+    def test_ae00_paths_preserve_legacy_record_bytes_and_bounds(self) -> None:
+        record, prior_head, repo_head = _make_valid_record(commits_count=1)
+        self.assertEqual(MAINTENANCE_TRANSITION_SCHEMA_VERSION, "1.0")
+        self.assertEqual(MAINTENANCE_TRANSITION_KIND, "REVIEWED_MAINTENANCE_TRANSITION")
+        self.assertEqual(
+            set(record.keys()),
+            {"schema_version", "kind", "prior_checkpoint_sha256", "prior_head", "new_repository", "maintenance_commits"},
+        )
+        self.assertEqual(len(record.keys()), 6)
+        self.assertEqual(
+            set(record["maintenance_commits"][0].keys()),
+            {"head", "parent", "paths", "worker_run_id", "reviewer_run_id", "proposal_sha256", "test_evidence_sha256"},
+        )
+        self.assertEqual(len(record["maintenance_commits"][0].keys()), 7)
+        self.assertEqual(MAX_MAINTENANCE_TRANSITION_RECORD_BYTES, 16384)
+        self.assertEqual(MAX_MAINTENANCE_COMMITS, 12)
+
+        self.assertEqual(record["prior_head"], "0" * 40)
+        self.assertEqual(record["prior_checkpoint_sha256"], "9" * 64)
+        self.assertEqual(record["new_repository"]["control_blobs"], {"scripts/two_site_autopilot_control.py": "4" * 40})
+        self.assertEqual(record["new_repository"]["assignment_scope"]["assignment_id"], "assign-101")
+        self.assertEqual(record["new_repository"]["assignment_scope"]["stage_id"], "stage-p1")
+        self.assertEqual(record["new_repository"]["assignment_scope"]["sha256"], "5" * 64)
+        self.assertEqual(record["maintenance_commits"][0]["head"], "0000000000000000000000000000000000000001")
+        self.assertEqual(record["maintenance_commits"][0]["parent"], "0" * 40)
+        self.assertEqual(record["maintenance_commits"][0]["paths"], ["scripts/two_site_worker.py"])
+
+        raw_fixture = (
+            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+        ).encode("utf-8")
+        self.assertEqual(len(raw_fixture), 1282)
+        self.assertEqual(
+            hashlib.sha256(raw_fixture).hexdigest(),
+            "9865b75e1634c5de984496ca9dd59334ef25091448e0e21f778c3ca0db4e6e48",
+        )
+
+        _assert_raw_legacy_codec_parity(record)
+
+        doc = "docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md"
+        metrics = "scripts/two_site_cycle_metrics.py"
+        rec12, _, _ = _make_valid_record(commits_count=12)
+        rec12["new_repository"]["control_blobs"][metrics] = "c" * 40
+        rec12["maintenance_commits"][0]["paths"] = [doc]
+        rec12["maintenance_commits"][1]["paths"] = [metrics]
+        rec12["maintenance_commits"][2]["paths"] = sorted([doc, metrics])
+        _assert_raw_legacy_codec_parity(rec12)
+
+        rec13, _, _ = _make_valid_record(commits_count=13)
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec13)
+        self.assertEqual(str(ctx.exception), "maintenance_commits count out of bounds")
+
+        rec_brk, _, _ = _make_valid_record(commits_count=2)
+        rec_brk["maintenance_commits"][1]["parent"] = "f" * 40
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            validate_maintenance_transition_record(rec_brk)
+        self.assertEqual(str(ctx.exception), "commit parent does not match previous commit head")
+
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            parse_maintenance_transition_record(b" " * 16385)
+        self.assertEqual(str(ctx.exception), "raw bytes exceed maximum allowed length")
+
+        big_rec, _, _ = _make_valid_record(commits_count=1)
+        big_rec["new_repository"]["assignment_scope"]["allowed_paths"] = ["a" * 1024 for _ in range(16)]
+        with self.assertRaises(MaintenanceTransitionRecordError) as ctx:
+            serialize_maintenance_transition_record(big_rec)
+        self.assertEqual(str(ctx.exception), "Canonical JSON size exceeds limit")
+
+    def test_ae00_legacy_oracle_detects_valid_field_drift(self) -> None:
+        import scripts.two_site_maintenance_transition_record as mod
+
+        record, _, _ = _make_valid_record(commits_count=1)
+        orig_bytes = (
+            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+        ).encode("utf-8")
+
+        _assert_raw_legacy_codec_parity(record)
+        current_bytes = (
+            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+        ).encode("utf-8")
+        self.assertEqual(current_bytes, orig_bytes)
+
+        orig_validate = mod._validate_maintenance_commits
+
+        def wrapped_worker_drift(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            res = orig_validate(*args, **kwargs)
+            mutated = copy.deepcopy(res)
+            mutated[0]["worker_run_id"] = "regressed-worker-run"
+            return mutated
+
+        try:
+            mod._validate_maintenance_commits = wrapped_worker_drift
+            with self.assertRaises(AssertionError):
+                _assert_raw_legacy_codec_parity(record)
+        finally:
+            mod._validate_maintenance_commits = orig_validate
+
+        def wrapped_sha_drift(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            res = orig_validate(*args, **kwargs)
+            mutated = copy.deepcopy(res)
+            mutated[0]["proposal_sha256"] = "e" * 64
+            return mutated
+
+        try:
+            mod._validate_maintenance_commits = wrapped_sha_drift
+            with self.assertRaises(AssertionError):
+                _assert_raw_legacy_codec_parity(record)
+        finally:
+            mod._validate_maintenance_commits = orig_validate
+
+        _assert_raw_legacy_codec_parity(record)
+        final_bytes = (
+            json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+        ).encode("utf-8")
+        self.assertEqual(final_bytes, orig_bytes)
 
 
 if __name__ == "__main__":
