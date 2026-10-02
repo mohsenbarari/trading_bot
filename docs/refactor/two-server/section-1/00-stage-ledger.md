@@ -202,3 +202,20 @@ Seed accounting, blockers, and Stage status:
 - Both canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`.
 - Origin matrix remains open; seed acceptance status remains `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
 - Explicit exclusions: nonempty lists, search, include_deleted, middle-manager policy, read_user self-success or super-admin rejection, mutation, persistence, retry, reload, origin cells, seed/blocker/Stage closure. No unit, seed, cell, or blocker is newly accepted or marked closed, and full five-unit reconciliation is not claimed.
+
+### 2026-10-02 UTC — Continuation 16 documentation linkage checkpoint (manager-peer HTTP403)
+
+Assignment `WA-P1-00B-AFTER-AE00-WORK-PRODUCER-20261002-153` (digest `42cf318ef79e18fa02c30dc927178832dcd1adb91fbb4cced713cac348f52f86`, inspected HEAD `93c01c59f828808f5f7ed86803643dbdc4e5695c`) records one bounded documentation-only continuation-16 evidence-linkage entry for open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Inventory artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json` (SHA256 `22e2c7c921ee8e20a2335a1ce1f32e0224f4b1403f2597ef6a11e36d4930fe3a`, last commit `0eebdb41c0300ae0d92a16d5cd0aa8db75ad2b9f`).
+- Existing accepted behavior test: `tests/test_p1_00b_characterization_users_read_manager_peer_http.py` (commit `05fe0d5c2a5dae727aa7219549843b1ce6235945`, SHA256 `f093210c5dadda895a370ec1427607c3eade7e593e3133d3551881f2e8e20bcd`, seed `API-IDENTITY-GET-USERS-READ-USER-L440`, selector `tests/test_p1_00b_characterization_users_read_manager_peer_http.py::UsersReadManagerPeerHttpCharacterizationTests::test_middle_manager_peer_read_returns_http_403_before_relation_loading`): describes only observed manager-peer HTTP403 before relation loading/serialization, never claim full handler acceptance.
+- Repaired provenance source: `tests/test_p1_00b_characterization_recent_inventory_continuation_16_manager_peer.py` at repair commit `93c01c59f828808f5f7ed86803643dbdc4e5695c`, SHA256 `44629dbe8698a1e2ad0d4be3948b16a6e21d72b77fa92b62421cc97d8746aafe`, and exact selector `tests/test_p1_00b_characterization_recent_inventory_continuation_16_manager_peer.py::ContinuationSixteenManagerPeerProvenanceTests::test_schema_version_wrong_types_rejected`: explains exact int schema_version 1 and independently decoded wrong JSON types/values rejection using existing evidence only. Do not state tests for this new proposal have already passed; acceptance/test receipts are separate.
+
+Reconciliation status and machine aggregate tracking:
+- This is documentation linkage for already accepted evidence only, not aggregate reconciliation or new behavior acceptance.
+- Keep aggregate reconciliation exactly 2/5 with pending-five=5, units_since_reconciliation=5, total_behavior_units=5, reconciled_behavior_units=2, remaining_behavior_units=3; explicitly keep continuations 15 empty-list HTTP200, 16 manager-peer HTTP403, 17 missing-target HTTP404 pending and no sixth behavior before complete reconciliation as recorded in `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-13-14.json`.
+- Reconciliation policy: no sixth behavior before complete reconciliation; continuation-12 and all prior rejected ledger proposals remain deferred.
+- Do not change inventory, counters, seed-handler coverage, test files, runtime/source, existing accepted evidence, or deferred prior proposals. This linkage adds no distinct seed and does not complete five-unit reconciliation.
+
+Seed accounting, blockers, and Stage status:
+- Retain coverage 387/465 (135 baseline + 252 reconciled new), 78 remaining, FULL_SEED_ACCEPTANCE_NOT_ASSESSED, both canonical High blockers open (`P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`), P1-00 COMPLETE and P1-00b IN_PROGRESS.
+- Exclude read_user self-success, super-admin rejection, success/mutation/persistence/retry/reload, origin cells and all seed/cell/blocker/Stage closure.
