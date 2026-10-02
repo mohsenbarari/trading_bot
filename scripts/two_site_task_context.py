@@ -16,6 +16,99 @@ PERSISTENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_RECONCILIATION_SCHEMA_PROFILE_ID = "P1_RECONCILIATION_SCHEMA_V1"
+_RECONCILIATION_SCHEMA_PROFILE_RULES = (
+    "derive exact recursive key sets and built-in container/key/leaf types from explicit schema: bool is not int, float is not int, str/dict subclasses are excluded where exact types required",
+    "independently read canonical manifest and verify exact accounting/stage/pending batch, never count every scenario as a new seed or close unproven origin cells",
+    "pin all supplied path/commit/SHA/selector identities from independent immutable reference literals/actual retained bytes, never reuse the implementation/input pin as expected oracle",
+    "independently corrupt each required nested shape, missing/extra key, wrong type and commit/SHA/selector, with one valid baseline and check-specific failure expectations (unrelated ValueError must not make negative pass)",
+    "Reviewer maps every requirement/positive/negative to actual assertions and reuse candidates before VERIFIED; PASS/covered_requirements/VERIFIED alone is not final acceptance",
+)
+
+_RECONCILIATION_TASK_ID_RE = re.compile(
+    r"^(?:WA[-_])?P1[-_]00B(?=[^A-Za-z0-9]|$)",
+    re.IGNORECASE,
+)
+_INVENTORY_CANONICAL_PATH_RE = re.compile(
+    r"^docs/refactor/two-server/section-1/inventory/(?:seed-handler-coverage\.json|recent-characterization(?:\-[a-zA-Z0-9]+)*\.json)$"
+)
+_RECONCILIATION_TEST_PATH_RE = re.compile(
+    r"^tests/test_p1_00b_characterization_reconciliation(?:_[a-zA-Z0-9]+)*\.py$"
+)
+_STAGE_LEDGER_PATH = "docs/refactor/two-server/section-1/00-stage-ledger.md"
+
+
+def _build_reconciliation_schema_profile() -> dict:
+    return {
+        "profile_id": _RECONCILIATION_SCHEMA_PROFILE_ID,
+        "rules": list(_RECONCILIATION_SCHEMA_PROFILE_RULES),
+    }
+
+
+def _is_reconciliation_schema_applicable(task, sources) -> bool:
+    if not isinstance(task, dict) or not isinstance(sources, dict):
+        return False
+
+    task_id = task.get("task_id")
+    if not isinstance(task_id, str):
+        return False
+    if not _RECONCILIATION_TASK_ID_RE.match(task_id.strip()):
+        return False
+
+    goal = task.get("goal")
+    if not isinstance(goal, str):
+        return False
+    reqs = task.get("requirements")
+    if reqs is not None:
+        if not isinstance(reqs, list) or not all(isinstance(r, str) for r in reqs):
+            return False
+
+    contract_text = _task_contract_text(task)
+    if not re.search(r"\breconciliation\b", contract_text, re.IGNORECASE):
+        return False
+    if not re.search(r"\b(?:schema|provenance|accounting|validation)\b", contract_text, re.IGNORECASE):
+        return False
+
+    if bool(PERSISTENCE_RE.search(contract_text)) or bool(
+        re.search(r"\b(?:session|live[-_ ]session|db[-_ ]session)\b", contract_text, re.IGNORECASE)
+    ):
+        return False
+
+    allowed_files = task.get("allowed_files")
+    if not isinstance(allowed_files, list) or not allowed_files:
+        return False
+
+    has_target = False
+    for p in allowed_files:
+        if not isinstance(p, str) or not p:
+            return False
+        is_p1_test = bool(_RECONCILIATION_TEST_PATH_RE.fullmatch(p))
+        is_inventory_json = bool(_INVENTORY_CANONICAL_PATH_RE.fullmatch(p))
+        is_ledger = (p == _STAGE_LEDGER_PATH)
+
+        if not (is_p1_test or is_inventory_json or is_ledger):
+            return False
+        if is_p1_test or is_inventory_json:
+            has_target = True
+
+    if not has_target:
+        return False
+
+    has_canonical_source = False
+    for path, item in sources.items():
+        if not isinstance(path, str):
+            continue
+        if _INVENTORY_CANONICAL_PATH_RE.fullmatch(path):
+            content = item.get("content") if isinstance(item, dict) else item
+            if isinstance(content, str) and content.strip():
+                has_canonical_source = True
+                break
+
+    if not has_canonical_source:
+        return False
+
+    return True
+
 
 def _task_contract_text(task) -> str:
     if not isinstance(task, dict):
@@ -626,4 +719,10 @@ def preparation_notes(task, sources):
         _add_warning("BLOCKER_IDS_OMITTED")
     while res["warnings"] and len(json.dumps(res).encode("utf-8")) > 8192:
         res["warnings"].pop()
+    if _is_reconciliation_schema_applicable(task, sources):
+        profile = _build_reconciliation_schema_profile()
+        candidate = dict(res)
+        candidate["reconciliation_schema_profile"] = profile
+        if len(json.dumps(candidate).encode("utf-8")) <= 8192:
+            res["reconciliation_schema_profile"] = profile
     return res
