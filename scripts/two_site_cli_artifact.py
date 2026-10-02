@@ -10,6 +10,12 @@ import stat
 import tempfile
 from typing import Iterator
 
+from scripts.two_site_cli_exit_pin import (
+    CliExitPin,
+    capture_cli_exit_pin as _capture_cli_exit_pin,
+    verify_cli_exit_pin as _verify_cli_exit_pin,
+)
+
 __all__ = ["CliArtifactError", "prepare_disposable_cli"]
 
 
@@ -50,6 +56,7 @@ def prepare_disposable_cli(
     _CANCEL_EXCS = (KeyboardInterrupt, SystemExit, GeneratorExit)
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     disposable_path: pathlib.Path | None = None
+    pin: CliExitPin | None = None
     yielded = False
     body_exc: BaseException | None = None
 
@@ -151,12 +158,30 @@ def prepare_disposable_cli(
         finally:
             os.close(source_fd)
 
+        try:
+            pin = _capture_cli_exit_pin(
+                disposable_path,
+                expected_sha256=digest,
+                expected_version=None,
+            )
+        except _CANCEL_EXCS:
+            raise
+        except BaseException as exc:
+            raise CliArtifactError("Disposable CLI identity validation failed") from exc
+
         yielded = True
         try:
             yield disposable_path, evidence
         except BaseException as exc:
             body_exc = exc
     finally:
+        verify_exc: BaseException | None = None
+        if yielded and pin is not None:
+            try:
+                _verify_cli_exit_pin(pin, version_probe=None)
+            except BaseException as exc:
+                verify_exc = exc
+
         unlink_exc: BaseException | None = None
         if disposable_path is not None:
             try:
@@ -176,11 +201,15 @@ def prepare_disposable_cli(
         if yielded:
             if body_exc is not None and isinstance(body_exc, _CANCEL_EXCS):
                 raise body_exc
+            if verify_exc is not None and isinstance(verify_exc, _CANCEL_EXCS):
+                raise verify_exc
             if isinstance(unlink_exc, _CANCEL_EXCS):
                 raise unlink_exc
             if isinstance(td_exc, _CANCEL_EXCS):
                 raise td_exc
             if unlink_exc is not None or td_exc is not None:
                 raise CliArtifactError("Disposable CLI cleanup failed")
+            if verify_exc is not None:
+                raise CliArtifactError("Disposable CLI identity validation failed") from verify_exc
             if body_exc is not None:
                 raise body_exc

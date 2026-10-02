@@ -122,11 +122,13 @@ class TestTwoSiteCliCleanup(unittest.TestCase):
 
     def test_harmless_already_missing_disposable(self) -> None:
         with _fault_scope(source_name=self.source_path.name) as (records, _, paths):
-            with prepare_disposable_cli(
-                self.source_path,
-                expected_sha256=self.digest,
-            ) as (disp_path, _):
-                os.unlink(disp_path)
+            with self.assertRaises(CliArtifactError) as ctx:
+                with prepare_disposable_cli(
+                    self.source_path,
+                    expected_sha256=self.digest,
+                ) as (disp_path, _):
+                    os.unlink(disp_path)
+            self.assertEqual(str(ctx.exception), "Disposable CLI identity validation failed")
             self.assertEqual(records, ["unlink", "td_cleanup"])
             self.assertFalse(paths[0].parent.exists())
 
