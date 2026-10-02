@@ -15,6 +15,20 @@ install_p1_00_network_fence()
 
 
 class RecentInventoryContinuationNineFinishContractTests(unittest.TestCase):
+    def _assert_schema_version(self, data, expected: int = 1):
+        if isinstance(data, dict):
+            if "schema_version" not in data:
+                self.fail("schema_version: missing required field")
+            val = data["schema_version"]
+        else:
+            val = data
+        if type(val) is not int:
+            self.fail(
+                f"schema_version: exact builtin int required, got {type(val).__name__}"
+            )
+        if val != expected:
+            self.fail(f"schema_version: wrong value, expected {expected}, got {val}")
+
     def test_finish_selected_record_exact_provenance_and_seed_entry(self):
         repo_root = Path(__file__).resolve().parent.parent
 
@@ -30,7 +44,7 @@ class RecentInventoryContinuationNineFinishContractTests(unittest.TestCase):
         continuation_9_bytes = continuation_9_path.read_bytes()
         continuation_9_data = json.loads(continuation_9_bytes.decode("utf-8"))
 
-        self.assertEqual(continuation_9_data.get("schema_version"), 1)
+        self._assert_schema_version(continuation_9_data)
         self.assertEqual(continuation_9_data.get("stage"), "P1-00b")
         self.assertEqual(
             set(continuation_9_data.keys()),
@@ -132,6 +146,66 @@ class RecentInventoryContinuationNineFinishContractTests(unittest.TestCase):
         target_entry = matching_entries[0]
         self.assertEqual(target_entry["handler"], "admin_broadcast.finish_selected_recipients")
         self.assertEqual(target_entry["source"], "bot/handlers/admin_broadcast.py:395")
+
+    def test_schema_version_rejects_invalid_types_and_values_with_specific_failure(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        continuation_9_path = (
+            repo_root
+            / "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json"
+        )
+        self.assertTrue(
+            continuation_9_path.is_file(),
+            f"Continuation 9 not found at {continuation_9_path}",
+        )
+
+        canonical_bytes = continuation_9_path.read_bytes()
+        canonical_data = json.loads(canonical_bytes.decode("utf-8"))
+
+        # Positively validate canonical JSON and builtin int 1
+        self._assert_schema_version(canonical_data)
+        canonical_with_builtin_int_1 = dict(canonical_data)
+        canonical_with_builtin_int_1["schema_version"] = int(1)
+        self._assert_schema_version(canonical_with_builtin_int_1)
+        self._assert_schema_version(1)
+
+        # Missing field
+        missing_field_data = dict(canonical_data)
+        del missing_field_data["schema_version"]
+        with self.assertRaisesRegex(AssertionError, r"schema_version: missing required field"):
+            self._assert_schema_version(missing_field_data)
+
+        # Non-exact builtin integer types
+        class _IntSubclass(int):
+            pass
+
+        invalid_type_cases = [
+            (True, "bool"),
+            (False, "bool"),
+            (1.0, "float"),
+            ("1", "str"),
+            (None, "NoneType"),
+            (_IntSubclass(1), "_IntSubclass"),
+        ]
+        for bad_val, type_name in invalid_type_cases:
+            corrupt_data = dict(canonical_data)
+            corrupt_data["schema_version"] = bad_val
+            with self.assertRaisesRegex(
+                AssertionError,
+                rf"schema_version: exact builtin int required, got {type_name}",
+            ):
+                self._assert_schema_version(corrupt_data)
+
+        # Wrong builtin integer values
+        for wrong_val in (0, 2):
+            corrupt_data = dict(canonical_data)
+            corrupt_data["schema_version"] = wrong_val
+            with self.assertRaisesRegex(
+                AssertionError,
+                rf"schema_version: wrong value, expected 1, got {wrong_val}",
+            ):
+                self._assert_schema_version(corrupt_data)
+
+        self.assertEqual(continuation_9_path.read_bytes(), canonical_bytes)
 
 
 if __name__ == "__main__":
