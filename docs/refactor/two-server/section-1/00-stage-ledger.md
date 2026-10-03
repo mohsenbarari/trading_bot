@@ -288,3 +288,28 @@ Seed accounting, blockers, and Stage status:
 - Both canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`.
 - Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`; `closures_authorized=false`.
 - Explicit exclusions: read_user self-success, super-admin rejection, other read success/authentication-policy acceptance, mutation, persistence, retry, reload, origin cells, and seed/cell/blocker/Stage closure. Canonical accounting, those remaining read_user scenarios and Stage closure stay unmet. This documentation unit grants no behavior/seed/origin progress. Reuse existing task selectors; do not author tests or invent pass receipts.
+
+### 2026-10-03 UTC — Continuation 16 evidence reconciliation successor checkpoint (manager-peer HTTP403)
+
+Assignment `WA-P1-00B-GATE-FIRST-RECONCILIATION-20261002-169` (digest `5f8cbf6411079ac471fbf364568a2f54997abc60253b67ec72aae88eae3cc23e`, inspected HEAD `8e5590383b40c46c4b5c2b97c20208b0bfb650a7`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded incremental evidence-reconciliation successor for accepted continuation 16 under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Receipt artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-c16-from-c15.json` as the incremental successor binding unchanged predecessor checkpoint `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-c15-from-c17.json` (commit `c66dabdfe845d6f69623986c0705c415dfcf089c`, SHA256 `b7dac667be1584c50743b24d806d2b9d1c6fe50a85ec1e9936a65ed96754ffbb`).
+- Source inventory artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json` (SHA256 `22e2c7c921ee8e20a2335a1ce1f32e0224f4b1403f2597ef6a11e36d4930fe3a`, commit `0eebdb41c0300ae0d92a16d5cd0aa8db75ad2b9f`).
+- Unchanged accepted behavior test: `tests/test_p1_00b_characterization_users_read_manager_peer_http.py` (commit `05fe0d5c2a5dae727aa7219549843b1ce6235945`, SHA256 `f093210c5dadda895a370ec1427607c3eade7e593e3133d3551881f2e8e20bcd`, seed `API-IDENTITY-GET-USERS-READ-USER-L440`, selector `tests/test_p1_00b_characterization_users_read_manager_peer_http.py::UsersReadManagerPeerHttpCharacterizationTests::test_middle_manager_peer_read_returns_http_403_before_relation_loading`).
+- Shared-seed witness: `tests/test_p1_00b_characterization_c16_c17_shared_seed_contribution.py` at accepted commit `ea1f081ab54bee071c56f2f59050a719b2559b41`.
+- Pinned-helper restoration: `tests/test_p1_00b_characterization_c16_pinned_helper_restoration.py` at accepted commit `fcc9ba2ee11ef589dae2216918f43a6aae9bd1e4`.
+- Live successor assertion test: `tests/test_p1_00b_characterization_c16_successor_reconciliation.py::C16SuccessorReconciliationTests::test_c16_successor_reconciles_accepted_unit_and_preserves_open_gates`.
+
+Reconciliation status and unit tracking:
+- 5/5 existing behavior evidence reconciled (`reconciled_behavior_units=5`, `remaining_behavior_units=0`).
+- Retained five-unit provenance counters: `total_behavior_units=5`, `pending_five=5`, `units_since_reconciliation=5`, `delta_reconciled_behavior_units=1`, `historical_prior_reconciled_units=4`.
+- Cumulative inventory paths (order preserved): continuations 13, 14, 17, 15, and 16; remaining inventory paths empty.
+- Reconciliation policy: five-unit evidence group reconciled while canonical accounting remains pending (`global_reconciliation_complete=false`, `no_sixth_behavior_accepted_before_complete_reconciliation=true`).
+- Deferrals preserved: continuation-12, prior rejected proposals, explicitly retaining `defer_prior_unit=normal169-c16-receipt-custody-20261003-c001` and `defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2`. Rejected artifacts are never evidence.
+
+Seed accounting, blockers, and Stage status:
+- Scoped read_user accounting view remains `prospective_distinct_seed_count=1` (`API-IDENTITY-GET-USERS-READ-USER-L440` shared between C16 and C17; zero new distinct seed contribution from C16).
+- Complete five-unit prospective distinct union is exactly two seeds (count 2: `API-IDENTITY-GET-USERS-READ-USER-L440` plus C13 `API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797`). C14/C15 `API-IDENTITY-GET-USERS-READ-ALL-USERS-L407` is already canonical.
+- Retained canonical counts: 135 baseline, 252 reconciled new, 387 evidenced, 78 remaining, 465 expected; coverage status `PARTIAL`; `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`. No mechanical receipt is Stage closure.
+- Explicit exclusions: read_user self-success, super-admin rejection, authorization policy coverage, mutation, persistence, retry, reload, origin matrix cells, seed-blocker closure, and Stage closure.

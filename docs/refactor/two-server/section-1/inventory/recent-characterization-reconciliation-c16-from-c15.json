@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-GATE-FIRST-RECONCILIATION-20261002-169",
+  "inspected_head": "8e5590383b40c46c4b5c2b97c20208b0bfb650a7",
+  "status": "PARTIAL_RECONCILIATION",
+  "historical_checkpoint": {
+    "last_commit": "c66dabdfe845d6f69623986c0705c415dfcf089c",
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-c15-from-c17.json",
+    "sha256": "b7dac667be1584c50743b24d806d2b9d1c6fe50a85ec1e9936a65ed96754ffbb"
+  },
+  "source_inventory": {
+    "last_commit": "0eebdb41c0300ae0d92a16d5cd0aa8db75ad2b9f",
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+    "sha256": "22e2c7c921ee8e20a2335a1ce1f32e0224f4b1403f2597ef6a11e36d4930fe3a"
+  },
+  "records": [
+    {
+      "last_commit": "05fe0d5c2a5dae727aa7219549843b1ce6235945",
+      "path": "tests/test_p1_00b_characterization_users_read_manager_peer_http.py",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-USER-L440"
+      ],
+      "sha256": "f093210c5dadda895a370ec1427607c3eade7e593e3133d3551881f2e8e20bcd",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_manager_peer_http.py::UsersReadManagerPeerHttpCharacterizationTests::test_middle_manager_peer_read_returns_http_403_before_relation_loading"
+      ]
+    }
+  ],
+  "delta_distinct_seed_count": 0,
+  "pre_reconciled_delta_seed_ids": [
+    "API-IDENTITY-GET-USERS-READ-USER-L440"
+  ],
+  "units_since_reconciliation": 5,
+  "total_behavior_units": 5,
+  "pending_five": 5,
+  "delta_reconciled_behavior_units": 1,
+  "historical_prior_reconciled_units": 4,
+  "reconciled_behavior_units": 5,
+  "remaining_behavior_units": 0,
+  "cumulative_inventory_paths": [
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json"
+  ],
+  "remaining_inventory_paths": [],
+  "remaining_behavior_descriptions": {},
+  "reconciliation_policy": {
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "deferred_continuations": [
+      "continuation-12"
+    ],
+    "deferred_proposals": [
+      "153/154/155/157-C001",
+      "normal159 C1/C2",
+      "rejected C15 machine checkpoint",
+      "rejected policy/seed proposals",
+      "normal161-c5 C16 incremental reconciliation",
+      "subsequent recorded deferrals",
+      "defer_prior_unit=normal169-c16-receipt-custody-20261003-c001",
+      "defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2"
+    ],
+    "global_reconciliation_complete": false
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 252,
+    "evidenced_seed_count": 387,
+    "remaining_seed_count": 78,
+    "expected_seed_count": 465
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "seed_accounting": {
+    "prospective_distinct_seed_count": 1,
+    "prospective_distinct_seeds": [
+      "API-IDENTITY-GET-USERS-READ-USER-L440"
+    ],
+    "overlapping_pending_seeds": [
+      {
+        "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+        "note": "overlapping C16 must never increment prospective distinct seed count again",
+        "seed_id": "API-IDENTITY-GET-USERS-READ-USER-L440"
+      }
+    ]
+  },
+  "five_unit_seed_accounting": {
+    "prospective_distinct_seed_count": 2,
+    "prospective_distinct_seeds": [
+      "API-IDENTITY-GET-USERS-READ-USER-L440",
+      "API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797"
+    ],
+    "already_canonical_seeds": [
+      "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407"
+    ]
+  },
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "closures_authorized": false,
+  "exclusions": [
+    "read_user self-success",
+    "super-admin rejection",
+    "authorization policy coverage",
+    "mutation",
+    "persistence",
+    "retry",
+    "reload",
+    "origin matrix cells",
+    "seed-blocker closure",
+    "Stage closure"
+  ]
+}
