@@ -55,6 +55,7 @@ MAX_FIELD_LEN: int = 1024
 
 ALLOWED_MAINTENANCE_CONTROL_PATHS: frozenset[str] = frozenset({
     "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md",
+    "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
     "scripts/two_site_autopilot_monitor.sh",
     "scripts/two_site_autopilot_tmux.sh",
     "scripts/two_site_codex_autopilot.py",
@@ -67,7 +68,7 @@ _HEX_40_RE = re.compile(r"^[0-9a-f]{40}$")
 _HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _COMMIT_PATH_RE = re.compile(
-    r"^(?:scripts/two_site_[A-Za-z0-9_]+\.py|tests/test_two_site_[A-Za-z0-9_]+\.py|scripts/two_site_autopilot_monitor\.sh|scripts/two_site_autopilot_tmux\.sh|docs/refactor/two-server/PROPOSAL_AUTOMATION\.md|docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT\.md|docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT\.md)$"
+    r"^(?:scripts/two_site_[A-Za-z0-9_]+\.py|tests/test_two_site_[A-Za-z0-9_]+\.py|scripts/two_site_autopilot_monitor\.sh|scripts/two_site_autopilot_tmux\.sh|docs/refactor/two-server/PROPOSAL_AUTOMATION\.md|docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT\.md|docs/refactor/two-server/templates/GEMINI_TASK_PROMPT\.md|docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT\.md)$"
 )
 
 _RECORD_KEYS = frozenset({

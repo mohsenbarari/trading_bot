@@ -354,6 +354,7 @@ class TestMaintenanceTransitionRecord(unittest.TestCase):
             mod.ALLOWED_MAINTENANCE_CONTROL_PATHS,
             frozenset({
                 "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md",
+                "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
                 "scripts/two_site_autopilot_monitor.sh",
                 "scripts/two_site_autopilot_tmux.sh",
                 "scripts/two_site_codex_autopilot.py",
