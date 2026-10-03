@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "inventory": {
+    "expected_seed_count": 465,
+    "paths": [
+      "docs/refactor/two-server/section-1/inventory/surface-api.json",
+      "docs/refactor/two-server/section-1/inventory/surface-bot.json",
+      "docs/refactor/two-server/section-1/inventory/surface-web.json",
+      "docs/refactor/two-server/section-1/inventory/surface-jobs.json"
+    ]
+  },
+  "evidence_sources": {
+    "baseline_path": "docs/refactor/two-server/section-1/inventory/scenario-records.json",
+    "base_path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
+    "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json",
+    "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json",
+    "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json",
+    "continuation_4_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json",
+    "continuation_5_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
+    "continuation_6_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json",
+    "continuation_7_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json",
+    "continuation_8_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json",
+    "continuation_9_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json",
+    "continuation_10_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json",
+    "continuation_11_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-11.json"
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 252,
+    "evidenced_seed_count": 387,
+    "remaining_seed_count": 78
+  },
+  "coverage_status": "PARTIAL",
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ]
+}
