@@ -25,13 +25,13 @@ from tests.test_p1_00b_characterization_recent_inventory_continuation_13_self_ex
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-LIVE_MANIFEST_RELPATH = (
-    "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+HISTORICAL_SNAPSHOT_RELPATH = (
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-388-snapshot.json"
 )
-EXPECTED_LIVE_MANIFEST_SHA256 = (
+EXPECTED_HISTORICAL_SNAPSHOT_SHA256 = (
     "da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7"
 )
-EXPECTED_LIVE_MANIFEST_BYTE_LEN = 2420
+EXPECTED_HISTORICAL_SNAPSHOT_BYTE_LEN = 2420
 
 C13_PROMOTION_RECEIPT_RELPATH = (
     "docs/refactor/two-server/section-1/inventory/recent-characterization-c13-canonical-promotion.json"
@@ -43,7 +43,7 @@ CONTINUATION_13_RELPATH = (
 EXPECTED_C13_SEED = "API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797"
 EXPECTED_SHARED_READ_USER_SEED = "API-IDENTITY-GET-USERS-READ-USER-L440"
 
-EXPECTED_LIVE_MANIFEST: dict[str, object] = {
+EXPECTED_HISTORICAL_SNAPSHOT: dict[str, object] = {
     "schema_version": 1,
     "stage": "P1-00b",
     "assignment_id": "WA-P1-00B-FREEZE-20260904-001",
@@ -169,17 +169,19 @@ class C13CanonicalPromotionTests(unittest.TestCase):
 
     def test_c13_canonical_promotion_retains_shared_seed_gate(self) -> None:
         """Verify C13 promotion manifest custody, set delta, and gate retention."""
-        live_path = REPO_ROOT / LIVE_MANIFEST_RELPATH
-        self.assertTrue(live_path.is_file(), f"Missing live manifest: {live_path}")
-        live_bytes = live_path.read_bytes()
-        self.assertEqual(len(live_bytes), EXPECTED_LIVE_MANIFEST_BYTE_LEN)
+        snapshot_path = REPO_ROOT / HISTORICAL_SNAPSHOT_RELPATH
+        self.assertTrue(
+            snapshot_path.is_file(), f"Missing historical snapshot: {snapshot_path}"
+        )
+        snapshot_bytes = snapshot_path.read_bytes()
+        self.assertEqual(len(snapshot_bytes), EXPECTED_HISTORICAL_SNAPSHOT_BYTE_LEN)
         self.assertEqual(
-            hashlib.sha256(live_bytes).hexdigest(),
-            EXPECTED_LIVE_MANIFEST_SHA256,
+            hashlib.sha256(snapshot_bytes).hexdigest(),
+            EXPECTED_HISTORICAL_SNAPSHOT_SHA256,
         )
 
-        live_doc = json.loads(live_bytes.decode("utf-8"))
-        self.assertEqual(live_doc, EXPECTED_LIVE_MANIFEST)
+        snapshot_doc = json.loads(snapshot_bytes.decode("utf-8"))
+        self.assertEqual(snapshot_doc, EXPECTED_HISTORICAL_SNAPSHOT)
 
         # Validate C13 inventory provenance and AST selector resolution
         c13_inv_path = REPO_ROOT / CONTINUATION_13_RELPATH
@@ -255,25 +257,25 @@ class C13CanonicalPromotionTests(unittest.TestCase):
         self.assertNotIn(EXPECTED_SHARED_READ_USER_SEED, live_evidenced)
         self.assertIn(EXPECTED_SHARED_READ_USER_SEED, live_remaining)
 
-        # Verify live manifest counts match computed accounting
+        # Verify historical snapshot counts match computed accounting
         self.assertEqual(
-            live_doc["counts"]["baseline_evidenced_seed_count"],
+            snapshot_doc["counts"]["baseline_evidenced_seed_count"],
             len(baseline_seeds),
         )
         self.assertEqual(
-            live_doc["counts"]["reconciled_new_seed_count"],
+            snapshot_doc["counts"]["reconciled_new_seed_count"],
             len(live_new_beyond_baseline),
         )
         self.assertEqual(
-            live_doc["counts"]["evidenced_seed_count"],
+            snapshot_doc["counts"]["evidenced_seed_count"],
             len(live_evidenced),
         )
         self.assertEqual(
-            live_doc["counts"]["remaining_seed_count"],
+            snapshot_doc["counts"]["remaining_seed_count"],
             len(live_remaining),
         )
         self.assertEqual(
-            live_doc["inventory"]["expected_seed_count"],
+            snapshot_doc["inventory"]["expected_seed_count"],
             len(surface_seeds),
         )
 
