@@ -50,7 +50,7 @@ C17_TEST_SELECTOR = (
 
 PINNED_ADDITIONAL_MANIFEST: dict[str, str] = {
     "tests/test_p1_00b_characterization_c13_canonical_seed_membership.py": (
-        "d09f1427b1f2dcb3523aac7cc646ce72b83acafdc2fede564309c9d966b9149a"
+        "08b1469af319c7a5750ab57efa2ef8dbc4fdfe9e57cf9ecaf04fe378034d22e0"
     ),
     "tests/test_p1_00b_characterization_c16_evidence_closure_snapshot.py": (
         "cf16f8be4df207b43c45d4ce5e87bc091cd3b325f62c3d2f2c689b212f8f4432"

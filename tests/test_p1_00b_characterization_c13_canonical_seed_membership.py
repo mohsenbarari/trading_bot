@@ -25,7 +25,7 @@ from tests.test_p1_00b_characterization_recent_inventory_continuation_13_self_ex
 )
 
 FROZEN_HEAD_MANIFEST: dict[str, str] = {
-    "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json": "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7",
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-387-snapshot.json": "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7",
     "docs/refactor/two-server/section-1/inventory/surface-api.json": "d263b03bebbce2ab5faf6345fbdd3c1c3d6f65d1ab76fc32d2fcae61402127ed",
     "docs/refactor/two-server/section-1/inventory/surface-bot.json": "bcd7299368f93b3e1abbc14c960d32adae591acf2a9f095279d7e77815474af7",
     "docs/refactor/two-server/section-1/inventory/surface-web.json": "37b965a4b29050acab829a1018da5889bfd4c2eb8168ea4da1b4963d764f15d8",
@@ -60,7 +60,9 @@ C13_TEST_SELECTOR = (
     "TradeExportSelfDelegationCharacterizationTests::"
     "test_self_target_delegates_exact_filters_and_returns_export_response"
 )
-COVERAGE_RELPATH = "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+COVERAGE_RELPATH = (
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-387-snapshot.json"
+)
 RECONCILIATION_13_14_RELPATH = (
     "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-13-14.json"
 )
@@ -303,6 +305,156 @@ class C13CanonicalSeedMembershipTests(unittest.TestCase):
 
             restored_data = json.loads(recon_temp_path.read_bytes().decode("utf-8"))
             assert_c13_canonical_seed_membership(restored_data, frozen_bytes)
+            assert_closure_bytes(temp_path, frozen_bytes)
+
+        self.assertFalse(temp_path.exists())
+        assert_closure_bytes(repo_root, frozen_bytes)
+
+    def test_historical_reader_ignores_live_manifest_and_restores_snapshot(self) -> None:
+        """Scope: 5/5 evidence reconciled, canonical integration still pending,
+        pending_five=5, units_since_reconciliation=5,
+        global_reconciliation_complete=false, coverage 387/465 and 78 remaining,
+        24 unresolved origins, both High blockers open, P1-00 COMPLETE and P1-00b IN_PROGRESS.
+        Preserve defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004,
+        defer_prior_unit=normal169-c16-receipt-custody-20261003-c001 and
+        defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2 verbatim.
+        Exclude read_user self-success, super-admin rejection, authorization policy coverage,
+        mutation, persistence, retry, reload, origin cells, seed/blocker/Stage closure and sixth behavior.
+        This migration alone changes no product behavior, seed count, pending counter or Stage status.
+        """
+        expected_manifest_path = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-387-snapshot.json"
+        )
+        expected_manifest_sha = (
+            "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7"
+        )
+        live_manifest_path = (
+            "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+        )
+
+        repo_root = Path(__file__).resolve().parents[1]
+        frozen_bytes = freeze_evidence_manifest(repo_root)
+
+        self.assertEqual(COVERAGE_RELPATH, expected_manifest_path)
+        self.assertIn(expected_manifest_path, FROZEN_HEAD_MANIFEST)
+        self.assertEqual(
+            FROZEN_HEAD_MANIFEST[expected_manifest_path],
+            expected_manifest_sha,
+        )
+        self.assertIn(expected_manifest_path, frozen_bytes)
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes[expected_manifest_path]).hexdigest(),
+            expected_manifest_sha,
+        )
+        self.assertNotIn(live_manifest_path, FROZEN_HEAD_MANIFEST)
+        self.assertNotIn(live_manifest_path, frozen_bytes)
+
+        (
+            repo_counts,
+            repo_surface,
+            repo_baseline,
+            repo_new,
+            repo_evidenced,
+            repo_remaining,
+        ) = compute_canonical_accounting(frozen_bytes)
+
+        self.assertEqual(len(repo_surface), 465)
+        self.assertEqual(len(repo_baseline), 135)
+        self.assertEqual(len(repo_new), 252)
+        self.assertEqual(len(repo_evidenced), 387)
+        self.assertEqual(len(repo_remaining), 78)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            for relpath, raw in frozen_bytes.items():
+                dest = temp_path / relpath
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(raw)
+
+            assert_closure_bytes(temp_path, frozen_bytes)
+            assert_closure_bytes(repo_root, frozen_bytes)
+
+            self.assertFalse((temp_path / live_manifest_path).exists())
+            temp_snap_absent = freeze_evidence_manifest(temp_path)
+            self.assertEqual(temp_snap_absent, frozen_bytes)
+            (
+                _c_abs,
+                surface_abs,
+                baseline_abs,
+                new_abs,
+                evidenced_abs,
+                remaining_abs,
+            ) = compute_canonical_accounting(temp_snap_absent)
+            self.assertEqual(len(surface_abs), 465)
+            self.assertEqual(len(baseline_abs), 135)
+            self.assertEqual(len(new_abs), 252)
+            self.assertEqual(len(evidenced_abs), 387)
+            self.assertEqual(len(remaining_abs), 78)
+
+            live_temp_file = temp_path / live_manifest_path
+            live_temp_file.parent.mkdir(parents=True, exist_ok=True)
+            live_temp_file.write_bytes(
+                b'{"schema_version": 1, "stage": "P1-00b", "changed_canary": "nonsecret"}\n'
+            )
+            self.assertTrue(live_temp_file.is_file())
+
+            temp_snap_live_changed = freeze_evidence_manifest(temp_path)
+            self.assertEqual(temp_snap_live_changed, frozen_bytes)
+            (
+                _c_chg,
+                surface_chg,
+                baseline_chg,
+                new_chg,
+                evidenced_chg,
+                remaining_chg,
+            ) = compute_canonical_accounting(temp_snap_live_changed)
+            self.assertEqual(len(surface_chg), 465)
+            self.assertEqual(len(baseline_chg), 135)
+            self.assertEqual(len(new_chg), 252)
+            self.assertEqual(len(evidenced_chg), 387)
+            self.assertEqual(len(remaining_chg), 78)
+
+            self.assertEqual(temp_snap_absent, frozen_bytes)
+            self.assertEqual(temp_snap_live_changed, frozen_bytes)
+            assert_closure_bytes(repo_root, frozen_bytes)
+
+            hist_temp_file = temp_path / expected_manifest_path
+            original_hist_bytes = frozen_bytes[expected_manifest_path]
+            drifted_hist_bytes = original_hist_bytes + b"\n"
+            hist_temp_file.write_bytes(drifted_hist_bytes)
+
+            decoded_original = json.loads(original_hist_bytes.decode("utf-8"))
+            decoded_drifted = json.loads(drifted_hist_bytes.decode("utf-8"))
+            self.assertEqual(decoded_drifted, decoded_original)
+
+            with self.assertRaises(AssertionError) as cm:
+                freeze_evidence_manifest(temp_path)
+            err_msg = str(cm.exception)
+            self.assertIn(expected_manifest_path, err_msg)
+            self.assertIn("Manifest SHA mismatch", err_msg)
+
+            for relpath, raw in frozen_bytes.items():
+                if relpath != expected_manifest_path:
+                    assert_receipt_bytes_unchanged(temp_path / relpath, raw)
+            assert_closure_bytes(repo_root, frozen_bytes)
+
+            hist_temp_file.write_bytes(original_hist_bytes)
+            assert_receipt_bytes_unchanged(hist_temp_file, original_hist_bytes)
+            restored_snap = freeze_evidence_manifest(temp_path)
+            self.assertEqual(restored_snap, frozen_bytes)
+            (
+                _c_res,
+                surface_res,
+                baseline_res,
+                new_res,
+                evidenced_res,
+                remaining_res,
+            ) = compute_canonical_accounting(restored_snap)
+            self.assertEqual(len(surface_res), 465)
+            self.assertEqual(len(baseline_res), 135)
+            self.assertEqual(len(new_res), 252)
+            self.assertEqual(len(evidenced_res), 387)
+            self.assertEqual(len(remaining_res), 78)
             assert_closure_bytes(temp_path, frozen_bytes)
 
         self.assertFalse(temp_path.exists())

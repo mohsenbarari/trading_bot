@@ -38,7 +38,7 @@ SHARED_HELPER_RELPATH = (
     "tests/test_p1_00b_characterization_c16_c17_shared_seed_contribution.py"
 )
 SHARED_HELPER_SHA256 = (
-    "eb0b27912d4cb10b74eedc4ec3a4b459a63de4794956453b2e9783dead56f915"
+    "b190f6f762a38b6232743b0ee0949cac4bd2a85bca888f5fb45ee153b669aa20"
 )
 RECEIPT_HELPER_RELPATH = (
     "tests/test_p1_00b_characterization_receipt_byte_preservation.py"
