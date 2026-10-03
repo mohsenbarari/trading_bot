@@ -630,6 +630,9 @@ def _run_healthcheck(
         age = (utc_now() - updated.astimezone(timezone.utc)).total_seconds()
         if document.get("role") != role:
             raise FoundationError("heartbeat_not_ready")
+        expected_release = os.environ.get("MARKET_PIPELINE_RELEASE_SHA", "").strip()
+        if document.get("mode") == "live" and expected_release and document.get("release_sha") != expected_release:
+            raise FoundationError("heartbeat_release_mismatch")
         if role in CAPTURE_ROLES:
             if document.get("schema") != "market_capture_engine/1.0":
                 raise FoundationError("capture_heartbeat_schema_invalid")

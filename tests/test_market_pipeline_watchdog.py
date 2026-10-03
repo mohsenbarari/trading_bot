@@ -20,6 +20,10 @@ def health(role, now=1000):
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_fresh_old_release_heartbeat_cannot_mask_new_runtime_startup(self):
+        document = {**health("market-store-adapter"), "release_sha": "old"}
+        self.assertEqual(watchdog.assess("market-store-adapter", document, {}, 1000, expected_release="new"), "HEARTBEAT_RELEASE_MISMATCH")
+
     def test_fresh_heartbeat_cannot_mask_failed_tls_http(self):
         self.assertEqual(watchdog.assess("market-fact-receiver", health("market-fact-receiver"), {}, 1000, endpoint_ok=False), "MTLS_HTTP_UNRESPONSIVE")
 

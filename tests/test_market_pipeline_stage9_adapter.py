@@ -661,6 +661,7 @@ class Stage9AdapterTests(unittest.TestCase):
         self.market.execute(
             "UPDATE private_fact_adapter_status_counts SET delivery_count=0"
         )
+        self.market.execute("DROP TRIGGER private_fact_adapter_delivery_count_insert")
         self.market.commit()
         initialize_adapter_store(self.market)
         statements: list[str] = []
@@ -676,6 +677,12 @@ class Stage9AdapterTests(unittest.TestCase):
                 for statement in statements
             )
         )
+        statements.clear()
+        self.market.set_trace_callback(statements.append)
+        initialize_adapter_store(self.market)
+        self.market.set_trace_callback(None)
+        self.assertFalse(any("COUNT(*)" in statement and "private_fact_adapter_deliveries" in statement for statement in statements))
+        self.assertEqual(adapter_metrics(self.market)["applied_count"], 1)
 
     def test_malformed_unit_is_rejected_and_next_fact_advances(self):
         stream = "market.fact.melted-aggregate"

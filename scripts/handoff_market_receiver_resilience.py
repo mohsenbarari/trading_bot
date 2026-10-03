@@ -1,7 +1,8 @@
-"""Commit-bound receiver-only handoff using the complete active Compose chain."""
+"""Commit-bound scoped Market handoff using the complete active Compose chain."""
 
 from contextlib import contextmanager
 import argparse
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -146,8 +147,14 @@ def main():
                 current = inspect(name)
                 require(current["Image"] == new_image and mounts(current) == old_mounts, "runtime_identity_drift")
                 if current["State"]["Running"]:
+                    report = json.loads((Path(state_source) / args.role / "health.json").read_text())
+                    updated = datetime.fromisoformat(str(report["updated_at_utc"]).replace("Z", "+00:00"))
+                    started = datetime.fromisoformat(current["State"]["StartedAt"].replace("Z", "+00:00"))
+                    if (report.get("release_sha") != args.release or updated < started
+                            or not 0 <= (datetime.now(timezone.utc) - updated).total_seconds() <= 30):
+                        time.sleep(3)
+                        continue
                     if args.role == "market-fact-sync-worker":
-                        report = json.loads((Path(state_source) / args.role / "health.json").read_text())
                         if report.get("release_sha") == args.release and int(report.get("acknowledged") or 0) > 0 and report.get("dead_letter_count") == 0:
                             break  # A catch-up backlog is readiness, not liveness.
                     elif current["State"].get("Health", {}).get("Status") == "healthy":

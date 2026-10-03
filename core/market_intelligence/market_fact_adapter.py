@@ -209,7 +209,18 @@ def connect_receiver_read_only(path: Path | str) -> sqlite3.Connection:
     return connection
 
 
-def initialize_adapter_store(connection: sqlite3.Connection) -> None:
+def initialize_adapter_store(connection: sqlite3.Connection, *, reconcile_counts: bool = False) -> None:
+    # Trigger-maintained counts share the ledger's transaction. Reconcile only
+    # for pre-trigger migration or explicit repair, never scan permanent
+    # history again on each restart (which can itself stall startup).
+    counts_ready = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+        "AND name='private_fact_adapter_delivery_count_insert'"
+    ).fetchone() is not None
+    if counts_ready:
+        counts_ready = {str(row[0]) for row in connection.execute(
+            "SELECT status FROM private_fact_adapter_status_counts"
+        )} == {"APPLIED", "AUDIT_ONLY", "REJECTED"}
     initialize_market_store(connection)
     connection.executescript(
         """
@@ -332,20 +343,18 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             "ALTER TABLE private_fact_adapter_projections "
             "ADD COLUMN envelope_hash TEXT"
         )
-    # Existing stores predate the insert trigger. Reconcile once at owner
-    # startup; steady-state health updates then read three constant-size rows
-    # instead of rescanning the permanently growing delivery ledger.
-    connection.execute(
-        """
-        UPDATE private_fact_adapter_status_counts
-        SET delivery_count=(
-          SELECT COUNT(*)
-          FROM private_fact_adapter_deliveries
-          WHERE private_fact_adapter_deliveries.status=
-                private_fact_adapter_status_counts.status
+    if reconcile_counts or not counts_ready:
+        connection.execute(
+            """
+            UPDATE private_fact_adapter_status_counts
+            SET delivery_count=(
+              SELECT COUNT(*)
+              FROM private_fact_adapter_deliveries
+              WHERE private_fact_adapter_deliveries.status=
+                    private_fact_adapter_status_counts.status
+            )
+            """
         )
-        """
-    )
     connection.commit()
 
 

@@ -87,10 +87,12 @@ def age(stamp, now):
         return float("inf")
 
 
-def assess(role, health, previous, now, *, endpoint_ok=True, upstream=None):
+def assess(role, health, previous, now, *, endpoint_ok=True, upstream=None, expected_release=None):
     """Return a liveness reason, preserving ordinary source silence."""
     if health.get("schema") != SCHEMAS[role] or health.get("role") != role:
         return "HEARTBEAT_INVALID"
+    if expected_release and health.get("release_sha") != expected_release:
+        return "HEARTBEAT_RELEASE_MISMATCH"
     if age(health.get("updated_at_utc"), now) > STALE_SECONDS:
         return "HEARTBEAT_STALLED"
     if role in RECEIVERS and not endpoint_ok:
@@ -178,7 +180,9 @@ def main():
                     except subprocess.TimeoutExpired:
                         endpoint_ok = False
                 upstream = healths.get("market-fact-receiver") if role == "market-store-adapter" else healths.get("coin-estimator")
-                reason = assess(role, health, current, now, endpoint_ok=endpoint_ok, upstream=upstream)
+                runtime_env = dict(item.split("=", 1) for item in container["Config"].get("Env", []) if item.startswith("MARKET_PIPELINE_RELEASE_SHA="))
+                reason = assess(role, health, current, now, endpoint_ok=endpoint_ok, upstream=upstream,
+                                expected_release=runtime_env.get("MARKET_PIPELINE_RELEASE_SHA"))
                 current["failures"] = int(current.get("failures", 0)) + 1 if reason else 0
                 streams = health.get("streams")
                 version = (health.get("latest") or {}).get("snapshot_version")
