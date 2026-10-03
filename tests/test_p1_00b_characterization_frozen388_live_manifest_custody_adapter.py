@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 from typing import Any
 import unittest
+import unittest.mock
 
 from tests.test_p1_00b_characterization_c13_canonical_seed_membership import (
     assert_closure_bytes,
@@ -121,6 +123,23 @@ class Frozen388LiveManifestCustodyTests(unittest.TestCase):
     defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004;
     defer_prior_unit=normal169-c16-receipt-custody-20261003-c001;
     defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2.
+
+    Scope documentation additions: current HEAD ab07078af5a03b496501d472c6dea3d91fabe3e6
+    and Assignment WA-P1-00B-GATE-FIRST-RECONCILIATION-20261002-169
+    (digest 5f8cbf6411079ac471fbf364568a2f54997abc60253b67ec72aae88eae3cc23e).
+    Additionally record these exact deferrals without paraphrase:
+    defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004;
+    defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded;
+    defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014;
+    defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012;
+    defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2;
+    defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2;
+    defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007;
+    defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005;
+    defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004;
+    defer_prior_unit=normal169-c16-receipt-custody-20261003-c001;
+    defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2.
+    Auxiliary regression grants no product behavior, seed or Stage progress.
     """
 
     def test_temporary_live_manifest_drift_rejected_and_restored_oracle_guarded(self) -> None:
@@ -167,17 +186,25 @@ class Frozen388LiveManifestCustodyTests(unittest.TestCase):
             set(CANONICAL_PINS.keys()) | {LIVE_CANARY_RELPATH},
         )
 
-        frozen_temporary_mapping: dict[str, bytes] = dict(frozen_canonical_mapping)
+        frozen_temporary_mapping: dict[str, bytes] = dict(canonical_bytes)
+        frozen_temporary_mapping[LIVE_CANARY_RELPATH] = canonical_bytes[snapshot_relpath]
+        self.assertEqual(len(frozen_temporary_mapping), 7)
+        self.assertEqual(
+            set(frozen_temporary_mapping.keys()),
+            set(CANONICAL_PINS.keys()) | {LIVE_CANARY_RELPATH},
+        )
 
         snapshot_decoded = json.loads(canonical_bytes[snapshot_relpath].decode("utf-8"))
-        live_decoded = json.loads(live_canonical_bytes.decode("utf-8"))
         self.assertEqual(snapshot_decoded, EXPECTED_FROZEN388_MANIFEST)
-        self.assertEqual(live_decoded, EXPECTED_FROZEN388_MANIFEST)
+        temp_live_decoded = json.loads(
+            frozen_temporary_mapping[LIVE_CANARY_RELPATH].decode("utf-8")
+        )
+        self.assertEqual(temp_live_decoded, EXPECTED_FROZEN388_MANIFEST)
 
         temp_dir = tempfile.TemporaryDirectory()
         try:
             temp_root = Path(temp_dir.name)
-            for relpath, raw_bytes in frozen_canonical_mapping.items():
+            for relpath, raw_bytes in frozen_temporary_mapping.items():
                 dest_path = temp_root / relpath
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 dest_path.write_bytes(raw_bytes)
@@ -285,3 +312,141 @@ class Frozen388LiveManifestCustodyTests(unittest.TestCase):
         finally:
             if Path(temp_dir.name).exists():
                 temp_dir.cleanup()
+
+    def test_frozen388_witness_survives_advanced_live_manifest_and_preserves_both_trees(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+
+        repo_bytes: dict[str, bytes] = {}
+        for relpath in CANONICAL_PINS:
+            file_path = repo_root / relpath
+            self.assertTrue(file_path.is_file(), f"Missing repository file: {file_path}")
+            repo_bytes[relpath] = file_path.read_bytes()
+
+        repo_live_path = repo_root / LIVE_CANARY_RELPATH
+        self.assertTrue(repo_live_path.is_file(), f"Missing repository live manifest: {repo_live_path}")
+        repo_bytes[LIVE_CANARY_RELPATH] = repo_live_path.read_bytes()
+
+        self.assertEqual(len(repo_bytes), 7)
+        self.assertEqual(
+            set(repo_bytes.keys()),
+            set(CANONICAL_PINS.keys()) | {LIVE_CANARY_RELPATH},
+        )
+        assert_closure_bytes(repo_root, repo_bytes)
+
+        snapshot_relpath = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-388-snapshot.json"
+        )
+        self.assertEqual(CANONICAL_PINS[snapshot_relpath], EXPECTED_SNAPSHOT388_SHA)
+        self.assertEqual(
+            hashlib.sha256(repo_bytes[snapshot_relpath]).hexdigest(),
+            EXPECTED_SNAPSHOT388_SHA,
+        )
+        snapshot_doc = json.loads(repo_bytes[snapshot_relpath].decode("utf-8"))
+        self.assertEqual(snapshot_doc, EXPECTED_FROZEN388_MANIFEST)
+
+        projected_manifest = copy.deepcopy(EXPECTED_FROZEN388_MANIFEST)
+        projected_manifest["evidence_sources"]["continuation_16_path"] = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json"
+        )
+        projected_manifest["evidence_sources"]["continuation_17_path"] = (
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json"
+        )
+        projected_manifest["counts"] = {
+            "baseline_evidenced_seed_count": 135,
+            "reconciled_new_seed_count": 254,
+            "evidenced_seed_count": 389,
+            "remaining_seed_count": 76,
+        }
+
+        self.assertNotEqual(projected_manifest, EXPECTED_FROZEN388_MANIFEST)
+        added_sources = set(projected_manifest["evidence_sources"].keys()) - set(
+            EXPECTED_FROZEN388_MANIFEST["evidence_sources"].keys()
+        )
+        self.assertEqual(added_sources, {"continuation_16_path", "continuation_17_path"})
+        self.assertEqual(
+            projected_manifest["evidence_sources"]["continuation_16_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+        )
+        self.assertEqual(
+            projected_manifest["evidence_sources"]["continuation_17_path"],
+            "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json",
+        )
+        self.assertEqual(
+            projected_manifest["counts"],
+            {
+                "baseline_evidenced_seed_count": 135,
+                "reconciled_new_seed_count": 254,
+                "evidenced_seed_count": 389,
+                "remaining_seed_count": 76,
+            },
+        )
+        for k in EXPECTED_FROZEN388_MANIFEST:
+            if k not in ("evidence_sources", "counts"):
+                self.assertEqual(projected_manifest[k], EXPECTED_FROZEN388_MANIFEST[k])
+        for k, v in EXPECTED_FROZEN388_MANIFEST["evidence_sources"].items():
+            self.assertEqual(projected_manifest["evidence_sources"][k], v)
+
+        projected_live_bytes = (
+            json.dumps(projected_manifest, indent=2) + "\n"
+        ).encode("utf-8")
+
+        outer_dir = tempfile.TemporaryDirectory()
+        original_module_file = __file__
+        try:
+            outer_root = Path(outer_dir.name)
+            outer_bytes: dict[str, bytes] = {}
+            for relpath in CANONICAL_PINS:
+                dest = outer_root / relpath
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(repo_bytes[relpath])
+                outer_bytes[relpath] = repo_bytes[relpath]
+
+            outer_live_file = outer_root / LIVE_CANARY_RELPATH
+            outer_live_file.parent.mkdir(parents=True, exist_ok=True)
+            outer_live_file.write_bytes(projected_live_bytes)
+            outer_bytes[LIVE_CANARY_RELPATH] = projected_live_bytes
+
+            self.assertEqual(len(outer_bytes), 7)
+            self.assertEqual(
+                set(outer_bytes.keys()),
+                set(CANONICAL_PINS.keys()) | {LIVE_CANARY_RELPATH},
+            )
+
+            # Freeze every outer temporary and actual repository byte before calls
+            for relpath, expected_bytes in outer_bytes.items():
+                self.assertEqual((outer_root / relpath).read_bytes(), expected_bytes)
+            assert_closure_bytes(outer_root, outer_bytes)
+
+            for relpath, expected_bytes in repo_bytes.items():
+                self.assertEqual((repo_root / relpath).read_bytes(), expected_bytes)
+            assert_closure_bytes(repo_root, repo_bytes)
+
+            scoped_test_path = outer_root / "tests" / Path(__file__).name
+            scoped_test_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with unittest.mock.patch(f"{__name__}.__file__", str(scoped_test_path)):
+                self.test_temporary_live_manifest_drift_rejected_and_restored_oracle_guarded()
+
+            # Restore module __file__ exactly, assert immediately after target call
+            self.assertEqual(__file__, original_module_file)
+
+            for relpath, expected_bytes in outer_bytes.items():
+                self.assertEqual((outer_root / relpath).read_bytes(), expected_bytes)
+            assert_closure_bytes(outer_root, outer_bytes)
+
+            for relpath, expected_bytes in repo_bytes.items():
+                self.assertEqual((repo_root / relpath).read_bytes(), expected_bytes)
+            assert_closure_bytes(repo_root, repo_bytes)
+
+            # Prove outer cleanup absent
+            self.assertTrue(outer_root.exists())
+            self.assertTrue(outer_root.is_dir())
+
+            outer_dir.cleanup()
+            self.assertFalse(outer_root.exists())
+            assert_closure_bytes(repo_root, repo_bytes)
+        finally:
+            if Path(outer_dir.name).exists():
+                outer_dir.cleanup()
+            self.assertEqual(__file__, original_module_file)
+            assert_closure_bytes(repo_root, repo_bytes)
