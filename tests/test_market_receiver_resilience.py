@@ -11,6 +11,8 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from core.market_intelligence.market_fact_receiver import (
     connect_receiver, initialize_receiver,
@@ -33,6 +35,25 @@ class ReceiverInitializationTests(unittest.TestCase):
                 "SELECT delivery_count,fact_count FROM receiver_status_counts"
             ).fetchone()[:], (0, 0))
             reopened.close()
+
+    def test_snapshot_http_health_identifies_its_schema(self):
+        from core.market_intelligence import estimator_snapshot_receiver_service as service
+        handler = object.__new__(service._Handler)
+        handler.server = SimpleNamespace(
+            allowed_peer_ip="10.0.0.1", database_path=Path("unused.sqlite"),
+            expected_lane="PRIVATE_PRIMARY", stale_after_seconds=30,
+            snapshot_root=Path("unused-snapshots"),
+        )
+        handler.client_address = ("127.0.0.1", 10000)
+        handler.path = service.HEALTH_PATH
+        handler._respond = MagicMock()
+        with patch.object(service, "connect_snapshot_receiver") as connect, \
+                patch.object(service, "snapshot_receiver_metrics", return_value={"snapshot_readiness": "READY"}):
+            handler.do_GET()
+        status, document = handler._respond.call_args.args
+        self.assertEqual(status, 200)
+        self.assertEqual(document["schema"], service.SNAPSHOT_RECEIVER_SCHEMA)
+        connect.return_value.close.assert_called_once()
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -116,6 +137,15 @@ class TLSIsolationTests(unittest.TestCase):
             self.get_health()
         finally:
             secured.close()
+
+    def test_saturated_idle_workers_release_their_capacity(self):
+        clients = [socket.create_connection(("127.0.0.1", self.port), 1) for _ in range(3)]
+        try:
+            time.sleep(0.7)
+            self.get_health()
+        finally:
+            for client in clients:
+                client.close()
 
 
 if __name__ == "__main__":
