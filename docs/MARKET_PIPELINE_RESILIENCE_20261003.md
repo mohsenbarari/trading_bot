@@ -97,7 +97,8 @@ production bystanders. It holds the deployment mutex and retains a journal and
 exact rollback chain. Failed activation restores runtime, not database state.
 
 Bot fact receiver runs `59e2461d`; WA-FI snapshot receiver runs `75db7dc7`; sender
-runs `532a9804`. Image/script transfer used the existing explicit authorization
+runs `532a9804`; Bot adapter/direct-display projection run `7aa96bdd`.
+Image/script transfer used the existing explicit authorization
 and user-confirmed WA-FI identity. Iran, the emergency standby path, application
 Writer authority and DNS were not changed.
 
@@ -118,11 +119,31 @@ snapshot publication. Coverage includes silent TCP, partial TLS/HTTP, historical
 reopening, exact byte limits, sequence gaps, 500-item batches, two-observation
 recovery, cooldown persistence, worker-saturation recovery, real HTTP schema
 and deployment-lock exclusion.
+Final combined pytest run passed **146 tests**; **34 tests** also passed directly
+against the final Python 3.11 image with no external network or production mounts.
 Projection regression coverage also exercises outliers, settlement fallback,
 transport-stable trade roots, late arrivals and conflict exclusions. The new
 performance tests compare indexed decisions to full-book decisions (including
 non-monotonic arrivals and boundary times) and bound candidate work over a long
 history. Adapter fairness tests cover independent group and reference progress.
+
+At 11:10 UTC all ten receiver-to-adapter stream gaps were zero. WA-FI fact sender
+had queue depth/oldest age/dead letters/retry alerts all zero; processor reported
+`caught-up` with zero pending coin/market messages. Bot and WA-FI agreed on
+snapshot version `630057`, generated at `11:10:11Z`, status `OK`. Authenticated
+dashboard/activity HTTP both returned 200; the dashboard was `RUNNING`/`HEALTHY`,
+`PRIVATE_PRIMARY`, with snapshot age 1.9–4 seconds and 13 estimated cells.
+Actual native projection completed successfully in seven seconds. Both host
+watchdog timers were enabled/active. By 11:12:46 UTC the adapter had completed
+startup grace and all ten supervised roles reported `LIVENESS_OK`. The model
+advanced to version `630088`; capture sequence advanced from `93304` to `93312`
+without additional restarts. The activity page displayed new canonical G1/G2
+offers from `11:10:44Z`/`11:11:04Z`, both active for the model, while primary input
+freshness reported `FRESH` for both groups. Group projection health was `HEALTHY`.
+The existing legacy bridge also reads the same canonical store and projection
+version, using the same writer lock; it cannot replace this display with the
+lagging legacy store. Capture/source update time is distinct from the latest
+recognized eligible offer: quiet/non-offer/ambiguous inputs must not create prices.
 
 Closeout checks source → receiver → adapter watermarks, increasing model versions,
 fresh WA-FI published views, and authenticated HTTP of the actual dashboard and
