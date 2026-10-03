@@ -18,6 +18,11 @@ import json
 from pathlib import Path
 import unittest
 
+from tests.test_p1_00b_characterization_seed_handler_coverage import (
+    HISTORICAL_SNAPSHOT_REL_PATH,
+    load_historical_seed_coverage_snapshot,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 RECONCILIATION_RELPATH = (
@@ -323,10 +328,10 @@ class C17PartialReconciliationTests(unittest.TestCase):
         c16_seeds = set(c16_data["records"][0]["seed_ids"])
         self.assertIn("API-IDENTITY-GET-USERS-READ-USER-L440", c16_seeds)
 
-        # Verify canonical coverage file remains frozen at 387/465 PARTIAL
-        cov_path = REPO_ROOT / COVERAGE_RELPATH
-        self.assertTrue(cov_path.is_file(), f"Missing coverage file {cov_path}")
-        cov_data = json.loads(cov_path.read_bytes().decode("utf-8"))
+        # Verify historical seed coverage snapshot remains frozen at 387/465 PARTIAL
+        cov_data = load_historical_seed_coverage_snapshot(
+            REPO_ROOT / HISTORICAL_SNAPSHOT_REL_PATH
+        )
         self.assertEqual(cov_data["counts"]["baseline_evidenced_seed_count"], 135)
         self.assertEqual(cov_data["counts"]["reconciled_new_seed_count"], 252)
         self.assertEqual(cov_data["counts"]["evidenced_seed_count"], 387)
