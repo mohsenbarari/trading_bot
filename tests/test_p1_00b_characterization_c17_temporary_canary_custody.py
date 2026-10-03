@@ -26,7 +26,7 @@ CANONICAL_PINS: dict[str, str] = {
         "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7"
     ),
     "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json": (
-        "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7"
+        "da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7"
     ),
 }
 
