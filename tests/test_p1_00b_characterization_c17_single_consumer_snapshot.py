@@ -11,16 +11,23 @@ defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007;
 defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005;
 defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004;
 defer_prior_unit=normal169-c16-receipt-custody-20261003-c001;
-defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2.
+defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2;
+defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded;
+defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014;
+defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012;
+defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2;
+defer_prior_unit=normal169-canonical-manifest-successor-20261003‑.
 
 Accounting status:
 5/5 evidence reconciled with canonical integration pending.
 pending_five=5, units_since_reconciliation=5, global_reconciliation_complete=false.
-canonical coverage 387/465, 78 remaining seeds, 24 unresolved origins.
+canonical coverage 388/465, 77 remaining seeds, 24 unresolved origins.
+immutable consumer receipt/snapshot retains historical 387/465.
 Both High blockers open:
 - P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE
 - P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN
 Stages: P1-00 COMPLETE and P1-00b IN_PROGRESS.
+open shared read_user gate.
 
 Exclusions:
 All other C17 consumers, C13/shared C16-C17 canonical integration,
@@ -67,6 +74,9 @@ C17_RECORD_RELPATH = (
 SNAPSHOT_387_RELPATH = (
     "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-387-snapshot.json"
 )
+SNAPSHOT_388_RELPATH = (
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-388-snapshot.json"
+)
 LIVE_COVERAGE_RELPATH = (
     "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
 )
@@ -78,7 +88,7 @@ SEVEN_PATH_SHA256_PINS: dict[str, str] = {
     C16_INVENTORY_RELPATH: "22e2c7c921ee8e20a2335a1ce1f32e0224f4b1403f2597ef6a11e36d4930fe3a",
     C17_RECORD_RELPATH: "7ae68ea6d3239cf6ab844b3087efe45a56a38b068308316861362b1ff71c8dfb",
     SNAPSHOT_387_RELPATH: "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7",
-    LIVE_COVERAGE_RELPATH: "da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7",
+    SNAPSHOT_388_RELPATH: "da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7",
 }
 
 
@@ -110,10 +120,40 @@ class C17SingleConsumerSnapshotTests(unittest.TestCase):
             )
             frozen_canonical_bytes[rel_path] = raw
 
+        # Read and independently freeze actual current live manifest bytes outside historical pin map
+        live_file = canonical_root / LIVE_COVERAGE_RELPATH
+        self.assertTrue(
+            live_file.is_file(),
+            f"Missing canonical live manifest at {live_file}",
+        )
+        frozen_canonical_bytes[LIVE_COVERAGE_RELPATH] = live_file.read_bytes()
+
+        # Assert mapping cardinality and exact path sets for seven-path pins and eight-path closure
+        self.assertEqual(len(SEVEN_PATH_SHA256_PINS), 7)
+        self.assertEqual(
+            set(SEVEN_PATH_SHA256_PINS.keys()),
+            {
+                C17_RECEIPT_RELPATH,
+                CHECKPOINT_13_14_RELPATH,
+                C17_INVENTORY_RELPATH,
+                C16_INVENTORY_RELPATH,
+                C17_RECORD_RELPATH,
+                SNAPSHOT_387_RELPATH,
+                SNAPSHOT_388_RELPATH,
+            },
+        )
+        self.assertEqual(len(frozen_canonical_bytes), 8)
+        self.assertEqual(
+            set(frozen_canonical_bytes.keys()),
+            set(SEVEN_PATH_SHA256_PINS.keys()) | {LIVE_COVERAGE_RELPATH},
+        )
+
         def verify_closures(
             temp_tree_root: Path,
             expected_temp_map: dict[str, bytes],
         ) -> None:
+            self.assertEqual(len(expected_temp_map), 8)
+            self.assertEqual(len(frozen_canonical_bytes), 8)
             for p, exp_bytes in expected_temp_map.items():
                 t_file = temp_tree_root / p
                 self.assertTrue(t_file.is_file(), f"Temporary file missing: {t_file}")
