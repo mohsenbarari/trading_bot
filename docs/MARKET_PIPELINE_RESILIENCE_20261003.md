@@ -17,6 +17,12 @@ No dead letters explained this interruption.
 - Sender metrics summed attempts over all permanent acknowledged rows after
   every batch. Batch construction also repeatedly hashed and validated each
   growing prefix, making catch-up construction quadratic.
+- Adapter initialization recounted historical statuses on every restart, and
+  global receipt ordering let a large old reference stream delay live inputs.
+  An old heartbeat could incorrectly attest readiness of a replacement image.
+- Activity-page compatibility projection still waited for the legacy Telegram
+  job/backfill before displaying groups. Its quality calculation rescanned each
+  entire instrument book per event, exceeding two minutes on the primary store.
 
 ## Corrections
 
@@ -36,6 +42,22 @@ sizes each serialized delivery once and hashes/validates the final batch, bounde
 by the existing 500-item contract and 768-KiB document limit. Small live batches
 are sent immediately. Stream sequences remain contiguous; G1/G2 retain priority
 and other sources remain fair.
+
+Adapter counters are maintained by durable triggers; restart recounts only a
+pre-trigger store or an explicitly requested repair. G1/G2, minute gold and
+Herat receive independent bounded priority; all remaining streams share work
+by served count, without changing per-stream sequences or skipping history.
+Health and handoff bind fresh heartbeat time to the expected release/start time.
+
+`scripts/install_primary_group_display.py` rebinds only the existing group
+projection service to the same canonical Bot store consumed by the model. It
+keeps the existing conversation writer lock, deterministic IDs, causal roots,
+late-arrival/conditional/review exclusions and financial quality rules. No new
+Telegram collector/session, Product Writer change or permanent fact deletion.
+The projector uses a sorted event-time index and exact closed five-minute
+window; availability/settlement checks remain unchanged. A read-only production
+measurement evaluated 47,969 rows in 2.647 seconds. Timer retries after 15 seconds;
+the one-shot has a 120-second timeout and a bounded lock wait.
 
 Long-running Market Compose roles and the archive database use `unless-stopped`,
 including restart after host reboot. Intentional operator stops remain respected;
@@ -68,8 +90,8 @@ that a model is receiving current data.
 
 ## Activation, rollback and verification
 
-`scripts/handoff_market_receiver_resilience.py` supports only the two receivers
-and fact sender. It checks the full active Compose chain, immutable release label
+`scripts/handoff_market_receiver_resilience.py` supports the two receivers,
+fact sender and adapter. It checks the full active Compose chain, immutable release label
 and portable image-content digest, mounts, exclusive owner lock, and unchanged
 production bystanders. It holds the deployment mutex and retains a journal and
 exact rollback chain. Failed activation restores runtime, not database state.
@@ -85,12 +107,22 @@ Another initial rollback exposed an ephemeral test-container false positive;
 the bystander guard now checks actual Compose services and excludes one-off
 tests. Failed journals remain available.
 
+The first direct-display activation timed out on the quadratic legacy quality
+calculation and rolled back its service configuration. Its transaction did not
+partially publish. The failed journal/release were retained; the window-indexed
+candidate is activated with a separate journal. No data reset was used.
+
 88 receiver/watchdog/transport/foundation/recovery/snapshot tests passed in an
 isolated network-disabled container; another 52 covered sender, adapter and
 snapshot publication. Coverage includes silent TCP, partial TLS/HTTP, historical
 reopening, exact byte limits, sequence gaps, 500-item batches, two-observation
 recovery, cooldown persistence, worker-saturation recovery, real HTTP schema
 and deployment-lock exclusion.
+Projection regression coverage also exercises outliers, settlement fallback,
+transport-stable trade roots, late arrivals and conflict exclusions. The new
+performance tests compare indexed decisions to full-book decisions (including
+non-monotonic arrivals and boundary times) and bound candidate work over a long
+history. Adapter fairness tests cover independent group and reference progress.
 
 Closeout checks source → receiver → adapter watermarks, increasing model versions,
 fresh WA-FI published views, and authenticated HTTP of the actual dashboard and

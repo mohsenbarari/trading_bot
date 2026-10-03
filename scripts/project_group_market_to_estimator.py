@@ -11,6 +11,7 @@ identifiers never cross this boundary.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -440,6 +441,14 @@ def _model_exclusion_reasons(
         offers_by_book.setdefault(book, []).append(
             _live_book_offer_ref(offer, offer_times=offer_times)
         )
+    # Index economic event time, not delivery order. A candidate can only use
+    # offers in the closed five-minute window ending at its availability time.
+    # Keep the original availability/self/settlement checks below: restricting
+    # this search must not introduce future evidence or alter model gates.
+    book_event_times: dict[tuple[str, str], list[float]] = {}
+    for book, offers in offers_by_book.items():
+        offers.sort(key=lambda offer: offer[1])
+        book_event_times[book] = [offer[1] for offer in offers]
     exclusions: dict[bytes, str | None] = {}
     for row in rows:
         event_key = bytes(row["event_key"])
@@ -458,9 +467,14 @@ def _model_exclusion_reasons(
                 str(row["trade_form"]).upper(),
             )
             event_time, available_at = offer_times[event_key]
+            offers = offers_by_book.get(book, ())
+            timestamps = book_event_times.get(book, ())
+            available_ts = available_at.timestamp()
+            first = bisect_left(timestamps, available_ts - LIVE_BOOK_PRICE_WINDOW_SECONDS)
+            last = bisect_right(timestamps, available_ts)
             reason = _live_book_price_exclusion_reason(
                 row,
-                eligible_offers=offers_by_book.get(book, ()),
+                eligible_offers=offers[first:last],
                 event_time=event_time,
                 available_at=available_at,
                 offer_times=offer_times,

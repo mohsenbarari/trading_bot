@@ -1376,7 +1376,9 @@ def _select_pending_deliveries(
     directory and can exhaust the deliberately small container tmpfs.  The
     primary key already gives an efficient contiguous sequence per stream.
     Fetch a bounded prefix from each stream, then merge only those prefixes in
-    memory while never exposing sequence N+1 before sequence N.
+    memory while never exposing sequence N+1 before sequence N. Reserve a
+    bounded fast-input share; distribute the remainder by served count so an
+    older, large reference stream cannot starve another reference's live head.
     """
 
     stream_ids = [
@@ -1390,12 +1392,13 @@ def _select_pending_deliveries(
     cursors: dict[str, sqlite3.Cursor] = {}
     heads: dict[str, sqlite3.Row] = {}
     next_sequences: dict[str, int] = {}
-    heap: list[tuple[int, str, str, int]] = []
+    heap: list[tuple[int, int, str, str, int]] = []
     selected: list[sqlite3.Row] = []
     fast_budget = max(1, max_deliveries // 4)
     fast_selected = 0
     fast_stream_budget = max(1, fast_budget // len(FAST_INPUT_PRIORITY))
     fast_by_stream: dict[str, int] = {}
+    selected_by_stream: dict[str, int] = {}
 
     def priority(stream_id):
         if fast_selected >= fast_budget or fast_by_stream.get(stream_id, 0) >= fast_stream_budget:
@@ -1425,21 +1428,23 @@ def _select_pending_deliveries(
                 heap,
                 (
                     priority(stream_id),
+                    0,
                     str(head["received_at_utc"]),
                     stream_id,
                     int(head["delivery_sequence"]),
                 ),
             )
         while heap and len(selected) < max_deliveries:
-            rank, received_at, stream_id, sequence = heapq.heappop(heap)
+            rank, served, received_at, stream_id, sequence = heapq.heappop(heap)
             if rank < 2 and priority(stream_id) == 2:
-                heapq.heappush(heap, (2, received_at, stream_id, sequence))
+                heapq.heappush(heap, (2, served, received_at, stream_id, sequence))
                 continue
             row = heads[stream_id]
             expected = next_sequences[stream_id]
             if sequence != expected or int(row["delivery_sequence"]) != expected:
                 raise MarketFactAdapterError("market_fact_adapter_sequence_gap")
             selected.append(row)
+            selected_by_stream[stream_id] = selected_by_stream.get(stream_id, 0) + 1
             if rank < 2:
                 fast_selected += 1
                 fast_by_stream[stream_id] = fast_by_stream.get(stream_id, 0) + 1
@@ -1451,6 +1456,7 @@ def _select_pending_deliveries(
                     heap,
                     (
                         priority(stream_id),
+                        selected_by_stream[stream_id],
                         str(following["received_at_utc"]),
                         stream_id,
                         int(following["delivery_sequence"]),

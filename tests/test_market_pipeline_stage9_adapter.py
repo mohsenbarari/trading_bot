@@ -151,7 +151,7 @@ class Stage9AdapterTests(unittest.TestCase):
                 )
         rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=4)
         self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows],
-                         [(group, 1), (reference, 1), (reference, 2), (reference, 3)])
+                         [(group, 1), (reference, 1), (reference, 2), (group, 2)])
         rows = _select_pending_deliveries(self.receiver, checkpoints={group: 1, reference: 3}, max_deliveries=4)
         self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows],
                          [(group, 2), (reference, 4), (group, 3), (group, 4)])
@@ -173,7 +173,27 @@ class Stage9AdapterTests(unittest.TestCase):
         rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=8)
         self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows[:2]],
                          [(group_1, 1), (group_2, 1)])
-        self.assertTrue(all(row["stream_id"] == reference for row in rows[2:]))
+        reference_rows = [row for row in rows if row["stream_id"] == reference]
+        self.assertGreaterEqual(len(reference_rows), 3)
+        for stream in (group_1, group_2, reference):
+            sequences = [row["delivery_sequence"] for row in rows if row["stream_id"] == stream]
+            self.assertEqual(sequences, list(range(1, len(sequences) + 1)))
+
+    def test_large_reference_stream_cannot_starve_another_reference(self):
+        busy = "market.fact.wallex-usdt"
+        fresh = "market.fact.melted-flow"
+        for stream, count, received_at in ((busy, 8, "2026-08-26T05:00:00Z"),
+                                           (fresh, 2, "2026-08-26T05:02:00Z")):
+            self.receiver.execute("INSERT INTO fact_checkpoints VALUES(?,?,?)", (stream, count, received_at))
+            for sequence in range(1, count + 1):
+                identity = content_hash({"stream": stream, "sequence": sequence})
+                self.receiver.execute(
+                    "INSERT INTO fact_deliveries(stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,payload_json,received_at_utc) VALUES(?,?,?,?,?,?,?)",
+                    (stream, sequence, identity, 1, "a" * 64, "{}", received_at),
+                )
+        rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=4)
+        self.assertEqual([(r["stream_id"], r["delivery_sequence"]) for r in rows],
+                         [(busy, 1), (fresh, 1), (busy, 2), (fresh, 2)])
 
     def test_compaction_watermark_is_durable_and_never_regresses(self):
         path = Path(self.directory.name) / "adapter-watermark.json"
