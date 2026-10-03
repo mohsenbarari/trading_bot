@@ -5,6 +5,7 @@ from pathlib import Path
 from core.market_intelligence.market_fact_sync import (
     ESTIMATOR_PRIORITY_STREAMS,
     load_next_batch,
+    outbox_metrics,
 )
 
 
@@ -53,6 +54,18 @@ class _Connection:
 
 
 class MarketFactSyncSchedulingTests(unittest.TestCase):
+    def test_operational_metrics_do_not_scan_acknowledged_history(self):
+        from unittest.mock import MagicMock
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (10, 5.0, 2, 0, 4)
+        report = outbox_metrics(connection)
+        self.assertEqual(cursor.execute.call_count, 1)
+        self.assertIn("WHERE acknowledged_at_utc IS NULL", cursor.execute.call_args[0][0])
+        self.assertEqual(report["queue_depth"], 10)
+        self.assertEqual(report["send_attempt_count"], 4)
+        self.assertEqual(report["send_attempt_count_scope"], "UNACKNOWLEDGED")
+
     def test_estimator_streams_precede_fair_scheduling_of_other_streams(self):
         envelope = json.loads(FIXTURE.read_text(encoding="utf-8"))["items"][0]["fact"]
         connection = _Connection(envelope)

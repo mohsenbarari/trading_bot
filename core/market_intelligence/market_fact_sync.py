@@ -347,30 +347,29 @@ def record_batch_failure(
 
 
 def outbox_metrics(connection) -> dict[str, object]:
+    """Measure outstanding work, never rescan permanent acknowledged history."""
     with connection.cursor() as cursor:
         cursor.execute(
             """
             SELECT COUNT(*),
                    COALESCE(EXTRACT(EPOCH FROM (clock_timestamp()-MIN(created_at_utc))),0),
                    COUNT(*) FILTER (WHERE attempt_count >= %s),
-                   COUNT(*) FILTER (WHERE dead_lettered_at_utc IS NOT NULL)
+                   COUNT(*) FILTER (WHERE dead_lettered_at_utc IS NOT NULL),
+                   COALESCE(SUM(attempt_count),0)
             FROM market_data.market_fact_outbox
             WHERE acknowledged_at_utc IS NULL
             """,
             (ALERT_AFTER_ATTEMPTS,),
         )
         row = cursor.fetchone()
-        cursor.execute(
-            "SELECT COALESCE(SUM(attempt_count),0) FROM market_data.market_fact_outbox"
-        )
-        attempts = int(cursor.fetchone()[0])
     connection.rollback()
     return {
         "queue_depth": int(row[0]),
         "oldest_age_seconds": round(float(row[1]), 3),
         "retry_alert_count": int(row[2]),
         "dead_letter_count": int(row[3]),
-        "send_attempt_count": attempts,
+        "send_attempt_count": int(row[4]),
+        "send_attempt_count_scope": "UNACKNOWLEDGED",
     }
 
 

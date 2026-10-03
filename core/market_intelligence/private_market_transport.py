@@ -276,6 +276,39 @@ def server_tls_context(*, ca: str | Path, cert: str | Path, key: str | Path) -> 
     return context
 
 
+def probe_local_receiver(*, port: int, cert: str | Path, key: str | Path,
+                         ca: str | Path, timeout_seconds: float = 2.0) -> dict:
+    """Exercise mTLS, HTTP and durable storage; pin the loopback server cert.
+
+    Receiver certificates carry the private IP SAN, not 127.0.0.1. Exact
+    certificate pinning replaces hostname verification only on this fixed
+    local endpoint; CA verification and mutual TLS remain mandatory.
+    """
+    context = client_tls_context(ca=ca, cert=cert, key=key)
+    context.check_hostname = False
+    expected = ssl.PEM_cert_to_DER_cert(Path(cert).read_text(encoding="ascii"))
+    connection = http.client.HTTPSConnection(
+        "127.0.0.1", port=port, context=context, timeout=timeout_seconds
+    )
+    try:
+        connection.connect()
+        if connection.sock.getpeercert(binary_form=True) != expected:
+            raise MarketTransportError("local_receiver_certificate_mismatch")
+        connection.request("GET", HEALTH_PATH, headers={"Connection": "close"})
+        response = connection.getresponse()
+        payload = response.read(MAX_WIRE_BYTES + 1)
+        if response.status != 200 or len(payload) > MAX_WIRE_BYTES:
+            raise MarketTransportError("local_receiver_health_unavailable")
+        document = json.loads(payload)
+        if not isinstance(document, dict):
+            raise MarketTransportError("local_receiver_health_invalid")
+        return document
+    except (OSError, http.client.HTTPException, ValueError) as exc:
+        raise MarketTransportError("local_receiver_health_unavailable") from exc
+    finally:
+        connection.close()
+
+
 def post_document(
     *,
     host: str,

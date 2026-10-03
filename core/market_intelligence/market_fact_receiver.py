@@ -41,7 +41,7 @@ def _utc_text() -> str:
     return _utc_now().isoformat().replace("+00:00", "Z")
 
 
-def connect_receiver(path: Path | str) -> sqlite3.Connection:
+def connect_receiver(path: Path | str, *, initialize: bool = True) -> sqlite3.Connection:
     database = Path(path)
     database.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     connection = sqlite3.connect(database, timeout=30, isolation_level=None)
@@ -49,7 +49,8 @@ def connect_receiver(path: Path | str) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=FULL")
     connection.execute("PRAGMA foreign_keys=ON")
-    initialize_receiver(connection)
+    if initialize:
+        initialize_receiver(connection)
     return connection
 
 
@@ -124,11 +125,6 @@ def initialize_receiver(connection: sqlite3.Connection) -> None:
           SET fact_count=fact_count+1
           WHERE singleton=1;
         END;
-        INSERT OR IGNORE INTO receiver_status_counts(
-            singleton,delivery_count,fact_count
-        ) SELECT 1,
-            (SELECT COUNT(*) FROM fact_deliveries),
-            (SELECT COUNT(*) FROM fact_latest);
         CREATE TABLE IF NOT EXISTS transport_nonces (
             key_id TEXT NOT NULL,
             nonce TEXT NOT NULL,
@@ -140,6 +136,18 @@ def initialize_receiver(connection: sqlite3.Connection) -> None:
         ON transport_nonces(expires_at_epoch);
         """
     )
+    # INSERT OR IGNORE does not short-circuit its SELECT: putting the counts
+    # in that statement rescans both permanent ledgers on EVERY connection,
+    # even when the singleton already exists. Backfill only during migration.
+    if connection.execute(
+        "SELECT 1 FROM receiver_status_counts WHERE singleton=1"
+    ).fetchone() is None:
+        connection.execute(
+            """INSERT OR IGNORE INTO receiver_status_counts(
+                   singleton,delivery_count,fact_count
+               ) SELECT 1,(SELECT COUNT(*) FROM fact_deliveries),
+                          (SELECT COUNT(*) FROM fact_latest)"""
+        )
     _initialize_payload_compaction(connection)
 
 

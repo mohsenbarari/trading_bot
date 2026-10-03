@@ -788,7 +788,22 @@ def _run_healthcheck(
             raise FoundationError("heartbeat_stale")
         pid = int(document["pid"])
         os.kill(pid, 0)
-        if role in RECEIVER_ROLES and document.get("mode") != "live":
+        if role in RECEIVER_ROLES and document.get("mode") == "live":
+            from .private_market_transport import MarketTransportError, probe_local_receiver
+
+            cert_role = "bot" if role == "market-fact-receiver" else "web"
+            try:
+                probe = probe_local_receiver(
+                    port=int(os.environ.get("MARKET_PIPELINE_LISTEN_PORT", "9443")),
+                    ca=os.environ.get("MARKET_TRANSPORT_CA_PATH", "/run/secrets/market_transport_ca"),
+                    cert=os.environ.get("MARKET_TRANSPORT_CERT_PATH", f"/run/secrets/market_{cert_role}_transport_cert"),
+                    key=os.environ.get("MARKET_TRANSPORT_KEY_PATH", f"/run/secrets/market_{cert_role}_transport_key"),
+                )
+            except MarketTransportError as exc:
+                raise FoundationError("receiver_health_not_ready") from exc
+            if probe.get("schema") != document.get("schema"):
+                raise FoundationError("receiver_health_schema_invalid")
+        elif role in RECEIVER_ROLES:
             port = int(os.environ.get("MARKET_PIPELINE_LISTEN_PORT", "9443"))
             with urlopen(f"http://127.0.0.1:{port}/healthz", timeout=2) as response:
                 if response.status != 200:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import hashlib
 import json
 import os
@@ -11,6 +11,8 @@ from pathlib import Path
 import sqlite3
 import threading
 from typing import Mapping
+
+from .private_tls_server import PrivateTLSServer
 
 from .estimator_snapshot_receiver import (
     SNAPSHOT_RECEIVER_SCHEMA,
@@ -49,9 +51,7 @@ def _health_status(metrics: Mapping[str, object]) -> str:
     return "live-degraded"
 
 
-class _Server(ThreadingHTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
+class _Server(PrivateTLSServer):
 
     def __init__(
         self,
@@ -66,6 +66,7 @@ class _Server(ThreadingHTTPServer):
         allow_private_primary: bool,
         expected_lane: str,
         stale_after_seconds: int,
+        tls_context,
     ) -> None:
         self.database_path = database_path
         self.snapshot_root = snapshot_root
@@ -76,7 +77,7 @@ class _Server(ThreadingHTTPServer):
         self.allow_private_primary = bool(allow_private_primary)
         self.expected_lane = expected_lane
         self.stale_after_seconds = int(stale_after_seconds)
-        super().__init__(address, _Handler)
+        super().__init__(address, _Handler, tls_context=tls_context)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -314,8 +315,8 @@ def run_estimator_snapshot_receiver_service(
         allow_private_primary=allow_private_primary,
         expected_lane=expected_lane,
         stale_after_seconds=stale_after_seconds,
+        tls_context=tls,
     )
-    server.socket = tls.wrap_socket(server.socket, server_side=True)
     server.timeout = 0.25
     from .private_pipeline_foundation import atomic_json_write
 
