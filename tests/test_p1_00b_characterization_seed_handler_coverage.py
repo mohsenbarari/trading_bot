@@ -2,19 +2,48 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import tempfile
 import unittest
+
+HISTORICAL_SNAPSHOT_REL_PATH = (
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-387-snapshot.json"
+)
+HISTORICAL_SNAPSHOT_SHA256 = (
+    "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7"
+)
+
+
+def load_historical_seed_coverage_snapshot(
+    snapshot_path: Path | str | None = None,
+    *,
+    expected_sha256: str = HISTORICAL_SNAPSHOT_SHA256,
+) -> dict:
+    if snapshot_path is not None:
+        target_path = Path(snapshot_path)
+    else:
+        repo_root = Path(__file__).resolve().parent.parent
+        target_path = repo_root / HISTORICAL_SNAPSHOT_REL_PATH
+
+    if not target_path.is_file():
+        raise FileNotFoundError(f"Historical snapshot not found at {target_path}")
+
+    raw_bytes = target_path.read_bytes()
+    actual_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ValueError(
+            f"Historical snapshot byte drift detected at {target_path}: "
+            f"expected SHA256 {expected_sha256}, got {actual_sha256}"
+        )
+    return json.loads(raw_bytes.decode("utf-8"))
 
 
 class SeedHandlerCoverageContractTests(unittest.TestCase):
     def test_canonical_remaining_seed_count_matches_inventory_and_reconciled_records(self):
         repo_root = Path(__file__).resolve().parent.parent
 
-        manifest_rel_path = "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
-        manifest_path = repo_root / manifest_rel_path
-        self.assertTrue(manifest_path.is_file(), f"Manifest not found at {manifest_path}")
-
-        manifest_bytes = manifest_path.read_bytes()
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        manifest = load_historical_seed_coverage_snapshot(
+            repo_root / HISTORICAL_SNAPSHOT_REL_PATH
+        )
 
         expected_top_level_keys = {
             "schema_version",
@@ -1494,6 +1523,96 @@ class SeedHandlerCoverageContractTests(unittest.TestCase):
         self.assertEqual(
             manifest["counts"]["remaining_seed_count"], len(final_remaining_seed_set)
         )
+
+    def test_historical_consumer_ignores_live_content_and_rejects_snapshot_drift(self):
+        """Witness historical snapshot reader isolation against live manifest drift.
+
+        Stage P1-00b IN_PROGRESS, P1-00 COMPLETE; active WA-P1-00B-GATE-FIRST-RECONCILIATION-20261002-169 digest 5f8cbf6411079ac471fbf364568a2f54997abc60253b67ec72aae88eae3cc23e.
+        Canonical blocker P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE remains open; P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN also open.
+        Evidence reconciliation 5/5; canonical integration of C13 and shared C16/C17 remains pending.
+        Keep pending_five=5, units_since_reconciliation=5, global_reconciliation_complete=false, canonical 387/465 (135 baseline +252 new), 78 remaining, 24 unresolved origins.
+        Exclude read_user self-success, super-admin rejection, authorization policy coverage, mutation, persistence, retry, reload, origin cells, seed/blocker/Stage closure and sixth behavior.
+        State this scope in the bounded new witness docstring; no ledger edit is authorized.
+        Preserve accepted C13 and C16 tests and all receipts. C17 consumer remains unresolved; no rejected artifacts may be reused.
+        Retain verbatim: defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005; defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004; defer_prior_unit=normal169-c16-receipt-custody-20261003-c001; defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2. These are deferrals, never acceptance evidence. No scope or gate closure is claimed by this migration.
+        """
+        repo_root = Path(__file__).resolve().parent.parent
+
+        real_snapshot_path = repo_root / HISTORICAL_SNAPSHOT_REL_PATH
+        self.assertTrue(
+            real_snapshot_path.is_file(),
+            f"Repository snapshot not found at {real_snapshot_path}",
+        )
+        real_snapshot_bytes = real_snapshot_path.read_bytes()
+        real_snapshot_sha256 = hashlib.sha256(real_snapshot_bytes).hexdigest()
+        self.assertEqual(real_snapshot_sha256, HISTORICAL_SNAPSHOT_SHA256)
+
+        real_live_rel_path = "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
+        real_live_path = repo_root / real_live_rel_path
+        self.assertTrue(
+            real_live_path.is_file(),
+            f"Live manifest not found at {real_live_path}",
+        )
+        real_live_bytes_before = real_live_path.read_bytes()
+
+        expected_sha256 = HISTORICAL_SNAPSHOT_SHA256
+        expected_manifest = json.loads(real_snapshot_bytes.decode("utf-8"))
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir_str:
+                temp_dir = Path(temp_dir_str)
+                temp_snapshot_dir = temp_dir / "docs/refactor/two-server/section-1/inventory"
+                temp_snapshot_dir.mkdir(parents=True, exist_ok=True)
+                temp_snapshot_path = (
+                    temp_snapshot_dir
+                    / "recent-characterization-seed-coverage-387-snapshot.json"
+                )
+                temp_live_path = temp_snapshot_dir / "seed-handler-coverage.json"
+
+                temp_snapshot_path.write_bytes(real_snapshot_bytes)
+                expected_temp_path = temp_snapshot_path
+
+                self.assertFalse(temp_live_path.exists())
+                result_absent = load_historical_seed_coverage_snapshot(
+                    expected_temp_path, expected_sha256=expected_sha256
+                )
+                self.assertEqual(result_absent, expected_manifest)
+
+                canary_bytes = (
+                    b'{"canary": "nonsecret-live-mutation-canary-payload", "stage": "CANARY"}\n'
+                )
+                temp_live_path.write_bytes(canary_bytes)
+                self.assertTrue(temp_live_path.is_file())
+                result_canary = load_historical_seed_coverage_snapshot(
+                    expected_temp_path, expected_sha256=expected_sha256
+                )
+                self.assertEqual(result_canary, expected_manifest)
+
+                drifted_snapshot_bytes = real_snapshot_bytes + b"\n"
+                temp_snapshot_path.write_bytes(drifted_snapshot_bytes)
+                self.assertEqual(
+                    json.loads(drifted_snapshot_bytes.decode("utf-8")),
+                    expected_manifest,
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    load_historical_seed_coverage_snapshot(
+                        expected_temp_path, expected_sha256=expected_sha256
+                    )
+                rejection_msg = str(ctx.exception)
+                self.assertIn(str(expected_temp_path), rejection_msg)
+                self.assertIn(expected_sha256, rejection_msg)
+
+                temp_snapshot_path.write_bytes(real_snapshot_bytes)
+                self.assertEqual(temp_snapshot_path.read_bytes(), real_snapshot_bytes)
+                result_restored = load_historical_seed_coverage_snapshot(
+                    expected_temp_path, expected_sha256=expected_sha256
+                )
+                self.assertEqual(result_restored, expected_manifest)
+                self.assertEqual(temp_snapshot_path.read_bytes(), real_snapshot_bytes)
+
+        finally:
+            self.assertEqual(real_live_path.read_bytes(), real_live_bytes_before)
+            self.assertEqual(real_snapshot_path.read_bytes(), real_snapshot_bytes)
 
 
 if __name__ == "__main__":
