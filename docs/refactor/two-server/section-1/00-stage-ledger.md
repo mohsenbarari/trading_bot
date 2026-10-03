@@ -313,3 +313,26 @@ Seed accounting, blockers, and Stage status:
 - Canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
 - Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`. No mechanical receipt is Stage closure.
 - Explicit exclusions: read_user self-success, super-admin rejection, authorization policy coverage, mutation, persistence, retry, reload, origin matrix cells, seed-blocker closure, and Stage closure.
+
+### 2026-10-03 UTC — Continuation 13 canonical ledger integration checkpoint (trade export self-delegation)
+
+Assignment `WA-P1-00B-GATE-FIRST-RECONCILIATION-20261002-169` (digest `5f8cbf6411079ac471fbf364568a2f54997abc60253b67ec72aae88eae3cc23e`, inspected HEAD `62a7c05f22b77150ad3724f47bfafc0967be4cf6`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only C13 current accounting entry integrating accepted C13 canonical promotion evidence under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Accepted C13 promotion receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-c13-canonical-promotion.json`, commit `ff8a08490a0555bc7afcc56c6e189294751e8eec`, SHA256 `5ab85485719dfe5635ed9c106082b0453108336b5791f6abc51c4c5bf2f8430b`. Receipt `inspected_head` `b8f2aea4367f3f08195e32522396f980351057cf` remains historical, not a current HEAD.
+- Historical 388 snapshot: `docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-388-snapshot.json`, commit `62a7c05f22b77150ad3724f47bfafc0967be4cf6`, SHA256 `da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7`; live `seed-handler-coverage.json` currently has the same bytes/hash, while the historical snapshot stays immutable.
+- Existing witness test selector: `tests/test_p1_00b_characterization_c13_only_canonical_promotion.py::C13CanonicalPromotionTests::test_c13_canonical_promotion_retains_shared_seed_gate` cited strictly in its role as existing evidence (no invented new run receipts).
+
+Current canonical counts from accepted evidence:
+- Canonical counts: 135 baseline + 253 reconciled new = 388/465 evidenced, 77 remaining, `PARTIAL`, `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- C13 seed `API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797` was already promoted with receipt `delta_distinct_seed_count=1`; this ledger unit contributes zero additional distinct seeds.
+- Older 387/78 ledger entries are historical and remain unchanged.
+- Shared C16/C17 seed `API-IDENTITY-GET-USERS-READ-USER-L440` is still pending canonical promotion and canonical ledger accounting; its shared union is one seed, C16 contributes zero after C17.
+
+Reconciliation status, blockers, and Stage status:
+- Retain five-unit evidence reconciliation 5/5 (`reconciled_behavior_units=5`, `remaining_behavior_units=0`) and all provenance counters `pending_five=5`, `total_behavior_units=5`, `units_since_reconciliation=5`, `global_reconciliation_complete=false`; no sixth behavior before actual complete canonical reconciliation.
+- Both High blockers stay open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`, 24 unresolved origins, `closures_authorized=false`, `P1-00` `COMPLETE` and `P1-00b` `IN_PROGRESS`.
+- `read_user` self-success and super-admin rejection remain unmet.
+- Auxiliary docs/tests/CONTINUE add no product behavior or Stage progress.
+
+Deferrals and exclusions:
+- Preserve all prior receipts/counters/deferrals and explicitly retain these exact strings: defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014; defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012; defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2; defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2; defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007; defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005; defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004; defer_prior_unit=normal169-c16-receipt-custody-20261003-c001; defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2. Rejected artifacts are not evidence.
+- State exclusions: shared C16/C17 canonical promotion/integration; read_user self-success; super-admin rejection; authorization policy; new/sixth behavior; mutation/persistence/retry/reload; origin/seed-blocker/Stage closure. No tracked file other than the ledger changes; no test, manifest, snapshot or historical receipt edits.
