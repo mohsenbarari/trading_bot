@@ -84,7 +84,7 @@ def bystanders(target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--role", choices=("market-fact-receiver", "estimator-snapshot-receiver", "market-fact-sync-worker"), required=True)
+    parser.add_argument("--role", choices=("market-fact-receiver", "estimator-snapshot-receiver", "market-fact-sync-worker", "market-store-adapter"), required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--release", required=True)
     parser.add_argument("--portable-digest", required=True)
@@ -111,7 +111,7 @@ def main():
     files = [Path(p) for p in labels["com.docker.compose.project.config_files"].split(",")]
     for path in [environment, *files]:
         safe_file(path)
-    compose = ["docker", "compose", "-p", PROJECT, "--profile", "bot" if args.role == "market-fact-receiver" else "web", "--env-file", str(environment)]
+    compose = ["docker", "compose", "-p", PROJECT, "--profile", "bot" if args.role in {"market-fact-receiver", "market-store-adapter"} else "web", "--env-file", str(environment)]
     for path in files:
         compose.extend(("-f", str(path)))
     before = json.loads(command([*compose, "config", "--format", "json"]))

@@ -10,6 +10,7 @@ from unittest.mock import patch
 from core.market_intelligence.coin_rate_engine import build_coin_rate_estimates
 from core.market_intelligence.market_fact_adapter import (
     MarketFactAdapterError,
+    _select_pending_deliveries,
     adapter_metrics,
     initialize_adapter_store,
     normalize_feed_mode,
@@ -134,6 +135,26 @@ class Stage9AdapterTests(unittest.TestCase):
             )
         ]
         self.assertEqual(columns, ["event_key"])
+
+    def test_group_priority_is_bounded_and_preserves_other_source_progress(self):
+        # Inbox scheduling does not inspect economic payloads; opaque fixture
+        # identities suffice to prove bounded/contiguous cross-stream ordering.
+        group = "market.fact.coin.group.1"
+        reference = "market.fact.wallex-usdt"
+        for stream, received_at in ((reference, "2026-08-26T05:00:00Z"), (group, "2026-08-26T05:01:00Z")):
+            self.receiver.execute("INSERT INTO fact_checkpoints VALUES(?,?,?)", (stream, 4, received_at))
+            for sequence in range(1, 5):
+                identity = content_hash({"stream": stream, "sequence": sequence})
+                self.receiver.execute(
+                    "INSERT INTO fact_deliveries(stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,payload_json,received_at_utc) VALUES(?,?,?,?,?,?,?)",
+                    (stream, sequence, identity, 1, "a" * 64, "{}", received_at),
+                )
+        rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=4)
+        self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows],
+                         [(group, 1), (reference, 1), (reference, 2), (reference, 3)])
+        rows = _select_pending_deliveries(self.receiver, checkpoints={group: 1, reference: 3}, max_deliveries=4)
+        self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows],
+                         [(group, 2), (reference, 4), (group, 3), (group, 4)])
 
     def test_compaction_watermark_is_durable_and_never_regresses(self):
         path = Path(self.directory.name) / "adapter-watermark.json"

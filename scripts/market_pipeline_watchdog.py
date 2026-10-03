@@ -98,9 +98,14 @@ def assess(role, health, previous, now, *, endpoint_ok=True, upstream=None):
     if role == "market-store-adapter" and upstream:
         source = upstream.get("streams") or {}
         target = health.get("streams") or {}
-        behind = any(int(v) > int(target.get(k, 0)) for k, v in source.items())
-        if behind and target == previous.get("streams") and now - previous.get("last_progress_at", now) > STALE_SECONDS:
-            return "ADAPTER_PROGRESS_STALLED"
+        prior_streams = previous.get("streams") or {}
+        progress_at = previous.get("stream_progress_at") or {}
+        for stream_id, sequence in source.items():
+            behind = int(sequence) > int(target.get(stream_id, 0))
+            unchanged = target.get(stream_id) == prior_streams.get(stream_id)
+            last_progress = progress_at.get(stream_id, previous.get("last_progress_at", now))
+            if behind and unchanged and now - last_progress > STALE_SECONDS:
+                return "ADAPTER_PROGRESS_STALLED"
     if role in {"coin-estimator", "estimator-snapshot-sender"}:
         latest = health.get("latest") or {}
         version = latest.get("snapshot_version")
@@ -160,7 +165,7 @@ def main():
                     continue  # Preserve intentional stops; Docker recovers crashes.
                 started = container["State"]["StartedAt"]
                 if current.get("started_at") != started:
-                    current.update(started_at=started, failures=0, last_progress_at=now)
+                    current.update(started_at=started, failures=0, last_progress_at=now, stream_progress_at={})
                 if age(started, now) < STALE_SECONDS:
                     results.append({"role": role, "status": "STARTUP_GRACE"})
                     continue
@@ -177,6 +182,11 @@ def main():
                 current["failures"] = int(current.get("failures", 0)) + 1 if reason else 0
                 streams = health.get("streams")
                 version = (health.get("latest") or {}).get("snapshot_version")
+                if role == "market-store-adapter" and isinstance(streams, dict):
+                    progress_at = current.setdefault("stream_progress_at", {})
+                    for stream_id, sequence in streams.items():
+                        if stream_id not in progress_at or sequence != (current.get("streams") or {}).get(stream_id):
+                            progress_at[stream_id] = now
                 if streams != current.get("streams") or version != current.get("snapshot_version"):
                     current["last_progress_at"] = now
                 current.update(streams=streams, snapshot_version=version)

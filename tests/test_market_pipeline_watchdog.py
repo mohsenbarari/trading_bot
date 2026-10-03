@@ -40,6 +40,13 @@ class WatchdogTests(unittest.TestCase):
         self.assertIsNone(watchdog.assess("estimator-snapshot-sender", document, previous, 1000, upstream={"latest": {"snapshot_version": 10}}))
         self.assertEqual(watchdog.assess("estimator-snapshot-sender", document, previous, 1000, upstream={"latest": {"snapshot_version": 11}}), "SNAPSHOT_PROGRESS_STALLED")
 
+    def test_other_source_progress_cannot_mask_one_stalled_adapter_stream(self):
+        document = {**health("market-store-adapter"), "streams": {"g1": 1, "usd": 9}}
+        previous = {"streams": {"g1": 1, "usd": 8}, "last_progress_at": 995,
+                    "stream_progress_at": {"g1": 700, "usd": 995}}
+        upstream = {"streams": {"g1": 2, "usd": 9}}
+        self.assertEqual(watchdog.assess("market-store-adapter", document, previous, 1000, upstream=upstream), "ADAPTER_PROGRESS_STALLED")
+
     def test_stale_heartbeat_is_a_liveness_failure(self):
         self.assertEqual(watchdog.assess("market-processor", health("market-processor", 700), {}, 1000), "HEARTBEAT_STALLED")
 

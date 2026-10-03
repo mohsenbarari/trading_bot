@@ -35,6 +35,14 @@ FEED_MODES = frozenset({"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"})
 MAX_DELIVERIES_PER_CYCLE = 500
 MAX_ADAPTER_STREAMS = 128
 MAX_FUTURE_SKEW_SECONDS = 30
+# Extend transport priority through the final consumer, with a bounded share
+# so live coin/minute inputs cannot starve historical reference catch-up.
+FAST_INPUT_PRIORITY = {
+    "market.fact.coin.group.1": 0,
+    "market.fact.coin.group.2": 0,
+    "market.fact.private-gold-minute": 1,
+    "market.fact.usd-herat": 1,
+}
 _REASON = re.compile(r"[^A-Z0-9_]+")
 
 
@@ -1373,8 +1381,14 @@ def _select_pending_deliveries(
     cursors: dict[str, sqlite3.Cursor] = {}
     heads: dict[str, sqlite3.Row] = {}
     next_sequences: dict[str, int] = {}
-    heap: list[tuple[str, str, int]] = []
+    heap: list[tuple[int, str, str, int]] = []
     selected: list[sqlite3.Row] = []
+    fast_budget = max(1, max_deliveries // 4)
+    fast_selected = 0
+
+    def priority(stream_id):
+        return FAST_INPUT_PRIORITY.get(stream_id, 2) if fast_selected < fast_budget else 2
+
     try:
         for stream_id in stream_ids:
             cursor = receiver.execute(
@@ -1397,18 +1411,24 @@ def _select_pending_deliveries(
             heapq.heappush(
                 heap,
                 (
+                    priority(stream_id),
                     str(head["received_at_utc"]),
                     stream_id,
                     int(head["delivery_sequence"]),
                 ),
             )
         while heap and len(selected) < max_deliveries:
-            _received_at, stream_id, sequence = heapq.heappop(heap)
+            rank, received_at, stream_id, sequence = heapq.heappop(heap)
+            if rank < 2 and fast_selected >= fast_budget:
+                heapq.heappush(heap, (2, received_at, stream_id, sequence))
+                continue
             row = heads[stream_id]
             expected = next_sequences[stream_id]
             if sequence != expected or int(row["delivery_sequence"]) != expected:
                 raise MarketFactAdapterError("market_fact_adapter_sequence_gap")
             selected.append(row)
+            if rank < 2:
+                fast_selected += 1
             next_sequences[stream_id] = expected + 1
             following = cursors[stream_id].fetchone()
             if following is not None:
@@ -1416,6 +1436,7 @@ def _select_pending_deliveries(
                 heapq.heappush(
                     heap,
                     (
+                        priority(stream_id),
                         str(following["received_at_utc"]),
                         stream_id,
                         int(following["delivery_sequence"]),
