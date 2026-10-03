@@ -73,7 +73,13 @@ def mounts(container):
 def bystanders(target):
     ids = command(["docker", "ps", "-q"]).split()
     rows = json.loads(command(["docker", "inspect", *ids])) if ids else []
-    return {row["Id"]: (row["Image"], row["State"]["StartedAt"]) for row in rows if row["Name"] != f"/{target}"}
+    return {
+        row["Id"]: (row["Image"], row["State"]["StartedAt"])
+        for row in rows
+        if row["Name"] != f"/{target}"
+        and (row["Config"].get("Labels") or {}).get("com.docker.compose.project")
+        and (row["Config"].get("Labels") or {}).get("com.docker.compose.oneoff") != "True"
+    }
 
 
 def main():
