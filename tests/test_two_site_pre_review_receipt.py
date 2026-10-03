@@ -615,3 +615,164 @@ def test_candidate_test_assertion_findings_negatives() -> None:
     bad_sel = "def test_sel():\n    sel = task.get('test_selectors', ['default.py'])\n"
     assert candidate_test_assertion_findings(_two_site_worker(bad_sentinel, path="tests/test_other.py")) == []
     assert candidate_test_assertion_findings(_two_site_worker(bad_sel, path="tests/test_other.py")) == []
+
+
+_this_file = Path(__file__).resolve()
+_repo_root = _this_file.parents[1]
+for _rel_path in ("scripts/two_site_pre_review_receipt.py", "tests/test_two_site_pre_review_receipt.py"):
+    _target = _repo_root / _rel_path
+    _st = _target.stat()
+    assert _st.st_size <= 40000, f"{_rel_path} exceeds 40000: {_st.st_size}"
+    with open(_target, "rb") as _f:
+        assert len(_f.read(40001)) <= 40000, f"{_rel_path} read exceeds 40000"
+
+import copy
+
+
+def test_shallow_dict_aliases_nested_mutation_demonstration() -> None:
+    orig = {"nested": [1, 2]}
+    shallow = dict(orig)
+    orig["nested"].append(3)
+    assert shallow["nested"] == [1, 2, 3]
+
+    orig2 = {"nested": [1, 2]}
+    deep = copy.deepcopy(orig2)
+    orig2["nested"].append(3)
+    assert deep["nested"] == [1, 2]
+
+
+_P = "tests/test_two_site_example.py"
+_S = "a" * 64
+_D = "    data_snap = dict(data)\n"
+_A = "    assert data == data_snap\n"
+
+FINDING_CASES = [
+    ("def test_f(data):\n" + _D + _A, _P, None, [2]),
+    ("def test_f(data):\n    data_snap = list(data)\n" + _A, _P, None, [2]),
+    ("def test_f(data):\n" + _D + "    assert data_snap == data\n", _P, None, [2]),
+    ("class T:\n    def test_f(self, data):\n    " + _D + "        self.assertEqual(data, data_snap)\n", _P, None, [3]),
+    ("class T:\n    def test_f(self, data):\n    " + _D + "        self.assertEqual(data_snap, data)\n", _P, None, [3]),
+    ("def test_f(data, /):\n" + _D + _A, _P, None, [2]),
+    ("def test_f(*, data):\n" + _D + _A, _P, None, [2]),
+    ("def test_f(**kwargs):\n    kw_snap = dict(kwargs)\n    assert kwargs == kw_snap\n", _P, None, [2]),
+    ("def test_f(*args):\n    a_snap = list(args)\n    assert args == a_snap\n", _P, None, [2]),
+    ("async def test_f(data):\n" + _D + _A, _P, None, [2]),
+    ("def test_f(data):\n    if True:\n    " + _D + _A, _P, None, [3]),
+    ("def test_f(data):\n" + _D + _A, _P, _S, [2]),
+    ("def test_f(data):\n" + _D + _A + _A, _P, None, [2]),
+    ("def test_f(a, b):\n    a_snap = dict(a); b_snap = dict(b)\n    assert a == a_snap and b == b_snap\n", _P, None, [2, 2]),
+]
+
+GOOD_FIXTURE_SRC = "import copy\ndef test_deep(data):\n    data_snap = copy.deepcopy(data)\n    assert data == data_snap\n"
+
+
+@pytest.mark.parametrize(("bad_src", "path", "sha", "bad_lines"), FINDING_CASES)
+def test_shallow_custody_finding_rows_with_full_good_bad_good_cycle(
+    bad_src: str, path: str, sha: str | None, bad_lines: list[int]
+) -> None:
+    good_worker = _two_site_worker(GOOD_FIXTURE_SRC, path=path, original_sha256=sha)
+    bad_worker = _two_site_worker(bad_src, path=path, original_sha256=sha)
+    expected_good: list[str] = []
+    expected_bad: list[str] = [f"{path}:{line}: shallow-custody-snapshot" for line in bad_lines]
+
+    good_clone_1 = copy.deepcopy(good_worker)
+    bad_clone = copy.deepcopy(bad_worker)
+    expected_good_clone = copy.deepcopy(expected_good)
+    expected_bad_clone = copy.deepcopy(expected_bad)
+
+    res_good_before = candidate_test_assertion_findings(good_worker)
+    assert res_good_before == expected_good
+    assert good_worker == good_clone_1
+    assert expected_good == expected_good_clone
+
+    res_bad = candidate_test_assertion_findings(bad_worker)
+    assert res_bad == expected_bad
+    assert bad_worker == bad_clone
+    assert expected_bad == expected_bad_clone
+
+    res_good_after = candidate_test_assertion_findings(good_worker)
+    assert res_good_after == expected_good
+    assert res_good_before == res_good_after
+
+    assert good_worker == good_clone_1
+    assert bad_worker == bad_clone
+    assert expected_good == expected_good_clone
+    assert expected_bad == expected_bad_clone
+
+
+NON_FINDING_CASES = [
+    ("def test_f(data):\n" + _D, _P),
+    ("def test_f(data):\n    other = {'a': 1}\n    data_snap = dict(other)\n    assert other == data_snap\n", _P),
+    ("def test_f():\n    data = {'a': 1}\n" + _D + _A, _P),
+    ("def test_f(data, other):\n" + _D + "    assert other == data_snap\n", _P),
+    ("from copy import deepcopy\ndef test_f(data):\n    data_snap = deepcopy(data)\n" + _A, _P),
+    ("import copy\ndef test_f(data):\n    data_snap = copy.deepcopy(data)\n" + _A, _P),
+    ("def test_f(data):\n" + _D + "    def inner():\n    " + _A, _P),
+    ("def test_f(data):\n" + _D + "    class Inner:\n    " + _A, _P),
+    ("def test_f(data):\n" + _D + "    f = lambda: data == data_snap\n", _P),
+    ("def test_f(data):\n" + _D + "    assert True, data == data_snap\n", _P),
+    ("def test_f(data, dict):\n" + _D + _A, _P),
+    ("def test_f(data):\n    dict = lambda x: x\n" + _D + _A, _P),
+    ("for _ in (1,):\n    dict = copy.deepcopy\ndef test_f(data):\n" + _D + _A, _P),
+    ("if True:\n    dict = copy.deepcopy\ndef test_f(data):\n" + _D + _A, _P),
+    ("def test_f(data):\n    data_snap = data.copy()\n" + _A, _P),
+    ("def test_f(data):\n" + _D + _A, "tests/test_other_unrelated.py"),
+    ("def test_f(data:\n", _P),
+]
+
+
+@pytest.mark.parametrize(("src", "path"), NON_FINDING_CASES)
+def test_shallow_custody_non_finding_positives(src: str, path: str) -> None:
+    worker = _two_site_worker(src, path=path)
+    expected: list[str] = []
+    worker_clone = copy.deepcopy(worker)
+    expected_clone = copy.deepcopy(expected)
+
+    res1 = candidate_test_assertion_findings(worker)
+    assert res1 == expected
+    assert worker == worker_clone
+    assert expected == expected_clone
+
+    res2 = candidate_test_assertion_findings(worker)
+    assert res2 == expected
+    assert res1 == res2
+    assert worker == worker_clone
+    assert expected == expected_clone
+
+
+def test_shallow_custody_mixed_old_new_and_bound_32() -> None:
+    mixed_src = (
+        "def test_f(data):\n"
+        "    sel = task.get('test_selectors', ['default.py'])\n"
+        "    data_snap = dict(data)\n"
+        "    assert data == data_snap\n"
+        "    assert data == data_snap\n"
+    )
+    mixed_worker = _two_site_worker(mixed_src, path=_P)
+    expected_mixed = [
+        f"{_P}:2: selector-default",
+        f"{_P}:3: shallow-custody-snapshot",
+    ]
+    w_clone = copy.deepcopy(mixed_worker)
+    exp_clone = copy.deepcopy(expected_mixed)
+    res_mixed = candidate_test_assertion_findings(mixed_worker)
+    assert res_mixed == expected_mixed
+    assert mixed_worker == w_clone
+    assert expected_mixed == exp_clone
+
+    bound_changes = [
+        {
+            "path": f"tests/test_two_site_f_{i}.py",
+            "original_sha256": None,
+            "content": "def test_f(data):\n    d_snap = dict(data)\n    assert data == d_snap\n",
+        }
+        for i in range(40)
+    ]
+    expected_32 = [f"tests/test_two_site_f_{i}.py:2: shallow-custody-snapshot" for i in range(32)]
+    bound_worker = {"changes": bound_changes}
+    bw_clone = copy.deepcopy(bound_worker)
+    exp32_clone = copy.deepcopy(expected_32)
+    res_32 = candidate_test_assertion_findings(bound_worker)
+    assert res_32 == expected_32
+    assert bound_worker == bw_clone
+    assert expected_32 == exp32_clone

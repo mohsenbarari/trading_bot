@@ -229,8 +229,178 @@ def _writes_name(node: ast.AST, name: str) -> bool:
     )
 
 
+def _iter_scope_nodes(nodes: list[ast.AST]):
+    """Yield AST nodes in the current scope without descending into nested function/class/comprehension scopes."""
+    stack = list(reversed(nodes))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(
+            node,
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+                ast.ClassDef,
+                ast.Lambda,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+            ),
+        ):
+            continue
+        for child in reversed(list(ast.iter_child_nodes(node))):
+            stack.append(child)
+
+
+def _collect_scope_bound_names(nodes: list[ast.AST]) -> set[str]:
+    """Collect direct variable, definition, and import names bound in the current scope."""
+    bound: set[str] = set()
+    for node in _iter_scope_nodes(nodes):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound.add(alias.asname if alias.asname else alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                bound.add(alias.asname if alias.asname else alias.name)
+        elif isinstance(node, ast.Name) and isinstance(getattr(node, "ctx", None), (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+        elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif (
+            isinstance(node, (getattr(ast, "MatchAs", ()), getattr(ast, "MatchStar", ())))
+            and getattr(node, "name", None)
+        ):
+            bound.add(node.name)
+    return bound
+
+
+def _function_param_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Return all parameter names (posonly, regular, kwonly, vararg, kwarg) for a function."""
+    params = {
+        arg.arg
+        for arg in (
+            func.args.posonlyargs
+            + func.args.args
+            + func.args.kwonlyargs
+        )
+    }
+    if func.args.vararg:
+        params.add(func.args.vararg.arg)
+    if func.args.kwarg:
+        params.add(func.args.kwarg.arg)
+    return params
+
+
+def _get_and_conjuncts(expr: ast.AST) -> list[ast.AST]:
+    """Flatten boolean AND expressions into constituent conjuncts."""
+    if isinstance(expr, ast.BoolOp) and isinstance(expr.op, ast.And):
+        res: list[ast.AST] = []
+        for val in expr.values:
+            res.extend(_get_and_conjuncts(val))
+        return res
+    return [expr]
+
+
+def _find_functions_with_enclosing(
+    node: ast.AST,
+    enclosing_func_bound: set[str],
+) -> list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, set[str]]]:
+    """Find all functions with their enclosing function bound names."""
+    results: list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, set[str]]] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            results.append((child, set(enclosing_func_bound)))
+            local_bound = _function_param_names(child) | _collect_scope_bound_names(child.body)
+            results.extend(_find_functions_with_enclosing(child, enclosing_func_bound | local_bound))
+        elif isinstance(child, ast.ClassDef):
+            results.extend(_find_functions_with_enclosing(child, enclosing_func_bound))
+        else:
+            results.extend(_find_functions_with_enclosing(child, enclosing_func_bound))
+    return results
+
+
+def _shallow_custody_findings(tree: ast.AST, path: str) -> list[tuple[int, str]]:
+    """Identify shallow-custody snapshot assignments in candidate test functions.
+
+    Note: This is a conservative subset detector, not proof of full deep custody;
+    independent semantic review is mandatory.
+    """
+    module_bound_names = _collect_scope_bound_names(tree.body) if isinstance(tree, ast.Module) else set()
+    findings: list[tuple[int, str]] = []
+
+    for func, enclosing_func_bound in _find_functions_with_enclosing(tree, set()):
+        func_params = _function_param_names(func)
+        func_bound = func_params | _collect_scope_bound_names(func.body)
+        shadowed = module_bound_names | enclosing_func_bound | func_bound
+
+        equality_pairs: set[tuple[str, str]] = set()
+        candidate_assignments: list[tuple[ast.AST, str, str, str]] = []
+
+        for node in _iter_scope_nodes(func.body):
+            if isinstance(node, ast.Assert):
+                for conjunct in _get_and_conjuncts(node.test):
+                    if isinstance(conjunct, ast.Compare):
+                        cur_left = conjunct.left
+                        for op, right in zip(conjunct.ops, conjunct.comparators):
+                            if (
+                                isinstance(op, ast.Eq)
+                                and isinstance(cur_left, ast.Name)
+                                and isinstance(right, ast.Name)
+                            ):
+                                equality_pairs.add((cur_left.id, right.id))
+                                equality_pairs.add((right.id, cur_left.id))
+                            cur_left = right
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "assertEqual"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "self"
+                and len(node.args) == 2
+                and not node.keywords
+                and isinstance(node.args[0], ast.Name)
+                and isinstance(node.args[1], ast.Name)
+            ):
+                equality_pairs.add((node.args[0].id, node.args[1].id))
+                equality_pairs.add((node.args[1].id, node.args[0].id))
+
+            target_name: str | None = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                target_name = node.targets[0].id
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+                target_name = node.target.id
+
+            if target_name and (target_name.endswith("_snap") or target_name.endswith("_snapshot")):
+                rhs = node.value
+                if (
+                    isinstance(rhs, ast.Call)
+                    and isinstance(rhs.func, ast.Name)
+                    and rhs.func.id in ("dict", "list")
+                    and len(rhs.args) == 1
+                    and isinstance(rhs.args[0], ast.Name)
+                    and not rhs.keywords
+                ):
+                    param_name = rhs.args[0].id
+                    if param_name in func_params and param_name != target_name:
+                        candidate_assignments.append((node, param_name, target_name, rhs.func.id))
+
+        for assign_node, param_name, snap_name, ctor in candidate_assignments:
+            if ctor not in shadowed and (param_name, snap_name) in equality_pairs:
+                findings.append((assign_node.lineno, f"{path}:{assign_node.lineno}: shallow-custody-snapshot"))
+
+    return findings
+
+
 def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[str]:
-    """Find deterministic no-op assertion defects in candidate two-site tests."""
+    """Find deterministic assertion and shallow-custody defects in candidate two-site tests.
+
+    Subset detector, not proof of full deep custody; semantic review mandatory.
+    """
     changes = worker_result.get("changes") if isinstance(worker_result, Mapping) else None
     if not isinstance(changes, list):
         return []
@@ -316,6 +486,9 @@ def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[
                     )
                     if dflt is not None and not (isinstance(dflt, ast.Constant) and dflt.value is None):
                         file_findings.append((node.lineno, f"{path}:{node.lineno}: selector-default"))
+
+        for item in _shallow_custody_findings(tree, path):
+            file_findings.append(item)
 
         file_findings.sort(key=lambda item: (item[0], item[1]))
         findings.extend(item[1] for item in file_findings)
