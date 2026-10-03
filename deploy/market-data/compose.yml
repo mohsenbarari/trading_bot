@@ -40,7 +40,7 @@ services:
     group_add:
       - "10001"
     read_only: true
-    restart: "on-failure:5"
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:

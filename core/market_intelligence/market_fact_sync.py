@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime, timedelta, timezone
+import json
 import os
 from pathlib import Path
 import random
@@ -34,7 +35,7 @@ from .market_fact_recovery import (
 
 
 SYNC_SCHEMA = "market_fact_sync/1.0"
-MAX_BATCH_ITEMS = 100
+MAX_BATCH_ITEMS = 500  # Existing wire/ACK contract limit; never wait to fill it.
 MAX_BATCH_DOCUMENT_BYTES = 768 * 1024
 DEFAULT_FLUSH_SECONDS = 0.25
 MAX_BACKOFF_SECONDS = 30.0
@@ -174,6 +175,22 @@ def load_next_batch(
     connection.rollback()
     deliveries: list[MarketFactDeliveryV1] = []
     expected = checkpoint + 1
+    created_at = _utc_now()
+    item_bytes = 0
+    # Metadata has fixed-length hashes. Only decimal count/last-sequence grow.
+    # Previously every appended item rehashed and revalidated the entire prefix
+    # twice, making large catch-up batches quadratic in their item count.
+    header = {
+        "contract": "market_fact_batch/1.0", "batch_id": "0" * 64,
+        "schema_version": "1.0", "stream_id": stream_id,
+        "first_sequence": expected, "last_sequence": expected,
+        "created_at_utc": created_at.isoformat().replace("+00:00", "Z"),
+        "item_count": 1, "items_hash": "0" * 64,
+        "sender_instance_id": sender_instance_id, "items": [],
+    }
+    header_bytes = len(json.dumps(header, separators=(",", ":"),
+                                 ensure_ascii=False).encode("utf-8"))
+    initial_sequence_digits = len(str(expected))
     for sequence_value, envelope in rows:
         sequence = int(sequence_value)
         if sequence != expected:
@@ -186,37 +203,22 @@ def load_next_batch(
             delivery_sequence=sequence,
             fact=fact,
         )
-        candidate_items = (*deliveries, candidate)
-        candidate_hash = batch_items_hash(candidate_items)
-        candidate_batch = MarketFactBatchV1(
-            contract="market_fact_batch/1.0",
-            batch_id=_batch_id(
-                stream_id=stream_id,
-                first_sequence=candidate_items[0].delivery_sequence,
-                last_sequence=candidate_items[-1].delivery_sequence,
-                items_hash=candidate_hash,
-            ),
-            schema_version="1.0",
-            stream_id=stream_id,
-            first_sequence=candidate_items[0].delivery_sequence,
-            last_sequence=candidate_items[-1].delivery_sequence,
-            created_at_utc=_utc_now(),
-            item_count=len(candidate_items),
-            items_hash=candidate_hash,
-            sender_instance_id=sender_instance_id,
-            items=candidate_items,
-        )
-        size = len(candidate_batch.model_dump_json().encode("utf-8"))
+        candidate_bytes = len(candidate.model_dump_json().encode("utf-8"))
+        count = len(deliveries) + 1
+        size = (header_bytes + item_bytes + candidate_bytes + count - 1
+                + len(str(sequence)) - initial_sequence_digits
+                + len(str(count)) - 1)
         if size > max_document_bytes:
             if not deliveries:
                 raise MarketFactSyncError("market_fact_sync_single_item_too_large")
             break
         deliveries.append(candidate)
+        item_bytes += candidate_bytes
         expected += 1
     if not deliveries:
         return None
     items_hash = batch_items_hash(deliveries)
-    return MarketFactBatchV1(
+    batch = MarketFactBatchV1(
         contract="market_fact_batch/1.0",
         batch_id=_batch_id(
             stream_id=stream_id,
@@ -228,12 +230,15 @@ def load_next_batch(
         stream_id=stream_id,
         first_sequence=deliveries[0].delivery_sequence,
         last_sequence=deliveries[-1].delivery_sequence,
-        created_at_utc=_utc_now(),
+        created_at_utc=created_at,
         item_count=len(deliveries),
         items_hash=items_hash,
         sender_instance_id=sender_instance_id,
         items=tuple(deliveries),
     )
+    if len(batch.model_dump_json().encode("utf-8")) > max_document_bytes:
+        raise MarketFactSyncError("market_fact_sync_batch_size_invariant")
+    return batch
 
 
 def acknowledge_batch(connection, batch: MarketFactBatchV1, ack: MarketFactAckV1) -> None:

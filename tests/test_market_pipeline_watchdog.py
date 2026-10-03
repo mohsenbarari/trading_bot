@@ -1,6 +1,12 @@
 import importlib.util
+import contextlib
+import io
+import json
 from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("market_watchdog", Path(__file__).parents[1] / "scripts/market_pipeline_watchdog.py")
 watchdog = importlib.util.module_from_spec(spec)
@@ -36,3 +42,73 @@ class WatchdogTests(unittest.TestCase):
 
     def test_stale_heartbeat_is_a_liveness_failure(self):
         self.assertEqual(watchdog.assess("market-processor", health("market-processor", 700), {}, 1000), "HEARTBEAT_STALLED")
+
+    def test_recovery_requires_two_samples_and_preserves_restart_cooldown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ops = root / "ops"
+            ops.mkdir()
+            deployment = root / "deployment.lock"
+            deployment.touch()
+            roles = watchdog.ROLES["bot"]
+            containers = []
+            for role in roles:
+                state = root / role / role
+                state.mkdir(parents=True)
+                (state / "health.json").write_text(json.dumps(health(role)))
+                containers.append({
+                    "Id": role,
+                    "Config": {"Labels": {
+                        "com.docker.compose.project": "test-pipeline",
+                        "com.docker.compose.service": role,
+                    }},
+                    "State": {"Running": True, "StartedAt": "1970-01-01T00:00:00Z"},
+                })
+            args = SimpleNamespace(host_role="bot", project="test-pipeline",
+                                   state_root=root, ops_root=ops,
+                                   deployment_lock=deployment, apply=True)
+            restarts = []
+
+            def run(command, timeout=10):
+                if command[1] == "inspect":
+                    return SimpleNamespace(returncode=0, stdout=json.dumps(containers))
+                if command[1] == "exec":
+                    return SimpleNamespace(returncode=1, stdout="")
+                if command[1] == "restart":
+                    restarts.append(command[-1])
+                    return SimpleNamespace(returncode=0, stdout="")
+                self.fail("Unexpected watchdog command")
+
+            with patch.object(watchdog.argparse.ArgumentParser, "parse_args", return_value=args), \
+                    patch.object(watchdog.os, "geteuid", return_value=0), \
+                    patch.object(watchdog.time, "time", return_value=1000), \
+                    patch.object(watchdog, "run", side_effect=run), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                watchdog.main()
+                self.assertEqual(restarts, [])
+                watchdog.main()
+                self.assertEqual(restarts, ["market-fact-receiver"])
+                report = json.loads((ops / "watchdog-health.json").read_text())
+                self.assertEqual(report["roles"][0]["status"], "RESTARTED")
+                watchdog.main()
+                self.assertEqual(restarts, ["market-fact-receiver"])
+                state = json.loads((ops / "watchdog-state.json").read_text())
+                self.assertEqual(state["market-fact-receiver"]["last_restart_at"], 1000)
+
+    def test_deployment_lock_prevents_any_runtime_inspection_or_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / "deployment.lock"
+            lock.touch()
+            args = SimpleNamespace(host_role="bot", project="test-pipeline",
+                                   state_root=root, ops_root=root,
+                                   deployment_lock=lock, apply=True)
+            with open(lock, "r") as descriptor:
+                watchdog.fcntl.flock(descriptor, watchdog.fcntl.LOCK_EX)
+                with patch.object(watchdog.argparse.ArgumentParser, "parse_args", return_value=args), \
+                        patch.object(watchdog.os, "geteuid", return_value=0), \
+                        patch.object(watchdog, "run") as run, \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    watchdog.main()
+                    run.assert_not_called()
+                    self.assertIn("DEPLOYMENT_IN_PROGRESS", output.getvalue())

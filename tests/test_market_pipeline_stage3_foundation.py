@@ -236,8 +236,9 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         capture_account2 = web.split("  market-capture-account2:", 1)[1].split(
             "  market-capture-external:", 1
         )[0]
-        self.assertIn('restart: "on-failure"', capture_account1)
-        self.assertIn('restart: "on-failure"', capture_account2)
+        self.assertIn('restart: unless-stopped', capture_account1)
+        self.assertIn('restart: unless-stopped', capture_account2)
+        self.assertNotIn('on-failure:5', base)
         self.assertIn("capture-liveness", capture_account1)
         self.assertIn("healthcheck", capture_account2)
         self.assertEqual(web.count("ports:"), 1)
