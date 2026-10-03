@@ -25,7 +25,7 @@ CANONICAL_PINS: dict[str, str] = {
     "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-387-snapshot.json": (
         "3a2662a8e60068566582744461bb12cfc3788d3ea04857ca23f99028548f25b7"
     ),
-    "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json": (
+    "docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-388-snapshot.json": (
         "da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7"
     ),
 }
@@ -71,12 +71,22 @@ class C17TemporaryCanaryCustodyTests(unittest.TestCase):
                 f"SHA256 mismatch for canonical path {relpath}: expected {expected_sha}, got {actual_sha}",
             )
 
+        live_file_path = repo_root / LIVE_CANARY_RELPATH
+        self.assertTrue(live_file_path.is_file(), f"Missing canonical live canary file: {live_file_path}")
+        live_canonical_bytes = live_file_path.read_bytes()
+
         frozen_canonical_mapping: dict[str, bytes] = dict(canonical_bytes)
+        frozen_canonical_mapping[LIVE_CANARY_RELPATH] = live_canonical_bytes
+        self.assertEqual(len(frozen_canonical_mapping), 7)
+        self.assertEqual(
+            set(frozen_canonical_mapping.keys()),
+            set(CANONICAL_PINS.keys()) | {LIVE_CANARY_RELPATH},
+        )
 
         temp_dir = tempfile.TemporaryDirectory()
         try:
             temp_root = Path(temp_dir.name)
-            for relpath, raw_bytes in canonical_bytes.items():
+            for relpath, raw_bytes in frozen_canonical_mapping.items():
                 dest_path = temp_root / relpath
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 dest_path.write_bytes(raw_bytes)
@@ -84,7 +94,7 @@ class C17TemporaryCanaryCustodyTests(unittest.TestCase):
             live_file = temp_root / LIVE_CANARY_RELPATH
             live_file.write_bytes(LITERAL_CANARY_BYTES)
 
-            frozen_temporary_mapping: dict[str, bytes] = dict(canonical_bytes)
+            frozen_temporary_mapping: dict[str, bytes] = dict(frozen_canonical_mapping)
             frozen_temporary_mapping[LIVE_CANARY_RELPATH] = LITERAL_CANARY_BYTES
 
             assert_closure_bytes(temp_root, frozen_temporary_mapping)
