@@ -1385,9 +1385,13 @@ def _select_pending_deliveries(
     selected: list[sqlite3.Row] = []
     fast_budget = max(1, max_deliveries // 4)
     fast_selected = 0
+    fast_stream_budget = max(1, fast_budget // len(FAST_INPUT_PRIORITY))
+    fast_by_stream: dict[str, int] = {}
 
     def priority(stream_id):
-        return FAST_INPUT_PRIORITY.get(stream_id, 2) if fast_selected < fast_budget else 2
+        if fast_selected >= fast_budget or fast_by_stream.get(stream_id, 0) >= fast_stream_budget:
+            return 2
+        return FAST_INPUT_PRIORITY.get(stream_id, 2)
 
     try:
         for stream_id in stream_ids:
@@ -1419,7 +1423,7 @@ def _select_pending_deliveries(
             )
         while heap and len(selected) < max_deliveries:
             rank, received_at, stream_id, sequence = heapq.heappop(heap)
-            if rank < 2 and fast_selected >= fast_budget:
+            if rank < 2 and priority(stream_id) == 2:
                 heapq.heappush(heap, (2, received_at, stream_id, sequence))
                 continue
             row = heads[stream_id]
@@ -1429,6 +1433,7 @@ def _select_pending_deliveries(
             selected.append(row)
             if rank < 2:
                 fast_selected += 1
+                fast_by_stream[stream_id] = fast_by_stream.get(stream_id, 0) + 1
             next_sequences[stream_id] = expected + 1
             following = cursors[stream_id].fetchone()
             if following is not None:
