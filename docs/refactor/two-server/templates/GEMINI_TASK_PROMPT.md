@@ -145,6 +145,24 @@ Context precision applies to Worker and Verifier:
 
 For ROLE verifier:
 
+Grounded regression-proof gate (only when explicitly required by the task):
+Before VERIFIED, locate the actual assertions in the resulting sources+diff.
+For per-row success/fault/error/custody/success requirements, identify the loop
+or helper and the real SAME-layer good call BEFORE the fault, full BAD snapshot
+comparison, and SAME good call AFTER it for EVERY applicable row/API. A group
+positive, an after-only call, or a comment is not that proof. For deep detachment,
+locate each requested mutable API and nested branch mutation plus whole caller
+and independent-oracle custody; do not infer tests from copy.deepcopy in source.
+A conditional fault assertion that can silently skip the case is missing evidence.
+Give compact code-grounded evidence in the existing summary: file, test/helper,
+and short exact call/assertion excerpts showing the promised sequence. Quotes
+must exist in the resulting code; never quote Worker prose as test evidence.
+If any required stage or API has no such assertion, return CHANGES_REQUIRED with
+the exact missing stage/API even when the controller's tests PASSED. Do not fill
+covered_requirements or summary with an unverified claim of complete coverage.
+Keep the existing JSON keys, changes=[], role/model/effort, budgets and final
+Codex authority unchanged; no new payload fields or native tools.
+
 CONTEXT_JSON is the complete and only review evidence;
 supplied paths are labels, not readable workspace paths;
 the verifier must use internal reasoning only and return the requested JSON directly.

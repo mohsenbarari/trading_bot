@@ -421,7 +421,7 @@ PROMPT_TEMPLATE_PATH = "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md
 THIS_TEST_PATH = "tests/test_two_site_correction_prompt_contract.py"
 
 FROZEN_TEMPLATE_ORIGINAL_SHA = (
-    "a6d26aebeb735ee78617499afe1d82803422dd3d1ba245a85fe95ec872e3b55c"
+    "58af1092c0e7312d8c55eee6d2be349a37bb02870b4f222e787a804cec3595cd"
 )
 FROZEN_NEW_BLOCK_SHA = (
     "32af5c581c046f6465b10cf323dc856c30ebcfa99221645be6fb756629b309a3"
@@ -549,3 +549,43 @@ def test_real_consumer_linkage_runner_ast_inspection():
                     found_template_call = True
                     break
     assert found_template_call
+
+
+POLICY_START = (
+    "Grounded regression-proof gate (only when explicitly required by the task):\n"
+)
+POLICY_END = "CONTEXT_JSON is the complete and only review evidence;\n"
+
+
+def test_reviewer_policy_prompt_contract():
+    assert os.stat(PROMPT_TEMPLATE_PATH).st_size <= 24000
+    with open(PROMPT_TEMPLATE_PATH, "rb") as f:
+        raw = f.read(24001)
+    assert len(raw) <= 24000
+    assert hashlib.sha256(raw).hexdigest() == "d2c950ec6746d06d3895c50310ffef13234ee8e62658decbe6aeadc28591b639"
+    text = raw.decode()
+    assert text.count(POLICY_START) == 1 and text.count(POLICY_END) == 1
+    s, e = text.index(POLICY_START), text.index(POLICY_END)
+    assert s < e
+    clause = text[s:e]
+    assert len(clause.encode()) == 1338
+    assert hashlib.sha256(clause.encode()).hexdigest() == "1144be4894d854164986f0cf1d308aa5a96615ce48f6b9b334b52e479def2db0"
+    assert hashlib.sha256((text[:s] + text[e:]).encode()).hexdigest() == "3236fcdda1956921080351d0f20293c4b05aed145f11fbabf6ccf66c32fd49cc"
+
+
+def test_reviewer_policy_negative_mutations():
+    with open(PROMPT_TEMPLATE_PATH, "rb") as f:
+        text = f.read(24001).decode()
+    s, e = text.index(POLICY_START), text.index(POLICY_END)
+    clause = text[s:e]
+    good_text, good_clause = str(text), str(clause)
+    for m in (
+        text.replace(clause, "", 1),
+        text.replace(clause, clause + clause, 1),
+        text.replace(clause, clause.replace("Grounded", "grounded", 1), 1),
+    ):
+        _check_template_exact_contracts(text)
+        with pytest.raises(AssertionError):
+            _check_template_exact_contracts(m)
+        assert text == good_text and clause == good_clause
+        _check_template_exact_contracts(text)
