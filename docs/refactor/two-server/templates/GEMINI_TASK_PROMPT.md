@@ -26,14 +26,21 @@ Context precision applies to Worker and Verifier:
   Treat source_contract_hints as advisory exact-key evidence, require authoritative source
   inspection and forbid guessing absent keys; Reviewer remains independent.
 - A nonempty dependency_context.missing_full_model_paths requires concise BLOCKED
-  instead of guessing field/status/nullability; obey output_contract; finish internal
-  reasoning plus JSON within max_provider_output_tokens=60000; a newly generated test
-  file retains the hard max_new_test_file_utf8_bytes=24000 limit but has a drafting
-  target of at most 18000 UTF-8 bytes. Prefer existing fixtures/helpers and one bounded
-  behavior unit with 2-3 independent scenarios; avoid source recitation, redundant
-  comments/assertions and copied fixtures. If complete correct work is likely to exceed
-  the target, hard cap or provider budget, return concise BLOCKED/rescope before drafting
-  or repeatedly resubmitting oversized bytes; never rely on continuation after truncation.
+  instead of guessing field/status/nullability; obey output_contract and every stricter
+  task-specific file, combined-source and aggregate hard byte limit simultaneously.
+  preparation_notes.output_contract values are global ceilings, not permission to
+  override a smaller hard limit in the authoritative task. For a newly generated test,
+  effective_file_cap is the smallest applicable hard limit, never above the default
+  max_new_test_file_utf8_bytes=24000. Draft at no more than min(18000, floor(0.75 *
+  effective_file_cap)) UTF-8 bytes and retain the same margin for combined/aggregate
+  limits; without a smaller task cap the existing 18000 target and 24000 ceiling remain.
+  Count final materialized file UTF-8 bytes, not code points, provider tokens or escaped
+  JSON transport bytes. Finish internal reasoning plus JSON within the unchanged
+  max_provider_output_tokens=60000. Prefer existing fixtures/helpers and one bounded
+  behavior unit with all required independent scenarios; avoid source recitation,
+  redundant comments/assertions and copied fixtures. If complete correct work cannot
+  fit these limits, return concise BLOCKED/rescope before drafting or repeatedly
+  resubmitting oversized bytes; never claim an unmeasured size or rely on truncation.
   Do not reduce requirements, independent assertions, semantic review, tests, or the
   tracked Worker (Gemini medium or Claude Opus 4.6 Thinking with model-default effort) / Reviewer high role contract.
 - For every supplied dependency_context.model_contract_hints entry, treat

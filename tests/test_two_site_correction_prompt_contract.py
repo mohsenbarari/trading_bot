@@ -400,3 +400,152 @@ def test_negative_replacement_transport_for_originally_new():
 
     # Valid after
     assert rebase_correction_result(_project_to_canonical(raw), allowed, orig, cand) == FROZEN_EXPECTED_REBASED_RESULT
+
+
+# ---------------------------------------------------------------------------
+# AE-01 Prompt Precedence Regression & Linkage
+# ---------------------------------------------------------------------------
+
+import ast
+import inspect
+import os
+
+import scripts.two_site_proposal_runner as real_runner
+
+FROZEN_ORIGINAL_TEST_PREFIX_SHA = (
+    "0790ac2d9345f8a96662f24ef5778f38d5ae0e4af4578502d175ece5dd471286"
+)
+FROZEN_ORIGINAL_TEST_PREFIX_LEN = 16353
+
+PROMPT_TEMPLATE_PATH = "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md"
+THIS_TEST_PATH = "tests/test_two_site_correction_prompt_contract.py"
+
+FROZEN_TEMPLATE_ORIGINAL_SHA = (
+    "a6d26aebeb735ee78617499afe1d82803422dd3d1ba245a85fe95ec872e3b55c"
+)
+FROZEN_NEW_BLOCK_SHA = (
+    "32af5c581c046f6465b10cf323dc856c30ebcfa99221645be6fb756629b309a3"
+)
+
+FROZEN_BUDGET_EXAMPLES = ((8000, 6000), (4000, 3000), (24000, 18000))
+
+BLOCK_START_ANCHOR = (
+    "- A nonempty dependency_context.missing_full_model_paths requires concise BLOCKED"
+)
+FOLLOWING_BLOCK_ANCHOR = (
+    "- For every supplied dependency_context.model_contract_hints entry, treat"
+)
+
+FROZEN_OLD_PARAGRAPH = (
+    "- A nonempty dependency_context.missing_full_model_paths requires concise BLOCKED\n"
+    "  instead of guessing field/status/nullability; obey output_contract; finish internal\n"
+    "  reasoning plus JSON within max_provider_output_tokens=60000; a newly generated test\n"
+    "  file retains the hard max_new_test_file_utf8_bytes=24000 limit but has a drafting\n"
+    "  target of at most 18000 UTF-8 bytes. Prefer existing fixtures/helpers and one bounded\n"
+    "  behavior unit with 2-3 independent scenarios; avoid source recitation, redundant\n"
+    "  comments/assertions and copied fixtures. If complete correct work is likely to exceed\n"
+    "  the target, hard cap or provider budget, return concise BLOCKED/rescope before drafting\n"
+    "  or repeatedly resubmitting oversized bytes; never rely on continuation after truncation.\n"
+    "  Do not reduce requirements, independent assertions, semantic review, tests, or the\n"
+    "  tracked Worker (Gemini medium or Claude Opus 4.6 Thinking with model-default effort) / Reviewer high role contract.\n"
+)
+
+
+def _check_template_exact_contracts(template_text: str) -> str:
+    assert FROZEN_OLD_PARAGRAPH not in template_text
+    assert template_text.count(BLOCK_START_ANCHOR) == 1
+    assert template_text.count(FOLLOWING_BLOCK_ANCHOR) == 1
+
+    start_idx = template_text.index(BLOCK_START_ANCHOR)
+    end_idx = template_text.index(FOLLOWING_BLOCK_ANCHOR)
+    assert start_idx < end_idx
+
+    extracted = template_text[start_idx:end_idx]
+    assert extracted.endswith("\n")
+    assert hashlib.sha256(extracted.encode("utf-8")).hexdigest() == FROZEN_NEW_BLOCK_SHA
+
+    reverted = template_text.replace(extracted, FROZEN_OLD_PARAGRAPH, 1)
+    assert hashlib.sha256(reverted.encode("utf-8")).hexdigest() == FROZEN_TEMPLATE_ORIGINAL_SHA
+    return extracted
+
+
+def test_prompt_template_and_test_file_bounded_stat_and_read():
+    assert os.stat(PROMPT_TEMPLATE_PATH).st_size <= 24000
+    assert os.stat(THIS_TEST_PATH).st_size <= 24000
+
+    with open(PROMPT_TEMPLATE_PATH, "rb") as f:
+        template_raw = f.read(24001)
+    assert len(template_raw) <= 24000
+
+    with open(THIS_TEST_PATH, "rb") as f:
+        test_raw = f.read(24001)
+    assert len(test_raw) <= 24000
+
+    assert len(test_raw) >= FROZEN_ORIGINAL_TEST_PREFIX_LEN
+    prefix = test_raw[:FROZEN_ORIGINAL_TEST_PREFIX_LEN]
+    assert hashlib.sha256(prefix).hexdigest() == FROZEN_ORIGINAL_TEST_PREFIX_SHA
+
+
+def test_prompt_template_realtemplate_exact_checker_and_invalid_vectors():
+    with open(PROMPT_TEMPLATE_PATH, "rb") as f:
+        template_raw = f.read(24001)
+    assert len(template_raw) <= 24000
+    template_text = template_raw.decode("utf-8")
+
+    # Valid before
+    extracted = _check_template_exact_contracts(template_text)
+
+    # Invalid vector 1: removed NEW
+    mutated_removed = template_text.replace(extracted, "")
+    with pytest.raises(AssertionError):
+        _check_template_exact_contracts(mutated_removed)
+
+    # Invalid vector 2: doubled NEW
+    mutated_doubled = template_text.replace(extracted, extracted + extracted)
+    with pytest.raises(AssertionError):
+        _check_template_exact_contracts(mutated_doubled)
+
+    # Invalid vector 3: one unrelated byte change
+    mutated_unrelated = template_text.replace("# Complete", "# complete", 1)
+    with pytest.raises(AssertionError):
+        _check_template_exact_contracts(mutated_unrelated)
+
+    # Valid after
+    _check_template_exact_contracts(template_text)
+
+
+def test_prompt_precedence_illustrative_advisory_budget_formula():
+    for cap, expected_target in FROZEN_BUDGET_EXAMPLES:
+        assert min(18000, (3 * cap) // 4) == expected_target
+
+    computed = tuple((cap, min(18000, (3 * cap) // 4)) for cap, _ in FROZEN_BUDGET_EXAMPLES)
+    assert computed == FROZEN_BUDGET_EXAMPLES
+
+
+def test_real_consumer_linkage_runner_ast_inspection():
+    source = inspect.getsource(real_runner.run)
+    tree = ast.parse(source)
+
+    constants = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert PROMPT_TEMPLATE_PATH in constants
+    assert any("ROLE: " in c for c in constants)
+    assert any("CONTEXT_JSON:" in c for c in constants)
+
+    found_template_call = False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "bounded_file_text"
+        ):
+            for subnode in ast.walk(node):
+                if (
+                    isinstance(subnode, ast.Constant)
+                    and subnode.value == PROMPT_TEMPLATE_PATH
+                ):
+                    found_template_call = True
+                    break
+    assert found_template_call
