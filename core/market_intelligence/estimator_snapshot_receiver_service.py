@@ -127,7 +127,8 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             finally:
                 connection.close()
-            self._respond(200, {"status": _health_status(metrics), **metrics})
+            self._respond(200, {"schema": SNAPSHOT_RECEIVER_SCHEMA,
+                                "status": _health_status(metrics), **metrics})
             return
         if self.path.startswith(SNAPSHOT_CURRENT_PATH):
             lane = (
