@@ -986,6 +986,42 @@ def test_failure_facts(receipt: Mapping[str, Any]) -> dict[str, list[str]]:
     return {"tests": tests, "exceptions": exceptions, "statements": statements}
 
 
+def _byte_profile_failure_factors(receipt: Mapping[str, Any]) -> list[str] | None:
+    """Recognize only complete canonical static-byte-profile gate diagnostics."""
+    if (receipt["isolation"] != "static-byte-profile" or receipt["returncode"] != 1
+            or receipt["stdout_tail"] or receipt["snapshot_files"] or receipt["snapshot_bytes"]):
+        return None
+    lines = receipt["stderr_tail"].split("\n")
+    if not 1 <= len(lines) <= 33:
+        return None
+    try:
+        from scripts.two_site_agent_sandbox import _validate_overlay_path
+    except ImportError:
+        from two_site_agent_sandbox import _validate_overlay_path
+    factors, seen = [], set()
+    for line in lines:
+        match = re.fullmatch(
+            r"AssertionError: (.+) exceeds ([1-9][0-9]{0,5}) byte limit: ([1-9][0-9]{0,6}) bytes",
+            line,
+        )
+        if match is None:
+            return None
+        target, cap_text, actual_text = match.groups()
+        cap, actual = int(cap_text), int(actual_text)
+        if cap > 160000 or actual <= cap or target in seen:
+            return None
+        if target != "proposal total":
+            try:
+                if len(target.encode("utf-8")) > 128 or any(c in target for c in "*?[]{}"):
+                    return None
+                _validate_overlay_path(target)
+            except ValueError:
+                return None
+        seen.add(target)
+        factors.append(f"{target} exceeds {cap_text} byte limit")
+    return sorted(factors)
+
+
 def test_failure_signature(receipt: Mapping[str, Any]) -> str:
     proposal_sha = (
         receipt.get("proposal_sha256")
@@ -1003,6 +1039,12 @@ def test_failure_signature(receipt: Mapping[str, Any]) -> str:
         "selectors": validated["selectors"],
         "facts": {k: sorted(v) for k, v in facts.items()},
     }
+    byte_factors = _byte_profile_failure_factors(validated)
+    if byte_factors is not None:
+        # Actual counts remain in feedback/receipts; only factor identity omits
+        # them. Generic pytest assertions and unknown diagnostics stay exact.
+        payload["facts"] = {"byte_budget_factors": byte_factors}
+        payload["isolation"] = "static-byte-profile"
     canonical_json = json.dumps(
         payload,
         sort_keys=True,

@@ -620,6 +620,23 @@ def preparation_notes(task, sources):
         "test_only_task": test_only_task,
         "new_test_files": new_test_files,
     }
+    # Canonical task limits outrank the generic drafting hint, not vice versa.
+    # Keep the complete detached profile even if advisory lists are later trimmed.
+    try:
+        from scripts.two_site_proposal_byte_profile import parse_proposal_utf8_budget_profile
+    except ImportError:
+        from two_site_proposal_byte_profile import parse_proposal_utf8_budget_profile
+    profile = parse_proposal_utf8_budget_profile(reqs, allowed_files, allowed_files)
+    if profile is not None:
+        out_contract["proposal_utf8_budget_profile"] = profile
+        allowed_new_tests = sorted(set(raw_new_tests) & set(profile["file_limits"]))
+        if len(allowed_new_tests) == 1:
+            cap = min(24000, profile["total_limit"],
+                      profile["file_limits"][allowed_new_tests[0]])
+            out_contract["max_new_test_file_utf8_bytes"] = cap
+            out_contract["new_test_file_draft_target_utf8_bytes"] = (3 * cap) // 4
+        # Multiple new files have independent caps in the profile. Never apply
+        # the smallest path's cap globally to a larger permitted sibling.
 
     literal_hints, seen_hints, omitted_literal_count, total_bytes = [], set(), 0, 0
 
@@ -725,4 +742,6 @@ def preparation_notes(task, sources):
         candidate["reconciliation_schema_profile"] = profile
         if len(json.dumps(candidate).encode("utf-8")) <= 8192:
             res["reconciliation_schema_profile"] = profile
+    if "proposal_utf8_budget_profile" in out_contract and len(json.dumps(res).encode("utf-8")) > 8192:
+        raise ValueError("preparation notes exceed byte budget")
     return res
