@@ -13,12 +13,14 @@ try:
         p1_00_characterization_bootstrap_findings,
     )
     from scripts.two_site_proposal_runner import ProposalError
+    from scripts.two_site_pre_review_receipt import SandboxError
 except ImportError:
     from two_site_proposal_pipeline import (
         _run_post_worker_remainder,
         p1_00_characterization_bootstrap_findings,
     )
     from two_site_proposal_runner import ProposalError
+    from two_site_pre_review_receipt import SandboxError
 
 PIPELINE_MOD = _run_post_worker_remainder.__module__
 
@@ -99,10 +101,26 @@ def test_verified_path_with_passed_receipt_selects_one_reviewer(tmp_path):
     evidence_dir = kwargs["evidence_dir"]
     reviewer_dir = tmp_path / "reviewer"
     reviewer_dir.mkdir(parents=True, exist_ok=True)
+    worker_result_path = kwargs["worker_dir"] / "result.json"
+    worker_result_path.write_text("{}", encoding="utf-8")
     receipt_path = evidence_dir / "pre-review-test-receipt.json"
-    receipt_path.write_text("{}", encoding="utf-8")
-    receipt = {"state": "PASSED", "selectors": ["tests/test_pipeline.py"]}
-    receipt_sha = "b" * 64
+
+    worker_sha = kwargs["current_worker"][1]
+    receipt = {
+        "state": "PASSED",
+        "proposal_sha256": worker_sha,
+        "selectors": ["tests/test_pipeline.py"],
+        "unsupported_specs": [],
+        "returncode": 0,
+        "stdout_tail": "",
+        "stderr_tail": "",
+        "snapshot_files": 0,
+        "snapshot_bytes": 0,
+        "isolation": "network-fence",
+    }
+    receipt_bytes = json.dumps(receipt, ensure_ascii=False, indent=2).encode("utf-8")
+    receipt_path.write_bytes(receipt_bytes)
+    receipt_sha = hashlib.sha256(receipt_bytes).hexdigest()
 
     with patch(
         f"{PIPELINE_MOD}.p1_00_characterization_bootstrap_findings",
@@ -116,13 +134,57 @@ def test_verified_path_with_passed_receipt_selects_one_reviewer(tmp_path):
     ) as mock_provider, patch(
         f"{PIPELINE_MOD}.validate_run",
         return_value=({"status": "VERIFIED", "findings": []}, {"conversation_id": "c1"}, "c" * 64, ""),
-    ), patch(
-        f"{PIPELINE_MOD}.check_state"
+    ) as mock_validate, patch(
+        f"{PIPELINE_MOD}.check_state",
     ):
         _run_post_worker_remainder(**kwargs)
 
     mock_persist.assert_called_once()
     assert mock_provider.call_count == 1
+    assert mock_provider.call_args[0][0] == kwargs["root"]
+    assert mock_provider.call_args[0][1] == kwargs["task_candidate"]
     assert mock_provider.call_args[0][2] == "verifier"
+    assert mock_provider.call_args[0][3] == f"{kwargs['run_prefix']}-reviewer-0"
+    assert mock_provider.call_args[0][4] == kwargs["timeout"]
+    assert mock_provider.call_args[1]["proposal"] == worker_result_path
+    assert mock_provider.call_args[1]["test_evidence"] == receipt_path
+    assert mock_provider.call_args[1]["expected_head"] == kwargs["initial_head"]
+    assert hashlib.sha256(receipt_path.read_bytes()).hexdigest() == receipt_sha
+    assert json.loads(receipt_path.read_text(encoding="utf-8")) == receipt
+    assert receipt["proposal_sha256"] == worker_sha
+
+    mock_validate.assert_called_once()
+    assert mock_validate.call_args[1]["expected_test_receipt"] == receipt
+    assert mock_validate.call_args[1]["expected_test_evidence_sha"] == receipt_sha
+    assert mock_validate.call_args[1]["expected_test_receipt"]["proposal_sha256"] == worker_sha
+    assert mock_validate.call_args[1]["prior_worker"] == kwargs["current_worker"]
+
+    assert list(evidence_dir.glob("feedback-*.json")) == []
     assert kwargs["state"]["state"] == "READY_FOR_CODEX"
     assert kwargs["state"]["blockers"] == []
+
+
+def test_malformed_two_key_receipt_rejected_before_provider(tmp_path):
+    kwargs = _base_kwargs(tmp_path)
+    evidence_dir = kwargs["evidence_dir"]
+    receipt_path = evidence_dir / "pre-review-test-receipt.json"
+    receipt_path.write_text("{}", encoding="utf-8")
+    malformed_receipt = {"state": "PASSED", "selectors": ["tests/test_pipeline.py"]}
+    receipt_sha = "b" * 64
+
+    with patch(
+        f"{PIPELINE_MOD}.p1_00_characterization_bootstrap_findings",
+        return_value=[],
+    ), patch(
+        f"{PIPELINE_MOD}.persist_pre_review_tests",
+        return_value=(malformed_receipt, receipt_path, receipt_sha),
+    ), patch(
+        f"{PIPELINE_MOD}.run_provider_session",
+    ) as mock_provider:
+        with pytest.raises(SandboxError, match="receipt keys must match expected schema exactly"):
+            _run_post_worker_remainder(**kwargs)
+
+    mock_provider.assert_not_called()
+    assert list(evidence_dir.glob("feedback-*.json")) == []
+    assert kwargs["state"]["state"] == "IN_PROGRESS"
+    assert kwargs["state"]["state"] != "READY_FOR_CODEX"
