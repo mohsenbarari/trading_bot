@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-NORMAL-RETURN-20261004-286",
+  "assignment_sha256": "e2f3970864735536ef564d52f115a5832f1f0a7e4990ef29b0ac308665b06129",
+  "inspected_head": "eb3d4e98ec781ff571e7cc9f727a14d5ad142013",
+  "status": "RETAINED_EVIDENCE_RECONCILIATION",
+  "acceptance_condition": "This auxiliary receipt is RETAINED_EVIDENCE_RECONCILIATION; acceptance contingent on independent Gemini/Codex checks and clean commit; canonical seed promotion and ledger reconciliation remain NOT_ASSESSED.",
+  "predecessor": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-users-notifications-closeout.json",
+    "last_commit": "eb3d4e98ec781ff571e7cc9f727a14d5ad142013",
+    "sha256": "75e1875d76e5f4c81a7b45987ddd1271bd7104e33443ae6a293d39fdb5feb734"
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "added_distinct_seed_count": 0,
+  "added_behavior_unit_count": 0,
+  "unresolved_origin_cells": 24,
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "canonical_counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 254,
+    "evidenced_seed_count": 389,
+    "remaining_seed_count": 76,
+    "expected_seed_count": 465
+  },
+  "predecessor_group_provenance": {
+    "description": "Completed users/notifications group remains reconciled 5/5 with remaining 0; preserved solely as nested predecessor-group provenance, never a new pending group or reacceptance.",
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_behavior_units": 5,
+    "remaining_behavior_units": 0
+  },
+  "records": [],
+  "reconciled_records": [
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py",
+      "last_commit": "868147b529c1f5571672b0a28aa32bef5365d20a",
+      "sha256": "0ee56b1b9eb2f6b8c9d597ea42a78b11737f4ad0e1c34843c4a575df42b244d0",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_two_row_success",
+        "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_empty",
+        "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_invalid_service_item_propagates_validation_error"
+      ],
+      "scenario_labels": [
+        "two_row_success",
+        "empty",
+        "invalid_service_item_propagates_validation_error"
+      ],
+      "observed_summary": "Explicit assertions capture: two-row GROUP success asserts get_room_or_404(db,chat_id) and list_group_message_seen_members(db,chat=chat,message_id=message_id,requester_id=current_user.id) once, ordered IDs/account_names, actual GroupMessageSeenRead result instances, optional-string/null field preservation and UTC datetimes; empty asserts the same calls and an empty list; invalid user_id asserts propagated Pydantic ValidationError containing user_id and the same once-awaited calls. Runtime route maps via GroupMessageSeenRead.model_validate; tests patch both service boundaries and directly invoke handler. Excludes HTTP response status/routing/authentication/membership/sender/DB query or persistence proof. Coordinator-observed preflight only: 3 passed, 16 deprecation warnings; final acceptance and test receipt remain contingent on actual pipeline/final checks."
+    }
+  ],
+  "preserved_deferrals": [
+    "defer_prior_unit=normal265-canonical-five-closeout-20261004-c001",
+    "defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007",
+    "defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004",
+    "defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded",
+    "defer_prior_unit=normal169-c16-c17-union-p\u78ba",
+    "defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2",
+    "defer_prior_unit=normal169-canonical-manifest-pre",
+    "defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2",
+    "defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007",
+    "defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005",
+    "defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004",
+    "defer_prior_unit=normal169-c16-receipt-custody-20261003-c001",
+    "defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2",
+    "continuation-12",
+    "153/154/155/157-C001",
+    "normal159 C1/C2",
+    "rejected C15 machine checkpoint",
+    "rejected policy/seed proposals",
+    "normal161-c5 C16 incremental reconciliation",
+    "subsequent recorded deferrals",
+    "defer_prior_unit=normal277-pending-five-users-http-reconciliation-20261004-c001-bounded",
+    "defer_prior_unit=normal273-notification-mark-read-missing-id-http-20261004-c002",
+    "defer_prior_unit=normal273-notification-delete-missing-id-http-20261004-c001",
+    "defer_prior_unit=normal271-notification-delete-cross-user-http-20261004-c002",
+    "defer_prior_unit=normal277-notification-http-last-three-inventory-20261004-c002",
+    "defer_prior_unit=normal277-notifications-three-ledger-accounting-20261004-c008",
+    "defer_prior_unit=normal277-current-five-ledger-accounting-20261004-c006"
+  ],
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "exclusions": [
+    "new_or_sixth_behavior",
+    "seed_origin_blocker_or_stage_closure",
+    "missing_id_mark_read",
+    "deferred_delete_404_outcomes",
+    "authentication_policy_acceptance",
+    "service_authorization_or_database_behavior",
+    "concurrency_retry_or_reload",
+    "production_deploy_dns_web_writer_secrets_remote_mutations",
+    "rejected_artifact_reuse"
+  ],
+  "next_internal_gate": "Bounded append-only ledger accounting for this exact retained record, then independently validated canonical seed promotion if eligible; this auxiliary receipt does not count as product progress."
+}
