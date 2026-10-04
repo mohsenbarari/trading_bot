@@ -592,3 +592,62 @@ Explicit exclusions:
 - Rejected-artifact reuse (including deferred normal277-notifications-three-ledger-accounting-20261004-c008 and normal277-current-five-ledger-accounting-20261004-c006);
 - Secrets, production, deploy, DNS, Web Writer, or remote changes;
 - Sixth product behavior.
+
+### 2026-10-04 UTC — Owner-notification partial canonical ledger accounting checkpoint (owner-unread and owner-already-read)
+
+Assignment `WA-P1-00B-NORMAL-RETURN-20261004-277` (digest `76f1ef2eb4693b3851816549b8c13ad31c6d3187031c38e7e9a5d646bd9910b8`, inspected HEAD `1a56c6e1ba041f23eb23ecf17adbc44dd6e39bb5`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only owner-notification partial canonical ledger accounting entry for the two remaining accepted notification records (owner-unread and owner-already-read) under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Predecessor ledger commit: `1a56c6e1ba041f23eb23ecf17adbc44dd6e39bb5`, SHA256 `17bdafe5fbd0dc425842764a62f8cfeacccc67053edd0be02c4413c73751253b` (`docs/refactor/two-server/section-1/00-stage-ledger.md`).
+- Accepted successor inventory: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-mark-read-already-read.json` at commit `3b49b936676b1d997d2094424c569bd0293f6c97`, SHA256 `1e3d42ec2f25e348b299fd1acaedaf2a5a1cfb376c0677a53d7bf87dbc5c0717`.
+- Canonical manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` at commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`.
+
+Two newly ledger-accounted owner-notification records:
+1. Owner-unread mark-read notification record:
+   - Source inventory path: `tests/test_p1_00b_characterization_notification_mark_read_owner_http.py`
+   - Accepted commit: `2dd5ba15a3789227ac5d490bd9b64ce08bf7722f`
+   - SHA256: `5b6ebdaa5f76eb15d14ef1e8d24b277a0bea0d45ece1a656f664d43c9a254ab0`
+   - Seed ID: `API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296` (existing shared canonical seed)
+   - Test selector: `tests/test_p1_00b_characterization_notification_mark_read_owner_http.py::NotificationMarkReadOwnerHttpCharacterizationTests::test_owner_unread_mark_read_returns_http_204_and_persists_before_redis`
+   - Scenario key: `P1-00B.NOTIFICATIONS.MARK-READ-OWNER-HTTP204`
+   - Observed summary: caller5 PATCH id1 returns empty204, exactly two owner-filtered and unread-count SQL execute calls with exact column-specific params, one commit, separate raw SQLite observation proves row1 read transition durable before Redis.set(user:5:unread_count, integer1); other eight columns and rows2..4 invariant before/after Session close, no explicit add/delete/flush/refresh/rollback, clean session and unchanged network-fence counters. Dependency overrides do not prove authentication policy.
+2. Owner-already-read mark-read notification record:
+   - Source inventory path: `tests/test_p1_00b_characterization_notification_mark_read_already_read_http.py`
+   - Accepted commit: `c4ca87ad3cb5c5a14de5d07acee346595c2ad30e`
+   - SHA256: `9ba605a1d63d2e4ce704662b97601a6f9e26a2dc79f6c9329a9e526156cdbe73`
+   - Seed ID: `API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296` (existing shared canonical seed)
+   - Test selector: `tests/test_p1_00b_characterization_notification_mark_read_already_read_http.py::NotificationMarkReadAlreadyReadHttpCharacterizationTests::test_owner_already_read_returns_http_204_without_mutation`
+   - Scenario key: `P1-00B.NOTIFICATIONS.MARK-READ-ALREADY-READ-OWNER-HTTP204`
+   - Observed summary: caller5 PATCH id3 returns empty HTTP 204, one exact owner-filtered SELECT with params id_1=3, user_id_1=5; zero commit, mutations, or Redis calls; all nine persisted columns of four rows invariant before/after Session close; owner unread count remains 2; dependency overrides do not prove authentication policy.
+
+Existing evidence citations only:
+Cited strictly as existing validation witnesses; tool-free Worker does not claim execution, nor does this documentation change invent test/review receipts or constitute new product behavior acceptance. Dependency overrides exclude authentication-policy acceptance.
+
+Accounting advancement and unit tracking:
+- Ledger accounting advances from 3/5 to 5/5 with 0/5 ledger records remaining; users accounting accepted at `598298ae45af8125f0541a0b37542500d0f87f85` and cross-user accounting accepted at `1a56c6e1ba041f23eb23ecf17adbc44dd6e39bb5` (existing behavior commit `bcda15dbacfe83e2b420d7053df147670678255c` and selector `tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py::NotificationMarkReadCrossUserHttpCharacterizationTests::test_cross_user_mark_read_returns_http_204_without_mutation`) remain preserved.
+- Inventory evidence reconciliation remains 5/5 complete with `remaining_behavior_units=0`.
+- This ledger delta adds zero product behaviors and zero distinct seeds.
+- Provenance counters retained: `pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, and `global_reconciliation_complete=false` until a separate exact-SHA canonical reconciliation closeout; no sixth behavior.
+
+Seed accounting, blockers, and Stage status:
+- Distinct seed accounting: Adds zero distinct seeds and zero accepted product behavior.
+- Canonical counts retained: 465 expected, 135 baseline + 254 reconciled new = 389 evidenced, 76 remaining.
+- Coverage and seed acceptance status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers retained open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Next internal gap: Distinct exact-SHA reconciliation closeout. Missing-ID mark-read, deferred delete404 outcomes, 76 remaining seeds, 24 origin cells, and concurrency remain unmet.
+- Historical prose: Older unmet prose stays historical only.
+
+Preserved deferrals:
+Preserve entire old ledger byte prefix including historical receipts, completed closeouts, counters, prior accounting checkpoints, and exact deferrals. Retain verbatim:
+- `defer_prior_unit=normal277-notifications-three-ledger-accounting-20261004-c008`
+- `defer_prior_unit=normal277-current-five-ledger-accounting-20261004-c006`
+Preserve all inventory `preserved_deferrals` and older ledger deferrals by the unchanged prefix. Rejected artifacts are never evidence.
+
+Explicit exclusions:
+- Global closeout or global reconciliation complete;
+- New or sixth product behavior;
+- New tests or test authoring / runtime work;
+- Seed, origin cell, blocker, or Stage closure;
+- Authentication-policy acceptance or authorization policy coverage;
+- New mutation, persistence, retry, reload;
+- Rejected-artifact reuse;
+- Secrets, production, deploy, DNS, Web Writer, or remote changes.
