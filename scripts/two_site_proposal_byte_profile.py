@@ -100,3 +100,11 @@ def parse_proposal_utf8_budget_profile(
         return {"version": "1.0", "file_limits": dict(sorted(limits.items())), "total_limit": profile["total_limit"]}
     except Exception:
         raise ProposalByteProfileError(ERROR) from None
+
+
+def require_proposal_utf8_budget_profile(requirements: object, allowed_files: object) -> dict:
+    """Require an explicit profile for newly prepared work; legacy parser stays optional."""
+    profile = parse_proposal_utf8_budget_profile(requirements, allowed_files, allowed_files)
+    if profile is None:
+        raise ProposalByteProfileError(ERROR)
+    return profile

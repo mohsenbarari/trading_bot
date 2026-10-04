@@ -85,12 +85,12 @@ except ImportError:
 try:
     from scripts.two_site_proposal_byte_profile import (
         ERROR as BYTE_PROFILE_ERROR, ProposalByteProfileError,
-        parse_proposal_utf8_budget_profile,
+        parse_proposal_utf8_budget_profile, require_proposal_utf8_budget_profile,
     )
 except ImportError:
     from two_site_proposal_byte_profile import (
         ERROR as BYTE_PROFILE_ERROR, ProposalByteProfileError,
-        parse_proposal_utf8_budget_profile,
+        parse_proposal_utf8_budget_profile, require_proposal_utf8_budget_profile,
     )
 
 
@@ -1392,6 +1392,13 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
             raise ProposalError("pipeline requires clean worktree")
         initial_refs = ref_snapshot(root)
         task, sources = load_task(root, task_candidate)
+        # Broker supplies this provenance only for a fresh ordinary cycle.
+        # Frozen quota continuations use their separate same-lineage route.
+        if "TWO_SITE_AUTOPILOT_RUN_ID" in os.environ:
+            try:
+                require_proposal_utf8_budget_profile(task["requirements"], task["allowed_files"])
+            except ProposalByteProfileError:
+                raise ProposalError("normal task requires an explicit valid UTF-8 budget profile") from None
 
         state["task_id"] = task["task_id"]
         state["source_head"] = initial_head
