@@ -406,6 +406,63 @@ def _shallow_custody_findings(tree: ast.AST, path: str) -> list[tuple[int, str]]
     return findings
 
 
+def _p1_sql_column_identity_findings(tree: ast.AST, path: str) -> list[str]:
+    """Detect only statement.left is Model.__table__.c.column or assertIs.
+
+    SQLAlchemy may annotate/wrap a selected column. Python object identity does
+    not establish its SQL column semantics. This is a narrow subset detector;
+    metadata custody identity, None identity and exact param mappings are not
+    defects. Alias/dataflow analysis and full semantic review remain separate.
+    """
+    def table_column(node: ast.AST) -> bool:
+        name = _dotted_name(node)
+        if name is not None:
+            return bool(re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.__table__\.c\.[A-Za-z_]\w*", name))
+        return (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+            and bool(re.fullmatch(
+                r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.__table__\.c",
+                _dotted_name(node.value) or "",
+            ))
+        )
+
+    def statement_left(node: ast.AST) -> bool:
+        return isinstance(node, ast.Attribute) and node.attr == "left"
+
+    def bad_pair(first: ast.AST, second: ast.AST) -> bool:
+        return (
+            statement_left(first) and table_column(second)
+            or table_column(first) and statement_left(second)
+        )
+
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assert):
+            for expr in ast.walk(node.test):
+                if not isinstance(expr, ast.Compare):
+                    continue
+                first = expr.left
+                for op, second in zip(expr.ops, expr.comparators):
+                    if isinstance(op, ast.Is) and bad_pair(first, second):
+                        lines.add(node.lineno)
+                    first = second
+        elif isinstance(node, ast.Call) and _dotted_name(node.func) == "self.assertIs":
+            if len(node.args) >= 2:
+                first, second = node.args[:2]
+            else:
+                kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
+                first, second = kwargs.get("first"), kwargs.get("second")
+            if first is not None and second is not None and bad_pair(first, second):
+                lines.add(node.lineno)
+    return [
+        f"{path}:{line}: sqlalchemy-column-object-identity; use exact compiled SQL "
+        "and column-specific parameter mapping, not Python identity of wrapped columns."
+        for line in sorted(lines)
+    ]
+
+
 def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[str]:
     """Find deterministic assertion and shallow-custody defects in candidate two-site tests.
 
@@ -421,6 +478,19 @@ def candidate_test_assertion_findings(worker_result: Mapping[str, Any]) -> list[
             continue
         path = change.get("path")
         content = change.get("content")
+        if (
+            isinstance(path, str)
+            and P1_00_CHARACTERIZATION_TEST.fullmatch(path)
+            and "original_sha256" in change
+            and change["original_sha256"] is None
+        ):
+            if isinstance(content, str):
+                try:
+                    tree = ast.parse(content, filename=path)
+                except SyntaxError:
+                    continue  # The existing syntax gate owns this diagnostic.
+                findings.extend(_p1_sql_column_identity_findings(tree, path))
+            continue
         if (
             not isinstance(path, str)
             or not TWO_SITE_TEST.fullmatch(path)

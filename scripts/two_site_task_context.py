@@ -629,6 +629,9 @@ def preparation_notes(task, sources):
     profile = parse_proposal_utf8_budget_profile(reqs, allowed_files, allowed_files)
     if profile is not None:
         out_contract["proposal_utf8_budget_profile"] = profile
+        # The machine byte profile is still a numbered physical requirement.
+        # Expose every success coverage ID; do not infer coverage from R-labels.
+        out_contract["success_covered_requirements"] = list(range(1, len(reqs) + 1))
         allowed_new_tests = sorted(set(raw_new_tests) & set(profile["file_limits"]))
         if len(allowed_new_tests) == 1:
             cap = min(24000, profile["total_limit"],

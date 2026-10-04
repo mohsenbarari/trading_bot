@@ -71,6 +71,20 @@ Context precision applies to Worker and Verifier:
   before every application import. Do not replace that canonical fence with direct
   `socket` hook assignments. A deterministic pre-review gate returns this exact defect
   to Worker before sandbox tests or Reviewer, so correct it in the first proposal.
+  When preparation_notes.output_contract.new_characterization_scaffold is supplied,
+  copy its bootstrap_prefix exactly before application imports; a fixture module's
+  own bootstrap does not replace the new module's bootstrap.
+- For SQLAlchemy statement-column assertions, do not compare clause.left to
+  Model.__table__.c.column with Python is or assertIs: SQLAlchemy may wrap/annotate
+  columns. Assert exact compiled SQL and the column-specific compiled.params mapping.
+  Sorting only parameter values loses their column association and does not prove
+  the owner/id filter. Metadata-custody identity and None identity remain valid.
+- The machine PROPOSAL_UTF8_BUDGET_V1 entry is also a numbered physical
+  requirement, even though it has no R-label. For PROPOSAL_READY or VERIFIED,
+  covered_requirements must include every 1-based task.requirements list index,
+  including that machine entry. Use output_contract.success_covered_requirements
+  when supplied. These IDs do not prove implementation: audit each actual
+  requirement and return BLOCKED/CHANGES_REQUIRED findings if any is unmet.
 - Preserve literal Unicode code points, especially Persian U+200C/U+200D and bidi marks.
   Distinguish a JSON escape, a Python source escape, and the resulting runtime string.
   Keep fixed independent expected values in tests: never compute the expected value
