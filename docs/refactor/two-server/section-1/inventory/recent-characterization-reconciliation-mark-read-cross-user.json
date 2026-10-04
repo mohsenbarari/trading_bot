@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-NORMAL-RETURN-20261004-277",
+  "assignment_sha256": "76f1ef2eb4693b3851816549b8c13ad31c6d3187031c38e7e9a5d646bd9910b8",
+  "inspected_head": "9c1a26d1c49637dbf39b761ac2635ed306d4219c",
+  "status": "PARTIAL_RECONCILIATION",
+  "predecessor": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-users-http-first-two.json",
+    "last_commit": "9c1a26d1c49637dbf39b761ac2635ed306d4219c",
+    "sha256": "6b1c0b7173686b36fc7d6997572742a74d15c211e0e726064b3943c4038b7a68"
+  },
+  "pending_five": 5,
+  "units_since_reconciliation": 5,
+  "total_behavior_units": 5,
+  "historical_prior_reconciled_units": 2,
+  "delta_reconciled_behavior_units": 1,
+  "reconciled_behavior_units": 3,
+  "remaining_behavior_units": 2,
+  "added_distinct_seed_count": 0,
+  "added_behavior_unit_count": 0,
+  "global_reconciliation_complete": false,
+  "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "canonical_counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 254,
+    "evidenced_seed_count": 389,
+    "remaining_seed_count": 76,
+    "expected_seed_count": 465
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py",
+      "last_commit": "bcda15dbacfe83e2b420d7053df147670678255c",
+      "sha256": "7f76cced2068fb9b686adcfe2a6810af61b23d24d11da36a77b513315c4808d8",
+      "seed_ids": [
+        "API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py::NotificationMarkReadCrossUserHttpCharacterizationTests::test_cross_user_mark_read_returns_http_204_without_mutation"
+      ],
+      "scenario_key": "P1-00B.NOTIFICATIONS.MARK-READ-CROSS-USER-HTTP204",
+      "observed_summary": "caller5 PATCH notification4 owned by user9 returns empty HTTP204; one exact owner-filtered SELECT with id_1=4,user_id_1=5; zero mutation/commit and zero Redis calls; all nine persisted columns unchanged before/after session close. Explicitly excludes authentication-policy acceptance and owner mutation-success/missing-ID/delete/retry/reload/concurrency outcomes from this delta."
+    }
+  ],
+  "reconciled_records": [
+    {
+      "path": "tests/test_p1_00b_characterization_users_read_super_admin_http.py",
+      "last_commit": "edc592a65a75b53fc73f8725f4a2a874e93d5c32",
+      "sha256": "ed939ee3502197d5be4520259b12d3e81ef339cf64d8d33c131d70f6e7b2ff42",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-USER-L440"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_super_admin_http.py::UsersReadSuperAdminHttpCharacterizationTests::test_middle_manager_super_admin_read_returns_http_403_before_relation_loading"
+      ],
+      "observed_summary": "Observed middle-manager super-admin read returns HTTP 403 before relation loading; dependency overrides exclude authentication-policy acceptance."
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_read_self_http.py",
+      "last_commit": "8037fad2c26fe7ddd9fa979039f715b0308d5a7e",
+      "sha256": "721943da28c64b58ba7647bfed742b4960f6282057df80af80ba4d1feaad9956",
+      "seed_ids": [
+        "API-IDENTITY-GET-USERS-READ-USER-L440"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_read_self_http.py::UsersReadSelfHttpCharacterizationTests::test_middle_manager_self_read_returns_http_200_with_live_serializer"
+      ],
+      "observed_summary": "Observed middle-manager self-read returns HTTP 200 with live serializer; dependency overrides exclude authentication-policy acceptance."
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py",
+      "last_commit": "bcda15dbacfe83e2b420d7053df147670678255c",
+      "sha256": "7f76cced2068fb9b686adcfe2a6810af61b23d24d11da36a77b513315c4808d8",
+      "seed_ids": [
+        "API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py::NotificationMarkReadCrossUserHttpCharacterizationTests::test_cross_user_mark_read_returns_http_204_without_mutation"
+      ],
+      "scenario_key": "P1-00B.NOTIFICATIONS.MARK-READ-CROSS-USER-HTTP204",
+      "observed_summary": "caller5 PATCH notification4 owned by user9 returns empty HTTP204; one exact owner-filtered SELECT with id_1=4,user_id_1=5; zero mutation/commit and zero Redis calls; all nine persisted columns unchanged before/after session close. Explicitly excludes authentication-policy acceptance and owner mutation-success/missing-ID/delete/retry/reload/concurrency outcomes from this delta."
+    }
+  ],
+  "remaining_units": [
+    {
+      "commit": "2dd5ba15a3789227ac5d490bd9b64ce08bf7722f",
+      "last_commit": "2dd5ba15a3789227ac5d490bd9b64ce08bf7722f",
+      "path": "tests/test_p1_00b_characterization_notification_mark_read_owner_http.py",
+      "sha256": "5b6ebdaa5f76eb15d14ef1e8d24b277a0bea0d45ece1a656f664d43c9a254ab0",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_mark_read_owner_http.py::NotificationMarkReadOwnerHttpCharacterizationTests::test_owner_unread_mark_read_returns_http_204_and_persists_before_redis"
+      ]
+    },
+    {
+      "commit": "c4ca87ad3cb5c5a14de5d07acee346595c2ad30e",
+      "last_commit": "c4ca87ad3cb5c5a14de5d07acee346595c2ad30e",
+      "path": "tests/test_p1_00b_characterization_notification_mark_read_already_read_http.py",
+      "sha256": "9ba605a1d63d2e4ce704662b97601a6f9e26a2dc79f6c9329a9e526156cdbe73",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_mark_read_already_read_http.py::NotificationMarkReadAlreadyReadHttpCharacterizationTests::test_owner_already_read_returns_http_204_without_mutation"
+      ]
+    }
+  ],
+  "historical_ledger": {
+    "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+    "last_commit": "875427dc78f9cd541efb57728f553230674a06bc",
+    "sha256": "b4beb37f2956543ee28cf4d93cd272beefe167d6820cfb0e8cf2a72438782a6b"
+  },
+  "canonical_manifest": {
+    "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    "last_commit": "65772a50b3729a9ec905a6b542ac27ced057e5f0",
+    "sha256": "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e"
+  },
+  "preserved_deferrals": [
+    "defer_prior_unit=normal265-canonical-five-closeout-20261004-c001",
+    "defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007",
+    "defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004",
+    "defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded",
+    "defer_prior_unit=normal169-c16-c17-union-p確",
+    "defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2",
+    "defer_prior_unit=normal169-canonical-manifest-pre",
+    "defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2",
+    "defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007",
+    "defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005",
+    "defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004",
+    "defer_prior_unit=normal169-c16-receipt-custody-20261003-c001",
+    "defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2",
+    "continuation-12",
+    "153/154/155/157-C001",
+    "normal159 C1/C2",
+    "rejected C15 machine checkpoint",
+    "rejected policy/seed proposals",
+    "normal161-c5 C16 incremental reconciliation",
+    "subsequent recorded deferrals",
+    "defer_prior_unit=normal277-pending-five-users-http-reconciliation-20261004-c001-bounded",
+    "defer_prior_unit=normal273-notification-mark-read-missing-id-http-20261004-c002",
+    "defer_prior_unit=normal273-notification-delete-missing-id-http-20261004-c001",
+    "defer_prior_unit=normal271-notification-delete-cross-user-http-20261004-c002",
+    "defer_prior_unit=normal277-notification-http-last-three-inventory-20261004-c002"
+  ],
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "unresolved_origin_cells": 24,
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "exclusions": [
+    "new_or_sixth_behavior",
+    "seed_origin_blocker_or_stage_closure",
+    "edits_to_ledger_canonical_manifest_historical_receipts_tests_runtime",
+    "authentication_policy_acceptance",
+    "new_mutation_persistence_retry_reload",
+    "rejected_artifact_reuse",
+    "secrets_production_deploy_dns_web_writer_remote_changes",
+    "missing_id_mark_read_unmet",
+    "deferred_delete_404_outcomes_unmet",
+    "owner_success_mutation_unreconciled",
+    "already_read_owner_unreconciled",
+    "concurrency_unproven",
+    "canonical_ledger_accounting_pending"
+  ]
+}
