@@ -1018,6 +1018,10 @@ def test_gate_feedback(
         _bound_utf8(f"selectors (count={selector_count}): {selector_sample}", 8192),
         _bound_utf8("normalized_failure_facts: " + facts_text, 8192),
     ]
+    if validated["isolation"] == "static-byte-profile":
+        # Already bounded/validated; retain every file AND total violation.
+        # The generic pytest fallback above is intentionally only 2048 bytes.
+        evidence.append(validated["stderr_tail"])
 
     feedback: dict[str, Any] = {
         "reviewer": "test-gate",

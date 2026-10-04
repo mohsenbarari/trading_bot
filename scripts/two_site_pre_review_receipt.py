@@ -7,6 +7,15 @@ import re
 from typing import Any, Mapping
 
 try:
+    from scripts.two_site_proposal_byte_profile import (
+        ProposalByteProfileError, parse_proposal_utf8_budget_profile,
+    )
+except ImportError:
+    from two_site_proposal_byte_profile import (
+        ProposalByteProfileError, parse_proposal_utf8_budget_profile,
+    )
+
+try:
     from scripts import two_site_agent_sandbox
     from scripts.two_site_agent_sandbox import (
         SandboxError,
@@ -716,6 +725,38 @@ def run_candidate_tests(
 
     if not chosen_selectors:
         raise SandboxError("at least one focused selector required")
+
+    profile_findings: list[str] = []
+    try:
+        profile = parse_proposal_utf8_budget_profile(
+            task.get("requirements"), task.get("allowed_files"), list(overlays),
+        )
+    except ProposalByteProfileError as exc:
+        profile_findings.append(str(exc))
+        profile = None
+    if profile is not None:
+        new_tests = {c["path"] for c in raw_changes if _is_canonical_new_test(c)}
+        total_bytes = 0
+        for path in sorted(overlays):
+            byte_count = len(overlays[path].encode("utf-8"))
+            total_bytes += byte_count
+            cap = profile["file_limits"][path]
+            if path in new_tests:
+                cap = min(cap, MAX_NEW_TEST_BYTES)
+            if byte_count > cap:
+                profile_findings.append(f"AssertionError: {path} exceeds {cap} byte limit: {byte_count} bytes")
+        if total_bytes > profile["total_limit"]:
+            profile_findings.append(
+                f"AssertionError: proposal total exceeds {profile['total_limit']} byte limit: {total_bytes} bytes"
+            )
+    if profile_findings:
+        return validate_test_receipt({
+            "state": "FAILED", "proposal_sha256": proposal_sha256,
+            "selectors": chosen_selectors, "unsupported_specs": unsupported_specs,
+            "returncode": 1, "stdout_tail": "",
+            "stderr_tail": _bound_utf8_tail("\n".join(profile_findings)),
+            "snapshot_files": 0, "snapshot_bytes": 0, "isolation": "static-byte-profile",
+        }, proposal_sha256)
 
     oversize_findings: list[str] = []
     for change in raw_changes:
