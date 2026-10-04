@@ -35,6 +35,14 @@ FEED_MODES = frozenset({"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"})
 MAX_DELIVERIES_PER_CYCLE = 500
 MAX_ADAPTER_STREAMS = 128
 MAX_FUTURE_SKEW_SECONDS = 30
+# Extend transport priority through the final consumer, with a bounded share
+# so live coin/minute inputs cannot starve historical reference catch-up.
+FAST_INPUT_PRIORITY = {
+    "market.fact.coin.group.1": 0,
+    "market.fact.coin.group.2": 0,
+    "market.fact.private-gold-minute": 1,
+    "market.fact.usd-herat": 1,
+}
 _REASON = re.compile(r"[^A-Z0-9_]+")
 
 
@@ -201,7 +209,18 @@ def connect_receiver_read_only(path: Path | str) -> sqlite3.Connection:
     return connection
 
 
-def initialize_adapter_store(connection: sqlite3.Connection) -> None:
+def initialize_adapter_store(connection: sqlite3.Connection, *, reconcile_counts: bool = False) -> None:
+    # Trigger-maintained counts share the ledger's transaction. Reconcile only
+    # for pre-trigger migration or explicit repair, never scan permanent
+    # history again on each restart (which can itself stall startup).
+    counts_ready = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+        "AND name='private_fact_adapter_delivery_count_insert'"
+    ).fetchone() is not None
+    if counts_ready:
+        counts_ready = {str(row[0]) for row in connection.execute(
+            "SELECT status FROM private_fact_adapter_status_counts"
+        )} == {"APPLIED", "AUDIT_ONLY", "REJECTED"}
     initialize_market_store(connection)
     connection.executescript(
         """
@@ -324,20 +343,18 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             "ALTER TABLE private_fact_adapter_projections "
             "ADD COLUMN envelope_hash TEXT"
         )
-    # Existing stores predate the insert trigger. Reconcile once at owner
-    # startup; steady-state health updates then read three constant-size rows
-    # instead of rescanning the permanently growing delivery ledger.
-    connection.execute(
-        """
-        UPDATE private_fact_adapter_status_counts
-        SET delivery_count=(
-          SELECT COUNT(*)
-          FROM private_fact_adapter_deliveries
-          WHERE private_fact_adapter_deliveries.status=
-                private_fact_adapter_status_counts.status
+    if reconcile_counts or not counts_ready:
+        connection.execute(
+            """
+            UPDATE private_fact_adapter_status_counts
+            SET delivery_count=(
+              SELECT COUNT(*)
+              FROM private_fact_adapter_deliveries
+              WHERE private_fact_adapter_deliveries.status=
+                    private_fact_adapter_status_counts.status
+            )
+            """
         )
-        """
-    )
     connection.commit()
 
 
@@ -1359,7 +1376,9 @@ def _select_pending_deliveries(
     directory and can exhaust the deliberately small container tmpfs.  The
     primary key already gives an efficient contiguous sequence per stream.
     Fetch a bounded prefix from each stream, then merge only those prefixes in
-    memory while never exposing sequence N+1 before sequence N.
+    memory while never exposing sequence N+1 before sequence N. Reserve a
+    bounded fast-input share; distribute the remainder by served count so an
+    older, large reference stream cannot starve another reference's live head.
     """
 
     stream_ids = [
@@ -1373,8 +1392,19 @@ def _select_pending_deliveries(
     cursors: dict[str, sqlite3.Cursor] = {}
     heads: dict[str, sqlite3.Row] = {}
     next_sequences: dict[str, int] = {}
-    heap: list[tuple[str, str, int]] = []
+    heap: list[tuple[int, int, str, str, int]] = []
     selected: list[sqlite3.Row] = []
+    fast_budget = max(1, max_deliveries // 4)
+    fast_selected = 0
+    fast_stream_budget = max(1, fast_budget // len(FAST_INPUT_PRIORITY))
+    fast_by_stream: dict[str, int] = {}
+    selected_by_stream: dict[str, int] = {}
+
+    def priority(stream_id):
+        if fast_selected >= fast_budget or fast_by_stream.get(stream_id, 0) >= fast_stream_budget:
+            return 2
+        return FAST_INPUT_PRIORITY.get(stream_id, 2)
+
     try:
         for stream_id in stream_ids:
             cursor = receiver.execute(
@@ -1397,18 +1427,27 @@ def _select_pending_deliveries(
             heapq.heappush(
                 heap,
                 (
+                    priority(stream_id),
+                    0,
                     str(head["received_at_utc"]),
                     stream_id,
                     int(head["delivery_sequence"]),
                 ),
             )
         while heap and len(selected) < max_deliveries:
-            _received_at, stream_id, sequence = heapq.heappop(heap)
+            rank, served, received_at, stream_id, sequence = heapq.heappop(heap)
+            if rank < 2 and priority(stream_id) == 2:
+                heapq.heappush(heap, (2, served, received_at, stream_id, sequence))
+                continue
             row = heads[stream_id]
             expected = next_sequences[stream_id]
             if sequence != expected or int(row["delivery_sequence"]) != expected:
                 raise MarketFactAdapterError("market_fact_adapter_sequence_gap")
             selected.append(row)
+            selected_by_stream[stream_id] = selected_by_stream.get(stream_id, 0) + 1
+            if rank < 2:
+                fast_selected += 1
+                fast_by_stream[stream_id] = fast_by_stream.get(stream_id, 0) + 1
             next_sequences[stream_id] = expected + 1
             following = cursors[stream_id].fetchone()
             if following is not None:
@@ -1416,6 +1455,8 @@ def _select_pending_deliveries(
                 heapq.heappush(
                     heap,
                     (
+                        priority(stream_id),
+                        selected_by_stream[stream_id],
                         str(following["received_at_utc"]),
                         stream_id,
                         int(following["delivery_sequence"]),

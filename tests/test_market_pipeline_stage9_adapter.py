@@ -10,6 +10,7 @@ from unittest.mock import patch
 from core.market_intelligence.coin_rate_engine import build_coin_rate_estimates
 from core.market_intelligence.market_fact_adapter import (
     MarketFactAdapterError,
+    _select_pending_deliveries,
     adapter_metrics,
     initialize_adapter_store,
     normalize_feed_mode,
@@ -134,6 +135,65 @@ class Stage9AdapterTests(unittest.TestCase):
             )
         ]
         self.assertEqual(columns, ["event_key"])
+
+    def test_group_priority_is_bounded_and_preserves_other_source_progress(self):
+        # Inbox scheduling does not inspect economic payloads; opaque fixture
+        # identities suffice to prove bounded/contiguous cross-stream ordering.
+        group = "market.fact.coin.group.1"
+        reference = "market.fact.wallex-usdt"
+        for stream, received_at in ((reference, "2026-08-26T05:00:00Z"), (group, "2026-08-26T05:01:00Z")):
+            self.receiver.execute("INSERT INTO fact_checkpoints VALUES(?,?,?)", (stream, 4, received_at))
+            for sequence in range(1, 5):
+                identity = content_hash({"stream": stream, "sequence": sequence})
+                self.receiver.execute(
+                    "INSERT INTO fact_deliveries(stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,payload_json,received_at_utc) VALUES(?,?,?,?,?,?,?)",
+                    (stream, sequence, identity, 1, "a" * 64, "{}", received_at),
+                )
+        rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=4)
+        self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows],
+                         [(group, 1), (reference, 1), (reference, 2), (group, 2)])
+        rows = _select_pending_deliveries(self.receiver, checkpoints={group: 1, reference: 3}, max_deliveries=4)
+        self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows],
+                         [(group, 2), (reference, 4), (group, 3), (group, 4)])
+
+    def test_one_busy_priority_group_cannot_hide_the_other_group(self):
+        group_1 = "market.fact.coin.group.1"
+        group_2 = "market.fact.coin.group.2"
+        reference = "market.fact.wallex-usdt"
+        for stream, count, received_at in ((reference, 8, "2026-08-26T05:00:00Z"),
+                                           (group_1, 8, "2026-08-26T05:01:00Z"),
+                                           (group_2, 1, "2026-08-26T05:02:00Z")):
+            self.receiver.execute("INSERT INTO fact_checkpoints VALUES(?,?,?)", (stream, count, received_at))
+            for sequence in range(1, count + 1):
+                identity = content_hash({"stream": stream, "sequence": sequence})
+                self.receiver.execute(
+                    "INSERT INTO fact_deliveries(stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,payload_json,received_at_utc) VALUES(?,?,?,?,?,?,?)",
+                    (stream, sequence, identity, 1, "a" * 64, "{}", received_at),
+                )
+        rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=8)
+        self.assertEqual([(row["stream_id"], row["delivery_sequence"]) for row in rows[:2]],
+                         [(group_1, 1), (group_2, 1)])
+        reference_rows = [row for row in rows if row["stream_id"] == reference]
+        self.assertGreaterEqual(len(reference_rows), 3)
+        for stream in (group_1, group_2, reference):
+            sequences = [row["delivery_sequence"] for row in rows if row["stream_id"] == stream]
+            self.assertEqual(sequences, list(range(1, len(sequences) + 1)))
+
+    def test_large_reference_stream_cannot_starve_another_reference(self):
+        busy = "market.fact.wallex-usdt"
+        fresh = "market.fact.melted-flow"
+        for stream, count, received_at in ((busy, 8, "2026-08-26T05:00:00Z"),
+                                           (fresh, 2, "2026-08-26T05:02:00Z")):
+            self.receiver.execute("INSERT INTO fact_checkpoints VALUES(?,?,?)", (stream, count, received_at))
+            for sequence in range(1, count + 1):
+                identity = content_hash({"stream": stream, "sequence": sequence})
+                self.receiver.execute(
+                    "INSERT INTO fact_deliveries(stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,payload_json,received_at_utc) VALUES(?,?,?,?,?,?,?)",
+                    (stream, sequence, identity, 1, "a" * 64, "{}", received_at),
+                )
+        rows = _select_pending_deliveries(self.receiver, checkpoints={}, max_deliveries=4)
+        self.assertEqual([(r["stream_id"], r["delivery_sequence"]) for r in rows],
+                         [(busy, 1), (fresh, 1), (busy, 2), (fresh, 2)])
 
     def test_compaction_watermark_is_durable_and_never_regresses(self):
         path = Path(self.directory.name) / "adapter-watermark.json"
@@ -621,6 +681,7 @@ class Stage9AdapterTests(unittest.TestCase):
         self.market.execute(
             "UPDATE private_fact_adapter_status_counts SET delivery_count=0"
         )
+        self.market.execute("DROP TRIGGER private_fact_adapter_delivery_count_insert")
         self.market.commit()
         initialize_adapter_store(self.market)
         statements: list[str] = []
@@ -636,6 +697,12 @@ class Stage9AdapterTests(unittest.TestCase):
                 for statement in statements
             )
         )
+        statements.clear()
+        self.market.set_trace_callback(statements.append)
+        initialize_adapter_store(self.market)
+        self.market.set_trace_callback(None)
+        self.assertFalse(any("COUNT(*)" in statement and "private_fact_adapter_deliveries" in statement for statement in statements))
+        self.assertEqual(adapter_metrics(self.market)["applied_count"], 1)
 
     def test_malformed_unit_is_rejected_and_next_fact_advances(self):
         stream = "market.fact.melted-aggregate"

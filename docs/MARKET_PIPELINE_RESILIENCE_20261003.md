@@ -1,0 +1,156 @@
+# Market pipeline receiver stall — 2026-10-03
+
+## Confirmed causes
+
+Capture and parsing continued while the sender accumulated 142,762 deliveries,
+with the oldest about 3.5 days old. The receiver emitted fresh heartbeats and
+Docker reported healthy, but private-peer and loopback HTTPS requests timed out.
+No dead letters explained this interruption.
+
+- Receiver initialization ran `INSERT OR IGNORE … SELECT COUNT(*)` on every
+  connection. SQLite evaluates the SELECT even when the insert is ignored,
+  rescanning millions of permanent history rows per request.
+- TLS wrapped the listening socket. A silent/partial TLS handshake blocked
+  the accept loop without a timeout, preventing subsequent valid clients.
+- Health inspected a heartbeat, not an authenticated HTTP exchange. Docker
+  does not restart a running-but-unresponsive unhealthy container.
+- Sender metrics summed attempts over all permanent acknowledged rows after
+  every batch. Batch construction also repeatedly hashed and validated each
+  growing prefix, making catch-up construction quadratic.
+- Adapter initialization recounted historical statuses on every restart, and
+  global receipt ordering let a large old reference stream delay live inputs.
+  An old heartbeat could incorrectly attest readiness of a replacement image.
+- Activity-page compatibility projection still waited for the legacy Telegram
+  job/backfill before displaying groups. Its quality calculation rescanned each
+  entire instrument book per event, exceeding two minutes on the primary store.
+
+## Corrections
+
+`59e2461d` initializes receiver schema/counters once at boot and never recounts
+existing history on reopening. Its bounded TLS server accepts raw sockets and
+performs TLS/HTTP in at most 24 workers with a five-second socket timeout. Both
+receivers use it; idle clients cannot block the accept loop.
+
+Receiver health performs an actual CA-verified, client-authenticated loopback
+HTTPS request and exact server-certificate pinning. The snapshot receiver's
+health response identifies its schema (`75db7dc7`). Private peer, HMAC, nonce,
+payload, and receipt validation remain unchanged.
+
+Sender metrics inspect only unacknowledged work; `send_attempt_count_scope` is
+explicitly `UNACKNOWLEDGED`. Historical retry evidence is not reset. `532a9804`
+sizes each serialized delivery once and hashes/validates the final batch, bounded
+by the existing 500-item contract and 768-KiB document limit. Small live batches
+are sent immediately. Stream sequences remain contiguous; G1/G2 retain priority
+and other sources remain fair.
+
+Adapter counters are maintained by durable triggers; restart recounts only a
+pre-trigger store or an explicitly requested repair. G1/G2, minute gold and
+Herat receive independent bounded priority; all remaining streams share work
+by served count, without changing per-stream sequences or skipping history.
+Health and handoff bind fresh heartbeat time to the expected release/start time.
+
+`scripts/install_primary_group_display.py` rebinds only the existing group
+projection service to the same canonical Bot store consumed by the model. It
+keeps the existing conversation writer lock, deterministic IDs, causal roots,
+late-arrival/conditional/review exclusions and financial quality rules. No new
+Telegram collector/session, Product Writer change or permanent fact deletion.
+The projector uses a sorted event-time index and exact closed five-minute
+window; availability/settlement checks remain unchanged. A read-only production
+measurement evaluated 47,969 rows in 2.647 seconds. Timer retries after 15 seconds;
+the one-shot has a 120-second timeout and a bounded lock wait.
+
+Long-running Market Compose roles and the archive database use `unless-stopped`,
+including restart after host reboot. Intentional operator stops remain respected;
+migration remains an explicitly non-restarting job.
+
+## Independent recovery supervisor
+
+`scripts/install_market_pipeline_watchdog.py` installs a root-owned systemd
+timer on each existing host. It supervises four Bot and six Web roles through
+their existing containers; it never creates another Telegram session owner.
+
+- Every 15 seconds check role/schema-bound heartbeats, real receiver mTLS HTTP,
+  adapter progress when receiver streams are ahead, and estimator/snapshot sender
+  version progress when new work is required.
+- Allow 180 seconds of startup grace. A heartbeat or demanded progress stalled
+  for 180 seconds is a liveness failure; endpoint failure is independent of a
+  fresh heartbeat.
+- Require two failed observations; restart at most one role per timer run, with
+  a five-minute per-role cooldown. Persist cooldown before restart.
+- Acquire the production deployment lock nonblocking and skip during handoff.
+  Never overlap deployment or create a new session/store owner.
+- Keep the same container, mounts and checkpoints. Never clear queues, fabricate
+  prices, rearm poison facts, change Writer/DNS, or start an intentionally stopped
+  container. Source silence, parser review and catch-up alone do not restart.
+
+The unit is `market-pipeline-watchdog.timer`. Value-free state/reports live under
+the protected Market operations root. Verify `systemctl is-active`, `is-enabled`,
+report freshness and per-role reason codes. Green heartbeats alone are not proof
+that a model is receiving current data.
+
+## Activation, rollback and verification
+
+`scripts/handoff_market_receiver_resilience.py` supports the two receivers,
+fact sender and adapter. It checks the full active Compose chain, immutable release label
+and portable image-content digest, mounts, exclusive owner lock, and unchanged
+production bystanders. It holds the deployment mutex and retains a journal and
+exact rollback chain. Failed activation restores runtime, not database state.
+
+Bot fact receiver runs `59e2461d`; WA-FI snapshot receiver runs `75db7dc7`; sender
+runs `532a9804`; Bot adapter/direct-display projection run `7aa96bdd`.
+Image/script transfer used the existing explicit authorization
+and user-confirmed WA-FI identity. Iran, the emergency standby path, application
+Writer authority and DNS were not changed.
+
+The first snapshot-receiver attempt rolled back when strengthened health exposed
+a missing schema field. The corrected response passed a fresh guarded handoff.
+Another initial rollback exposed an ephemeral test-container false positive;
+the bystander guard now checks actual Compose services and excludes one-off
+tests. Failed journals remain available.
+
+The first direct-display activation timed out on the quadratic legacy quality
+calculation and rolled back its service configuration. Its transaction did not
+partially publish. The failed journal/release were retained; the window-indexed
+candidate is activated with a separate journal. No data reset was used.
+
+88 receiver/watchdog/transport/foundation/recovery/snapshot tests passed in an
+isolated network-disabled container; another 52 covered sender, adapter and
+snapshot publication. Coverage includes silent TCP, partial TLS/HTTP, historical
+reopening, exact byte limits, sequence gaps, 500-item batches, two-observation
+recovery, cooldown persistence, worker-saturation recovery, real HTTP schema
+and deployment-lock exclusion.
+Final combined pytest run passed **146 tests**; **34 tests** also passed directly
+against the final Python 3.11 image with no external network or production mounts.
+Projection regression coverage also exercises outliers, settlement fallback,
+transport-stable trade roots, late arrivals and conflict exclusions. The new
+performance tests compare indexed decisions to full-book decisions (including
+non-monotonic arrivals and boundary times) and bound candidate work over a long
+history. Adapter fairness tests cover independent group and reference progress.
+
+At 11:10 UTC all ten receiver-to-adapter stream gaps were zero. WA-FI fact sender
+had queue depth/oldest age/dead letters/retry alerts all zero; processor reported
+`caught-up` with zero pending coin/market messages. Bot and WA-FI agreed on
+snapshot version `630057`, generated at `11:10:11Z`, status `OK`. Authenticated
+dashboard/activity HTTP both returned 200; the dashboard was `RUNNING`/`HEALTHY`,
+`PRIVATE_PRIMARY`, with snapshot age 1.9–4 seconds and 13 estimated cells.
+Actual native projection completed successfully in seven seconds. Both host
+watchdog timers were enabled/active. By 11:12:46 UTC the adapter had completed
+startup grace and all ten supervised roles reported `LIVENESS_OK`. The model
+advanced to version `630088`; capture sequence advanced from `93304` to `93312`
+without additional restarts. The activity page displayed new canonical G1/G2
+offers from `11:10:44Z`/`11:11:04Z`, both active for the model, while primary input
+freshness reported `FRESH` for both groups. Group projection health was `HEALTHY`.
+The existing legacy bridge also reads the same canonical store and projection
+version, using the same writer lock; it cannot replace this display with the
+lagging legacy store. Capture/source update time is distinct from the latest
+recognized eligible offer: quiet/non-offer/ambiguous inputs must not create prices.
+
+Closeout checks source → receiver → adapter watermarks, increasing model versions,
+fresh WA-FI published views, and authenticated HTTP of the actual dashboard and
+activity pages. Diagnostic sessions log out afterward. Print timestamps/statuses/
+counts, never credentials, private routes or prices.
+
+Recovery is automatic for detected hang/crash conditions, not a promise of
+uninterrupted operation during network/provider outages, unavailable/corrupt
+storage, missing credentials, or intentionally stopped services. Financial
+freshness and abstention gates remain intact during recovery.

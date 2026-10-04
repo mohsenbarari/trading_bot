@@ -21,6 +21,25 @@ def fixture(name):
 
 
 class MarketPipelineStage3FoundationTests(unittest.TestCase):
+    def test_live_health_is_bound_to_runtime_release_not_reused_pid(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "MARKET_PIPELINE_STATE_ROOT": directory,
+            "MARKET_PIPELINE_RELEASE_SHA": "a" * 40,
+        }), patch("os.kill"):
+            state = Path(directory) / "market-store-adapter"
+            state.mkdir()
+            document = {"schema": "market_fact_adapter/1.0", "role": "market-store-adapter",
+                        "mode": "live", "status": "live-ready", "feed_mode": "PRIVATE_PRIMARY",
+                        "streams": {}, "consuming_private_facts": True,
+                        "updated_at_utc": foundation.utc_now().isoformat(),
+                        "pid": os.getpid(), "release_sha": "b" * 40}
+            path = state / "health.json"
+            path.write_text(json.dumps(document))
+            self.assertEqual(foundation.run_healthcheck("market-store-adapter", 60), 1)
+            document["release_sha"] = "a" * 40
+            path.write_text(json.dumps(document))
+            self.assertEqual(foundation.run_healthcheck("market-store-adapter", 60), 0)
+
     def test_live_capture_starting_is_process_healthy_during_backfill(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(
             os.environ,
@@ -236,8 +255,9 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         capture_account2 = web.split("  market-capture-account2:", 1)[1].split(
             "  market-capture-external:", 1
         )[0]
-        self.assertIn('restart: "on-failure"', capture_account1)
-        self.assertIn('restart: "on-failure"', capture_account2)
+        self.assertIn('restart: unless-stopped', capture_account1)
+        self.assertIn('restart: unless-stopped', capture_account2)
+        self.assertNotIn('on-failure:5', base)
         self.assertIn("capture-liveness", capture_account1)
         self.assertIn("healthcheck", capture_account2)
         self.assertEqual(web.count("ports:"), 1)

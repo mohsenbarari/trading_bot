@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import hashlib
 import json
 import os
@@ -11,6 +11,8 @@ import sqlite3
 import threading
 import time
 from typing import Mapping
+
+from .private_tls_server import PrivateTLSServer
 
 from .market_fact_receiver import (
     DEFAULT_PAYLOAD_RETENTION_SECONDS,
@@ -60,9 +62,7 @@ def _bounded_integer(
     return value
 
 
-class _ReceiverServer(ThreadingHTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
+class _ReceiverServer(PrivateTLSServer):
 
     def __init__(
         self,
@@ -71,11 +71,12 @@ class _ReceiverServer(ThreadingHTTPServer):
         database_path: Path,
         allowed_peer_ip: str,
         keys: Mapping[str, bytes],
+        tls_context,
     ) -> None:
         self.database_path = database_path
         self.allowed_peer_ip = allowed_peer_ip
         self.keys = dict(keys)
-        super().__init__(address, _ReceiverHandler)
+        super().__init__(address, _ReceiverHandler, tls_context=tls_context)
 
 
 class _ReceiverHandler(BaseHTTPRequestHandler):
@@ -117,7 +118,7 @@ class _ReceiverHandler(BaseHTTPRequestHandler):
             return
         if not self._peer_allowed(health=True):
             return
-        connection = connect_receiver(self.receiver.database_path)
+        connection = connect_receiver(self.receiver.database_path, initialize=False)
         try:
             metrics = receiver_metrics(connection)
         finally:
@@ -139,7 +140,7 @@ class _ReceiverHandler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(length)
         body_hash = hashlib.sha256(body).hexdigest()
-        connection = connect_receiver(self.receiver.database_path)
+        connection = connect_receiver(self.receiver.database_path, initialize=False)
         try:
             try:
                 connection.execute("BEGIN IMMEDIATE")
@@ -259,8 +260,8 @@ def run_market_fact_receiver_service(
         database_path=database_path,
         allowed_peer_ip=peer,
         keys=keys,
+        tls_context=tls,
     )
-    server.socket = tls.wrap_socket(server.socket, server_side=True)
     server.timeout = 0.25
     from .private_pipeline_foundation import atomic_json_write, utc_text
 
@@ -275,7 +276,7 @@ def run_market_fact_receiver_service(
 
     try:
         while not stop.is_set():
-            connection = connect_receiver(database_path)
+            connection = connect_receiver(database_path, initialize=False)
             try:
                 monotonic_now = time.monotonic()
                 if monotonic_now - last_compaction_check >= 5.0:

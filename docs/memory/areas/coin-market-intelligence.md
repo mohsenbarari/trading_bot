@@ -1,9 +1,9 @@
 # Coin Market Intelligence
 
-- Sep08 Imam CASH: a 68h trade masked today's offer across melted sources. Trade priority≤5m; non-fallback transfer needs same source; retention=7d. `f5b98fee`/`a37ec78e` is live estimator-only; dashboard/Web≈231m; rollback retained. `docs/COIN_IMAM_CASH_ANCHOR_INCIDENT_20260908.md`.
-- Sep07 `9d752171` processor + `0625597f` bridge live; LEGACY 14/14 and projection lag<7s. Locks/data/d08 rollback retained; revision/raw gap open. `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
-- Sender `fb95bbde` is live. Replay only retained originals with bound ACKs; never reset checkpoints. Dead letters/backlog degrade health; silence does not. `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
-- Account1 `a6dcd636` is live; retain replay quarantine. Liveness validates role/schema/source/status/freshness/PID; strict readiness still exposes quarantine. Never delete/synthesize evidence. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`.
+- Estimator `f5b98fee`: trade≤5m; non-fallback anchors same-source; retention7d/rollback. Old trades must not mask fresh offers.
+- Processor recovery retains peers/data and revision links; see `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
+- Oct03: sender `532a9804`, adapter `7aa96bdd`; bound-ACK replay, fair streams, trigger counters, no resets. Release-bound endpoint/progress watchdogs:15s, two failures, cooldown5m, deploy mutex; silence/catch-up never restart. `docs/MARKET_PIPELINE_RESILIENCE_20261003.md`.
+- Account1 `a6dcd636`: retain replay quarantine. Liveness validates role/schema/source/status/freshness/PID; readiness exposes quarantine. No deleted/synthetic evidence.
 
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`.
 - Units=project-thousands; normalize zeros/separators; `رب`=quarter and `پ/ت پ/پایین`=low-date.
@@ -15,5 +15,5 @@
 - Private melted: immutable price/quantity, lifetime=120s, freshness=900s; lower remaining=fill, zero=full, positive close=no-trade, edit≠trade.
 - Cutover needs real 7d coin/gold/Herat; predated coins abstain; no synthesis.
 - 2026-08-31: 22–23 Tehran uses melted/Herat fresh at 22:00 (`AFTER_CLOSE_HOLD`, +0.4%). Never revive older data; guard stays fail-open.
-- Account2 captures G1/G2. Projection health derives from results, never heartbeats.
+- Account2 captures G1/G2. Display `7aa96bdd` reads canonical Bot input, not legacy Telegram/backfill. Preserve conversation lock/gates; indexed causal5m books, timeout120s/timer15s. Parallel bridge: same source/version. Result-based health; retain transaction/config rollback.
 - Replay digests stream via `(run_id,account)` to avoid `/tmp` overflow. Empty retries require prior nonempty immutable manifest, attempt>1, zero quarantine. Never clear state/backfill.
