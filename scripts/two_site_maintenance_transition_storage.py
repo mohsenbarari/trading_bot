@@ -55,8 +55,19 @@ class MaintenanceTransitionStorageError(Exception):
     """Raised when maintenance transition storage loading or verification fails."""
 
 
+class MainMaintenanceRouteError(MaintenanceTransitionStorageError):
+    """Known main route failed; never legacy/quarantine fallback authority."""
+
+
+# Internal route marker only, never a record or owner approval. The actual main
+# reader starts a fresh continuous Broker hold after the old hold exits normally.
+_MAIN_TRANSITION_REQUIRED = object()
+_MAIN_REF = "refs/heads/main"
+
+
 __all__ = [
     "MaintenanceTransitionStorageError",
+    "MainMaintenanceRouteError",
     "read_maintenance_transition_locked",
 ]
 
@@ -234,7 +245,7 @@ def _recheck_checkpoint(
         raise MaintenanceTransitionStorageError("Checkpoint repository drift detected during hold")
 
 
-def read_maintenance_transition_locked(
+def _read_legacy_maintenance_transition_locked(
     root: Path,
     state_root: Path,
 ) -> dict[str, Any] | None:
@@ -250,6 +261,7 @@ def read_maintenance_transition_locked(
     if not isinstance(state_root, Path) or state_root != expected_state_root:
         raise MaintenanceTransitionStorageError("state_root must match canonical expected path")
 
+    main_route = False
     try:
         with hold_idle_broker_client_lock_for_cold_adoption(root):
             root_fd = _pin_validated_root(root)
@@ -305,11 +317,22 @@ def read_maintenance_transition_locked(
                     if not isinstance(chk_repo, dict):
                         raise MaintenanceTransitionStorageError("Checkpoint repository invalid")
 
+                    if not _type_sensitive_equal(norm_repo.get("protected_refs"), chk_repo.get("protected_refs")):
+                        current_refs = norm_repo["protected_refs"]
+                        prior_refs = chk_repo["protected_refs"]
+                        if (set(current_refs) == set(prior_refs)
+                                and current_refs[_MAIN_REF] != prior_refs[_MAIN_REF]
+                                and all(current_refs[ref] == digest for ref, digest in prior_refs.items()
+                                        if ref != _MAIN_REF)):
+                            main_route = True
+                            _recheck_repository(root, norm_repo)
+                            _recheck_checkpoint(state_root_fd, state_root, chk_sha, chk_repo)
+                            _check_stop_and_pending(root_fd, state_root_fd, state_root)
+                            return _MAIN_TRANSITION_REQUIRED
+                        raise MaintenanceTransitionStorageError("Protected refs mismatch between current and checkpoint")
+
                     if norm_repo.get("head") == chk_repo.get("head"):
                         raise MaintenanceTransitionStorageError("Current head matches checkpoint head")
-
-                    if not _type_sensitive_equal(norm_repo.get("protected_refs"), chk_repo.get("protected_refs")):
-                        raise MaintenanceTransitionStorageError("Protected refs mismatch between current and checkpoint")
 
                     curr_ctrl = norm_repo.get("control_blobs")
                     chk_ctrl = chk_repo.get("control_blobs")
@@ -445,6 +468,31 @@ def read_maintenance_transition_locked(
     except (KeyboardInterrupt, SystemExit):
         raise
     except MaintenanceTransitionStorageError:
+        if main_route:
+            raise MainMaintenanceRouteError("main maintenance verification failed") from None
         raise
     except Exception:
+        if main_route:
+            raise MainMaintenanceRouteError("main maintenance verification failed") from None
         raise MaintenanceTransitionStorageError("Broker lock operation failed") from None
+
+
+def read_maintenance_transition_locked(root: Path, state_root: Path) -> dict[str, Any] | None:
+    """Preserve legacy reads; main changes require actual fresh owner/evidence proof.
+
+    The private marker has no authority. The old Broker context must exit
+    successfully first; the fixed main reader then rechecks all current inputs
+    under its own continuous Broker hold. Any main failure is hard and typed.
+    """
+    record = _read_legacy_maintenance_transition_locked(root, state_root)
+    if record is not _MAIN_TRANSITION_REQUIRED:
+        return record
+    try:
+        from scripts.two_site_main_maintenance_storage import read_main_maintenance_transition_locked
+
+        record = read_main_maintenance_transition_locked(root, state_root)
+        if type(record) is not dict:
+            raise ValueError
+        return record
+    except Exception:
+        raise MainMaintenanceRouteError("main maintenance verification failed") from None

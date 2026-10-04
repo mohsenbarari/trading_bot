@@ -12,6 +12,7 @@ from scripts.two_site_codex_autopilot import (
     validate_repository,
 )
 from scripts.two_site_maintenance_transition_storage import (
+    MainMaintenanceRouteError,
     read_maintenance_transition_locked,
 )
 
@@ -59,6 +60,8 @@ def require_reviewed_maintenance_transition_locked(
         record = read_maintenance_transition_locked(root, state_root)
     except (KeyboardInterrupt, SystemExit):
         raise
+    except MainMaintenanceRouteError:
+        raise MaintenanceTransitionStartupError("main maintenance verification failed") from None
     except Exception:
         record = None
 
