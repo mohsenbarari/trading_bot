@@ -731,3 +731,53 @@ Explicit exclusions:
 - All production, deploy, DNS, Web Writer, network, secrets;
 - Reuse or alias of any rejected/deferred artifact;
 - Edits to existing inventory, canonical manifest, tests, runtime, scripts, or controls.
+
+### 2026-10-04 UTC — Chat seen-member retained characterization accounting checkpoint
+
+Assignment `WA-P1-00B-NORMAL-RETURN-20261004-286` (digest `e2f3970864735536ef564d52f115a5832f1f0a7e4990ef29b0ac308665b06129`, inspected HEAD `3c98a94f4b1315c0fcd4947a658374a70a66151b`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only canonical ledger accounting entry for the accepted retained chat seen-member receipt under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Retained receipt artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-chat-seen-members.json` at accepted commit `3c98a94f4b1315c0fcd4947a658374a70a66151b`, SHA256 `bf35ae4126701cbb687fcf48d6964c572af749f9312b965d87a1b66f0ceeeb8a`.
+- Predecessor ledger commit: `eb3d4e98ec781ff571e7cc9f727a14d5ad142013`, SHA256 `7f6577b7ff52e6053d660ba8d0847e09fb00eae31d9bc327b433d5b27a5454ab` (`docs/refactor/two-server/section-1/00-stage-ledger.md`).
+- Canonical manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` at commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`.
+
+Retained chat seen-member characterization record:
+- Source inventory path: `tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py`
+- Accepted commit: `868147b529c1f5571672b0a28aa32bef5365d20a`
+- SHA256: `0ee56b1b9eb2f6b8c9d597ea42a78b11737f4ad0e1c34843c4a575df42b244d0`
+- Seed ID: `API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874`
+- Exact test selectors:
+  1. `tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_two_row_success`
+  2. `tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_empty`
+  3. `tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_invalid_service_item_propagates_validation_error`
+- Observed evidence summaries:
+  1. Two-row GROUP success: direct handler invocation with `chat.type == ChatType.GROUP` asserts `get_room_or_404(db, chat_id)` once and `list_group_message_seen_members(db, chat=chat, message_id=message_id, requester_id=current_user.id)` once, ordered IDs and account names, validates `GroupMessageSeenRead` result model instances with optional-string/null field preservation and UTC datetimes.
+  2. Empty result: direct handler invocation with empty service summary asserts once-awaited service calls and returns empty list `[]`.
+  3. Propagated validation error: invalid service item with non-int `user_id` asserts once-awaited service calls and propagates Pydantic `ValidationError` containing `user_id`.
+
+Witness citations and boundary exclusions:
+- Existing validation witnesses are cited strictly without claiming tool-free Worker execution or inventing test/review receipts.
+- Direct unit tests patch both service boundaries (`api.routers.chat.get_room_or_404` and `api.routers.chat.list_group_message_seen_members`) and directly invoke the router handler.
+- HTTP response status/routing, authentication, membership/sender validation, and DB-service query or persistence behavior are excluded.
+
+Accounting status and unit tracking:
+- Accounting completion is recorded only as contingent on independent Gemini verification, Codex review/exact-byte/tests, and clean commit.
+- Adds zero distinct seeds and zero accepted product behavior.
+- Predecessor provenance: the completed users/notifications group remains fully reconciled 5/5 with 0 remaining units (`remaining_behavior_units=0`); historical counters (`pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `reconciled_behavior_units=5`) are retained solely as predecessor provenance, never a new pending group.
+- Preserved deferrals: preserve every old receipt/counter/deferral by unchanged prefix and refer to `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-chat-seen-members.json` preserved_deferrals without altering it.
+
+Seed accounting, blockers, and Stage status:
+- Distinct seed accounting: adds zero distinct seeds and zero accepted product behavior.
+- Canonical counts retained: 465 expected, 135 baseline + 254 reconciled new = 389 evidenced, 76 remaining seeds.
+- Coverage and seed acceptance status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers retained open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Next internal gap: independently assessed canonical seed promotion of exactly this retained evidence if genuinely eligible, otherwise a distinct bounded uncharacterized scenario after current coverage validation.
+- Non-GROUP 404 and service-failure remain explicitly retained as uncharacterized, plus remaining authentication/concurrency/retry/reload gates; all terminal deferrals and external exclusions stay intact.
+
+Explicit exclusions:
+- All authentication-policy acceptance;
+- New behavior, seed, origin cell, blocker, or Stage acceptance/closure;
+- Non-GROUP 404 and service-failure characterization;
+- Concurrency, retry, reload;
+- All production, deploy, DNS, Web Writer, network, secrets;
+- Reuse or alias of any rejected/deferred artifact;
+- Edits to existing inventory, canonical manifest, tests, runtime, scripts, or controls.
