@@ -544,8 +544,17 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         expected = inventory.get("expected_seed_count")
         surfaces = inventory.get("paths")
         n_sources = len(sources) - 2
-        expected_source_keys = {"baseline_path", "base_path", "continuation_path"} | {
-            f"continuation_{i}_path" for i in range(2, n_sources + 1)
+        required_source_keys = {"baseline_path", "base_path", "continuation_path"}
+        numbered_sources = {}
+        for key in sources:
+            if key in required_source_keys:
+                continue
+            match = re.fullmatch(r"continuation_([1-9][0-9]?)_path", key) if type(key) is str else None
+            if match is None or not 2 <= int(match[1]) <= 64:
+                raise runner.ProposalError("canonical manifest inventory or sources invalid")
+            numbered_sources[int(match[1])] = sources[key]
+        expected_source_keys = required_source_keys | {
+            f"continuation_{i}_path" for i in numbered_sources
         }
         if (
             type(expected) is not int
@@ -611,23 +620,57 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         if c1.get("schema_version") != 1 or c1.get("stage") != "P1-00b" or not isinstance(c1.get("records"), list) or not isinstance(c1_base, dict) or c1_base.get("path") != sources["base_path"] or c1_base.get("sha256") != base_sha or not ancestor(c1_base.get("inspected_head")):
             raise runner.ProposalError("continuation 1 invalid")
 
-        continuations = [
-            (
-                sources[f"continuation_{index}_path"],
-                sources["continuation_path"] if index == 2 else sources[f"continuation_{index - 1}_path"],
-                c1_sha if index == 2 else None,
-            )
-            for index in range(2, n_sources + 1)
-        ]
-        docs = [base, c1]
-        for index, (path, predecessor, predecessor_sha) in enumerate(continuations, start=2):
+        # Source labels are not acceptance counters: reviewed promotions can
+        # skip labels. Audit every declared source and its whole predecessor
+        # closure, but only declared records contribute scenario coverage.
+        selected = {1: sources["continuation_path"], **numbered_sources}
+        if len(set(sources.values())) != len(sources):
+            raise runner.ProposalError("canonical source paths conflict")
+        path_indexes = {path: index for index, path in selected.items()}
+        audited = {1: (sources["continuation_path"], c1, c1_sha)}
+        auditing = set()
+
+        def audit_continuation(index: int, path: str) -> tuple[dict, str]:
+            if index in audited:
+                old_path, document, digest = audited[index]
+                if old_path != path:
+                    raise runner.ProposalError("canonical predecessor identity conflict")
+                return document, digest
+            if index in auditing or len(audited) + len(auditing) >= 64:
+                raise runner.ProposalError("canonical predecessor graph invalid")
+            auditing.add(index)
             current, current_sha = load(path)
-            if predecessor_sha is None:
-                predecessor_sha = load(predecessor)[1]
             link = current.get("predecessor_inventory")
-            actual_touch = runner.git(root, "log", "-1", "--format=%H", head, "--", predecessor)
-            if current.get("schema_version") != 1 or current.get("stage") != "P1-00b" or not isinstance(current.get("records"), list) or not isinstance(link, dict) or link.get("path") != predecessor or link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or git_blob_digest(actual_touch, predecessor) != predecessor_sha:
+            if current.get("schema_version") != 1 or current.get("stage") != "P1-00b" or not isinstance(current.get("records"), list) or not isinstance(link, dict):
                 raise runner.ProposalError(f"continuation {index} invalid")
+            predecessor = link.get("path")
+            predecessor_index = path_indexes.get(predecessor) if type(predecessor) is str else None
+            if predecessor_index is None:
+                match = re.fullmatch(
+                    r"docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-([1-9][0-9]?)\.json",
+                    predecessor,
+                ) if type(predecessor) is str else None
+                if match is None or not 2 <= int(match[1]) <= 64:
+                    if set(numbered_sources) != set(range(2, max(numbered_sources) + 1)):
+                        raise runner.ProposalError("canonical manifest inventory or sources invalid")
+                    raise runner.ProposalError(f"continuation {index} invalid")
+                predecessor_index = int(match[1])
+                if predecessor_index in selected and selected[predecessor_index] != predecessor:
+                    raise runner.ProposalError("canonical predecessor identity conflict")
+            previous_selected = max(number for number in selected if number < index)
+            if not previous_selected <= predecessor_index < index:
+                raise runner.ProposalError(f"continuation {index} invalid")
+            _, predecessor_sha = audit_continuation(predecessor_index, predecessor)
+            actual_touch = runner.git(root, "log", "-1", "--format=%H", head, "--", predecessor)
+            if link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or git_blob_digest(actual_touch, predecessor) != predecessor_sha:
+                raise runner.ProposalError(f"continuation {index} invalid")
+            auditing.remove(index)
+            audited[index] = (path, current, current_sha)
+            return current, current_sha
+
+        docs = [base, c1]
+        for index in sorted(numbered_sources):
+            current, _ = audit_continuation(index, numbered_sources[index])
             docs.append(current)
 
         current_seen: set[tuple[str, str]] = set()
