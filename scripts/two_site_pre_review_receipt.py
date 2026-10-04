@@ -40,6 +40,7 @@ __all__ = [
 ]
 
 MAX_SPECS, MAX_CHANGES, MAX_SELECTORS, MAX_TAIL_BYTES = 32, 32, 200, 8192
+MAX_NEW_TEST_BYTES = 24000
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXPECTED_RECEIPT_KEYS = frozenset({
     "state",
@@ -607,6 +608,19 @@ def validate_test_receipt(
     }
 
 
+def _is_canonical_new_test(change: Mapping[str, Any]) -> bool:
+    if "original_sha256" not in change or change["original_sha256"] is not None:
+        return False
+    path = change.get("path")
+    if not isinstance(path, str):
+        return False
+    parts = Path(path).parts
+    if len(parts) < 2 or parts[0] != "tests":
+        return False
+    name = parts[-1]
+    return name.startswith("test_") and name.endswith(".py")
+
+
 def run_candidate_tests(
     root: str | Path,
     task: Mapping[str, Any],
@@ -702,6 +716,32 @@ def run_candidate_tests(
 
     if not chosen_selectors:
         raise SandboxError("at least one focused selector required")
+
+    oversize_findings: list[str] = []
+    for change in raw_changes:
+        if _is_canonical_new_test(change):
+            path = change["path"]
+            content = change["content"]
+            byte_count = len(content.encode("utf-8"))
+            if byte_count > MAX_NEW_TEST_BYTES:
+                oversize_findings.append(
+                    f"AssertionError: {path} exceeds {MAX_NEW_TEST_BYTES} byte limit: {byte_count} bytes"
+                )
+    if oversize_findings:
+        bounded_findings = oversize_findings[:MAX_CHANGES]
+        receipt = {
+            "state": "FAILED",
+            "proposal_sha256": proposal_sha256,
+            "selectors": chosen_selectors,
+            "unsupported_specs": unsupported_specs,
+            "returncode": 1,
+            "stdout_tail": "",
+            "stderr_tail": _bound_utf8_tail("\n".join(bounded_findings)),
+            "snapshot_files": 0,
+            "snapshot_bytes": 0,
+            "isolation": "static-byte-budget",
+        }
+        return validate_test_receipt(receipt, proposal_sha256)
 
     sandbox_result = two_site_agent_sandbox.run_tests(
         resolved_root,
