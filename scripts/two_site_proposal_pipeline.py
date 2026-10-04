@@ -1022,6 +1022,52 @@ def _byte_profile_failure_factors(receipt: Mapping[str, Any]) -> list[str] | Non
     return sorted(factors)
 
 
+def _branch_root_failure_factor(receipt: Mapping[str, Any]) -> str | None:
+    """Recognize only the exact typed canonical repository-branch failure factor."""
+    proposal_sha = (
+        receipt.get("proposal_sha256")
+        if isinstance(receipt, Mapping) and not isinstance(receipt, (str, bytes))
+        else ""
+    )
+    if not isinstance(proposal_sha, str):
+        proposal_sha = ""
+    validated = validate_test_receipt(receipt, proposal_sha)
+    if validated["state"] != "FAILED":
+        raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+
+    target_exceptions = {
+        f"scripts.two_site_codex_autopilot.AutopilotError: autopilot requires branch {BRANCH}",
+        f"two_site_codex_autopilot.AutopilotError: autopilot requires branch {BRANCH}",
+    }
+
+    combined = validated["stdout_tail"] + "\n" + validated["stderr_tail"]
+    has_typed_branch_exc = False
+    for raw_line in combined.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("E "):
+            exc_candidate = stripped[2:].strip()
+            if exc_candidate in target_exceptions:
+                has_typed_branch_exc = True
+                break
+
+    if not has_typed_branch_exc:
+        return None
+
+    normalized_selectors = sorted(set(validated["selectors"]))
+    payload = {
+        "branch": BRANCH,
+        "factor": "repository_branch",
+        "selectors": normalized_selectors,
+    }
+    canonical_json = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest().lower()
+
+
 def test_failure_signature(receipt: Mapping[str, Any]) -> str:
     proposal_sha = (
         receipt.get("proposal_sha256")
@@ -1239,9 +1285,12 @@ def _run_post_worker_remainder(
     seen_norm_findings: set[str],
     seen_test_signatures: set[str],
     seen_bootstrap_signatures: set[str],
+    seen_branch_factors: set[str] | None = None,
 ) -> None:
     """Execute post-worker verification, test execution, and correction loop."""
     prior_changes = worker_res["changes"]
+    if seen_branch_factors is None:
+        seen_branch_factors = set()
     while True:
         worker_result_path = worker_dir / "result.json"
         bootstrap_findings = p1_00_characterization_bootstrap_findings(worker_res)
@@ -1291,6 +1340,11 @@ def _run_post_worker_remainder(
                 if sig in seen_test_signatures:
                     raise ProposalError(f"repeated test failure signature: {sig}")
                 seen_test_signatures.add(sig)
+                branch_factor = _branch_root_failure_factor(receipt)
+                if branch_factor is not None:
+                    if branch_factor in seen_branch_factors:
+                        raise ProposalError(f"repeated branch root factor: {branch_factor}")
+                    seen_branch_factors.add(branch_factor)
                 feedback_payload = test_gate_feedback(receipt, current_worker[1])
             else:
                 reviewer_run_id, reviewer_dir = run_provider_session(
@@ -1423,6 +1477,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         seen_norm_findings: set[str] = set()
         seen_test_signatures: set[str] = set()
         seen_bootstrap_signatures: set[str] = set()
+        seen_branch_factors: set[str] = set()
 
         worker_run_id, worker_dir = run_provider_session(
             root, task_candidate, "worker", f"{run_prefix}-worker-0", timeout,
@@ -1461,6 +1516,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
             seen_norm_findings=seen_norm_findings,
             seen_test_signatures=seen_test_signatures,
             seen_bootstrap_signatures=seen_bootstrap_signatures,
+            seen_branch_factors=seen_branch_factors,
         )
 
         check_state(root, initial_head, initial_refs, task_candidate, task, sources)
