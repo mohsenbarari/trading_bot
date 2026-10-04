@@ -50,6 +50,17 @@ else:
     from two_site_source_excerpts import extract_bundle
     from two_site_task_preflight import prepare_task
 
+try:
+    from scripts.two_site_proposal_byte_profile import (
+        PREFIX as BYTE_PROFILE_PREFIX, ProposalByteProfileError,
+        parse_proposal_utf8_budget_profile, require_proposal_utf8_budget_profile,
+    )
+except ImportError:
+    from two_site_proposal_byte_profile import (
+        PREFIX as BYTE_PROFILE_PREFIX, ProposalByteProfileError,
+        parse_proposal_utf8_budget_profile, require_proposal_utf8_budget_profile,
+    )
+
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
 P1_00B_ASSIGNMENT = "WA-P1-00B-FREEZE-20260904-001"
 P1_00B_BATCH_PREFIX = "P1-00B-BATCH-V1."
@@ -94,14 +105,23 @@ def validate_p1_00b_batch_spec(task: object, scenario_key: object) -> None:
             "P1-00b batch must change exactly one canonical characterization test module"
         )
 
+    # A validated machine profile is transport metadata, not another handler.
+    try:
+        parse_proposal_utf8_budget_profile(requirements, allowed_files, allowed_files)
+    except ProposalByteProfileError:
+        raise runner.ProposalError("invalid P1-00b batch byte profile") from None
+    handler_requirements = [
+        entry for entry in requirements
+        if not (isinstance(entry, str) and entry.startswith(BYTE_PROFILE_PREFIX))
+    ]
     parsed = []
-    for requirement in requirements:
+    for requirement in handler_requirements:
         if not isinstance(requirement, str):
             continue
         match = P1_00B_HANDLER_REQUIREMENT.fullmatch(requirement)
         if match is not None:
             parsed.append(match.groupdict())
-    if not 2 <= len(parsed) <= 4 or len(parsed) != len(requirements):
+    if not 2 <= len(parsed) <= 4 or len(parsed) != len(handler_requirements):
         raise runner.ProposalError(
             "P1-00b batch must contain exactly two to four explicit handler requirements"
         )
@@ -209,6 +229,13 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         task = spec["task"]
         if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
             raise runner.ProposalError("invalid base task")
+        if startup is not None and startup.route == "one_shot":
+            try:
+                require_proposal_utf8_budget_profile(
+                    task.get("requirements"), task.get("allowed_files"),
+                )
+            except ProposalByteProfileError:
+                raise runner.ProposalError("normal task requires an explicit valid UTF-8 budget profile") from None
         validate_p1_00b_batch_spec(task, spec["scenario_key"])
         validate_direct_script_tests(root, task)
         if not isinstance(spec["snippets"], list) or len(spec["snippets"]) > 32:

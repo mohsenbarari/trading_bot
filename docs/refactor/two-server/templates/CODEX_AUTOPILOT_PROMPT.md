@@ -47,9 +47,10 @@ and unrelated remote-service mutation. This does not widen any other gate.
    source module into one shared hermetic characterization module by default. Use the
    `P1-00B-BATCH-V1.<family>` scenario key and one requirement per handler exactly as
    `[HANDLER] source.py:symbol | selector=tests/test_p1_00b_characterization_x.py::Class::test_x | scenario=key`.
-   Its selectors must be exactly those handler selectors. The local builder rejects a batch
-   that has a duplicate handler/scenario, mixed source modules, more/fewer handlers, extra
-   requirements, or selector drift. This packages review transport only: every handler still
+   Its selectors must be exactly those handler selectors. One canonical UTF-8 budget
+   requirement (see below) is metadata and is not another handler. The local builder
+   rejects duplicate handler/scenario, mixed modules, more/fewer handlers, other extra
+   requirements, invalid/duplicate budget profiles, or selector drift. This packages review transport only: every handler still
    needs its own live assertion and ledger evidence. Do not batch an origin-matrix cell,
    custom Session/table setup, persistence/retry path, subprocess/reload path, or any unit
    whose fixture/lifecycle is not genuinely shared; record that concrete reason and use one unit.
@@ -65,6 +66,25 @@ and unrelated remote-service mutation. This does not widen any other gate.
    transitive DB-call closure and query/result contracts. Add every missing path:symbol in one
    rebuild. If the closure exceeds bounds, split it or first build/reuse a real-AsyncSession
    canonical helper. Never use ordered result queues or generic owner/None fallbacks.
+   Every NEW ordinary task MUST declare exactly one starting-prefix machine budget
+   requirement: PROPOSAL_UTF8_BUDGET_V1: followed immediately by canonical ASCII JSON
+   with recursive sorted keys, no spaces, version "1.0", file_limits for EVERY exact
+   allowed_files path and total_limit. Example for one new test:
+   PROPOSAL_UTF8_BUDGET_V1:{"file_limits":{"tests/test_example.py":24000},"total_limit":24000,"version":"1.0"}
+   Use actual applicable per-file limits <=160000 and aggregate <=160000; never widen
+   another stricter source, output or test cap. Budgets count FULL FINAL MATERIALIZED
+   UTF-8 FILES, not append text, replacement transport, Unicode characters or tokens.
+   For an append-only ledger, include its current full UTF-8 size plus bounded addition;
+   a 50KB ledger cannot have a 4500-byte final-file cap. Reuse fixtures and allow drafting
+   margin; never reduce an assertion or requirement merely to fit. A profile is one
+   physical requirement covered by Worker/Reviewer, not a new behavior or seed. Keep
+   custom-session packages <=4 physical requirements including this profile.
+   Fix missing/malformed declarations LOCALLY before submit. The one-shot builder
+   rejects them before writing a task; the fresh ordinary pipeline rejects them before
+   semantic reservation or Provider. A Broker admission intent is not acceptance or a
+   retry permit. Do not edit historical/frozen tasks, reset reservations, or convert a
+   quota continuation into a new initial task. Legacy read/check and same-lineage
+   continuation retain their existing compatibility and exact custody.
    Use scripts/two_site_cycle_tools.py build --spec <ignored-spec.json> --output
    .local/two-site-refactor/tasks/<fresh-id>.json. Spec keys: task (the exact six-key runner contract),
    snippets ([{path, symbols}] or []), gap_reference (tracked doc#gap), and scenario_key (stable
