@@ -364,3 +364,87 @@ Reconciliation status, blockers, and Stage status:
 Deferrals and exclusions:
 - Preserve every prior deferral and explicitly retain all deferrals in the accepted shared receipt; in particular these exact strings verbatim: defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007; defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004; defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded; defer_prior_unit=normal169-c16-c17-union-p確; defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014; defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012; defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2; defer_prior_unit=normal169-canonical-manifest-pre; defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2; defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007; defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005; defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004; defer_prior_unit=normal169-c16-receipt-custody-20261003-c001; defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2; continuation-12; 153/154/155/157-C001; normal159 C1/C2; rejected C15 machine checkpoint; rejected policy/seed proposals; normal161-c5 C16 incremental reconciliation; subsequent recorded deferrals. Rejected artifacts are never evidence.
 - State exclusions: global reconciliation closeout; new/sixth behavior; read_user self-success and super-admin rejection; authorization policy; mutation/persistence/retry/reload; origin/seed/blocker/Stage closure; production/deploy/DNS/Web Writer/network/secrets; rejected-artifact reuse. Canonical global reconciliation closeout is a subsequent unit gap; do not create new tests or accept a sixth behavior.
+
+### 2026-10-04 UTC — Canonical five-unit reconciliation closeout checkpoint
+
+Assignment `WA-P1-00B-CANONICAL-CLOSEOUT-20261004-265` (digest `6d4a30f06544ef2e4597656204c842a30a055f733453ff2143e862cf482f33fa`, inspected HEAD `9fb0627591a438597e8e25984ec0a3ccb8d142f1`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only canonical five-unit closeout checkpoint under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Accepted prior ledger commit: `55868d08ffc9b42ff318fa0065f1689665135d32`, SHA256 `dd7bf2cdd9ab42d6ececc1e214df1e89be213ee31dea5a0b42fe347442ad0561` (`docs/refactor/two-server/section-1/00-stage-ledger.md`).
+- Accepted C16 successor receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-c16-from-c15.json` at commit `d06621acf04aec7b6d01e7041e6e637ca6d582b2`, SHA256 `956103bddc94004da7a80dd4a73f9fc4dd05fde25c7dea3d126d8da6c80d5cce`.
+- Accepted C13 promotion receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-c13-canonical-promotion.json` at commit `ff8a08490a0555bc7afcc56c6e189294751e8eec`, SHA256 `5ab85485719dfe5635ed9c106082b0453108336b5791f6abc51c4c5bf2f8430b`.
+- Accepted shared read_user promotion receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-shared-read-user-canonical-promotion.json` at commit `78bce2289acba0a4108237daf84c559c0d4f79f4`, SHA256 `c25d0ac4b030109d1a186ba95085807dfe481bc754c1220826b8ae6c66bda97d`.
+- Accepted live manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` at live promotion commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`.
+
+Five accepted behavior records (in original cumulative order C13, C14, C17, C15, C16):
+1. Continuation 13 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json`): `tests/test_p1_00b_characterization_trade_export_self_delegation.py` (commit `98c98e93e94aa426ebae7502a67a5d5053a3a31a`, SHA256 `b8db918415014c2fbaec56888bdc37e6be53f329829a6a1af9dd0ba72b5856d1`, seed `API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797`, selector `tests/test_p1_00b_characterization_trade_export_self_delegation.py::TradeExportSelfDelegationCharacterizationTests::test_self_target_delegates_exact_filters_and_returns_export_response`).
+2. Continuation 14 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-14.json`): `tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py` (commit `d175d215f83631a98a1a9fefea7c27cef6d88936`, SHA256 `1fd0fe0e19768903c6fd2e921b63238c2af0ceba5b6331210ce6e1e1494e0623`, seed `API-IDENTITY-GET-USERS-READ-ALL-USERS-L407`, selector `tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py::UsersReadAllExecuteFailureHttpCharacterizationTests::test_list_query_failure_returns_http_500_before_relation_context`).
+3. Continuation 17 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json`): `tests/test_p1_00b_characterization_users_read_missing_http.py` (commit `0f3deb613251c7c5f39822b2a1f0e5532e5e140f`, SHA256 `7ae68ea6d3239cf6ab844b3087efe45a56a38b068308316861362b1ff71c8dfb`, seed `API-IDENTITY-GET-USERS-READ-USER-L440`, selector `tests/test_p1_00b_characterization_users_read_missing_http.py::UsersReadMissingHttpCharacterizationTests::test_authorized_missing_target_returns_http_404_after_single_get`).
+4. Continuation 15 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-15.json`): `tests/test_p1_00b_characterization_users_read_all_empty_http.py` (commit `f564bf674a6c5f7ab38be28a2ad92f69ff886ab8`, SHA256 `83151fbafaa7953fbad50136ad564a0bdd2f5d39c1e5943c75a40b3364cf7faa`, seed `API-IDENTITY-GET-USERS-READ-ALL-USERS-L407`, selector `tests/test_p1_00b_characterization_users_read_all_empty_http.py::UsersReadAllEmptyHttpCharacterizationTests::test_empty_list_returns_http_200_without_relation_queries`).
+5. Continuation 16 (`docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json`): `tests/test_p1_00b_characterization_users_read_manager_peer_http.py` (commit `05fe0d5c2a5dae727aa7219549843b1ce6235945`, SHA256 `f093210c5dadda895a370ec1427607c3eade7e593e3133d3551881f2e8e20bcd`, seed `API-IDENTITY-GET-USERS-READ-USER-L440`, selector `tests/test_p1_00b_characterization_users_read_manager_peer_http.py::UsersReadManagerPeerHttpCharacterizationTests::test_middle_manager_peer_read_returns_http_403_before_relation_loading`).
+
+Reconciliation closeout and unit tracking:
+- 5/5 behavior units reconciled (`reconciled_behavior_units=5`, `remaining_behavior_units=0`).
+- Completed-group provenance counters retained: `pending_five=5`, `total_behavior_units=5`, `units_since_reconciliation=5`.
+- Current canonical accounting/ledger closeout is complete on final acceptance of this entry, while all older false flags and historical counters stay unchanged.
+- No sixth behavior before this actual closeout passes.
+
+Distinct seed accounting and counts:
+- Canonical counts: 465 expected, 135 baseline + 254 reconciled new = 389 evidenced, 76 remaining; this closeout append adds zero distinct seeds and zero product behavior.
+- Five-unit union added exactly two historical distinct seeds: C13 export (`API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797`) and one shared read_user seed (`API-IDENTITY-GET-USERS-READ-USER-L440`) across C16 and C17; C14/C15 read_all_users (`API-IDENTITY-GET-USERS-READ-ALL-USERS-L407`) is already canonical, and C16 contributes zero after C17.
+- Historical 388 snapshot (`docs/refactor/two-server/section-1/inventory/recent-characterization-seed-coverage-388-snapshot.json`, SHA256 `da0fd31c0dbc4776b548a8b235f8479fe8e60687ff51e0cb2623c3c21d4c42d7`) and C13 historical 388 receipt binding remain historical provenance; live manifest `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` is current 389.
+- Preserve every immutable receipt and counter unchanged.
+
+Witness validation selectors:
+Cited strictly as existing validation witnesses (without claiming tests were run by the tool-free Worker or inventing test/review receipts):
+1. `tests/test_p1_00b_characterization_c13_only_canonical_promotion.py::C13CanonicalPromotionTests::test_c13_canonical_promotion_retains_shared_seed_gate`
+2. `tests/test_p1_00b_characterization_shared_read_user_live_set_promotion.py::SharedReadUserLiveSetPromotionTests::test_live_manifest_promotes_exactly_one_shared_seed_with_custody`
+3. `tests/test_p1_00b_characterization_shared_read_user_canonical_promotion_receipt.py::SharedReadUserCanonicalPromotionReceiptTests::test_receipt_binds_accepted_promotion_and_preserves_open_gates`
+4. `tests/test_p1_00b_characterization_c16_successor_reconciliation.py::C16SuccessorReconciliationTests::test_c16_successor_reconciles_accepted_unit_and_preserves_open_gates`
+5. `tests/test_p1_00b_characterization_frozen388_live_manifest_custody_adapter.py::Frozen388LiveManifestCustodyTests::test_temporary_live_manifest_drift_rejected_and_restored_oracle_guarded`
+6. `tests/test_p1_00b_characterization_frozen388_live_manifest_custody_adapter.py::Frozen388LiveManifestCustodyTests::test_frozen388_witness_survives_advanced_live_manifest_and_preserves_both_trees`
+7. `tests/test_p1_00b_characterization_trade_export_self_delegation.py::TradeExportSelfDelegationCharacterizationTests::test_self_target_delegates_exact_filters_and_returns_export_response`
+8. `tests/test_p1_00b_characterization_users_read_all_execute_failure_http.py::UsersReadAllExecuteFailureHttpCharacterizationTests::test_list_query_failure_returns_http_500_before_relation_context`
+9. `tests/test_p1_00b_characterization_users_read_all_empty_http.py::UsersReadAllEmptyHttpCharacterizationTests::test_empty_list_returns_http_200_without_relation_queries`
+10. `tests/test_p1_00b_characterization_users_read_manager_peer_http.py::UsersReadManagerPeerHttpCharacterizationTests::test_middle_manager_peer_read_returns_http_403_before_relation_loading`
+11. `tests/test_p1_00b_characterization_users_read_missing_http.py::UsersReadMissingHttpCharacterizationTests::test_authorized_missing_target_returns_http_404_after_single_get`
+
+Blockers, Stage status, and next internal gap:
+- Retain `coverage_status: PARTIAL` and `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Both canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`.
+- Origin matrix unresolved cells remain 24; `closures_authorized=false`.
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- The next internal gap is the remaining seed-handler assertions (including read_user self-success and super-admin rejection), with 76 seeds and 24 origins remaining after this group closeout.
+
+Preserved deferrals:
+Preserve every prior deferral verbatim in unchanged history and explicitly retain all deferrals from the accepted shared receipt and predecessor proposal:
+- `defer_prior_unit=normal265-canonical-five-closeout-20261004-c001`
+- `defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007`
+- `defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004`
+- `defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded`
+- `defer_prior_unit=normal169-c16-c17-union-p確`
+- `defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014`
+- `defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012`
+- `defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2`
+- `defer_prior_unit=normal169-canonical-manifest-pre`
+- `defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2`
+- `defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007`
+- `defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005`
+- `defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004`
+- `defer_prior_unit=normal169-c16-receipt-custody-20261003-c001`
+- `defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2`
+- `continuation-12`
+- `153/154/155/157-C001`
+- `normal159 C1/C2`
+- `rejected C15 machine checkpoint`
+- `rejected policy/seed proposals`
+- `normal161-c5 C16 incremental reconciliation`
+- `subsequent recorded deferrals`
+Rejected artifacts are never evidence.
+
+Explicit exclusions:
+- New or sixth product behavior;
+- read_user self-success and super-admin rejection (unmet);
+- authorization-policy acceptance;
+- mutation, persistence, retry, reload;
+- origin matrix cells, seed-blocker closure, Stage closure;
+- external, production, deploy, DNS, Web Writer, network, secrets;
+- auxiliary documentation, tests, and CONTINUE count as zero new behavior and zero new seeds.
