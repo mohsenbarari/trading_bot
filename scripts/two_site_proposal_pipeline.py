@@ -20,7 +20,7 @@ try:
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
         ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
-        bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
+        bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
     )
@@ -29,7 +29,7 @@ except ModuleNotFoundError:
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
         ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
-        bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
+        bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
     )
@@ -81,6 +81,34 @@ try:
     from scripts.two_site_required_test_gate import required_selector_gate_feedback
 except ImportError:
     from two_site_required_test_gate import required_selector_gate_feedback
+
+try:
+    from scripts.two_site_proposal_byte_profile import (
+        ERROR as BYTE_PROFILE_ERROR, ProposalByteProfileError,
+        parse_proposal_utf8_budget_profile,
+    )
+except ImportError:
+    from two_site_proposal_byte_profile import (
+        ERROR as BYTE_PROFILE_ERROR, ProposalByteProfileError,
+        parse_proposal_utf8_budget_profile,
+    )
+
+
+def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
+    """Reject an unrepairable task declaration before reservation or Provider.
+
+    All initial, state-recheck and continuation task reads use this boundary.
+    The allowed set validates syntax only; no candidate paths are authorized.
+    """
+    task, sources = _load_task(root, task_path)
+    try:
+        parse_proposal_utf8_budget_profile(
+            task["requirements"], task["allowed_files"], task["allowed_files"],
+        )
+    except ProposalByteProfileError:
+        raise ProposalError(BYTE_PROFILE_ERROR) from None
+    return task, sources
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"

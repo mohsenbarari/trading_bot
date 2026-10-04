@@ -13,6 +13,15 @@ else:
     import two_site_proposal_runner as runner
     from two_site_readiness_facts import _collect_session_readiness_issues
 
+try:
+    from scripts.two_site_proposal_byte_profile import (
+        ProposalByteProfileError, parse_proposal_utf8_budget_profile,
+    )
+except ImportError:
+    from two_site_proposal_byte_profile import (
+        ProposalByteProfileError, parse_proposal_utf8_budget_profile,
+    )
+
 __all__ = ["preflight_task", "prepare_task"]
 
 _MAX_PAYLOAD_BYTES = 16384
@@ -71,6 +80,18 @@ def _inspect_task(
             if issue is not None:
                 return _format_result("TASK_BLOCKED", issues=[issue]), None
         raise exc
+
+    try:
+        # Before a candidate exists, validate the declaration against the exact
+        # allowed set; this does not grant permission to change every path.
+        parse_proposal_utf8_budget_profile(
+            task["requirements"], task["allowed_files"], task["allowed_files"],
+        )
+    except ProposalByteProfileError:
+        issues = runner._normalize_readiness_issues([
+            runner._TaskBoundaryError("TASK_SCHEMA_INVALID").to_fact(),
+        ])
+        return _format_result("TASK_BLOCKED", issues=issues), None
 
     notes = runner.task_preparation_notes(task, sources)
     enriched = runner.enrich_repository_dependency_context(
