@@ -7,6 +7,7 @@ reviewed maintenance-transition record files.
 from __future__ import annotations
 
 import errno
+import copy
 import os
 import re
 import secrets
@@ -111,12 +112,14 @@ def _stat_fingerprint(
     )
 
 
-def _validate_file_stat(st: os.stat_result) -> None:
+def _validate_file_stat(st: os.stat_result, max_allowed: int = MAX_MAINTENANCE_TRANSITION_RECORD_BYTES) -> None:
     if stat.S_ISLNK(st.st_mode):
         raise MaintenanceTransitionFileError("Leaf file must not be a symlink")
     if not stat.S_ISREG(st.st_mode):
         raise MaintenanceTransitionFileError("Leaf file must be a regular file")
     if (st.st_mode & 0o777) != 0o600:
+        raise MaintenanceTransitionFileError("Leaf file mode must be 0600")
+    if max_allowed != MAX_MAINTENANCE_TRANSITION_RECORD_BYTES and stat.S_IMODE(st.st_mode) != 0o600:
         raise MaintenanceTransitionFileError("Leaf file mode must be 0600")
     if st.st_uid != os.geteuid():
         raise MaintenanceTransitionFileError("Leaf file owner mismatch")
@@ -124,8 +127,58 @@ def _validate_file_stat(st: os.stat_result) -> None:
         raise MaintenanceTransitionFileError("Leaf file link count must be 1")
     if st.st_size <= 0:
         raise MaintenanceTransitionFileError("Leaf file cannot be empty")
-    if st.st_size > MAX_MAINTENANCE_TRANSITION_RECORD_BYTES:
+    if st.st_size > max_allowed:
         raise MaintenanceTransitionFileError("Leaf file exceeds maximum size")
+
+
+def _record_profile(main_bindings: object) -> tuple[dict | None, int]:
+    """Fixed codec profiles only; no caller-supplied size, parser or approval authority.
+
+    Upper runtime storage must obtain these bindings from actual live readers.
+    Here they are only validated and detached before descriptor/filesystem I/O.
+    """
+    if main_bindings is None:
+        return None, MAX_MAINTENANCE_TRANSITION_RECORD_BYTES
+    try:
+        from scripts.two_site_main_maintenance_record import (
+            MAX_MAIN_MAINTENANCE_RECORD_BYTES, _canonical, _owner,
+        )
+        from scripts.two_site_maintenance_transition_record import _validate_new_repository
+        if type(main_bindings) is not dict or set(main_bindings) != {"prior_checkpoint_sha256", "prior_repository", "owner_approval"}:
+            raise ValueError
+        checkpoint = main_bindings["prior_checkpoint_sha256"]
+        if type(checkpoint) is not str or not re.fullmatch(r"[0-9a-f]{64}", checkpoint):
+            raise ValueError
+        prior = _validate_new_repository(main_bindings["prior_repository"])
+        if prior["status"] != "":
+            raise ValueError
+        _canonical(prior, MAX_MAIN_MAINTENANCE_RECORD_BYTES)
+        owner = main_bindings["owner_approval"]
+        if type(owner) is not dict or type(owner.get("decision")) is not dict:
+            raise ValueError
+        approved = owner["decision"].get("approved_main_sha")
+        if type(approved) is not str or not re.fullmatch(r"[0-9a-f]{40}", approved):
+            raise ValueError
+        if approved == prior["protected_refs"]["refs/heads/main"]:
+            raise ValueError
+        owner = _owner(owner, prior, {"protected_refs":{"refs/heads/main":approved}}, checkpoint)
+        return copy.deepcopy({"prior_checkpoint_sha256":checkpoint, "prior_repository":prior,
+                              "owner_approval":owner}), MAX_MAIN_MAINTENANCE_RECORD_BYTES
+    except Exception:
+        raise MaintenanceTransitionFileError("invalid main transition file bindings") from None
+
+
+def _parse_record(raw: bytes, bindings: dict | None) -> None:
+    if bindings is None:
+        parse_maintenance_transition_record(raw)
+    else:
+        from scripts.two_site_main_maintenance_record import (
+            MainMaintenanceRecordError, parse_main_maintenance_record,
+        )
+        try:
+            parse_main_maintenance_record(raw, **bindings)
+        except MainMaintenanceRecordError:
+            raise MaintenanceTransitionRecordError("invalid main transition record") from None
 
 
 def _cleanup_temp_file(
@@ -185,12 +238,15 @@ def _cleanup_temp_file(
 def read_maintenance_transition_bytes(
     transitions_fd: int,
     leaf: str,
+    *,
+    main_bindings: object = None,
 ) -> bytes | None:
     """Read and validate a reviewed maintenance-transition record file.
 
     Returns the exact raw bytes of the record, or None ONLY if the final
     leaf file does not exist on initial stat.
     """
+    bindings, max_allowed = _record_profile(main_bindings)
     _validate_transitions_fd(transitions_fd)
     _validate_leaf_name(leaf)
 
@@ -203,7 +259,7 @@ def read_maintenance_transition_bytes(
             "Failed to stat leaf file"
         ) from None
 
-    _validate_file_stat(st_path_before)
+    _validate_file_stat(st_path_before, max_allowed)
 
     flags = (
         os.O_RDONLY
@@ -229,7 +285,7 @@ def read_maintenance_transition_bytes(
                 "Failed to stat leaf descriptor"
             ) from None
 
-        _validate_file_stat(st_fd_before)
+        _validate_file_stat(st_fd_before, max_allowed)
 
         if _stat_fingerprint(st_path_before) != _stat_fingerprint(st_fd_before):
             raise MaintenanceTransitionFileError(
@@ -239,7 +295,6 @@ def read_maintenance_transition_bytes(
         expected_size = st_fd_before.st_size
         chunks: list[bytes] = []
         total_read = 0
-        max_allowed = MAX_MAINTENANCE_TRANSITION_RECORD_BYTES
         chunk_size = 4096
 
         while True:
@@ -292,7 +347,7 @@ def read_maintenance_transition_bytes(
             )
 
         try:
-            parse_maintenance_transition_record(raw)
+            _parse_record(raw, bindings)
         except MaintenanceTransitionRecordError:
             raise MaintenanceTransitionFileError(
                 "Invalid canonical transition record content"
@@ -307,23 +362,26 @@ def publish_maintenance_transition_bytes_noreplace(
     transitions_fd: int,
     leaf: str,
     raw: bytes,
+    *,
+    main_bindings: object = None,
 ) -> None:
     """Publish a reviewed maintenance-transition record file with no-overwrite semantics.
 
     Writes to a private temporary file, validates metadata and syncs, hardlinks
     to final leaf, cleans own temporary file, and verifies final state via reader.
     """
+    bindings, max_allowed = _record_profile(main_bindings)
     if type(raw) is not bytes:
         raise MaintenanceTransitionFileError("raw must be bytes")
     if len(raw) == 0:
         raise MaintenanceTransitionFileError("raw bytes cannot be empty")
-    if len(raw) > MAX_MAINTENANCE_TRANSITION_RECORD_BYTES:
+    if len(raw) > max_allowed:
         raise MaintenanceTransitionFileError(
             "raw bytes exceed maximum allowed length"
         )
 
     try:
-        parse_maintenance_transition_record(raw)
+        _parse_record(raw, bindings)
     except MaintenanceTransitionRecordError:
         raise MaintenanceTransitionFileError(
             "Invalid canonical transition record content"
@@ -582,7 +640,8 @@ def publish_maintenance_transition_bytes_noreplace(
         _cleanup_temp_file(transitions_fd, temp_name, temp_dev, temp_ino)
 
         try:
-            final_bytes = read_maintenance_transition_bytes(transitions_fd, leaf)
+            final_bytes = read_maintenance_transition_bytes(
+                transitions_fd, leaf, **({"main_bindings":bindings} if bindings is not None else {}))
         except Exception:
             raise MaintenanceTransitionAmbiguousError(
                 "Failed to read final transition file after link; publication is ambiguous"
