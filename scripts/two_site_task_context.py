@@ -637,6 +637,11 @@ def preparation_notes(task, sources):
             out_contract["new_test_file_draft_target_utf8_bytes"] = (3 * cap) // 4
         # Multiple new files have independent caps in the profile. Never apply
         # the smallest path's cap globally to a larger permitted sibling.
+        if any(path.startswith(("tests/test_p1_00_characterization_",
+                                "tests/test_p1_00b_characterization_"))
+               for path in allowed_new_tests):
+            # Advisory only: do not rewrite proposals or weaken static/test/review gates.
+            out_contract["new_characterization_scaffold"] = {"bootstrap_prefix":"from __future__ import annotations\nimport os\nos.environ[\"APP_ENV_FILE\"] = \"config/unit-test.env.example\"\nfrom tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence\ninstall_p1_00_network_fence()\n","fixture_import_rule":"Reuse unittest.TestCase fixtures through module imports, not imported class bindings (private aliases also collect). Verify whole-file pytest collection matches the task.","persistence_snapshot_rule":"When full-row invariance is required, independently compare every mapped persisted column, including time, nullable and JSON fields; a partial shared snapshot helper is not full-row proof."}
 
     literal_hints, seen_hints, omitted_literal_count, total_bytes = [], set(), 0, 0
 

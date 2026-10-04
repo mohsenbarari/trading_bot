@@ -28,8 +28,13 @@ def _check_pre_dispatch_stop(root: Path) -> None:
         raise broker.BrokerError("stop requested before continuation dispatch")
 
     stop_path = root / ".local" / "two-site-refactor" / "autopilot" / "STOP"
-    if os.path.lexists(stop_path):
-        raise broker.BrokerError("stop requested before continuation dispatch")
+    try:
+        stop_path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise broker.BrokerError("cannot inspect continuation STOP sentinel") from exc
+    raise broker.BrokerError("stop requested before continuation dispatch")
 
 
 def execute_intent_bound_continuation(
