@@ -651,3 +651,83 @@ Explicit exclusions:
 - New mutation, persistence, retry, reload;
 - Rejected-artifact reuse;
 - Secrets, production, deploy, DNS, Web Writer, or remote changes.
+
+### 2026-10-04 UTC — Users and notifications canonical reconciliation closeout checkpoint
+
+Assignment `WA-P1-00B-NORMAL-RETURN-20261004-286` (digest `e2f3970864735536ef564d52f115a5832f1f0a7e4990ef29b0ac308665b06129`, inspected HEAD `e8c2de3118945ebd33721a565b427a660da1a289`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only current-group canonical reconciliation closeout entry for the five-unit users/notifications group under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Successor closeout receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-users-notifications-closeout.json`.
+- Predecessor inventory: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-mark-read-already-read.json` at commit `3b49b936676b1d997d2094424c569bd0293f6c97`, SHA256 `1e3d42ec2f25e348b299fd1acaedaf2a5a1cfb376c0677a53d7bf87dbc5c0717`.
+- Predecessor ledger: `docs/refactor/two-server/section-1/00-stage-ledger.md` at commit `0944c9b693815444916ccc5da228f5eb9b9a818d`, SHA256 `c6565e811d3d66eb02dc86b3b1c75b03d0e45b88786b0ae2ecab5c6c290504ba`.
+- Canonical manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` at commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`.
+
+Five accepted behavior records (in original ordering):
+1. Middle-manager super-admin read rejection:
+   - Path: `tests/test_p1_00b_characterization_users_read_super_admin_http.py`
+   - Commit: `edc592a65a75b53fc73f8725f4a2a874e93d5c32`
+   - SHA256: `ed939ee3502197d5be4520259b12d3e81ef339cf64d8d33c131d70f6e7b2ff42`
+   - Seed ID: `API-IDENTITY-GET-USERS-READ-USER-L440`
+   - Selector: `tests/test_p1_00b_characterization_users_read_super_admin_http.py::UsersReadSuperAdminHttpCharacterizationTests::test_middle_manager_super_admin_read_returns_http_403_before_relation_loading`
+2. Middle-manager self-read success:
+   - Path: `tests/test_p1_00b_characterization_users_read_self_http.py`
+   - Commit: `8037fad2c26fe7ddd9fa979039f715b0308d5a7e`
+   - SHA256: `721943da28c64b58ba7647bfed742b4960f6282057df80af80ba4d1feaad9956`
+   - Seed ID: `API-IDENTITY-GET-USERS-READ-USER-L440`
+   - Selector: `tests/test_p1_00b_characterization_users_read_self_http.py::UsersReadSelfHttpCharacterizationTests::test_middle_manager_self_read_returns_http_200_with_live_serializer`
+3. Cross-user notification mark-read:
+   - Path: `tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py`
+   - Commit: `bcda15dbacfe83e2b420d7053df147670678255c`
+   - SHA256: `7f76cced2068fb9b686adcfe2a6810af61b23d24d11da36a77b513315c4808d8`
+   - Seed ID: `API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296`
+   - Selector: `tests/test_p1_00b_characterization_notification_mark_read_cross_user_http.py::NotificationMarkReadCrossUserHttpCharacterizationTests::test_cross_user_mark_read_returns_http_204_without_mutation`
+4. Owner-unread notification mark-read:
+   - Path: `tests/test_p1_00b_characterization_notification_mark_read_owner_http.py`
+   - Commit: `2dd5ba15a3789227ac5d490bd9b64ce08bf7722f`
+   - SHA256: `5b6ebdaa5f76eb15d14ef1e8d24b277a0bea0d45ece1a656f664d43c9a254ab0`
+   - Seed ID: `API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296`
+   - Selector: `tests/test_p1_00b_characterization_notification_mark_read_owner_http.py::NotificationMarkReadOwnerHttpCharacterizationTests::test_owner_unread_mark_read_returns_http_204_and_persists_before_redis`
+5. Owner-already-read notification mark-read:
+   - Path: `tests/test_p1_00b_characterization_notification_mark_read_already_read_http.py`
+   - Commit: `c4ca87ad3cb5c5a14de5d07acee346595c2ad30e`
+   - SHA256: `9ba605a1d63d2e4ce704662b97601a6f9e26a2dc79f6c9329a9e526156cdbe73`
+   - Seed ID: `API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296`
+   - Selector: `tests/test_p1_00b_characterization_notification_mark_read_already_read_http.py::NotificationMarkReadAlreadyReadHttpCharacterizationTests::test_owner_already_read_returns_http_204_without_mutation`
+
+Existing evidence citations only:
+Cited strictly as existing validation witnesses without claiming tool-free Worker execution or new test/review receipts. Dependency overrides in all tests exclude authentication-policy acceptance.
+
+Reconciliation and ledger tracking:
+- Users accounting accepted at `598298ae45af8125f0541a0b37542500d0f87f85`, cross-user accounting accepted at `1a56c6e1ba041f23eb23ecf17adbc44dd6e39bb5`, and owner accounting accepted at `0944c9b693815444916ccc5da228f5eb9b9a818d` remain preserved.
+- Inventory evidence reconciliation is 5/5 complete and canonical ledger accounting is 5/5 complete.
+- THIS group global canonical closeout becomes complete on final exact acceptance, with 0 remaining units (`remaining_behavior_units=0`) and all completed-group provenance counters retained at 5 (`pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `reconciled_behavior_units=5`).
+- Closeout adds zero new behavior and zero distinct seeds.
+- All historical false flags, counters, deferrals, and earlier completed groups (including the C13-C17 closeout) remain unchanged. Do not duplicate old closeout as new evidence.
+
+Seed accounting, blockers, and Stage status:
+- Distinct seed accounting: Closeout adds zero distinct seeds and zero accepted product behavior.
+- Canonical counts retained: 465 expected, 135 baseline + 254 reconciled new = 389 evidenced, 76 remaining seeds.
+- Coverage and seed acceptance status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers retained open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Next internal gap: Distinct eligible remaining seed-handler characterization validated against current evidence; missing-ID mark-read and deferred delete404 stay deferred and no accepted scenario is repeated. No automatic Stage transition.
+
+Preserved deferrals:
+Preserve entire old ledger byte prefix, all historical receipts/counters/deferrals, and explicitly retain:
+- `defer_prior_unit=normal277-notifications-three-ledger-accounting-20261004-c008`
+- `defer_prior_unit=normal277-current-five-ledger-accounting-20261004-c006`
+- `defer_prior_unit=normal277-pending-five-users-http-reconciliation-20261004-c001-bounded`
+- `defer_prior_unit=normal273-notification-mark-read-missing-id-http-20261004-c002`
+- `defer_prior_unit=normal273-notification-delete-missing-id-http-20261004-c001`
+- `defer_prior_unit=normal271-notification-delete-cross-user-http-20261004-c002`
+- `defer_prior_unit=normal277-notification-http-last-three-inventory-20261004-c002`
+- `defer_prior_unit=normal265-canonical-five-closeout-20261004-c001`
+Rejected artifacts are never evidence.
+
+Explicit exclusions:
+- All authentication-policy acceptance;
+- New behavior, seed, origin cell, blocker, or Stage acceptance/closure;
+- Missing-ID mark-read;
+- Deferred delete404 outcomes;
+- Concurrency, retry, reload;
+- All production, deploy, DNS, Web Writer, network, secrets;
+- Reuse or alias of any rejected/deferred artifact;
+- Edits to existing inventory, canonical manifest, tests, runtime, scripts, or controls.
