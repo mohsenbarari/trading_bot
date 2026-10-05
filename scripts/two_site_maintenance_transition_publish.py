@@ -41,6 +41,7 @@ from scripts.two_site_maintenance_transition_git import (
 from scripts.two_site_maintenance_transition_record import (
     ALLOWED_MAINTENANCE_CONTROL_PATHS,
     build_maintenance_transition_record,
+    maintenance_control_paths_for_record,
     serialize_maintenance_transition_record,
 )
 from scripts.two_site_codex_autopilot import (
@@ -180,26 +181,8 @@ def publish_maintenance_transition_locked(
                 ):
                     raise MaintenanceTransitionPublishError("Control blobs keys mismatch")
 
-                for k, v in chk_ctrl.items():
-                    if k not in ALLOWED_MAINTENANCE_CONTROL_PATHS and curr_ctrl.get(k) != v:
-                        raise MaintenanceTransitionPublishError("Control blob hash mismatch")
-
-                changed_controls = {
-                    k for k in ALLOWED_MAINTENANCE_CONTROL_PATHS
-                    if curr_ctrl.get(k) != chk_ctrl.get(k)
-                }
-
                 if _type_sensitive_equal(norm_repo.get("assignment_scope"), chk_repo.get("assignment_scope")):
                     raise MaintenanceTransitionPublishError("Current assignment scope matches checkpoint scope")
-
-                for ctrl_path in sorted(changed_controls):
-                    declared = any(
-                        ctrl_path in c.get("paths", [])
-                        for c in maintenance_commits
-                        if isinstance(c, dict)
-                    )
-                    if not declared:
-                        raise MaintenanceTransitionPublishError("Control change not declared in commits")
 
                 try:
                     record = build_maintenance_transition_record(
@@ -212,6 +195,17 @@ def publish_maintenance_transition_locked(
                     raise
                 except Exception:
                     raise MaintenanceTransitionPublishError("Failed to build maintenance transition record") from None
+
+                permitted_controls = maintenance_control_paths_for_record(record)
+                for k, v in chk_ctrl.items():
+                    if k not in permitted_controls and curr_ctrl.get(k) != v:
+                        raise MaintenanceTransitionPublishError("Control blob hash mismatch")
+                changed_controls = {
+                    k for k in permitted_controls if curr_ctrl.get(k) != chk_ctrl.get(k)
+                }
+                for ctrl_path in sorted(changed_controls):
+                    if not any(ctrl_path in c["paths"] for c in record["maintenance_commits"]):
+                        raise MaintenanceTransitionPublishError("Control change not declared in commits")
 
                 try:
                     raw_record_bytes = serialize_maintenance_transition_record(record)

@@ -90,6 +90,112 @@ _COMMIT_KEYS = frozenset({
     "test_evidence_sha256",
 })
 
+# One owner-authorized Codex maintenance package, not a general Runner whitelist.
+_BOOTSTRAP_CHECKPOINT = "4d0b2482a47809827db196a22e05840a3884bc23bb02bb43887f3b6cf8e80cba"
+_BOOTSTRAP_PRIOR_HEAD = "3a0f5db6d948c3aa17797e1cf5d771b76145e4e1"
+_BOOTSTRAP_PATH_GROUPS = (
+    [
+        "scripts/two_site_maintenance_transition_publish.py",
+        "scripts/two_site_maintenance_transition_record.py",
+        "scripts/two_site_maintenance_transition_storage.py",
+        "tests/test_two_site_runtime_bootstrap_custody.py",
+    ],
+    [
+        "scripts/two_site_proposal_runner.py",
+        "scripts/two_site_proposal_runtime_profile.py",
+        "tests/test_two_site_proposal_runner.py",
+        "tests/test_two_site_runtime_proposal_profile.py",
+    ],
+)
+_BOOTSTRAP_RUNNER_PATH = "scripts/two_site_proposal_runner.py"
+
+
+def _exact_keyset(value: object, keys: frozenset[str]) -> bool:
+    # Cardinality and all key identities precede every set/hash/lookup operation.
+    return (
+        type(value) is dict
+        and len(value) == len(keys)
+        and all(type(key) is str for key in value)
+        and set(value) == keys
+    )
+
+
+def _plain_record_tree(value: object, depth: int, remaining: list[int]) -> bool:
+    """Bounded identity-only preflight; never invokes foreign value/key hooks."""
+    remaining[0] -= 1
+    if remaining[0] < 0 or depth > 8:
+        return False
+    kind = type(value)
+    if kind is str:
+        return len(value) <= MAX_FIELD_LEN
+    if kind is list:
+        return len(value) <= 256 and all(
+            _plain_record_tree(item, depth + 1, remaining) for item in value
+        )
+    if kind is dict:
+        if len(value) > 256 or not all(type(key) is str for key in value):
+            return False
+        return all(
+            len(key) <= MAX_FIELD_LEN
+            and _plain_record_tree(item, depth + 1, remaining)
+            for key, item in value.items()
+        )
+    return False
+
+
+def maintenance_control_paths_for_record(record: object) -> frozenset[str]:
+    """Project controls for exactly the sealed chain; this is NOT acceptance."""
+    default = ALLOWED_MAINTENANCE_CONTROL_PATHS
+    if not _exact_keyset(record, _RECORD_KEYS):
+        return default
+    repo = record["new_repository"]
+    if not _exact_keyset(repo, frozenset(REPOSITORY_FACT_KEYS)):
+        return default
+    if not _exact_keyset(repo["assignment_scope"], frozenset(ASSIGNMENT_SCOPE_KEYS_ORDER)):
+        return default
+    commits = record["maintenance_commits"]
+    if type(commits) is not list or len(commits) != 2:
+        return default
+    if not all(_exact_keyset(commit, _COMMIT_KEYS) for commit in commits):
+        return default
+    if not _plain_record_tree(record, 0, [4096]):
+        return default
+    if (
+        record["schema_version"] != MAINTENANCE_TRANSITION_SCHEMA_VERSION
+        or record["kind"] != MAINTENANCE_TRANSITION_KIND
+        or record["prior_checkpoint_sha256"] != _BOOTSTRAP_CHECKPOINT
+        or record["prior_head"] != _BOOTSTRAP_PRIOR_HEAD
+        or repo["assignment_scope"]["stage_id"] != "P1-00b"
+    ):
+        return default
+    for index, phase in enumerate(("custody", "runtime")):
+        commit = commits[index]
+        paths = commit["paths"]
+        expected = _BOOTSTRAP_PATH_GROUPS[index]
+        if type(paths) is not list or len(paths) != len(expected):
+            return default
+        if not all(type(path) is str for path in paths) or paths != expected:
+            return default
+        prefix = "ae00-runtime-tool-bootstrap-20261005-330-" + phase
+        for key, role in (("worker_run_id", "author"), ("reviewer_run_id", "reviewer")):
+            actor = commit[key]
+            if type(actor) is not str or len(actor) > 128:
+                return default
+            suffix = r"-author-[0-2]" if role == "author" else r"-reviewer-[0-2](?:-retry-[12])?"
+            if not re.fullmatch(re.escape(prefix) + suffix, actor):
+                return default
+    permitted = default | {_BOOTSTRAP_RUNNER_PATH}
+    try:
+        normalized = _validate_new_repository(repo)
+        _validate_maintenance_commits(
+            commits, record["prior_head"], normalized["head"],
+            set(normalized["control_blobs"]), permitted,
+        )
+        _bounded_canonical_bytes(record)
+    except MaintenanceTransitionRecordError:
+        return default
+    return permitted
+
 
 class MaintenanceTransitionRecordError(ValueError):
     """Raised when maintenance-transition record building, validation, or parsing fails."""
@@ -111,6 +217,7 @@ __all__ = [
     "parse_maintenance_transition_record",
     "serialize_maintenance_transition_record",
     "validate_maintenance_transition_record",
+    "maintenance_control_paths_for_record",
 ]
 
 
@@ -195,7 +302,10 @@ def _validate_commit_path(p: Any) -> str:
     return p
 
 
-def _validate_commit_paths(paths: Any, control_blob_paths: set[str]) -> list[str]:
+def _validate_commit_paths(
+    paths: Any, control_blob_paths: set[str],
+    permitted_controls: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS,
+) -> list[str]:
     if type(paths) is not list:
         raise MaintenanceTransitionRecordError("commit paths must be a list")
     if not (1 <= len(paths) <= MAX_COMMIT_PATHS):
@@ -206,7 +316,7 @@ def _validate_commit_paths(paths: Any, control_blob_paths: set[str]) -> list[str
         norm_p = _validate_commit_path(p)
         if (
             norm_p in control_blob_paths
-            and norm_p not in ALLOWED_MAINTENANCE_CONTROL_PATHS
+            and norm_p not in permitted_controls
         ):
             raise MaintenanceTransitionRecordError(
                 "commit path cannot be a control path"
@@ -260,10 +370,7 @@ def _validate_control_path(p: Any) -> str:
 def _validate_new_repository(new_repository: Any) -> dict[str, Any]:
     if type(new_repository) is not dict:
         raise MaintenanceTransitionRecordError("new_repository must be a dict")
-    if (
-        set(new_repository.keys()) != REPOSITORY_FACT_KEYS
-        or len(new_repository) != len(REPOSITORY_FACT_KEYS)
-    ):
+    if not _exact_keyset(new_repository, frozenset(REPOSITORY_FACT_KEYS)):
         raise MaintenanceTransitionRecordError(
             "new_repository keys mismatch"
         )
@@ -274,16 +381,14 @@ def _validate_new_repository(new_repository: Any) -> dict[str, Any]:
             "repository head must be 40 lowercase hex characters"
         )
 
-    if new_repository.get("status") != "":
+    if type(new_repository.get("status")) is not str or new_repository["status"] != "":
         raise MaintenanceTransitionRecordError(
             "repository status must be empty clean-tree string"
         )
 
     protected_refs = new_repository.get("protected_refs")
     if (
-        type(protected_refs) is not dict
-        or set(protected_refs.keys()) != set(PROTECTED_REFS)
-        or len(protected_refs) != len(set(PROTECTED_REFS))
+        not _exact_keyset(protected_refs, frozenset(PROTECTED_REFS))
     ):
         raise MaintenanceTransitionRecordError(
             "protected_refs keys mismatch"
@@ -309,9 +414,7 @@ def _validate_new_repository(new_repository: Any) -> dict[str, Any]:
 
     scope = new_repository.get("assignment_scope")
     if (
-        type(scope) is not dict
-        or set(scope.keys()) != set(ASSIGNMENT_SCOPE_KEYS_ORDER)
-        or len(scope) != len(ASSIGNMENT_SCOPE_KEYS_ORDER)
+        not _exact_keyset(scope, frozenset(ASSIGNMENT_SCOPE_KEYS_ORDER))
     ):
         raise MaintenanceTransitionRecordError(
             "assignment_scope keys mismatch"
@@ -391,6 +494,7 @@ def _validate_maintenance_commits(
     prior_head: str,
     new_repo_head: str,
     control_blob_paths: set[str],
+    permitted_controls: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS,
 ) -> list[dict[str, Any]]:
     if type(commits) is not list:
         raise MaintenanceTransitionRecordError("maintenance_commits must be a list")
@@ -407,7 +511,7 @@ def _validate_maintenance_commits(
             raise MaintenanceTransitionRecordError(
                 "maintenance commit entry must be a dict"
             )
-        if set(raw_commit.keys()) != _COMMIT_KEYS or len(raw_commit) != len(_COMMIT_KEYS):
+        if not _exact_keyset(raw_commit, _COMMIT_KEYS):
             raise MaintenanceTransitionRecordError(
                 "maintenance commit keys mismatch"
             )
@@ -459,7 +563,7 @@ def _validate_maintenance_commits(
                 "commit worker_run_id and reviewer_run_id must be distinct"
             )
 
-        val_paths = _validate_commit_paths(raw_commit.get("paths"), control_blob_paths)
+        val_paths = _validate_commit_paths(raw_commit.get("paths"), control_blob_paths, permitted_controls)
 
         if idx == 0:
             if parent != prior_head:
@@ -519,7 +623,7 @@ def validate_maintenance_transition_record(record: object) -> dict[str, Any]:
     """Validate a maintenance-transition candidate record and return detached copy."""
     if type(record) is not dict:
         raise MaintenanceTransitionRecordError("record must be a dict")
-    if set(record.keys()) != _RECORD_KEYS or len(record) != len(_RECORD_KEYS):
+    if not _exact_keyset(record, _RECORD_KEYS):
         raise MaintenanceTransitionRecordError(
             "record keys mismatch or unknown fields present"
         )
@@ -562,6 +666,7 @@ def validate_maintenance_transition_record(record: object) -> dict[str, Any]:
         prior_head=prior_head,
         new_repo_head=norm_repo["head"],
         control_blob_paths=control_blob_paths,
+        permitted_controls=maintenance_control_paths_for_record(record),
     )
 
     validated_record: dict[str, Any] = {

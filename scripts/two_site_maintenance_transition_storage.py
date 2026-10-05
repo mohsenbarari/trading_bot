@@ -38,6 +38,7 @@ from scripts.two_site_maintenance_transition_git import (
 from scripts.two_site_maintenance_transition_record import (
     ALLOWED_MAINTENANCE_CONTROL_PATHS,
     parse_maintenance_transition_record,
+    maintenance_control_paths_for_record,
 )
 from scripts.two_site_codex_autopilot import (
     _validate_persisted_repository,
@@ -343,12 +344,10 @@ def _read_legacy_maintenance_transition_locked(
                     ):
                         raise MaintenanceTransitionStorageError("Control blobs keys mismatch")
 
-                    for k, v in chk_ctrl.items():
-                        if k not in ALLOWED_MAINTENANCE_CONTROL_PATHS and curr_ctrl.get(k) != v:
-                            raise MaintenanceTransitionStorageError("Control blob hash mismatch")
-
+                    # Missing-leaf behavior remains fail-closed on ANY control drift.
+                    # Expanded permission can only come from the actual bound leaf.
                     changed_controls = {
-                        k for k in ALLOWED_MAINTENANCE_CONTROL_PATHS
+                        k for k in chk_ctrl
                         if curr_ctrl.get(k) != chk_ctrl.get(k)
                     }
                     controls_differ = bool(changed_controls)
@@ -426,6 +425,11 @@ def _read_legacy_maintenance_transition_locked(
                             raise MaintenanceTransitionStorageError("Record prior_head mismatch")
                         if not _type_sensitive_equal(record.get("new_repository"), norm_repo):
                             raise MaintenanceTransitionStorageError("Record new_repository does not match current repository")
+
+                        permitted_controls = maintenance_control_paths_for_record(record)
+                        for k, v in chk_ctrl.items():
+                            if k not in permitted_controls and curr_ctrl.get(k) != v:
+                                raise MaintenanceTransitionStorageError("Control blob hash mismatch")
 
                         if controls_differ:
                             for ctrl_path in sorted(changed_controls):
