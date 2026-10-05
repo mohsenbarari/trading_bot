@@ -2509,7 +2509,7 @@ def validate_result(
                 raise ProposalError(f"new test file content exceeds budget: {name}")
         if role == "worker" and success and name.endswith(".py"):
             try:
-                ast.parse(change["content"], filename=name)
+                compile(change["content"], name, "exec", dont_inherit=True)
             except SyntaxError as exc:
                 line = exc.lineno if isinstance(exc.lineno, int) else 0
                 column = exc.offset if isinstance(exc.offset, int) else 0
@@ -2935,6 +2935,18 @@ def proposal_diff(changes: list, sources: dict) -> str:
     return patch
 
 
+try:
+    from scripts.two_site_proposal_runtime_profile import (
+        PreparedProfile, ProposalProfileError, prepare_profile, validate_profile,
+        proposal_hooks,
+    )
+except ModuleNotFoundError:
+    from two_site_proposal_runtime_profile import (
+        PreparedProfile, ProposalProfileError, prepare_profile, validate_profile,
+        proposal_hooks,
+    )
+
+
 def serialize_json(value: dict) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
@@ -3181,15 +3193,22 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("split task or feedback into a smaller coherent unit")
     if SECRET.search(prompt):
         raise ProposalError("credential-like content excluded from model input")
+    response_schema = schema(role, task, candidate_sources if candidate_sources is not None else sources, force_full_paths)
+    prompt += (
+        "\nREQUIRED_RESPONSE_SCHEMA_DATA:\n"
+        + json.dumps(response_schema, ensure_ascii=False, separators=(",", ":"))
+        + "\nReturn exactly one JSON object directly, no Markdown or fences. "
+        "The same exact schema is supplied to the CLI; no tool, shell or file action is authorized.\n"
+    )
+    schema_prompt_limit = 160_000 if is_compact_review else 2 * MAX_CONTEXT
+    if len(prompt.encode("utf-8")) > schema_prompt_limit:
+        raise ProposalError("split task or feedback into a smaller coherent unit")
     with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):
         # The lock covers every CLI invocation, including identity probes.
         initial_cli_identity = cli_identity(disposable_cli)
         session_gate = derive_session_gate(prep_notes)
         out = local / run_id
         out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
-        workspace = out / "workspace"
-        (workspace / ".agents").mkdir(parents=True)
-        write_json(workspace / ".agents/hooks.json", DENY_HOOK)
         write_json(out / "task.json", material)
         (out / "prompt.txt").write_text(prompt)
         meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
@@ -3224,17 +3243,40 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             if role_effort != policy.effort:
                 raise ProposalError("invalid worker model route effort")
             effort_args = []
+        response_schema_path = out / "response-schema.json"
+        write_json(response_schema_path, response_schema)
+        response_schema_bytes = bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema")
+        if unique_json(response_schema_bytes.decode("utf-8")) != response_schema:
+            raise ProposalError("response schema binding changed before dispatch")
+        meta["response_schema_sha256"] = sha(response_schema_bytes)
+        write_json(out / "status.json", meta)
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
                    *effort_args, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
-                   "--json-schema", json.dumps(schema(
-                       role, task, active_sources, force_full_paths
-                   ))]
+                   "--json-schema", str(response_schema_path)]
         try:
+            runtime_workspace = disposable_cli.parent / "proposal-runtime-workspace"
+            runtime_workspace.mkdir(mode=0o700)
+            (runtime_workspace / ".agents").mkdir(mode=0o700)
+            write_json(runtime_workspace / ".agents/hooks.json", proposal_hooks())
+            profile = prepare_profile(
+                disposable_cli, runtime_workspace, role_model,
+                role_effort if effort_args else None, terminate=terminate_process,
+            )
+            if cli_identity(disposable_cli) != initial_cli_identity:
+                raise ProposalError("CLI identity changed during profile preparation")
+            if prior_status is not None and profile.conversation_id == prior_status["conversation_id"]:
+                raise ProposalError("profile preparation reused the worker session")
+            meta["runtime_profile"] = validate_profile(profile, fresh=True)
+            write_json(out / "status.json", meta)
+            command += ["--conversation", profile.conversation_id]
             # Auth belongs to the CLI. No credential files are read or copied here.
             if pre_provider_check is not None:
                 pre_provider_check()
-            with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
+            validate_profile(profile, fresh=True)
+            if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
+                raise ProposalError("response schema binding changed before dispatch")
+            with subprocess.Popen(command, cwd=profile.workspace, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   start_new_session=True,
                                   env=dict(os.environ, AGY_CLI_DISABLE_AUTO_UPDATE='true')) as process:
@@ -3274,6 +3316,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             final_cli_identity = cli_identity(disposable_cli)
             if final_cli_identity != initial_cli_identity:
                 raise ProposalError("CLI identity changed during generation")
+            if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
+                raise ProposalError("response schema binding changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
             quota_evidence = classify_gemini_quota_stream(
                 raw, role_model, datetime.now(timezone.utc)
@@ -3287,6 +3331,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             result, envelope = _parse_stream(
                 raw, task, active_sources, role, force_full_paths, role_model
             )
+            if envelope["conversation_id"] != profile.conversation_id:
+                raise ProposalError("CLI result differs from prepared runtime session")
+            meta["runtime_profile"] = validate_profile(profile, fresh=False)
             if (prior_status is not None
                     and envelope["conversation_id"] == prior_status["conversation_id"]):
                 raise ProposalError("review/correction reused the worker session")

@@ -377,6 +377,8 @@ class ProposalContracts(unittest.TestCase):
 
         def capture(fake_process, _input, stdout_path, stderr_path, _timeout, **_kwargs):
             cmd = popen.call_args.args[0] if popen.call_args else getattr(fake_process, "args", [])
+            hook_path = Path(cmd[0]).parent / "proposal-runtime-workspace/.agents/hooks.json"
+            self.last_runtime_hooks = json.loads(hook_path.read_text())
             if timeout:
                 runner.terminate_process(fake_process)
                 raise subprocess.TimeoutExpired("fake-cli", 30)
@@ -395,7 +397,7 @@ class ProposalContracts(unittest.TestCase):
                 else:
                     schema = {}
                     if "--json-schema" in cmd:
-                        schema = json.loads(cmd[cmd.index("--json-schema") + 1])
+                        schema = json.loads(Path(cmd[cmd.index("--json-schema") + 1]).read_text())
                     changes_schema = schema.get("properties", {}).get("changes", {})
                     items_schema = changes_schema.get("items", {})
                     branches = items_schema.get("anyOf") or ([items_schema] if "properties" in items_schema else [])
@@ -413,8 +415,11 @@ class ProposalContracts(unittest.TestCase):
                     if _input:
                         try:
                             prompt_text = json.loads(_input).get("message", {}).get("content", "")
+                            self.last_schema_data = json.loads(prompt_text.split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n",1)[1].split("\nReturn exactly",1)[0])
+                            self.last_cli_schema = schema
+                            self.assertEqual(self.last_schema_data, self.last_cli_schema)
                             if "\nCONTEXT_JSON:\n" in prompt_text:
-                                context = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1])
+                                context = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n",1)[0])
                         except Exception:
                             pass
                     if not context and (stdout_path.parent / "task.json").exists():
@@ -468,6 +473,8 @@ class ProposalContracts(unittest.TestCase):
                           patch.object(runner, "cli_identity", side_effect=cli_identities))
         with patch.object(runner, "git", side_effect=git_effects), \
                 identity_patch, \
+                patch.object(runner, "prepare_profile", return_value=runner.PreparedProfile("session-one", self.root, runner.WORKER_MODEL, runner.WORKER_EFFORT)), \
+                patch.object(runner, "validate_profile", return_value={"native_tools": 0}), \
                 patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT), \
                 patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
@@ -498,7 +505,12 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(status["cli"]["version"], runner.EXPECTED_CLI_VERSION)
         self.assertGreater(status["retain_until"], status["started_at"])
         self.assertEqual(status["result_sha256"], runner.sha((out / "result.json").read_bytes()))
-        self.assertEqual(json.loads((out / "workspace/.agents/hooks.json").read_text()), runner.DENY_HOOK)
+        self.assertEqual(self.last_runtime_hooks["proposal-only"], runner.DENY_HOOK["proposal-only"])
+        self.assertEqual(self.last_runtime_hooks["proposal-single-invocation"], {"PostInvocation": [{
+            "type": "command", "timeout": 5,
+            "command": "/usr/bin/printf '%s\\n' '{\"injectSteps\":[],\"terminationBehavior\":\"terminate\"}'",
+        }]})
+        self.assertFalse((out / "workspace").exists())
         with self.assertRaises(FileExistsError):
             self.invoke_fake_cli()
 
@@ -653,6 +665,8 @@ class ProposalContracts(unittest.TestCase):
 
         with patch.object(runner, "git", side_effect=["head", "", "head", ""]), \
                 patch.object(runner, "cli_identity", return_value=identity), \
+                patch.object(runner, "prepare_profile", return_value=runner.PreparedProfile("session-one", self.root, runner.MODEL, runner.EFFORT)), \
+                patch.object(runner, "validate_profile", return_value={"native_tools": 0}), \
                 patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process):
             out = runner.run(self.root, self.task_path, "verifier", "verify-001", 30,
@@ -1538,7 +1552,7 @@ class ProposalContracts(unittest.TestCase):
         # prompt.txt contains candidate sources/feedback/prior identity and does not contain duplicate proposal
         prompt_text = prompt_file.read_text()
         self.assertIn("\nROLE: worker\nCONTEXT_JSON:\n", prompt_text)
-        prompt_json = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1])
+        prompt_json = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n",1)[0])
         self.assertEqual(prompt_json["sources"], expected_candidate_sources)
         self.assertEqual(prompt_json["sources"]["source.py"]["sha256"], candidate_source_sha)
         self.assertEqual(prompt_json["sources"]["test_new.py"]["sha256"], candidate_new_sha)
