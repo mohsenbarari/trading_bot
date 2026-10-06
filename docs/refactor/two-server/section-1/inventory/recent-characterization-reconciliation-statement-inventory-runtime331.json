@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331",
+  "assignment_sha256": "9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4",
+  "assignment_expiry": "2026-10-30T23:59:00Z",
+  "inspected_head": "b0db2737c881611a12a51f26f4c0bb97c1b95d0b",
+  "status": "RETAINED_EVIDENCE_RECONCILIATION",
+  "acceptance_condition": "This auxiliary receipt is RETAINED_EVIDENCE_RECONCILIATION; acceptance contingent on independent Gemini/Codex checks, exact bytes, tests and clean commit; canonical seed promotion and aggregate group closeout remain pending.",
+  "predecessor": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-statement-acceptance-provenance-runtime331.json",
+    "last_commit": "3145ccd25b4fab026ebb7265241cd6576c4d710f",
+    "sha256": "5236c0552a481fc2f6e89f1b0706db44e794ef409175b5a1b536c8acd3be6b62"
+  },
+  "prior_four_record_inventory": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-conversations-two-runtime331.json",
+    "last_commit": "410e45cf0e0529af710129fbf7a0791f9e09a7f2",
+    "sha256": "182263b35f524718d4148f90e131defc8e363f91fa522f2499ad480606a210ac"
+  },
+  "statement_ledger": {
+    "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+    "last_commit": "b0db2737c881611a12a51f26f4c0bb97c1b95d0b",
+    "sha256": "36e4f454d8c31fdb9a80b9b05d93917d06c72e61f4ff09435a9216437cc1b03a"
+  },
+  "canonical_manifest": {
+    "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    "last_commit": "65772a50b3729a9ec905a6b542ac27ced057e5f0",
+    "sha256": "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e"
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "added_distinct_seed_count": 0,
+  "added_behavior_unit_count": 0,
+  "unresolved_origin_cells": 24,
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "canonical_counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 254,
+    "evidenced_seed_count": 389,
+    "remaining_seed_count": 76,
+    "expected_seed_count": 465
+  },
+  "predecessor_group_provenance": {
+    "description": "Completed users/notifications group remains reconciled 5/5 with remaining 0; preserved solely as nested predecessor-group provenance, never a new pending group or reacceptance.",
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_behavior_units": 5,
+    "remaining_behavior_units": 0
+  },
+  "current_group_tracking": {
+    "historical_prior_reconciled_units": 4,
+    "delta_reconciled_behavior_units": 1,
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_behavior_units": 5,
+    "remaining_behavior_units": 0,
+    "global_reconciliation_complete": false,
+    "canonical_ledger_accounting_complete": false
+  },
+  "provenance_resolution": "EXACT_ACCEPTED_CHAIN_IDENTIFIED",
+  "authoritative_local_evidence": {
+    "accepted_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+    "assignment_label_contains_statement_file": false,
+    "candidate_test_evidence_sha256": "da68331ee7afc4182af833c2d9c7fe2f494831194441737d04bedbe7c87e97af",
+    "candidate_test_returncode": 0,
+    "candidate_test_state": "PASSED",
+    "committed_bytes_equal_worker_and_current": true,
+    "contradictory_assignment_label": "3c98a94f4b1315c0fcd4947a658374a70a66151b",
+    "historical_assignment_id": "WA-P1-00B-NORMAL-RETURN-20261004-292",
+    "historical_assignment_sha256": "f031f6f7137c8923c969761efbd67de397ad7e85fe5c8c75a3829f33921f8a01",
+    "historical_source_head": "1e8e2aafea4ff87cbeebf0493406cceebd8953bf",
+    "historical_task_id": "P1-00B-CHAT-CONVERSATIONS-STATEMENT-FAILURE-20261004-292-C003",
+    "local_verification": "Exact nonsecret receipt bytes and Git/test/source identities checked locally; supplied scalars are citations, not new acceptance.",
+    "proposal_sha256": "0b92375a43dcc9c0dbbb083238a9c98780d9e110c34da09087c8c52b92f98f62",
+    "receipt_citations": [
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-worker-0/task.json",
+        "sha256": "52040920ec7f5381af13e320228970d8631afde191390ac5e7a3f8c5d0e0afd0"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-worker-0/result.json",
+        "sha256": "0b92375a43dcc9c0dbbb083238a9c98780d9e110c34da09087c8c52b92f98f62"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-worker-0/status.json",
+        "sha256": "4d877a1bb6969cd6f42737510b1b118d7be2cf48db7dc59434fcbe673184c41c"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-reviewer-0/result.json",
+        "sha256": "661962607023aa9f8817cd97f3d6f656f3d0d961f6be5a4111a7d596d05055ca"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-reviewer-0/status.json",
+        "sha256": "c5952f5214f1d9232478c21f930bc1fd87190d3d2eaebece56152b0c35355540"
+      },
+      {
+        "path": ".local/two-site-refactor/pipeline/normal292-chat-statement-failure-20261004-c003/pre-review-tests-0.json",
+        "sha256": "da68331ee7afc4182af833c2d9c7fe2f494831194441737d04bedbe7c87e97af"
+      },
+      {
+        "path": ".local/two-site-refactor/autopilot/runs/cycle-0003-20261004T183619Z-2062337/result.json",
+        "sha256": "0b38b2854dceeefd2133d8139086c399a94f5110f9211009faa7b6306c83f821"
+      },
+      {
+        "path": ".local/two-site-refactor/autopilot/runs/cycle-0003-20261004T183619Z-2062337/status.json",
+        "sha256": "3c1f8e07ee00d6478f452f8bda789017d79cdb1c8f088595577748c578f68e6e"
+      }
+    ],
+    "reviewer_conversation_id": "34e18e1f-23b3-4ccb-96d8-175e1c5a03c5",
+    "reviewer_findings": [],
+    "reviewer_run_id": "normal292-chat-statement-failure-20261004-c003-reviewer-0",
+    "reviewer_status": "VERIFIED",
+    "schema_version": 1,
+    "source_introduction_and_last_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+    "supervisor_cycle_id": "cycle-0003-20261004T183619Z-2062337",
+    "supervisor_head_after": "22335aa5267e4d242b446dd392fb57230613054c",
+    "supervisor_head_before": "1e8e2aafea4ff87cbeebf0493406cceebd8953bf",
+    "supervisor_post_coordinator_validation_recorded": true,
+    "supervisor_terminal_state": "CONTINUE",
+    "test_path": "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py",
+    "test_selector": "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work",
+    "test_sha256": "37cd092db54205b6c0d0d802c904468da0387cba08eae7c0f0b08fa2366ea87a",
+    "test_utf8_bytes": 4704,
+    "worker_conversation_id": "c1c61494-0a84-4892-98b8-155cfb76c219",
+    "worker_run_id": "normal292-chat-statement-failure-20261004-c003-worker-0"
+  },
+  "statement_acceptance_assessment": {
+    "provenance_resolution": "EXACT_ACCEPTED_CHAIN_IDENTIFIED",
+    "accepted_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+    "contradictory_assignment_label": "3c98a94f4b1315c0fcd4947a658374a70a66151b",
+    "contradiction_details": "Git at the contradictory label 3c98a94f4b1315c0fcd4947a658374a70a66151b has no statement test and adds a seen-member receipt instead; accepted commit 22335aa5267e4d242b446dd392fb57230613054c introduces the statement file. Current Assignment prose remains contradictory and untouched; exact historical evidence establishes the identity, while its old group/counter prose has no current accounting authority. Cite existing evidence only; Worker has no tool authority and makes no new execution claims.",
+    "acceptance_basis": "Terminal Supervisor CONTINUE with post-coordinator validation, distinct Worker/Reviewer conversations, exact proposal SHA, VERIFIED without findings, candidate PASS and exact Worker/commit/current bytes."
+  },
+  "reconciled_records": [
+    {
+      "path": "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py",
+      "status": "RECONCILED",
+      "acceptance_identity": "EXACT_ACCEPTED_CHAIN_IDENTIFIED",
+      "accepted_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+      "last_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+      "source_introduction_and_last_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+      "contradictory_assignment_label": "3c98a94f4b1315c0fcd4947a658374a70a66151b",
+      "sha256": "37cd092db54205b6c0d0d802c904468da0387cba08eae7c0f0b08fa2366ea87a",
+      "test_utf8_bytes": 4704,
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work"
+      ],
+      "scenario_labels": [
+        "statement_builder_exception_propagates_before_downstream_work"
+      ],
+      "observed_summary": "Direct-handler characterization asserts: target lookup _get_customer_visible_direct_target_ids returns None and receives exact opaque_db and current_user with separate once call and once await checks; synchronous mocked builder build_direct_conversation_list_stmt receives only current_user.id positional, no kwargs and no allowed_target_ids keyword, and raises identical synthetic RuntimeError; customer scoping filter _filter_customer_scoped_direct_target_ids and room conversation listing list_room_conversations are neither called nor awaited. The test uses an opaque_db = object() with no execute attribute, so any accidental downstream DB execution access would fail the exception-identity assertion; there is no execute mock and no explicit DB execute call/await assertion. Excludes runtime query-builder failure reachability, DB/SQL/transactions/persistence, HTTP/ASGI/auth/Depends/service-authorization, and response serialization. Existing selector is a validation witness only."
+    }
+  ],
+  "retained_prior_reconciled_records": [
+    {
+      "path": "tests/test_p1_00b_characterization_chat_seen_members_non_group.py",
+      "last_commit": "ce55ebc5f3f36cc6a6034224adc59bf844a45f68",
+      "sha256": "27290e269d83047d0698d6ffc43196c93faf0dfc7127130649ae11d91d8ce640",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_channel_room_rejected_before_seen_service",
+        "tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_direct_boundary_input_rejected_before_seen_service"
+      ],
+      "scenario_labels": [
+        "channel_room_rejected_before_seen_service",
+        "direct_boundary_input_rejected_before_seen_service"
+      ],
+      "observed_summary": "Direct-handler characterization asserts: non-GROUP CHANNEL raises exact HTTPException 404 with detail 'Message seen list is available for groups only' after once-awaited opaque DB/chat lookup via get_room_or_404 and suppresses list_group_message_seen_members call/await; DIRECT is mocked room-boundary input only and raises identical 404/detail while suppressing downstream seen-service (in production, authoritative get_room_or_404 queries CHANNEL/GROUP only and does not return DIRECT). Excludes real DB reachability, HTTP/ASGI routing, auth/Depends execution, sender/membership validation, and outcome coverage beyond these assertions."
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_seen_members_service_failure.py",
+      "last_commit": "7a91bba47224380a1b6beebddd693e6394c96d94",
+      "sha256": "fffe385c5d136272f9e50e7bf6b36c95d6dbce378028efc01efbd73049744b6a",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_seen_members_service_failure.py::ChatSeenMembersServiceFailureCharacterizationTests::test_group_seen_service_exception_propagates_unchanged"
+      ],
+      "scenario_labels": [
+        "group_seen_service_exception_propagates_unchanged"
+      ],
+      "observed_summary": "Direct-handler characterization asserts: for a GROUP room returned by get_room_or_404, when downstream list_group_message_seen_members raises a synthetic RuntimeError, the exact exception instance propagates unchanged; get_room_or_404 is awaited once with opaque db session and chat_id; list_group_message_seen_members is awaited once with exact opaque db, chat=group_room, message_id=message_id, requester_id=current_user.id. Excludes real DB reachability, HTTP/ASGI routing, auth/Depends execution, service authorization, and outcome coverage beyond these assertions."
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py",
+      "last_commit": "1e8e2aafea4ff87cbeebf0493406cceebd8953bf",
+      "sha256": "ade0847c95d615297f4ac2e821d90a8cc9feef31af018b488b515a9f122a7685",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py::ChatConversationsTargetScopeFailureCharacterizationTests::test_target_scope_exception_propagates_before_downstream_work"
+      ],
+      "scenario_labels": [
+        "target_scope_exception_propagates_before_downstream_work"
+      ],
+      "observed_summary": "Direct-handler characterization asserts: when _get_customer_visible_direct_target_ids raises a synthetic RuntimeError, the identical exception instance propagates unchanged; target lookup is called once and awaited once with opaque_db and current_user; downstream build_direct_conversation_list_stmt, _filter_customer_scoped_direct_target_ids, and list_room_conversations are neither called nor awaited. Excludes real DB reachability, query execution/persistence, HTTP/ASGI routing, auth/Depends execution, and service authorization beyond direct-handler mocks."
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_conversations_execution_failure.py",
+      "last_commit": "3a0f5db6d948c3aa17797e1cf5d771b76145e4e1",
+      "sha256": "2cf7c7618cf5fc43606a01041b2c883e9bfa4469e586d0800e2f2afa6a5f304b",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_conversations_execution_failure.py::ChatConversationsExecutionFailureCharacterizationTests::test_execute_exception_propagates_before_downstream_work"
+      ],
+      "scenario_labels": [
+        "execute_exception_propagates_before_downstream_work"
+      ],
+      "observed_summary": "Direct-handler characterization asserts: target lookup returns None; ordered calls execute target_lookup(db, current_user=current_user), stmt_builder(current_user.id), and execute(opaque_statement); statement builder is called once with positional current_user.id and no kwargs; direct-conversation db.execute is called once and awaited once with exact opaque statement object positional and no kwargs; identical synthetic RuntimeError propagates unchanged; downstream ConversationRead result conversion, _filter_customer_scoped_direct_target_ids, and list_room_conversations are neither called nor awaited. db is a SimpleNamespace fake with AsyncMock execute; excludes real DB reachability, SQL execution, transactions, persistence, HTTP/ASGI routing, auth/Depends execution, and service authorization beyond direct-handler mocks."
+    }
+  ],
+  "pending_records": [],
+  "preserved_deferrals": [
+    "defer_prior_unit=normal265-canonical-five-closeout-20261004-c001",
+    "defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007",
+    "defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004",
+    "defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded",
+    "defer_prior_unit=normal169-c16-c17-union-p\u78ba",
+    "defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2",
+    "defer_prior_unit=normal169-canonical-manifest-pre",
+    "defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2",
+    "defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007",
+    "defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005",
+    "defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004",
+    "defer_prior_unit=normal169-c16-receipt-custody-20261003-c001",
+    "defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2",
+    "continuation-12",
+    "153/154/155/157-C001",
+    "normal159 C1/C2",
+    "rejected C15 machine checkpoint",
+    "rejected policy/seed proposals",
+    "normal161-c5 C16 incremental reconciliation",
+    "subsequent recorded deferrals",
+    "defer_prior_unit=normal277-pending-five-users-http-reconciliation-20261004-c001-bounded",
+    "defer_prior_unit=normal273-notification-mark-read-missing-id-http-20261004-c002",
+    "defer_prior_unit=normal273-notification-delete-missing-id-http-20261004-c001",
+    "defer_prior_unit=normal271-notification-delete-cross-user-http-20261004-c002",
+    "defer_prior_unit=normal277-notification-http-last-three-inventory-20261004-c002",
+    "defer_prior_unit=normal277-notifications-three-ledger-accounting-20261004-c008",
+    "defer_prior_unit=normal277-current-five-ledger-accounting-20261004-c006",
+    "defer_prior_unit=normal292-chat-seen-room-failure-20261004-c001",
+    "defer_prior_unit=normal331-statement-reconciliation-20261006-c001"
+  ],
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "exclusions": [
+    "sixth_behavior",
+    "canonical_seed_promotion",
+    "reconciliation_accounting_group_closeout",
+    "seed_origin_blocker_stage_closure",
+    "authentication_concurrency_retry_reload",
+    "production_deploy_dns_writer_network_secrets",
+    "rejected_artifact_reuse"
+  ],
+  "next_internal_gate": "Distinct aggregate accounting proof followed by exact-SHA current-group closeout, citing accepted statement commit 22335aa5267e4d242b446dd392fb57230613054c and selector tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work, retaining open High blockers P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE and P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN, PARTIAL coverage, 24 unresolved origin cells, closures_authorized=false, Stage P1-00b IN_PROGRESS, and all unmet authentication, concurrency, retry, reload, and closure gates; existing live selector is a validation witness only."
+}
