@@ -451,6 +451,55 @@ def _iter_ast_literals(tree):
                 stack.append((child, in_f))
 
 
+def _proposal_existing_file_budgets(profile: dict, sources: object) -> dict:
+    limits = profile.get("file_limits", {}) if isinstance(profile, dict) else {}
+    total_limit = profile.get("total_limit", 0) if isinstance(profile, dict) else 0
+    sorted_paths = sorted(limits.keys())
+    entries = []
+    for path in sorted_paths[:8]:
+        file_limit = limits[path]
+        effective_limit = min(file_limit, total_limit)
+        item = sources.get(path) if isinstance(sources, dict) and path in sources else None
+        state = "UNKNOWN"
+        baseline = None
+        growth = None
+        if type(item) is dict and "content" in item and "sha256" in item:
+            c = item["content"]
+            s = item["sha256"]
+            if c is None and s is None:
+                state = "NEW_FILE"
+                baseline = 0
+                growth = effective_limit
+            elif (
+                type(c) is str
+                and type(s) is str
+                and len(s) == 64
+                and all(ch in "0123456789abcdef" for ch in s)
+                and len(c) <= 160000
+            ):
+                try:
+                    cb = c.encode("utf-8")
+                    if len(cb) <= 160000:
+                        state = "EXISTING"
+                        baseline = len(cb)
+                        growth = effective_limit - baseline
+                except UnicodeEncodeError:
+                    pass
+        entries.append({
+            "path": path,
+            "state": state,
+            "baseline_utf8_bytes": baseline,
+            "file_limit_utf8_bytes": file_limit,
+            "effective_single_file_limit_utf8_bytes": effective_limit,
+            "max_net_growth_utf8_bytes": growth,
+        })
+    return {
+        "version": 1,
+        "entries": entries,
+        "omitted_path_count": max(0, len(sorted_paths) - 8),
+    }
+
+
 def preparation_notes(task, sources):
     """Generate deterministic advisory notes from task context and sources."""
     warnings, exact_blocker_ids, seen_blockers = [], [], set()
@@ -629,6 +678,7 @@ def preparation_notes(task, sources):
     profile = parse_proposal_utf8_budget_profile(reqs, allowed_files, allowed_files)
     if profile is not None:
         out_contract["proposal_utf8_budget_profile"] = profile
+        out_contract["proposal_existing_file_budgets"] = _proposal_existing_file_budgets(profile, sources)
         # The machine byte profile is still a numbered physical requirement.
         # Expose every success coverage ID; do not infer coverage from R-labels.
         out_contract["success_covered_requirements"] = list(range(1, len(reqs) + 1))
