@@ -1096,3 +1096,51 @@ Preserve all historic receipts, counters, and deferrals through immutable ledger
 - `defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003`
 No rejected-artifact reuse.
 Next distinct safe gap: An approval-only association from accepted registration, preserving login pending, without replaying the deferred approval artifact.
+
+### 2026-10-06 UTC — Request-identity admin-access canonical accounting checkpoint <a id="request-identity-admin-access-canonical-accounting-nine363"></a>
+
+Assignment `WA-P1-00B-NORMAL-NINE-RETURN-20261006-363` (SHA256 `e526cedd5e9e802aa73a869f3c23464c6f20558a6c70807f5ea9da49b670fce6`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one compact, documentation-only canonical accounting entry for request-identity admin-access under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Cited receipt artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-request-identity-access-only-literal361.json` at commit `d39464c173612f0f2b0587ee83e8b95adbb360eb`, SHA256 `57205b9c4e52f6594d3b9bbcd222a2d9ee8ea655a73648d31585b3ffc37f60b9` (receipt_id `REC-P1-00B-RECONCILIATION-REQUEST-IDENTITY-ACCESS-ONLY-LITERAL-361`, task_id `normal361-reconcile-request-identity-access-only-20261006-c003`, status `PARTIAL_RECONCILIATION`).
+- Associated seed and handler (`registered_handlers[0]`):
+  - Seed ID: `API-AUTH-POST-SESSIONS-REQUEST-SINGLE-SESSION-RECOVERY-IDENTITY-L807`
+  - Canonical symbol: `api/routers/sessions.py:request_single_session_recovery_identity`
+  - Scenario key: `request-identity-admin-access-exception-before-side-effects`
+  - Selector: `tests/test_p1_00b_characterization_request_identity_admin_access_failure.py::RequestIdentityAdminAccessFailureCharacterizationTests::test_access_exception_follows_guard_and_uuid_before_side_effects`
+  - Accepted source commit: `5dbbaf0ff89d6b884550ed8bff190d720af3297d`
+  - Source file SHA256: `8146380b392217566cf0e6466d5539280499713980a269abd2392ed632d9f4f4`
+- Complete Source, Actor, Scope, Git metadata and `registered_handlers[0].evidence_limits_summary` are incorporated BY REFERENCE from the cited receipt; no dependency paraphrase or expanded behavior claims. Receipt and tests remain unchanged.
+
+#### Inventory counters, unit tracking, and evidence boundaries
+
+- Receipt 3/5 inventory counters remain historical evidence. Current inventory state: 5/5 units, 7/7 scenarios, zero inventory scenarios outstanding; `pending_five=5`, `units_since_reconciliation=5`.
+- Aggregate canonical accounting and separate exact group closeout remain pending; zero added behaviors/seeds (`added_behavior_unit_count=0`, `added_distinct_seed_count=0`), and no sixth behavior, reset, or closure.
+- Existing selector is cited strictly as a live validation witness only without claiming execution or new acceptance.
+- Real authentication, DB query execution, model persistence, transaction semantics, concurrency, retry, and reload remain unproven.
+- Entry acceptance depends on fresh review, exact bytes, actual tests, and clean commit.
+
+#### Seed accounting, blockers, and Stage status
+
+- Preserved canonical counts: 465 total (`expected_seed_count=465`), 135 baseline + 254 reconciled new = 389 evidenced (`evidenced_seed_count=389`), 76 remaining (`remaining_seed_count=76`).
+- Coverage and seed acceptance status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Open High blockers: 24 unresolved origin cells; both canonical High blockers stay open (`P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`); `closures_authorized=false`.
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+
+#### Preserved deferrals and next safe internal gap
+
+Preserve nine exact deferrals via receipt `accounting.deferrals`:
+- `defer_prior_unit=normal355-reconcile-login-recovery-first-two-20261006-c001`
+- `defer_prior_unit=normal355-reconcile-login-only-20261006-c001`
+- `defer_prior_unit=normal346-recovery-approval-ledger-association-20261006-c008`
+- `defer_prior_unit=normal346-recovery-canonical-ledger-association-20261006-c007b`
+- `defer_prior_unit=normal346-recovery-lookup-evidence-registration-20261006-c004`
+- `defer_prior_unit=normal346-login-lookup-ledger-association-20261006-c002`
+- `defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003`
+- `defer_prior_unit=normal346-login-approval-reference-only-ledger-20261006-c007`
+- `defer_prior_unit=normal346-login-rejection-ledger-association-20261006-c006`
+
+Also retain verbatim:
+- `defer_prior_unit=normal363-submit-identity-canonical-accounting-20261006-r001`
+- `defer_prior_unit=normal363-login-rejection-canonical-accounting-20261006-c001c`
+
+No rejected-artifact reuse.
+Next distinct safe unit: request-identity accountant-lookup canonical accounting from accepted `recent-characterization-reconciliation-request-identity-lookup-only-literal361.json`, then remaining canonical accounting and separate closeout.
