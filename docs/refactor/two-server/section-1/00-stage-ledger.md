@@ -1052,3 +1052,47 @@ Assignment `WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331` (digest `9e3ee05ed49ef
 #### Next safe internal action
 
 After accepted closeout passes verification, review, tests, and clean commit: revalidate canonical seed-handler gaps and accepted evidence, then choose a distinct dependency-ready remaining handler characterization using the required shared-fixture one-module batch only where genuinely eligible.
+
+### 2026-10-06 UTC — Recovery rejection-only ledger association checkpoint <a id="recovery-rejection-ledger-association-foundation346"></a>
+
+Assignment `WA-P1-00B-NORMAL-FOUNDATION-RETURN-20261006-346` (Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one compact, documentation-only rejection-only recovery evidence association under canonical open blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Accepted registration receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json` (receipt_id `REC-P1-00B-RECOVERY-ACCEPTANCE-CHAIN-REGISTRATION-346`, commit `5cfda55da64601fedce2ea8551d3a34d251edf43`, SHA256 `d0a0f3499a06db699e2e6831c3d20d0843d36059315435df8013fdc4004a3e41`).
+- Associated seed and handler (registered_handlers[1] only):
+  - Seed ID: `API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907`
+  - Canonical symbol: `api/routers/sessions.py:reject_single_session_recovery`
+  - Scenario key: `reject-recovery-accountant-lookup-exception-before-uuid`
+  - Test selector: `tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_reject_recovery_propagates_accountant_lookup_exception_before_uuid`
+  - Accepted source commit: `d5e485295de2802d5186a4a44cc6471a7ecc8c62`
+  - Exact unchanged test SHA256: `1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027`
+- Complete Source/Actor/Scope/Git metadata and `registered_handlers[1].evidence_limits` are incorporated by accepted receipt reference rather than duplicating tables or source manifests.
+- Prior recovery registration status remains `PENDING_RECONCILIATION`. Registration receipt and accepted test bytes were locally verified against accepted ancestor commits and current HEAD `5cfda55da64601fedce2ea8551d3a34d251edf43`, and the rejection selector resolves in the accepted AST.
+
+#### Bounded rejection observation and evidence limits
+
+From accepted receipt `registered_handlers[1]`:
+- Direct handler characterization asserts: actual `reject_single_session_recovery` handler calls real guard `ensure_non_accountant_session_management` under an AsyncMock wraps spy with real unpersisted User (`is_accountant=False`, `UserRole.STANDARD`; `UserRole.BUYER` does not exist); mocked lookup `sessions.is_user_accountant` raises an identical fresh `RuntimeError` before malformed-ID UUID parsing.
+- Call contracts: exactly one call and one await to real guard and mocked lookup with exact db/user identity arguments; downstream sync zero-call and async zero-call plus zero-await; opaque built-in `object()` db session without custom adapter.
+- Selected-field assertions: nine selected actor fields checked unchanged; this does not prove full-row immutability. No Request dummy passed (Request attribute access does not apply).
+- Downstream bodies are not executed and supplied definitions are signature/boundary context only.
+- Validation witness: existing selector is a validation witness only, not new or repeated behavior acceptance. No new assertions or source implementation are authored.
+- Explicit exclusions: successful recovery approval/rejection, HTTP/authentication/Depends/admin authorization, actual queries/SQL/session transactions/persistence, concurrency/retry/reload, origin interaction cells, Request attribute-access and full-row immutability, canonical seed/blocker/Stage closure, and production/deploy/DNS/Writer/secrets/network/control mutations.
+
+#### Accounting status, blockers, and Stage status
+
+- Association completion: This rejection-only association becomes complete only contingent on this new unit passing fresh independent Gemini review, Codex semantic/exact-byte checks, actual tests, and clean commit. Approval association and login association remain pending.
+- Predecessor chat provenance: Completed chat group commit `3beab068b4e641fcf2eb243e029d7cc330cf1540` is retained as completed provenance (5/5, zero pending; `total_behavior_units=5`, `reconciled_behavior_units=5`, `remaining_behavior_units=0`), not a current pending-five group; historical groups are never reopened.
+- Current pending group: `accepted_source_batches=2`, `handler_scenarios_count=4`, `units_since_reconciliation=2`, `reconciled_behavior_units=0`, `remaining_behavior_units=2`. Reconcile only after five accepted source behavior units; this unit adds zero new behavior and zero distinct canonical seeds (`added_behavior_unit_count=0`, `added_distinct_seed_count=0`).
+- Canonical inventory counts: Retain canonical 465 total (`expected_seed_count=465`), 135 baseline + 254 reconciled new = 389 evidenced (`evidenced_seed_count=389`), 76 remaining (`remaining_seed_count=76`), `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Open High blockers: 24 unresolved origin cells remain open; both canonical High blockers stay open (`P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN`); `closures_authorized=false`.
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+
+#### Preserved deferrals and next safe internal gap
+
+Preserve all historic receipts, counters, and deferrals through immutable ledger prefix and accepted receipt. Retain verbatim:
+- `defer_prior_unit=normal346-recovery-approval-ledger-association-20261006-c008`
+- `defer_prior_unit=normal346-recovery-canonical-ledger-association-20261006-c007b`
+- `defer_prior_unit=normal346-recovery-lookup-evidence-registration-20261006-c004`
+- `defer_prior_unit=normal346-login-lookup-ledger-association-20261006-c002`
+- `defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003`
+No rejected-artifact reuse.
+Next distinct safe gap: An approval-only association from accepted registration, preserving login pending, without replaying the deferred approval artifact.
