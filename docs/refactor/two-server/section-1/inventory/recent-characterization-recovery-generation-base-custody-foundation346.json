@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-RECOVERY-GENERATION-BASE-CUSTODY-346",
+  "task_id": "normal346-recovery-generation-base-custody-20261006-c005",
+  "receipt_type": "GENERATION_BASE_CUSTODY",
+  "status": "PENDING",
+  "stage": "P1-00b",
+  "canonical_gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "source": {
+    "source_head": "55146244cb72fb3b80feee83beb06993b8a632da",
+    "source_task_id": "normal346-recovery-accountant-lookup-exception-20261006-c003b",
+    "source_task_snapshot_sha256": "3dabbfa4687eb022c3d86389a9f5086105f8787fabb161986fa9043246af65d6",
+    "accepted_source_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+    "accepted_parent": "55146244cb72fb3b80feee83beb06993b8a632da",
+    "inspected_head": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+    "accepted_test_file": {
+      "path": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py",
+      "sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027"
+    }
+  },
+  "assignment": {
+    "active_assignment_id": "WA-P1-00B-NORMAL-FOUNDATION-RETURN-20261006-346",
+    "active_assignment_sha256": "7122ac5b7d2e239094a3a74897766019f3627acbe3853f71b40a89f14a8dd24e"
+  },
+  "preserved_prior_evidence": {
+    "login_source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+    "login_registration_commit": "55146244cb72fb3b80feee83beb06993b8a632da"
+  },
+  "live_validation_witnesses": {
+    "note": "Existing two selectors are live validation witnesses only, not new behavior acceptance.",
+    "selectors": [
+      "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_approve_recovery_propagates_accountant_lookup_exception_before_uuid",
+      "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_reject_recovery_propagates_accountant_lookup_exception_before_uuid"
+    ]
+  },
+  "accounting": {
+    "completed_chat_group": {
+      "commit": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+      "pending_five": 5,
+      "units_since_reconciliation": 5,
+      "total_behavior_units": 5,
+      "reconciled_behavior_units": 5,
+      "remaining_behavior_units": 0,
+      "status": "COMPLETED_RECONCILED",
+      "note": "Completed historical group; never edit, reset, or reopen"
+    },
+    "pending_group": {
+      "accepted_source_batches": 2,
+      "accepted_source_commits": [
+        "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+        "d5e485295de2802d5186a4a44cc6471a7ecc8c62"
+      ],
+      "handler_scenarios_count": 4,
+      "units_since_reconciliation": 2,
+      "reconciled_behavior_units": 0,
+      "remaining_behavior_units": 2,
+      "status": "PENDING_RECONCILIATION",
+      "reconciliation_threshold": 5,
+      "behavior_units_added_by_this_operation": 0,
+      "distinct_canonical_seeds_added_by_this_operation": 0,
+      "full_recovery_evidence_registration": "PENDING",
+      "login_lookup_ledger_association": "PENDING",
+      "recovery_lookup_ledger_association": "PENDING",
+      "canonical_ledger_associations": "PENDING"
+    },
+    "canonical_inventory_counts": {
+      "expected_seed_count": 465,
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 254,
+      "evidenced_seed_count": 389,
+      "remaining_seed_count": 76,
+      "coverage_status": "PARTIAL",
+      "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+    },
+    "blockers_and_stages": {
+      "unresolved_origin_cells": 24,
+      "canonical_blockers": [
+        "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+        "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+      ],
+      "blockers_open": true,
+      "closures_authorized": false,
+      "stage_p1_00": "COMPLETE",
+      "stage_p1_00b": "IN_PROGRESS"
+    },
+    "deferrals": {
+      "defer_prior_unit_recovery_registration": "defer_prior_unit=normal346-recovery-lookup-evidence-registration-20261006-c004",
+      "defer_prior_unit_login_ledger": "defer_prior_unit=normal346-login-lookup-ledger-association-20261006-c002",
+      "defer_prior_unit_login_guard": "defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003",
+      "historic_deferrals_policy": "Preserve all historic deferrals by immutable reference; no rejected artifact reuse."
+    }
+  },
+  "evidence_limitations": {
+    "proven_scope": "Recovery witnesses prove only synthetic accountant-lookup exception propagation through real guard with mocked lookup and opaque db; Request attribute-access and full-row immutability are not independently proven.",
+    "exclusions_and_unproven": [
+      "successful_approve_recovery_request",
+      "successful_reject_recovery_request",
+      "http_authentication_depends_authorization",
+      "actual_database_queries",
+      "sql_persistence_and_transactions",
+      "concurrency_retry_and_process_reload",
+      "origin_matrix_interaction_cells",
+      "request_attribute_access_and_full_row_immutability",
+      "canonical_seed_acceptance",
+      "blocker_closure",
+      "stage_closure"
+    ]
+  },
+  "governance_and_gates": {
+    "acceptance_condition": "Future custody receipt acceptance requires fresh independent Gemini review, final Codex semantic/exact-byte checks, actual focused validation witnesses and clean commit; the receipt alone never grants acceptance.",
+    "next_internal_action": "Next internal action: fresh bounded recovery evidence registration using the accepted generation-base custody, then distinct canonical ledger associations, retaining TWO pending batches/FOUR scenarios and threshold-five. This receipt neither supplies full registration actor/source/evidence metadata nor accepts behavioral assertions anew."
+  }
+}
