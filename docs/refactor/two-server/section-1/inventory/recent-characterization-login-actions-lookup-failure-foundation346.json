@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-LOGIN-ACTIONS-ACCOUNTANT-LOOKUP-FAILURE-346",
+  "task_id": "normal346-login-actions-lookup-evidence-registration-20261006-c001",
+  "status": "PENDING_RECONCILIATION",
+  "stage": "P1-00b",
+  "source": {
+    "accepted_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+    "accepted_parent": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+    "source_head": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+    "source_task_id": "normal331-login-actions-lookup-exception-20261006-c004",
+    "source_task_snapshot_sha256": "8d0e7db4531f678402ce26324d5c7a7ca1460280cb92f12c694d6f4a89fe8e3e",
+    "source_proposal_sha256": "a652bbfb07c719048011dc0284753ca602bc607a3af26a1126559510df985d01",
+    "accepted_file": {
+      "path": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+      "sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+      "utf8_bytes": 10377,
+      "mode": "100644"
+    },
+    "source_manifest_sha256": {
+      "api/routers/sessions.py": "60da5f06afe521cdaca5ad049c2f78cabd53e6753a2ef9c77099d20ee07ccd47",
+      "core/enums.py": "8a2d9b6fc8ad772c0501c5477b646bafd5b7c6b16c3f77c85de4cf6e81845161",
+      "core/registration_identity.py": "e2eae34d0567c17551c67c92d102bbcb696976c6217b0933c73ec43eee8ea522",
+      "core/services/accountant_relation_service.py": "7087458663022c546fae34354ec8660f99cd89cac627f066ffea16218e650302",
+      "models/accountant_relation.py": "0a0f590f76f798b86653dc2c65ff96713a33961a58c9bc3c106055351cc065b8",
+      "models/database.py": "00e1887c37b6c95626cd07d619eb00c554fcca2259a9a10acd7388a5e111454f",
+      "models/session.py": "ee53994483a51aeeea1889d4a2c50603f9eaf7bbfef631d442cd30c2f5b5fa94",
+      "models/user.py": "4caca81d39dfa682ac8c453a5e4362da39df2de435eae24dcb394ca7239cd7a7",
+      "tests/test_p1_00_characterization_network_isolation.py": "e1aee47359a9f72eac838b000537992434c66eaf903d30cce40634da01da5b69"
+    }
+  },
+  "actor": {
+    "controller_run_id": "cycle-0001-20261006T052747Z-367279",
+    "worker": {
+      "run_id": "normal331-login-actions-lookup-exception-20261006-c004-worker-0",
+      "conversation_id": "31fbc39a-a125-429c-a8ee-a9729f46fd8a",
+      "state": "PROPOSAL_READY"
+    },
+    "reviewer": {
+      "run_id": "normal331-login-actions-lookup-exception-20261006-c004-reviewer-0",
+      "conversation_id": "2e3650f4-fe4b-4420-8bb1-91782ee244db",
+      "state": "VERIFIED",
+      "findings": [],
+      "result_sha256": "71056106169ec78f36f97823dc41b9b3afdf1c43b1fcf2f64e4bc0931892c8f7"
+    }
+  },
+  "scope": {
+    "source_assignment": {
+      "assignment_id": "WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331",
+      "sha256": "9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4"
+    },
+    "registration_assignment": {
+      "assignment_id": "WA-P1-00B-NORMAL-FOUNDATION-RETURN-20261006-346",
+      "scope_digest": "7122ac5b7d2e239094a3a74897766019f3627acbe3853f71b40a89f14a8dd24e",
+      "expiry": "2026-10-30T23:59:00Z",
+      "stage": "P1-00b",
+      "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001"
+    },
+    "scenarios_covered": [
+      "approve-accountant-lookup-exception-before-uuid",
+      "reject-accountant-lookup-exception-before-uuid"
+    ],
+    "exclusions_and_unproven": [
+      "successful_approve_login_request",
+      "successful_reject_login_request",
+      "account_status_verification",
+      "http_transport_status_codes",
+      "fastapi_depends_injection",
+      "authentication_token_creation",
+      "actual_accountant_relation_database_query",
+      "sql_construction_and_execution",
+      "async_session_transaction_management",
+      "database_persistence",
+      "concurrency_retry_and_process_reload",
+      "origin_matrix_interaction_cells",
+      "canonical_seed_acceptance",
+      "blocker_closure",
+      "stage_closure"
+    ]
+  },
+  "git": {
+    "inspected_head": "5a5fb8513464f26cd6fab00bb5bcd3d15982788d",
+    "accepted_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+    "accepted_parent": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+    "is_ancestor_of_head": true,
+    "single_accepted_file": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+    "current_file_sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+    "current_file_unchanged": true
+  },
+  "test_witness_evidence": {
+    "note": "Historical isolated 2-test pass is explicitly historical; this task's two existing selectors are live validation witnesses and are not new/repeated behavior acceptance.",
+    "historical": {
+      "input_test_evidence_sha256": "b170deb70262f5e47276d9adb90d699289170d9ea70a8b13d402d470bbf7e063",
+      "passed_tests": 2,
+      "returncode": 0,
+      "state": "PASSED"
+    },
+    "live_witness_selectors": [
+      "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_approve_request_propagates_accountant_lookup_exception_before_uuid",
+      "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_reject_request_propagates_accountant_lookup_exception_before_uuid"
+    ]
+  },
+  "registered_handlers": [
+    {
+      "seed_id": "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210",
+      "canonical_symbol": "api/routers/sessions.py:approve_request",
+      "selector": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_approve_request_propagates_accountant_lookup_exception_before_uuid",
+      "scenario_key": "approve-accountant-lookup-exception-before-uuid",
+      "source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+      "source_file_sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+      "evidence_limits": {
+        "user_state": "Authoritative unpersisted User with is_accountant explicitly False and valid UserRole.STANDARD",
+        "guard_execution": "Real ensure_non_accountant_session_management executes under AsyncMock wraps spy",
+        "mock_target": "Only sessions.is_user_accountant replaced with AsyncMock raising fresh RuntimeError",
+        "handler_invocation": "Actual approve_request handler invoked with malformed request_id and unread Request dummy",
+        "exception_propagation": "Escaped RuntimeError asserted identical before UUID parsing, SQL construction, DB access, service calls, tokens, cache, audit",
+        "call_contract": "Exactly one call and one await to real guard and mocked lookup with exact db/user identity arguments; downstream async mocks zero calls and zero awaits; sync mocks zero calls",
+        "db_contract": "Opaque db object without custom Session adapter",
+        "behavior_proven": "Characterization proves exception propagation only; no success, authorization, or query semantics accepted"
+      }
+    },
+    {
+      "seed_id": "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270",
+      "canonical_symbol": "api/routers/sessions.py:reject_request",
+      "selector": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_reject_request_propagates_accountant_lookup_exception_before_uuid",
+      "scenario_key": "reject-accountant-lookup-exception-before-uuid",
+      "source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+      "source_file_sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+      "evidence_limits": {
+        "user_state": "Authoritative unpersisted User with is_accountant explicitly False and valid UserRole.STANDARD",
+        "guard_execution": "Real ensure_non_accountant_session_management executes under AsyncMock wraps spy",
+        "mock_target": "Only sessions.is_user_accountant replaced with AsyncMock raising fresh RuntimeError",
+        "handler_invocation": "Actual reject_request handler invoked with malformed request_id",
+        "exception_propagation": "Escaped RuntimeError asserted identical before UUID parsing, SQL construction, DB access, service calls, tokens, audit",
+        "call_contract": "Exactly one call and one await to real guard and mocked lookup with exact db/user identity arguments; downstream async mocks zero calls and zero awaits; sync mocks zero calls",
+        "db_contract": "Opaque db object without custom Session adapter",
+        "behavior_proven": "Characterization proves exception propagation only; no success, authorization, or query semantics accepted"
+      }
+    }
+  ],
+  "accounting": {
+    "completed_chat_group": {
+      "commit": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+      "pending_five": 5,
+      "units_since_reconciliation": 5,
+      "total_behavior_units": 5,
+      "reconciled_behavior_units": 5,
+      "remaining_behavior_units": 0,
+      "status": "COMPLETED_RECONCILED",
+      "note": "Completed historical group; never edit, reset, or reopen"
+    },
+    "pending_group": {
+      "accepted_source_batches": 1,
+      "accepted_source_commits": [
+        "54a334cd4a0916ed6e8d8c3bece06340e671eca6"
+      ],
+      "handler_scenarios_count": 2,
+      "units_since_reconciliation": 1,
+      "reconciled_behavior_units": 0,
+      "remaining_behavior_units": 1,
+      "status": "PENDING_RECONCILIATION",
+      "reconciliation_threshold": 5,
+      "behavior_units_added_by_this_operation": 0,
+      "distinct_canonical_seeds_added_by_this_operation": 0,
+      "source_of_pending_unit": "accepted Source commit 54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+      "canonical_ledger_association": "PENDING"
+    },
+    "canonical_inventory_counts": {
+      "expected_seed_count": 465,
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 254,
+      "evidenced_seed_count": 389,
+      "remaining_seed_count": 76,
+      "coverage_status": "PARTIAL",
+      "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+    },
+    "blockers_and_stages": {
+      "unresolved_origin_cells": 24,
+      "canonical_blockers": [
+        "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+        "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+      ],
+      "blockers_open": true,
+      "closures_authorized": false,
+      "stage_p1_00": "COMPLETE",
+      "stage_p1_00b": "IN_PROGRESS"
+    },
+    "deferrals": {
+      "defer_prior_unit": "normal331-login-request-guard-ordering-20261006-c003",
+      "historic_deferrals_policy": "preserved by reference without artifact reuse"
+    },
+    "maintenance_foundation": {
+      "commit": "5a5fb8513464f26cd6fab00bb5bcd3d15982788d",
+      "behavior_units_added": 0,
+      "seed_progress_added": 0
+    }
+  },
+  "governance_and_gates": {
+    "acceptance_condition": "Future receipt acceptance is explicitly limited to fresh independent Gemini review, final Codex semantic and exact-byte checks, actual focused witness tests, and clean commit; receipt by itself never grants acceptance.",
+    "next_internal_gate": "Canonical ledger association for this pending batch, then distinct remaining handler coverage, preserving 1 pending unit and five-unit threshold."
+  }
+}
