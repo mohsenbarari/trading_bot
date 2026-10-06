@@ -781,3 +781,61 @@ Explicit exclusions:
 - All production, deploy, DNS, Web Writer, network, secrets;
 - Reuse or alias of any rejected/deferred artifact;
 - Edits to existing inventory, canonical manifest, tests, runtime, scripts, or controls.
+
+### 2026-10-05 UTC — Chat conversations failure characterization accounting checkpoint
+
+Assignment `WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331` (digest `9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4`, inspected HEAD `410e45cf0e0529af710129fbf7a0791f9e09a7f2`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only canonical ledger accounting entry for exactly the two conversation failure records in `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-conversations-two-runtime331.json` under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Retained receipt artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-conversations-two-runtime331.json` accepted at `410e45cf0e0529af710129fbf7a0791f9e09a7f2`, SHA256 `182263b35f524718d4148f90e131defc8e363f91fa522f2499ad480606a210ac`.
+- Predecessor ledger: `docs/refactor/two-server/section-1/00-stage-ledger.md` (last commit `a5934a7d611316a1b808719bf3bb0910015ba1b1`, SHA256 `8b1483af9ae17c6b5c2b761fc8c22621a1da618e55cde1cb723a26d685579df4`).
+- Canonical manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` (last commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`).
+
+Two newly ledger-accounted conversation failure records:
+1. Target-scope failure record:
+   - Path: `tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py`
+   - Accepted commit: `1e8e2aafea4ff87cbeebf0493406cceebd8953bf`
+   - SHA256: `ade0847c95d615297f4ac2e821d90a8cc9feef31af018b488b515a9f122a7685`
+   - Test selector: `tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py::ChatConversationsTargetScopeFailureCharacterizationTests::test_target_scope_exception_propagates_before_downstream_work`
+   - Scenario label: `target_scope_exception_propagates_before_downstream_work`
+   - Observed summary: Direct-handler characterization asserts: when _get_customer_visible_direct_target_ids raises a synthetic RuntimeError, the identical exception instance propagates unchanged; target lookup is called once and awaited once with opaque_db and current_user; downstream build_direct_conversation_list_stmt, _filter_customer_scoped_direct_target_ids, and list_room_conversations are neither called nor awaited. Excludes real DB reachability, query execution/persistence, HTTP/ASGI routing, auth/Depends execution, and service authorization beyond direct-handler mocks. Target-scope failure propagates identical synthetic RuntimeError and suppresses downstream builder/filter/room work.
+2. Direct execute failure record:
+   - Path: `tests/test_p1_00b_characterization_chat_conversations_execution_failure.py`
+   - Accepted commit: `3a0f5db6d948c3aa17797e1cf5d771b76145e4e1`
+   - SHA256: `2cf7c7618cf5fc43606a01041b2c883e9bfa4469e586d0800e2f2afa6a5f304b`
+   - Test selector: `tests/test_p1_00b_characterization_chat_conversations_execution_failure.py::ChatConversationsExecutionFailureCharacterizationTests::test_execute_exception_propagates_before_downstream_work`
+   - Scenario label: `execute_exception_propagates_before_downstream_work`
+   - Observed summary: Direct-handler characterization asserts: target lookup returns None; ordered calls execute target_lookup(db, current_user=current_user), stmt_builder(current_user.id), and execute(opaque_statement); statement builder is called once with positional current_user.id and no kwargs; direct-conversation db.execute is called once and awaited once with exact opaque statement object positional and no kwargs; identical synthetic RuntimeError propagates unchanged; downstream ConversationRead result conversion, _filter_customer_scoped_direct_target_ids, and list_room_conversations are neither called nor awaited. db is a SimpleNamespace fake with AsyncMock execute; excludes real DB reachability, SQL execution, transactions, persistence, HTTP/ASGI routing, auth/Depends execution, and service authorization beyond direct-handler mocks. Execute failure propagates identical RuntimeError after the exact ordered lookup/build/execute calls and suppresses result conversion/filter/rooms.
+
+Witness citations and evidence boundaries:
+- Existing accepted evidence is cited strictly as validation witnesses; tool-free Worker has no tool authority and does not invent new execution or review receipts.
+- Direct-handler unit tests mock helper dependencies and invoke router handler directly; bounded mocked direct-handler test assertions are the evidence contract; unexecuted transitive service/query behavior is excluded.
+- Excludes real DB reachability, SQL execution, transactions, persistence, HTTP/ASGI routing, auth/Depends execution, and service authorization beyond direct-handler mocks.
+
+Accounting status and unit tracking:
+- Accounting for this pair becomes accepted only on independent Gemini verification, final Codex semantic/exact-byte checks, focused tests, and clean commit.
+- Distinguish THIS scoped two-record ledger accounting from aggregate `canonical_ledger_accounting_complete=false`.
+- Keep retained reconciliation at 4/5 (`reconciled_behavior_units=4`) and `remaining_behavior_units=1`, `pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `global_reconciliation_complete=false`.
+- Do not account the earlier seen-member pair in this entry; it needs a separate bounded ledger unit.
+- Statement record remains UNRECONCILED/REVALIDATE_REQUIRED with unresolved acceptance identity: Assignment names `3c98a94f4b1315c0fcd4947a658374a70a66151b` while Git source introduction is `22335aa5267e4d242b446dd392fb57230613054c`; neither is resolved or relabeled as accepted here.
+- Predecessor provenance: Retain completed users/notifications 5/5 group only as predecessor provenance with remaining 0 (`remaining_behavior_units=0`), never the current group.
+- This is auxiliary ledger accounting, zero new accepted product behaviors and zero distinct seeds.
+
+Seed accounting, blockers, and Stage status:
+- Distinct seed accounting: Adds zero distinct seeds and zero accepted product behavior.
+- Retain canonical counts: 465 expected, 135 baseline + 254 reconciled new = 389 evidenced, 76 remaining seeds.
+- Coverage and seed acceptance status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers retained open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Next safe internal action: Separate seen-member pair ledger accounting; statement provenance resolution and remaining inventory reconciliation and global closeout stay pending.
+
+Preserved deferrals:
+Preserve every historical receipt, counter and deferral through unchanged byte prefix and refer to the retained receipt `preserved_deferrals` in `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-conversations-two-runtime331.json` unchanged. Rejected artifacts are never evidence.
+
+Explicit exclusions:
+- No sixth behavior, canonical seed promotion, or new product behavior;
+- No seed, origin cell, blocker, or Stage closure;
+- No repeated accepted scenarios or rejected artifact reuse;
+- No auth, HTTP, Depends, or service authorization acceptance;
+- No real DB, SQL, transaction, or persistence reachability;
+- No concurrency, retry, or process reload;
+- No external production, deploy, DNS, Web Writer, network, or secret mutation.
+- Only the ledger changes.
