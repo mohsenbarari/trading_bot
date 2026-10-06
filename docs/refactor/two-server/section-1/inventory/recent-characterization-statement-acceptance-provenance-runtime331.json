@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331",
+  "assignment_sha256": "9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4",
+  "assignment_expiry": "2026-10-30T23:59:00Z",
+  "inspected_head": "dfc4a4254f70ca33c77f9a5d41bc59e3f44461d4",
+  "status": "ACCEPTANCE_PROVENANCE_ASSESSED",
+  "acceptance_condition": "This auxiliary receipt assesses only the one pending statement record acceptance provenance. Status ACCEPTANCE_PROVENANCE_ASSESSED; own acceptance contingent on independent Gemini/Codex gates and clean commit. Do not modify any existing file or fabricate an acceptance receipt.",
+  "predecessor": {
+    "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-conversations-two-runtime331.json",
+    "last_commit": "410e45cf0e0529af710129fbf7a0791f9e09a7f2",
+    "sha256": "182263b35f524718d4148f90e131defc8e363f91fa522f2499ad480606a210ac"
+  },
+  "canonical_manifest": {
+    "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    "last_commit": "65772a50b3729a9ec905a6b542ac27ced057e5f0",
+    "sha256": "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e"
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "added_distinct_seed_count": 0,
+  "added_behavior_unit_count": 0,
+  "unresolved_origin_cells": 24,
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "canonical_counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 254,
+    "evidenced_seed_count": 389,
+    "remaining_seed_count": 76,
+    "expected_seed_count": 465
+  },
+  "predecessor_group_provenance": {
+    "description": "Completed users/notifications group remains reconciled 5/5 with remaining 0; preserved solely as nested predecessor-group provenance, never a new pending group or reacceptance.",
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_behavior_units": 5,
+    "remaining_behavior_units": 0
+  },
+  "current_group_tracking": {
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_behavior_units": 4,
+    "remaining_behavior_units": 1,
+    "global_reconciliation_complete": false,
+    "canonical_ledger_accounting_complete": false
+  },
+  "provenance_resolution": "EXACT_ACCEPTED_CHAIN_IDENTIFIED",
+  "authoritative_local_evidence": {
+    "accepted_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+    "assignment_label_contains_statement_file": false,
+    "candidate_test_evidence_sha256": "da68331ee7afc4182af833c2d9c7fe2f494831194441737d04bedbe7c87e97af",
+    "candidate_test_returncode": 0,
+    "candidate_test_state": "PASSED",
+    "committed_bytes_equal_worker_and_current": true,
+    "contradictory_assignment_label": "3c98a94f4b1315c0fcd4947a658374a70a66151b",
+    "historical_assignment_id": "WA-P1-00B-NORMAL-RETURN-20261004-292",
+    "historical_assignment_sha256": "f031f6f7137c8923c969761efbd67de397ad7e85fe5c8c75a3829f33921f8a01",
+    "historical_source_head": "1e8e2aafea4ff87cbeebf0493406cceebd8953bf",
+    "historical_task_id": "P1-00B-CHAT-CONVERSATIONS-STATEMENT-FAILURE-20261004-292-C003",
+    "local_verification": "Exact nonsecret receipt bytes and Git/test/source identities checked locally; supplied scalars are citations, not new acceptance.",
+    "proposal_sha256": "0b92375a43dcc9c0dbbb083238a9c98780d9e110c34da09087c8c52b92f98f62",
+    "receipt_citations": [
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-worker-0/task.json",
+        "sha256": "52040920ec7f5381af13e320228970d8631afde191390ac5e7a3f8c5d0e0afd0"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-worker-0/result.json",
+        "sha256": "0b92375a43dcc9c0dbbb083238a9c98780d9e110c34da09087c8c52b92f98f62"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-worker-0/status.json",
+        "sha256": "4d877a1bb6969cd6f42737510b1b118d7be2cf48db7dc59434fcbe673184c41c"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-reviewer-0/result.json",
+        "sha256": "661962607023aa9f8817cd97f3d6f656f3d0d961f6be5a4111a7d596d05055ca"
+      },
+      {
+        "path": ".local/two-site-refactor/proposals/normal292-chat-statement-failure-20261004-c003-reviewer-0/status.json",
+        "sha256": "c5952f5214f1d9232478c21f930bc1fd87190d3d2eaebece56152b0c35355540"
+      },
+      {
+        "path": ".local/two-site-refactor/pipeline/normal292-chat-statement-failure-20261004-c003/pre-review-tests-0.json",
+        "sha256": "da68331ee7afc4182af833c2d9c7fe2f494831194441737d04bedbe7c87e97af"
+      },
+      {
+        "path": ".local/two-site-refactor/autopilot/runs/cycle-0003-20261004T183619Z-2062337/result.json",
+        "sha256": "0b38b2854dceeefd2133d8139086c399a94f5110f9211009faa7b6306c83f821"
+      },
+      {
+        "path": ".local/two-site-refactor/autopilot/runs/cycle-0003-20261004T183619Z-2062337/status.json",
+        "sha256": "3c1f8e07ee00d6478f452f8bda789017d79cdb1c8f088595577748c578f68e6e"
+      }
+    ],
+    "reviewer_conversation_id": "34e18e1f-23b3-4ccb-96d8-175e1c5a03c5",
+    "reviewer_findings": [],
+    "reviewer_run_id": "normal292-chat-statement-failure-20261004-c003-reviewer-0",
+    "reviewer_status": "VERIFIED",
+    "schema_version": 1,
+    "source_introduction_and_last_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+    "supervisor_cycle_id": "cycle-0003-20261004T183619Z-2062337",
+    "supervisor_head_after": "22335aa5267e4d242b446dd392fb57230613054c",
+    "supervisor_head_before": "1e8e2aafea4ff87cbeebf0493406cceebd8953bf",
+    "supervisor_post_coordinator_validation_recorded": true,
+    "supervisor_terminal_state": "CONTINUE",
+    "test_path": "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py",
+    "test_selector": "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work",
+    "test_sha256": "37cd092db54205b6c0d0d802c904468da0387cba08eae7c0f0b08fa2366ea87a",
+    "test_utf8_bytes": 4704,
+    "worker_conversation_id": "c1c61494-0a84-4892-98b8-155cfb76c219",
+    "worker_run_id": "normal292-chat-statement-failure-20261004-c003-worker-0"
+  },
+  "statement_acceptance_assessment": {
+    "provenance_resolution": "EXACT_ACCEPTED_CHAIN_IDENTIFIED",
+    "accepted_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+    "contradictory_assignment_label": "3c98a94f4b1315c0fcd4947a658374a70a66151b",
+    "contradiction_details": "Git at the contradictory label 3c98a94f4b1315c0fcd4947a658374a70a66151b has no statement test and adds a seen-member receipt instead; accepted commit 22335aa5267e4d242b446dd392fb57230613054c introduces the statement file. Current Assignment prose remains contradictory and untouched; exact historical evidence establishes the identity, while its old group/counter prose has no current accounting authority. Cite existing evidence only; Worker has no tool authority and makes no new execution claims.",
+    "acceptance_basis": "Terminal Supervisor CONTINUE with post-coordinator validation, distinct Worker/Reviewer conversations, exact proposal SHA, VERIFIED without findings, candidate PASS and exact Worker/commit/current bytes."
+  },
+  "pending_records": [
+    {
+      "path": "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py",
+      "status": "UNRECONCILED",
+      "acceptance_identity": "EXACT_ACCEPTED_CHAIN_IDENTIFIED",
+      "accepted_commit": "22335aa5267e4d242b446dd392fb57230613054c",
+      "contradictory_assignment_label": "3c98a94f4b1315c0fcd4947a658374a70a66151b",
+      "sha256": "37cd092db54205b6c0d0d802c904468da0387cba08eae7c0f0b08fa2366ea87a",
+      "test_utf8_bytes": 4704,
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work"
+      ],
+      "scenario_labels": [
+        "statement_builder_exception_propagates_before_downstream_work"
+      ],
+      "observed_summary": "Mocked target lookup returns None and has independent exact call/await and multiplicity checks; synchronous mocked builder receives only current_user.id with empty kwargs and raises identical synthetic RuntimeError; downstream filter/list-room mocks are never called/awaited. Opaque object DB has no execute attribute: accidental downstream DB access would fail exception-identity assertion; do not describe a DB execute mock or explicit execute call/await assertion. No real query-builder failure reachability, DB/SQL/persistence, HTTP/auth/Depends/service-authorization/serialization coverage. Existing live selector is a validation witness, not newly accepted behavior."
+    }
+  ],
+  "preserved_deferrals": [
+    "defer_prior_unit=normal265-canonical-five-closeout-20261004-c001",
+    "defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007",
+    "defer_prior_unit=normal169-shared-read-user-manifest-only-frozen388-20261003-c004",
+    "defer_prior_unit=normal169-c17-only-canonical-promotion-20261003-c016-bounded",
+    "defer_prior_unit=normal169-c16-c17-union-p\u78ba",
+    "defer_prior_unit=normal169-c16-c17-union-promotion-with-custody-20261003-c014",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012",
+    "defer_prior_unit=normal169-c16-c17-canonical-promotion-20261003-c012-v2",
+    "defer_prior_unit=normal169-canonical-manifest-pre",
+    "defer_prior_unit=normal169-canonical-manifest-successor-20261003-c010-v2",
+    "defer_prior_unit=normal169-c17-consumer-loader-integration-20261003-c007",
+    "defer_prior_unit=normal169-c17-historical-coverage-reader-isolation-20261003-c005",
+    "defer_prior_unit=normal169-historical-coverage-isolation-20261003-c004",
+    "defer_prior_unit=normal169-c16-receipt-custody-20261003-c001",
+    "defer_prior_unit=normal169-c16-machine-linkage-20261003-c001-v2",
+    "continuation-12",
+    "153/154/155/157-C001",
+    "normal159 C1/C2",
+    "rejected C15 machine checkpoint",
+    "rejected policy/seed proposals",
+    "normal161-c5 C16 incremental reconciliation",
+    "subsequent recorded deferrals",
+    "defer_prior_unit=normal277-pending-five-users-http-reconciliation-20261004-c001-bounded",
+    "defer_prior_unit=normal273-notification-mark-read-missing-id-http-20261004-c002",
+    "defer_prior_unit=normal273-notification-delete-missing-id-http-20261004-c001",
+    "defer_prior_unit=normal271-notification-delete-cross-user-http-20261004-c002",
+    "defer_prior_unit=normal277-notification-http-last-three-inventory-20261004-c002",
+    "defer_prior_unit=normal277-notifications-three-ledger-accounting-20261004-c008",
+    "defer_prior_unit=normal277-current-five-ledger-accounting-20261004-c006",
+    "defer_prior_unit=normal292-chat-seen-room-failure-20261004-c001"
+  ],
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "exclusions": [
+    "sixth_behavior",
+    "canonical_seed_promotion",
+    "reconciliation_accounting_group_closeout",
+    "seed_origin_blocker_stage_closure",
+    "authentication_concurrency_retry_reload",
+    "production_deploy_dns_writer_network_secrets",
+    "rejected_artifact_reuse"
+  ],
+  "next_internal_gate": "Bounded statement inventory reconciliation using this assessed exact acceptance chain, then statement ledger accounting and distinct group closeout; no sixth behavior first."
+}
