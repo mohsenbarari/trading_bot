@@ -904,3 +904,58 @@ Explicit exclusions:
 
 Next distinct safe gap:
 - Bounded statement acceptance-provenance assessment using exact Git/accepted receipts, then remaining inventory reconciliation, statement accounting, and group closeout.
+
+### 2026-10-06 UTC — Chat conversations statement failure characterization accounting checkpoint
+
+Assignment `WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331` (digest `9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4`, inspected HEAD `3145ccd25b4fab026ebb7265241cd6576c4d710f`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only canonical ledger accounting entry for the accepted statement failure record assessed in `docs/refactor/two-server/section-1/inventory/recent-characterization-statement-acceptance-provenance-runtime331.json` under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Accepted provenance assessment artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-statement-acceptance-provenance-runtime331.json` at commit `3145ccd25b4fab026ebb7265241cd6576c4d710f`, SHA256 `5236c0552a481fc2f6e89f1b0706db44e794ef409175b5a1b536c8acd3be6b62`.
+- Predecessor ledger commit: `3145ccd25b4fab026ebb7265241cd6576c4d710f`, SHA256 `9e0004ec417d13f68fd2d5d2fd273f8fe5a13c4cf143c8e8d8109b2f568ec95f` (`docs/refactor/two-server/section-1/00-stage-ledger.md`).
+- Canonical manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` at commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`.
+- Accepted statement commit: `22335aa5267e4d242b446dd392fb57230613054c`.
+
+Accepted statement failure characterization record:
+- Path: `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py`
+- Source introduction and last commit: `22335aa5267e4d242b446dd392fb57230613054c`
+- SHA256: `37cd092db54205b6c0d0d802c904468da0387cba08eae7c0f0b08fa2366ea87a`
+- Test size: 4704 UTF-8 bytes
+- Exact test selector: `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work`
+- Scenario label: `statement_builder_exception_propagates_before_downstream_work`
+- Observed evidence summary: Direct-handler characterization asserts: target lookup `_get_customer_visible_direct_target_ids` returns `None` and receives exact `opaque_db` and `current_user` with separate once call and once await checks; synchronous mocked builder `build_direct_conversation_list_stmt` receives only `current_user.id` positional, no kwargs and no `allowed_target_ids` keyword, and raises identical synthetic `RuntimeError`; customer scoping filter `_filter_customer_scoped_direct_target_ids` and room conversation listing `list_room_conversations` are neither called nor awaited. The test uses an `opaque_db = object()` with no `execute` attribute, so any accidental downstream DB execution access would fail the exception-identity assertion; there is no execute mock and no explicit DB execute call/await assertion. Excludes runtime query-builder failure reachability, DB/SQL/transactions/persistence, HTTP/ASGI/auth/Depends/service-authorization, and response serialization. Existing selector is a validation witness only.
+
+Provenance resolution and historic chain:
+- Provenance resolution: `EXACT_ACCEPTED_CHAIN_IDENTIFIED`.
+- Basis of acceptance: Terminal Supervisor `CONTINUE` with recorded post-coordinator validation (`supervisor_post_coordinator_validation_recorded: true`, cycle `cycle-0003-20261004T183619Z-2062337`), distinct Worker conversation (`c1c61494-0a84-4892-98b8-155cfb76c219`, run `normal292-chat-statement-failure-20261004-c003-worker-0`) and Reviewer conversation (`34e18e1f-23b3-4ccb-96d8-175e1c5a03c5`, run `normal292-chat-statement-failure-20261004-c003-reviewer-0`), exact proposal SHA (`0b92375a43dcc9c0dbbb083238a9c98780d9e110c34da09087c8c52b92f98f62`), Reviewer status `VERIFIED` with empty findings (`reviewer_findings: []`), candidate pre-review test state `PASSED` (`candidate_test_evidence_sha256: da68331ee7afc4182af833c2d9c7fe2f494831194441737d04bedbe7c87e97af`, returncode 0), and exact byte identity between Worker output, commit `22335aa5267e4d242b446dd392fb57230613054c`, and current repository bytes (`committed_bytes_equal_worker_and_current: true`).
+- Preserved Assignment prose and non-authoritative label: Git at the contradictory Assignment label `3c98a94f4b1315c0fcd4947a658374a70a66151b` contains no statement test and introduces a seen-member receipt instead; commit `22335aa5267e4d242b446dd392fb57230613054c` authoritatively introduces the statement test file. Contradictory Assignment prose is preserved untouched, and `3c98a94f4b1315c0fcd4947a658374a70a66151b` is identified as non-authoritative for statement provenance. Citations are strictly historic evidence citations, never fresh execution or new acceptance claims. This appendix supersedes only older ledger statement-provenance uncertainty using the accepted assessment, leaving all historical entries intact.
+
+Accounting status and unit tracking:
+- Scoped statement ledger accounting is contingent on independent Gemini verification, Codex semantic/exact-byte/tests, and clean commit.
+- Inventory statement status remains `UNRECONCILED` in inventory tracking until distinct statement inventory reconciliation is performed.
+- Current group reconciliation remains at 4/5 (`reconciled_behavior_units=4`), with `remaining_behavior_units=1`, `pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `global_reconciliation_complete=false`, and aggregate `canonical_ledger_accounting_complete=false`.
+- No sixth behavior unit and no counter reset.
+- Completed users/notifications group is preserved solely as predecessor provenance (`remaining_behavior_units=0`).
+
+Seed accounting, blockers, and Stage status:
+- Distinct seed accounting: This auxiliary accounting adds zero distinct seeds and zero accepted product behaviors (`added_distinct_seed_count=0`, `added_behavior_unit_count=0`).
+- Canonical counts from manifest `seed-handler-coverage.json` (commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`): 465 expected (`expected_seed_count=465`), 135 baseline + 254 reconciled new = 389 evidenced (`evidenced_seed_count=389`), 76 remaining (`remaining_seed_count=76`).
+- Coverage status remains `PARTIAL`; seed acceptance status remains `FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Authentication, concurrency, retry, reload, and seed/origin/blocker/Stage closure gates remain pending.
+
+Preserved deferrals:
+Preserve all historic receipts, counters, and deferrals through unchanged byte prefix. Reference `preserved_deferrals` in accepted assessment `recent-characterization-statement-acceptance-provenance-runtime331.json` unchanged, and retain the exact new recovery deferral:
+- `defer_prior_unit=normal331-statement-reconciliation-20261006-c001`
+Rejected artifacts are never evidence.
+
+Explicit exclusions:
+- Only the ledger changes; no source or test mutations.
+- No sixth behavior, canonical seed promotion, or new product behavior.
+- No seed, origin cell, blocker, or Stage closure.
+- No repeated accepted scenarios or rejected artifact reuse.
+- No auth, HTTP, Depends, or service authorization acceptance.
+- No real DB, SQL, transaction, or persistence reachability.
+- No concurrency, retry, or process reload.
+- No external production, deploy, DNS, Web Writer, network, or secret mutation.
+
+Next distinct safe gate:
+- Statement inventory reconciliation using this exact accepted assessment (`docs/refactor/two-server/section-1/inventory/recent-characterization-statement-acceptance-provenance-runtime331.json`), commit `22335aa5267e4d242b446dd392fb57230613054c`, and selector `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work`, followed by distinct aggregate accounting and group closeout; do not reaccept the statement or any of the other four accepted units.
