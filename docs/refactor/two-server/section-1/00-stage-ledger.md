@@ -959,3 +959,56 @@ Explicit exclusions:
 
 Next distinct safe gate:
 - Statement inventory reconciliation using this exact accepted assessment (`docs/refactor/two-server/section-1/inventory/recent-characterization-statement-acceptance-provenance-runtime331.json`), commit `22335aa5267e4d242b446dd392fb57230613054c`, and selector `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work`, followed by distinct aggregate accounting and group closeout; do not reaccept the statement or any of the other four accepted units.
+
+### 2026-10-06 UTC — Chat five custody aggregate accounting checkpoint <a id="chat-five-custody-aggregate-accounting-runtime331"></a>
+
+Assignment `WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331` (digest `9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one compact aggregate canonical ledger accounting checkpoint for the accepted current chat group under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Custody proof receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-chat-five-accounting-custody-runtime331.json` at commit `935a21660a32238e3b44dd0120c2c72848bb4f1a` / SHA256 `92307efac483d2f870137f1bd21ccf8570a211cd711172f3013607fe33d7c793`.
+- Inventory reference: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-statement-inventory-runtime331.json` at commit `6c7d43b3c99b9f9cfbf1008ee900cc5fbb5ce5ae` / SHA256 `0995426c37a706e2c01bfb23b84d3a60c01c2e6fbc0773b3750be70e85bddc9e`.
+- Scoped 2+2+1 entry commits from `accounting_custody_map`:
+  1. Commit `a2ba7e15a6b33e0ed4d56f93f270a8d126542bdc` (conversations failure pair; start_line 784, end_line 841)
+  2. Commit `dfc4a4254f70ca33c77f9a5d41bc59e3f44461d4` (seen-member rejection and service failure pair; start_line 842, end_line 906)
+  3. Commit `b0db2737c881611a12a51f26f4c0bb97c1b95d0b` (statement failure record; start_line 907, end_line 961)
+- Authoritative statement acceptance: Preserve exact statement acceptance commit `22335aa5267e4d242b446dd392fb57230613054c`; contradictory Assignment label `3c98a94f4b1315c0fcd4947a658374a70a66151b` has no statement acceptance authority. Do not reaccept any record.
+
+#### Five-record accounting custody map
+
+| Record | Test Path | Test Selectors | Accepted Commit | Test SHA256 | Ledger Entry Commit |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py` | `tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py::ChatConversationsTargetScopeFailureCharacterizationTests::test_target_scope_exception_propagates_before_downstream_work` | `1e8e2aafea4ff87cbeebf0493406cceebd8953bf` | `ade0847c95d615297f4ac2e821d90a8cc9feef31af018b488b515a9f122a7685` | `a2ba7e15a6b33e0ed4d56f93f270a8d126542bdc` |
+| 2 | `tests/test_p1_00b_characterization_chat_conversations_execution_failure.py` | `tests/test_p1_00b_characterization_chat_conversations_execution_failure.py::ChatConversationsExecutionFailureCharacterizationTests::test_execute_exception_propagates_before_downstream_work` | `3a0f5db6d948c3aa17797e1cf5d771b76145e4e1` | `2cf7c7618cf5fc43606a01041b2c883e9bfa4469e586d0800e2f2afa6a5f304b` | `a2ba7e15a6b33e0ed4d56f93f270a8d126542bdc` |
+| 3 | `tests/test_p1_00b_characterization_chat_seen_members_non_group.py` | 1. `tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_channel_room_rejected_before_seen_service`<br>2. `tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_direct_boundary_input_rejected_before_seen_service` | `ce55ebc5f3f36cc6a6034224adc59bf844a45f68` | `27290e269d83047d0698d6ffc43196c93faf0dfc7127130649ae11d91d8ce640` | `dfc4a4254f70ca33c77f9a5d41bc59e3f44461d4` |
+| 4 | `tests/test_p1_00b_characterization_chat_seen_members_service_failure.py` | `tests/test_p1_00b_characterization_chat_seen_members_service_failure.py::ChatSeenMembersServiceFailureCharacterizationTests::test_group_seen_service_exception_propagates_unchanged` | `7a91bba47224380a1b6beebddd693e6394c96d94` | `fffe385c5d136272f9e50e7bf6b36c95d6dbce378028efc01efbd73049744b6a` | `dfc4a4254f70ca33c77f9a5d41bc59e3f44461d4` |
+| 5 | `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py` | `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work` | `22335aa5267e4d242b446dd392fb57230613054c` | `37cd092db54205b6c0d0d802c904468da0387cba08eae7c0f0b08fa2366ea87a` | `b0db2737c881611a12a51f26f4c0bb97c1b95d0b` |
+
+#### Reconciliation status and unit tracking
+
+- Inventory reconciliation: Inventory is 5/5 reconciled (`remaining_behavior_units=0`).
+- Scoped ledger union: Scoped ledger union is exactly five distinct records and six selectors.
+- Accounting completion: State `canonical_ledger_accounting_complete=true` only contingent on this unit passing independent Gemini Reviewer, Codex semantic/exact-byte/tests and clean commit; `global_reconciliation_complete=false` and separate exact-SHA current-group closeout remain pending.
+- Current-group tracking counters preserved: `pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `reconciled_behavior_units=5`, `remaining_behavior_units=0`.
+- Status supersession: Supersedes only older current-group 4/5 and statement `UNRECONCILED` ledger status using accepted inventory and custody proofs; completed users/notifications group remains predecessor provenance only. No counter resets, sixth behavior, canonical seed promotion, or acceptance inflation.
+
+#### Seed accounting, blockers, and Stage status
+
+- Retained canonical counts: 465 expected (`expected_seed_count=465`), 135 baseline + 254 reconciled new = 389 evidenced (`evidenced_seed_count=389`), 76 remaining (`remaining_seed_count=76`).
+- Seed coverage status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Open High blockers: Both canonical High blocker IDs remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Added units: Zero seeds added (`added_distinct_seed_count=0`) and zero behaviors added (`added_behavior_unit_count=0`).
+
+#### Evidence boundaries and witness citations
+
+- Existing six pytest selectors are validation witnesses only; cited strictly as accepted historic evidence without new execution or test claims; no new tests/source or changed behavior.
+- Evidence boundaries remain strictly within accepted `evidence_limits`: direct-handler characterizations asserting synthetic exception propagation and downstream work suppression under opaque mocked dependencies.
+- Explicit exclusions: auth/HTTP/Depends/service authorization, real DB/SQL/transactions/persistence, concurrency/retry/reload, seed/origin/blocker/Stage closure, all production/deploy/DNS/Web Writer/network/secret mutation, and prohibited rejected artifact reuse (including deferred `normal331-chat-five-aggregate-ledger-20261006-c001`).
+
+#### Preserved deferrals
+
+Preserve every existing deferral through immutable ledger prefix and reference to custody `preserved_deferrals` in `docs/refactor/two-server/section-1/inventory/recent-characterization-chat-five-accounting-custody-runtime331.json`, specifically retaining:
+- `defer_prior_unit=normal331-chat-five-aggregate-ledger-20261006-c001`
+- `defer_prior_unit=normal331-statement-reconciliation-20261006-c001`
+
+#### Next internal action
+
+Next safe action is a distinct exact-SHA current-group closeout of this accepted aggregate checkpoint plus the custody/inventory proof, preserving all other open gates and five provenance counters.
