@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-RECONCILIATION-RECOVERY-ONLY-LITERAL-361",
+  "task_id": "normal361-reconcile-recovery-only-20261006-c001",
+  "receipt_type": "RECOVERY_ONLY_INVENTORY_RECONCILIATION",
+  "stage": "P1-00b",
+  "canonical_gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "status": "PARTIAL_RECONCILIATION",
+  "assignment": {
+    "active_assignment_id": "WA-P1-00B-NORMAL-LITERAL-RETURN-20261006-361",
+    "assignment_sha256": "6758eed3533417a28aa5a20e089f947084b892fe4979ef025baef2656198efd5",
+    "expiry": "2026-10-30T23:59:00Z",
+    "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001"
+  },
+  "provenance_references": {
+    "canonical_ledger": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "commit": "d0ff85b1e2a0fbaeb7ca0221eaa9e2c604c40131",
+      "sha256": "184e743518bec60026a2879d7f979de9d611804c34cfc05a8a8790212a167398"
+    },
+    "registration": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json",
+      "commit": "5cfda55da64601fedce2ea8551d3a34d251edf43",
+      "sha256": "d0a0f3499a06db699e2e6831c3d20d0843d36059315435df8013fdc4004a3e41",
+      "source_pointer": "/source",
+      "actor_pointer": "/actor",
+      "scope_pointer": "/scope",
+      "git_pointer": "/git",
+      "handler_0_evidence_limits_pointer": "/registered_handlers/0/evidence_limits",
+      "handler_1_evidence_limits_pointer": "/registered_handlers/1/evidence_limits",
+      "accounting_deferrals_pointer": "/accounting/deferrals",
+      "accounting_completed_chat_group_pointer": "/accounting/completed_chat_group"
+    },
+    "custody": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-generation-base-custody-foundation346.json",
+      "commit": "a6f1b30de6701d68f94a8460b40db89b2091fb23",
+      "sha256": "635597849bc7284305a96f78c3d6db87033389c2e8729ee3c2717613f4268daf"
+    }
+  },
+  "source": {
+    "inspected_head": "d0ff85b1e2a0fbaeb7ca0221eaa9e2c604c40131",
+    "accepted_source_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+    "accepted_parent": "55146244cb72fb3b80feee83beb06993b8a632da",
+    "accepted_file": {
+      "mode": "100644",
+      "path": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py",
+      "sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+      "utf8_bytes": 8197
+    },
+    "historical_inspected_heads": {
+      "registration_inspected_head": "a6f1b30de6701d68f94a8460b40db89b2091fb23",
+      "custody_inspected_head": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+      "note": "Historical inspected heads retained as historical only; current inspected HEAD is authoritative."
+    },
+    "registration_source_pointer": "/source"
+  },
+  "actor": {
+    "registration_actor_pointer": "/actor",
+    "controller_run_id": "cycle-0001-20261006T081136Z-565319",
+    "worker": {
+      "run_id": "normal346-recovery-lookup-c003b-worker-0",
+      "conversation_id": "0d09805b-38f2-4319-b0c1-2017209e763d",
+      "state": "PROPOSAL_READY"
+    },
+    "reviewer": {
+      "run_id": "normal346-recovery-lookup-c003b-reviewer-0",
+      "conversation_id": "2018ed49-c288-45cd-a4a2-f7df46ac4e7d",
+      "state": "VERIFIED",
+      "findings": [],
+      "result_sha256": "1496955636bc27a2d82950cde423b3542ab2c9e01580690a8fa241379bd280e2"
+    },
+    "governance_note": "Reconciliation receipt retains exact distinct Worker/Reviewer run and conversation identities, proposal SHA and VERIFIED empty findings by registration reference; this receipt never invents new run acceptance."
+  },
+  "scope": {
+    "registration_scope_pointer": "/scope",
+    "reconciled_scope": {
+      "reconciled_source_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+      "scenarios_reconciled": [
+        "approve-recovery-accountant-lookup-exception-before-uuid",
+        "reject-recovery-accountant-lookup-exception-before-uuid"
+      ]
+    },
+    "exclusions_and_unproven": [
+      "successful_approve_recovery_request",
+      "successful_reject_recovery_request",
+      "http_transport_status_codes",
+      "fastapi_depends_injection",
+      "authentication_token_creation",
+      "admin_authorization_verification",
+      "actual_accountant_relation_database_query",
+      "sql_construction_and_execution",
+      "async_session_transaction_management",
+      "database_persistence",
+      "concurrency_retry_and_process_reload",
+      "origin_matrix_interaction_cells",
+      "request_attribute_access_and_full_row_immutability",
+      "canonical_seed_acceptance",
+      "blocker_closure",
+      "stage_closure",
+      "production_deploy_dns_writer_secrets_network_control_mutations"
+    ]
+  },
+  "git": {
+    "registration_git_pointer": "/git",
+    "current_inspected_head": "d0ff85b1e2a0fbaeb7ca0221eaa9e2c604c40131",
+    "historical_inspected_head": "a6f1b30de6701d68f94a8460b40db89b2091fb23",
+    "accepted_source_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+    "accepted_parent": "55146244cb72fb3b80feee83beb06993b8a632da",
+    "is_ancestor_of_head": true,
+    "single_accepted_file": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py",
+    "current_file_sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+    "current_file_unchanged": true,
+    "current_file_utf8_bytes": 8197,
+    "file_mode": "100644"
+  },
+  "test_witness_evidence": {
+    "note": "Existing selectors are live validation witnesses only; historical test evidence stays historical. Fresh test results are conditional on gates actually running.",
+    "live_witness_selectors": [
+      "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_approve_recovery_propagates_accountant_lookup_exception_before_uuid",
+      "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_reject_recovery_propagates_accountant_lookup_exception_before_uuid"
+    ]
+  },
+  "registered_handlers": [
+    {
+      "seed_id": "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845",
+      "canonical_symbol": "api/routers/sessions.py:approve_single_session_recovery",
+      "selector": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_approve_recovery_propagates_accountant_lookup_exception_before_uuid",
+      "scenario_key": "approve-recovery-accountant-lookup-exception-before-uuid",
+      "source_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+      "source_file_sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+      "registration_evidence_limits_pointer": "/registered_handlers/0/evidence_limits",
+      "evidence_limits_summary": "Actual handler and real guard with mocked lookup, opaque object db, identical RuntimeError before malformed UUID, exact call/await identity contracts, downstream zero calls/awaits, nine selected actor fields checked unchanged; approval empty Mock.mock_calls is NOT no-attribute-access proof, and selected fields are NOT full-row immutability."
+    },
+    {
+      "seed_id": "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907",
+      "canonical_symbol": "api/routers/sessions.py:reject_single_session_recovery",
+      "selector": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_reject_recovery_propagates_accountant_lookup_exception_before_uuid",
+      "scenario_key": "reject-recovery-accountant-lookup-exception-before-uuid",
+      "source_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+      "source_file_sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+      "registration_evidence_limits_pointer": "/registered_handlers/1/evidence_limits",
+      "evidence_limits_summary": "Actual handler and real guard with mocked lookup, opaque object db, identical RuntimeError before malformed UUID, exact call/await identity contracts, downstream zero calls/awaits, nine selected actor fields checked unchanged; selected fields are NOT full-row immutability."
+    }
+  ],
+  "accounting": {
+    "group_accounting": {
+      "total_accepted_source_units": 5,
+      "total_handler_scenarios_count": 7,
+      "pending_five": 5,
+      "units_since_reconciliation": 5,
+      "total_behavior_units": 5,
+      "reconciled_behavior_units": 1,
+      "remaining_behavior_units": 4,
+      "reconciled_handler_scenarios_count": 2,
+      "remaining_handler_scenarios_count": 5,
+      "added_behavior_unit_count": 0,
+      "added_distinct_seed_count": 0,
+      "status": "PARTIAL_RECONCILIATION",
+      "canonical_ledger_accounting_complete": false,
+      "global_reconciliation_complete": false,
+      "no_sixth_behavior_rule": "No sixth behavior before full inventory reconciliation, canonical ledger accounting and separate exact-SHA closeout."
+    },
+    "current_five_source_group": [
+      {
+        "commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+        "path": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+        "sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+        "utf8_bytes": 10377,
+        "reconciliation_status": "UNRECONCILED"
+      },
+      {
+        "commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+        "path": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py",
+        "sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+        "utf8_bytes": 8197,
+        "reconciliation_status": "RECONCILED_THIS_PACKET"
+      },
+      {
+        "commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+        "path": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py",
+        "sha256": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+        "utf8_bytes": 6346,
+        "reconciliation_status": "UNRECONCILED"
+      },
+      {
+        "commit": "5dbbaf0ff89d6b884550ed8bff190d720af3297d",
+        "path": "tests/test_p1_00b_characterization_request_identity_admin_access_failure.py",
+        "sha256": "8146380b392217566cf0e6466d5539280499713980a269abd2392ed632d9f4f4",
+        "utf8_bytes": 6492,
+        "reconciliation_status": "UNRECONCILED"
+      },
+      {
+        "commit": "c064c00f62bb82bf2e62edad8ce7e55368f9a612",
+        "path": "tests/test_p1_00b_characterization_request_identity_accountant_lookup_failure.py",
+        "sha256": "40d0709a053e914ffddfca127ad71014b717037854ee655fdb2a81f3f12a508a",
+        "utf8_bytes": 6657,
+        "reconciliation_status": "UNRECONCILED"
+      }
+    ],
+    "canonical_inventory_counts": {
+      "expected_seed_count": 465,
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 254,
+      "evidenced_seed_count": 389,
+      "remaining_seed_count": 76,
+      "coverage_status": "PARTIAL",
+      "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+    },
+    "blockers_and_stages": {
+      "unresolved_origin_cells": 24,
+      "canonical_blockers": [
+        "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+        "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+      ],
+      "blockers_open": true,
+      "closures_authorized": false,
+      "stage_p1_00": "COMPLETE",
+      "stage_p1_00b": "IN_PROGRESS"
+    },
+    "deferrals": [
+      "defer_prior_unit=normal355-reconcile-login-recovery-first-two-20261006-c001",
+      "defer_prior_unit=normal355-reconcile-login-only-20261006-c001",
+      "defer_prior_unit=normal346-recovery-approval-ledger-association-20261006-c008",
+      "defer_prior_unit=normal346-recovery-canonical-ledger-association-20261006-c007b",
+      "defer_prior_unit=normal346-recovery-lookup-evidence-registration-20261006-c004",
+      "defer_prior_unit=normal346-login-lookup-ledger-association-20261006-c002",
+      "defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003"
+    ],
+    "historical_references": {
+      "completed_chat_group_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json#/accounting/completed_chat_group",
+      "registration_accounting_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json#/accounting",
+      "note": "Historical two/four accounting and completed chat group remain immutable provenance by reference only."
+    }
+  },
+  "governance_and_gates": {
+    "acceptance_condition": "The recovery reconciliation completion is conditional on independent Gemini Reviewer, Codex semantic/exact-byte review, actual tests and clean commit; receipt prose grants no acceptance.",
+    "next_gap": "Remaining four source units are unreconciled, including login; next gap is a distinct compact identity-submit active-lookup-failure inventory reconciliation from source 1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8, then other remaining evidence, aggregate canonical accounting and exact closeout."
+  }
+}
