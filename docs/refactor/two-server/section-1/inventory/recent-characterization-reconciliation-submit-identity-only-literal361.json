@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-RECONCILIATION-SUBMIT-IDENTITY-ONLY-LITERAL-361",
+  "task_id": "normal361-reconcile-submit-identity-only-20261006-c002",
+  "receipt_type": "SUBMIT_IDENTITY_ONLY_INVENTORY_RECONCILIATION",
+  "stage": "P1-00b",
+  "canonical_gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "status": "PARTIAL_RECONCILIATION",
+  "assignment": {
+    "active_assignment_id": "WA-P1-00B-NORMAL-LITERAL-RETURN-20261006-361",
+    "assignment_sha256": "6758eed3533417a28aa5a20e089f947084b892fe4979ef025baef2656198efd5",
+    "expiry": "2026-10-30T23:59:00Z",
+    "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001"
+  },
+  "provenance_references": {
+    "canonical_ledger": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "commit": "f5626b663638179049de14c4ab88b6e718cb6232",
+      "sha256": "184e743518bec60026a2879d7f979de9d611804c34cfc05a8a8790212a167398"
+    },
+    "predecessor_recovery_reconciliation": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-recovery-only-literal361.json",
+      "commit": "f5626b663638179049de14c4ab88b6e718cb6232",
+      "sha256": "11af657adf9afe813b03f7c0297058e1a769497e667e56acb41a942af4da3e2c"
+    },
+    "canonical_coverage": {
+      "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+      "commit": "f5626b663638179049de14c4ab88b6e718cb6232",
+      "sha256": "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e"
+    }
+  },
+  "source": {
+    "current_inspected_head": "f5626b663638179049de14c4ab88b6e718cb6232",
+    "accepted_source_commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+    "accepted_parent": "59ddd3a8c748eda1608f67f4b9f4186b0179627c",
+    "source_commit_is_ancestor_of_current_head": true,
+    "accepted_file": {
+      "mode": "100644",
+      "path": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py",
+      "sha256": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+      "utf8_bytes": 6346
+    },
+    "committed_bytes_equal_worker_and_current": true,
+    "changed_paths_exactly_one_test": true,
+    "historical_inspected_heads": {
+      "predecessor_inspected_head": "d0ff85b1e2a0fbaeb7ca0221eaa9e2c604c40131",
+      "current_inspected_head": "f5626b663638179049de14c4ab88b6e718cb6232",
+      "note": "Historical inspected heads retained as historical evidence; current inspected HEAD is authoritative."
+    },
+    "generation_source_manifest": {
+      "api/routers/sessions.py": "60da5f06afe521cdaca5ad049c2f78cabd53e6753a2ef9c77099d20ee07ccd47",
+      "core/enums.py": "8a2d9b6fc8ad772c0501c5477b646bafd5b7c6b16c3f77c85de4cf6e81845161",
+      "core/registration_identity.py": "e2eae34d0567c17551c67c92d102bbcb696976c6217b0933c73ec43eee8ea522",
+      "core/services/single_session_recovery_service.py": "4b8886b27a1972bafc671409fffc1484991743c9a8e9f2641510858beb1cc09f",
+      "core/sms.py": "68ef1cb71077106b12464ffff89052f2d1c1c69736d7375aed76f0264cd996bd",
+      "core/utils.py": "5c541febd48153ad55d200fafb10c98730cd52d801746c437861c5d5f6bfb291",
+      "docs/refactor/two-server/section-1/inventory/scenario-records.json": "036e65dc9ce96d26ccbc1704d85298c42d52f097e198192df6fd623a4895a4a5",
+      "docs/refactor/two-server/section-1/stages/P1-00b.md": "d878bed557822e5a780fe2cc02226d66b787c19d7eddb4c90230c3d81bb4f792",
+      "models/database.py": "00e1887c37b6c95626cd07d619eb00c554fcca2259a9a10acd7388a5e111454f",
+      "models/session.py": "ee53994483a51aeeea1889d4a2c50603f9eaf7bbfef631d442cd30c2f5b5fa94",
+      "models/user.py": "4caca81d39dfa682ac8c453a5e4362da39df2de435eae24dcb394ca7239cd7a7",
+      "tests/test_p1_00_characterization_network_isolation.py": "e1aee47359a9f72eac838b000537992434c66eaf903d30cce40634da01da5b69",
+      "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+      "tests/test_p1_00b_characterization_submit_single_session_recovery_identity.py": "c21b26f8b49fec1cf3a85272f424899f3bcdf7d439869646a3e6089d357f9bcb"
+    },
+    "generation_source_hashes_match_current": true
+  },
+  "actor": {
+    "controller_run_id": "cycle-0008-20261006T111111Z-687602",
+    "generation_task_id": "normal346-submit-identity-active-lookup-failure-20261006-c008",
+    "generation_task_sha256": "02c503cada341bd99256b91676b7e5693f16f5b4e4c9b4e2b18dfa3092490ec9",
+    "generation_assignment_id": "WA-P1-00B-NORMAL-FOUNDATION-RETURN-20261006-346",
+    "generation_assignment_sha256": "7122ac5b7d2e239094a3a74897766019f3627acbe3853f71b40a89f14a8dd24e",
+    "proposal_sha256": "b36041bc2a0432c91a84f1f17c0c523d754b63e390f1b05b2ba2302b9c95d5df",
+    "worker": {
+      "run_id": "normal346-submit-identity-lookup-c008-20261006-worker-0",
+      "conversation_id": "6d484f5a-d10d-48d8-be2c-155fcfd87693",
+      "state": "PROPOSAL_READY"
+    },
+    "reviewer": {
+      "run_id": "normal346-submit-identity-lookup-c008-20261006-reviewer-0",
+      "conversation_id": "29505fed-c0dc-4bb0-91ce-24d238162249",
+      "role": "verifier",
+      "state": "VERIFIED",
+      "findings": [],
+      "result_sha256": "741cc0334c4fca12da529e2ed5e1564d41863d8325d22b2b2b076e331a6d53ec"
+    },
+    "supervisor_acceptance": {
+      "cycle_id": "cycle-0008-20261006T111111Z-687602",
+      "state": "CONTINUE",
+      "head_before": "59ddd3a8c748eda1608f67f4b9f4186b0179627c",
+      "head_after": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+      "result_sha256": "c2660e478cf5d3fc8df6a74f28e233161bca1402e61c902f449d2a36f976fe66",
+      "status_sha256": "23a12cbb3884a1b8c09f3a05d946c0ca7a7a1a452e395f495a9c3b333b78c6b2",
+      "post_coordinator_validation_recorded": true,
+      "historical_local_test_summary": "Committed recovery identity lookup-failure characterization after independent Gemini review, exact-byte validation, and 21 passing local tests. Worktree is clean; protected refs and tracked controls are unchanged. P1-00b remains IN_PROGRESS; coverage remains 389/465."
+    },
+    "historical_evidence_only": true,
+    "governance_note": "Receipt retains exact distinct Worker/Reviewer run and conversation identities, proposal SHA, VERIFIED state with empty findings, candidate PASS evidence, and historical Supervisor CONTINUE/post-validation. Existing witness validates current behavior only; receipt cannot assert its own fresh acceptance."
+  },
+  "scope": {
+    "reconciled_scope": {
+      "reconciled_source_commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+      "scenarios_reconciled": [
+        "submit-identity-active-lookup-exception-before-sql-and-upload"
+      ]
+    },
+    "exclusions_and_unproven": [
+      "successful_submit_single_session_recovery_identity_image",
+      "successful_submit_single_session_recovery_identity_document",
+      "later_payload_builder_failure",
+      "real_database_and_model_instances",
+      "database_persistence",
+      "http_transport_and_depends_injection",
+      "request_attribute_access",
+      "full_row_immutability",
+      "upload_file_attributes_beyond_content_type_filename_read_close",
+      "concurrency_retry_and_process_reload",
+      "origin_matrix_interaction_cells",
+      "canonical_seed_acceptance",
+      "blocker_closure",
+      "stage_closure",
+      "production_deploy_dns_writer_secrets_network_control_mutations"
+    ]
+  },
+  "git": {
+    "current_inspected_head": "f5626b663638179049de14c4ab88b6e718cb6232",
+    "accepted_source_commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+    "accepted_parent": "59ddd3a8c748eda1608f67f4b9f4186b0179627c",
+    "is_ancestor_of_head": true,
+    "single_accepted_file": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py",
+    "current_file_sha256": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+    "current_file_unchanged": true,
+    "current_file_utf8_bytes": 6346,
+    "file_mode": "100644"
+  },
+  "test_witness_evidence": {
+    "note": "Existing selector is a live validation witness only; historical test evidence stays historical. Fresh test results are conditional on gates actually running.",
+    "candidate_test_evidence": {
+      "selector": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py::SubmitIdentityActiveLookupFailureCharacterizationTests::test_active_lookup_exception_precedes_sql_and_upload_access",
+      "state": "PASSED",
+      "returncode": 0,
+      "sha256": "38f0e1c51dd418226c2246d12f7a19643adf2848dab51e353d0cf3b22ea984be",
+      "isolation": "bwrap:ro-source,empty-home,clearenv,unshare-all"
+    },
+    "live_witness_selectors": [
+      "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py::SubmitIdentityActiveLookupFailureCharacterizationTests::test_active_lookup_exception_precedes_sql_and_upload_access"
+    ]
+  },
+  "registered_handlers": [
+    {
+      "seed_id": "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955",
+      "canonical_symbol": "api/routers/sessions.py:submit_single_session_recovery_identity",
+      "selector": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py::SubmitIdentityActiveLookupFailureCharacterizationTests::test_active_lookup_exception_precedes_sql_and_upload_access",
+      "scenario_key": "submit-identity-active-lookup-exception-before-sql-and-upload",
+      "source_commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+      "source_file_sha256": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+      "evidence_limits_summary": "Direct real handler, fixed valid UUID string converted to genuine uuid.UUID without monkeypatch, AsyncMock lookup called and awaited exactly once with identical opaque db and exact UUID; identical fresh RuntimeError propagates. sessions.select zero calls; guarded content_type/filename reads empty; upload read/close zero calls and awaits; downstream expiry, payload-builder, transition, admin-action clearing, delivery, SMS, serialization zero calls and async ones zero awaits as actually asserted. Guard proves only its two named properties and read/close methods, not every possible upload attribute. No real DB or model instance, no persistence, HTTP/auth/Depends, Request attributes, full-row immutability, concurrency/retry/reload, origin cells, success/image/document/later payload-builder failure, canonical seed/blocker/Stage closure, production/deploy/DNS/Writer/network/secrets/control acceptance."
+    }
+  ],
+  "accounting": {
+    "group_accounting": {
+      "total_accepted_source_units": 5,
+      "total_behavior_units": 5,
+      "total_handler_scenarios_count": 7,
+      "reconciled_behavior_units": 2,
+      "remaining_behavior_units": 3,
+      "reconciled_handler_scenarios_count": 3,
+      "remaining_handler_scenarios_count": 4,
+      "pending_five": 5,
+      "units_since_reconciliation": 5,
+      "packet_delta": {
+        "delta_reconciled_behavior_units": 1,
+        "delta_reconciled_handler_scenarios_count": 1,
+        "added_behavior_unit_count": 0,
+        "added_distinct_seed_count": 0
+      },
+      "status": "PARTIAL_RECONCILIATION",
+      "canonical_ledger_accounting_complete": false,
+      "global_reconciliation_complete": false,
+      "no_sixth_behavior_rule": "No sixth behavior until full inventory reconciliation, canonical ledger accounting and separate exact-SHA closeout."
+    },
+    "current_five_source_group": [
+      {
+        "commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+        "path": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+        "sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+        "utf8_bytes": 10377,
+        "reconciliation_status": "UNRECONCILED"
+      },
+      {
+        "commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+        "path": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py",
+        "sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+        "utf8_bytes": 8197,
+        "reconciliation_status": "RECONCILED_PRIOR_PACKET"
+      },
+      {
+        "commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+        "path": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py",
+        "sha256": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+        "utf8_bytes": 6346,
+        "reconciliation_status": "RECONCILED_THIS_PACKET"
+      },
+      {
+        "commit": "5dbbaf0ff89d6b884550ed8bff190d720af3297d",
+        "path": "tests/test_p1_00b_characterization_request_identity_admin_access_failure.py",
+        "sha256": "8146380b392217566cf0e6466d5539280499713980a269abd2392ed632d9f4f4",
+        "utf8_bytes": 6492,
+        "reconciliation_status": "UNRECONCILED"
+      },
+      {
+        "commit": "c064c00f62bb82bf2e62edad8ce7e55368f9a612",
+        "path": "tests/test_p1_00b_characterization_request_identity_accountant_lookup_failure.py",
+        "sha256": "40d0709a053e914ffddfca127ad71014b717037854ee655fdb2a81f3f12a508a",
+        "utf8_bytes": 6657,
+        "reconciliation_status": "UNRECONCILED"
+      }
+    ],
+    "canonical_inventory_counts": {
+      "expected_seed_count": 465,
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 254,
+      "evidenced_seed_count": 389,
+      "remaining_seed_count": 76,
+      "coverage_status": "PARTIAL",
+      "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+    },
+    "blockers_and_stages": {
+      "unresolved_origin_cells": 24,
+      "canonical_blockers": [
+        "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+        "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+      ],
+      "blockers_open": true,
+      "closures_authorized": false,
+      "stage_p1_00": "COMPLETE",
+      "stage_p1_00b": "IN_PROGRESS"
+    },
+    "deferrals": [
+      "defer_prior_unit=normal355-reconcile-login-recovery-first-two-20261006-c001",
+      "defer_prior_unit=normal355-reconcile-login-only-20261006-c001",
+      "defer_prior_unit=normal346-recovery-approval-ledger-association-20261006-c008",
+      "defer_prior_unit=normal346-recovery-canonical-ledger-association-20261006-c007b",
+      "defer_prior_unit=normal346-recovery-lookup-evidence-registration-20261006-c004",
+      "defer_prior_unit=normal346-login-lookup-ledger-association-20261006-c002",
+      "defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003",
+      "defer_prior_unit=normal346-login-approval-reference-only-ledger-20261006-c007",
+      "defer_prior_unit=normal346-login-rejection-ledger-association-20261006-c006"
+    ],
+    "historical_references": {
+      "completed_chat_group_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json#/accounting/completed_chat_group",
+      "registration_accounting_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json#/accounting",
+      "note": "Historical two/four accounting and completed chat group remain immutable provenance by reference only."
+    }
+  },
+  "governance_and_gates": {
+    "acceptance_condition": "The identity-submit reconciliation completion is conditional on fresh independent Gemini Reviewer, Codex semantic/exact-byte review, actual tests and clean commit; receipt prose grants no acceptance.",
+    "next_gap": "Next DISTINCT bounded unit is identity-request admin-access-failure reconciliation at 5dbbaf0ff89d6b884550ed8bff190d720af3297d, selector tests/test_p1_00b_characterization_request_identity_admin_access_failure.py::RequestIdentityAdminAccessFailureCharacterizationTests::test_access_exception_follows_guard_and_uuid_before_side_effects. Remaining other units are login lookup and identity-request accountant lookup, followed by aggregate canonical accounting and exact group closeout."
+  }
+}
