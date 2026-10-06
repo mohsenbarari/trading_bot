@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-RECONCILIATION-LOGIN-REJECTION-ONLY-NINE-363",
+  "task_id": "normal363-reconcile-login-rejection-only-20261006-c001b",
+  "receipt_type": "LOGIN_REJECTION_ONLY_INVENTORY_RECONCILIATION",
+  "stage": "P1-00b",
+  "canonical_gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "status": "PARTIAL_RECONCILIATION",
+  "assignment": {
+    "active_assignment_id": "WA-P1-00B-NORMAL-NINE-RETURN-20261006-363",
+    "assignment_sha256": "e526cedd5e9e802aa73a869f3c23464c6f20558a6c70807f5ea9da49b670fce6",
+    "expiry": "2026-10-30T23:59:00Z",
+    "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001"
+  },
+  "provenance_references": {
+    "canonical_ledger": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "commit": "d39464c173612f0f2b0587ee83e8b95adbb360eb",
+      "sha256": "184e743518bec60026a2879d7f979de9d611804c34cfc05a8a8790212a167398"
+    },
+    "predecessor_login_approval_reconciliation": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-login-approval-only-nine363.json",
+      "commit": "3a0be19518ebb3c3866f05e720018b8c3442d79a",
+      "sha256": "f3dacc418568fa53569f081cd11ed771ba1af4122fabf29230d5df9b4b83c373"
+    },
+    "accepted_login_actions_registration": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json",
+      "commit": "55146244cb72fb3b80feee83beb06993b8a632da",
+      "sha256": "c3afc54d560db72276ce4745889ed64f55efaadf1132f259215446868619aaa4"
+    },
+    "canonical_coverage": {
+      "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+      "commit": "d39464c173612f0f2b0587ee83e8b95adbb360eb",
+      "sha256": "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e"
+    }
+  },
+  "source": {
+    "current_inspected_head": "3a0be19518ebb3c3866f05e720018b8c3442d79a",
+    "accepted_source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+    "accepted_parent": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+    "source_commit_is_ancestor_of_current_head": true,
+    "accepted_file": {
+      "mode": "100644",
+      "path": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+      "sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+      "utf8_bytes": 10377
+    },
+    "committed_bytes_equal_worker_and_current": true,
+    "changed_paths_exactly_one_test": true,
+    "registration_source_manifest_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/source/source_manifest_sha256"
+  },
+  "actor": {
+    "registration_actor_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/actor",
+    "controller_run_id": "cycle-0001-20261006T052747Z-367279",
+    "historical_worker_run_id": "normal331-login-actions-lookup-exception-20261006-c004-worker-0",
+    "historical_worker_conversation_id": "31fbc39a-a125-429c-a8ee-a9729f46fd8a",
+    "historical_reviewer_run_id": "normal331-login-actions-lookup-exception-20261006-c004-reviewer-0",
+    "historical_reviewer_conversation_id": "2e3650f4-fe4b-4420-8bb1-91782ee244db",
+    "historical_source_proposal_sha256": "a652bbfb07c719048011dc0284753ca602bc607a3af26a1126559510df985d01",
+    "worker_conversation_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/actor/worker",
+    "reviewer_conversation_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/actor/reviewer",
+    "source_proposal_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/source/source_proposal_sha256",
+    "historical_evidence_only": true,
+    "governance_note": "Receipt retains exact registration Worker/Reviewer and historical test witness references. Existing witness validates current behavior only; receipt cannot assert its own fresh acceptance."
+  },
+  "scope": {
+    "reconciled_scope": {
+      "reconciled_source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+      "predecessor_approval_scenario_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-login-approval-only-nine363.json#/scope/reconciled_scope/scenarios_reconciled",
+      "scenarios_reconciled": [
+        "reject-accountant-lookup-exception-before-uuid"
+      ],
+      "outstanding_scenarios": []
+    },
+    "source_assignment_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/scope/source_assignment",
+    "registration_assignment_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/scope/registration_assignment",
+    "exclusions_and_unproven": [
+      "successful_approve_login_request",
+      "successful_reject_login_request",
+      "account_status_verification",
+      "http_transport_status_codes",
+      "fastapi_depends_injection",
+      "authentication_token_creation",
+      "actual_accountant_relation_database_query",
+      "sql_construction_and_execution",
+      "async_session_transaction_management",
+      "database_persistence",
+      "concurrency_retry_and_process_reload",
+      "origin_matrix_interaction_cells",
+      "selected_field_or_full_row_immutability",
+      "canonical_seed_acceptance",
+      "blocker_closure",
+      "stage_closure",
+      "production_deploy_dns_writer_secrets_network_control_mutations"
+    ]
+  },
+  "git": {
+    "current_inspected_head": "3a0be19518ebb3c3866f05e720018b8c3442d79a",
+    "accepted_source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+    "accepted_parent": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+    "is_ancestor_of_head": true,
+    "single_accepted_file": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+    "current_file_sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+    "current_file_unchanged": true,
+    "current_file_utf8_bytes": 10377,
+    "file_mode": "100644"
+  },
+  "test_witness_evidence": {
+    "note": "Historical isolated 2-test pass is explicitly historical; this task's one existing rejection selector is a live validation witness and is not new behavior acceptance.",
+    "historical_registration_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/test_witness_evidence",
+    "predecessor_approval_witness_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-login-approval-only-nine363.json#/test_witness_evidence",
+    "live_witness_selectors": [
+      "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_reject_request_propagates_accountant_lookup_exception_before_uuid"
+    ],
+    "outstanding_selectors": []
+  },
+  "registered_handlers": [
+    {
+      "seed_id": "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270",
+      "canonical_symbol": "api/routers/sessions.py:reject_request",
+      "selector": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_reject_request_propagates_accountant_lookup_exception_before_uuid",
+      "scenario_key": "reject-accountant-lookup-exception-before-uuid",
+      "source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+      "source_file_sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+      "evidence_limits": {
+        "user_state": "Authoritative unpersisted User with is_accountant explicitly False and valid UserRole.STANDARD; UserRole.BUYER absent",
+        "guard_execution": "Real ensure_non_accountant_session_management executes under AsyncMock wraps spy",
+        "mock_target": "Only sessions.is_user_accountant replaced with AsyncMock raising fresh RuntimeError",
+        "handler_invocation": "Actual reject_request handler invoked with malformed request_id and opaque built-in object() db; no Request argument",
+        "exception_propagation": "Escaped RuntimeError asserted identical before uuid.UUID parsing and select",
+        "call_contract": "Exactly one call and await with db/user or db/user.id arguments and identity checks; downstream async approve_login_request/reject_login_request/_store_temporary_refresh_token zero calls and awaits; synchronous select/uuid.UUID/uuid-module/create_refresh_token/session_to_dict/audit_log/_audit_actor_role zero calls",
+        "db_contract": "Opaque built-in object() db without custom Session adapter",
+        "behavior_proven": "Characterization proves exception propagation only before uuid.UUID and select; no actor immutability, accountant query, authorization, HTTP/Depends, successful login rejection, tokens, persistence, concurrency, retry, reload, or origin cells"
+      },
+      "evidence_limits_summary": "Direct handler reject_request invoked with malformed request_id string and opaque object() db; authoritative unpersisted User STANDARD with explicit is_accountant=False (UserRole.BUYER is absent); real ensure_non_accountant_session_management executes under AsyncMock wraps spy, mocked is_user_accountant raises fresh identical RuntimeError before uuid.UUID and select. Exactly one call and await to real guard and mocked lookup with exact db/user and db/user.id identity arguments. No Request argument or actor immutability assertion in rejection witness. Downstream asynchronous approve_login_request, reject_login_request, _store_temporary_refresh_token zero calls and awaits; synchronous select, uuid.UUID, uuid-module, create_refresh_token, session_to_dict, audit_log, _audit_actor_role zero calls. Characterization proves exception propagation only before UUID parsing and select; no accountant query, authorization, HTTP/Depends, successful login rejection or approval, tokens, SQL, session, transaction, persistence, concurrency, retry, reload, origin cells, seed acceptance, or Stage/blocker closure."
+    }
+  ],
+  "accounting": {
+    "group_accounting": {
+      "total_accepted_source_units": 5,
+      "total_behavior_units": 5,
+      "total_handler_scenarios_count": 7,
+      "reconciled_behavior_units": 5,
+      "remaining_behavior_units": 0,
+      "reconciled_handler_scenarios_count": 7,
+      "remaining_handler_scenarios_count": 0,
+      "pending_five": 5,
+      "units_since_reconciliation": 5,
+      "packet_delta": {
+        "delta_reconciled_behavior_units": 1,
+        "delta_reconciled_handler_scenarios_count": 1,
+        "added_behavior_unit_count": 0,
+        "added_distinct_seed_count": 0
+      },
+      "status": "PARTIAL_RECONCILIATION",
+      "canonical_ledger_accounting_complete": false,
+      "global_reconciliation_complete": false,
+      "no_sixth_behavior_rule": "No sixth behavior until bounded canonical accounting then separate exact group closeout."
+    },
+    "current_five_source_group": {
+      "custody_source_map_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-login-approval-only-nine363.json#/accounting/current_five_source_group",
+      "note": "Five-source custody map preserved through accepted approval predecessor reference; rejection scenario completes two-scenario login unit, leaving 0 remaining behavior units and 0 remaining handler scenarios in group."
+    },
+    "canonical_inventory_counts": {
+      "expected_seed_count": 465,
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 254,
+      "evidenced_seed_count": 389,
+      "remaining_seed_count": 76,
+      "coverage_status": "PARTIAL",
+      "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+    },
+    "blockers_and_stages": {
+      "unresolved_origin_cells": 24,
+      "canonical_blockers": [
+        "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+        "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+      ],
+      "blockers_open": true,
+      "closures_authorized": false,
+      "stage_p1_00": "COMPLETE",
+      "stage_p1_00b": "IN_PROGRESS"
+    },
+    "deferrals": [
+      "defer_prior_unit=normal355-reconcile-login-recovery-first-two-20261006-c001",
+      "defer_prior_unit=normal355-reconcile-login-only-20261006-c001",
+      "defer_prior_unit=normal346-recovery-approval-ledger-association-20261006-c008",
+      "defer_prior_unit=normal346-recovery-canonical-ledger-association-20261006-c007b",
+      "defer_prior_unit=normal346-recovery-lookup-evidence-registration-20261006-c004",
+      "defer_prior_unit=normal346-login-lookup-ledger-association-20261006-c002",
+      "defer_prior_unit=normal331-login-request-guard-ordering-20261006-c003",
+      "defer_prior_unit=normal346-login-approval-reference-only-ledger-20261006-c007",
+      "defer_prior_unit=normal346-login-rejection-ledger-association-20261006-c006"
+    ],
+    "historical_references": {
+      "completed_chat_group_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-recovery-acceptance-chain-registration-foundation346.json#/accounting/completed_chat_group",
+      "predecessor_approval_accounting_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-login-approval-only-nine363.json#/accounting",
+      "historical_registration_accounting_ref": "docs/refactor/two-server/section-1/inventory/recent-characterization-login-actions-lookup-failure-foundation346.json#/accounting",
+      "note": "Historical registration accounting is outdated provenance: accepted approval predecessor supplied 4/5 units and 6/7 scenarios; historical records preserved by reference only."
+    }
+  },
+  "governance_and_gates": {
+    "acceptance_condition": "The login rejection-only inventory reconciliation completion is conditional on fresh independent Gemini Reviewer, Codex semantic and exact-byte review, actual focused witness tests, and clean commit; receipt prose grants no acceptance.",
+    "next_distinct_action": "Canonical accounting of exactly this five-source group from accepted receipts, followed by separate exact group closeout. No sixth behavior until bounded canonical accounting then separate exact group closeout."
+  }
+}
