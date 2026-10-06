@@ -1012,3 +1012,43 @@ Preserve every existing deferral through immutable ledger prefix and reference t
 #### Next internal action
 
 Next safe action is a distinct exact-SHA current-group closeout of this accepted aggregate checkpoint plus the custody/inventory proof, preserving all other open gates and five provenance counters.
+
+### 2026-10-06 UTC — Chat current group exact reconciliation closeout checkpoint <a id="chat-current-group-exact-closeout-runtime331"></a>
+
+Assignment `WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331` (digest `9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one compact, documentation-only exact-SHA closeout checkpoint for the CURRENT five-record chat reconciliation group under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Accepted aggregate accounting checkpoint: `docs/refactor/two-server/section-1/00-stage-ledger.md#chat-five-custody-aggregate-accounting-runtime331` at commit `9933ad4c48b7276570babefd12ff235d7e229819`, full-file SHA256 `a86e21819708c20b7ac118976678b3d2f34ae67660790da1fe27092dc10e3992`.
+- Custody receipt: `docs/refactor/two-server/section-1/inventory/recent-characterization-chat-five-accounting-custody-runtime331.json` at commit `935a21660a32238e3b44dd0120c2c72848bb4f1a` / SHA256 `92307efac483d2f870137f1bd21ccf8570a211cd711172f3013607fe33d7c793`.
+- Inventory reference: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-statement-inventory-runtime331.json` at commit `6c7d43b3c99b9f9cfbf1008ee900cc5fbb5ce5ae` / SHA256 `0995426c37a706e2c01bfb23b84d3a60c01c2e6fbc0773b3750be70e85bddc9e`.
+- Custody map incorporation: All five exact accepted commits, test paths, hashes, and six selectors are retained by explicit incorporation of the complete `accounting_custody_map` from the accepted custody receipt (`docs/refactor/two-server/section-1/inventory/recent-characterization-chat-five-accounting-custody-runtime331.json`), without repeating the full table.
+- Authoritative statement acceptance: Retain statement acceptance commit `22335aa5267e4d242b446dd392fb57230613054c` and selector `tests/test_p1_00b_characterization_chat_conversations_statement_failure.py::ChatConversationsStatementFailureCharacterizationTests::test_statement_builder_exception_propagates_before_downstream_work`; contradictory Assignment label `3c98a94f4b1315c0fcd4947a658374a70a66151b` is not acceptance authority and remains untouched.
+- Evidence checks: Supplied evidence was checked locally for accepted Git/current bytes, SHA256, sizes, ancestor commits, and AST selector resolution; Worker does not invent fresh executions or reacceptance.
+
+#### Reconciliation closeout status and unit tracking
+
+- CURRENT chat group inventory is 5/5 complete and the scoped ledger union is exactly five distinct records and six selectors.
+- Accounting status: `canonical_ledger_accounting_complete=true` carried forward from the accepted aggregate checkpoint.
+- Reconciliation completion: `global_reconciliation_complete=true` ONLY contingent on this closeout passing independent Gemini Reviewer, Codex semantic/exact-byte review, actual focused tests, and clean commit.
+- Completed-group provenance: Following that gate, this current group represents completed provenance with zero pending behavior units; retain original `pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `reconciled_behavior_units=5`, and `remaining_behavior_units=0` as completed-group historical counters rather than resetting or editing historic receipts.
+- Status supersession: Supersedes only the older current-chat-group `global_reconciliation_complete=false` status; preserves predecessor users/notifications group as predecessor provenance only.
+- Cardinality and bounds: No sixth behavior in this unit, no repeated acceptance, `added_behavior_unit_count=0`, and `added_distinct_seed_count=0`.
+- Evidence boundaries: All accepted `evidence_limits` are preserved exactly by custody reference, and the six existing selectors serve as validation witnesses only.
+
+#### Seed accounting, blockers, and Stage status
+
+- Seed counts: Retain 465 expected seeds (`expected_seed_count=465`), 135 baseline + 254 reconciled new = 389 evidenced (`evidenced_seed_count=389`), and 76 remaining (`remaining_seed_count=76`).
+- Coverage and seed acceptance: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers: Both open High blocker IDs remain open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+- Operational gates: All unmet authentication, concurrency, retry, and reload gates remain open.
+- Non-claim: Group closeout does not promote any seed, resolve a High blocker, or complete a Stage.
+
+#### Preserved deferrals and exclusions
+
+- Entire ledger prefix and every deferral are preserved verbatim, explicitly incorporating custody `preserved_deferrals` without rewriting them, including:
+  - `defer_prior_unit=normal331-chat-five-aggregate-ledger-20261006-c001`
+  - `defer_prior_unit=normal331-statement-reconciliation-20261006-c001`
+- Exclusions: No new behavior, tests, or source code; no other groups or Stages; no seed, origin cell, High blocker, or Stage closure; no auth, HTTP, Depends, or service authorization acceptance; no real DB, SQL, transaction, or persistence reachability; no concurrency, retry, or process reload; no production, deploy, DNS, Web Writer, network, or secret mutation; no controls or Assignment edits; and no rejected-artifact reuse.
+
+#### Next safe internal action
+
+After accepted closeout passes verification, review, tests, and clean commit: revalidate canonical seed-handler gaps and accepted evidence, then choose a distinct dependency-ready remaining handler characterization using the required shared-fixture one-module batch only where genuinely eligible.
