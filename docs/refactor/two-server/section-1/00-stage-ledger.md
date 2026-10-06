@@ -839,3 +839,68 @@ Explicit exclusions:
 - No concurrency, retry, or process reload;
 - No external production, deploy, DNS, Web Writer, network, or secret mutation.
 - Only the ledger changes.
+
+### 2026-10-06 UTC — Chat seen-member rejection and service failure characterization accounting checkpoint
+
+Assignment `WA-P1-00B-NORMAL-RUNTIME-RETURN-20261005-331` (digest `9e3ee05ed49ef598ba1d6ff4c4659231b51405ac9dbc4112ba7a80f60ddc2cd4`, inspected HEAD `a2ba7e15a6b33e0ed4d56f93f270a8d126542bdc`, expiry `2026-10-30T23:59:00Z`, Stage `P1-00b`, parent `WA-P1-00B-FREEZE-20260904-001`) records one bounded documentation-only canonical ledger accounting entry for exactly the accepted seen-member rejection/service-failure pair in `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-seen-members-first-two-runtime331.json` under open canonical blocker `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE`:
+- Retained pair receipt artifact: `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-seen-members-first-two-runtime331.json` accepted at `45e0ec90430fea37f6c2a711ac3f1d2678f8433a`, SHA256 `849526a77f14354fe3a7222bcaebd79a1a51346a852010e7322fa4f4f3a0ab4e`.
+- Predecessor ledger commit: `a2ba7e15a6b33e0ed4d56f93f270a8d126542bdc`, SHA256 `d01f9a88a2c3b75ca25f2d491044a3313bd8ce31bf456823fae15871c6382fe6` (`docs/refactor/two-server/section-1/00-stage-ledger.md`).
+- Canonical manifest: `docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json` (last commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`).
+
+Two newly ledger-accounted chat seen-member records:
+1. Non-GROUP rejection record:
+   - Path: `tests/test_p1_00b_characterization_chat_seen_members_non_group.py`
+   - Accepted commit: `ce55ebc5f3f36cc6a6034224adc59bf844a45f68`
+   - SHA256: `27290e269d83047d0698d6ffc43196c93faf0dfc7127130649ae11d91d8ce640`
+   - Seed ID: `API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874`
+   - Test selectors:
+     - `tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_channel_room_rejected_before_seen_service`
+     - `tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_direct_boundary_input_rejected_before_seen_service`
+   - Scenario labels:
+     - `channel_room_rejected_before_seen_service`
+     - `direct_boundary_input_rejected_before_seen_service`
+   - Observed summary: Direct-handler characterization asserts: non-GROUP CHANNEL raises exact HTTPException 404 with detail 'Message seen list is available for groups only' after once-awaited opaque DB/chat lookup via get_room_or_404 and suppresses list_group_message_seen_members call/await; DIRECT is mocked room-boundary input only and raises identical 404/detail while suppressing downstream seen-service (in production, authoritative get_room_or_404 queries CHANNEL/GROUP only and does not return DIRECT). Excludes real DB reachability, HTTP/ASGI routing, auth/Depends execution, sender/membership validation, and outcome coverage beyond these assertions.
+2. Group service failure record:
+   - Path: `tests/test_p1_00b_characterization_chat_seen_members_service_failure.py`
+   - Accepted commit: `7a91bba47224380a1b6beebddd693e6394c96d94`
+   - SHA256: `fffe385c5d136272f9e50e7bf6b36c95d6dbce378028efc01efbd73049744b6a`
+   - Seed ID: `API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874`
+   - Test selector:
+     - `tests/test_p1_00b_characterization_chat_seen_members_service_failure.py::ChatSeenMembersServiceFailureCharacterizationTests::test_group_seen_service_exception_propagates_unchanged`
+   - Scenario label:
+     - `group_seen_service_exception_propagates_unchanged`
+   - Observed summary: Direct-handler characterization asserts: for a GROUP room returned by get_room_or_404, when downstream list_group_message_seen_members raises a synthetic RuntimeError, the exact exception instance propagates unchanged; get_room_or_404 is awaited once with opaque db session and chat_id; list_group_message_seen_members is awaited once with exact opaque db, chat=group_room, message_id=message_id, requester_id=current_user.id. Excludes real DB reachability, HTTP/ASGI routing, auth/Depends execution, service authorization, and outcome coverage beyond these assertions.
+
+Witness citations and evidence boundaries:
+- Existing accepted evidence is cited strictly as validation witnesses; tool-free Worker has no tool authority and does not invent new execution or review receipts.
+- Direct unit test assertions across opaque DB and mocked boundaries prove direct-handler exception propagation and suppression only; they prove no real DB reachability, SQL execution, transactions, persistence, HTTP/ASGI routing, auth/Depends execution, or service authorization.
+- No other record accounting or accepted scenario replay (existing success/empty/schema and conversation accounting are different records).
+
+Accounting status and unit tracking:
+- Scoped pair accounting is contingent on independent Gemini verification, Codex semantic/exact-byte/tests, and clean commit, separate from aggregate `canonical_ledger_accounting_complete=false`.
+- Current conversations receipt (`410e45cf0e0529af710129fbf7a0791f9e09a7f2`, SHA256 `182263b35f524718d4148f90e131defc8e363f91fa522f2499ad480606a210ac`) supersedes pair historical 2/5: retain current 4/5 (`reconciled_behavior_units=4`), `remaining_behavior_units=1`, `pending_five=5`, `units_since_reconciliation=5`, `total_behavior_units=5`, `global_reconciliation_complete=false`.
+- Statement record remains `UNRECONCILED`/`REVALIDATE_REQUIRED`: Assignment `3c98a94f4b1315c0fcd4947a658374a70a66151b` versus source introduction `22335aa5267e4d242b446dd392fb57230613054c` is unresolved acceptance provenance. Neither is relabeled accepted.
+- Predecessor provenance: Prior completed users/notifications 5/5 group with remaining 0 is predecessor provenance only. No sixth behavior before reconciliation/accounting/group closeout.
+
+Seed accounting, blockers, and Stage status:
+- Distinct seed accounting: Auxiliary accounting adds zero product behaviors and zero distinct seeds (`added_distinct_seed_count=0`, `added_behavior_unit_count=0`).
+- Canonical counts from manifest `seed-handler-coverage.json` (commit `65772a50b3729a9ec905a6b542ac27ced057e5f0`, SHA256 `3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e`): 465 expected (`expected_seed_count=465`), 135 baseline + 254 reconciled new = 389 evidenced (`evidenced_seed_count=389`), 76 remaining (`remaining_seed_count=76`).
+- Coverage and seed acceptance status: `coverage_status: PARTIAL`, `seed_acceptance_status: FULL_SEED_ACCEPTANCE_NOT_ASSESSED`.
+- Canonical High blockers retained open: `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` and `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` (24 unresolved origin cells; `closures_authorized=false`).
+- Stage status: `P1-00` `COMPLETE`; `P1-00b` `IN_PROGRESS`.
+
+Preserved deferrals:
+Preserve every historic receipt, counter, and deferral by unchanged prefix, and cite current receipt `preserved_deferrals` in `docs/refactor/two-server/section-1/inventory/recent-characterization-reconciliation-conversations-two-runtime331.json` unchanged. Rejected artifacts are never evidence.
+
+Explicit exclusions:
+- Only ledger changes.
+- Seed promotion, seed/origin/blocker/Stage closure;
+- Real DB/SQL/transaction/persistence reachability;
+- HTTP/ASGI routing, auth/Depends execution, service authorization;
+- Concurrency, retry, reload;
+- Production, deploy, DNS, Web Writer, network, secrets;
+- Reaccepting pair or conversation evidence;
+- Reuse or alias of rejected artifacts.
+
+Next distinct safe gap:
+- Bounded statement acceptance-provenance assessment using exact Git/accepted receipts, then remaining inventory reconciliation, statement accounting, and group closeout.
