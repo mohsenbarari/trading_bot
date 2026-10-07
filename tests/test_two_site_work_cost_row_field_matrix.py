@@ -79,10 +79,40 @@ FROZEN_EXPECTED_IDS: tuple[str, ...] = tuple(
     + [f"num_finished_str_{name}" for name in _FINISHED_STR_NAMES]
 )
 
+_STRUCT_TYPES = (
+    "native_none", "native_bool", "native_int", "native_float", "native_str",
+    "native_list", "native_tuple", "foreign_dict", "foreign_list", "foreign_str",
+    "foreign_int", "foreign_float", "foreign_class_all_hooks",
+    "foreign_class_unhashable", "foreign_opaque",
+)
+_KEY_CONTEXTS = (
+    "root", "provider_root", "top_semantic", "top_work",
+    "nested_semantic", "nested_work", "full_token_map",
+    "reachable_subtotal_token_map",
+)
+_KEY_FAULTS = (
+    "native_nonstring_replaces_known",
+    "foreign_string_replaces_known",
+)
+_STRUCT_BOUNDS = (
+    "root64valid_pad45actual19",
+    "root65malformed_pad46actual19",
+    "provider32valid_pad25actual7",
+    "provider33invalid_pad26actual7",
+)
+
+FROZEN_STRUCTURAL_50_IDS: tuple[str, ...] = tuple(
+    [f"struct_type_root_{t}" for t in _STRUCT_TYPES]
+    + [f"struct_type_provider_{t}" for t in _STRUCT_TYPES]
+    + [f"struct_key_{ctx}_{flt}" for ctx in _KEY_CONTEXTS for flt in _KEY_FAULTS]
+    + [f"struct_bound_{b}" for b in _STRUCT_BOUNDS]
+)
+FROZEN_CUMULATIVE_185_IDS: tuple[str, ...] = FROZEN_EXPECTED_IDS + FROZEN_STRUCTURAL_50_IDS
+
 
 def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
-    if len(plan) != 135:
-        raise ValueError(f"plan length {len(plan)} != 135")
+    if len(plan) != len(expected_ids):
+        raise ValueError(f"plan length {len(plan)} != {len(expected_ids)}")
     plan_ids = [item[0] for item in plan]
     if len(set(plan_ids)) != len(plan_ids):
         raise ValueError("plan has duplicate IDs")
@@ -91,8 +121,8 @@ def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
 
 
 def validate_completed(completed: list[str], expected_ids: tuple[str, ...]) -> None:
-    if len(completed) != 135:
-        raise ValueError(f"completed length {len(completed)} != 135")
+    if len(completed) != len(expected_ids):
+        raise ValueError(f"completed length {len(completed)} != {len(expected_ids)}")
     if set(completed) != set(expected_ids):
         raise ValueError("completed ID set != expected ID set")
 
@@ -125,16 +155,12 @@ def _build_a1_plan() -> list[tuple[str, dict, dict]]:
                 rf.pop(f, None)
             else:
                 rf[f] = s_faults[flt]
-            if f in ("run_id", "model", "effort"):
-                if f == "run_id":
-                    ef["run_id"] = None
-                else:
-                    ef["dimensions"][f] = None
-                ef["observed_candidate"] = True
+            if f == "run_id":
+                ef["run_id"] = None
             else:
-                dim_k = "state" if f == "state" else ("worker_run_id" if f == "gemini_worker_run_id" else "reviewer_run_id")
+                dim_k = "worker_run_id" if f == "gemini_worker_run_id" else ("reviewer_run_id" if f == "gemini_reviewer_run_id" else f)
                 ef["dimensions"][dim_k] = None
-                ef["observed_candidate"] = False
+                ef["observed_candidate"] = f in ("model", "effort")
             plan.append((f"scalar_{f}_{flt}", rf, ef))
 
     for f in _SCALAR_FIELDS:
@@ -186,6 +212,12 @@ def _build_a1_plan() -> list[tuple[str, dict, dict]]:
         ef["observed_candidate"] = cand
         plan.append((f"head_prop_{name}", rf, ef))
 
+    def _set_num(ef, f, val):
+        if f == "duration_seconds":
+            ef["reported_cycle_seconds"] = val
+        else:
+            ef["dimensions"]["finished_at"] = val
+
     num_faults = {
         "negative_int": -1, "negative_float": -1.0, "bool_true": True, "bool_false": False,
         "null": None, "foreign_float": h.ForeignDuration(5.0),
@@ -197,10 +229,7 @@ def _build_a1_plan() -> list[tuple[str, dict, dict]]:
         for flt in _NUM_FAULTS:
             rf, ef = _pair()
             rf[f] = num_faults[flt]
-            if f == "duration_seconds":
-                ef["reported_cycle_seconds"] = None
-            else:
-                ef["dimensions"]["finished_at"] = None
+            _set_num(ef, f, None)
             plan.append((f"num_fault_{f}_{flt}", rf, ef))
 
     pos_vals = {
@@ -212,19 +241,13 @@ def _build_a1_plan() -> list[tuple[str, dict, dict]]:
             rf, ef = _pair()
             v = pos_vals[name]
             rf[f] = v
-            if f == "duration_seconds":
-                ef["reported_cycle_seconds"] = float(v)
-            else:
-                ef["dimensions"]["finished_at"] = float(v)
+            _set_num(ef, f, float(v))
             plan.append((f"num_pos_{f}_{name}", rf, ef))
 
     for f in _NUM_FIELDS:
         rf, ef = _pair()
         rf.pop(f, None)
-        if f == "duration_seconds":
-            ef["reported_cycle_seconds"] = None
-        else:
-            ef["dimensions"]["finished_at"] = None
+        _set_num(ef, f, None)
         plan.append((f"num_missing_{f}", rf, ef))
 
     rf_ds, ef_ds = _pair()
@@ -252,50 +275,34 @@ def _build_a1_plan() -> list[tuple[str, dict, dict]]:
     return plan
 
 
-def test_a1_closed_manifest_execution_and_counterproofs():
-    plan = _build_a1_plan()
-    validate_plan(plan, FROZEN_EXPECTED_IDS)
-
-    orig_0 = plan[0]
+def _test_fault(target: list, idx: int, bad_val: object, check_fn, exp_ids: tuple[str, ...], req_len: bool = False) -> None:
+    orig = target[idx]
     try:
-        plan[0] = ("ALTERED_ID", orig_0[1], orig_0[2])
-        _expect_check_failure(validate_plan, plan, FROZEN_EXPECTED_IDS)
+        target[idx] = bad_val
+        if req_len:
+            assert len(target) == len(exp_ids)
+        _expect_check_failure(check_fn, target, exp_ids)
     finally:
-        plan[0] = orig_0
-    validate_plan(plan, FROZEN_EXPECTED_IDS)
+        target[idx] = orig
+    check_fn(target, exp_ids)
+
+
+def _run_counterproofs_and_exec(plan: list, expected_ids: tuple[str, ...]) -> None:
+    validate_plan(plan, expected_ids)
+    _test_fault(plan, 0, ("ALTERED_ID", plan[0][1], plan[0][2]), validate_plan, expected_ids)
 
     popped = plan.pop(0)
     try:
-        _expect_check_failure(validate_plan, plan, FROZEN_EXPECTED_IDS)
+        _expect_check_failure(validate_plan, plan, expected_ids)
     finally:
         plan.insert(0, popped)
-    validate_plan(plan, FROZEN_EXPECTED_IDS)
+    validate_plan(plan, expected_ids)
 
-    try:
-        plan[0] = ("REPLACED_ID", orig_0[1], orig_0[2])
-        assert len(plan) == 135
-        _expect_check_failure(validate_plan, plan, FROZEN_EXPECTED_IDS)
-    finally:
-        plan[0] = orig_0
-    validate_plan(plan, FROZEN_EXPECTED_IDS)
+    _test_fault(plan, 0, ("REPLACED_ID", plan[0][1], plan[0][2]), validate_plan, expected_ids, True)
+    _test_fault(plan, 1, plan[0], validate_plan, expected_ids, True)
 
-    orig_1 = plan[1]
-    try:
-        plan[1] = plan[0]
-        assert len(plan) == 135
-        _expect_check_failure(validate_plan, plan, FROZEN_EXPECTED_IDS)
-    finally:
-        plan[1] = orig_1
-    validate_plan(plan, FROZEN_EXPECTED_IDS)
-
-    dummy_completed = list(FROZEN_EXPECTED_IDS)
-    orig_comp_0 = dummy_completed[0]
-    try:
-        dummy_completed[0] = "WRONG_COMPLETION_ID"
-        _expect_check_failure(validate_completed, dummy_completed, FROZEN_EXPECTED_IDS)
-    finally:
-        dummy_completed[0] = orig_comp_0
-    validate_completed(dummy_completed, FROZEN_EXPECTED_IDS)
+    dummy_completed = list(expected_ids)
+    _test_fault(dummy_completed, 0, "WRONG_COMPLETION_ID", validate_completed, expected_ids, True)
 
     completed_ids: list[str] = []
     for cid, rf, ef in plan:
@@ -303,7 +310,107 @@ def test_a1_closed_manifest_execution_and_counterproofs():
         core.run_case(rg, eg, rf, ef)
         completed_ids.append(cid)
 
-    validate_completed(completed_ids, FROZEN_EXPECTED_IDS)
+    validate_completed(completed_ids, expected_ids)
+
+
+def test_a1_closed_manifest_execution_and_counterproofs():
+    plan = _build_a1_plan()
+    _run_counterproofs_and_exec(plan, FROZEN_EXPECTED_IDS)
+
+
+def _make_provider_invalid_expected():
+    ef = fixtures.make_expected_row("A")
+    ef["provider_state"] = None
+    ef["nested_identities"] = {
+        "semantic": {"state": "UNAVAILABLE", "value": None},
+        "work": {"state": "UNAVAILABLE", "value": None},
+    }
+    ef["provider_usage"] = {"observed_subtotal": None, "full_usage": None, "attempt_pair": None}
+    ef["group_eligible"], ef["observed_candidate"] = False, False
+    return ef
+
+
+def _build_structural_plan() -> list[tuple[str, object, object]]:
+    plan: list[tuple[str, object, object]] = []
+    wt = {
+        "native_none": None, "native_bool": True, "native_int": 123,
+        "native_float": 1.23, "native_str": "wrong_str", "native_list": [1, 2],
+        "native_tuple": (1, 2), "foreign_dict": h.ForeignDict({"a": 1}),
+        "foreign_list": h.ForeignList([1, 2]), "foreign_str": h.ForeignStrKey("foreign"),
+        "foreign_int": h.ForeignFinished(123), "foreign_float": h.ForeignDuration(1.23),
+        "foreign_class_all_hooks": h.ForeignClassAllHooks,
+        "foreign_class_unhashable": h.ForeignClassUnhashable,
+        "foreign_opaque": h.ForeignOpaqueLeaf(),
+    }
+    for t in _STRUCT_TYPES:
+        plan.append((f"struct_type_root_{t}", wt[t], None))
+
+    for t in _STRUCT_TYPES:
+        rf = fixtures.make_valid_raw("A")
+        rf["provider_metrics"] = wt[t]
+        plan.append((f"struct_type_provider_{t}", rf, _make_provider_invalid_expected()))
+
+    ctx_keys = {
+        "root": "run_id", "provider_root": "state", "top_semantic": "stage_id",
+        "top_work": "schema_version", "nested_semantic": "stage_id",
+        "nested_work": "schema_version", "full_token_map": "input_tokens",
+        "reachable_subtotal_token_map": "input_tokens",
+    }
+    for ctx in _KEY_CONTEXTS:
+        orig_k = ctx_keys[ctx]
+        for flt in _KEY_FAULTS:
+            rf, ef = _pair()
+            bad_k = 123 if flt == "native_nonstring_replaces_known" else h.ForeignStrKey(orig_k)
+            if ctx == "root":
+                rf[bad_k] = rf.pop(orig_k)
+                ef = None
+            elif ctx == "provider_root":
+                rf["provider_metrics"][bad_k] = rf["provider_metrics"].pop(orig_k)
+                ef = _make_provider_invalid_expected()
+            elif ctx in ("top_semantic", "top_work", "nested_semantic", "nested_work"):
+                ef["group_eligible"] = ef["observed_candidate"] = False
+                if ctx == "top_semantic":
+                    rf["semantic_identity"][bad_k] = rf["semantic_identity"].pop(orig_k)
+                    ef["semantic_identity"] = None
+                elif ctx == "top_work":
+                    rf["work_lineage"][bad_k] = rf["work_lineage"].pop(orig_k)
+                    ef["work_lineage"] = None
+                elif ctx == "nested_semantic":
+                    rf["provider_metrics"]["semantic_identity"][bad_k] = rf["provider_metrics"]["semantic_identity"].pop(orig_k)
+                    ef["nested_identities"]["semantic"] = {"state": "INVALID", "value": None}
+                else:
+                    rf["provider_metrics"]["work_lineage"][bad_k] = rf["provider_metrics"]["work_lineage"].pop(orig_k)
+                    ef["nested_identities"]["work"] = {"state": "INVALID", "value": None}
+            elif ctx == "full_token_map":
+                rf["provider_metrics"]["usage"][bad_k] = rf["provider_metrics"]["usage"].pop(orig_k)
+                ef["provider_usage"]["full_usage"] = None
+            elif ctx == "reachable_subtotal_token_map":
+                rf["provider_metrics"].pop("usage", None)
+                rf["provider_metrics"]["observed_usage_subtotal"][bad_k] = rf["provider_metrics"]["observed_usage_subtotal"].pop(orig_k)
+                ef["provider_usage"]["observed_subtotal"] = None
+                ef["provider_usage"]["full_usage"] = None
+            plan.append((f"struct_key_{ctx}_{flt}", rf, ef))
+
+    for name, target_len, is_root, exp in (
+        ("root64valid_pad45actual19", 64, True, _pair()[1]),
+        ("root65malformed_pad46actual19", 65, True, None),
+        ("provider32valid_pad25actual7", 32, False, _pair()[1]),
+        ("provider33invalid_pad26actual7", 33, False, _make_provider_invalid_expected()),
+    ):
+        rf, _ = _pair()
+        d = rf if is_root else rf["provider_metrics"]
+        for i in range(target_len - len(d)):
+            d[f"_pad_{i}"] = 1
+        plan.append((f"struct_bound_{name}", rf, exp))
+
+    return plan
+
+
+def test_cumulative_185_manifest_execution_and_counterproofs():
+    plan = _build_a1_plan() + _build_structural_plan()
+    assert set(FROZEN_EXPECTED_IDS).issubset(set(FROZEN_CUMULATIVE_185_IDS))
+    assert len(set(FROZEN_EXPECTED_IDS) & set(FROZEN_STRUCTURAL_50_IDS)) == 0
+    _run_counterproofs_and_exec(plan, FROZEN_CUMULATIVE_185_IDS)
 
 
 def test_supplemental_valid_empty_witness():
