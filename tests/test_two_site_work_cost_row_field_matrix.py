@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from tests import test_two_site_work_cost_rows as core
 
 fixtures = core.fixtures
@@ -109,8 +111,32 @@ FROZEN_STRUCTURAL_50_IDS: tuple[str, ...] = tuple(
 )
 FROZEN_CUMULATIVE_185_IDS: tuple[str, ...] = FROZEN_EXPECTED_IDS + FROZEN_STRUCTURAL_50_IDS
 
+_ALIAS_PATHS = (
+    "dimensions", "codex_usage", "reported_cycle_seconds",
+    "worker_run_id", "reviewer_run_id",
+    "provider_metrics.full_usage", "provider_metrics.observed_subtotal",
+    "provider_metrics.attempt_pair",
+)
+_PAYLOAD_KINDS = ("native_dict", "native_list", "raising_foreign_bomb")
+_EXTRA_PATHS = ("schema_version", "reasoning_output_tokens", "prompt_sha256")
+_SAME_RUN_CASES = (
+    "unknown_only_equal", "nested_validity_different",
+    "model_different", "effort_different", "finished_at_different",
+    "duration_different", "selected_cost_different",
+)
+
+FROZEN_A2A_41_IDS: tuple[str, ...] = tuple(
+    [f"alias_{p.replace('.', '_')}_{k}" for p in _ALIAS_PATHS for k in _PAYLOAD_KINDS]
+    + ["alias_crosscase_full_usage_120"]
+    + [f"opaque_extra_{p}_{k}" for p in _EXTRA_PATHS for k in _PAYLOAD_KINDS]
+    + [f"samerun_{c}" for c in _SAME_RUN_CASES]
+)
+FROZEN_CUMULATIVE_226_IDS: tuple[str, ...] = FROZEN_CUMULATIVE_185_IDS + FROZEN_A2A_41_IDS
+
 
 def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
+    if len(expected_ids) not in (135, 185, 226):
+        raise ValueError(f"unsupported manifest length {len(expected_ids)}")
     if len(plan) != len(expected_ids):
         raise ValueError(f"plan length {len(plan)} != {len(expected_ids)}")
     plan_ids = [item[0] for item in plan]
@@ -121,6 +147,8 @@ def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
 
 
 def validate_completed(completed: list[str], expected_ids: tuple[str, ...]) -> None:
+    if len(expected_ids) not in (135, 185, 226):
+        raise ValueError(f"unsupported completed manifest length {len(expected_ids)}")
     if len(completed) != len(expected_ids):
         raise ValueError(f"completed length {len(completed)} != {len(expected_ids)}")
     if set(completed) != set(expected_ids):
@@ -307,7 +335,13 @@ def _run_counterproofs_and_exec(plan: list, expected_ids: tuple[str, ...]) -> No
     completed_ids: list[str] = []
     for cid, rf, ef in plan:
         rg, eg = _pair()
-        core.run_case(rg, eg, rf, ef)
+        r1, r2, r3 = core.run_case(rg, eg, rf, ef)
+        assert r1 == eg and r2 == ef and r3 == eg
+        assert "PRIVATE_PROBE_ONLY_IN_IGNORED_FIELDS" not in json.dumps(r2)
+        if ef == eg:
+            assert r2 == r1
+        else:
+            assert r2 != r1
         completed_ids.append(cid)
 
     validate_completed(completed_ids, expected_ids)
@@ -411,6 +445,83 @@ def test_cumulative_185_manifest_execution_and_counterproofs():
     assert set(FROZEN_EXPECTED_IDS).issubset(set(FROZEN_CUMULATIVE_185_IDS))
     assert len(set(FROZEN_EXPECTED_IDS) & set(FROZEN_STRUCTURAL_50_IDS)) == 0
     _run_counterproofs_and_exec(plan, FROZEN_CUMULATIVE_185_IDS)
+
+
+def _build_a2a_plan() -> list[tuple[str, dict, dict]]:
+    plan: list[tuple[str, dict, dict]] = []
+    sentinel = "PRIVATE_PROBE_ONLY_IN_IGNORED_FIELDS"
+
+    def _payload(kind: str):
+        if kind == "native_dict":
+            return {"probe": sentinel}
+        if kind == "native_list":
+            return [sentinel]
+        return h.ForeignOpaqueLeaf()
+
+    for p in _ALIAS_PATHS:
+        for k in _PAYLOAD_KINDS:
+            rf, ef = _pair()
+            val = _payload(k)
+            if p.startswith("provider_metrics."):
+                rf["provider_metrics"][p.split(".")[1]] = val
+            else:
+                rf[p] = val
+            plan.append((f"alias_{p.replace('.', '_')}_{k}", rf, ef))
+
+    rf_cross, ef_cross = _pair()
+    rf_cross["provider_metrics"].pop("usage", None)
+    rf_cross["provider_metrics"]["full_usage"] = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}
+    ef_cross["provider_usage"]["full_usage"] = None
+    plan.append(("alias_crosscase_full_usage_120", rf_cross, ef_cross))
+
+    for p in _EXTRA_PATHS:
+        for k in _PAYLOAD_KINDS:
+            rf, ef = _pair()
+            rf[p] = _payload(k)
+            plan.append((f"opaque_extra_{p}_{k}", rf, ef))
+
+    rf1, ef1 = _pair()
+    rf1["unknown_opaque_field"] = {"probe": sentinel}
+    plan.append(("samerun_unknown_only_equal", rf1, ef1))
+
+    rf2, ef2 = _pair()
+    rf2["provider_metrics"]["semantic_identity"] = None
+    ef2["nested_identities"]["semantic"] = {"state": "INVALID", "value": None}
+    ef2["group_eligible"] = ef2["observed_candidate"] = False
+    plan.append(("samerun_nested_validity_different", rf2, ef2))
+
+    diff_cases = (
+        ("model_different", "model", "gpt-6.1-other", "dimensions", "model"),
+        ("effort_different", "effort", "high", "dimensions", "effort"),
+        ("finished_at_different", "finished_at", 6.0, "dimensions", "finished_at"),
+        ("duration_different", "duration_seconds", 6.0, "reported_cycle_seconds", None),
+    )
+    for c_id, raw_k, raw_v, exp_p1, exp_p2 in diff_cases:
+        rf, ef = _pair()
+        rf[raw_k] = raw_v
+        if exp_p2 is None:
+            ef[exp_p1] = raw_v
+        else:
+            ef[exp_p1][exp_p2] = raw_v
+        plan.append((f"samerun_{c_id}", rf, ef))
+
+    rf7, ef7 = _pair()
+    f120 = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}
+    rf7["provider_metrics"]["usage"] = dict(f120)
+    ef7["provider_usage"]["observed_subtotal"] = dict(f120)
+    ef7["provider_usage"]["full_usage"] = dict(f120)
+    plan.append(("samerun_selected_cost_different", rf7, ef7))
+
+    return plan
+
+
+def test_cumulative_226_manifest_execution_and_counterproofs():
+    plan = _build_a1_plan() + _build_structural_plan() + _build_a2a_plan()
+    assert set(FROZEN_CUMULATIVE_185_IDS).issubset(set(FROZEN_CUMULATIVE_226_IDS))
+    assert len(set(FROZEN_CUMULATIVE_185_IDS) & set(FROZEN_A2A_41_IDS)) == 0
+    assert len(FROZEN_A2A_41_IDS) == 41
+    assert len(FROZEN_CUMULATIVE_226_IDS) == 226
+    _run_counterproofs_and_exec(plan, FROZEN_CUMULATIVE_226_IDS)
 
 
 def test_supplemental_valid_empty_witness():
