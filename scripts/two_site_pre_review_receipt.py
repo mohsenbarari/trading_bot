@@ -43,6 +43,7 @@ except ImportError:
 
 __all__ = [
     "candidate_test_assertion_findings",
+    "candidate_test_whitespace_findings",
     "p1_00_characterization_bootstrap_findings",
     "run_candidate_tests",
     "validate_test_receipt",
@@ -700,6 +701,34 @@ def _is_canonical_new_test(change: Mapping[str, Any]) -> bool:
     return name.startswith("test_") and name.endswith(".py")
 
 
+def candidate_test_whitespace_findings(worker_or_changes: Any) -> list[str]:
+    """Find trailing whitespace defects in canonical new tests before sandbox run."""
+    raw = worker_or_changes.get("changes") if isinstance(worker_or_changes, Mapping) else worker_or_changes
+    if not isinstance(raw, (list, tuple)):
+        return []
+    findings: list[str] = []
+    for c in raw:
+        if len(findings) >= 32:
+            break
+        if not isinstance(c, Mapping) or not _is_canonical_new_test(c):
+            continue
+        p, s = c.get("path"), c.get("content")
+        if not isinstance(p, str) or not isinstance(s, str):
+            continue
+        lines = s[:-1].split("\n") if s.endswith("\n") else s.split("\n")
+        bad, more = [], 0
+        for i, line in enumerate(lines, 1):
+            if line.rstrip("\r").endswith((" ", "\t")):
+                if len(bad) < 10:
+                    bad.append(i)
+                else:
+                    more += 1
+        if bad:
+            desc = ", ".join(map(str, bad)) + (f" ... ({more} more)" if more else "")
+            findings.append(f"{p}: trailing-whitespace on line(s) {desc}")
+    return findings
+
+
 def run_candidate_tests(
     root: str | Path,
     task: Mapping[str, Any],
@@ -853,6 +882,17 @@ def run_candidate_tests(
             "isolation": "static-byte-budget",
         }
         return validate_test_receipt(receipt, proposal_sha256)
+
+    ws_findings = candidate_test_whitespace_findings(raw_changes)
+    if ws_findings:
+        return validate_test_receipt({
+            "state": "FAILED", "proposal_sha256": proposal_sha256,
+            "selectors": chosen_selectors, "unsupported_specs": unsupported_specs,
+            "returncode": 1, "stdout_tail": "",
+            "stderr_tail": _bound_utf8_tail("\n".join(ws_findings)),
+            "snapshot_files": 0, "snapshot_bytes": 0,
+            "isolation": "static-new-test-whitespace",
+        }, proposal_sha256)
 
     sandbox_result = two_site_agent_sandbox.run_tests(
         resolved_root,
