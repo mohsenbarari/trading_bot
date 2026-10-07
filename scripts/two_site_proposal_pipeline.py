@@ -986,20 +986,54 @@ def test_failure_facts(receipt: Mapping[str, Any]) -> dict[str, list[str]]:
     return {"tests": tests, "exceptions": exceptions, "statements": statements}
 
 
+_NEW_TEST_WHITESPACE_PREFIX = "New-test trailing whitespace at sorted change indices: "
+
+
+def _is_canonical_new_test_whitespace_summary(summary_text: str) -> bool:
+    if not isinstance(summary_text, str) or not summary_text.startswith(_NEW_TEST_WHITESPACE_PREFIX):
+        return False
+    rest = summary_text[len(_NEW_TEST_WHITESPACE_PREFIX):]
+    if not rest:
+        return False
+    tokens = rest.split(",")
+    prev = -1
+    for token in tokens:
+        if not token or len(token) > 2:
+            return False
+        for ch in token:
+            if ch not in "0123456789":
+                return False
+        if len(token) > 1 and token[0] == "0":
+            return False
+        val = int(token)
+        if not (0 <= val <= 31) or val <= prev:
+            return False
+        prev = val
+    return True
+
+
 def _byte_profile_failure_factors(receipt: Mapping[str, Any]) -> list[str] | None:
     """Recognize only complete canonical static-byte-profile gate diagnostics."""
     if (receipt["isolation"] != "static-byte-profile" or receipt["returncode"] != 1
             or receipt["stdout_tail"] or receipt["snapshot_files"] or receipt["snapshot_bytes"]):
         return None
     lines = receipt["stderr_tail"].split("\n")
-    if not 1 <= len(lines) <= 33:
+    if not 1 <= len(lines) <= 34:
+        return None
+    if not lines[-1].startswith("AssertionError: "):
+        if not _is_canonical_new_test_whitespace_summary(lines[-1]):
+            return None
+        byte_lines = lines[:-1]
+    else:
+        byte_lines = lines
+    if not 1 <= len(byte_lines) <= 33:
         return None
     try:
         from scripts.two_site_agent_sandbox import _validate_overlay_path
     except ImportError:
         from two_site_agent_sandbox import _validate_overlay_path
     factors, seen = [], set()
-    for line in lines:
+    for line in byte_lines:
         match = re.fullmatch(
             r"AssertionError: (.+) exceeds ([1-9][0-9]{0,5}) byte limit: ([1-9][0-9]{0,6}) bytes",
             line,

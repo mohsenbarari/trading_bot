@@ -37,6 +37,18 @@ def test_notes_single_actual_cap_targets_detached_and_legacy_unchanged():
     assert result == {"max_provider_output_tokens": 60000, "max_test_only_transport_bytes": 64000,
         "max_new_test_file_utf8_bytes": 12000, "test_only_task": True,
         "new_test_files": [TEST], "proposal_utf8_budget_profile": expected,
+        "proposal_existing_file_budgets": {
+            "version": 1,
+            "entries": [{
+                "path": TEST,
+                "state": "NEW_FILE",
+                "baseline_utf8_bytes": 0,
+                "file_limit_utf8_bytes": 12000,
+                "effective_single_file_limit_utf8_bytes": 12000,
+                "max_net_growth_utf8_bytes": 12000,
+            }],
+            "omitted_path_count": 0,
+        },
         "success_covered_requirements": [1],
         "new_test_file_draft_target_utf8_bytes": 9000}
     result["proposal_utf8_budget_profile"]["file_limits"][TEST] = 1
