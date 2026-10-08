@@ -133,9 +133,20 @@ FROZEN_A2A_41_IDS: tuple[str, ...] = tuple(
 )
 FROZEN_CUMULATIVE_226_IDS: tuple[str, ...] = FROZEN_CUMULATIVE_185_IDS + FROZEN_A2A_41_IDS
 
+FROZEN_A3_11_IDS: tuple[str, ...] = tuple(
+    [f"ownership_{s}" for s in (
+        "dimensions", "semantic_identity", "work_lineage",
+        "nested_identities_semantic_value", "nested_identities_work_value",
+        "codex_usage", "provider_usage_observed_subtotal",
+        "provider_usage_full_usage", "provider_usage_attempt_pair",
+    )]
+    + ["guard_MAX_NUMERIC", "guard_actual_grouping_state_guard"]
+)
+FROZEN_CUMULATIVE_237_IDS: tuple[str, ...] = FROZEN_CUMULATIVE_226_IDS + FROZEN_A3_11_IDS
+
 
 def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
-    if len(expected_ids) not in (135, 185, 226):
+    if len(expected_ids) not in (135, 185, 226, 237):
         raise ValueError(f"unsupported manifest length {len(expected_ids)}")
     if len(plan) != len(expected_ids):
         raise ValueError(f"plan length {len(plan)} != {len(expected_ids)}")
@@ -144,6 +155,20 @@ def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
         raise ValueError("plan has duplicate IDs")
     if set(plan_ids) != set(expected_ids):
         raise ValueError("plan ID set != expected ID set")
+    if len(expected_ids) == 237:
+        o, n, g = (
+            core.test_nine_mutable_branches_isolation,
+            core.test_counterproof_numeric_fault,
+            core.test_counterproof_ok_grouping_fault,
+        )
+        for i in range(226):
+            c, r, _ = plan[i]
+            if c != expected_ids[i] or r is o or r is n or r is g:
+                raise ValueError("ordinary plan item invalid")
+        for i, fn in enumerate((o,) * 9 + (n, g), 226):
+            c, f, e = plan[i]
+            if c != expected_ids[i] or f is not fn or e is not None:
+                raise ValueError("a3 plan item invalid")
 
 
 def validate_completed(completed: list[str], expected_ids: tuple[str, ...]) -> None:
@@ -513,6 +538,15 @@ def _build_a2a_plan() -> list[tuple[str, dict, dict]]:
     plan.append(("samerun_selected_cost_different", rf7, ef7))
 
     return plan
+
+
+def _build_a3_plan() -> list[tuple[str, object, object]]:
+    core_fn = core.test_nine_mutable_branches_isolation
+    fns = (core_fn,) * 9 + (
+        core.test_counterproof_numeric_fault,
+        core.test_counterproof_ok_grouping_fault,
+    )
+    return [(c, fn, None) for c, fn in zip(FROZEN_A3_11_IDS, fns)]
 
 
 def test_cumulative_226_manifest_execution_and_counterproofs():
