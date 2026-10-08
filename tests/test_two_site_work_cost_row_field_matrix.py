@@ -172,7 +172,7 @@ def validate_plan(plan: list, expected_ids: tuple[str, ...]) -> None:
 
 
 def validate_completed(completed: list[str], expected_ids: tuple[str, ...]) -> None:
-    if len(expected_ids) not in (135, 185, 226):
+    if len(expected_ids) not in (135, 185, 226, 237):
         raise ValueError(f"unsupported completed manifest length {len(expected_ids)}")
     if len(completed) != len(expected_ids):
         raise ValueError(f"completed length {len(completed)} != {len(expected_ids)}")
@@ -358,7 +358,7 @@ def _run_counterproofs_and_exec(plan: list, expected_ids: tuple[str, ...]) -> No
     _test_fault(dummy_completed, 0, "WRONG_COMPLETION_ID", validate_completed, expected_ids, True)
 
     completed_ids: list[str] = []
-    for cid, rf, ef in plan:
+    for cid, rf, ef in plan[:226]:
         rg, eg = _pair()
         r1, r2, r3 = core.run_case(rg, eg, rf, ef)
         assert r1 == eg and r2 == ef and r3 == eg
@@ -368,6 +368,14 @@ def _run_counterproofs_and_exec(plan: list, expected_ids: tuple[str, ...]) -> No
         else:
             assert r2 != r1
         completed_ids.append(cid)
+
+    if len(expected_ids) == 237:
+        assert plan[226][1]() is None
+        completed_ids.extend(FROZEN_A3_11_IDS[:9])
+        assert plan[235][1]() is None
+        completed_ids.append(plan[235][0])
+        assert plan[236][1]() is None
+        completed_ids.append(plan[236][0])
 
     validate_completed(completed_ids, expected_ids)
 

@@ -45,3 +45,13 @@ def test_a3_fixture_route_preflight_and_permutations() -> None:
         finally:
             plan[i], plan[j] = oi, oj
             _chk()
+
+
+def test_a3_cumulative_237_manifest_execution() -> None:
+    plan = (
+        field._build_a1_plan()
+        + field._build_structural_plan()
+        + field._build_a2a_plan()
+        + field._build_a3_plan()
+    )
+    field._run_counterproofs_and_exec(plan, field.FROZEN_CUMULATIVE_237_IDS)
