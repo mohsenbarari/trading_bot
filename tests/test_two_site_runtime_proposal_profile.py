@@ -75,7 +75,11 @@ class RuntimeProfileContracts(unittest.TestCase):
         self.db_path = self.home/"conversations"/(CID+".db")
         self.body = (
             "Use internal reasoning only and the complete supplied source snapshot. "
-            "Paths are labels, not permission to read files. Return the supplied JSON schema. "
+            "Paths are labels, not permission to read files. "
+            "State direct one complete schema-bound JSON now from supplied snapshot; "
+            "task/model roles and all requirements must be thoroughly checked, then brief final output/protocol check. "
+            "No progress/status-only prose, task plans, future promises or manage_task/task creation/task update/delegation/tool invocation, including intentional finish. "
+            "Distinguish model-intentional finish from CLI-owned existing terminal lifecycle. "
             "Never call tools, shell, files, browser, network, subagents or delegation. "
             "You have no direct Source, Git, deployment or Writer authority."
         )
@@ -170,6 +174,28 @@ class RuntimeProfileContracts(unittest.TestCase):
                 finally:
                     self.replace_meta(self.oracle)
                 self.check_positive()
+
+    def test_legacy_body_metadata_rejects_and_restores(self):
+        old_body = (
+            "Use internal reasoning only and the complete supplied source snapshot. "
+            "Paths are labels, not permission to read files. Return the supplied JSON schema. "
+            "Never call tools, shell, files, browser, network, subagents or delegation. "
+            "You have no direct Source, Git, deployment or Writer authority."
+        )
+        self.check_positive()
+        self.replace_meta(literal_metadata(self.work, old_body))
+        before_db = self.db_path.read_bytes()
+        before_source = self.source.read_bytes()
+        before_hooks = self.hooks.read_bytes()
+        try:
+            with self.assertRaises(profile.ProposalProfileError):
+                profile.validate_profile(self.candidate, fresh=True, cli_home=self.home)
+            self.assertEqual(self.db_path.read_bytes(), before_db)
+            self.assertEqual(self.source.read_bytes(), before_source)
+            self.assertEqual(self.hooks.read_bytes(), before_hooks)
+        finally:
+            self.replace_meta(self.oracle)
+        self.check_positive()
 
     def test_source_hardlink_symlink_and_content_change_reject(self):
         original = self.source.read_bytes()
