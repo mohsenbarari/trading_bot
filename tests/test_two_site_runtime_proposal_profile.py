@@ -107,6 +107,27 @@ class RuntimeProfileContracts(unittest.TestCase):
         with sqlite3.connect(self.db_path) as db:
             db.execute("UPDATE trajectory_metadata_blob SET data=? WHERE id='main'", (data,))
 
+    def assert_rejected(self, candidate=None, *, fresh=True, cli_home=None):
+        target = self.candidate if candidate is None else candidate
+        home = self.home if cli_home is None else cli_home
+        with self.assertRaises(profile.ProposalProfileError):
+            profile.validate_profile(target, fresh=fresh, cli_home=home)
+
+    @contextmanager
+    def _preparation_mocks(self):
+        process = mock.Mock(); process.poll.return_value = None
+        closed = []; clock = iter([0, 0, 0, 46])
+        with mock.patch.object(profile.subprocess, "run", return_value=mock.Mock(returncode=0)) as git,\
+             mock.patch.object(profile.subprocess, "Popen", return_value=process) as popen,\
+             mock.patch.object(profile.time, "monotonic", side_effect=lambda: next(clock)),\
+             mock.patch.object(profile.pty, "openpty", return_value=(31, 32)),\
+             mock.patch.object(profile.termios, "tcsetwinsize"),\
+             mock.patch.object(profile.os, "set_blocking"),\
+             mock.patch.object(profile.os, "close", side_effect=closed.append),\
+             mock.patch.object(profile.selectors, "DefaultSelector") as selector,\
+             mock.patch.object(profile, "_sessions", return_value=set()):
+            yield git, popen, process, closed, selector
+
     def test_complete_independent_positive(self):
         self.check_positive()
         self.assertEqual(profile.expected_tool_container(), tool_literal(self.body))
@@ -125,23 +146,20 @@ class RuntimeProfileContracts(unittest.TestCase):
                 self.check_positive()
                 self.hooks.write_bytes(bad)
                 try:
-                    with self.assertRaises(profile.ProposalProfileError):
-                        profile.validate_profile(self.candidate, fresh=True, cli_home=self.home)
+                    self.assert_rejected()
                 finally:
                     self.hooks.write_bytes(HOOK_BYTES)
                 self.check_positive()
         link = self.hooks.with_name("hook-link")
         os.link(self.hooks, link)
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate, fresh=True, cli_home=self.home)
+            self.assert_rejected()
         finally:
             link.unlink()
         self.check_positive()
         self.hooks.rename(link); self.hooks.symlink_to(link)
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate, fresh=True, cli_home=self.home)
+            self.assert_rejected()
         finally:
             self.hooks.unlink(); link.rename(self.hooks)
         self.check_positive()
@@ -168,8 +186,7 @@ class RuntimeProfileContracts(unittest.TestCase):
                 self.replace_meta(bad)
                 before = self.db_path.read_bytes()
                 try:
-                    with self.assertRaises(profile.ProposalProfileError):
-                        profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+                    self.assert_rejected()
                     self.assertEqual(self.db_path.read_bytes(),before)
                 finally:
                     self.replace_meta(self.oracle)
@@ -188,8 +205,7 @@ class RuntimeProfileContracts(unittest.TestCase):
         before_source = self.source.read_bytes()
         before_hooks = self.hooks.read_bytes()
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate, fresh=True, cli_home=self.home)
+            self.assert_rejected()
             self.assertEqual(self.db_path.read_bytes(), before_db)
             self.assertEqual(self.source.read_bytes(), before_source)
             self.assertEqual(self.hooks.read_bytes(), before_hooks)
@@ -203,22 +219,19 @@ class RuntimeProfileContracts(unittest.TestCase):
         self.check_positive()
         os.link(self.source,link)
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:
             link.unlink()
         self.check_positive()
         self.source.write_bytes(original+b"extra\n")
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:
             self.source.write_bytes(original)
         self.check_positive()
         self.source.rename(link);self.source.symlink_to(link)
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:
             self.source.unlink();link.rename(self.source)
         self.check_positive()
@@ -227,15 +240,13 @@ class RuntimeProfileContracts(unittest.TestCase):
         self.check_positive()
         with sqlite3.connect(self.db_path) as db:db.execute("INSERT INTO steps VALUES(3)")
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:
             with sqlite3.connect(self.db_path) as db:db.execute("DELETE FROM steps")
         self.check_positive()
         with sqlite3.connect(self.db_path) as db:db.execute("UPDATE trajectory_meta SET cascade_id='foreign'")
         try:
-            with self.assertRaises(profile.ProposalProfileError):
-                profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:
             with sqlite3.connect(self.db_path) as db:db.execute("UPDATE trajectory_meta SET cascade_id=?",(CID,))
         self.check_positive()
@@ -251,22 +262,22 @@ class RuntimeProfileContracts(unittest.TestCase):
             self.assertEqual(profile.validate_profile(self.candidate,fresh=False,cli_home=self.home),{**self.expected,"actual_executor_checked":True})
             with sqlite3.connect(self.db_path) as db:db.execute("UPDATE executor_metadata SET data=?",(bad,))
             try:
-                with self.assertRaises(profile.ProposalProfileError):profile.validate_profile(self.candidate,fresh=False,cli_home=self.home)
+                self.assert_rejected(fresh=False)
             finally:
                 with sqlite3.connect(self.db_path) as db:db.execute("DELETE FROM executor_metadata")
             self.check_positive()
-        with self.assertRaises(profile.ProposalProfileError):profile.validate_profile(self.candidate,fresh=False,cli_home=self.home)
+        self.assert_rejected(fresh=False)
 
     def test_database_links_size_and_duplicate_rows_reject(self):
         link=self.db_path.with_suffix(".other")
         os.link(self.db_path,link)
         try:
-            with self.assertRaises(profile.ProposalProfileError):profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:link.unlink()
         self.check_positive()
         with sqlite3.connect(self.db_path) as db:db.execute("INSERT INTO trajectory_metadata_blob VALUES('main',?)",(self.oracle,))
         try:
-            with self.assertRaises(profile.ProposalProfileError):profile.validate_profile(self.candidate,fresh=True,cli_home=self.home)
+            self.assert_rejected()
         finally:
             with sqlite3.connect(self.db_path) as db:db.execute("DELETE FROM trajectory_metadata_blob WHERE rowid=(SELECT MAX(rowid) FROM trajectory_metadata_blob)")
         self.check_positive()
@@ -296,11 +307,7 @@ class RuntimeProfileContracts(unittest.TestCase):
     def test_preparation_failure_cleans_owned_process_and_never_sends_prompt(self):
         self.source.unlink()
         self.source.parent.rmdir()
-        process=mock.Mock()
-        process.poll.return_value=None
-        closed=[]
-        clock=iter([0,0,0,46])
-        with mock.patch.object(profile.subprocess,"run",return_value=mock.Mock(returncode=0)), mock.patch.object(profile.subprocess,"Popen",return_value=process) as popen, mock.patch.object(profile.time,"monotonic",side_effect=lambda:next(clock)), mock.patch.object(profile.pty,"openpty",return_value=(31,32)), mock.patch.object(profile.termios,"tcsetwinsize"), mock.patch.object(profile.os,"set_blocking"), mock.patch.object(profile.os,"close",side_effect=closed.append), mock.patch.object(profile.selectors,"DefaultSelector") as selector, mock.patch.object(profile.os,"write") as write, mock.patch.object(profile,"_sessions",return_value=set()):
+        with self._preparation_mocks() as (git,popen,process,closed,selector), mock.patch.object(profile.os,"write") as write:
             selector.return_value.select.return_value=[]
             terminate=mock.Mock()
             with self.assertRaises(profile.ProposalProfileError):
@@ -315,9 +322,7 @@ class RuntimeProfileContracts(unittest.TestCase):
 
     def test_preparation_termination_failure_still_closes_local_descriptors(self):
         self.source.unlink(); self.source.parent.rmdir()
-        process=mock.Mock(); process.poll.return_value=None
-        closed=[]; clock=iter([0,0,0,46])
-        with mock.patch.object(profile.subprocess,"run",return_value=mock.Mock(returncode=0)) as git, mock.patch.object(profile.subprocess,"Popen",return_value=process), mock.patch.object(profile.time,"monotonic",side_effect=lambda:next(clock)), mock.patch.object(profile.pty,"openpty",return_value=(31,32)), mock.patch.object(profile.termios,"tcsetwinsize"), mock.patch.object(profile.os,"set_blocking"), mock.patch.object(profile.os,"close",side_effect=closed.append), mock.patch.object(profile.selectors,"DefaultSelector") as selector, mock.patch.object(profile,"_sessions",return_value=set()):
+        with self._preparation_mocks() as (git,popen,process,closed,selector):
             terminate=mock.Mock(side_effect=OSError("owned process cleanup failed"))
             with self.assertRaisesRegex(OSError,"owned process cleanup failed"):
                 profile.prepare_profile(Path("/tmp/owned-disposable-cli"),self.work,MODEL,"high",terminate=terminate)
