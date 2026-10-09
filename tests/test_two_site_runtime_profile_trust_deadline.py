@@ -287,3 +287,87 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
             self.assertNotIn(SELECT, [data for _, data in trace.writes])
+
+    def test_late_panel_multiple_valid_fresh_sessions_rejected(self):
+        cid2 = "22345678-1234-1234-1234-123456789abc"
+        with self.owned([(14, PANEL)]) as trace:
+            f = trace.fixture
+            cand2 = profile.PreparedProfile(cid2, f.work, fixtures.MODEL, "high")
+            oracle2 = fixtures.literal_metadata(f.work, f.body, root_id=cid2)
+            db2_path = f.home / "conversations" / (cid2 + ".db")
+            staged2 = f.root / "prepared-fixture2.db"
+            with sqlite3.connect(staged2) as db2:
+                db2.execute("CREATE TABLE trajectory_meta(cascade_id TEXT,trajectory_type INTEGER,source INTEGER)")
+                db2.execute("CREATE TABLE trajectory_metadata_blob(id TEXT,data BLOB)")
+                db2.execute("CREATE TABLE steps(status INTEGER)")
+                db2.execute("CREATE TABLE executor_metadata(data BLOB)")
+                db2.execute("INSERT INTO trajectory_meta VALUES(?,?,?)", (cid2, 4, 17))
+                db2.execute("INSERT INTO trajectory_metadata_blob VALUES('main',?)", (oracle2,))
+            staged2.chmod(0o600)
+            staged2.rename(db2_path)
+            try:
+                self.assertEqual(profile.validate_profile(f.candidate, fresh=True, cli_home=f.home), f.expected)
+                self.assertEqual(
+                    profile.validate_profile(cand2, fresh=True, cli_home=f.home),
+                    {**f.expected, "conversation_id": cid2},
+                )
+            finally:
+                db2_path.rename(staged2)
+            db2_bytes = staged2.read_bytes()
+            orig_write = trace.write
+            def write_with_second(fd, data):
+                ret = orig_write(fd, data)
+                if data == SELECT:
+                    staged2.rename(db2_path)
+                return ret
+            trace.write = write_with_second
+            try:
+                trace.invoke()
+                self.clean(trace)
+                self.assertIsNone(trace.result)
+                self.assertIs(type(trace.error), profile.ProposalProfileError)
+                self.assertEqual(
+                    str(trace.error),
+                    "proposal runtime selected session is ambiguous or absent",
+                )
+                self.assertEqual([data for _, data in trace.writes].count(AGENTS), 1)
+                self.assertEqual([data for _, data in trace.writes].count(SELECT), 1)
+                self.assertEqual(
+                    profile._sessions(f.home / "conversations"),
+                    {fixtures.CID + ".db", cid2 + ".db"},
+                )
+                self.assertEqual(f.db_path.read_bytes(), trace.original_db)
+                self.assertEqual(db2_path.read_bytes(), db2_bytes)
+            finally:
+                if db2_path.exists():
+                    db2_path.unlink()
+                if staged2.exists():
+                    staged2.unlink()
+            f.check_positive()
+
+    def test_late_panel_zero_valid_fresh_sessions_rejected(self):
+        cases = (
+            (lambda f: fixtures.literal_metadata(f.work, f.body, root_id="22345678-1234-1234-1234-123456789abc"), "invalid_root_uuid"),
+            (lambda f: fixtures.literal_metadata(f.work, f.body, name="wrong-agent"), "invalid_role_name"),
+        )
+        for builder, label in cases:
+            with self.subTest(case=label), self.owned([(16, PANEL)]) as trace:
+                f = trace.fixture
+                bad_meta = builder(f)
+                f.replace_meta(bad_meta)
+                fault_bytes = f.db_path.read_bytes()
+                trace.invoke()
+                self.clean(trace)
+                self.assertIsNone(trace.result)
+                self.assertIs(type(trace.error), profile.ProposalProfileError)
+                self.assertEqual(
+                    str(trace.error),
+                    "proposal runtime selected session is ambiguous or absent",
+                )
+                self.assertEqual([data for _, data in trace.writes].count(AGENTS), 1)
+                self.assertEqual([data for _, data in trace.writes].count(SELECT), 1)
+                self.assertEqual(
+                    profile._sessions(f.home / "conversations"),
+                    {fixtures.CID + ".db"},
+                )
+                self.assertEqual(f.db_path.read_bytes(), fault_bytes)
