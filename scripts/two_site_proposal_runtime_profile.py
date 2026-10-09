@@ -301,8 +301,11 @@ def prepare_profile(
         selector.register(master, selectors.EVENT_READ)
         started = time.monotonic()
         panel_started = started
-        while time.monotonic()-started < timeout and process.poll() is None:
-            age = time.monotonic()-panel_started
+        while (observed := time.monotonic())-started < timeout and process.poll() is None:
+            observed = time.monotonic()
+            if observed-started >= timeout:
+                break
+            age = observed-panel_started
             text = buffer.decode("utf-8", errors="replace")
             choice = trust_choice(text, workspace) if not trust_accepted else None
             if choice is not None:
@@ -313,11 +316,9 @@ def prepare_profile(
                 continue
             if not sent and age >= 7:
                 os.write(master, b"/agents\r"); sent = True
-            if sent and not selected and age >= 12:
-                if "Available Agents" not in text:
-                    error = ProposalProfileError("proposal runtime agent panel label unavailable")
-                    error.observation = {"ui_bytes": len(buffer), "fixture_label_present": NAME in text, "agents_word_present": "Agents" in text, "no_agents_label_present": "No agents" in text, "trust_word_present": "trust" in text.lower(), "workspace_word_present": "workspace" in text.lower(), "login_word_present": "login" in text.lower(), "enter_word_present": "enter" in text.lower(), "enter_boundary_present": re.search(r"\benter\b",text,re.IGNORECASE) is not None, "owned_path_present": str(workspace) in text, "trust_accepted": trust_accepted, "elapsed_seconds": round(age, 1), "fixed_trust_choices": {label:label in text for label in ("Trust this workspace", "Do you trust", "Yes, I trust", "Yes", "No", "Continue", "Workspace Trust", "Don't trust", "trust this folder", "1.", "2.")}}
-                    raise error
+            # A slow terminal render is not an invalid profile. Keep draining
+            # within the original absolute deadline; never extend it for trust.
+            if sent and not selected and age >= 12 and "Available Agents" in text:
                 if NAME not in text:
                     raise ProposalProfileError("proposal runtime local profile not discovered")
                 if any(label in text for label in ("two-site-coordinator", "two-site-stage-worker", "two-site-stage-verifier")):
@@ -341,6 +342,11 @@ def prepare_profile(
                     if query in chunk:
                         os.write(master, reply)
         if not selected:
+            text = buffer.decode("utf-8", errors="replace")
+            if sent and observed-started >= timeout and "Available Agents" not in text:
+                error = ProposalProfileError("proposal runtime agent panel label unavailable")
+                error.observation = {"ui_bytes": len(buffer), "fixture_label_present": NAME in text, "agents_word_present": "Agents" in text, "no_agents_label_present": "No agents" in text, "trust_word_present": "trust" in text.lower(), "workspace_word_present": "workspace" in text.lower(), "login_word_present": "login" in text.lower(), "enter_word_present": "enter" in text.lower(), "enter_boundary_present": re.search(r"\benter\b",text,re.IGNORECASE) is not None, "owned_path_present": str(workspace) in text, "trust_accepted": trust_accepted, "elapsed_seconds": round(observed-panel_started, 1), "fixed_trust_choices": {label:label in text for label in ("Trust this workspace", "Do you trust", "Yes, I trust", "Yes", "No", "Continue", "Workspace Trust", "Don't trust", "trust this folder", "1.", "2.")}}
+                raise error
             raise ProposalProfileError("proposal runtime profile selection failed")
     finally:
         try:
