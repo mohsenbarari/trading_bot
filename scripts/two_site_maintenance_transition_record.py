@@ -261,7 +261,21 @@ def _validate_run_id(val: Any, role: str) -> str:
     return val
 
 
-def _validate_commit_path(p: Any) -> str:
+_PROFILE_V1: object = object()
+_PROFILE_V2: object = object()
+_V2_RUNTIME_CONTRACT_PATH: str = "docs/refactor/two-server/templates/gemini-runtime-contract.json"
+_ALLOWED_MAINTENANCE_CONTROL_PATHS_V2: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS | frozenset({
+    _V2_RUNTIME_CONTRACT_PATH,
+})
+_PROTECTED_PATHS_V2: frozenset[str] = frozenset({
+    "scripts/two_site_proposal_runner.py",
+    "scripts/two_site_provider_broker.py",
+})
+
+
+def _validate_commit_path(p: Any, *, profile: object = _PROFILE_V1) -> str:
+    if profile is not _PROFILE_V1 and profile is not _PROFILE_V2:
+        raise MaintenanceTransitionRecordError("invalid profile")
     if type(p) is not str:
         raise MaintenanceTransitionRecordError("commit path must be a string")
     if not (1 <= len(p) <= MAX_PATH_LEN):
@@ -295,6 +309,8 @@ def _validate_commit_path(p: Any) -> str:
         raise MaintenanceTransitionRecordError(
             "commit path must be a canonical normalized POSIX path"
         )
+    if profile is _PROFILE_V2 and p == _V2_RUNTIME_CONTRACT_PATH:
+        return p
     if not _COMMIT_PATH_RE.fullmatch(p):
         raise MaintenanceTransitionRecordError(
             "commit path does not match allowed pattern"
@@ -303,9 +319,34 @@ def _validate_commit_path(p: Any) -> str:
 
 
 def _validate_commit_paths(
-    paths: Any, control_blob_paths: set[str],
+    paths: Any,
+    control_blob_paths: set[str],
     permitted_controls: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS,
+    *,
+    profile: object = _PROFILE_V1,
 ) -> list[str]:
+    if profile is not _PROFILE_V1 and profile is not _PROFILE_V2:
+        raise MaintenanceTransitionRecordError("invalid profile")
+    if profile is _PROFILE_V2:
+        if (
+            permitted_controls is not ALLOWED_MAINTENANCE_CONTROL_PATHS
+            and permitted_controls is not _ALLOWED_MAINTENANCE_CONTROL_PATHS_V2
+        ):
+            raise MaintenanceTransitionRecordError(
+                "caller permitted_controls cannot broaden V2"
+            )
+        if type(control_blob_paths) is not set and type(control_blob_paths) is not frozenset:
+            raise MaintenanceTransitionRecordError(
+                "control_blob_paths must be a native set or frozenset"
+            )
+        for item in control_blob_paths:
+            if type(item) is not str:
+                raise MaintenanceTransitionRecordError(
+                    "control_blob_paths entries must be strings"
+                )
+        effective_controls = _ALLOWED_MAINTENANCE_CONTROL_PATHS_V2
+    else:
+        effective_controls = permitted_controls
     if type(paths) is not list:
         raise MaintenanceTransitionRecordError("commit paths must be a list")
     if not (1 <= len(paths) <= MAX_COMMIT_PATHS):
@@ -313,10 +354,14 @@ def _validate_commit_paths(
     validated_paths: list[str] = []
     seen: set[str] = set()
     for p in paths:
-        norm_p = _validate_commit_path(p)
+        norm_p = _validate_commit_path(p, profile=profile)
+        if profile is _PROFILE_V2 and norm_p in _PROTECTED_PATHS_V2:
+            raise MaintenanceTransitionRecordError(
+                "commit path cannot be a control path"
+            )
         if (
             norm_p in control_blob_paths
-            and norm_p not in permitted_controls
+            and norm_p not in effective_controls
         ):
             raise MaintenanceTransitionRecordError(
                 "commit path cannot be a control path"
@@ -495,10 +540,35 @@ def _validate_maintenance_commits(
     new_repo_head: str,
     control_blob_paths: set[str],
     permitted_controls: frozenset[str] = ALLOWED_MAINTENANCE_CONTROL_PATHS,
+    *,
+    profile: object = _PROFILE_V1,
 ) -> list[dict[str, Any]]:
+    if profile is not _PROFILE_V1 and profile is not _PROFILE_V2:
+        raise MaintenanceTransitionRecordError("invalid profile")
+    if profile is _PROFILE_V2:
+        if (
+            permitted_controls is not ALLOWED_MAINTENANCE_CONTROL_PATHS
+            and permitted_controls is not _ALLOWED_MAINTENANCE_CONTROL_PATHS_V2
+        ):
+            raise MaintenanceTransitionRecordError(
+                "caller permitted_controls cannot broaden V2"
+            )
+        if type(control_blob_paths) is not set and type(control_blob_paths) is not frozenset:
+            raise MaintenanceTransitionRecordError(
+                "control_blob_paths must be a native set or frozenset"
+            )
+        for item in control_blob_paths:
+            if type(item) is not str:
+                raise MaintenanceTransitionRecordError(
+                    "control_blob_paths entries must be strings"
+                )
+        effective_controls = _ALLOWED_MAINTENANCE_CONTROL_PATHS_V2
+    else:
+        effective_controls = permitted_controls
     if type(commits) is not list:
         raise MaintenanceTransitionRecordError("maintenance_commits must be a list")
-    if not (MIN_MAINTENANCE_COMMITS <= len(commits) <= MAX_MAINTENANCE_COMMITS):
+    max_commits = 32 if profile is _PROFILE_V2 else MAX_MAINTENANCE_COMMITS
+    if not (MIN_MAINTENANCE_COMMITS <= len(commits) <= max_commits):
         raise MaintenanceTransitionRecordError(
             "maintenance_commits count out of bounds"
         )
@@ -563,7 +633,12 @@ def _validate_maintenance_commits(
                 "commit worker_run_id and reviewer_run_id must be distinct"
             )
 
-        val_paths = _validate_commit_paths(raw_commit.get("paths"), control_blob_paths, permitted_controls)
+        val_paths = _validate_commit_paths(
+            raw_commit.get("paths"),
+            control_blob_paths,
+            effective_controls,
+            profile=profile,
+        )
 
         if idx == 0:
             if parent != prior_head:
