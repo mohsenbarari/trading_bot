@@ -773,6 +773,8 @@ def capture_bounded_process(
             if remaining_time <= 0:
                 raise subprocess.TimeoutExpired(getattr(process, "args", "CLI"), timeout)
             process.wait(timeout=remaining_time)
+            if input_offset != len(input_bytes):
+                raise ProposalError("CLI input was not completely written")
     except BaseException:
         terminate_process(process)
         raise
