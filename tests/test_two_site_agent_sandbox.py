@@ -163,6 +163,12 @@ class SandboxTests(unittest.TestCase):
             (repo / "tests").mkdir()
             test_file = repo / "tests" / "test_ancestry.py"
             test_file.write_text("def test_seed():\n    assert True\n")
+            gate_source = Path("scripts/two_site_pre_review_pytest_gate.py")
+            if not gate_source.is_file():
+                gate_source = Path(__file__).resolve().parent.parent / "scripts" / "two_site_pre_review_pytest_gate.py"
+            gate_bytes = gate_source.read_bytes()
+            (repo / "scripts").mkdir(parents=True, exist_ok=True)
+            (repo / "scripts" / "two_site_pre_review_pytest_gate.py").write_bytes(gate_bytes)
             ancestor = self.commit(repo, "initial")
             test_file.write_text(
                 "import subprocess\n"
