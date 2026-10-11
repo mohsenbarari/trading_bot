@@ -263,32 +263,69 @@ def test_run_command_uses_task_aware_schema(tmp_path: Path):
     sources = make_sources()
     task_file = tmp_path / "task.json"
     task_file.write_text(json.dumps(task))
+    cli_path = tmp_path / "mock_cli"
+    cli_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    cli_path.chmod(0o755)
 
+    fixture_cid = "conv-test-schema-001"
     captured_cmd = None
+    captured_cwd = None
 
     class FakePopen:
-        def __init__(self, cmd, **kwargs):
-            nonlocal captured_cmd
-            captured_cmd = cmd
+        def __init__(self, cmd, cwd=None, **kwargs):
+            nonlocal captured_cmd, captured_cwd
+            captured_cmd = list(cmd)
+            captured_cwd = Path(cwd) if cwd is not None else None
             raise RuntimeError("intercepted_command")
+
+    def mock_prepare_profile(disposable_cli, workspace, model, effort=None, **kwargs):
+        return runner.PreparedProfile(
+            conversation_id=fixture_cid,
+            workspace=Path(workspace),
+            model=model,
+            effort=effort,
+        )
+
+    def mock_validate_profile(profile, fresh=True):
+        return {"profile": "valid", "fresh": fresh}
 
     with patch.object(runner, "validate_runtime_contract"), \
          patch.object(runner, "load_task", return_value=(task, sources)), \
          patch.object(runner, "git", side_effect=lambda *args: "HEAD_SHA" if "rev-parse" in args else ""), \
          patch.object(runner, "bounded_file_text", return_value="template prompt"), \
          patch.object(runner, "proposal_cli_context") as mock_ctx, \
-         patch.object(runner, "cli_identity", return_value={"path": "cli", "version": "1.0", "sha256": "abc"}), \
+         patch.object(runner, "cli_identity", return_value={"path": str(cli_path), "version": "1.0", "sha256": "abc"}), \
+         patch.object(runner, "prepare_profile", side_effect=mock_prepare_profile), \
+         patch.object(runner, "validate_profile", side_effect=mock_validate_profile), \
          patch.object(runner.subprocess, "Popen", side_effect=FakePopen):
 
-        mock_ctx.return_value.__enter__.return_value = (tmp_path, Path("/bin/cli"), {"path": "cli"})
+        mock_ctx.return_value.__enter__.return_value = (tmp_path, cli_path, {"path": str(cli_path)})
         mock_ctx.return_value.__exit__.return_value = False
 
         with pytest.raises(RuntimeError, match="intercepted_command"):
             run(tmp_path, task_file, "worker", "run-1", 100)
 
     assert captured_cmd is not None
+    assert captured_cmd[0] == str(cli_path)
+    assert captured_cmd.count("--json-schema") == 1
+    assert captured_cmd.count("--conversation") == 1
+
+    conv_idx = captured_cmd.index("--conversation")
+    assert captured_cmd[conv_idx + 1] == fixture_cid
+    expected_workspace = tmp_path / "proposal-runtime-workspace"
+    assert captured_cwd == expected_workspace
+    assert captured_cwd.is_dir()
+    assert (captured_cwd / ".agents" / "hooks.json").is_file()
+
     idx = captured_cmd.index("--json-schema")
-    actual_schema = json.loads(captured_cmd[idx + 1])
+    schema_file_path = Path(captured_cmd[idx + 1])
+    expected_schema_path = tmp_path / "run-1" / "response-schema.json"
+    assert schema_file_path == expected_schema_path
+    assert schema_file_path.is_file()
+
+    schema_bytes = schema_file_path.read_bytes()
+    actual_schema = json.loads(schema_bytes.decode("utf-8"))
     expected_schema = schema("worker", task, sources)
+    assert schema_bytes == runner.serialize_json(expected_schema)
     assert actual_schema == expected_schema
     assert actual_schema != schema("worker")

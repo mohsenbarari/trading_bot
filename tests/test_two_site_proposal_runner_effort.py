@@ -108,6 +108,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 }
             }
             captured_commands: list[list[str]] = []
+            captured_cwds: list[Path | None] = []
 
             class DummyProcess:
                 pid = 98765
@@ -119,8 +120,11 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 def __exit__(self, *exc: object) -> bool:
                     return False
 
-            def mock_popen(cmd: list[str], **_kwargs: object) -> DummyProcess:
+            def mock_popen(cmd: list[str], cwd: object = None, **_kwargs: object) -> DummyProcess:
                 captured_commands.append(list(cmd))
+                captured_cwds.append(Path(cwd) if cwd is not None else None)
+                if cwd is not None:
+                    self.assertTrue(Path(cwd).is_dir())
                 return DummyProcess()
 
             def mock_capture(
@@ -135,6 +139,27 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                     raise runner.ProposalError("simulated cli bounded process failure")
                 stdout_path.write_bytes(b"")
                 stderr_path.write_bytes(b"")
+
+            def mock_prepare_profile(
+                cli: Path,
+                workspace: Path,
+                model: str,
+                effort: str | None = None,
+                **_kwargs: object,
+            ) -> runner.PreparedProfile:
+                self.assertTrue(Path(workspace).is_dir())
+                return runner.PreparedProfile(
+                    conversation_id="conv-test-effort-42",
+                    workspace=Path(workspace),
+                    model=model,
+                    effort=effort,
+                )
+
+            prepare_profile_mock = mock.MagicMock(side_effect=mock_prepare_profile)
+            validate_profile_mock = mock.MagicMock(
+                side_effect=lambda prof, fresh=True: {"profile": "valid", "fresh": fresh}
+            )
+            capture_mock = mock.MagicMock(side_effect=mock_capture)
 
             mock_result = {
                 "status": "PROPOSAL_READY" if role == "worker" else "VERIFIED",
@@ -163,7 +188,9 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 mock.patch.object(runner, "acquire_proposal_lock", return_value=(42, proposals_dir)),
                 mock.patch.object(runner, "release_proposal_lock"),
                 mock.patch.object(runner, "cli_identity", return_value={"path": str(cli_file), "version": runner.EXPECTED_CLI_VERSION, "sha256": runner.EXPECTED_CLI_SHA256}),
-                mock.patch.object(runner, "capture_bounded_process", side_effect=mock_capture),
+                mock.patch.object(runner, "prepare_profile", prepare_profile_mock),
+                mock.patch.object(runner, "validate_profile", validate_profile_mock),
+                mock.patch.object(runner, "capture_bounded_process", capture_mock),
                 mock.patch.object(runner, "_parse_stream", return_value=(mock_result, mock_envelope)),
                 mock.patch.object(runner, "load_prior_worker", return_value=(mock_result, {"run_id": "prior-worker", "conversation_id": "prior-conv"}, runner.sha(b"{}"))),
                 mock.patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT),
@@ -186,54 +213,76 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                     mock.patch.object(runner, "load_worker_routing_policy", loader_mock)
                 )
 
+            def _invoke_run() -> Path:
+                return runner.run(temp_path, task_file, role, run_id, 30, proposal=proposal_arg, cli=cli_file)
+
             with ExitStack() as stack:
                 for patcher in patches:
                     stack.enter_context(patcher)
 
                 if simulate_error:
                     with self.assertRaises(runner.ProposalError):
-                        runner.run(
-                            temp_path,
-                            task_file,
-                            role,
-                            run_id,
-                            30,
-                            proposal=proposal_arg,
-                            cli=cli_file,
-                        )
+                        _invoke_run()
+                    self.assertEqual(prepare_profile_mock.call_count, 1)
+                    self.assertEqual(validate_profile_mock.call_count, 2)
+                    validate_profile_mock.assert_has_calls([
+                        mock.call(mock.ANY, fresh=True),
+                        mock.call(mock.ANY, fresh=True),
+                    ])
+                    self.assertEqual(popen_mock.call_count, 1)
+                    self.assertEqual(capture_mock.call_count, 1)
                 elif isinstance(policy, Exception) or (
                     isinstance(policy, type) and issubclass(policy, Exception)
                 ):
                     expected_exc = policy if isinstance(policy, type) else type(policy)
                     with self.assertRaises(expected_exc):
-                        runner.run(
-                            temp_path,
-                            task_file,
-                            role,
-                            run_id,
-                            30,
-                            proposal=proposal_arg,
-                            cli=cli_file,
-                        )
+                        _invoke_run()
                     if role == "worker":
                         self.assertIsNotNone(loader_mock)
                         loader_mock.assert_called_once()
+                    prepare_profile_mock.assert_not_called()
+                    validate_profile_mock.assert_not_called()
                     popen_mock.assert_not_called()
+                    capture_mock.assert_not_called()
                     self.assertEqual(len(captured_commands), 0)
                     run_dir = proposals_dir / run_id
                     self.assertFalse(run_dir.exists())
                     return captured_commands, {}
                 else:
-                    out = runner.run(
-                        temp_path,
-                        task_file,
-                        role,
-                        run_id,
-                        30,
-                        proposal=proposal_arg,
-                        cli=cli_file,
-                    )
+                    out = _invoke_run()
                     self.assertEqual(out, proposals_dir / run_id)
+                    self.assertEqual(prepare_profile_mock.call_count, 1)
+                    self.assertEqual(validate_profile_mock.call_count, 3)
+                    validate_profile_mock.assert_has_calls([
+                        mock.call(mock.ANY, fresh=True),
+                        mock.call(mock.ANY, fresh=True),
+                        mock.call(mock.ANY, fresh=False),
+                    ])
+                    self.assertEqual(popen_mock.call_count, 1)
+                    self.assertEqual(capture_mock.call_count, 1)
+
+            self.assertEqual(len(captured_commands), 1)
+            cmd = captured_commands[0]
+            prep_args, prep_kwargs = prepare_profile_mock.call_args
+            prep_ws = prep_args[1] if len(prep_args) > 1 else prep_kwargs["workspace"]
+            prep_model = prep_args[2] if len(prep_args) > 2 else prep_kwargs["model"]
+            prep_effort = prep_args[3] if len(prep_args) > 3 else prep_kwargs.get("effort")
+            self.assertEqual(captured_cwds[0], prep_ws)
+            self.assertEqual(prep_ws.name, "proposal-runtime-workspace")
+            self.assertIn("--conversation", cmd)
+            conv_idx = cmd.index("--conversation")
+            self.assertEqual(cmd[conv_idx + 1], "conv-test-effort-42")
+            if role == "verifier":
+                self.assertNotEqual("conv-test-effort-42", "prior-conv")
+            self.assertIn("--model", cmd)
+            model_idx = cmd.index("--model")
+            self.assertEqual(cmd[model_idx + 1], prep_model)
+            if prep_effort is None:
+                self.assertNotIn("--effort", cmd)
+            else:
+                self.assertIn("--effort", cmd)
+                effort_idx = cmd.index("--effort")
+                self.assertEqual(cmd[effort_idx + 1], prep_effort)
 
             status_path = proposals_dir / run_id / "status.json"
             self.assertTrue(status_path.is_file())
