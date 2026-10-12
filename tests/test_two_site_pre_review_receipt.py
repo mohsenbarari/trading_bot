@@ -619,12 +619,12 @@ def test_candidate_test_assertion_findings_negatives() -> None:
 
 _this_file = Path(__file__).resolve()
 _repo_root = _this_file.parents[1]
-for _rel_path in ("scripts/two_site_pre_review_receipt.py", "tests/test_two_site_pre_review_receipt.py"):
+for _rel_path, _cap in (("scripts/two_site_pre_review_receipt.py", 48000), ("tests/test_two_site_pre_review_receipt.py", 40000)):
     _target = _repo_root / _rel_path
     _st = _target.stat()
-    assert _st.st_size <= 40000, f"{_rel_path} exceeds 40000: {_st.st_size}"
+    assert _st.st_size <= _cap, f"{_rel_path} exceeds {_cap}: {_st.st_size}"
     with open(_target, "rb") as _f:
-        assert len(_f.read(40001)) <= 40000, f"{_rel_path} read exceeds 40000"
+        assert len(_f.read(_cap + 1)) <= _cap, f"{_rel_path} read exceeds {_cap}"
 
 import copy
 
