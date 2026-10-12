@@ -1,6 +1,6 @@
 ---
 name: two-site-refactor
-description: Coordinate the Finland-primary/Iran-standby refactor with complete Gemini-authored proposals, independent Gemini first review, Codex final review/application/tests/Git and exact-SHA acceptance. Also covers recovery of its paused legacy Antigravity adapter.
+description: Coordinate the Finland-primary/Iran-standby refactor with Gemini proposals or authorized Codex intervention, independent review, Codex final verification and exact-SHA acceptance. Also covers recovery of its paused legacy Antigravity adapter.
 ---
 
 # Two-Site Refactor for Antigravity
@@ -8,7 +8,7 @@ description: Coordinate the Finland-primary/Iran-standby refactor with complete 
 ## Current entrypoint — read first
 
 For the current simplification/automation task, use Codex as coordinator/final gate
-and Gemini Worker as the sole implementation/test/project-document author through
+and Gemini Worker as the default implementation/test/project-document author through
 `scripts/two_site_proposal_runner.py`. Load `AGENTS.md`, routed MemoryCustodian files,
 and `docs/refactor/two-server/PROPOSAL_AUTOMATION.md` completely. The latter is the
 small executable contract and states the current readiness limitations. The runner
@@ -17,11 +17,17 @@ CLI version and SHA before and after every provider call; a directory name is ne
 version evidence. Every file sent to a model must be root-confined, read with a hard
 byte limit, and rejected if it is a symlink or has more than one hardlink. One
 nonblocking process lock must cover identity probes and the complete provider run.
-Every Worker result must receive first review from a separate fresh Gemini session
-on the exact proposal SHA. Codex never repairs source itself: Gemini/Codex findings
-and test evidence return through SHA-bound correction feedback to a fresh Worker,
-followed by another fresh Gemini review. Codex alone applies accepted bytes, tests
-and operates Git.
+Every Gemini Worker result receives first review from a separate fresh Gemini session
+on the exact proposal SHA. Owner authorization of 2026-10-12 permits Codex to author
+needed implementation, tests or project docs through refactor completion without
+routine reapproval. This supersedes sole-Gemini and one-off author restrictions,
+not independent review, scoped tests, byte/provenance or Git gates. Declare Codex
+authorship honestly; never manufacture a Gemini Worker/session to satisfy a validator.
+Existing Gemini Runner/Supervisor validators do not automatically accept that route.
+Codex-authored code needs independent review before final acceptance; instruction-only
+governance edits may use independent Codex review where the model loader protects
+instruction paths. Gemini-route corrections retain SHA-bound feedback and fresh
+Worker/Reviewer sessions. Codex alone applies accepted bytes, tests and operates Git.
 
 For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
 Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex

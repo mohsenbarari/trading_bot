@@ -25,9 +25,14 @@ Hard invariants:
   version/SHA changes before, during or after a run; path names are not version proof.
   Read every model input through a root-confined byte cap; reject symlinks and any
   `st_nlink != 1`. Hold one nonblocking runner lock across all CLI probes/calls.
-  Gemini Worker is the sole implementation/test/project-doc author; require a fresh
-  Gemini Reviewer on the exact proposal before the final Codex gate. Codex may apply,
-  test and commit accepted bytes but must return findings instead of authoring a fix.
+  Gemini Worker remains the default implementation/test/project-doc author and its
+  proposals require a fresh Gemini Reviewer before the final Codex gate. Owner
+  authorization of 2026-10-12 permits necessary Codex implementation/tests/docs through
+  refactor completion without routine reapproval, superseding sole-Gemini/one-off
+  author restrictions. Preserve independent exact-byte review and honest author
+  provenance; never fake a Worker/session or self-certify. Instruction-only governance
+  edits may use independent Codex review for model-protected instruction paths.
+  Existing runtime validators do not automatically accept CODEX_AUTHORED units.
   Unattended cycles use only the bounded Codex Supervisor/tmux launcher. Continue only
   after a clean descendant commit with unchanged protected refs and control blobs;
   no-progress, ambiguous mutation or an external gate stops the loop.

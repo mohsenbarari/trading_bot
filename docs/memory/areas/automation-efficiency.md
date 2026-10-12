@@ -1,9 +1,9 @@
 # Automation Efficiency
 
 ## Authority & Roles
-- Permanent 2026-10-12 standing invariant: every necessary bounded architecture-refactor/automation package, relevant nonsecret model transfer, verified safe recovery authorized through project completion without routine reapproval.
-- Fences: no Root author exception, cap/quality waiver, replay/reservation/checkpoint reset, secrets/user/production export, main/production/deploy/DNS/Web Writer change, automatic Supervisor activation; recovery/adoption/ACK/STOP/permission evidence mandatory.
-- Roles: sole Gemini author for tracked source/test/project-doc; fresh independent Reviewer; Root semantic/native/byte/Git gates; task, source, Assignment, HEAD bound via link-safe pinned CLI.
+- Owner 2026-10-12: bounded packages/transfers/recovery and Codex implementation, tests or docs authorized through refactor completion without reapproval. Supersedes sole-Gemini/one-off author prohibitions; Gemini remains default.
+- Preserve caps/quality, no replay/reservation/checkpoint reset or secrets/user/production export; main/production/deploy/DNS/Web Writer unchanged. Supervisor activation needs recovery/adoption/ACK/STOP/permission proof.
+- Honest author provenance, independent exact-byte review and Root semantic/native/byte/Git gates remain. Gemini validators do not accept CODEX_AUTHORED automatically; never fabricate Worker/session evidence. Bind task/source/Assignment/HEAD through link-safe pinned CLI.
 - [Decision](../../refactor/two-server/AE05_AE06_GATE_DECISION_20260924.md): one Gemini Worker until comparable cohorts support overlap; comparison uses same-family cohorts with failed attempts, UNKNOWN-not-zero.
 
 ## Fences & Custody
@@ -13,5 +13,5 @@
 
 ## Recovery & Status
 - [Recovery](../../refactor/two-server/AE03_COLD_START_RECOVERY_CONTRACT_20260929.md): startup requires Broker hold, pre/post STOP, pending scans, strict reader, permissions 0700, HEAD/protected refs/controls, one prior, no current epoch, stale checkpoint, explicit root, clean repository. Historical checkpoints are provenance; no old Assignment restore, fabricated checkpoint, evidence deletion, Monitor rebaseline before restart fence.
-- Status: Supervisor STOPPED; valid scoped 670 maintenance Assignment (not cold-adoption absent); accepted 668 header prerequisite at 6b8a; capture 667/669 nonaccepted/open.
+- Status: Supervisor STOPPED; producer 672/673 terminal/nonaccepted, no capture/consumer closure. Codex authority removes author blocker, not runtime/adoption gates.
 - Forward: adoption record, Monitor fence, bounded Start unissued; live routing/wake, Monitor custody, STOP race, cohorts, C4c/C5d/C5e integration, activation OPEN. No live health, Stage, full goal, efficiency, savings, adoption claims.
