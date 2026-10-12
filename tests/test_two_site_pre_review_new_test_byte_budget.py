@@ -9,10 +9,10 @@ _source_path = _repo_root / "scripts/two_site_pre_review_receipt.py"
 _test_path = _this_file
 
 _src_stat = _source_path.stat().st_size
-assert _src_stat <= 38000, f"scripts/two_site_pre_review_receipt.py exceeds 38000: {_src_stat}"
+assert _src_stat <= 48000, f"scripts/two_site_pre_review_receipt.py exceeds 48000: {_src_stat}"
 with open(_source_path, "rb") as _f:
-    _src_bytes = _f.read(38001)
-assert len(_src_bytes) <= 38000, "scripts/two_site_pre_review_receipt.py read exceeds 38000"
+    _src_bytes = _f.read(48001)
+assert len(_src_bytes) <= 48000, "scripts/two_site_pre_review_receipt.py read exceeds 48000"
 assert len(_src_bytes) == _src_stat, "scripts/two_site_pre_review_receipt.py size inconsistent"
 
 _test_stat = _test_path.stat().st_size

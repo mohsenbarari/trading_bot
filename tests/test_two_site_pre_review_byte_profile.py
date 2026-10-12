@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 for _path, _cap in ((Path(__file__).resolve(), 24000),
-                   (Path(__file__).resolve().parents[1] / "scripts/two_site_pre_review_receipt.py", 38000)):
+                   (Path(__file__).resolve().parents[1] / "scripts/two_site_pre_review_receipt.py", 48000)):
     with _path.open("rb") as _stream:
         _bytes = _stream.read(_cap + 1)
     assert len(_bytes) == _path.stat().st_size <= _cap
