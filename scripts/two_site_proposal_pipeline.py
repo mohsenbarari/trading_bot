@@ -38,14 +38,14 @@ try:
     from scripts.two_site_pre_review_receipt import (
         candidate_test_assertion_findings,
         p1_00_characterization_bootstrap_findings,
-        run_candidate_tests,
+        _run_candidate_tests_structured as run_candidate_tests,
         validate_test_receipt,
     )
 except ImportError:
     from two_site_pre_review_receipt import (
         candidate_test_assertion_findings,
         p1_00_characterization_bootstrap_findings,
-        run_candidate_tests,
+        _run_candidate_tests_structured as run_candidate_tests,
         validate_test_receipt,
     )
 
@@ -946,18 +946,59 @@ def _normalized_failure_statement(statement: str) -> str:
         return compact
 
 
-def test_failure_facts(receipt: Mapping[str, Any]) -> dict[str, list[str]]:
-    """Extract bounded stable pytest root-cause facts, excluding trace/warning noise."""
+def _structured_failure_records(validated: dict[str, Any]) -> tuple[list[dict], str, str]:
+    """Canonical associated observations; completeness never confers authority."""
+    diagnostic = validated["pytest_diagnostics"]
+    if diagnostic is None:
+        return [], "unavailable", "unknown"
+    unique = {
+        json.dumps(record, sort_keys=True, separators=(",", ":")): record
+        for record in diagnostic["records"]
+    }
+    records = [unique[key] for key in sorted(unique)]
+    complete = (records and not diagnostic["partial"]
+                and all(not record["partial"] for record in records))
+    return records, "available", "complete" if complete else "unknown"
+
+
+def _failed_test_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    """Screen exact-dict ingress before any lookup; preserve legacy Mapping ABI."""
+    if type(receipt) is dict and (
+        len(receipt) not in (10, 13) or any(
+            type(key) is not str or len(key) > 32 or not key.isascii()
+            for key in receipt
+        )
+    ):
+        return validate_test_receipt(receipt, "")
     proposal_sha = (
         receipt.get("proposal_sha256")
         if isinstance(receipt, Mapping) and not isinstance(receipt, (str, bytes))
         else ""
     )
+    if type(receipt) is dict and len(receipt) == 13 and type(proposal_sha) is not str:
+        proposal_sha = ""  # Central V2 rejection without consulting __class__.
     if not isinstance(proposal_sha, str):
         proposal_sha = ""
     validated = validate_test_receipt(receipt, proposal_sha)
     if validated["state"] != "FAILED":
         raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+    return validated
+
+
+def test_failure_facts(receipt: Mapping[str, Any]) -> dict[str, list[str]]:
+    """V2 uses safe observations only; TEN retains legacy console compatibility."""
+    validated = _failed_test_receipt(receipt)
+
+    if validated.get("receipt_version") == 2:
+        records, _availability, completeness = _structured_failure_records(validated)
+        return {
+            "tests": sorted({f"{record['phase']}: {record['nodeid']}" for record in records}),
+            "exceptions": sorted({record["exception"] for record in records
+                                  if record["exception"] is not None}
+                                 | ({"UNKNOWN"} if completeness != "complete" else set())),
+            "statements": sorted({record["assertion"] for record in records
+                                  if record["assertion"] is not None}),
+        }
 
     tests: list[str] = []
     exceptions: list[str] = []
@@ -1057,32 +1098,30 @@ def _byte_profile_failure_factors(receipt: Mapping[str, Any]) -> list[str] | Non
 
 
 def _branch_root_failure_factor(receipt: Mapping[str, Any]) -> str | None:
-    """Recognize only the exact typed canonical repository-branch failure factor."""
-    proposal_sha = (
-        receipt.get("proposal_sha256")
-        if isinstance(receipt, Mapping) and not isinstance(receipt, (str, bytes))
-        else ""
-    )
-    if not isinstance(proposal_sha, str):
-        proposal_sha = ""
-    validated = validate_test_receipt(receipt, proposal_sha)
-    if validated["state"] != "FAILED":
-        raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+    """V2 canonical branch STRING observation only; TEN keeps its old detector.
+
+    A child observation is not authenticated type identity or retry authority.
+    """
+    validated = _failed_test_receipt(receipt)
 
     target_exceptions = {
         f"scripts.two_site_codex_autopilot.AutopilotError: autopilot requires branch {BRANCH}",
         f"two_site_codex_autopilot.AutopilotError: autopilot requires branch {BRANCH}",
     }
 
-    combined = validated["stdout_tail"] + "\n" + validated["stderr_tail"]
-    has_typed_branch_exc = False
-    for raw_line in combined.splitlines():
-        stripped = raw_line.strip()
-        if stripped.startswith("E "):
-            exc_candidate = stripped[2:].strip()
-            if exc_candidate in target_exceptions:
-                has_typed_branch_exc = True
-                break
+    if validated.get("receipt_version") == 2:
+        records, _availability, _completeness = _structured_failure_records(validated)
+        has_typed_branch_exc = any(record["exception"] in target_exceptions for record in records)
+    else:
+        combined = validated["stdout_tail"] + "\n" + validated["stderr_tail"]
+        has_typed_branch_exc = False
+        for raw_line in combined.splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("E "):
+                exc_candidate = stripped[2:].strip()
+                if exc_candidate in target_exceptions:
+                    has_typed_branch_exc = True
+                    break
 
     if not has_typed_branch_exc:
         return None
@@ -1103,16 +1142,25 @@ def _branch_root_failure_factor(receipt: Mapping[str, Any]) -> str | None:
 
 
 def test_failure_signature(receipt: Mapping[str, Any]) -> str:
-    proposal_sha = (
-        receipt.get("proposal_sha256")
-        if isinstance(receipt, Mapping) and not isinstance(receipt, (str, bytes))
-        else ""
-    )
-    if not isinstance(proposal_sha, str):
-        proposal_sha = ""
-    validated = validate_test_receipt(receipt, proposal_sha)
-    if validated["state"] != "FAILED":
-        raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+    validated = _failed_test_receipt(receipt)
+    if validated.get("receipt_version") == 2:
+        records, availability, completeness = _structured_failure_records(validated)
+        diagnostic = validated["pytest_diagnostics"]
+        payload = {
+            "receipt_version": 2,
+            "diagnostic_version": None if diagnostic is None else diagnostic["version"],
+            "availability": availability,
+            "completeness": completeness,
+            "diagnostic_partial": None if diagnostic is None else diagnostic["partial"],
+            "diagnostic_error": validated["pytest_diagnostics_error"],
+            "returncode": validated["returncode"],
+            "selectors": sorted(set(validated["selectors"])),
+            "records": records,
+        }
+        if completeness != "complete":
+            payload["proposal_sha256"] = validated["proposal_sha256"]
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     facts = test_failure_facts(validated)
     payload = {
         "returncode": validated["returncode"],
@@ -1168,7 +1216,7 @@ def test_gate_feedback(
         _bound_utf8(f"selectors (count={selector_count}): {selector_sample}", 8192),
         _bound_utf8("normalized_failure_facts: " + facts_text, 8192),
     ]
-    if validated["isolation"] == "static-byte-profile":
+    if validated.get("receipt_version") != 2 and validated["isolation"] == "static-byte-profile":
         # Already bounded/validated; retain every file AND total violation.
         # The generic pytest fallback above is intentionally only 2048 bytes.
         evidence.append(validated["stderr_tail"])

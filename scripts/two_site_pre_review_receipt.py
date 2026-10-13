@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -63,6 +64,14 @@ EXPECTED_RECEIPT_KEYS = frozenset({
     "snapshot_files",
     "snapshot_bytes",
     "isolation",
+})
+_V2_RECEIPT_KEYS = EXPECTED_RECEIPT_KEYS | {
+    "receipt_version", "pytest_diagnostics", "pytest_diagnostics_error",
+}
+_DIAGNOSTIC_ERRORS = frozenset({
+    "diagnostic overflow", "diagnostic unavailable or invalid",
+    "diagnostic custody failure", "diagnostic cleanup failure",
+    "diagnostic custody or read failure", "diagnostic process cleanup failure",
 })
 P1_00_CHARACTERIZATION_TEST = re.compile(
     r"^tests/test_p1_00b?_characterization_[a-z0-9_]+\.py$"
@@ -589,6 +598,82 @@ def _bound_utf8_tail(text: str, max_bytes: int = MAX_TAIL_BYTES) -> str:
     return tail.decode("utf-8", errors="ignore")
 
 
+def _screen_diagnostics(artifact: Any, error: Any) -> dict[str, Any] | None:
+    """Screen exact primitives and cumulative compact JSON bytes before encoding.
+
+    Only the accepted SDK parser interprets identities and normalized ASTs. Its
+    input is assembled here only after bounded, callback-free shape screening.
+    """
+    if error is not None and (not two_site_agent_sandbox._bounded_text(error, 63)
+                              or error not in _DIAGNOSTIC_ERRORS):
+        raise SandboxError("receipt diagnostic error must be a fixed SDK label")
+    if artifact is None:
+        if error is None:
+            raise SandboxError("receipt diagnostic availability mismatch")
+        return None
+    if error is not None:
+        raise SandboxError("receipt diagnostic availability mismatch")
+
+    def keys(value: Any, expected: set[str]) -> bool:
+        return (type(value) is dict and len(value) == len(expected)
+                and all(two_site_agent_sandbox._bounded_text(key, 16) for key in value)
+                and set(value) == expected)
+
+    if (not keys(artifact, {"version", "records", "partial"})
+            or type(artifact["version"]) is not int or artifact["version"] != 1
+            or type(artifact["partial"]) is not bool
+            or type(artifact["records"]) is not list or len(artifact["records"]) > 16):
+        raise SandboxError("receipt diagnostic primitive schema invalid")
+    for record in artifact["records"]:
+        if not keys(record, {"nodeid", "phase", "outcome", "exception", "assertion", "partial"}):
+            raise SandboxError("receipt diagnostic record schema invalid")
+        for field, limit in (("nodeid", 512), ("phase", 8), ("outcome", 8),
+                             ("exception", 160), ("assertion", 512)):
+            value = record[field]
+            if value is None and field in {"exception", "assertion"}:
+                continue
+            if not two_site_agent_sandbox._bounded_text(value, limit):
+                raise SandboxError("receipt diagnostic text invalid or oversized")
+        if type(record["partial"]) is not bool:
+            raise SandboxError("receipt diagnostic partial must be a boolean")
+
+    remaining = two_site_agent_sandbox.DIAGNOSTIC_LIMIT
+
+    def size(value: Any) -> None:
+        nonlocal remaining
+        if value is None:
+            remaining -= 4
+        elif type(value) is bool:
+            remaining -= 4 if value else 5
+        elif type(value) is int:  # The only integer admitted above is version 1.
+            remaining -= 1
+        elif type(value) is str:
+            remaining -= 2
+            for ch in value:
+                point = ord(ch)
+                remaining -= (2 if ch in '\\"\b\f\n\r\t' else 6 if point < 32
+                              else 1 if point < 128 else 2 if point < 2048
+                              else 3 if point < 65536 else 4)
+                if remaining < 0:
+                    raise SandboxError("receipt diagnostic exceeds 8192 bytes")
+        elif type(value) is list:
+            remaining -= 2 + max(0, len(value) - 1)
+            for item in value:
+                size(item)
+        else:  # Only the exact three-key artifact and six-key records reach here.
+            remaining -= 2 + max(0, len(value) - 1)
+            for key, item in value.items():
+                size(key)
+                remaining -= 1
+                size(item)
+        if remaining < 0:
+            raise SandboxError("receipt diagnostic exceeds 8192 bytes")
+
+    size(artifact)
+    data = json.dumps(artifact, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return two_site_agent_sandbox._diagnostic_artifact(data)
+
+
 def validate_test_receipt(
     receipt: Mapping[str, Any],
     proposal_sha256: str,
@@ -599,8 +684,42 @@ def validate_test_receipt(
         raise SandboxError("receipt must be a mapping")
     if not isinstance(require_passed, bool):
         raise SandboxError("require_passed must be a bool")
-    if set(receipt.keys()) != EXPECTED_RECEIPT_KEYS:
+    v2 = False
+    if type(receipt) is dict:
+        if (len(receipt) not in (10, 13)
+                or any(not two_site_agent_sandbox._bounded_text(key, 32) for key in receipt)):
+            raise SandboxError("receipt keys must match expected schema exactly")
+        v2 = set(receipt) == _V2_RECEIPT_KEYS
+        if not v2 and set(receipt) != EXPECTED_RECEIPT_KEYS:
+            raise SandboxError("receipt keys must match expected schema exactly")
+    elif set(receipt.keys()) != EXPECTED_RECEIPT_KEYS:
+        # Other mappings have only the original TEN admission and errors.
         raise SandboxError("receipt keys must match expected schema exactly")
+    diagnostics = None
+    if v2:
+        if type(proposal_sha256) is not str:
+            raise SandboxError("proposal_sha256 must be a lowercase 64-hex SHA")
+        if type(receipt["receipt_version"]) is not int or receipt["receipt_version"] != 2:
+            raise SandboxError("receipt_version must be exact integer 2")
+        for key in EXPECTED_RECEIPT_KEYS:
+            expected = (list if key in {"selectors", "unsupported_specs"} else int
+                        if key in {"returncode", "snapshot_files", "snapshot_bytes"} else str)
+            if type(receipt[key]) is not expected:
+                raise SandboxError("receipt V2 fields must be built-in primitives")
+        for key in ("selectors", "unsupported_specs"):
+            cap = MAX_SELECTORS if key == "selectors" else MAX_SPECS
+            if len(receipt[key]) > cap or any(
+                not two_site_agent_sandbox._bounded_text(value, 512) for value in receipt[key]
+            ):
+                raise SandboxError("receipt V2 lists must contain built-in strings")
+        for key in EXPECTED_RECEIPT_KEYS - {"selectors", "unsupported_specs"}:
+            value = receipt[key]
+            if (type(value) is str and not two_site_agent_sandbox._bounded_text(value, MAX_TAIL_BYTES)
+                    or type(value) is int and value.bit_length() > 64):
+                raise SandboxError("receipt V2 primitive field exceeds bound")
+        diagnostics = _screen_diagnostics(
+            receipt["pytest_diagnostics"], receipt["pytest_diagnostics_error"],
+        )
 
     if not isinstance(proposal_sha256, str) or not SHA_PATTERN.fullmatch(proposal_sha256):
         raise SandboxError("proposal_sha256 must be a lowercase 64-hex SHA")
@@ -674,7 +793,7 @@ def validate_test_receipt(
     except UnicodeEncodeError as exc:
         raise SandboxError("receipt isolation must be valid UTF-8") from exc
 
-    return {
+    result = {
         "state": state,
         "proposal_sha256": receipt_sha,
         "selectors": list(raw_selectors),
@@ -686,6 +805,10 @@ def validate_test_receipt(
         "snapshot_bytes": receipt["snapshot_bytes"],
         "isolation": isolation,
     }
+    if v2:
+        result.update(receipt_version=2, pytest_diagnostics=diagnostics,
+                      pytest_diagnostics_error=receipt["pytest_diagnostics_error"])
+    return result
 
 
 def _is_canonical_new_test(change: Mapping[str, Any]) -> bool:
@@ -735,8 +858,12 @@ def run_candidate_tests(
     worker_result: Mapping[str, Any],
     proposal_sha256: str,
     timeout: int = 1200,
+    *,
+    structured_diagnostics: bool = False,
 ) -> dict[str, Any]:
     """Execute candidate tests through sandbox and return bounded receipt."""
+    if type(structured_diagnostics) is not bool:
+        raise SandboxError("structured_diagnostics must be a boolean")
     if isinstance(root, str):
         if not root.strip():
             raise SandboxError("root must be a nonempty path")
@@ -894,11 +1021,13 @@ def run_candidate_tests(
             "isolation": "static-new-test-whitespace",
         }, proposal_sha256)
 
+    diagnostic_options = {"structured_diagnostics": True} if structured_diagnostics else {}
     sandbox_result = two_site_agent_sandbox.run_tests(
         resolved_root,
         chosen_selectors,
         timeout=timeout,
         overlays=overlays,
+        **diagnostic_options,
     )
 
     if not isinstance(sandbox_result, Mapping) or isinstance(sandbox_result, (str, bytes)):
@@ -930,4 +1059,33 @@ def run_candidate_tests(
         "snapshot_bytes": snapshot_bytes,
         "isolation": isolation,
     }
+    if structured_diagnostics:
+        present = "pytest_diagnostics" in sandbox_result
+        error_present = "pytest_diagnostics_error" in sandbox_result
+        if present != error_present:
+            raise SandboxError("malformed sandbox result: asymmetric diagnostic fields")
+        if present:
+            if type(sandbox_result) is not dict:
+                raise SandboxError("malformed sandbox result: diagnostics require exact dict")
+            receipt.update(receipt_version=2,
+                           pytest_diagnostics=sandbox_result["pytest_diagnostics"],
+                           pytest_diagnostics_error=sandbox_result["pytest_diagnostics_error"])
+        elif (type(isolation) is str
+              and isolation == "bwrap:ro-source,empty-home,clearenv,unshare-all"):
+            # Record native capture absence; the tag grants no authentication.
+            receipt.update(receipt_version=2, pytest_diagnostics=None,
+                           pytest_diagnostics_error="diagnostic unavailable or invalid")
+        # Unversioned ordinary legacy transports retain TEN and its old privacy.
     return validate_test_receipt(receipt, proposal_sha256)
+
+
+def _run_candidate_tests_structured(
+    root: str | Path,
+    task: Mapping[str, Any],
+    worker_result: Mapping[str, Any],
+    proposal_sha256: str,
+    timeout: int = 1200,
+) -> dict[str, Any]:
+    """Private fixed-five-argument Pipeline adapter; observations grant no authority."""
+    return run_candidate_tests(root, task, worker_result, proposal_sha256,
+                               timeout, structured_diagnostics=True)
