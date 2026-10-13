@@ -51,6 +51,18 @@ class SupervisorFinalizationAmbiguousError(SupervisorFinalizationError):
 AmbiguousFinalizationError = SupervisorFinalizationAmbiguousError
 
 
+def _check_stop_markers(root: Path) -> None:
+    """Observe canonical STOP paths without following links; not an OS-atomic fence."""
+    if not isinstance(root, Path):
+        return  # Preserve the original bridge's invalid-root rejection.
+    for marker in (root / "STOP", root / ".local/two-site-refactor/autopilot/STOP"):
+        try:
+            marker.lstat()
+        except FileNotFoundError:
+            continue
+        raise SupervisorFinalizationError("quota finalization stopped")
+
+
 def finalize_accepted_quota_continuation_locked(
     root: Path,
     original_controller_run_id: str,
@@ -67,6 +79,11 @@ def finalize_accepted_quota_continuation_locked(
 
     Returns a copy of the verified final acknowledgement record only after both bridges complete.
     """
+    try:
+        _check_stop_markers(root)
+    except OSError as exc:
+        raise SupervisorFinalizationError("STOP marker inspection failed") from exc
+
     # 1. Publish validated final acceptance lineage
     lineage_record = publish_validated_final_acceptance_lineage_locked(
         root=root,
@@ -78,6 +95,7 @@ def finalize_accepted_quota_continuation_locked(
 
     # 2. Publish validated final acknowledgement with exact lineage record and same parameters
     try:
+        _check_stop_markers(root)
         ack_record = publish_validated_final_ack_locked(
             root=root,
             original_controller_run_id=original_controller_run_id,
@@ -86,10 +104,10 @@ def finalize_accepted_quota_continuation_locked(
             accepted_lineage_record=lineage_record,
             acknowledged_at_utc=acknowledged_at_utc,
         )
+        _check_stop_markers(root)
+        return copy.deepcopy(ack_record)
     except BaseException as exc:
         raise SupervisorFinalizationAmbiguousError(
-            f"ambiguous finalization failure: final acknowledgement failed after lineage publication: {exc}; "
-            "immutable record retained in custody"
+            "ambiguous finalization failure after lineage publication; "
+            "immutable records retained in custody"
         ) from exc
-
-    return copy.deepcopy(ack_record)
