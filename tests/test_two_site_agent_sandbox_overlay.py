@@ -24,7 +24,11 @@ ENV_CONTENT = "APP_ENV=test\n"
 GATE_SOURCE = Path(__file__).resolve().parent.parent / GATE_PATH
 if not GATE_SOURCE.is_file():
     GATE_SOURCE = Path(GATE_PATH)
-REAL_GATE_BYTES = GATE_SOURCE.read_bytes()
+with GATE_SOURCE.open("rb") as gate_stream:
+    REAL_GATE_BYTES = gate_stream.read(12001)
+assert len(REAL_GATE_BYTES) <= 12000
+REAL_GATE_SIZE = len(REAL_GATE_BYTES)
+REAL_GATE_SHA = hashlib.sha256(REAL_GATE_BYTES).hexdigest()
 
 
 def create_test_repo(path: Path) -> Path:
@@ -45,8 +49,8 @@ def create_test_repo(path: Path) -> Path:
     gate_dest.write_bytes(REAL_GATE_BYTES)
     copied_bytes = gate_dest.read_bytes()
     assert copied_bytes == REAL_GATE_BYTES
-    assert len(copied_bytes) == 824
-    assert hashlib.sha256(copied_bytes).hexdigest() == "de6177a5e7923d01586c88fa98e502efac4f3fea792ae5a48cb46326c14301ce"
+    assert len(copied_bytes) == REAL_GATE_SIZE
+    assert hashlib.sha256(copied_bytes).hexdigest() == REAL_GATE_SHA
     subprocess.run(
         ["git", "-C", str(repo), "add", "--all"],
         check=True,
@@ -284,3 +288,160 @@ def test_omitted_and_empty_overlays_preserve_default_behavior(repo: Path, overla
 
     with pytest.raises(SandboxError, match="test selector not in authorized source snapshot"):
         run_tests(repo, [NEW_PATH], overlays=overlays)
+
+def install_native_namespace_adapter(monkeypatch):
+  """Only outer /work uid65534 adapts namespace args to a real bounded prlimit
+  child with unchanged proposed Gate, environment, cwd and private FIFO.
+  HOST retains actual bwrap; no reports, process outputs or receipts are stubbed.
+  """
+  import os
+  from scripts import two_site_agent_sandbox as sdk
+  if Path.cwd() != Path("/work") or os.geteuid() != 65534:
+    return False
+  actual = sdk._run_bounded_process
+
+  def child(argv, **kwargs):
+    if not argv or argv[0] != "/usr/bin/prlimit":
+      return actual(argv, **kwargs)
+    boundary = argv.index("--") + 1
+    snapshot = Path(argv[argv.index("/work") - 1])
+    env = {}
+    for index, v in enumerate(argv):
+      if v == "--setenv":
+        env[argv[index + 1]] = argv[index + 2]
+    env["PYTHONPATH"] = str(snapshot)
+    env["GIT_CONFIG_VALUE_0"] = str(snapshot)
+    if sdk.DIAGNOSTIC_ENV in env:
+      binding = argv.index("--bind")
+      assert argv[binding + 2] == "/tmp/two-site-pytest-diagnostics.fifo"
+      env[sdk.DIAGNOSTIC_ENV] = argv[binding + 1]
+    options = dict(kwargs)
+    options.update(cwd=snapshot, env=env)
+    command = argv[:boundary] + argv[argv.index("/usr/bin/python3"):]
+    return actual(command, **options)
+
+  monkeypatch.setattr(sdk, "_run_bounded_process", child)
+  return True
+
+
+def test_native_report_dictionary_callbacks_are_unsupported(repo, monkeypatch):
+    from scripts import two_site_agent_sandbox as sdk
+    install_native_namespace_adapter(monkeypatch)
+    source = """from _pytest.reports import TestReport
+class Bomb(dict):
+    def get(self,*args): raise RuntimeError('private callback')
+    def __getitem__(self,key): raise RuntimeError('private callback')
+original=TestReport.from_item_and_call.__func__
+def report(cls,item,call):
+    real=original(cls,item,call)
+    real.__dict__=Bomb(real.__dict__)
+    return real
+TestReport.from_item_and_call=classmethod(report)
+def test_bomb():
+    raise ValueError('private payload')
+"""
+    result = sdk.run_tests(repo, [EXISTING_PATH], overlays={EXISTING_PATH: source},
+                           timeout=15, structured_diagnostics=True)
+    assert result["returncode"] == 1
+    assert result["pytest_diagnostics_error"] is None
+    assert result["pytest_diagnostics"] == {"version": 1, "records": [], "partial": True}
+
+
+def test_native_diagnostic_read_failure_restores_same_witness(repo, monkeypatch):
+    from scripts import two_site_agent_sandbox as sdk
+    install_native_namespace_adapter(monkeypatch)
+    source = "def test_subject():\n    raise ValueError('private')\n"
+    def run():
+        return sdk.run_tests(repo, [EXISTING_PATH], overlays={EXISTING_PATH: source},
+                             timeout=15, structured_diagnostics=True)
+    def good():
+        result = run()
+        assert result["returncode"] == 1 and result["pytest_diagnostics_error"] is None
+        assert result["pytest_diagnostics"]["records"][0]["exception"] == "builtins.ValueError"
+    good()
+    reader = []
+    create, read = sdk._DiagnosticFIFO.__init__, sdk.os.read
+    def created(channel):
+        create(channel)
+        reader.append(channel.reader)
+    def failed(fd, size):
+        if reader and fd == reader[0]:
+            raise OSError("injected read failure")
+        return read(fd, size)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sdk._DiagnosticFIFO, "__init__", created)
+        scoped.setattr(sdk.os, "read", failed)
+        result = run()
+    assert result["returncode"] == 1 and result["pytest_diagnostics"] is None
+    assert result["pytest_diagnostics_error"] is not None
+    good()
+
+
+def test_native_inheritable_controller_lock_does_not_reach_child(repo, monkeypatch):
+    import os
+    from scripts import two_site_agent_sandbox as sdk
+    install_native_namespace_adapter(monkeypatch)
+    path = repo / "ap-client-runner-lock.sentinel"
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
+    os.set_inheritable(descriptor, True)
+    source = """import os
+def test_lock():
+    assert os.geteuid()==65534
+    for name in os.listdir('/proc/self/fd'):
+        try: target=os.readlink('/proc/self/fd/'+name)
+        except FileNotFoundError: continue
+        assert 'lock.sentinel' not in target and 'report.fifo' not in target
+"""
+    try:
+        result = sdk.run_tests(repo, [EXISTING_PATH], overlays={EXISTING_PATH: source},
+                               timeout=15, structured_diagnostics=True)
+        assert result["returncode"] == 0
+        assert result["pytest_diagnostics_error"] is None
+        assert result["pytest_diagnostics"] == {"version": 1, "records": [], "partial": False}
+        assert os.fstat(descriptor).st_ino == path.stat().st_ino
+    finally:
+        os.close(descriptor)
+        path.unlink()
+
+
+def prove_canonical_presession_spoof(root, path):
+    from scripts import two_site_agent_sandbox as sdk
+    conftest = "import sys,types\nfrom pathlib import Path\nclass AutopilotError(Exception): pass\nm=types.ModuleType('scripts.two_site_codex_autopilot')\nm.__file__=str(Path(__file__).parents[1]/'scripts/two_site_codex_autopilot.py')\nm.AutopilotError=AutopilotError\nsys.modules[m.__name__]=m\n"
+    fake = "from scripts.two_site_codex_autopilot import AutopilotError\ndef test_fake():\n    raise AutopilotError('autopilot requires branch refactor/two-site-architecture')\n"
+    r = sdk.run_tests(root, [path], overlays={path: fake, "tests/conftest.py": conftest,
+        GATE_PATH: REAL_GATE_BYTES.decode()}, timeout=30, structured_diagnostics=True)
+    assert r["returncode"] == 1 and r["pytest_diagnostics_error"] is None
+    v = r["pytest_diagnostics"]
+    assert v["partial"] is True and len(v["records"]) == 1 and v["records"][0]["exception"] is None
+
+
+def test_diagnostic_runtime_cleanup_and_resource_faults(monkeypatch):
+    import os
+    import sys
+    from scripts import two_site_agent_sandbox as sdk
+    before = set(os.listdir("/proc/self/fd"))
+    stop, Selector = sdk._stop_process_group, sdk.io_selectors.DefaultSelector
+    def stop_fault(process):
+        stop(process)
+        raise OSError("injected cleanup")
+    class CloseFault(Selector):
+        def close(self):
+            super().close()
+            raise OSError("injected cleanup")
+    for fault in ("stop", "close", "memory", "process"):
+        channel = sdk._DiagnosticFIFO()
+        options = {"memory_limit": 1} if fault == "memory" else {"process_limit": 1} if fault == "process" else {}
+        code = "import time;time.sleep(30)" if fault != "process" else "import os,time;os.fork();time.sleep(30)"
+        try:
+            with monkeypatch.context() as scoped:
+                if fault == "stop": scoped.setattr(sdk, "_stop_process_group", stop_fault)
+                if fault == "close": scoped.setattr(sdk.io_selectors, "DefaultSelector", CloseFault)
+                with pytest.raises(SandboxError) as raised:
+                    sdk._run_bounded_process([sys.executable, "-c", code], timeout=.15,
+                        output_limit=1024, _diagnostics=channel, **options)
+            assert ("resource budget" if options else "timeout") in str(raised.value)
+            if fault == "close": assert channel.error == "diagnostic process cleanup failure"
+        finally:
+            channel.close()
+        assert not channel.directory.exists()
+    assert set(os.listdir("/proc/self/fd")) == before
