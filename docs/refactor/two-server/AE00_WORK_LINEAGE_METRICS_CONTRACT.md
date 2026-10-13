@@ -136,9 +136,30 @@ missing IDs do not deduplicate or prohibit eligible grouping. Run/metadata/attem
 conflicts quarantine connected work before allocation, including valid ineligible
 identities. Malformed rows retain unknown costs; doc-only candidates confer no authority.
 
-Selector: `tests/test_two_site_work_cost_report.py` plus seven unchanged scoped suites.
-REQUIRED OPEN: original normalizer B194/C176/full607; Unit C whole-report field
-matrix; Unit D actual Producer persistence; grounded denominator/shared allocation;
-active/quota/calendar timing; cohorts/value; 627/628; AE03 live gates (including
-nonaccepted 680), AE04, subsequent AE00–AE06. No backfill, replay/startup/adoption,
-activation, Stage/full-goal or savings authority. Prior evidence remains prerequisite.
+Selector: `tests/test_two_site_work_cost_report.py` plus scoped suites.
+
+### Units C/D
+Unit C accepted at `a64729d5`: selectors
+`tests/test_two_site_work_cost_report_field_cases.py` and
+`tests/test_two_site_work_cost_report_fields.py`; closed 1,368-case whole-report
+valid/fault/SAME matrix, native pre/post 86 passed (73.65/71.60s).
+
+Unit D selector: `tests/test_two_site_work_cost_report_persistence.py`.
+Native: 3 passed. Original R6 actual A/B/blocked-A Producer,
+returned/per-run/ledger full19 oracles, all permutations, detached return,
+failed-only and valid/fault/SAME conservation; R7 explicit distinct
+wire-known/wire-unknown runs, status usage null, known stream versus absent stream,
+sole/combined reports in all three channels and restoration. Unknown Provider
+subtotal zero is observed 1/unknown 0, full null, attempts 1/0/1; failure is not
+free. Retained frames and unconditional byte/stat custody guard inputs, oracles,
+prior reports and raw/persisted files; no privacy sentinel leaks. Four-key
+telemetry tasks confer no six-key Runner/Assignment or acceptance authority.
+
+REQUIRED OPEN: original normalizer B194/C176/full607; grounded denominator/shared
+allocation; active/quota/calendar timing; cohorts/value; 627/628; AE03 live gates
+(including nonaccepted 680), AE04, subsequent AE00–AE06. Revalidate Units B/C/D
+after normalizer repairs; Unit D requires all 13 canonical selectors, fresh
+independent review and Root exact-byte/Git acceptance of both files. No backfill,
+replay/startup/adoption, activation, Stage/full-goal or savings authority.
+Observer evidence remains prerequisite; denominator UNVERIFIED/null and
+value/cohort NOT_ESTABLISHED remain unchanged.
