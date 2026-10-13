@@ -4,7 +4,7 @@
 This contract defines the Producer implementation of `work_lineage` in `scripts/two_site_provider_metrics.py` and the cycle observer projection prerequisite in `scripts/two_site_cycle_metrics.py`.
 - **Observational Only**: Work identity produced and observed by these modules is purely observational telemetry over provider attempts and cycle runs.
 - **No Authority**: It does NOT constitute proof of accepted product work, product behavior, replay authority, startup authority, or billing/token savings.
-- **Unimplemented Dimensions**: Full pure Consumer grouping (`summarize_work_lineage_ledger`), downstream grouping / UNKNOWN-not-zero denominator, semantic-attempt vs logical work cardinality, conflict reports, partial cost allocation, value reports, savings calculations, comparable accepted-behavior cohorts, and subsequent stages AE00-AE06 remain completely OPEN, REQUIRED, and UNIMPLEMENTED. No source grouping helper exists.
+- **Pure Unit B**: Offline grouping/cost API below; other Consumer gates remain REQUIRED OPEN.
 - **No Backfill or Activation**: No historical telemetry is backfilled, no replay authority is conferred, and no live consumer activation is performed.
 
 ## 2. Work Lineage Schema & Canonical Hashing Domain
@@ -58,7 +58,7 @@ In `scripts/two_site_cycle_metrics.py::record_cycle`, observer work projection i
 - **Semantic Identity Requirement**: A valid 5-key `semantic_identity` projection (`stage_id`, `scenario_key`, `gap_reference`, `source_sha256`, `fingerprint`) must be present.
 - **Legacy Compatibility**: Valid legacy provider states `"OK"` and `"PARTIAL"` preserve semantic identity projection without new `work_lineage` projection.
 - **Stale Fallback Clearing**: When fallback is invoked (e.g. initial provider metrics unavailable), any fallback failure, source drift (`source_head` mismatch), or provider exception (`OSError`) explicitly clears stale `semantic_identity` and `work_lineage` keys from the cycle record via `pop()`.
-- **Unchanged Public API**: All existing function signatures and behavior in `scripts/two_site_cycle_metrics.py` (`record_cycle`, `summarize_efficiency_ledger`, `command_group`, etc.) remain identical and backwards compatible. No source grouping helper exists.
+- **Unchanged Public API**: All existing function signatures and behavior in `scripts/two_site_cycle_metrics.py` (`record_cycle`, `summarize_efficiency_ledger`, `command_group`, etc.) remain identical and backwards compatible.
 
 ## 3. Marker, Readers, Link Safety, and Caps
 - **Unique Canonical Marker**: `goal` in `task.json` must contain exactly one `\nCANONICAL_SOURCE_EXCERPTS_JSON:\n` marker. Harmless escaped marker substrings within valid source excerpt JSON strings are accepted; inline, unanchored, or duplicate canonical delimiter occurrences cause fail-closed rejection. Legacy single-inline metadata reading remains unchanged and permissive.
@@ -95,12 +95,50 @@ Implemented in `tests/test_two_site_work_lineage_consumer.py` (hard cap <= 24,00
 - **Supplementary Codex Diagnostic**: Codex executed an additional ignored final-review diagnostic on the exact bound pre-apply proposal. This is administrative review evidence, NOT a tracked product test. It exercised 4 actual Producer fixtures using the SAME independent full literal oracle that bounded-read BOTH persisted per-run and ledger `metrics.json`, checked top + nested `work_lineage` and `semantic_identity`, full usage / attempt counts / `first_pass`, cache and reasoning token arithmetic, and asserted ALL inputs immutable before injecting a missing-work implementation mutation -> verified `AssertionError` -> verified restore.
 - **Prerequisite Scope Only**: This combined evidence accepted ONLY a limited observer prerequisite (cycle record projection and validation in `record_cycle`), NOT whole Consumer or accepted product behavior. All requirements are not proved by a single narrower test.
 
-### Open Consumer Roadmap & Non-Authority
-All full pure Consumer capabilities remain completely OPEN, REQUIRED, and UNIMPLEMENTED:
-- Pure Consumer grouping and ledger summarization (`summarize_work_lineage_ledger`)
-- UNKNOWN-not-zero denominator
-- Conflicts, partial cost allocation, and value reports
-- Billing and token savings calculations
-- Comparable accepted-behavior cohorts
-- Subsequent work packages AE00-AE06
-No historical telemetry backfill, no replay authority, no startup authority, no live activation, and no acceptance authority exist. Producer-only goal closure is prohibited; whole Consumer completion is not achieved.
+### Pure Unit B
+
+`scripts/two_site_work_cost_report.py::summarize_work_lineage_ledger(records)`
+Pure/offline, detached and source-free; inputs and normalization stay unchanged.
+Exact builtin list <=2,000; invalid outer type/count raises `WorkCostReportError`
+(ValueError), fixed `invalid work lineage ledger records`.
+
+19 fields: schema_version, state, input_record_count, distinct_record_count,
+duplicate_record_count, run_conflict_count, identity_conflict_work_count,
+logical_work_count, semantic_attempt_count, observed_acceptance_candidate_lineage_count,
+costs, lineages, unattributed, accepted_behavior_count, denominator_state,
+token_per_accepted_behavior, billing_savings, value_state, cohort_comparability.
+Version integer 1, state OBSERVATIONAL_ONLY; behavior/token/billing null;
+denominator UNVERIFIED, value/cohort NOT_ESTABLISHED.
+
+Nested schemas:
+- costs: codex, provider, reported_cycle_seconds.
+- codex: observed_record_count, unknown_record_count, observed_subtotal, full_usage.
+  Token maps: input_tokens, cached_input_tokens, uncached_input_tokens, output_tokens.
+- provider: observed_record_count, unknown_record_count, observed_subtotal, full_usage,
+  attempt_coverage_record_count, unknown_attempt_coverage_record_count,
+  reported_attempt_count, observed_attempt_count, unknown_attempt_count.
+  Token maps: input_tokens, output_tokens, total_tokens.
+- reported_cycle_seconds: observed_record_count, unknown_record_count,
+  observed_subtotal, full_total.
+- each sorted lineage: work_fingerprint, semantic_attempt_count,
+  source_revision_count, record_count, observed_candidate_count, costs.
+- unattributed: record_count, conflict_record_count, malformed_record_count,
+  allocation_rule, costs; allocation is UNATTRIBUTED_NOT_ALLOCATED.
+
+Tokens/counts conserve each allocated row; times use sorted fsum. Full Provider usage wins once;
+PARTIAL uses subtotal only. Full values require nonempty all-known rows, otherwise
+null. Empty sums are 0/0.0, zero coverage, full null; zero [1,0] is not full-known.
+Timing is deterministic float reported-cycle sum, not active/quota/calendar/waste.
+Cache arithmetic is conserved; reasoning excluded.
+
+Only identical normalized variants of one valid run ID deduplicate. Invalid/
+missing IDs do not deduplicate or prohibit eligible grouping. Run/metadata/attempt
+conflicts quarantine connected work before allocation, including valid ineligible
+identities. Malformed rows retain unknown costs; doc-only candidates confer no authority.
+
+Selector: `tests/test_two_site_work_cost_report.py` plus seven unchanged scoped suites.
+REQUIRED OPEN: original normalizer B194/C176/full607; Unit C whole-report field
+matrix; Unit D actual Producer persistence; grounded denominator/shared allocation;
+active/quota/calendar timing; cohorts/value; 627/628; AE03 live gates (including
+nonaccepted 680), AE04, subsequent AE00–AE06. No backfill, replay/startup/adoption,
+activation, Stage/full-goal or savings authority. Prior evidence remains prerequisite.
