@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping
 try:
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
-        ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
+        CorrectionDeltaError, ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
@@ -27,7 +27,7 @@ try:
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
-        ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
+        CorrectionDeltaError, ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
@@ -1273,6 +1273,19 @@ def run_provider_session(
             )
             return attempt_id, run_dir
         except RetryableProviderOutputError as exc:
+            if (
+                role == "worker" and feedback is not None and proposal is not None
+                and (
+                    type(exc.__cause__) is ProposalError and str(exc.__cause__) in {
+                        "empty or unchanged file",
+                        "plan-only or no-op response is not implementation",
+                    }
+                    or type(exc.__cause__) is CorrectionDeltaError
+                    and str(exc.__cause__) == "complete no-op rejection: rebase yielded no canonical changes"
+                )
+            ):
+                state_check()
+                raise ProposalError("correction worker made no implementation progress") from exc
             output_errors += 1
             last_error = exc
             next_hint = None
