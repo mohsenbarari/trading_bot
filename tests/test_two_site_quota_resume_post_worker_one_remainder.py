@@ -34,6 +34,8 @@ def _setup_workspace(
 
     post_ctx = {
         "base_context": {
+            "artifacts": {"correction_origin": None},
+            "evidence": {"receipt": None},
             "admitted_task_path": task_file,
             "admitted_request": {"timeout": timeout},
             "continuation_run_prefix": run_prefix,
@@ -96,6 +98,14 @@ class TestExecuteWorkerOnePostResultRemainder(unittest.TestCase):
                     context_open = False
 
             recorded_kwargs: dict = {}
+            expected_kwargs = {
+                "root", "task_candidate", "task", "sources", "initial_head",
+                "initial_refs", "run_prefix", "timeout", "cli", "state",
+                "evidence_dir", "state_check", "worker_dir", "worker_res",
+                "current_worker", "seen_convs", "correction_count",
+                "seen_norm_findings", "seen_test_signatures",
+                "seen_bootstrap_signatures", "seen_branch_factors",
+            }
             remainder_calls = 0
 
             def mock_remainder(**kwargs) -> None:
@@ -103,6 +113,7 @@ class TestExecuteWorkerOnePostResultRemainder(unittest.TestCase):
                 remainder_calls += 1
                 self.assertTrue(context_open)
                 recorded_kwargs.update(kwargs)
+                self.assertEqual(set(kwargs), expected_kwargs)
                 self.assertEqual(state_check_calls, [1])
                 ev_dir = kwargs["evidence_dir"]
                 self.assertTrue(ev_dir.is_dir())
@@ -168,6 +179,7 @@ class TestExecuteWorkerOnePostResultRemainder(unittest.TestCase):
             self.assertEqual(recorded_kwargs["seen_norm_findings"], {"finding-1"})
             self.assertEqual(recorded_kwargs["seen_test_signatures"], {"test-sig-1"})
             self.assertEqual(recorded_kwargs["seen_bootstrap_signatures"], {"boot-sig-1"})
+            self.assertEqual(recorded_kwargs["seen_branch_factors"], set())
 
     def test_caller_mutation_isolation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -403,6 +415,54 @@ class TestExecuteWorkerOnePostResultRemainder(unittest.TestCase):
 
             self.assertEqual(binder_calls, 1)
             self.assertEqual(remainder_calls, [])
+
+    def test_strict_bound_history_context_and_empty_origins(self) -> None:
+        cases = (None, "REVIEWER", "BOOTSTRAP", "missing artifacts", "bad artifacts",
+                 "missing evidence", "bad evidence", "missing receipt", "unknown origin")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                root, _, _, _, ctx, request, returned = _setup_workspace(Path(td))
+                base = ctx["base_context"]
+                good = case in (None, "REVIEWER", "BOOTSTRAP")
+                if good:
+                    base["artifacts"]["correction_origin"] = case
+                elif case == "missing artifacts":
+                    del base["artifacts"]
+                elif case == "bad artifacts":
+                    base["artifacts"] = None
+                elif case == "missing evidence":
+                    del base["evidence"]
+                elif case == "bad evidence":
+                    base["evidence"] = None
+                elif case == "missing receipt":
+                    base["artifacts"]["correction_origin"] = "TEST_FAILED"
+                    del base["evidence"]["receipt"]
+                else:
+                    base["artifacts"]["correction_origin"] = "UNKNOWN"
+                checks, calls = [], []
+                ctx["state_check"] = lambda: checks.append(True)
+
+                @contextmanager
+                def binder(*args):
+                    yield ctx
+
+                def remainder(**kwargs):
+                    calls.append(kwargs)
+                    self.assertEqual(kwargs["seen_branch_factors"], set())
+                    kwargs["state"].update(state="READY_FOR_CODEX", final_reviewer_run_id="reviewer")
+
+                with patch("scripts.two_site_quota_resume_post_worker_one_remainder.worker_one_post_result_context", binder), \
+                     patch("scripts.two_site_quota_resume_post_worker_one_remainder._run_post_worker_remainder", remainder):
+                    if good:
+                        result = execute_worker_one_post_result_remainder(root, request, returned)
+                        self.assertEqual(result["state"], "READY_FOR_CODEX")
+                    else:
+                        with self.assertRaises(ProposalError):
+                            execute_worker_one_post_result_remainder(root, request, returned)
+                self.assertEqual(checks, [True, True] if good else [True])
+                self.assertEqual(len(calls), 1 if good else 0)
+                if not good:
+                    self.assertFalse((root / ".local/two-site-refactor/pipeline/valid-run-001").exists())
 
     def test_missing_final_reviewer_id_failures(self) -> None:
         bad_reviewer_ids = [None, "", "   ", 123]

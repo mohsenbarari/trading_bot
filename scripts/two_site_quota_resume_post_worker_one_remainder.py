@@ -9,6 +9,7 @@ try:
         RUN_PREFIX_RE,
         ProposalError,
         _run_post_worker_remainder,
+        _branch_root_failure_factor,
     )
     from scripts.two_site_quota_resume_post_worker_one import (
         worker_one_post_result_context,
@@ -18,6 +19,7 @@ except ImportError:
         RUN_PREFIX_RE,
         ProposalError,
         _run_post_worker_remainder,
+        _branch_root_failure_factor,
     )
     from two_site_quota_resume_post_worker_one import (  # type: ignore[no-redef]
         worker_one_post_result_context,
@@ -150,6 +152,23 @@ def execute_worker_one_post_result_remainder(
 
         state_check()
 
+        artifacts = base_context.get("artifacts")
+        evidence = base_context.get("evidence")
+        if type(artifacts) is not dict or type(evidence) is not dict:
+            raise ProposalError("missing or invalid bound correction artifacts/evidence")
+        origin = artifacts.get("correction_origin")
+        if origin is None:
+            origin = "REVIEWER"
+        if origin not in ("REVIEWER", "BOOTSTRAP", "TEST_FAILED"):
+            raise ProposalError(f"unknown bound correction origin: {origin!r}")
+        seen_branch_factors: set[str] = set()
+        if origin == "TEST_FAILED":
+            if "receipt" not in evidence:
+                raise ProposalError("missing bound receipt for TEST_FAILED origin")
+            factor = _branch_root_failure_factor(evidence["receipt"])
+            if factor is not None:
+                seen_branch_factors.add(factor)
+
         pipeline_dir = root / ".local/two-site-refactor/pipeline"
         try:
             resolved_pipeline_dir = pipeline_dir.resolve(strict=True)
@@ -212,6 +231,7 @@ def execute_worker_one_post_result_remainder(
             seen_norm_findings=seen_norm_findings,
             seen_test_signatures=seen_test_signatures,
             seen_bootstrap_signatures=seen_bootstrap_signatures,
+            seen_branch_factors=seen_branch_factors,
         )
 
         state_check()
