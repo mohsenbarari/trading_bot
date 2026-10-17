@@ -25,6 +25,7 @@ __all__ = [
     "TASK_ASSIGNMENT_TOKEN_MISSING",
     "ASSIGNMENT_EXPIRED",
     "ASSIGNMENT_CONTRACT_INVALID",
+    "parse_assignment_scope_bytes",
     "load_active_assignment_scope",
     "load_expected_assignment_scope",
     "validate_task_scope",
@@ -706,6 +707,194 @@ def _validate_stage_in_execution_order(exec_order_data: Any, stage_id: str) -> N
         )
 
 
+def _parse_assignment_header(
+    assignment_bytes: bytes,
+    assignment_id: str,
+    integration_branch: str,
+) -> Tuple[dict, datetime.datetime]:
+    """Decode canonical document fields through aware UTC expiry, without NOW."""
+    if type(assignment_bytes) is not bytes:
+        raise AssignmentScopeError("assignment_bytes must be exact bytes")
+    if len(assignment_bytes) > MAX_CONTROL_FILE_BYTES:
+        raise AssignmentScopeError("Assignment bytes oversized")
+    assignment_id = _validate_assignment_id(assignment_id)
+    if not isinstance(integration_branch, str) or not integration_branch:
+        raise AssignmentScopeError("integration_branch must be a nonempty string")
+    try:
+        assignment_text = assignment_bytes.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise AssignmentScopeError("Assignment file is not valid UTF-8") from e
+
+    fenced_blocks = re.findall(
+        r"^[ \t]*```(?:yaml|yml)?\s*\n(.*?)\n[ \t]*```\s*$",
+        assignment_text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if len(fenced_blocks) != 1:
+        raise AssignmentScopeError("Assignment Markdown must contain exactly one fenced YAML block")
+
+    assignment_yaml_data = _safe_load_yaml(fenced_blocks[0])
+    if not isinstance(assignment_yaml_data, dict):
+        raise AssignmentScopeError("Assignment YAML block must be a mapping")
+
+    doc_id = assignment_yaml_data.get("id") or assignment_yaml_data.get("assignment_id")
+    if doc_id != assignment_id:
+        raise AssignmentScopeError("Assignment document id does not match active_assignment_id")
+
+    status = assignment_yaml_data.get("status")
+    if status != "READY":
+        raise AssignmentScopeError("Assignment status must be READY")
+
+    role = assignment_yaml_data.get("role")
+    if role != "WORKER":
+        raise AssignmentScopeError("Assignment role must be WORKER")
+
+    doc_branch = assignment_yaml_data.get("integration_branch")
+    if doc_branch != integration_branch:
+        raise AssignmentScopeError("Assignment integration_branch does not match current branch")
+
+    external_access = assignment_yaml_data.get("external_access")
+    if external_access != "NONE":
+        raise AssignmentScopeError("Assignment external_access must be NONE")
+
+    raw_expires = assignment_yaml_data.get("expires_at")
+    if raw_expires is None:
+        raise AssignmentScopeError("Assignment document missing 'expires_at'")
+    if type(raw_expires) is datetime.date:
+        raise AssignmentScopeError("expires_at must include time and timezone information")
+    elif isinstance(raw_expires, datetime.datetime):
+        if raw_expires.tzinfo is None:
+            raise AssignmentScopeError("expires_at must include timezone information")
+        expires_dt = raw_expires
+    elif isinstance(raw_expires, str):
+        expires_at_str_raw = raw_expires.strip()
+        if not expires_at_str_raw:
+            raise AssignmentScopeError("expires_at cannot be empty")
+        try:
+            dt_clean = (
+                expires_at_str_raw.replace("Z", "+00:00")
+                if expires_at_str_raw.endswith("Z")
+                else expires_at_str_raw
+            )
+            expires_dt = datetime.datetime.fromisoformat(dt_clean)
+        except Exception as e:
+            raise AssignmentScopeError("Invalid expires_at format") from e
+        if expires_dt.tzinfo is None:
+            raise AssignmentScopeError("expires_at must include timezone information")
+    else:
+        raise AssignmentScopeError("Unsupported expires_at type")
+
+    utc_dt = expires_dt.astimezone(datetime.timezone.utc)
+    return assignment_yaml_data, utc_dt
+
+
+def _parse_assignment_stage_paths(
+    assignment_yaml_data: dict,
+) -> Tuple[str, Tuple[str, ...], Tuple[str, ...]]:
+    """Validate the existing stage/path contract independently of active expiry."""
+    raw_stage_id = assignment_yaml_data.get("stage_id")
+    raw_stages = assignment_yaml_data.get("stages")
+    stage_id: Optional[str] = None
+    if raw_stages is not None:
+        if not isinstance(raw_stages, (list, tuple)):
+            raise AssignmentScopeError("Assignment stages must be a list or tuple")
+        if len(raw_stages) != 1:
+            raise AssignmentScopeError("Assignment stages must have exactly one element")
+        item = raw_stages[0]
+        stage_from_list = _validate_stage_id(item)
+        if raw_stage_id is not None:
+            if _validate_stage_id(raw_stage_id) != stage_from_list:
+                raise AssignmentScopeError("Mismatch between stage_id and stages[0]")
+        stage_id = stage_from_list
+    elif raw_stage_id is not None:
+        stage_id = _validate_stage_id(raw_stage_id)
+    else:
+        raise AssignmentScopeError("Assignment must specify exactly one stage_id")
+
+    allowed_paths = _validate_pattern_list(assignment_yaml_data.get("allowed_paths"), "allowed_paths")
+    forbidden_paths = _validate_pattern_list(assignment_yaml_data.get("forbidden_paths"), "forbidden_paths")
+
+    return stage_id, allowed_paths, forbidden_paths
+
+
+def _finalize_assignment_scope(
+    assignment_bytes: bytes,
+    assignment_id: str,
+    integration_branch: str,
+    utc_dt: datetime.datetime,
+    stage_id: str,
+    allowed_paths: Tuple[str, ...],
+    forbidden_paths: Tuple[str, ...],
+) -> AssignmentScope:
+    """Hash the canonical contract and every original Markdown byte."""
+    iso_z = utc_dt.isoformat()
+    if iso_z.endswith("+00:00"):
+        iso_z = iso_z[:-6] + "Z"
+    expires_at_str = iso_z
+
+    canonical_contract = {
+        "allowed_paths": list(allowed_paths),
+        "assignment_id": assignment_id,
+        "expires_at": expires_at_str,
+        "external_access": "NONE",
+        "forbidden_paths": list(forbidden_paths),
+        "integration_branch": integration_branch,
+        "role": "WORKER",
+        "stage_id": stage_id,
+        "status": "READY",
+    }
+    canonical_contract_bytes = json.dumps(
+        canonical_contract, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+    hasher = hashlib.sha256()
+    hasher.update(canonical_contract_bytes)
+    hasher.update(b"\n")
+    hasher.update(assignment_bytes)
+    sha256_digest = hasher.hexdigest().lower()
+
+    return AssignmentScope(
+        assignment_id=assignment_id,
+        stage_id=stage_id,
+        allowed_paths=allowed_paths,
+        forbidden_paths=forbidden_paths,
+        expires_at=expires_at_str,
+        sha256=sha256_digest,
+    )
+
+
+def parse_assignment_scope_bytes(
+    assignment_bytes: bytes,
+    *,
+    expected_assignment_id: str,
+    integration_branch: str,
+) -> AssignmentScope:
+    """Describe already-read Assignment bytes; never establish historical authority.
+
+    Expired documents may be described. No clock, repository, registry or I/O is
+    consulted; the result authenticates neither custody nor acceptance time and
+    grants no adoption, exclusion, final-ACK, retention or activation authority.
+    """
+    try:
+        document, utc_dt = _parse_assignment_header(
+            assignment_bytes, expected_assignment_id, integration_branch,
+        )
+        stage_id, allowed_paths, forbidden_paths = _parse_assignment_stage_paths(document)
+        return _finalize_assignment_scope(
+            assignment_bytes, expected_assignment_id, integration_branch, utc_dt,
+            stage_id, allowed_paths, forbidden_paths,
+        )
+    except OverflowError as exc:
+        raise AssignmentScopeError(
+            "expires_at UTC normalization out of range",
+            AssignmentFact(ASSIGNMENT_CONTRACT_INVALID, None),
+        ) from exc
+    except AssignmentScopeError as exc:
+        if exc.fact is None:
+            exc._fact = AssignmentFact(ASSIGNMENT_CONTRACT_INVALID, None)
+        raise
+
+
 def _load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> AssignmentScope:
     if not integration_root:
         raise AssignmentScopeError("integration_root cannot be empty")
@@ -764,71 +953,9 @@ def _load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> 
         active_assignment_id=active_assignment_id,
     )
     assignment_bytes = _safe_read_file_bytes(assignment_file_path)
-    try:
-        assignment_text = assignment_bytes.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise AssignmentScopeError("Assignment file is not valid UTF-8") from e
-
-    fenced_blocks = re.findall(
-        r"^[ \t]*```(?:yaml|yml)?\s*\n(.*?)\n[ \t]*```\s*$",
-        assignment_text,
-        re.MULTILINE | re.DOTALL,
+    assignment_yaml_data, utc_dt = _parse_assignment_header(
+        assignment_bytes, active_assignment_id, current_branch,
     )
-    if len(fenced_blocks) != 1:
-        raise AssignmentScopeError("Assignment Markdown must contain exactly one fenced YAML block")
-
-    assignment_yaml_data = _safe_load_yaml(fenced_blocks[0])
-    if not isinstance(assignment_yaml_data, dict):
-        raise AssignmentScopeError("Assignment YAML block must be a mapping")
-
-    doc_id = assignment_yaml_data.get("id") or assignment_yaml_data.get("assignment_id")
-    if doc_id != active_assignment_id:
-        raise AssignmentScopeError("Assignment document id does not match active_assignment_id")
-
-    status = assignment_yaml_data.get("status")
-    if status != "READY":
-        raise AssignmentScopeError("Assignment status must be READY")
-
-    role = assignment_yaml_data.get("role")
-    if role != "WORKER":
-        raise AssignmentScopeError("Assignment role must be WORKER")
-
-    doc_branch = assignment_yaml_data.get("integration_branch")
-    if doc_branch != current_branch:
-        raise AssignmentScopeError("Assignment integration_branch does not match current branch")
-
-    external_access = assignment_yaml_data.get("external_access")
-    if external_access != "NONE":
-        raise AssignmentScopeError("Assignment external_access must be NONE")
-
-    raw_expires = assignment_yaml_data.get("expires_at")
-    if raw_expires is None:
-        raise AssignmentScopeError("Assignment document missing 'expires_at'")
-    if type(raw_expires) is datetime.date:
-        raise AssignmentScopeError("expires_at must include time and timezone information")
-    elif isinstance(raw_expires, datetime.datetime):
-        if raw_expires.tzinfo is None:
-            raise AssignmentScopeError("expires_at must include timezone information")
-        expires_dt = raw_expires
-    elif isinstance(raw_expires, str):
-        expires_at_str_raw = raw_expires.strip()
-        if not expires_at_str_raw:
-            raise AssignmentScopeError("expires_at cannot be empty")
-        try:
-            dt_clean = (
-                expires_at_str_raw.replace("Z", "+00:00")
-                if expires_at_str_raw.endswith("Z")
-                else expires_at_str_raw
-            )
-            expires_dt = datetime.datetime.fromisoformat(dt_clean)
-        except Exception as e:
-            raise AssignmentScopeError("Invalid expires_at format") from e
-        if expires_dt.tzinfo is None:
-            raise AssignmentScopeError("expires_at must include timezone information")
-    else:
-        raise AssignmentScopeError("Unsupported expires_at type")
-
-    utc_dt = expires_dt.astimezone(datetime.timezone.utc)
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     if utc_dt <= now_utc:
         raise AssignmentScopeError(
@@ -836,32 +963,9 @@ def _load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> 
             AssignmentFact(ASSIGNMENT_EXPIRED),
         )
 
-    iso_z = utc_dt.isoformat()
-    if iso_z.endswith("+00:00"):
-        iso_z = iso_z[:-6] + "Z"
-    expires_at_str = iso_z
-
-    raw_stage_id = assignment_yaml_data.get("stage_id")
-    raw_stages = assignment_yaml_data.get("stages")
-    stage_id: Optional[str] = None
-    if raw_stages is not None:
-        if not isinstance(raw_stages, (list, tuple)):
-            raise AssignmentScopeError("Assignment stages must be a list or tuple")
-        if len(raw_stages) != 1:
-            raise AssignmentScopeError("Assignment stages must have exactly one element")
-        item = raw_stages[0]
-        stage_from_list = _validate_stage_id(item)
-        if raw_stage_id is not None:
-            if _validate_stage_id(raw_stage_id) != stage_from_list:
-                raise AssignmentScopeError("Mismatch between stage_id and stages[0]")
-        stage_id = stage_from_list
-    elif raw_stage_id is not None:
-        stage_id = _validate_stage_id(raw_stage_id)
-    else:
-        raise AssignmentScopeError("Assignment must specify exactly one stage_id")
-
-    allowed_paths = _validate_pattern_list(assignment_yaml_data.get("allowed_paths"), "allowed_paths")
-    forbidden_paths = _validate_pattern_list(assignment_yaml_data.get("forbidden_paths"), "forbidden_paths")
+    stage_id, allowed_paths, forbidden_paths = _parse_assignment_stage_paths(
+        assignment_yaml_data,
+    )
 
     exec_order_rel = "docs/refactor/two-server/execution-order.yaml"
     _run_git_cmd(
@@ -877,34 +981,9 @@ def _load_active_assignment_scope(integration_root: Union[str, os.PathLike]) -> 
 
     _validate_stage_in_execution_order(exec_order_data, stage_id)
 
-    canonical_contract = {
-        "allowed_paths": list(allowed_paths),
-        "assignment_id": active_assignment_id,
-        "expires_at": expires_at_str,
-        "external_access": "NONE",
-        "forbidden_paths": list(forbidden_paths),
-        "integration_branch": current_branch,
-        "role": "WORKER",
-        "stage_id": stage_id,
-        "status": "READY",
-    }
-    canonical_contract_bytes = json.dumps(
-        canonical_contract, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-
-    hasher = hashlib.sha256()
-    hasher.update(canonical_contract_bytes)
-    hasher.update(b"\n")
-    hasher.update(assignment_bytes)
-    sha256_digest = hasher.hexdigest().lower()
-
-    return AssignmentScope(
-        assignment_id=active_assignment_id,
-        stage_id=stage_id,
-        allowed_paths=allowed_paths,
-        forbidden_paths=forbidden_paths,
-        expires_at=expires_at_str,
-        sha256=sha256_digest,
+    return _finalize_assignment_scope(
+        assignment_bytes, active_assignment_id, current_branch, utc_dt,
+        stage_id, allowed_paths, forbidden_paths,
     )
 
 
