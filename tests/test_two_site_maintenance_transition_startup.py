@@ -111,6 +111,10 @@ class TestWiringReplacementsMetadata(unittest.TestCase):
                 self.assertEqual(text.count(old_frag), 0)
 
 
+@mock.patch(
+    "scripts.two_site_maintenance_transition_startup.read_root_maintenance_bridge_locked",
+    new=lambda *args, **kwargs: None,
+)
 class TestRequireReviewedMaintenanceTransitionLocked(unittest.TestCase):
     def setUp(self) -> None:
         self.repo = _make_repo()
@@ -297,6 +301,10 @@ class TestRequireReviewedMaintenanceTransitionLocked(unittest.TestCase):
                 )
 
 
+@mock.patch(
+    "scripts.two_site_maintenance_transition_startup.read_root_maintenance_bridge_locked",
+    new=lambda *args, **kwargs: None,
+)
 class TestWiringIntegration(unittest.TestCase):
     def _is_applied(self, rel_path: str, new_frag: str) -> bool:
         root = _find_repo_root()

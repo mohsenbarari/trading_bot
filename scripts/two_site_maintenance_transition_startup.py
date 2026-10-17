@@ -11,6 +11,10 @@ from scripts.two_site_codex_autopilot import (
     validate_accepted_repository,
     validate_repository,
 )
+from scripts.two_site_root_maintenance_bridge import (
+    RootMaintenanceBridgeError,
+    read_root_maintenance_bridge_locked,
+)
 from scripts.two_site_maintenance_transition_storage import (
     MainMaintenanceRouteError,
     read_maintenance_transition_locked,
@@ -45,8 +49,8 @@ def require_reviewed_maintenance_transition_locked(
 ) -> None:
     """Verify an accepted maintenance transition record for startup or monitor preflight.
 
-    Caller holds exclusive Supervisor lock. The underlying read_maintenance_transition_locked
-    helper acquires the idle Broker client lock across all inspection and verification steps.
+    Caller holds exclusive Supervisor lock. The explicit live-Scope Root route is checked
+    first; marked errors never fall back. Each reader holds the idle Broker client lock.
     After Broker exit, live repository is revalidated and both STOP paths are rechecked.
     Does not perform any disk writes.
     """
@@ -55,42 +59,51 @@ def require_reviewed_maintenance_transition_locked(
     if not isinstance(state_root, Path) or state_root != root / STATE_ROOT_REL:
         raise MaintenanceTransitionStartupError("state_root must match canonical expected path")
 
-    record: Any = None
     try:
-        record = read_maintenance_transition_locked(root, state_root)
+        record = read_root_maintenance_bridge_locked(root, state_root, repository)
     except (KeyboardInterrupt, SystemExit):
         raise
-    except MainMaintenanceRouteError:
-        raise MaintenanceTransitionStartupError("main maintenance verification failed") from None
-    except Exception:
-        record = None
+    except RootMaintenanceBridgeError:
+        raise MaintenanceTransitionStartupError("root maintenance bridge verification failed") from None
 
     if record is None:
         try:
-            from scripts.two_site_quarantine_recovery_storage import (
-                read_quarantine_recovery_locked,
-            )
-
-            envelope = read_quarantine_recovery_locked(root, state_root)
+            record = read_maintenance_transition_locked(root, state_root)
         except (KeyboardInterrupt, SystemExit):
             raise
-        except Exception as exc:
-            raise MaintenanceTransitionStartupError(
-                "quarantine recovery verification failed"
-            ) from exc
+        except MainMaintenanceRouteError:
+            raise MaintenanceTransitionStartupError("main maintenance verification failed") from None
+        except Exception:
+            record = None
 
-        if not isinstance(envelope, dict):
-            raise MaintenanceTransitionStartupError(
-                "no reviewed maintenance transition or quarantine recovery record found"
-            )
-        rec = envelope.get("record")
-        if not isinstance(rec, dict) or not isinstance(rec.get("new_repository"), dict):
-            raise MaintenanceTransitionStartupError(
-                "invalid quarantine recovery record"
-            )
-        record = rec
-    elif not isinstance(record, dict):
-        raise MaintenanceTransitionStartupError("invalid maintenance transition record")
+        if record is None:
+            try:
+                from scripts.two_site_quarantine_recovery_storage import (
+                    read_quarantine_recovery_locked,
+                )
+
+                envelope = read_quarantine_recovery_locked(root, state_root)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                raise MaintenanceTransitionStartupError(
+                    "quarantine recovery verification failed"
+                ) from exc
+
+            if not isinstance(envelope, dict):
+                raise MaintenanceTransitionStartupError(
+                    "no reviewed maintenance transition or quarantine recovery record found"
+                )
+            rec = envelope.get("record")
+            if not isinstance(rec, dict) or not isinstance(rec.get("new_repository"), dict):
+                raise MaintenanceTransitionStartupError(
+                    "invalid quarantine recovery record"
+                )
+            record = rec
+        elif not isinstance(record, dict):
+            raise MaintenanceTransitionStartupError("invalid maintenance transition record")
+    elif type(record) is not dict:
+        raise MaintenanceTransitionStartupError("invalid root maintenance bridge record")
 
     try:
         norm_current = validate_accepted_repository(repository)
