@@ -123,7 +123,7 @@ see `ANTIGRAVITY_EXECUTION.md` for registration and version-pin recovery. Then u
 ```bash
 agy -p "Resume the approved two-site refactor autonomously from canonical state; run no external or production mutation." \
   --conversation <VERIFIED_EXECUTION_COORDINATOR_ID> \
-  --model gemini-3.8-flash-high --effort high \
+  --model gemini-4-argon-high --effort high \
   --sandbox \
   --output-format stream-json \
   --print-timeout 60m

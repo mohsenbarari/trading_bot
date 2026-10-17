@@ -9,7 +9,10 @@ Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا ی�
 
 مدل جاری Supervisor: `gpt-6.1-sol` با `xhigh`.
 مدل‌های Gemini از `templates/gemini-runtime-contract.json` می‌آیند:
-Worker=`gemini-3.8-flash-medium/medium` و Reviewer=`gemini-3.8-flash-high/high`.
+Worker=`gemini-4-argon-medium/medium` و Reviewer=`gemini-4-argon-high/high`.
+این انتخاب در ۲۰۲۶-۱۰-۱۷ پس از مشاهدهٔ هر دو مدل در فهرست همین حساب و آزمون
+واقعیِ مستقل هر دو نقش انجام شد؛ CLI پین‌شده 1.4.0 است. inventory منابعِ CLI
+مجوز ابزار نیست؛ Agent و hookهای محلی باید دقیقاً همان نقش محدود آماده‌شده باشند.
 این تفکیک از خروجی‌های غیرقابل‌تحویل
 ناشی از reasoning بی‌حد Worker جلوگیری می‌کند، درحالی‌که بازبینی مستقل روی بالاترین
 effort باقی می‌ماند. Runner پیش از مصرف provider سازگاری قرارداد و ارجاع‌هایش را
@@ -287,7 +290,7 @@ metadata مشترک Git بیرون writable worktree است؛ اولین add/com
 
 ## پایداری و کنترل منابع
 
-Antigravity CLI نسخهٔ 1.1.27 و SHA از runtime contract می‌آید. منبع کانونی در
+Antigravity CLI نسخهٔ 1.4.0 و SHA از runtime contract می‌آید. منبع کانونی در
 .local/tools/ زیر checkout مشترک، متعلق به UID جاری، single-link، read-only و دقیقاً
 همان SHA است. هر اجرا فقط روی کپی disposable در پوشهٔ موقت 0700 انجام می‌شود.
 AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا بررسی می‌شوند.

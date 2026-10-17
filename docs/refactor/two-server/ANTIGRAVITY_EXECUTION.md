@@ -8,6 +8,9 @@ Codex هماهنگ‌کننده است و Gemini تغییرات کامل را پ
 شروع کار امروز نیست. مسیر واقعیِ آزموده‌شده از Gemini Worker و Codex Verifier مستقل
 استفاده می‌کند؛ جزئیات شواهد و مجوزهای محدود در راهنمای بالا ثبت شده‌اند.
 
+تغییر مدل ۲۰۲۶-۱۰-۱۷ مربوط به مسیر CLI است: Argon در IDE قدیمی عرضه نشده است؛
+بخش «شروع در IDE» و نام مدل آن در ادامه، شرح تاریخی مسیر متوقف‌شده‌اند.
+
 gateway در commit `1290009dd51e80b776357c3668564796e3fc1f1f` نتیجهٔ
 `CHANGES_REQUIRED` با یک finding سطح High و دو Medium گرفته است. smoke تاریخی،
 آمادگی اجرای امروز را ثابت نمی‌کند. طبق اصل «امن، آسان و دقیق» در
@@ -117,7 +120,7 @@ authentication فهرست خالی بدهد و `--agent` به default برگرد
 ```bash
 agy -p "Resume the approved two-site refactor autonomously from canonical state; run no external or production mutation." \
   --conversation <VERIFIED_EXECUTION_COORDINATOR_ID> \
-  --model gemini-3.8-flash-high --effort high \
+  --model gemini-4-argon-high --effort high \
   --sandbox \
   --output-format stream-json \
   --print-timeout 60m
@@ -220,7 +223,7 @@ Coordinator و `invoke_subagent` گرفته می‌شوند، نه از متن �
 و schema ناشناخته یا تغییر باینری باعث توقف می‌شود. به `init.tools` اعتماد نمی‌شود،
 چون CLI در آن فهرست عمومی ابزارها را می‌دهد، نه ابزارهای واقعی نقش انتخاب‌شده.
 
-سپس هر سه نشست با `--conversation`، مدل صریح `gemini-3.8-flash-high`، `plan` و sandbox
+سپس هر سه نشست با `--conversation`، مدل صریح `gemini-4-argon-high`، `plan` و sandbox
 یک prompt ثابت بدون tool/read/write دریافت می‌کنند. پاسخ موفق، شناسهٔ دقیق و نبود
 tool step الزامی است. HEAD، full status، digest وضعیت محلی و اتصال نشست به تعریف
 Agent قبل/بعد کنترل می‌شوند. Agent قدیمی، config/model drift، خطای قبلی نشست، auth

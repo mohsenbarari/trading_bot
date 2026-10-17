@@ -82,7 +82,7 @@ def make_ndjson(events: list[dict]) -> str:
 def make_valid_events(
     root: str = "/root/test",
     conv_id: str = "conv-12345",
-    model: str = "gemini-3.8-flash-high",
+    model: str = "gemini-4-argon-high",
     permission_mode: str = "request-review",
     status: str = "SUCCESS",
     error: str | None = None,

@@ -9,8 +9,8 @@ status_file="$state_root/status.json"
 session="two-site-autopilot"
 broker_session="two-site-provider-broker"
 recovery_file="$report_root/recovery.json"
-antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.1.27-93eb2118b778a400.pin"
-expected_antigravity_sha256="93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
+antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.4.0-60e72242f07c131f.pin"
+expected_antigravity_sha256="60e72242f07c131f75afcd9a9e425d6ee097a1a1b3190ea98ae78fa4180bbfa8"
 running_heartbeat_max_age_seconds=90
 
 cd "$integration_root" || exit 1
@@ -384,9 +384,9 @@ if [[ "$restart_eligible" == true ]]; then
           && /usr/bin/chmod 700 "$probe_cli" \
           && [[ "$cli_sha256" == "$expected_antigravity_sha256" ]] \
           && [[ "$(/usr/bin/sha256sum -- "$probe_cli" 2>/dev/null | /usr/bin/awk '{print $1}' || true)" == "$expected_antigravity_sha256" ]] \
-          && [[ "$(AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 10 "$probe_cli" --version 2>/dev/null || true)" == "1.1.27" ]] \
+          && [[ "$(AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 10 "$probe_cli" --version 2>/dev/null || true)" == "1.4.0" ]] \
           && (ulimit -f 2048; AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 150 "$probe_cli" \
-            --model gemini-3.8-flash-high --effort high --sandbox --mode plan \
+            --model gemini-4-argon-high --effort high --sandbox --mode plan \
             --disable-slash-commands --output-format stream-json --print-timeout 2m \
             -p 'Health probe only. Do not invoke tools and do not read or write files. Reply exactly AUTOPILOT_PROVIDER_OK' \
             >"$probe_stdout_tmp" 2>"$probe_stderr_tmp") \
@@ -398,7 +398,7 @@ if [[ "$restart_eligible" == true ]]; then
             ([.[] | select(.event == "init")][0]) as $init |
             ([.[] | select(.event == "result")][0].result) as $result |
             $init.init.cwd == $root and
-            $init.init.model == "gemini-3.8-flash-high" and
+            $init.init.model == "gemini-4-argon-high" and
             $init.init.permission_mode == "request-review" and
             $result.conversation_id == $init.conversation_id and
             $result.status == "SUCCESS" and

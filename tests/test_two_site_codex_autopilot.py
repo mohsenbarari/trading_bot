@@ -975,11 +975,12 @@ class AutopilotContracts(unittest.TestCase):
         contract.write_text((proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_CONTRACT_REL).read_text())
         reference = self.root / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0]
         reference.parent.mkdir(parents=True, exist_ok=True)
-        reference.write_text(
-            (proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0])
-            .read_text()
-            .replace("gemini-3.8-flash-high", "gemini-3.8-flash-medium")
-        )
+        original_reference = (
+            proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0]
+        ).read_text()
+        changed_reference = original_reference.replace("gemini-4-argon-high", "gemini-4-argon-medium")
+        self.assertNotEqual(changed_reference, original_reference)
+        reference.write_text(changed_reference)
         for relative in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[1:]:
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)

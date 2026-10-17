@@ -68,9 +68,9 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
 
     def test_runtime_contract_references_are_consistent(self) -> None:
         contract = runner.validate_runtime_contract(runner.ROOT)
-        self.assertEqual(contract["model"], "gemini-3.8-flash-high")
+        self.assertEqual(contract["model"], "gemini-4-argon-high")
         self.assertEqual(contract["effort"], "high")
-        self.assertEqual(contract["worker_model"], "gemini-3.8-flash-medium")
+        self.assertEqual(contract["worker_model"], "gemini-4-argon-medium")
         self.assertEqual(contract["worker_effort"], "medium")
 
     def _execute_mock_run(

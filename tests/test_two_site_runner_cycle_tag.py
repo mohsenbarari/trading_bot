@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import tempfile
 from unittest import mock
 
 import pytest
@@ -20,6 +21,7 @@ try:
         run_standalone,
         validate_autopilot_run_id,
     )
+    from scripts.two_site_proposal_runtime_profile import PreparedProfile
 except ImportError:
     from two_site_proposal_runner import (
         AUTOPILOT_RUN_ID_ENV,
@@ -30,6 +32,7 @@ except ImportError:
         run_standalone,
         validate_autopilot_run_id,
     )
+    from two_site_proposal_runtime_profile import PreparedProfile
 
 VALID_CYCLE_TAG = "cycle-0001-20260913T120000Z-12345"
 SAMPLE_SHA = "a" * 64
@@ -97,6 +100,8 @@ def _mock_runner_execution(
     fail_in_execution: bool = False,
     retryable_failure: bool = False,
 ):
+    model_name = "gemini-4-argon-medium" if role == "worker" else "gemini-4-argon-high"
+    profile = PreparedProfile("session-xyz", root, model_name, "medium" if role == "worker" else "high")
     task = {
         "task_id": "test-task",
         "goal": "sample goal",
@@ -114,11 +119,13 @@ def _mock_runner_execution(
 
     @contextlib.contextmanager
     def fake_proposal_cli_context(r, cli=None):
-        yield proposals_root, root / "fake_cli", {
-            "path": str(root / "fake_cli"),
-            "sha256": "0" * 64,
-            "version": "1.0.0",
-        }
+        with tempfile.TemporaryDirectory(dir=root) as directory:
+            fake_cli = Path(directory) / "fake_cli"
+            yield proposals_root, fake_cli, {
+                "path": str(fake_cli),
+                "sha256": "0" * 64,
+                "version": "1.0.0",
+            }
 
     def fake_git(r, *args):
         if args and args[0] == "rev-parse":
@@ -137,7 +144,6 @@ def _mock_runner_execution(
         if retryable_failure:
             raise RetryableProviderSessionError("CLI did not complete one successful session")
 
-        model_name = "gemini-3.8-flash-medium" if role == "worker" else "gemini-3.8-flash-high"
         init_event = {
             "event": "init",
             "conversation_id": "session-xyz",
@@ -151,7 +157,7 @@ def _mock_runner_execution(
                 input_json = json.loads(input_bytes.decode("utf-8").strip())
                 prompt_text = input_json.get("message", {}).get("content", "")
                 if "CONTEXT_JSON:\n" in prompt_text:
-                    context_data = json.loads(prompt_text.split("CONTEXT_JSON:\n", 1)[1])
+                    context_data, _ = json.JSONDecoder().raw_decode(prompt_text.split("CONTEXT_JSON:\n", 1)[1])
                     sample_info = context_data.get("sources", {}).get("sample.py")
                     if sample_info and sample_info.get("content") is not None:
                         current_content = sample_info["content"]
@@ -201,6 +207,8 @@ def _mock_runner_execution(
          mock.patch("scripts.two_site_proposal_runner.git", side_effect=fake_git), \
          mock.patch("scripts.two_site_proposal_runner.proposal_cli_context", side_effect=fake_proposal_cli_context), \
          mock.patch("scripts.two_site_proposal_runner.cli_identity", return_value={"path": "cli", "version": "1.0.0", "sha256": "0" * 64}), \
+         mock.patch("scripts.two_site_proposal_runner.prepare_profile", return_value=profile), \
+         mock.patch("scripts.two_site_proposal_runner.validate_profile", return_value={"native_tools": 0}), \
          mock.patch("scripts.two_site_proposal_runner.bounded_file_text", side_effect=fake_bounded_file_text), \
          mock.patch("scripts.two_site_proposal_runner.capture_bounded_process", side_effect=fake_capture), \
          mock.patch("subprocess.Popen", return_value=mock_process):

@@ -15,8 +15,8 @@ from scripts import two_site_proposal_runtime_profile as profile
 from scripts import two_site_proposal_runner as runner
 
 CID = "12345678-1234-1234-1234-123456789abc"
-MODEL = "gemini-3.8-flash-high"
-REFS = ("user_information", "mcp_servers", "skills", "messaging", "artifacts", "guidelines", "communication_style")
+MODEL = "gemini-4-argon-high"
+REFS = ("user_information", "mcp_servers", "user_rules", "skills", "messaging", "artifacts", "guidelines", "communication_style")
 CHECKS = ("message_continue_check", "terminal_step_check", "max_generator_invocations_check", "empty_output_continuation_check", "force_invocation", "no_tool_call_check")
 AUX = bytes.fromhex("0a086a0642041a023001")
 FLAGS = bytes.fromhex("0a021001120208011a020800220208013a020801")
@@ -33,24 +33,52 @@ HOOK_ORACLE = {
 HOOK_BYTES = (json.dumps(HOOK_ORACLE, ensure_ascii=False, indent=2) + "\n").encode()
 
 
-def tool_literal(body):
+def tool_literal(body, *, refs=REFS):
     return message(
         (2, message((1, message((1, "System Prompt"), (2, body))))),
-        *[(2, message((2, name))) for name in REFS],
+        *[(2, message((2, name))) for name in refs],
         *[(5, message((1, name), (2, 1))) for name in CHECKS],
     )
 
 
-def literal_metadata(work, body, *, name="two-site-proposal-only", policy="off", extra=b"", tools_extra=b"", source=None, root_id=CID, selected_extra=b"", flags=FLAGS):
-    container = tool_literal(body) + tools_extra
+def flags_literal(agent_uri):
+    return FLAGS + message((8, agent_uri), (9, b"\x08\x01"))
+
+
+def resource_literal(kind, label, source, origin, status=1, plugin=None):
+    optional = () if plugin is None else ((6, plugin),)
+    return message((1, kind), (2, label), (3, source), (4, origin), (5, status), *optional)
+
+
+def inventory_rows(work):
+    hooks = str(work/".agents/hooks.json")
+    return (
+        resource_literal(4, "two-site-proposal-only", str(work/".agents/agents/two-site-proposal-only/agent.md"), 3),
+        resource_literal(6, "proposal-only", hooks, 3),
+        resource_literal(6, "proposal-single-invocation", hooks, 3),
+        resource_literal(3, "fixture-skill", "/global/skills/fixture/SKILL.md", 2),
+        resource_literal(5, "fixture-plugin", "/global/plugins/fixture", 2, plugin="fixture-plugin"),
+    )
+
+
+def literal_metadata(work, body, *, name="two-site-proposal-only", policy="off", extra=b"", tools_extra=b"", source=None, root_id=CID, selected_extra=b"", flags=None, refs=REFS, selected_resolved_extra=b"", selected_flags=None):
+    expected_source = (work/".agents/agents/two-site-proposal-only/agent.md").as_uri()
+    if flags is None:
+        flags = flags_literal(expected_source)
+    container = tool_literal(body, refs=refs) + tools_extra
     resolved = message(
         (5, policy), (11, AUX),
-        (17, message((16, source or (work/".agents/agents/two-site-proposal-only/agent.md").as_uri()))),
+        (17, message((16, source or expected_source))),
         (18, message((1, container), (3, AUX), (4, flags))),
     )
+    selected_resolved = message(
+        (5, policy), (11, AUX),
+        (18, message((1, container), (3, AUX),
+                     (4, flags if selected_flags is None else selected_flags))),
+    ) + selected_resolved_extra
     selected = message(
         (1, name), (8, "Isolated proposal-only author or reviewer; no native tools or delegation."),
-        (12, 0), (13, 1), (15, 1), (7, resolved),
+        (12, 0), (13, 1), (15, 1), (7, selected_resolved),
     ) + selected_extra
     return message((1, b"non-authority-ui"), (2, b"time"), (3, CID), (4, selected), (6, root_id), (7, work.as_uri()), (10, resolved), (18, b"runtime")) + extra
 
@@ -106,6 +134,20 @@ class RuntimeProfileContracts(unittest.TestCase):
     def replace_meta(self, data):
         with sqlite3.connect(self.db_path) as db:
             db.execute("UPDATE trajectory_metadata_blob SET data=? WHERE id='main'", (data,))
+
+    def reject_metadata_then_restore(self, data):
+        self.check_positive()
+        self.replace_meta(data)
+        before = self.db_path.read_bytes()
+        source, hooks = self.source.read_bytes(), self.hooks.read_bytes()
+        try:
+            self.assert_rejected()
+            self.assertEqual(self.db_path.read_bytes(), before)
+            self.assertEqual(self.source.read_bytes(), source)
+            self.assertEqual(self.hooks.read_bytes(), hooks)
+        finally:
+            self.replace_meta(self.oracle)
+        self.check_positive()
 
     def assert_rejected(self, candidate=None, *, fresh=True, cli_home=None):
         target = self.candidate if candidate is None else candidate
@@ -176,21 +218,52 @@ class RuntimeProfileContracts(unittest.TestCase):
             literal_metadata(self.work,self.body,source=(self.work/"foreign-agent.md").as_uri()),
             literal_metadata(self.work,self.body,root_id="different-root"),
             literal_metadata(self.work,self.body,selected_extra=message((16,1))),
-            literal_metadata(self.work,self.body,flags=FLAGS+message((99,1))),
+            literal_metadata(self.work,self.body,selected_resolved_extra=message((17,message((16,self.source.as_uri()))))),
+            literal_metadata(self.work,self.body,selected_flags=FLAGS),
+            literal_metadata(self.work,self.body,flags=flags_literal(self.source.as_uri())+message((99,1))),
             literal_metadata(self.work,self.body+" injected prompt"),
             b"", b"not protobuf", self.oracle*2,
         ]
         for bad in variants:
             with self.subTest(size=len(bad)):
-                self.check_positive()
-                self.replace_meta(bad)
-                before = self.db_path.read_bytes()
-                try:
-                    self.assert_rejected()
-                    self.assertEqual(self.db_path.read_bytes(),before)
-                finally:
-                    self.replace_meta(self.oracle)
-                self.check_positive()
+                self.reject_metadata_then_restore(bad)
+
+    def test_user_rules_reference_drift_rejects_role_and_actual_executor(self):
+        variants = {
+            "missing": REFS[:2] + REFS[3:],
+            "duplicate": REFS[:3] + ("user_rules",) + REFS[3:],
+            "reordered": REFS[:1] + ("user_rules", "mcp_servers") + REFS[3:],
+            "unknown": REFS[:2] + ("foreign_rules",) + REFS[3:],
+            "added_unknown": REFS + ("foreign_rules",),
+        }
+        for label, refs in variants.items():
+            with self.subTest(reference=label):
+                self.reject_metadata_then_restore(literal_metadata(self.work, self.body, refs=refs))
+                self.reject_executor_then_restore(self.executor(refs=refs))
+
+    def test_cli_14_source_flags_reject_each_fault_and_restore(self):
+        uri = self.source.as_uri()
+        foreign = (self.work/"foreign-agent.md").as_uri()
+        complete = flags_literal(uri)
+        variants = {
+            "legacy": FLAGS,
+            "missing_source": FLAGS + message((9, b"\x08\x01")),
+            "missing_nested": FLAGS + message((8, uri)),
+            "duplicate_source": complete + message((8, uri)),
+            "duplicate_nested": complete + message((9, b"\x08\x01")),
+            "foreign_source": flags_literal(foreign),
+            "source_wrong_wire": FLAGS + message((8, 1), (9, b"\x08\x01")),
+            "nested_wrong_wire": FLAGS + message((8, uri), (9, 1)),
+            "nested_false": FLAGS + message((8, uri), (9, b"\x08\x00")),
+            "nested_duplicate": FLAGS + message((8, uri), (9, b"\x08\x01\x08\x01")),
+            "nested_unknown": FLAGS + message((8, uri), (9, b"\x08\x01\x10\x01")),
+        }
+        for label, flags in variants.items():
+            with self.subTest(flags=label):
+                self.reject_metadata_then_restore(literal_metadata(self.work, self.body, flags=flags))
+        self.reject_metadata_then_restore(literal_metadata(
+            self.work, self.body, source=foreign, flags=flags_literal(foreign),
+        ))
 
     def test_legacy_body_metadata_rejects_and_restores(self):
         old_body = (
@@ -199,19 +272,7 @@ class RuntimeProfileContracts(unittest.TestCase):
             "Never call tools, shell, files, browser, network, subagents or delegation. "
             "You have no direct Source, Git, deployment or Writer authority."
         )
-        self.check_positive()
-        self.replace_meta(literal_metadata(self.work, old_body))
-        before_db = self.db_path.read_bytes()
-        before_source = self.source.read_bytes()
-        before_hooks = self.hooks.read_bytes()
-        try:
-            self.assert_rejected()
-            self.assertEqual(self.db_path.read_bytes(), before_db)
-            self.assertEqual(self.source.read_bytes(), before_source)
-            self.assertEqual(self.hooks.read_bytes(), before_hooks)
-        finally:
-            self.replace_meta(self.oracle)
-        self.check_positive()
+        self.reject_metadata_then_restore(literal_metadata(self.work, old_body))
 
     def test_source_hardlink_symlink_and_content_change_reject(self):
         original = self.source.read_bytes()
@@ -251,22 +312,79 @@ class RuntimeProfileContracts(unittest.TestCase):
             with sqlite3.connect(self.db_path) as db:db.execute("UPDATE trajectory_meta SET cascade_id=?",(CID,))
         self.check_positive()
 
-    def executor(self, model=MODEL, tools_extra=b"", kind=9):
-        config=message((28,model),(46,tool_literal(self.body)+tools_extra))
-        return message((1,kind),(2,1),(3,3),(9,CID),(10,message((1,config))),(11,b"opaque telemetry"),(17,b"source"))
+    def executor(self, model=MODEL, tools_extra=b"", kind=9, refs=REFS, inventory=None, include_inventory=True):
+        config=message((28,model),(46,tool_literal(self.body,refs=refs)+tools_extra))
+        base = message((1,kind),(2,1),(3,3),(9,CID),(10,message((1,config))),(11,b"opaque telemetry"),(17,b"source"))
+        if not include_inventory:
+            return base
+        if inventory is None:
+            inventory = message(*[(1, row) for row in inventory_rows(self.work)])
+        return base + message((18, inventory))
+
+    def reject_executor_then_restore(self, bad):
+        self.check_positive()
+        good = self.executor()
+        expected = {**self.expected, "actual_executor_checked": True}
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("INSERT INTO executor_metadata VALUES(?)", (good,))
+        try:
+            self.assertEqual(profile.validate_profile(self.candidate, fresh=False, cli_home=self.home), expected)
+            with sqlite3.connect(self.db_path) as db:
+                db.execute("UPDATE executor_metadata SET data=?", (bad,))
+            before = self.db_path.read_bytes()
+            source, hooks = self.source.read_bytes(), self.hooks.read_bytes()
+            try:
+                self.assert_rejected(fresh=False)
+                self.assertEqual(self.db_path.read_bytes(), before)
+                self.assertEqual(self.source.read_bytes(), source)
+                self.assertEqual(self.hooks.read_bytes(), hooks)
+            finally:
+                with sqlite3.connect(self.db_path) as db:
+                    db.execute("UPDATE executor_metadata SET data=?", (good,))
+            self.assertEqual(profile.validate_profile(self.candidate, fresh=False, cli_home=self.home), expected)
+        finally:
+            with sqlite3.connect(self.db_path) as db:
+                db.execute("DELETE FROM executor_metadata")
+        self.check_positive()
 
     def test_actual_executor_model_and_tools_and_unknown_field_reject(self):
         good=self.executor()
         for bad in (self.executor(model="different-model"), self.executor(tools_extra=message((3,message((1,"read_file"),(2,1))))), self.executor(kind=4), self.executor(kind=6), good+message((99,1))):
-            with sqlite3.connect(self.db_path) as db:db.execute("INSERT INTO executor_metadata VALUES(?)",(good,))
-            self.assertEqual(profile.validate_profile(self.candidate,fresh=False,cli_home=self.home),{**self.expected,"actual_executor_checked":True})
-            with sqlite3.connect(self.db_path) as db:db.execute("UPDATE executor_metadata SET data=?",(bad,))
-            try:
-                self.assert_rejected(fresh=False)
-            finally:
-                with sqlite3.connect(self.db_path) as db:db.execute("DELETE FROM executor_metadata")
-            self.check_positive()
+            self.reject_executor_then_restore(bad)
         self.assert_rejected(fresh=False)
+
+    def test_resource_inventory_faults_restore_same_actual_executor(self):
+        rows = inventory_rows(self.work)
+        agent, hook, second_hook, skill, plugin = rows
+        hooks = str(self.work/".agents/hooks.json")
+        def pack(*records):
+            return message(*[(1, record) for record in records])
+        def replace_agent(row):
+            return pack(row, *rows[1:])
+        variants = {
+            "empty": b"",
+            "wrong_envelope_wire": message((1, 1)),
+            "unknown_envelope": pack(*rows) + message((99, 1)),
+            "missing_agent": pack(*rows[1:]),
+            "missing_hook": pack(agent, hook, skill, plugin),
+            "duplicate_record": pack(*rows, agent),
+            "unknown_record_field": replace_agent(agent + message((99, 1))),
+            "duplicate_record_field": replace_agent(agent + message((2, "duplicate"))),
+            "wrong_record_wire": replace_agent(resource_literal(b"4", "agent", "/foreign", 3)),
+            "native_mcp": pack(*rows, resource_literal(7, "mcp", "/global/mcp", 2)),
+            "rule": pack(*rows, resource_literal(1, "rule", "/global/rule", 2)),
+            "wrong_agent_origin": replace_agent(resource_literal(4, "two-site-proposal-only", str(self.source), 2)),
+            "wrong_status": replace_agent(resource_literal(4, "two-site-proposal-only", str(self.source), 3, 0)),
+            "foreign_agent": replace_agent(resource_literal(4, "two-site-proposal-only", "/foreign/agent.md", 3)),
+            "foreign_hook": pack(agent, resource_literal(6, "foreign", hooks, 3), second_hook, skill, plugin),
+            "foreign_hook_path": pack(agent, resource_literal(6, "proposal-only", "/foreign/hooks.json", 3), second_hook, skill, plugin),
+            "local_skill": pack(agent, hook, second_hook, resource_literal(3, "skill", "/local/skill", 3), plugin),
+        }
+        for label, inventory in variants.items():
+            with self.subTest(inventory=label):
+                self.reject_executor_then_restore(self.executor(inventory=inventory))
+        self.reject_executor_then_restore(self.executor(include_inventory=False))
+        self.reject_executor_then_restore(self.executor(inventory=1))
 
     def test_database_links_size_and_duplicate_rows_reject(self):
         link=self.db_path.with_suffix(".other")

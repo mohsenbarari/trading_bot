@@ -179,7 +179,7 @@ After exact-SHA `APPROVE`: `closeout-prepare` → `closeout-review` →
 `next-stage-commit` → `next-stage-bind` → delegate the new Worker.
 
 All three Codex review bridges pin `gpt-6-sol` with `xhigh` reasoning in a read-only
-sandbox. Antigravity execution remains pinned separately to `gemini-3.8-flash-high`.
+sandbox. Antigravity execution remains pinned separately to `gemini-4-argon-high`.
 
 Never skip a receipt edge, manufacture an approval, use an arbitrary command, change
 DNS/Writer/deploy/production, read secrets, or broaden an Assignment. Unknown state

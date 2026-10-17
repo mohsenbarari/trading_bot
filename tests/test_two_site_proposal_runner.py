@@ -724,13 +724,13 @@ class ProposalContracts(unittest.TestCase):
 
     def test_cli_identity_requires_exact_reviewed_binary_and_version(self):
         cli = self.root / "agy"
-        cli.write_text("#!/usr/bin/env python3\nprint('1.1.27')\n")
+        cli.write_text(f"#!/usr/bin/env python3\nprint('{runner.EXPECTED_CLI_VERSION}')\n")
         cli.chmod(0o755)
         digest = runner.file_sha256(cli)
         with patch.object(runner, "EXPECTED_CLI_SHA256", digest):
             identity = runner.cli_identity(cli)
         self.assertEqual(identity, {
-            "path": str(cli), "version": "1.1.27", "sha256": digest,
+            "path": str(cli), "version": runner.EXPECTED_CLI_VERSION, "sha256": digest,
         })
 
         with patch.object(runner, "EXPECTED_CLI_SHA256", "0" * 64), \
@@ -1672,7 +1672,7 @@ class ProposalContracts(unittest.TestCase):
             return runner.role_model("worker")
         if hasattr(runner, "ROLE_MODELS") and "worker" in runner.ROLE_MODELS:
             return runner.ROLE_MODELS["worker"]
-        return "gemini-3.8-flash-medium"
+        return "gemini-4-argon-medium"
 
     def quota_events(self, *, error="RESOURCE_EXHAUSTED: quota exceeded, resets at 2026-09-24T19:00:00Z",
                      usage=None, conversation_id="session-quota", model=None):
