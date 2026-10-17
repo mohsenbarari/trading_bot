@@ -1,9 +1,11 @@
 # اتوماسیون Codex و Antigravity — قرارداد جاری
 
-به‌روز: ۲۰۲۶-۰۹-۱۵. مسیر توسعهٔ خودکار:
+به‌روز: ۲۰۲۶-۱۰-۱۷. مسیر توسعهٔ خودکار:
 Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
-تماس provider فقط از Broker محلیِ محدود انجام می‌شود؛ Codex یک درخواست فایل‌محور
-محلی می‌گذارد و به مجوز تودرتوی مدل approval-review وابسته نیست.
+تماس provider در مسیر عادی و `submit-maintenance` فقط از Broker محلیِ محدود
+انجام می‌شود؛ Codex یک درخواست فایل‌محور محلی می‌گذارد و به مجوز تودرتوی مدل
+approval-review وابسته نیست. تنها استثنا، مسیر دستی و متوقفِ `Root REVIEW_ONLY`
+برای بازبینی مستقل کد Codex است که تمام شروط بخش اختصاصی پایین را لازم دارد.
 مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
@@ -227,6 +229,70 @@ binding ناسازگار رد می‌شود. Runner این شناسه را فق�
 assignment اصلی و راه‌اندازی عادی؛ این مسیر مجوز دورزدن review یا تغییر
 production نیست.
 
+### Root REVIEW_ONLY — استثنای محدود برای بازبینی کد Codex
+
+سناریو: Codex طبق مجوز دائمی مالک یک بستهٔ کامل نوشته، ولی Worker واقعی وجود
+ندارد. برای گرفتن بازبینی مستقل نباید Worker یا conversation ساختگی ساخت.
+فقط در حالت دستیِ Root و Supervisor متوقف، یک Gemini verifier تازه می‌تواند
+proposal دقیق و هنوز اعمال‌نشدهٔ `CODEX_AUTHORED` را با سازوکار Runner پین‌شده
+بازبینی کند. این استثنا مسیر unattended، نویسندگی/اصلاح، جایگزین Broker خراب،
+یا راه دورزدن رد نهایی، سهمیه، مجوز محیط یا failure budget نیست. مسیرهای عادی
+و `submit-maintenance` همچنان فقط Broker هستند؛ عملیات تازه‌ای به Broker اضافه نشده است.
+
+هر فراخوانی این مسیر تمام شروط زیر را لازم دارد:
+
+1. Assignment تازه، معتبر و صادرشده، canonical `TASK_READY` واقعی، integration root،
+   HEAD، scope digest و مسیرهای دقیق باید یکسان باشند. هر سه متغیر
+   `TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED=1`، `TWO_SITE_ASSIGNMENT_ID` و
+   `TWO_SITE_ASSIGNMENT_SHA256` دقیقاً از همان Scope گرفته شوند. یک intent محلی،
+   تازه، تغییرناپذیر و تک‌مصرف، SHA خام Task، manifest کامل Source اولیه، SHA خام
+   proposal کامل، manifest کامل AFTER و SHA خام رسید native واقعی کاندیدا را
+   متصل کند. رسید باید `PASSED`، selectorهای دقیق Task و `unsupported_specs=[]`
+   داشته باشد؛ RAM/diagnostic به‌جای این گیت پذیرفته نیست. هویت معنایی و رزروهای
+   موجود رعایت شوند؛ intent یا نام تازه مجوز retry معادل یا آزادسازی رزرو نیست.
+2. Supervisor واقعاً `STOPPED` و بدون active assignment باشد. هیچ‌کدام از STOPهای
+   root/autopilot نباید وجود داشته باشد؛ خطای stat نیز مانع است و STOP خودکار پاک
+   نمی‌شود. Root قفل Supervisor، hold موجودِ Broker با IDLE تازه/صف‌های خالی و قفل
+   client، و قفل pipeline را تا پایان نگه دارد. خود Runner قفل nonblocking runner
+   را در تمام probe، profile، streaming و cleanup نگه می‌دارد؛ آن را دوبار نگیرید
+   یا دور نزنید. هویت‌ها، STOP، Scope/HEAD/refs/controls و همهٔ bytes پیش از dispatch
+   و در finally، از جمله مسیر خطا/BaseException، دوباره کنترل شوند.
+3. Root پیش از اجرا، کد کامل adapter محلی و وابستگی‌های استفاده‌شده را مستقل review
+   و byte-pin کند. اتصال خصوصی و محدودِ prior-loader برای همان Task/Source/HEAD/proposal
+   باید صریحاً بدون lineageِ Worker باشد؛ helper تاریخی مجوز یا API آمادهٔ عمومی نیست.
+   هر role-template یا projection بی‌اتلافِ prompt باید صریح، پین‌شده، مستقل بازبینی‌شده
+   و بازسازندهٔ محتوای کامل review باشد. تغییر shared SDK globals یا جایگزینی validation،
+   locks، parsers، profile، model، caps و permission checks ممنوع است. executable، shell،
+   CLI args، callback یا namespace/permission override عمومیِ دریافتی از درخواست مجاز نیست.
+4. تمام ورودی‌های مدل با reader موجودِ root-confined و bounded، regular/single-link،
+   بدون symlink و با هویت ثابت خوانده شوند. سقف Source/Task/proposal و خروجی حفظ شود؛
+   بستهٔ کامل Reviewer حداکثر ۱۸۷٬۰۰۰ بایت و prompt کامل حداکثر ۳۲۰٬۰۰۰ بایت باشد.
+   حذف AFTER، review جزئی، Source مبهم/encoded، cap waiver یا رسید مصنوعی ممنوع است.
+   پیش از dispatch، CLI version/SHA و fresh selected/resolved profile سنجیده شوند؛
+   پس از اجرا، actual executor و مدل/session/tool-free واقعی و CLI identity سنجیده شوند.
+   پیش از وقوع invocation ادعای اجرای executor نشود. سقف ترکیبی خروجی حین stream،
+   timeout، process-group termination و cleanup نسخهٔ disposable حفظ شوند. فقط خود
+   CLI به احراز هویت خودش دسترسی دارد؛ secret/credential/user/production data خارج دامنه‌اند.
+5. verifier run/session تازه و یکتا باشد. `cycle-` و Broker `maint-` جعل نشوند؛ هیچ
+   Worker status/conversation یا prior-worker tuple ساخته نشود. منشأ `CODEX_AUTHORED`
+   و نشست واقعی Reviewer ثبت شوند. SUCCESS، مدل/session/tool-free lifecycle، schema
+   کانونی verifier، VERIFIED با findings خالی و همهٔ bindingهای proposal/Task/native/
+   Source/prompt لازم‌اند. تمام شکست‌ها و هزینه‌ها حفظ شوند. dispatch مبهم، crash،
+   timeout، خروجی بدفرمت، auth/quota/security/runtime drift یا STOP دیرهنگام، مجوز
+   replay/resume/retry یا پذیرش جزئی نیست؛ شواهد همان تلاش تعیین تکلیف شوند. پرداخت
+   تازه فقط با تصمیم صریح، محدود و تک‌مصرف تازه در همان قواعد no-equivalent-retry
+   مجاز است؛ تأیید روتین دوباره از مالک لازم نیست و مجوز محیط مستقل باقی می‌ماند.
+6. تأیید Reviewer صرفاً شاهد است. Root همچنان بازبینی معنایی کامل، native کامل،
+   کنترل دقیق Source/mode/diff و پذیرش سریال Git با یک parent را انجام می‌دهد؛ فقط
+   bytes دقیقِ بازبینی‌شده اعمال/commit شوند. این مسیر BINDINGS_VALID/CONTINUE/checkpoint
+   ساختگی یا پذیرش خودکار Supervisor تولید نمی‌کند. Supervisor متوقف می‌ماند؛ restart/
+   adoption/activation، تغییر main/protected refs، production/deploy/DNS/Web Writer، حذف
+   evidence یا reset رزرو/checkpoint و اعتبار کسب‌وکاریِ Stage/goal از آن مجاز نمی‌شود.
+
+Scope، adapter، رسید native و intent تازه برای هر واحد لازم‌اند. دستورالعمل فوق
+به‌تنهایی مجوز یک فراخوانی مشخص نیست؛ Scope/receiptهای تاریخی 685/689 نیز استثنای
+قابل‌بازاستفاده نمی‌سازند. همهٔ شروط باید برای همان bytes و همان تلاش برقرار باشند.
+
 مالک در ۲۰۲۶-۰۹-۰۹
 ارسال source محدود و غیرمحرمانه، tests، docs، task، proposal، review/findings و
 test evidence به Google Antigravity/Gemini را دائماً و بدون تأیید جداگانه مجاز کرده است.
@@ -235,7 +301,7 @@ Codex نباید credential را بخواند، چاپ کند، کپی کند ی
 secret، اطلاعات هویتی/اعتباری، دادهٔ کاربر، دادهٔ عملیاتی/تولید، deploy، DNS،
 Writer، fetch/push و تغییر سرویس نامرتبط خارج دامنه‌اند. Broker این مجوز را گسترش نمی‌دهد.
 
-خروجی READY_FOR_CODEX مسیر دقیق Worker، Reviewer و proposal SHA را می‌دهد.
+در مسیر عادی، خروجی READY_FOR_CODEX مسیر دقیق Worker، Reviewer و proposal SHA را می‌دهد.
 بدون اسکن شواهد قدیمی، قبل از اعمال:
 
 ```bash
@@ -271,7 +337,8 @@ truncation، scope/security/Git/runtime و پوشش معنایی requirements و
 correction معنایی همچنان حداکثر دو بار است و رد معادل باید به rescope واقعی منجر شود.
 اگر Codex در گیت نهایی ایراد معنایی پیدا کند، همان واحد با Git تمیز و یافتهٔ دقیق
 BLOCKED/RESCOPE می‌شود؛ Codex runner مستقیم provider اجرا نمی‌کند و واحد بعدی باید
-کوچک‌تر و با context اصلاح‌شده ساخته شود.
+کوچک‌تر و با context اصلاح‌شده ساخته شود. استثنای دستی `Root REVIEW_ONLY` فقط با
+تمام شروط بخش اختصاصی خودش است و راه تبدیل همان retry ردشده به فراخوانی مستقیم نیست.
 
 حداکثر دو اصلاح متمایز در یک واحد؛ تمام‌شدن بودجه با Git تمیز و بدون commit یعنی
 BLOCKED/RESCOPE INTERNAL_REJECTION و یک واحد کوچک‌تر/کامل‌تر جدید.

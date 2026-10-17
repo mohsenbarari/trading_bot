@@ -29,6 +29,22 @@ governance edits may use independent Codex review where the model loader protect
 instruction paths. Gemini-route corrections retain SHA-bound feedback and fresh
 Worker/Reviewer sessions. Codex alone applies accepted bytes, tests and operates Git.
 
+Ordinary Worker/pipeline and submit-maintenance provider calls remain Broker-only.
+The sole narrow exception is the manual, stopped Root REVIEW_ONLY procedure in
+PROPOSAL_AUTOMATION.md for independently reviewing an exact unapplied
+CODEX_AUTHORED proposal without inventing a Worker. It requires a fresh issued
+Scope and real TASK_READY, passed complete native receipt with exact selectors
+and unsupported_specs=[], immutable one-shot intent, full <=187000-byte review,
+all existing Source/cap/STOP/permission/custody gates, and final serial Root Git.
+Root holds Supervisor, fresh-IDLE Broker-client and pipeline locks; unchanged
+Runner owns its runner lock. Check fresh profile/CLI before dispatch and actual
+executor/model/session/tool-free/CLI after execution. Independently review and pin
+the exact finite local adapter; no shared SDK mutation or generic request-supplied
+execution/namespace override. Preserve no-replay and semantic reservations.
+Historical helpers/receipts alone authorize nothing. This is not an auth/quota/
+Broker-failure fallback, an authoring/correction pipeline or an unattended route;
+it does not enable Supervisor adoption, activation or automatic acceptance.
+
 For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
 Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex
 cycle must finish one bounded unit in a clean commit before continuation. The local
