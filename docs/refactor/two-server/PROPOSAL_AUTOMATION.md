@@ -284,7 +284,19 @@ proposal دقیق و هنوز اعمال‌نشدهٔ `CODEX_AUTHORED` را با
    CLI args، callback یا namespace/permission override عمومیِ دریافتی از درخواست مجاز نیست.
 4. تمام ورودی‌های مدل با reader موجودِ root-confined و bounded، regular/single-link،
    بدون symlink و با هویت ثابت خوانده شوند. سقف Source/Task/proposal و خروجی حفظ شود؛
-   بستهٔ کامل Reviewer حداکثر ۱۸۷٬۰۰۰ بایت و prompt کامل حداکثر ۳۲۰٬۰۰۰ بایت باشد.
+   حد پیش‌فرض بستهٔ کامل Reviewer همچنان ۱۸۷٬۰۰۰ بایت و سقف SDK برای prompt کامل
+   ۳۲۰٬۰۰۰ بایت است. تنها پروفایل نسخه‌دار `ROOT_REVIEW_ONLY_AE04_FULL_V1` سقف
+   ۲۲۴٬۰۰۰ بایت UTF-8، شامل schema و رسید native واقعی، دارد: فقط برای اصلاح کامل
+   انتخاب‌گر AE04 با هر هفت requirement، هشت selector اصلی و دقیقاً سه مسیر
+   `scripts/two_site_cycle_tools.py`، `tests/test_two_site_canonical_selector_evidence.py`
+   و `tests/test_two_site_canonical_selector_support.py`. اندازهٔ واقعی بستهٔ قبلی
+   حتی بدون native برابر ۲۰۰٬۹۳۲ بایت بود؛ این افزایش محدود مانع حذف زمینه می‌شود.
+   پروفایل فقط پس از Scope تازه، TASK_READY واقعی، adapter محدود و مستقل‌بازبینی‌شده
+   با همین نسخهٔ ثابت، آزمون مرز ۲۲۴٬۰۰۰/۲۲۴٬۰۰۱ و UTF-8 چندبایتی، native کامل PASS
+   و intent تازه قابل اجراست؛ تنظیم دلخواه مدل/محیط یا تعمیم آن به واحد دیگر ممنوع است.
+   تمام Source اولیه و AFTER بازساختنی از diff کانونی بدون تغییر، زمینه، requirement
+   و آزمون‌ها حفظ شوند. TaskSources/proposal همچنان هرکدام حداکثر ۱۶۰٬۰۰۰ بایت‌اند؛
+   مسیرهای دیگر همان حد پیش‌فرض را دارند. این تصمیم پذیرش کد یا اجازهٔ retry نیست.
    حذف AFTER، review جزئی، Source مبهم/encoded، cap waiver یا رسید مصنوعی ممنوع است.
    پیش از dispatch، CLI version/SHA و fresh selected/resolved profile سنجیده شوند؛
    پس از اجرا، actual executor و مدل/session/tool-free واقعی و CLI identity سنجیده شوند.

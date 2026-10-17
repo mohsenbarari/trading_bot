@@ -2,7 +2,7 @@
 
 ## Authority & Roles
 - Owner authorizes bounded transfers/recovery and Codex code/tests/docs through refactor completion without reapproval; Gemini remains default.
-- Owner2026-10-17 includes measured finite budget revisions: scoped versioned implementation, boundary/compatibility tests and independent review first; existing gates apply until acceptance, no arbitrary override or quality cut.
+- Owner2026-10-17 includes measured finite budget revisions without reapproval. Named AE04 full-review profile224000 retains other187000 defaults and all context; only fresh scoped fixed-adapter/boundary/compatibility/independent gates authorize execution, never an arbitrary override or quality cut.
 - Honest authorship, exact-byte independent review and Root semantic/native/Git gates remain. CODEX_AUTHORED is not automatically accepted; never fake Worker/session. Bind task/source/Assignment/HEAD and link-safe pinned CLI.
 - No replay/reservation/checkpoint reset, secret/user/production export or main/production/deploy/DNS/Web Writer changes. Activation requires recovery/adoption/ACK/STOP/permission proof.
 - [Decision](../../refactor/two-server/AE05_AE06_GATE_DECISION_20260924.md): one Worker until comparable same-family cohorts, including failures and UNKNOWN usage, support overlap.

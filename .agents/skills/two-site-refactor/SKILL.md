@@ -34,7 +34,12 @@ The sole narrow exception is the manual, stopped Root REVIEW_ONLY procedure in
 PROPOSAL_AUTOMATION.md for independently reviewing an exact unapplied
 CODEX_AUTHORED proposal without inventing a Worker. It requires a fresh issued
 Scope and real TASK_READY, passed complete native receipt with exact selectors
-and unsupported_specs=[], immutable one-shot intent, full <=187000-byte review,
+and unsupported_specs=[], immutable one-shot intent and full review under the
+governing fixed profile: default187000 bytes; only ROOT_REVIEW_ONLY_AE04_FULL_V1
+permits224000 for the exact complete three-path/seven-requirement/eight-selector
+AE04 unit defined in PROPOSAL_AUTOMATION.md, after fresh Scope, measured complete
+packet, independently reviewed fixed adapter and exact boundary/UTF8 tests;
+no arbitrary override, omitted context or changed defaults for other units.
 all existing Source/cap/STOP/permission/custody gates, and final serial Root Git.
 Root holds Supervisor, fresh-IDLE Broker-client and pipeline locks; unchanged
 Runner owns its runner lock. Check fresh profile/CLI before dispatch and actual
