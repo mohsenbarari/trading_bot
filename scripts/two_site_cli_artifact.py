@@ -11,11 +11,18 @@ import sys
 import tempfile
 from typing import Callable, Iterator, Mapping
 
-from scripts.two_site_cli_exit_pin import (
-    CliExitPin,
-    capture_cli_exit_pin as _capture_cli_exit_pin,
-    verify_cli_exit_pin as _verify_cli_exit_pin,
-)
+if __package__:
+    from .two_site_cli_exit_pin import (
+        CliExitPin,
+        capture_cli_exit_pin as _capture_cli_exit_pin,
+        verify_cli_exit_pin as _verify_cli_exit_pin,
+    )
+else:
+    from two_site_cli_exit_pin import (
+        CliExitPin,
+        capture_cli_exit_pin as _capture_cli_exit_pin,
+        verify_cli_exit_pin as _verify_cli_exit_pin,
+    )
 
 __all__ = ["CliArtifactError", "prepare_disposable_cli"]
 
