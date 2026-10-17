@@ -12,7 +12,7 @@ import subprocess
 import time
 
 if __package__:
-    from scripts.two_site_agent_sandbox import SandboxError, _git_read
+    from scripts.two_site_agent_sandbox import SandboxError, _git_read, _run_bounded_process
     from scripts.two_site_inventory_display import (
         error_report,
         format_inventory,
@@ -31,7 +31,7 @@ if __package__:
     from scripts.two_site_source_excerpts import extract_bundle
     from scripts.two_site_task_preflight import prepare_task
 else:
-    from two_site_agent_sandbox import SandboxError, _git_read
+    from two_site_agent_sandbox import SandboxError, _git_read, _run_bounded_process
     from two_site_inventory_display import (
         error_report,
         format_inventory,
@@ -470,103 +470,170 @@ CANONICAL_TOTAL_BUDGET_BYTES = 8_000_000
 _BLOB_FAILED = object()
 
 
+def _selector_bindings(scope: ast.Module | ast.ClassDef) -> dict[str, ast.AST | None]:
+    """Index only direct definitions; same-scope writes invalidate a name."""
+    cells = {}
+
+    def bind(name, definition=None):
+        cells[name] = None if name in cells else definition
+
+    def invalidate_class_globals(node):
+        # Executed class scopes can write the module namespace; methods cannot.
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.Global):
+            cells.update(dict.fromkeys(node.names))
+        for child in ast.iter_child_nodes(node):
+            invalidate_class_globals(child)
+
+    def visit(node, direct=False):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bind(node.name, node if direct else None)
+            if isinstance(scope, ast.Module) and isinstance(node, ast.ClassDef):
+                invalidate_class_globals(node)
+            body_nodes = set(node.body)
+            for child in ast.iter_child_nodes(node):
+                if child not in body_nodes:
+                    visit(child)
+            return
+        if isinstance(node, ast.Lambda):
+            visit(node.args)
+            return
+        if isinstance(node, ast.comprehension):
+            for child in [node.iter, *node.ifs]:
+                visit(child)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bind(node.id)
+        elif isinstance(scope, ast.ClassDef) and isinstance(node, (ast.Global, ast.Nonlocal)):
+            cells.update(dict.fromkeys(node.names))
+        elif isinstance(node, ast.alias):
+            if node.name == "*":
+                cells.update(dict.fromkeys(cells))
+            else:
+                bind(node.asname or node.name.split(".")[0])
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            if node.name:
+                bind(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bind(node.rest)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for statement in scope.body:
+        visit(statement, True)
+    return cells
+
+
+def _resolve_selectors_in_source(cells: dict, selectors: list[str], path: str) -> bool:
+    for selector in selectors:
+        parts = selector.split("::")
+        if not (2 <= len(parts) <= 3 and parts[0] == path
+                and all(name.isidentifier() for name in parts[1:])
+                and parts[-1].startswith("test_")):
+            return False
+        definition = cells.get(parts[1])
+        if len(parts) == 3:
+            if not isinstance(definition, ast.ClassDef):
+                return False
+            definition = _selector_bindings(definition).get(parts[2])
+        if not isinstance(definition, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+    return True
+
+
 def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> dict:
     """Classify current canonical P1-00b evidence, bound to the current HEAD."""
     root = Path(root).resolve(strict=True)
     loaded: dict[str, tuple[dict, str]] = {}
-    blob_digests: dict[tuple[str, str], str | object] = {}
+    blobs: dict[tuple, object] = {}
+    definitions: dict[tuple[str, str], dict] = {}
     consumed_bytes = 0
     try:
         head = runner.git(root, "rev-parse", "HEAD")
         if not _HEX40.fullmatch(head):
             raise runner.ProposalError("HEAD is not a full lowercase commit SHA")
 
-        def _validate_commit(commit: object) -> str:
-            if not isinstance(commit, str) or not _HEX40.fullmatch(commit):
-                raise runner.ProposalError("unsafe Git commit reference")
-            return commit
-
         def _validate_safe_path(path: object) -> str:
-            if (
-                not isinstance(path, str)
-                or not path
-                or "\x00" in path
-                or "\\" in path
-                or ":" in path
-                or path.startswith("/")
-            ):
+            if (not isinstance(path, str) or not path or path.startswith("/")
+                    or any(char in path for char in ("\x00", "\\", ":"))):
                 raise runner.ProposalError("unsafe source path")
             runner.relative_file(root, path)
             return path
 
-        def git_blob_digest(commit: str, path: str) -> str:
+        def bounded(read, maximum: int, label: str, *, process: bool = False):
             nonlocal consumed_bytes
-            _validate_commit(commit)
-            _validate_safe_path(path)
-            cache_key = (commit, path)
-            if cache_key in blob_digests:
-                cached = blob_digests[cache_key]
-                if cached is _BLOB_FAILED:
-                    raise runner.ProposalError("bounded Git blob read failed")
-                return cached  # type: ignore[return-value]
-
-            remaining = CANONICAL_TOTAL_BUDGET_BYTES - consumed_bytes
-            if remaining <= 0:
+            limit = min(maximum, CANONICAL_TOTAL_BUDGET_BYTES - consumed_bytes)
+            if limit <= 0:
                 raise runner.ProposalError("canonical content budget exhausted")
-            current_limit = min(CANONICAL_READ_LIMIT_BYTES, remaining)
-
             try:
-                blob_bytes = _git_read(
-                    root,
-                    ("show", f"{commit}:{path}"),
-                    output_limit=current_limit,
-                )
-            except (SandboxError, OSError, subprocess.SubprocessError) as exc:
-                consumed_bytes += current_limit
-                blob_digests[cache_key] = _BLOB_FAILED
-                raise runner.ProposalError("bounded Git blob read failed") from exc
+                result = read(limit)
+            except (SandboxError, runner.ProposalError, OSError, subprocess.SubprocessError) as exc:
+                consumed_bytes += limit
+                raise runner.ProposalError(label) from exc
+            consumed_bytes += len(result.stdout) + len(result.stderr) if process else len(result)
+            return result
 
-            consumed_bytes += len(blob_bytes)
-            digest = runner.sha(blob_bytes)
-            blob_digests[cache_key] = digest
-            return digest
+        def git_blob(commit: str, path: str, *, metadata: bool = False):
+            if not isinstance(commit, str) or not _HEX40.fullmatch(commit):
+                raise runner.ProposalError("unsafe Git commit reference")
+            _validate_safe_path(path)
+            key = (commit, path, metadata)
+            if key not in blobs:
+                blobs[key] = _BLOB_FAILED
+                if metadata:
+                    result = bounded(
+                        lambda limit: _run_bounded_process(
+                            ["/usr/bin/git", "--no-replace-objects", "-C", str(root),
+                             "--literal-pathspecs", "ls-tree", "-z", commit, "--", path],
+                            cwd=root, timeout=30, output_limit=limit,
+                            env={"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
+                                 "GIT_NO_LAZY_FETCH": "1", "GIT_CONFIG_NOSYSTEM": "1"}),
+                        4096, "bounded Git blob read failed", process=True)
+                    entry = re.fullmatch(
+                        rb"(100644 blob|100755 blob|120000 blob|040000 tree|160000 commit) "
+                        rb"[0-9a-f]{40}\t([^\0]+)\0", result.stdout)
+                    if result.returncode or entry is None or entry[2] != path.encode("utf-8"):
+                        raise runner.ProposalError("invalid Git tree metadata")
+                    value = tuple(entry[1].split())
+                else:
+                    raw = bounded(lambda limit: _git_read(
+                        root, ("show", f"{commit}:{path}"), output_limit=limit),
+                        CANONICAL_READ_LIMIT_BYTES, "bounded Git blob read failed")
+                    value = (raw, runner.sha(raw))
+                blobs[key] = value
+            if blobs[key] is _BLOB_FAILED:
+                raise runner.ProposalError("bounded Git blob read failed")
+            return blobs[key]
 
         def load(path: str) -> tuple[dict, str]:
-            nonlocal consumed_bytes
             _validate_safe_path(path)
-            if path in loaded:
-                return loaded[path]
-            runner.git(root, "ls-files", "--error-unmatch", "--", path)
-            rel_path = runner.relative_file(root, path)
-
-            remaining = CANONICAL_TOTAL_BUDGET_BYTES - consumed_bytes
-            if remaining <= 0:
-                raise runner.ProposalError("canonical content budget exhausted")
-            current_limit = min(CANONICAL_READ_LIMIT_BYTES, remaining)
-
-            try:
-                data = runner.bounded_file_bytes(root, rel_path, current_limit, path)
-            except (runner.ProposalError, OSError) as exc:
-                consumed_bytes += current_limit
-                raise runner.ProposalError("canonical file read failed") from exc
-
-            consumed_bytes += len(data)
-            data_sha = runner.sha(data)
-            if data_sha != git_blob_digest(head, path):
-                raise runner.ProposalError(f"live canonical bytes differ from HEAD: {path}")
-            doc = runner.unique_json(data.decode("utf-8"))
-            if not isinstance(doc, dict):
-                raise runner.ProposalError(f"canonical document is not an object: {path}")
-            loaded[path] = (doc, data_sha)
+            if path not in loaded:
+                runner.git(root, "ls-files", "--error-unmatch", "--", path)
+                rel_path = runner.relative_file(root, path)
+                data = bounded(lambda limit: runner.bounded_file_bytes(
+                    root, rel_path, limit, path), CANONICAL_READ_LIMIT_BYTES,
+                    "canonical file read failed")
+                data_sha = runner.sha(data)
+                if data_sha != git_blob(head, path)[1]:
+                    raise runner.ProposalError(f"live canonical bytes differ from HEAD: {path}")
+                doc = runner.unique_json(data.decode("utf-8"))
+                if not isinstance(doc, dict):
+                    raise runner.ProposalError(f"canonical document is not an object: {path}")
+                loaded[path] = (doc, data_sha)
             return loaded[path]
 
+        def canonical_stage(document: dict, *, records: bool = False) -> bool:
+            return (document.get("schema_version") == 1 and document.get("stage") == "P1-00b"
+                    and (not records or isinstance(document.get("records"), list)))
+
         manifest, _ = load(_CANONICAL_ROOT)
-        if manifest.get("schema_version") != 1 or manifest.get("stage") != "P1-00b":
+        if not canonical_stage(manifest):
             raise runner.ProposalError("invalid canonical manifest schema or stage")
         inventory = manifest.get("inventory")
         sources = manifest.get("evidence_sources")
         counts = manifest.get("counts")
-        if not isinstance(inventory, dict) or not isinstance(sources, dict) or not isinstance(counts, dict):
+        if any(not isinstance(section, dict) for section in (inventory, sources, counts)):
             raise runner.ProposalError("canonical manifest sections missing")
         expected = inventory.get("expected_seed_count")
         surfaces = inventory.get("paths")
@@ -627,7 +694,8 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             raise runner.ProposalError("scenario source inventories do not match manifest")
         items = registry.get("items") if isinstance(registry, dict) else None
         status_by_blocker = {item.get("blocker_id"): item for item in items if isinstance(item, dict)} if isinstance(items, list) else {}
-        if any(status_by_blocker.get(key, {}).get("disposition") != "BLOCKED_EXPLICIT" or status_by_blocker.get(key, {}).get("status") != "BLOCKED_EXPLICIT" for key in _CANONICAL_BLOCKERS):
+        if any(status_by_blocker.get(key, {}).get(field) != "BLOCKED_EXPLICIT"
+               for key in _CANONICAL_BLOCKERS for field in ("disposition", "status")):
             raise runner.ProposalError("scenario blockers invalid")
 
         def ancestor(commit: object) -> bool:
@@ -640,16 +708,14 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 return False
 
         base, base_sha = load(sources["base_path"])
-        if base.get("schema_version") != 1 or base.get("stage") != "P1-00b" or not ancestor(base.get("inspected_head")) or not isinstance(base.get("records"), list):
+        if not canonical_stage(base, records=True) or not ancestor(base.get("inspected_head")):
             raise runner.ProposalError("base characterization invalid")
         c1, c1_sha = load(sources["continuation_path"])
         c1_base = c1.get("base_inventory")
-        if c1.get("schema_version") != 1 or c1.get("stage") != "P1-00b" or not isinstance(c1.get("records"), list) or not isinstance(c1_base, dict) or c1_base.get("path") != sources["base_path"] or c1_base.get("sha256") != base_sha or not ancestor(c1_base.get("inspected_head")):
+        if not canonical_stage(c1, records=True) or not isinstance(c1_base, dict) or c1_base.get("path") != sources["base_path"] or c1_base.get("sha256") != base_sha or not ancestor(c1_base.get("inspected_head")):
             raise runner.ProposalError("continuation 1 invalid")
 
-        # Source labels are not acceptance counters: reviewed promotions can
-        # skip labels. Audit every declared source and its whole predecessor
-        # closure, but only declared records contribute scenario coverage.
+        # Audit the full predecessor closure; only declared sources prove coverage.
         selected = {1: sources["continuation_path"], **numbered_sources}
         if len(set(sources.values())) != len(sources):
             raise runner.ProposalError("canonical source paths conflict")
@@ -668,7 +734,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             auditing.add(index)
             current, current_sha = load(path)
             link = current.get("predecessor_inventory")
-            if current.get("schema_version") != 1 or current.get("stage") != "P1-00b" or not isinstance(current.get("records"), list) or not isinstance(link, dict):
+            if not canonical_stage(current, records=True) or not isinstance(link, dict):
                 raise runner.ProposalError(f"continuation {index} invalid")
             predecessor = link.get("path")
             predecessor_index = path_indexes.get(predecessor) if type(predecessor) is str else None
@@ -689,7 +755,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 raise runner.ProposalError(f"continuation {index} invalid")
             _, predecessor_sha = audit_continuation(predecessor_index, predecessor)
             actual_touch = runner.git(root, "log", "-1", "--format=%H", head, "--", predecessor)
-            if link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or git_blob_digest(actual_touch, predecessor) != predecessor_sha:
+            if link.get("sha256") != predecessor_sha or link.get("last_commit") != actual_touch or git_blob(actual_touch, predecessor)[1] != predecessor_sha:
                 raise runner.ProposalError(f"continuation {index} invalid")
             auditing.remove(index)
             audited[index] = (path, current, current_sha)
@@ -702,30 +768,26 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
 
         current_seen: set[tuple[str, str]] = set()
         proven: set[str] = set()
+        invalid_current: set[str] = set()
         unknown: set[str] = set()
         for doc in docs:
             for record in doc["records"]:
                 seed_ids = record.get("seed_ids") if isinstance(record, dict) else None
                 if not isinstance(seed_ids, list) or any(not isinstance(seed, str) or seed not in known for seed in seed_ids):
                     raise runner.ProposalError("record seed IDs invalid")
-                # Origin-matrix records may deliberately have no seed binding.
-                # They remain canonical context, but cannot prove or weaken one.
+                # Unbound origin records cannot affect seed coverage.
                 if not seed_ids:
                     continue
-                # Scenario lookup is the normal path.  Avoid re-proving unrelated
-                # records while preserving the full-inventory audit when no target
-                # behavior is requested.
+                # Targeted lookup skips unrelated records, never graph validation.
                 if behavior_id is not None and behavior_id not in seed_ids:
                     continue
+                selectors = record.get("test_selectors")
                 valid = (
                     isinstance(record.get("path"), str)
-                    and isinstance(record.get("sha256"), str)
-                    and bool(_HEX64.fullmatch(record["sha256"]))
-                    and isinstance(record.get("last_commit"), str)
-                    and bool(_HEX40.fullmatch(record["last_commit"]))
-                    and isinstance(record.get("test_selectors"), list)
-                    and bool(record["test_selectors"])
-                    and all(isinstance(selector, str) and bool(selector) for selector in record["test_selectors"])
+                    and all(isinstance(record.get(key), str) and pattern.fullmatch(record[key])
+                            for key, pattern in (("sha256", _HEX64), ("last_commit", _HEX40)))
+                    and isinstance(selectors, list) and bool(selectors)
+                    and all(isinstance(item, str) and item for item in selectors)
                 )
                 if not valid:
                     unknown.update(seed_ids)
@@ -739,25 +801,45 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                     unknown.update(seed_ids)
                     continue
 
-                if last_commit == latest_touch:
+                current = last_commit == latest_touch
+                if current:
                     for seed in seed_ids:
                         if (seed, path) in current_seen:
                             raise runner.ProposalError(f"conflicting current evidence: {seed}")
                         current_seen.add((seed, path))
-                    proof_sha = None
-                    try:
-                        proof_sha = git_blob_digest(head, path)
-                    except runner.ProposalError:
-                        proof_sha = None
-                    if record["sha256"] == proof_sha and ancestor(last_commit):
-                        proven.update(seed_ids)
-                    else:
-                        unknown.update(seed_ids)
-                else:
-                    if not ancestor(last_commit) or git_blob_digest(last_commit, path) != record["sha256"]:
+                proof_commit = head if current else last_commit
+                try:
+                    if not ancestor(last_commit):
                         raise runner.ProposalError("historical record invalid")
+                    mode, kind = git_blob(proof_commit, path, metadata=True)
+                    supported = mode in (b"100644", b"100755") and kind == b"blob" and path.endswith(".py")
+                    if supported:
+                        raw, digest = git_blob(proof_commit, path)
+                        if digest != record["sha256"]:
+                            raise runner.ProposalError("historical record invalid")
+                        cache_key = (proof_commit, path)
+                        if cache_key not in definitions:
+                            try:
+                                definitions[cache_key] = _selector_bindings(ast.parse(raw.decode("utf-8")))
+                            except (SyntaxError, UnicodeError, ValueError):
+                                definitions[cache_key] = {}
+                        supported = _resolve_selectors_in_source(
+                            definitions[cache_key], record["test_selectors"], path)
+                except runner.ProposalError as exc:
+                    if not current:
+                        raise runner.ProposalError("historical record invalid") from exc
                     unknown.update(seed_ids)
+                    continue
+                if not supported:
+                    if not current:
+                        raise runner.ProposalError("historical record invalid")
+                    invalid_current.update(seed_ids)
+                elif current:
+                    proven.update(seed_ids)
+                unknown.update(seed_ids)
         unknown.difference_update(proven)
+        unknown.update(invalid_current)
+        proven.difference_update(invalid_current)
         covered_ids = ids if behavior_id is None else [behavior_id] if behavior_id in known else []
         coverage = {bid: "PROVEN_FOR_REQUESTED_SCENARIO" if bid in proven else "UNKNOWN" if bid in unknown else "PARTIAL_OR_SEED_ONLY" for bid in covered_ids}
         result = {"status": "VALID", "expected_seed_count": expected, "seed_count": len(ids), "coverage": coverage}
