@@ -116,6 +116,9 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_state
         ON market_observations(id,event_key,inserted_at_utc,source_code)
         WHERE source_code<>'XAUUSD';
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_xau_state
+        ON market_observations(event_key,inserted_at_utc,id,source_code)
+        WHERE source_code='XAUUSD';
         CREATE INDEX IF NOT EXISTS market_fact_export_ledger_state_idx
         ON market_fact_export_ledger(
             event_key,observation_inserted_at_utc,status,reason_code
@@ -440,7 +443,8 @@ def _pending_export_rows(
         historical.extend(select(
             exclusion + "ORDER BY o.id", selected, remaining,
             from_sql=("market_xau_model_input_buckets b "
-                      "CROSS JOIN market_observations o"),
+                      "CROSS JOIN market_observations o INDEXED BY "
+                      "idx_market_observations_export_xau_state"),
             columns="o.id", eligibility=(
                 "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
                 "AND CAST(strftime('%s','now') AS INTEGER) >= "

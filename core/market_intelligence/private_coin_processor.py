@@ -764,6 +764,10 @@ def process_coin_spool_cycle(
     try:
         initialize_capture_adapter(staging)
         initialize_market_store(market)
+        phase_started = time.monotonic()
+        phase_durations = {
+            "setup_duration_seconds": round(phase_started - cycle_started, 3),
+        }
         spool_sources = (
             (("market", paths.market_spool_directory),)
             if paths.market_spool_directory is not None
@@ -807,6 +811,8 @@ def process_coin_spool_cycle(
             market.commit()
         # The raw event and byte cursor are one durable restart boundary.
         staging.commit()
+        phase_durations["spool_duration_seconds"] = round(time.monotonic() - phase_started, 3)
+        phase_started = time.monotonic()
         feedback, anchors, causal = _load_causal_inputs(
             staging,
             paths,
@@ -819,6 +825,8 @@ def process_coin_spool_cycle(
             parser_version_before=COIN_GROUP_PARSER_VERSION,
             appended_at_utc=now,
         )
+        phase_durations["causal_inputs_duration_seconds"] = round(time.monotonic() - phase_started, 3)
+        phase_started = time.monotonic()
         projection = project_capture_changes(
             staging,
             market,
@@ -827,6 +835,8 @@ def process_coin_spool_cycle(
             group_parser_feedback=feedback,
             max_market_messages=max_market_projections,
         )
+        phase_durations["projection_duration_seconds"] = round(time.monotonic() - phase_started, 3)
+        phase_started = time.monotonic()
         pipeline_applied = set(
             projection.group_pipeline.applied_feedback_event_keys
             if projection.group_pipeline is not None
@@ -893,6 +903,7 @@ def process_coin_spool_cycle(
         market.commit()
         staging.commit()
         corpus.commit()
+        phase_durations["review_snapshot_commit_duration_seconds"] = round(time.monotonic() - phase_started, 3)
         archive_report = None
         archive_started = time.monotonic()
         if os.environ.get("MARKET_PROCESSOR_ARCHIVE_ENABLED", "0").strip() == "1":
@@ -933,6 +944,7 @@ def process_coin_spool_cycle(
     group = projection.group_pipeline
     return {
         **totals,
+        **phase_durations,
         "stream_records": {
             stream: values["records"] for stream, values in stream_totals.items()
         },
