@@ -33,7 +33,8 @@ Ordinary Worker/pipeline and submit-maintenance provider calls remain Broker-onl
 The sole narrow exception is the manual, stopped Root REVIEW_ONLY procedure in
 PROPOSAL_AUTOMATION.md for independently reviewing an exact unapplied
 CODEX_AUTHORED proposal without inventing a Worker. It requires a fresh issued
-Scope and real TASK_READY, passed complete native receipt with exact selectors
+Scope and real TASK_READY (or only the exact named Runner readiness below after
+its separate implementation acceptance), passed complete native receipt with exact selectors
 and unsupported_specs=[], immutable one-shot intent and full review under the
 governing fixed profile: default187000 bytes; only ROOT_REVIEW_ONLY_AE04_FULL_V1
 permits224000 for the exact complete three-path/seven-requirement/eight-selector
@@ -71,6 +72,19 @@ real TASK_READY, complete native PASS, independently reviewed pinned adapter,
 full measured/sealed packet and one explicit bounded session decision.
 This instruction grants no ordinary Worker/pipeline use, automatic retry,
 Supervisor restart, Stage credit or operational authority.
+
+Read the exact `ROOT_REVIEW_ONLY_AE03_RUNNER_TEXT_V1` section of
+PROPOSAL_AUTOMATION.md before that named stopped-Root maintenance case. It is
+not implemented/activated by instructions. Compatible independently accepted
+factory/tests and the dual-input witness must precede the two-expression Runner
+edit; pin the accepted factory version, never reuse historical authority.
+Only this exact case may use the named readiness and fixed private172K
+aggregate/canonical bindings; ordinary defaults and actual model limits stay.
+Its honest complete-run compact projection is NOT whole-Runner Gemini review:
+Root must still review/pin the complete originals/AFTER and prove the exact two
+byte changes. Preserve dependency context, independent/native/Source/Git,
+CLI/profile/executor/R2, STOP/no-replay and permission gates. No shared-SDK,
+generic namespace/callback/cap override, invocation or restart follows.
 
 For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
 Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex

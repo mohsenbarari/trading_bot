@@ -288,7 +288,8 @@ proposal دقیق و هنوز اعمال‌نشدهٔ `CODEX_AUTHORED` را با
 
 هر فراخوانی این مسیر تمام شروط زیر را لازم دارد:
 
-1. Assignment تازه، معتبر و صادرشده، canonical `TASK_READY` واقعی، integration root،
+1. Assignment تازه، معتبر و صادرشده، canonical `TASK_READY` واقعی (یا فقط readiness
+   نام‌گذاری‌شدهٔ پروفایل محدود Runner در پایین، با تمام شروط آن)، integration root،
    HEAD، scope digest و مسیرهای دقیق باید یکسان باشند. هر سه متغیر
    `TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED=1`، `TWO_SITE_ASSIGNMENT_ID` و
    `TWO_SITE_ASSIGNMENT_SHA256` دقیقاً از همان Scope گرفته شوند. یک intent محلی،
@@ -347,6 +348,66 @@ proposal دقیق و هنوز اعمال‌نشدهٔ `CODEX_AUTHORED` را با
    ساختگی یا پذیرش خودکار Supervisor تولید نمی‌کند. Supervisor متوقف می‌ماند؛ restart/
    adoption/activation، تغییر main/protected refs، production/deploy/DNS/Web Writer، حذف
    evidence یا reset رزرو/checkpoint و اعتبار کسب‌وکاریِ Stage/goal از آن مجاز نمی‌شود.
+
+### پروفایل محدود Runner؛ تعریف قرارداد، نه فعال‌سازی
+
+`ROOT_REVIEW_ONLY_AE03_RUNNER_TEXT_V1` فقط برای Scope تازهٔ
+`WA-AE03-RUNNER-TEXT-STDIN-20261018-725B` و تغییر دو عبارت در
+`scripts/two_site_proposal_runner.py:run` تعریف می‌شود: ورودی CLI از stream-json
+به text و bytes ورودی از envelope به `prompt.encode("utf-8")` تبدیل شود.
+هیچ print/prompt flag اضافه نمی‌شود؛ schema، output، مدل، profile، EOF، انتظار
+خروج واقعی، timeout، termination، cleanup و دیگر bytes/رفتارها ثابت می‌مانند.
+Source اولیه دقیقاً SHA55cd2cc5f0dc8489514db8843d3e3114532d2beced0566b0456e2cf87d5c8af4
+و AFTER دقیقاً SHAd786e58266893481c9bbd8447d0228170b2037f91073ac2b0ad447bc1f59367f است.
+این نگاشت اجازهٔ تغییر دیگری یا ادعای رفع hang واقعی نیست.
+
+علت محدودیت: حتی snapshot تشخیصیِ Runner کامل با Task خالیِ غیرمرجع 162736 بایت
+است؛ proposal کانونی نیز از160000 می‌گذرد. compact پس از admission ساخته می‌شود.
+در این یک پروفایل، فقط aggregate کامل TaskSources و canonical-proposal/readback
+حداکثر172000 بایت می‌شوند. خواندن هر Source خام، raw AFTER و مجموع raw AFTER
+همچنان حداکثر160000 است. پیش‌فرض TaskSources/proposal160000 و Root187000 برای
+تمام مسیرهای دیگر دست‌نخورده می‌ماند؛ اندازهٔ واقعی همهٔ دامنه‌ها پیش از اجرا ثبت شود.
+
+پیش‌نیاز مستقل و مقدم، پذیرش کامل factory سازگار و آزمون‌هایش و witness هر دو
+ورودی است؛ این بستهٔ آماده‌سازی با همان بودجه‌های عادی، Source کامل و review کامل
+اجرا می‌شود. factory فقط دو زوج ثابت Source→run-AST را می‌شناسد: زوج فعلی
+55cd…/90afa2143a2172212027a01092aa80107cd1b5f19cc6bdf3349671c9add0232b و زوج آیندهٔ
+d786…/8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d.
+عضویت جداگانه در دو مجموعه کافی نیست؛ cross-pair، Source ناشناخته و code/debug
+نامنطبق رد شوند. factory خراب یا suite حذف‌شده را به follow-up موکول نکنید.
+
+فقط پس از پذیرش جداگانهٔ کد همان factory، پیاده‌سازی پین‌شده می‌تواند readiness
+صریح `ROOT_RUNNER_TEXT_TASK_READY_V1` و review function ثابت این پروفایل را بدهد.
+بدنهٔ همهٔ validationهای عادی، Scope/path/selector/secret/link/Source و کنترل‌های
+مدل حفظ شود؛ تنها دامنه‌های aggregate بالا مجاز به تفاوت‌اند. private loader،
+canonical validator و allowance خواندن proposal باید ثابت، byte/AST-bound و
+مقید به همین Task/Scope/HEAD/path/Source باشند. خواندن Source خام در همان160000
+بسته بماند. shared SDK/globals یا تابع برگشتیِ factory قبلی را تغییر ندهید؛
+هیچ namespace/callback/encoder/cap دلخواه از درخواست یا محیط پذیرفته نشود.
+قائم‌مقامیِ ثابتِ اضافی باید در factory مستقل‌بازبینی‌شده صریح باشد، نه monkeypatch
+پنهان adapter. public check عادی همچنان ممکن است BUDGET_EXCEEDED بدهد؛ آن شکست
+TASK_READY نامیده نشود. readiness جدید همهٔ شروط واقعی را اجرا و اندازه/هویت‌ها
+را ثبت کند، نه اینکه خطای budget را بگیرد و موفقیت برگرداند.
+
+برای همین دو عبارت، تنها استثنای full-file-before مدل، projection موجود و صادقانهٔ
+compact است: کل تابع run با decorator/importها و تمام تعریف‌های وابستهٔ لازم،
+diff کانونیِ بازسازندهٔ AFTER، manifest کامل، تمام requirements، schema، native
+واقعی و Role کامل حفظ شوند. Gemini باید نشانگر
+`EXCERPT_NOT_FULL_SOURCE_CODEX_FULL_REVIEW_REQUIRED` و محدودیت زمینه را ببیند؛
+ادعای دیدن کل Runner ممنوع و نبود تعریف لازم CHANGES_REQUIRED است.
+Root تمام Source اولیه و AFTER را کامل بررسی و byte-pin کند و با inverse دقیق
+ثابت کند هیچ byte خارج دو عبارت تغییر نکرده است. این استثنا فقط بند full-file
+مدل و bindings ثابتِ فوق را برای همین مورد supersede می‌کند، نه کیفیت/پذیرش جزئی.
+compact material120000، prompt کامل compact160000، actual input-counter64000
+و request192000، سقف ترکیبی خروجی و همهٔ گیت‌های CLI/session/executor ثابت‌اند.
+
+مرز172000/172001 و چندبایتی، per-file160000/160001، cross-pair، هویت/Scope/path/
+selector غلط، namespace اضافی، تغییر shared SDK و سازگاری تمام مسیرهای عادی تست
+شوند. native شامل suite کامل fidelity و چهار suite725A، به‌علاوهٔ تست‌های profile
+جدید و compact باشد. native، review مستقل High، Source/Git و qualification واقعی
+خروج CLI هیچ‌کدام با سند جایگزین نمی‌شوند. تا پذیرش پیاده‌سازی، Scope تازه،
+adapter ثابتِ مستقل‌بازبینی‌شده و intent تازه، این پروفایل اجرایی نیست؛ مجوز تماس،
+restart/adoption، replay/reset یا Stage/سلامت/صرفه‌جویی از آن حاصل نمی‌شود.
 
 Scope، adapter، رسید native و intent تازه برای هر واحد لازم‌اند. دستورالعمل فوق
 به‌تنهایی مجوز یک فراخوانی مشخص نیست؛ Scope/receiptهای تاریخی 685/689 نیز استثنای
