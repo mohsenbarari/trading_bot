@@ -1,8 +1,8 @@
 # Coin Market Intelligence
 
 - Estimator `f5b98fee`: trade≤5m; non-fallback anchors same-source; retention7d/rollback. Old trades must not mask fresh offers.
-- Processor recovery retains peers/data and revision links; see `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
-- Oct03: sender `532a9804`, adapter `7aa96bdd`; bound-ACK replay, fair streams, trigger counters, no resets. Release-bound endpoint/progress watchdogs:15s, two failures, cooldown5m, deploy mutex; silence/catch-up never restart. `docs/MARKET_PIPELINE_RESILIENCE_20261003.md`.
+- Processor `aeaa3f0c`: numeric poison atomically FILTERED; preserve raw/exact lineage, other contracts fail closed. Fair live/history export with bounded cyclic discovery; keep indexes/timings. `docs/MARKET_PROCESSOR_NUMERIC_ISOLATION_20261018.md` links prior recovery.
+- Sender/adapter `532a9804`/`7aa96bdd`: bound ACK, fair streams, trigger counters; no resets. Release-bound endpoint/progress watchdog:15s/two failures/cooldown5m/deploy mutex; silence/catch-up never restart.
 - Account1 `a6dcd636`: retain replay quarantine. Liveness validates role/schema/source/status/freshness/PID; readiness exposes quarantine. No deleted/synthetic evidence.
 
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`.
@@ -15,5 +15,5 @@
 - Private melted: immutable price/quantity, lifetime=120s, freshness=900s; lower remaining=fill, zero=full, positive close=no-trade, edit≠trade.
 - Cutover needs real 7d coin/gold/Herat; predated coins abstain; no synthesis.
 - 2026-08-31: 22–23 Tehran uses melted/Herat fresh at 22:00 (`AFTER_CLOSE_HOLD`, +0.4%). Never revive older data; guard stays fail-open.
-- Account2 captures G1/G2. Display `7aa96bdd` reads canonical Bot input, not legacy Telegram/backfill. Preserve conversation lock/gates; indexed causal5m books, timeout120s/timer15s. Parallel bridge: same source/version. Result-based health; retain transaction/config rollback.
+- Account2=G1/G2. Display `7aa96bdd`=canonical Bot, not legacy/backfill. Conversation lock/gates; indexed causal5m books; timeout120s/timer15s. Bridge same source/version; result-health and transaction/config rollback.
 - Replay digests stream via `(run_id,account)` to avoid `/tmp` overflow. Empty retries require prior nonempty immutable manifest, attempt>1, zero quarantine. Never clear state/backfill.
