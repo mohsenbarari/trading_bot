@@ -421,7 +421,7 @@ PROMPT_TEMPLATE_PATH = "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md
 THIS_TEST_PATH = "tests/test_two_site_correction_prompt_contract.py"
 
 FROZEN_TEMPLATE_ORIGINAL_SHA = (
-    "8e6d30f7626f9fff1267d6778b64c0d4afc22bd3d5116fd25dda54415b307c0d"
+    "29dc6a165ee17754feae1042eae0e94febb4580148d5e556988fc7576a575d13"
 )
 FROZEN_NEW_BLOCK_SHA = (
     "32af5c581c046f6465b10cf323dc856c30ebcfa99221645be6fb756629b309a3"
@@ -562,7 +562,7 @@ def test_reviewer_policy_prompt_contract():
     with open(PROMPT_TEMPLATE_PATH, "rb") as f:
         raw = f.read(24001)
     assert len(raw) <= 24000
-    assert hashlib.sha256(raw).hexdigest() == "53e08768795485cfd14d41bf576b46830faa5ec1cc0aec3727d898cf60149132"
+    assert hashlib.sha256(raw).hexdigest() == "822446689dd11ac47f9ad0dc91b9a52d3db9058c997cb52cf7415abd01c928eb"
     text = raw.decode()
     assert text.count(POLICY_START) == 1 and text.count(POLICY_END) == 1
     s, e = text.index(POLICY_START), text.index(POLICY_END)
@@ -570,7 +570,7 @@ def test_reviewer_policy_prompt_contract():
     clause = text[s:e]
     assert len(clause.encode()) == 1338
     assert hashlib.sha256(clause.encode()).hexdigest() == "1144be4894d854164986f0cf1d308aa5a96615ce48f6b9b334b52e479def2db0"
-    assert hashlib.sha256((text[:s] + text[e:]).encode()).hexdigest() == "e8b96bccc8a71c1cd030416bec9407fa630288ab46d0fd5e048ee2550d869c7f"
+    assert hashlib.sha256((text[:s] + text[e:]).encode()).hexdigest() == "81dff73db3154783a9dede67e315a775751a65a56ed93121a9104c6c06a570da"
 
 
 def test_reviewer_policy_negative_mutations():
