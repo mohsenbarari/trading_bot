@@ -22,13 +22,36 @@ except ImportError:
     import two_site_proposal_runner as runner
 
 
+SCHEMA_MARKER = "\nREQUIRED_RESPONSE_SCHEMA_DATA:\n"
+SCHEMA_FOOTER = (
+    "\nReturn exactly one JSON object directly, no Markdown or fences. "
+    "The same exact schema is supplied to the CLI; no tool, shell or file action is authorized.\n"
+)
+# Independent fixed verifier envelope; this fixture tests budgets, not profile or receipt validity.
+EXPECTED_VERIFIER_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["status", "summary", "covered_requirements", "findings", "changes"],
+    "properties": {
+        "status": {"type": "string", "enum": ["VERIFIED", "CHANGES_REQUIRED", "BLOCKED"]},
+        "summary": {"type": "string"},
+        "covered_requirements": {"type": "array", "items": {"type": "integer"}},
+        "findings": {"type": "array", "items": {"type": "string"}},
+        "changes": {"type": "array", "maxItems": 0,
+                    "items": {"type": "object", "additionalProperties": False}},
+    },
+}
+
+
 class PreProviderExecutionIntercepted(Exception):
-    """Raised when execution reaches provider invocation without errors."""
+    """Raised after complete prompt/schema construction, before profile or Popen."""
 
 
 class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
+        self.assertEqual(runner.MAX_CONTEXT, 160000)
+        self.assertEqual(runner.MAX_REVIEW_TRANSPORT_BYTES, 160000)
         clean_env = {
             k: v
             for k, v in os.environ.items()
@@ -123,35 +146,72 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
         cli_context_calls: list,
         captured_data: dict,
     ):
+        # Observe the real first response-schema read. Never run profile preparation,
+        # git-init, a version probe, or a provider; Popen remains an independent tripwire.
+        real_read = runner.bounded_file_bytes
+
         @contextlib.contextmanager
         def fake_cli_context(root_path, cli=None):
             cli_context_calls.append((root_path, cli))
             proposals_dir = root_path / ".local/two-site-refactor/proposals"
             proposals_dir.mkdir(parents=True, exist_ok=True)
-            yield (
-                proposals_dir,
-                root_path / "fake_cli",
-                {
-                    "path": "fake_cli",
-                    "version": runner.EXPECTED_CLI_VERSION,
-                    "sha256": runner.EXPECTED_CLI_SHA256,
-                },
-            )
 
-        def fake_popen(cmd, **kwargs):
-            cwd = Path(kwargs.get("cwd", "."))
-            out_dir = cwd.parent
-            prompt_file = out_dir / "prompt.txt"
-            if prompt_file.is_file():
-                captured_data["prompt_text"] = prompt_file.read_text(encoding="utf-8")
-            status_file = out_dir / "status.json"
-            if status_file.is_file():
-                captured_data["status_json"] = json.loads(
-                    status_file.read_text(encoding="utf-8")
+            def schema_read(root, path, limit, label):
+                body = real_read(root, path, limit, label)
+                if path.name != "response-schema.json" or label != "response schema":
+                    return body
+                self.assertEqual(root, root_path)
+                self.assertEqual(limit, runner.MAX_CONTEXT)
+                self.assertEqual(path.parent.parent, proposals_dir)
+                self.assertNotIn("schema_read_args", captured_data)
+                prompt_path, status_path = path.parent / "prompt.txt", path.parent / "status.json"
+                prompt_raw = real_read(root, prompt_path, 2 * runner.MAX_CONTEXT, "budget fixture prompt")
+                status_raw = real_read(root, status_path, runner.MAX_CONTEXT, "budget fixture status")
+                expected_schema_raw = (json.dumps(EXPECTED_VERIFIER_SCHEMA, ensure_ascii=False, indent=2) + "\n").encode()
+                self.assertEqual(body, expected_schema_raw)
+                for observed_path, observed, cap in (
+                    (path, body, runner.MAX_CONTEXT),
+                    (prompt_path, prompt_raw, 2 * runner.MAX_CONTEXT),
+                    (status_path, status_raw, runner.MAX_CONTEXT),
+                ):
+                    self.assertEqual(real_read(root, observed_path, cap, "budget fixture immutable reread"), observed)
+                captured_data.update(
+                    schema_read_args=(root, path, limit, label), artifact_stage="response-schema-first-read",
+                    schema_raw=body, prompt_text=prompt_raw.decode("utf-8"),
+                    status_json=json.loads(status_raw.decode("utf-8")),
                 )
-            raise PreProviderExecutionIntercepted()
+                self.assertNotIn("runtime_profile", captured_data["status_json"])
+                self.assertNotIn("cli_pid", captured_data["status_json"])
+                raise PreProviderExecutionIntercepted()
+
+            with mock.patch.object(runner, "bounded_file_bytes", side_effect=schema_read):
+                yield (
+                    proposals_dir,
+                    root_path / "fake_cli",
+                    {
+                        "path": "fake_cli",
+                        "version": runner.EXPECTED_CLI_VERSION,
+                        "sha256": runner.EXPECTED_CLI_SHA256,
+                    },
+                )
+
+        def fake_popen(*args, **kwargs):
+            raise AssertionError("budget fixture crossed the pre-profile/schema-read boundary")
 
         return fake_cli_context, fake_popen
+
+    def _captured_context(self, captured_data: dict) -> dict:
+        text = captured_data["prompt_text"]
+        self.assertEqual(text.count("\nCONTEXT_JSON:\n"), 1)
+        self.assertEqual(text.count(SCHEMA_MARKER), 1)
+        context_and_schema = text.split("\nCONTEXT_JSON:\n", 1)[1]
+        context_text, schema_tail = context_and_schema.split(SCHEMA_MARKER, 1)
+        schema, end = json.JSONDecoder().raw_decode(schema_tail)
+        self.assertEqual(schema, EXPECTED_VERIFIER_SCHEMA)
+        self.assertEqual(schema_tail[end:], SCHEMA_FOOTER)
+        self.assertEqual(json.loads(captured_data["schema_raw"].decode("utf-8")), schema)
+        self.assertEqual(captured_data["artifact_stage"], "response-schema-first-read")
+        return json.loads(context_text)
 
     def test_boundary_1_task_source_snapshot_construction(self) -> None:
         """Boundary 1: Task/source snapshot ceiling (MAX_CONTEXT = 160,000 bytes)."""
@@ -162,13 +222,13 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
             task_file = tmp_dir / "task.json"
 
             # Measure base size with empty padding in goal
-            task["goal"] = "G"
+            task["goal"] = "Gé"
             base_snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
             pad_160k = runner.MAX_CONTEXT - len(base_snapshot)
             self.assertGreaterEqual(pad_160k, 0)
 
             # Exact accepted boundary: 160,000 bytes
-            task["goal"] = "G" + ("x" * pad_160k)
+            task["goal"] = "Gé" + ("x" * pad_160k)
             exact_snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
             self.assertEqual(len(exact_snapshot), runner.MAX_CONTEXT)
             task_file.write_text(json.dumps(task, ensure_ascii=False), encoding="utf-8")
@@ -217,8 +277,11 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
                         proposal=exact_prop_path,
                     )
                 self.assertEqual(len(cli_context_calls), 1)
+                mock_popen.assert_not_called()
                 self.assertIn("prompt_text", captured_data)
-                ctx = json.loads(captured_data["prompt_text"].split("CONTEXT_JSON:\n", 1)[1])
+                self.assertEqual(captured_data["schema_read_args"][1],
+                                 tmp_dir / ".local/two-site-refactor/proposals/run-b1-exact/response-schema.json")
+                ctx = self._captured_context(captured_data)
                 self.assertEqual(ctx["task"]["task_id"], task["task_id"])
                 self.assertEqual(ctx["sources"], sources)
                 self.assertEqual(ctx["proposal"]["canonical_proposal_sha256"], exact_sha)
@@ -227,7 +290,7 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
                 )
 
             # One-byte overflow boundary: 160,001 bytes
-            task["goal"] = "G" + ("x" * (pad_160k + 1))
+            task["goal"] = "Gé" + ("x" * (pad_160k + 1))
             overflow_snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
             self.assertEqual(len(overflow_snapshot), runner.MAX_CONTEXT + 1)
             task_file.write_text(json.dumps(task, ensure_ascii=False), encoding="utf-8")
@@ -275,7 +338,7 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
             base_prop_path, base_prop_dict, base_sha = self._create_worker_artifacts(
                 tmp_dir, task, sources, head,
                 materialized_content="value = 999\n",
-                summary="S",
+                summary="Sé",
                 run_id="worker-run-base",
             )
 
@@ -294,7 +357,7 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
             self.assertGreaterEqual(pad_160k, 0)
 
             # Exact accepted boundary: 160,000 bytes
-            exact_summary = "S" + ("x" * pad_160k)
+            exact_summary = "Sé" + ("x" * pad_160k)
             exact_prop_path, exact_prop_dict, exact_sha = self._create_worker_artifacts(
                 tmp_dir, task, sources, head,
                 materialized_content="value = 999\n",
@@ -310,7 +373,7 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
             )
 
             # One-byte overflow boundary: 160,001 bytes
-            overflow_summary = "S" + ("x" * (pad_160k + 1))
+            overflow_summary = "Sé" + ("x" * (pad_160k + 1))
             overflow_prop_path, overflow_prop_dict, overflow_sha = self._create_worker_artifacts(
                 tmp_dir, task, sources, head,
                 materialized_content="value = 999\n",
@@ -394,9 +457,12 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
                         proposal=exact_prop_path,
                     )
                 self.assertEqual(len(cli_context_calls), 1)
+                mock_popen.assert_not_called()
                 self.assertIn("prompt_text", captured_data)
+                self.assertEqual(captured_data["schema_read_args"][1],
+                                 tmp_dir / ".local/two-site-refactor/proposals/run-b2-exact/response-schema.json")
                 prompt_text = captured_data["prompt_text"]
-                ctx = json.loads(prompt_text.split("CONTEXT_JSON:\n", 1)[1])
+                ctx = self._captured_context(captured_data)
                 self.assertEqual(ctx["proposal"]["canonical_proposal_sha256"], exact_sha)
                 self.assertEqual(ctx["sources"], sources)
                 self.assertIn("-value = 1", ctx["proposal"]["unified_diff"])
@@ -433,7 +499,7 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
             evidence_data = {"status": "PASSED", "proposal_sha256": prop_sha, "detail": "D"}
             evidence_file.write_text(json.dumps(evidence_data), encoding="utf-8")
 
-            template_text = "# VERIFIER TASK\nVerify the candidate proposal."
+            template_text = "# VERIFIER TASK é\nVerify the candidate proposal."
 
             dummy_notes = {
                 "schema_version": 1,
@@ -464,6 +530,9 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
                 template_text
                 + "\nROLE: verifier\nCONTEXT_JSON:\n"
                 + json.dumps(base_prompt_mat, ensure_ascii=False)
+                + SCHEMA_MARKER
+                + json.dumps(EXPECTED_VERIFIER_SCHEMA, ensure_ascii=False, separators=(",", ":"))
+                + SCHEMA_FOOTER
             )
             pad_320k = (2 * runner.MAX_CONTEXT) - len(base_prompt.encode("utf-8"))
             self.assertGreaterEqual(pad_320k, 0)
@@ -522,10 +591,14 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
                         test_evidence=evidence_file,
                     )
                 self.assertEqual(len(cli_context_calls), 1)
+                mock_popen.assert_not_called()
                 self.assertIn("prompt_text", captured_data)
+                self.assertEqual(captured_data["schema_read_args"][1],
+                                 tmp_dir / ".local/two-site-refactor/proposals/run-b3-exact/response-schema.json")
                 exact_prompt_bytes = captured_data["prompt_text"].encode("utf-8")
                 self.assertEqual(len(exact_prompt_bytes), 2 * runner.MAX_CONTEXT)
-                ctx = json.loads(captured_data["prompt_text"].split("CONTEXT_JSON:\n", 1)[1])
+                self.assertGreater(len(exact_prompt_bytes), len(captured_data["prompt_text"]))
+                ctx = self._captured_context(captured_data)
                 self.assertEqual(ctx["proposal"]["canonical_proposal_sha256"], prop_sha)
                 self.assertEqual(ctx["sources"], sources)
                 self.assertEqual(ctx["pre_review_test_evidence"]["status"], "PASSED")
@@ -539,6 +612,11 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
 
             # One-byte overflow boundary: 320,001 bytes
             evidence_data["detail"] = "D" + ("y" * (pad_320k + 1))
+            overflow_material = dict(base_prompt_mat, pre_review_test_evidence=evidence_data)
+            overflow_prompt = (template_text + "\nROLE: verifier\nCONTEXT_JSON:\n"
+                + json.dumps(overflow_material, ensure_ascii=False) + SCHEMA_MARKER
+                + json.dumps(EXPECTED_VERIFIER_SCHEMA, ensure_ascii=False, separators=(",", ":")) + SCHEMA_FOOTER)
+            self.assertEqual(len(overflow_prompt.encode("utf-8")), 2 * runner.MAX_CONTEXT + 1)
             evidence_file.write_text(json.dumps(evidence_data), encoding="utf-8")
             cli_context_calls.clear()
             captured_data.clear()

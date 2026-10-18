@@ -63,15 +63,21 @@ def test_correction_worker_transport_clauses():
     assert "run_id" in correction and "proposal_sha256" in correction
 
     # Candidate SHA use, direct change scope, and finding resolution
-    assert "Change only paths needed to resolve every finding" in correction
+    assert "change only paths needed to resolve every finding" in correction
     assert "Use candidate original_sha256 values" in correction
     assert "candidate original_sha256" in correction
     assert "resolve every" in correction.lower()
     assert "address EVERY finding in feedback" in correction
 
     # Omission/retention of unaffected paths and rebase
-    assert "Omit unaffected paths" in correction
-    assert "controller retains/rebases them" in correction
+    assert "Omit unchanged listed paths" in correction
+    assert "controller deterministically retains/rebases omitted unaffected artifacts into the complete final proposal" in correction
+    assert "which still receives complete isolated tests and fresh independent review" in correction
+    assert "correction_transport.full_content_required_paths constrains transport mode, not membership in changes" in correction
+    assert "Only paths whose final bytes actually differ belong in correction changes" in correction
+    assert "Do not manufacture unrelated byte changes just to include every listed path" in correction
+    assert "For a changed listed path, emit complete non-empty genuinely different final content with candidate SHA and replacements=[]; never replacements or legacy form" in correction
+    assert "Originally-new remains full-mode-only AFTER overlay even though its candidate SHA is now non-null; original null SHA is restored only in rebased whole proposal" in correction
 
     # Prohibition on unintended reverts
     assert "Never revert accepted bytes unless a finding requires it" in correction
