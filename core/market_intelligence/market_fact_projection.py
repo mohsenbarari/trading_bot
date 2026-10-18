@@ -119,6 +119,9 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_xau_state
         ON market_observations(event_key,inserted_at_utc,id,source_code)
         WHERE source_code='XAUUSD';
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_source_latest
+        ON market_observations(source_code,event_time_utc DESC,id DESC)
+        WHERE source_code<>'XAUUSD';
         CREATE INDEX IF NOT EXISTS market_fact_export_ledger_state_idx
         ON market_fact_export_ledger(
             event_key,observation_inserted_at_utc,status,reason_code
@@ -384,13 +387,59 @@ def _pending_export_rows(
     # Coin-group facts are the primary estimator input and must not be starved
     # by the continuous public-reference stream. Offers sort ahead of trades,
     # so dependent trades follow their offer roots in this or an earlier batch.
-    rows = select(
-        "AND o.source_code IN ('GROUP_1','GROUP_2') "
-        "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
-        "o.event_time_utc DESC,o.id DESC",
-        (),
-        max_rows,
-    )
+    references = [code for code, source in load_source_registry().by_code().items()
+                  if source.transfer_to_bot and code not in {"GROUP_1", "GROUP_2"}]
+    fair_batch = max_rows >= max(10, len(references) + 3)
+    if fair_batch:
+        # A day of coin replay must not hide fresh gold/Herat references from
+        # the model. Bound every source's live share, and reserve history work.
+        # Source-time indexes restrict empty/acknowledged searches to ten
+        # minutes instead of sorting the entire permanent group history.
+        rows = []
+        history_reserve = min(max(1, max_rows // 5), max_rows - len(references) - 2)
+        group_budget = min(max_rows // 2, max_rows - len(references) - history_reserve)
+        group_share = max(1, group_budget // 2)
+        for source in ("GROUP_1", "GROUP_2"):
+            rows.extend(select(
+                "AND o.source_code=? AND o.event_time_utc >= "
+                "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+                "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
+                "o.event_time_utc DESC,o.id DESC", (source,), group_share,
+                from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
+                eligibility="o.source_code<>'XAUUSD'",
+            ))
+        reference_share = max(1, (max_rows - 2 * group_share - history_reserve) // max(1, len(references)))
+        for source in references:
+            remaining = max_rows - len(rows)
+            if remaining <= 0:
+                break
+            if source == "XAUUSD":
+                rows.extend(select(
+                    "ORDER BY b.bucket_number DESC", (), min(reference_share, remaining),
+                    from_sql="market_xau_model_input_buckets b CROSS JOIN market_observations o INDEXED BY idx_market_observations_export_xau_state",
+                    eligibility=(
+                        "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
+                        "AND b.bucket_number >= CAST(strftime('%s','now') AS INTEGER) / "
+                        f"{XAU_MODEL_INPUT_BUCKET_SECONDS} - {600 // XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                        "AND CAST(strftime('%s','now') AS INTEGER) >= "
+                        f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                        f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
+                    ),
+                ))
+            else:
+                rows.extend(select(
+                    "AND o.source_code=? AND o.event_time_utc >= "
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+                    "ORDER BY o.event_time_utc DESC,o.id DESC", (source,), min(reference_share, remaining),
+                    from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
+                    eligibility="o.source_code<>'XAUUSD'",
+                ))
+    else:
+        rows = select(
+            "AND o.source_code IN ('GROUP_1','GROUP_2') "
+            "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
+            "o.event_time_utc DESC,o.id DESC", (), max_rows,
+        )
     remaining = max_rows - len(rows)
     if remaining:
         selected = tuple(bytes(row["event_key"]) for row in rows)
@@ -407,7 +456,7 @@ def _pending_export_rows(
             + "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
             + "ORDER BY o.event_time_utc DESC,o.id DESC",
             selected,
-            remaining,
+            max(0, remaining - min(remaining, history_reserve)) if fair_batch else remaining,
         )
         fresh.sort(
             key=lambda row: (

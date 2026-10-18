@@ -469,6 +469,49 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_busy_groups_cannot_hide_live_references_or_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+
+            def add(identity, source, timestamp):
+                group = source.startswith("GROUP_")
+                gold = source == "PRIVATE_GOLD_PAPER_MINUTE"
+                herat = source == "USD_HERAT"
+                upsert_observation(market, MarketObservation(
+                    event_key=derive_event_key("fair-export-fixture", identity), source_code=source,
+                    source_family="GROUP" if group else "TELEGRAM_PRIVATE" if gold else "TELEGRAM_PUBLIC" if source in {"USD_HERAT", "XAUUSD"} else "EXTERNAL_MARKET",
+                    event_time_utc=timestamp, available_at_utc=timestamp,
+                    instrument="COIN_IMAM" if group else "MELTED_GOLD_PRIVATE" if gold else "USD_HERAT" if herat else "XAUUSD" if source == "XAUUSD" else "PAXG_USD_PROXY",
+                    market_label="FIXTURE", settlement_term="CASH" if group else "TOMORROW" if gold or herat else "SPOT",
+                    trade_form="PHYSICAL" if group else "PAPER_NORMAL" if gold or herat else "NOT_APPLICABLE",
+                    event_type="OFFER" if group or herat else "QUOTE" if gold or source == "XAUUSD" else "REFERENCE",
+                    side="SELL" if group or herat else "MID",
+                    price="187500" if group else "45100000" if gold else "185200" if herat else "3480",
+                    price_unit="PROJECT_THOUSAND_TOMAN" if group else "TOMAN_PER_MESGHAL_750" if gold else "TOMAN_PER_USD" if herat else "USD_PER_TROY_OUNCE",
+                    currency="TOMAN" if group or gold or herat else "USD", parser_version="fixture-v1",
+                ))
+
+            add("oldest", "GROUP_1", now - timedelta(days=2))
+            for number in range(60):
+                for source in ("GROUP_1", "GROUP_2", "BINANCE_PAXG_PUBLIC_API"):
+                    add(source + str(number), source, now - timedelta(seconds=number))
+            for source in ("PRIVATE_GOLD_PAPER_MINUTE", "USD_HERAT", "XAUUSD"):
+                add(source, source, now - timedelta(seconds=60))
+            market.commit()
+            rows = _pending_export_rows(market, max_rows=25)
+            self.assertEqual(len(rows), 25)
+            self.assertEqual(len({bytes(row["event_key"]) for row in rows}), 25)
+            for source in ("GROUP_1", "GROUP_2", "PRIVATE_GOLD_PAPER_MINUTE", "USD_HERAT", "XAUUSD", "BINANCE_PAXG_PUBLIC_API"):
+                self.assertIn(source, {row["source_code"] for row in rows})
+            self.assertIn(derive_event_key("fair-export-fixture", "oldest"), {bytes(row["event_key"]) for row in rows})
+            plan = " ".join(str(tuple(row)) for row in market.execute("EXPLAIN QUERY PLAN SELECT * FROM market_observations INDEXED BY idx_market_observations_export_source_latest WHERE source_code<>'XAUUSD' AND source_code=? AND event_time_utc>=? ORDER BY event_time_utc DESC,id DESC LIMIT 1", ("USD_HERAT", now.isoformat())))
+            self.assertIn("SEARCH", plan)
+            self.assertIn("idx_market_observations_export_source_latest", plan)
+            market.close()
+
     def test_pending_export_prioritizes_fresh_events_over_old_backlog(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")
