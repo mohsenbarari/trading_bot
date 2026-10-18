@@ -121,7 +121,7 @@ def test_encoded_187000_boundary_is_measured_without_truncation_or_waiver():
 def _runner_and_source():
     from scripts import two_site_proposal_runner as runner
     source = fidelity._read_runner_source()
-    assert hashlib.sha256(source).hexdigest() == fidelity.RUNNER_SOURCE_SHA256
+    assert hashlib.sha256(source).hexdigest() in fidelity._RUNNER_IDENTITIES
     return runner, source
 
 
@@ -247,3 +247,107 @@ def test_drafts_and_active_helper_test_sources_contain_no_raw_format_characters(
         body = path.read_bytes()
         assert body.isascii()
         assert not any(unicodedata.category(character) == "Cf" for character in body.decode("utf-8"))
+
+
+
+def _known_runner_versions():
+    runner, source = _runner_and_source()
+    command = b'*effort_args, "--input-format", "stream-json",'
+    stdin = b'(json.dumps({"event": "user", "message": {"content": prompt}}) + "\\n").encode(),'
+    new_command = b'*effort_args, "--input-format", "text",'
+    new_stdin = b'prompt.encode("utf-8"),'
+    if hashlib.sha256(source).hexdigest() == fidelity.RUNNER_SOURCE_SHA256:
+        current = source
+    else:
+        assert source.count(new_command) == source.count(new_stdin) == 1
+        current = source.replace(new_command, command).replace(new_stdin, stdin)
+    assert current.count(command) == current.count(stdin) == 1
+    future = current.replace(command, new_command).replace(stdin, new_stdin)
+    assert future.replace(new_command, command).replace(new_stdin, stdin) == current
+    assert [hashlib.sha256(s).hexdigest() for s in (current, future)] == [
+        "55cd2cc5f0dc8489514db8843d3e3114532d2beced0566b0456e2cf87d5c8af4",
+        "d786e58266893481c9bbd8447d0228170b2037f91073ac2b0ad447bc1f59367f",
+    ]
+    assert [hashlib.sha256(ast.dump(_run_node(s), include_attributes=True).encode()).hexdigest()
+            for s in (current, future)] == [
+        "90afa2143a2172212027a01092aa80107cd1b5f19cc6bdf3349671c9add0232b",
+        "8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d",
+    ]
+    return runner, (current, future)
+
+
+def _unexecuted_original(runner, source):
+    return FunctionType(fidelity._compile_run(ast.parse(source)), runner.run.__globals__,
+                        "run", runner.run.__defaults__, runner.run.__closure__)
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_both_known_versions_validate_without_executing_run(index, tmp_path, monkeypatch):
+    runner, versions = _known_runner_versions()
+    source = versions[index]
+    original = _unexecuted_original(runner, source)
+    before = {name: id(value) for name, value in vars(runner).items()}
+    assert fidelity._validated_run_code(source, original).co_name == "run"
+    with pytest.raises(fidelity.PromptFidelityError, match="actual SDK run code mismatch"):
+        fidelity._validated_run_code(source, _unexecuted_original(runner, versions[1-index]))
+    node = _run_node(source)
+    node.body[0] = ast.copy_location(ast.Pass(), node.body[0])
+    with pytest.raises(fidelity.PromptFidelityError):
+        fidelity._replace_context_call(node)
+    for attribute in ("co_linetable", "co_exceptiontable"):
+        fake = FunctionType(original.__code__.replace(**{attribute: b""}), original.__globals__)
+        with pytest.raises(fidelity.PromptFidelityError):
+            fidelity._validated_run_code(source, fake)
+    fixture = tmp_path / "known.py"
+    fixture.write_bytes(source)
+    with monkeypatch.context() as patcher:
+        patcher.setattr(fidelity, "_RUNNER_PATH", fixture)
+        assert fidelity._read_runner_source() == source
+    assert before == {name: id(value) for name, value in vars(runner).items()}
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_known_source_requires_its_own_ast_not_union_membership(index, monkeypatch):
+    runner, versions = _known_runner_versions()
+    source, other = versions[index], versions[1-index]
+    key = hashlib.sha256(source).hexdigest()
+    wrong = hashlib.sha256(ast.dump(_run_node(other), include_attributes=True).encode()).hexdigest()
+    monkeypatch.setitem(fidelity._RUNNER_IDENTITIES, key, wrong)
+    with pytest.raises(fidelity.PromptFidelityError, match="paired SDK source/run AST pin mismatch"):
+        fidelity._validated_run_code(source, _unexecuted_original(runner, source))
+
+
+def test_unknown_newline_and_each_half_migration_fail_closed(tmp_path, monkeypatch):
+    runner, (current, _) = _known_runner_versions()
+    invalid = [current + b"\n",
+               current.replace(b'*effort_args, "--input-format", "stream-json",',
+                               b'*effort_args, "--input-format", "text",'),
+               current.replace(b'(json.dumps({"event": "user", "message": {"content": prompt}}) + "\\n").encode(),',
+                               b'prompt.encode("utf-8"),')]
+    for source in invalid:
+        assert hashlib.sha256(source).hexdigest() not in fidelity._RUNNER_IDENTITIES
+        with pytest.raises(fidelity.PromptFidelityError, match="SDK source pin mismatch"):
+            fidelity._validated_run_code(source, runner.run)
+        fixture = tmp_path / "unknown.py"
+        fixture.write_bytes(source)
+        with monkeypatch.context() as patcher:
+            patcher.setattr(fidelity, "_RUNNER_PATH", fixture)
+            with pytest.raises(fidelity.PromptFidelityError, match="SDK source pin mismatch"):
+                fidelity._read_runner_source()
+
+
+def test_factory_rejects_switch_between_two_individually_known_sources(monkeypatch):
+    runner, versions = _known_runner_versions()
+    source = fidelity._read_runner_source()
+    other = next(value for value in versions if value != source)
+    reads = iter((source, other))
+    before = {name: id(value) for name, value in vars(runner).items()}
+    original = runner.run
+
+    def prior_loader(*args):
+        raise AssertionError("returned SDK function must never execute")
+
+    monkeypatch.setattr(fidelity, "_read_runner_source", lambda: next(reads))
+    with pytest.raises(fidelity.PromptFidelityError, match="shared SDK or source changed"):
+        fidelity.make_root_review_run(prior_loader)
+    assert runner.run is original and before == {name: id(value) for name, value in vars(runner).items()}

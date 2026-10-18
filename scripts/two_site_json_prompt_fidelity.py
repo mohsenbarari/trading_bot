@@ -15,6 +15,11 @@ import unicodedata
 
 RUNNER_SOURCE_SHA256 = "55cd2cc5f0dc8489514db8843d3e3114532d2beced0566b0456e2cf87d5c8af4"
 RUN_AST_SHA256 = "90afa2143a2172212027a01092aa80107cd1b5f19cc6bdf3349671c9add0232b"
+_RUNNER_IDENTITIES = {
+    RUNNER_SOURCE_SHA256: RUN_AST_SHA256,
+    "d786e58266893481c9bbd8447d0228170b2037f91073ac2b0ad447bc1f59367f":
+        "8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d",
+}
 _ENCODER_NAME = "_root_review_context_json_720f"
 _ROOT = Path(__file__).absolute().parents[1]
 _RUNNER_PATH = _ROOT / "scripts/two_site_proposal_runner.py"
@@ -78,7 +83,7 @@ def _read_runner_source():
               and path.resolve(strict=True) == path, "SDK source changed during read")
     finally:
         os.close(descriptor)
-    _need(hashlib.sha256(body).hexdigest() == RUNNER_SOURCE_SHA256, "SDK source pin mismatch")
+    _need(hashlib.sha256(body).hexdigest() in _RUNNER_IDENTITIES, "SDK source pin mismatch")
     return body
 
 
@@ -86,7 +91,7 @@ def _replace_context_call(run_node):
     """Transform exactly one pinned call; retain every other AST attribute."""
     _need(isinstance(run_node, ast.FunctionDef) and run_node.name == "run", "wrong SDK function AST")
     original_dump = ast.dump(run_node, include_attributes=True)
-    _need(hashlib.sha256(original_dump.encode()).hexdigest() == RUN_AST_SHA256,
+    _need(hashlib.sha256(original_dump.encode()).hexdigest() in _RUNNER_IDENTITIES.values(),
           "complete SDK run AST pin mismatch")
     transformed = copy.deepcopy(run_node)
     matches = [node for node in ast.walk(transformed) if isinstance(node, ast.Call)
@@ -133,7 +138,7 @@ def _same_code_identity(actual, expected):
 
 def _validated_run_code(source, original):
     _need(type(source) is bytes and len(source) <= _SOURCE_LIMIT
-          and hashlib.sha256(source).hexdigest() == RUNNER_SOURCE_SHA256, "SDK source pin mismatch")
+          and hashlib.sha256(source).hexdigest() in _RUNNER_IDENTITIES, "SDK source pin mismatch")
     _need(type(original) is FunctionType and original.__module__ == "scripts.two_site_proposal_runner"
           and original.__name__ == original.__qualname__ == "run"
           and original.__code__.co_filename == str(_RUNNER_PATH) and original.__closure__ is None,
@@ -142,6 +147,9 @@ def _validated_run_code(source, original):
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run"]
     _need(len(nodes) == 1, "SDK function source cardinality drift")
     node = nodes[0]
+    _need(hashlib.sha256(ast.dump(node, include_attributes=True).encode()).hexdigest()
+          == _RUNNER_IDENTITIES[hashlib.sha256(source).hexdigest()],
+          "paired SDK source/run AST pin mismatch")
     expected_code = _compile_run(tree)
     _need(_same_code_identity(original.__code__, expected_code), "actual SDK run code mismatch")
     transformed = copy.deepcopy(tree)

@@ -603,8 +603,10 @@ class ProposalContracts(unittest.TestCase):
         with patch.object(self, "parse_cli_input", wraps=self.parse_cli_input) as parse:
             self.invoke_fake_cli(run_id="fixture-wire")
         payload, schema = parse.call_args.args
-        self.assertEqual(parse.call_args.kwargs, {"input_format": "stream-json"})
-        self.assertEqual(payload, self.cli_wire(self.last_fake_cli_prompt_text))
+        prompt = self.last_fake_cli_prompt_text
+        expected = {"stream-json": self.cli_wire(prompt), "text": prompt.encode("utf-8")}
+        self.assertEqual(set(parse.call_args.kwargs), {"input_format"})
+        self.assertEqual(payload, expected[parse.call_args.kwargs["input_format"]])
         self.assertEqual(schema, self.last_cli_schema)
         sentinel = AssertionError("parser assertion must escape")
         with patch.object(self, "parse_cli_input", side_effect=sentinel):
