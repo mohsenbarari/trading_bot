@@ -1,6 +1,6 @@
 # اتوماسیون Codex و Antigravity — قرارداد جاری
 
-به‌روز: ۲۰۲۶-۱۰-۱۷. مسیر توسعهٔ خودکار:
+به‌روز: ۲۰۲۶-۱۰-۱۸. مسیر توسعهٔ خودکار:
 Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
 تماس provider در مسیر عادی و `submit-maintenance` فقط از Broker محلیِ محدود
 انجام می‌شود؛ Codex یک درخواست فایل‌محور محلی می‌گذارد و به مجوز تودرتوی مدل
@@ -13,12 +13,24 @@ Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا ی�
 مدل‌های Gemini از `templates/gemini-runtime-contract.json` می‌آیند:
 Worker=`gemini-4-argon-medium/medium` و Reviewer=`gemini-4-argon-high/high`.
 این انتخاب در ۲۰۲۶-۱۰-۱۷ پس از مشاهدهٔ هر دو مدل در فهرست همین حساب و آزمون
-واقعیِ مستقل هر دو نقش انجام شد؛ CLI پین‌شده 1.4.0 است. inventory منابعِ CLI
+واقعیِ مستقل هر دو نقش انجام شد؛ آن مشاهدهٔ تاریخی با CLI 1.4.0 بود.
+نسخه/SHA جاری CLI فقط از runtime contract می‌آیند. inventory منابعِ CLI
 مجوز ابزار نیست؛ Agent و hookهای محلی باید دقیقاً همان نقش محدود آماده‌شده باشند.
 این تفکیک از خروجی‌های غیرقابل‌تحویل
 ناشی از reasoning بی‌حد Worker جلوگیری می‌کند، درحالی‌که بازبینی مستقل روی بالاترین
 effort باقی می‌ماند. Runner پیش از مصرف provider سازگاری قرارداد و ارجاع‌هایش را
 می‌سنجد. حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
+
+شاهد مستقل ۲۰۲۶-۱۰-۱۸، فقط qualification غیرproviderِ 713Q برای artifact رسمی و
+غیرفعال CLI 1.4.2 با SHA085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef بود:
+version دو بار و profile تازهٔ Worker medium و Reviewer high با صفر step/tool سنجیده
+شد؛ فرایند آماده‌سازی پیش از generation عمداً متوقف شد. این شاهد نه invocation یا
+actual executor، نه خروج graceful پس از terminal result، سلامت Medium/High، رفع hang
+و نه activation را ثابت می‌کند. RAWِ Root با SHA7012e5acb1586f104495a39006f3a446d63362f1cde11258091fdd768190da50
+و Return مشاهده‌شده با SHA9268363c9eb06b96284de73c65ef70620c8859fd971681cd9c7f195ca7ef5fcd
+در `.local/two-site-refactor/reviews/AE03_713Q_ACTUAL_NONPROVIDER_RAW_20261018.json`
+و `AE03_713Q_NONPROVIDER_RETURN_OBSERVED_20261018.json` حفظ شده‌اند؛ این ارجاع تاریخی
+مجوز اجرا یا شاهد سلامت جاری نیست.
 
 ## سناریوی یک چرخه، بدون واسطه‌گری مالک
 
@@ -102,6 +114,18 @@ output اضافه نمی‌شود. `provider_reported` زمان گزارش‌ش�
 `outside_provider_unattributed` باقی‌ماندهٔ هنوز پروفایل‌نشده است، نه زمان تلف‌شده.
 تعداد requirement و selector صرفاً اندازهٔ اعلام‌شدهٔ بسته است؛ برای مقایسهٔ کار/توکن
 باید سناریوهای واقعاً پذیرفته‌شده و پیچیدگی مشابه بررسی شوند. صرفه‌جویی هنوز اثبات نشده.
+
+تغییر template/header در `GEMINI_TASK_PROMPT.md` باید چهار regression کاملِ
+correction_prompt_contract، prompt_transport_contract، verifier_context_budget و
+proposal_runner_effort و کل ماتریس۱۴ماژولیِ شامل همان چهار را اجرا کند. نام‌های
+ماتریس زیر قالب `tests/test_two_site_<name>.py` هستند:
+`proposal_runner_effort, autopilot_monitor, runtime_proposal_profile, profile_metadata_cardinality,
+cli_artifact, cli_version_exit_integration, proposal_runner, cli_exit_pin,
+worker_model_routing, runtime_profile_trust_deadline, prompt_transport_contract,
+correction_prompt_contract, verifier_context_budget, autopilot_monitor_wiring`.
+Goldenهای وابسته فقط از bytes کاملِ مستقل‌بازبینی‌شده به literal ثابت هم‌تراز شوند؛
+clauseهای محافظت‌شده، assertionهای hash و همهٔ negative vectorها حفظ شوند. این یادآوریِ
+فرایند و قراردادهای موجود است، نه runtime gate یا مجوز تازه.
 
 قرارداد Runner دقیقاً شش کلید دارد:
 `task_id`, `goal`, `context_files`, `allowed_files`, `requirements`, `test_selectors`.
@@ -199,6 +223,11 @@ session/table/patch سفارشی سنگین نیاز دارد، Coordinator آن
 replacement دقیق استفاده کند؛ برای فایل موجود کوچک‌تر نیز replacement مجاز است.
 فایل تازه همیشه با content کامل منتقل می‌شود.
 قالب چهارکلیدی raw change: path، original_sha256، content و replacements.
+چهار کلید بالا فقط raw transport مدل‌اند؛ هر change در proposal کانونیِ materializeشده
+دقیقاً سه کلید `path`, `original_sha256`, `content` دارد. در مسیر دستی Codex، summary
+کانونی باید با `CODEX_AUTHORED` آغاز شود؛ prefix و شکل سه‌کلیدی پیش از ساخت Task بررسی
+شوند تا raw چهارکلیدی به validator کانونی داده نشود. این preflight نه TASK_READY است
+و نه جایگزین Scope، Source/byte budget، native یا بازبینی مستقل.
 حالت کامل content کامل + replacements خالی؛ حالت replacement مقدار content=null و
 ۱ تا ۳۲ {old,new} یکتا و غیرهم‌پوشان، مجموع حداکثر ۶۵۵۳۶ بایت UTF-8.
 Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ Reviewer و Codex همواره
@@ -387,7 +416,7 @@ metadata مشترک Git بیرون writable worktree است؛ اولین add/com
 
 ## پایداری و کنترل منابع
 
-Antigravity CLI نسخهٔ 1.4.0 و SHA از runtime contract می‌آید. منبع کانونی در
+نسخه و SHA جاری Antigravity CLI از `templates/gemini-runtime-contract.json` می‌آیند. منبع کانونی در
 .local/tools/ زیر checkout مشترک، متعلق به UID جاری، single-link، read-only و دقیقاً
 همان SHA است. هر اجرا فقط روی کپی disposable در پوشهٔ موقت 0700 انجام می‌شود.
 AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا بررسی می‌شوند.
