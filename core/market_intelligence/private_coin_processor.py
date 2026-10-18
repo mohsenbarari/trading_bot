@@ -968,6 +968,7 @@ def process_coin_spool_cycle(
         ),
         "market_messages_reprojected": projection.market_messages_reprojected,
         "public_price_policy_rejections": projection.public_price_policy_rejections,
+        "input_policy_rejections": projection.input_policy_rejections,
         "pending_market_messages": sum(item["messages"] for item in projection_backlog.values()),
         "pending_coin_groups": pending_groups,
         "projection_backlog_by_source": projection_backlog,

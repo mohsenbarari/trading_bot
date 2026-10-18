@@ -20,6 +20,26 @@ def health(role, now=1000):
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_restart_loop_cannot_renew_startup_grace_forever(self):
+        role = "market-processor"
+        container = {"Id": "same-container", "Config": {}, "State": {"StartedAt": "1970-01-01T00:16:40Z"}}
+        current = {}
+        stale = health(role, 100)
+        self.assertTrue(watchdog.startup_grace(role, container, stale, current, 1000))
+        container["State"]["StartedAt"] = "1970-01-01T00:19:40Z"
+        self.assertFalse(watchdog.startup_grace(role, container, stale, current, 1200))
+        self.assertEqual(current["startup_first_seen_at"], 1000)
+        # A different verified deployment, unlike a process restart, gets grace.
+        container["Id"] = "replacement-container"
+        self.assertTrue(watchdog.startup_grace(role, container, stale, current, 1200))
+
+    def test_real_fresh_health_ends_startup_failure_chain(self):
+        role = "market-processor"
+        container = {"Id": "same-container", "Config": {}, "State": {"StartedAt": "1970-01-01T00:16:40Z"}}
+        current = {"startup_first_seen_at": 800}
+        self.assertFalse(watchdog.startup_grace(role, container, health(role, 1001), current, 1002))
+        self.assertNotIn("startup_first_seen_at", current)
+
     def test_fresh_old_release_heartbeat_cannot_mask_new_runtime_startup(self):
         document = {**health("market-store-adapter"), "release_sha": "old"}
         self.assertEqual(watchdog.assess("market-store-adapter", document, {}, 1000, expected_release="new"), "HEARTBEAT_RELEASE_MISMATCH")

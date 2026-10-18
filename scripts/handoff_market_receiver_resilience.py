@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import time
@@ -83,13 +84,31 @@ def bystanders(target):
     }
 
 
+def validate_prior_runtime(old, role, repair_release, health):
+    if not repair_release:
+        require(old["State"]["Running"], "prior_runtime_not_running")
+        return
+    require(role == "market-processor" and re.fullmatch(r"[0-9a-f]{40}", repair_release),
+            "repair_scope_invalid")
+    runtime_env = dict(item.split("=", 1) for item in old["Config"].get("Env", []))
+    require(runtime_env.get("MARKET_PIPELINE_RELEASE_SHA") == repair_release
+            and old["Config"]["Labels"].get("org.opencontainers.image.revision") == repair_release,
+            "repair_prior_release_mismatch")
+    require(old["State"].get("Status") in {"running", "restarting"}
+            and old["RestartCount"] > 0 and old["State"].get("ExitCode") == 1
+            and not old["State"].get("OOMKilled"), "repair_prior_failure_mismatch")
+    require(health.get("schema") == "market_processor/4.0" and health.get("role") == role
+            and health.get("release_sha") == repair_release, "repair_prior_health_mismatch")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--role", choices=("market-fact-receiver", "estimator-snapshot-receiver", "market-fact-sync-worker", "market-store-adapter"), required=True)
+    parser.add_argument("--role", choices=("market-fact-receiver", "estimator-snapshot-receiver", "market-fact-sync-worker", "market-store-adapter", "market-processor"), required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--release", required=True)
     parser.add_argument("--portable-digest", required=True)
     parser.add_argument("--ops-root", type=Path, required=True)
+    parser.add_argument("--repair-prior-release", help="Explicitly verified processor exit-1 loop only")
     args = parser.parse_args()
     require(os.geteuid() == 0, "root_required")
     require(args.ops_root.resolve() == args.ops_root, "ops_path_invalid")
@@ -104,9 +123,11 @@ def main():
     new_image = image["Id"]
     old = inspect(name)
     labels = old["Config"]["Labels"]
-    require(old["State"]["Running"] and labels.get("com.docker.compose.project") == PROJECT and labels.get("com.docker.compose.service") == args.role, "prior_runtime_drift")
+    require(labels.get("com.docker.compose.project") == PROJECT and labels.get("com.docker.compose.service") == args.role, "prior_runtime_drift")
     old_mounts = mounts(old)
     state_source = next(m["Source"] for m in old["Mounts"] if m["Destination"] == "/var/lib/market-data/state")
+    prior_health = json.loads((Path(state_source) / args.role / "health.json").read_text())
+    validate_prior_runtime(old, args.role, args.repair_prior_release, prior_health)
     owner_lock = Path(state_source) / args.role / "owner.lock"
     environment = Path(labels["com.docker.compose.project.environment_file"])
     files = [Path(p) for p in labels["com.docker.compose.project.config_files"].split(",")]
@@ -173,7 +194,7 @@ def main():
             with locked(owner_lock, 10001):
                 require(not inspect(name)["State"]["Running"], "rollback_owner_not_stopped")
             command([*compose, "up", "-d", "--no-deps", "--no-build", "--pull", "never", args.role])
-            journal["status"] = "ROLLED_BACK"
+            journal["status"] = "ROLLED_BACK_DEGRADED" if args.repair_prior_release else "ROLLED_BACK"
             write_json(journal_path, journal)
             raise
 

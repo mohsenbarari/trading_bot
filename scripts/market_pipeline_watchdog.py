@@ -87,6 +87,33 @@ def age(stamp, now):
         return float("inf")
 
 
+def startup_grace(role, container, health, current, now):
+    """Bound grace across a restart loop, not separately for every process.
+
+    Only a real fresh heartbeat from this start can end the failure chain. A
+    newly deployed container receives its own grace; Docker restarting the
+    same poisoned container must not hide stale processing forever.
+    """
+    identity = container["Id"]
+    started = container["State"]["StartedAt"]
+    if current.get("container_id") not in (None, identity):
+        current.pop("startup_first_seen_at", None)
+    current["container_id"] = identity
+    elapsed = age(started, now)
+    fresh = (health.get("role") == role and health.get("schema") == SCHEMAS[role]
+             and 0 <= age(health.get("updated_at_utc"), now) <= min(elapsed, STALE_SECONDS))
+    expected = dict(item.split("=", 1) for item in container["Config"].get("Env", [])
+                    if item.startswith("MARKET_PIPELINE_RELEASE_SHA="))
+    if expected and health.get("release_sha") != expected["MARKET_PIPELINE_RELEASE_SHA"]:
+        fresh = False
+    if fresh:
+        current.pop("startup_first_seen_at", None)
+        return False
+    if "startup_first_seen_at" not in current:
+        current["startup_first_seen_at"] = now - max(0, elapsed) if elapsed != float("inf") else now
+    return now - current["startup_first_seen_at"] < STALE_SECONDS
+
+
 def assess(role, health, previous, now, *, endpoint_ok=True, upstream=None, expected_release=None):
     """Return a liveness reason, preserving ordinary source silence."""
     if health.get("schema") != SCHEMAS[role] or health.get("role") != role:
@@ -162,16 +189,22 @@ def main():
                 if labels.get("com.docker.compose.project") != args.project or labels.get("com.docker.compose.service") != role:
                     raise RuntimeError("watchdog_container_identity_mismatch")
                 current = state.setdefault(role, {})
+                health = healths[role]
+                grace = startup_grace(role, container, health, current, now)
                 if not container["State"]["Running"]:
-                    results.append({"role": role, "status": "STOPPED_REQUIRES_REVIEW"})
+                    restarting = container["State"].get("Restarting") or container["State"].get("Status") == "restarting"
+                    if restarting:
+                        results.append({"role": role, "status": "STARTUP_GRACE" if grace else "DEGRADED",
+                                        "reason_code": None if grace else "CRASH_LOOP"})
+                    else:
+                        results.append({"role": role, "status": "STOPPED_REQUIRES_REVIEW"})
                     continue  # Preserve intentional stops; Docker recovers crashes.
                 started = container["State"]["StartedAt"]
                 if current.get("started_at") != started:
                     current.update(started_at=started, failures=0, last_progress_at=now, stream_progress_at={})
-                if age(started, now) < STALE_SECONDS:
+                if grace:
                     results.append({"role": role, "status": "STARTUP_GRACE"})
                     continue
-                health = healths[role]
                 endpoint_ok = True
                 if role in RECEIVERS:
                     try:
@@ -211,7 +244,9 @@ def main():
                         result["status"] = "WOULD_RESTART"
                 results.append(result)
             write_json(state_path, state)
-            report = {"updated_at_utc": datetime.fromtimestamp(now, timezone.utc).isoformat(), "roles": results}
+            report = {"updated_at_utc": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                      "status": "DEGRADED" if any(r["status"] in {"DEGRADED", "STOPPED_REQUIRES_REVIEW"} for r in results) else "HEALTHY",
+                      "roles": results}
             write_json(args.ops_root / "watchdog-health.json", report)
             print(json.dumps(report, sort_keys=True))
 
