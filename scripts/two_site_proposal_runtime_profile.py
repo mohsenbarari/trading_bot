@@ -228,16 +228,20 @@ def validate_profile(
         with closing(sqlite3.connect(database.as_uri()+"?mode=ro", uri=True, timeout=5)) as db:
             db.execute("PRAGMA query_only=ON"); db.execute("BEGIN")
             ids = db.execute("SELECT cascade_id,trajectory_type,source FROM trajectory_meta LIMIT 2").fetchall()
-            rows = db.execute("SELECT data FROM trajectory_metadata_blob WHERE id='main' AND length(data)<=262144 LIMIT 2").fetchall()
-            if ids != [(profile.conversation_id, 4, 17)] or len(rows) != 1:
+            main_count = db.execute("SELECT COUNT(*) FROM trajectory_metadata_blob WHERE id='main'").fetchone()[0]
+            rows = db.execute("SELECT data FROM trajectory_metadata_blob WHERE id='main' AND typeof(data)='blob' AND length(data)<=262144 LIMIT 2").fetchall()
+            if ids != [(profile.conversation_id, 4, 17)] or main_count != 1 or len(rows) != main_count:
                 raise ProposalProfileError("proposal runtime database identity mismatch")
             validate_role_metadata(rows[0][0], profile)
             count = db.execute("SELECT COUNT(*) FROM steps").fetchone()[0]
             if fresh and count != 0:
                 raise ProposalProfileError("proposal runtime session is not fresh")
             if not fresh:
-                executors = db.execute("SELECT data FROM executor_metadata WHERE length(data)<=524288 LIMIT 9").fetchall()
-                if not executors or len(executors) > 8:
+                executor_count = db.execute("SELECT COUNT(*) FROM executor_metadata").fetchone()[0]
+                if not 1 <= executor_count <= 8:
+                    raise ProposalProfileError("proposal runtime executor evidence missing")
+                executors = db.execute("SELECT data FROM executor_metadata WHERE typeof(data)='blob' AND length(data)<=524288 LIMIT 9").fetchall()
+                if len(executors) != executor_count:
                     raise ProposalProfileError("proposal runtime executor evidence missing")
                 for row in executors:
                     data = row[0]
