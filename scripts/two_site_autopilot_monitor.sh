@@ -9,8 +9,8 @@ status_file="$state_root/status.json"
 session="two-site-autopilot"
 broker_session="two-site-provider-broker"
 recovery_file="$report_root/recovery.json"
-antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.4.0-60e72242f07c131f.pin"
-expected_antigravity_sha256="60e72242f07c131f75afcd9a9e425d6ee097a1a1b3190ea98ae78fa4180bbfa8"
+antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.4.2-085f43e0d0628a8a.pin"
+expected_antigravity_sha256="085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef"
 running_heartbeat_max_age_seconds=90
 
 cd "$integration_root" || exit 1
@@ -384,7 +384,7 @@ if [[ "$restart_eligible" == true ]]; then
           && /usr/bin/chmod 700 "$probe_cli" \
           && [[ "$cli_sha256" == "$expected_antigravity_sha256" ]] \
           && [[ "$(/usr/bin/sha256sum -- "$probe_cli" 2>/dev/null | /usr/bin/awk '{print $1}' || true)" == "$expected_antigravity_sha256" ]] \
-          && [[ "$(AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 10 "$probe_cli" --version 2>/dev/null || true)" == "1.4.0" ]] \
+          && [[ "$(AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 10 "$probe_cli" --version 2>/dev/null || true)" == "1.4.2" ]] \
           && (ulimit -f 2048; AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 150 "$probe_cli" \
             --model gemini-4-argon-high --effort high --sandbox --mode plan \
             --disable-slash-commands --output-format stream-json --print-timeout 2m \

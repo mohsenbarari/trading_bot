@@ -5,6 +5,6 @@
   "effort": "high",
   "worker_model": "gemini-4-argon-medium",
   "worker_effort": "medium",
-  "cli_version": "1.4.0",
-  "cli_sha256": "60e72242f07c131f75afcd9a9e425d6ee097a1a1b3190ea98ae78fa4180bbfa8"
+  "cli_version": "1.4.2",
+  "cli_sha256": "085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef"
 }
