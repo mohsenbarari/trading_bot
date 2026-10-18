@@ -33,6 +33,7 @@ from .xau_model_input import (
 PROJECTION_VERSION = "market-fact-projection-v2-xau-model-input"
 MAX_EXPORT_PER_CYCLE = 5_000
 XAU_MODEL_INPUT_REFRESH_PER_CYCLE = 50_000
+HISTORY_DISCOVERY_WINDOW = 500
 RESEARCH_CONTEXT_SOURCES = frozenset(
     {
         "GROUP_1",
@@ -109,6 +110,10 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS market_fact_export_history_event_idx
         ON market_fact_export_history(event_key,fact_revision);
+        CREATE TABLE IF NOT EXISTS market_fact_export_discovery_cursor (
+            partition_name TEXT PRIMARY KEY,
+            last_order_key INTEGER NOT NULL CHECK(last_order_key>=0)
+        );
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_event_time
         ON market_observations(event_time_utc DESC,id DESC);
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_id
@@ -304,6 +309,63 @@ def _refresh_xau_model_input_buckets(
     return len(rows)
 
 
+def _bounded_export_history(market, *, pending, excluded, limit):
+    """Discover old work in bounded cyclic windows, retaining unselected work.
+
+    No permanent ledger/ACK reset. The cursor belongs only to discovery, and is
+    committed with the normal export transaction. A full sweep wraps so edits
+    and retractions behind a prior window are eventually rediscovered as well.
+    """
+    windows = {}
+    pending_rows = {}
+    for partition in ("non_xau", "xau"):
+        row = market.execute("SELECT last_order_key FROM market_fact_export_discovery_cursor WHERE partition_name=?", (partition,)).fetchone()
+        previous = int(row[0]) if row else 0
+        if partition == "non_xau":
+            window = market.execute(
+                "SELECT id AS order_key,id FROM market_observations INDEXED BY idx_market_observations_export_non_xau_state "
+                "WHERE source_code<>'XAUUSD' AND id>? ORDER BY id LIMIT ?",
+                (previous, HISTORY_DISCOVERY_WINDOW),
+            ).fetchall()
+        else:
+            window = market.execute(
+                "SELECT bucket_number AS order_key,selected_observation_id AS id FROM market_xau_model_input_buckets "
+                "WHERE bucket_number>? AND CAST(strftime('%s','now') AS INTEGER) >= "
+                f"(bucket_number+1)*{XAU_MODEL_INPUT_BUCKET_SECONDS}+{XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS} "
+                "ORDER BY bucket_number LIMIT ?", (previous, HISTORY_DISCOVERY_WINDOW),
+            ).fetchall()
+        windows[partition] = (previous, window)
+        identities = tuple(int(item["id"]) for item in window)
+        if not identities:
+            continue
+        placeholders = ",".join("?" for _ in identities)
+        for item in market.execute(
+            "SELECT o.id,o.event_key FROM market_observations o "
+            "LEFT JOIN market_fact_export_ledger l INDEXED BY market_fact_export_ledger_state_idx ON l.event_key=o.event_key "
+            "LEFT JOIN market_fact_export_semantics s INDEXED BY market_fact_export_semantics_state_idx ON s.event_key=o.event_key "
+            f"WHERE o.id IN ({placeholders}) AND {pending}", identities,
+        ):
+            if bytes(item["event_key"]) not in excluded:
+                pending_rows[int(item["id"])] = item
+    selected = set(sorted(pending_rows)[:limit])
+    for partition, (previous, window) in windows.items():
+        safe_key = previous
+        for item in window:
+            identity = int(item["id"])
+            if identity in pending_rows and identity not in selected:
+                break  # Never advance past pending work left outside this batch.
+            safe_key = int(item["order_key"])
+        if not window:
+            safe_key = 0  # End of sweep, not a stream/checkpoint reset.
+        market.execute(
+            "INSERT INTO market_fact_export_discovery_cursor VALUES(?,?) ON CONFLICT(partition_name) DO UPDATE SET last_order_key=excluded.last_order_key",
+            (partition, safe_key),
+        )
+    if not selected:
+        return []
+    return market.execute("SELECT * FROM market_observations WHERE id IN (" + ",".join("?" for _ in selected) + ") ORDER BY id", tuple(sorted(selected))).fetchall()
+
+
 def _pending_export_rows(
     market: sqlite3.Connection,
     *,
@@ -442,6 +504,12 @@ def _pending_export_rows(
         )
     remaining = max_rows - len(rows)
     if remaining:
+        if fair_batch:
+            rows.extend(_bounded_export_history(
+                market, pending=pending,
+                excluded={bytes(row["event_key"]) for row in rows}, limit=remaining,
+            ))
+            return rows
         selected = tuple(bytes(row["event_key"]) for row in rows)
         exclusion = (
             "AND o.event_key NOT IN ("

@@ -19,6 +19,7 @@ from core.market_intelligence.market_fact_projection import (
     MarketFactProjectionError,
     _pending_export_rows,
     initialize_export_ledger,
+    HISTORY_DISCOVERY_WINDOW,
     observation_payload,
 )
 from core.market_intelligence.market_fact_archive import _normalize_fact_payload
@@ -469,6 +470,50 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_history_discovery_is_bounded_resumable_and_does_not_skip_pending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            old = datetime.now(timezone.utc) - timedelta(days=2)
+            for number in range(HISTORY_DISCOVERY_WINDOW + 40):
+                upsert_observation(market, MarketObservation(
+                    event_key=derive_event_key("bounded-history", number), source_code="GROUP_1", source_family="GROUP",
+                    event_time_utc=old, available_at_utc=old, instrument="COIN_IMAM", market_label="FIXTURE",
+                    settlement_term="CASH", trade_form="PHYSICAL", event_type="OFFER", side="SELL",
+                    price="187500", price_unit="PROJECT_THOUSAND_TOMAN", currency="TOMAN", parser_version="fixture-v1",
+                ))
+
+            def accounted(rows):
+                # Terminal fixture rejections are accounted, not pending work.
+                for row in rows:
+                    market.execute("INSERT INTO market_fact_export_ledger VALUES(?,?,'REJECTED',NULL,NULL,'fixture_terminal',1,?)", (row["event_key"], row["inserted_at_utc"], row["inserted_at_utc"]))
+
+            accounted(market.execute("SELECT * FROM market_observations ORDER BY id LIMIT ?", (HISTORY_DISCOVERY_WINDOW,)).fetchall())
+            market.commit()
+            self.assertEqual(_pending_export_rows(market, max_rows=25), [])
+            self.assertEqual(market.execute("SELECT last_order_key FROM market_fact_export_discovery_cursor WHERE partition_name='non_xau'").fetchone()[0], HISTORY_DISCOVERY_WINDOW)
+            market.rollback()  # A failed export cannot advance discovery either.
+            self.assertIsNone(market.execute("SELECT last_order_key FROM market_fact_export_discovery_cursor WHERE partition_name='non_xau'").fetchone())
+            self.assertEqual(_pending_export_rows(market, max_rows=25), [])
+            market.commit()
+            selected = _pending_export_rows(market, max_rows=25)
+            self.assertEqual([row["id"] for row in selected], list(range(HISTORY_DISCOVERY_WINDOW + 1, HISTORY_DISCOVERY_WINDOW + 26)))
+            self.assertEqual(market.execute("SELECT last_order_key FROM market_fact_export_discovery_cursor WHERE partition_name='non_xau'").fetchone()[0], HISTORY_DISCOVERY_WINDOW + 25)
+            accounted(selected)
+            market.commit()
+            remaining = _pending_export_rows(market, max_rows=25)
+            self.assertEqual([row["id"] for row in remaining], list(range(HISTORY_DISCOVERY_WINDOW + 26, HISTORY_DISCOVERY_WINDOW + 41)))
+            accounted(remaining)
+            market.commit()
+            self.assertEqual(_pending_export_rows(market, max_rows=25), [])
+            self.assertEqual(market.execute("SELECT last_order_key FROM market_fact_export_discovery_cursor WHERE partition_name='non_xau'").fetchone()[0], 0)
+            market.commit()
+            market.execute("UPDATE market_fact_export_ledger SET observation_inserted_at_utc='older-fixture-revision' WHERE event_key=(SELECT event_key FROM market_observations WHERE id=1)")
+            market.commit()
+            self.assertEqual([row["id"] for row in _pending_export_rows(market, max_rows=25)], [1])
+            market.close()
+
     def test_busy_groups_cannot_hide_live_references_or_history(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")
