@@ -3253,7 +3253,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         meta["response_schema_sha256"] = sha(response_schema_bytes)
         write_json(out / "status.json", meta)
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
-                   *effort_args, "--input-format", "stream-json",
+                   *effort_args, "--input-format", "text",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", str(response_schema_path)]
         try:
@@ -3286,7 +3286,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 write_json(out / "status.json", meta)
                 capture_bounded_process(
                     process,
-                    (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode(),
+                    prompt.encode("utf-8"),
                     out / "stream.jsonl",
                     out / "stderr.txt",
                     timeout + 15,
