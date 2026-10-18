@@ -50,6 +50,28 @@ Historical helpers/receipts alone authorize nothing. This is not an auth/quota/
 Broker-failure fallback, an authoring/correction pipeline or an unattended route;
 it does not enable Supervisor adoption, activation or automatic acceptance.
 
+For stopped Root REVIEW_ONLY only, the accepted fixed factory
+scripts/two_site_json_prompt_fidelity.py
+(SHA256 4aec892c18d9e034fad687aed19e9d2ddde1a5291e49164700ce4452e7c833ab,
+accepted at 3496837b867bbb49623d8acec308c417c560fe61) may supply
+make_root_review_run(prior_loader), using encode_context_json as its one fixed
+CONTEXT serializer. It replaces only the pinned context JSON-dump call in one
+private SDK run function, together with the existing closed prior-loader.
+Category-Cf JSON escapes must decode to the exact complete original material,
+Source and diff; shared SDK code/globals remain unchanged. This finite exception
+supersedes only the manual-route namespace prohibition in PROPOSAL_AUTOMATION.md
+for that exact accepted factory. No generic factory, request-selected namespace,
+encoder, executable, model, permission, reload or cap override is allowed.
+All existing full-Source/AFTER, whole-prompt R2/input-counter/default187000,
+holds, STOP, permission, CLI/profile/executor/session/tool-free/schema,
+no-replay, review/native and exact Git gates still apply.
+The failed718D result is not accepted or adopted, and its intent is never replayed.
+Any later transport-corrected documentation review needs fresh issued Scope,
+real TASK_READY, complete native PASS, independently reviewed pinned adapter,
+full measured/sealed packet and one explicit bounded session decision.
+This instruction grants no ordinary Worker/pipeline use, automatic retry,
+Supervisor restart, Stage credit or operational authority.
+
 For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
 Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex
 cycle must finish one bounded unit in a clean commit before continuation. The local
