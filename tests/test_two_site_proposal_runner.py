@@ -364,6 +364,75 @@ class ProposalContracts(unittest.TestCase):
         self.sources["test_new.py"]["content"] = None
         self.assertIn("--- /dev/null\n", runner.proposal_diff(changes, self.sources))
 
+    def parse_cli_input(self, input_bytes, cli_schema, *, input_format):
+        self.assertIs(type(input_bytes), bytes)
+        if input_format == "stream-json":
+            lines = input_bytes.splitlines()
+            self.assertEqual(len(lines), 1, "one NDJSON user turn required")
+            envelope = runner.unique_json(lines[0].decode("utf-8"))
+            self.assertIs(type(envelope), dict)
+            self.assertEqual(set(envelope), {"event", "message"})
+            self.assertEqual(envelope["event"], "user")
+            message = envelope["message"]
+            self.assertIs(type(message), dict)
+            self.assertEqual(set(message), {"content"})
+            prompt_text = message["content"]
+            self.assertIs(type(prompt_text), str)
+        elif input_format == "text":
+            prompt_text = input_bytes.decode("utf-8")
+        else:
+            self.fail("unsupported fake CLI input format")
+
+        context_marker = "\nCONTEXT_JSON:\n"
+        schema_marker = "\nREQUIRED_RESPONSE_SCHEMA_DATA:\n"
+        self.assertEqual(prompt_text.count(context_marker), 1, "expected one context boundary")
+        self.assertEqual(prompt_text.count(schema_marker), 1, "expected one schema boundary")
+        before_schema, schema_tail = prompt_text.split(schema_marker)
+        self.assertIn("\nReturn exactly", schema_tail)
+        schema_text, _ = schema_tail.split("\nReturn exactly", 1)
+        _, context_text = before_schema.split(context_marker)
+        self.last_schema_data = runner.unique_json(schema_text)
+        self.last_cli_schema = deepcopy(cli_schema)
+        self.assertTrue(
+            runner._exact_equal(self.last_schema_data, self.last_cli_schema),
+            "CLI schema mismatch",
+        )
+        context = runner.unique_json(context_text)
+        self.assertIs(type(context), dict)
+        self.assertTrue({"task", "sources"} <= context.keys())
+        self.assertIs(type(context["task"]), dict)
+        self.assertIs(type(context["sources"]), dict)
+        self.last_fake_cli_prompt_text = prompt_text
+        return context
+
+    def prompt_fixture(self):
+        schema = {
+            "type": "object",
+            "properties": {"sentinel": {"type": "string", "enum": ["tail"]}},
+            "required": ["sentinel"],
+            "additionalProperties": False,
+        }
+        context = {
+            "task": deepcopy(self.task),
+            "sources": deepcopy(self.sources),
+            "preservation": {
+                "unicode": "caf\u00e9\u200c",
+                "nested": [None, False, 0, {"last": "context-tail"}],
+                "marker_as_data": "\nCONTEXT_JSON:\nnot-a-new-boundary",
+            },
+        }
+        prompt = (
+            "Role.\nROLE: worker\nCONTEXT_JSON:\n"
+            + json.dumps(context, ensure_ascii=False)
+            + "\nREQUIRED_RESPONSE_SCHEMA_DATA:\n"
+            + json.dumps(schema, ensure_ascii=False)
+            + "\nReturn exactly one JSON object, no tools.\n"
+        )
+        return schema, context, prompt
+
+    def cli_wire(self, prompt):
+        return (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode()
+
     def invoke_fake_cli(self, *, drift=None, timeout=False, denied=False,
                         result=None, events=None, raw_output=None,
                         git_side_effect=None, run_id="run-001",
@@ -377,6 +446,7 @@ class ProposalContracts(unittest.TestCase):
 
         def capture(fake_process, _input, stdout_path, stderr_path, _timeout, **_kwargs):
             cmd = popen.call_args.args[0] if popen.call_args else getattr(fake_process, "args", [])
+            schema = runner.unique_json(Path(cmd[cmd.index("--json-schema") + 1]).read_bytes().decode())
             hook_path = Path(cmd[0]).parent / "proposal-runtime-workspace/.agents/hooks.json"
             self.last_runtime_hooks = json.loads(hook_path.read_text())
             if timeout:
@@ -395,9 +465,6 @@ class ProposalContracts(unittest.TestCase):
                 elif result is not None:
                     evs = self.events(result=result)
                 else:
-                    schema = {}
-                    if "--json-schema" in cmd:
-                        schema = json.loads(Path(cmd[cmd.index("--json-schema") + 1]).read_text())
                     changes_schema = schema.get("properties", {}).get("changes", {})
                     items_schema = changes_schema.get("items", {})
                     branches = items_schema.get("anyOf") or ([items_schema] if "properties" in items_schema else [])
@@ -411,22 +478,13 @@ class ProposalContracts(unittest.TestCase):
                     if not path_shas:
                         path_shas = {"test_new.py": None}
 
-                    context = {}
-                    if _input:
-                        try:
-                            prompt_text = json.loads(_input).get("message", {}).get("content", "")
-                            self.last_schema_data = json.loads(prompt_text.split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n",1)[1].split("\nReturn exactly",1)[0])
-                            self.last_cli_schema = schema
-                            self.assertEqual(self.last_schema_data, self.last_cli_schema)
-                            if "\nCONTEXT_JSON:\n" in prompt_text:
-                                context = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n",1)[0])
-                        except Exception:
-                            pass
-                    if not context and (stdout_path.parent / "task.json").exists():
-                        try:
-                            context = json.loads((stdout_path.parent / "task.json").read_text())
-                        except Exception:
-                            pass
+                    input_format = (
+                        cmd[cmd.index("--input-format") + 1]
+                        if "--input-format" in cmd else "text"
+                    )
+                    context = self.parse_cli_input(
+                        _input, schema, input_format=input_format,
+                    )
 
                     sources_ctx = context.get("sources", {})
                     changes = []
@@ -494,6 +552,65 @@ class ProposalContracts(unittest.TestCase):
             finally:
                 if timeout:
                     kill.assert_called_once_with(process.pid, runner.signal.SIGKILL)
+
+    def test_fake_cli_fixture_preserves_both_inputs(self):
+        schema, context, prompt = self.prompt_fixture()
+        wire = self.cli_wire(prompt)
+        for input_format, payload in (("stream-json", wire), ("text", prompt.encode("utf-8"))):
+            with self.subTest(input_format=input_format):
+                actual = self.parse_cli_input(payload, schema, input_format=input_format)
+                self.assertTrue(runner._exact_equal(actual, context))
+                self.assertEqual(self.last_schema_data, schema)
+                self.assertEqual(self.last_cli_schema, schema)
+                self.assertEqual(self.last_fake_cli_prompt_text, prompt)
+
+    def test_fake_cli_fixture_rejects_invalid_inputs(self):
+        schema, _, prompt = self.prompt_fixture()
+        wire = self.cli_wire(prompt)
+        cases = [
+            ("unsupported", prompt.encode(), AssertionError),
+            ("stream-json", prompt.encode(), AssertionError),
+            ("stream-json", b'{', json.JSONDecodeError),
+            ("stream-json", wire + wire, AssertionError),
+            ("stream-json", b'{"event":"user","message":{}}\n', AssertionError),
+            ("stream-json", wire.replace(b'{"event":', b'{"event":"user","event":', 1), runner.ProposalError),
+            ("text", wire, AssertionError),
+            ("text", prompt.replace("CONTEXT_JSON:", "MISSING_CONTEXT:").encode(), AssertionError),
+            ("text", prompt.replace("REQUIRED_RESPONSE_SCHEMA_DATA:", "MISSING_SCHEMA:").encode(), AssertionError),
+            ("text", prompt.replace('{"task":', '{"task": invalid,').encode(), json.JSONDecodeError),
+            ("text", prompt.replace('{"type": "object",', '{"type": invalid,').encode(), json.JSONDecodeError),
+            ("text", prompt.replace('{"task":', '{"task":{},"task":', 1).encode(), runner.ProposalError),
+            ("text", prompt.replace('{"type": "object",', '{"type":"object","type":"object",', 1).encode(), runner.ProposalError),
+        ]
+        for input_format, payload, error in cases:
+            with self.subTest(input_format=input_format, payload=payload[:40]):
+                with self.assertRaises(error):
+                    self.parse_cli_input(payload, schema, input_format=input_format)
+
+    def test_fake_cli_fixture_rejects_schema_mismatch(self):
+        schema, _, prompt = self.prompt_fixture()
+        for input_format in ("stream-json", "text"):
+            wire = (
+                self.cli_wire(prompt)
+                if input_format == "stream-json" else prompt.encode()
+            )
+            for wrong in (dict(schema, required=["wrong"]), dict(schema, additionalProperties=0)):
+                with self.subTest(input_format=input_format, wrong=wrong):
+                    with self.assertRaisesRegex(AssertionError, "CLI schema mismatch"):
+                        self.parse_cli_input(wire, wrong, input_format=input_format)
+
+    def test_fake_cli_fixture_assertion_reaches_caller(self):
+        with patch.object(self, "parse_cli_input", wraps=self.parse_cli_input) as parse:
+            self.invoke_fake_cli(run_id="fixture-wire")
+        payload, schema = parse.call_args.args
+        self.assertEqual(parse.call_args.kwargs, {"input_format": "stream-json"})
+        self.assertEqual(payload, self.cli_wire(self.last_fake_cli_prompt_text))
+        self.assertEqual(schema, self.last_cli_schema)
+        sentinel = AssertionError("parser assertion must escape")
+        with patch.object(self, "parse_cli_input", side_effect=sentinel):
+            with self.assertRaises(AssertionError) as caught:
+                self.invoke_fake_cli(run_id="fixture-parser-assertion")
+        self.assertIs(caught.exception, sentinel)
 
     def test_offline_run_only_writes_artifacts(self):
         out = self.invoke_fake_cli()
@@ -799,6 +916,59 @@ class ProposalContracts(unittest.TestCase):
         self.assertLess(time.monotonic() - started_at, 2)
         self.assertFalse(marker.exists())
         self.assertIsNotNone(process.returncode)
+
+    def assert_terminal_success_child(self, *, stay_alive, close_output_pipes=False):
+        """Terminal wire bytes alone never substitute for child exit."""
+        wire = ("\n".join(json.dumps(event) for event in self.events()) + "\n").encode()
+        suffix = ("closed" if close_output_pipes else "open") if stay_alive else "exit"
+        base = self.root / ("terminal-success-" + suffix)
+        stdout_path = base.with_suffix(".stdout")
+        stderr_path = base.with_suffix(".stderr")
+        marker = base.with_suffix(".finished")
+        child = (
+            "import os,pathlib,sys,time\n"
+            + f"if sys.stdin.buffer.read() != {wire!r}: sys.exit(7)\n"
+            + f"os.write(1, {wire!r})\n"
+        )
+        if stay_alive:
+            child += (
+                ("os.close(1)\nos.close(2)\n" if close_output_pipes else "")
+                + "time.sleep(5)\n"
+                + f"pathlib.Path({str(marker)!r}).write_text('graceful-success')\n"
+            )
+        started_at = time.monotonic()
+        with subprocess.Popen(
+            [sys.executable, "-c", child],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        ) as process:
+            if stay_alive:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    runner.capture_bounded_process(
+                        process, wire, stdout_path, stderr_path, 1, max_output=4096,
+                    )
+            else:
+                self.assertIsNone(runner.capture_bounded_process(
+                    process, wire, stdout_path, stderr_path, 1, max_output=4096,
+                ))
+        self.assertEqual(stdout_path.read_bytes(), wire)
+        self.assertEqual(stderr_path.read_bytes(), b"")
+        self.assertLess(time.monotonic() - started_at, 4)
+        self.assertFalse(marker.exists())
+        self.assertIsNotNone(process.returncode)
+        if stay_alive:
+            self.assertLess(process.returncode, 0)
+        else:
+            self.assertEqual(process.returncode, 0)
+
+    def test_bounded_capture_terminal_success_open_pipes_times_out(self):
+        self.assert_terminal_success_child(stay_alive=True)
+
+    def test_bounded_capture_terminal_success_closed_pipes_times_out(self):
+        self.assert_terminal_success_child(stay_alive=True, close_output_pipes=True)
+
+    def test_bounded_capture_same_success_wire_exits_normally(self):
+        self.assert_terminal_success_child(stay_alive=False)
 
     def test_worker_and_verifier_schema_contracts(self):
         worker_schema = runner.schema("worker")
