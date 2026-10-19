@@ -21,7 +21,6 @@ _MAX_METADATA = 65_536
 _SECONDS = 120
 _CHUNK = 65_536
 _MAX_DEPTH = 32
-_MAX_NODES = 100_000
 _MAX_RECORDS = 2_000
 _LIMITS = {
     "ledger": 2_000_000, "metrics": 2_000_000, "receipt": 2_000_000,
@@ -29,6 +28,8 @@ _LIMITS = {
     "native": 160_000, "reviewer_result": 64_000, "proposal_status": 64_000,
     "root_result": 64_000, "root_status": 64_000,
 }
+# Valid N-node JSON needs at least2N-1 wire bytes.
+_METRICS_MAX_NODES = _LIMITS["metrics"] // 2 + 1
 _ERRORS = frozenset({
     "INVALID_ROOT", "INVALID_KEY", "UNSAFE_PATH", "UNSAFE_FILE", "MISSING_FILE",
     "CUSTODY_DRIFT", "BYTE_LIMIT", "COUNT_LIMIT", "TIME_LIMIT", "JSON_INVALID",
@@ -284,6 +285,25 @@ class _EvidenceFiles:
             self._open_dir(current, parent, component)
         return current
 
+    def _root_parent(self, path):
+        # Root families alone allow a guarded absent descendant of autopilot.
+        parts = path.split("/")
+        current = self._parent("/".join(parts[:3]) + "/anchor")
+        for component in parts[3:-1]:
+            parent = current
+            current = current / component
+            try:
+                os.stat(component, dir_fd=self._dirs[parent]["fd"], follow_symlinks=False)
+            except FileNotFoundError:
+                self._records[path] = {"fd": None, "mark": None, "data": None,
+                    "missing": True, "parent": parent, "name": component}
+                self._verify()
+                _fail("MISSING_FILE")
+            except OSError:
+                _fail("UNSAFE_PATH")
+            self._open_dir(current, parent, component)
+        return current
+
     def _pin_aux_directory(self, path):
         # Trusted wrapper only: named repository chain, never an artifact API.
         current = Path(path.anchor)
@@ -430,7 +450,8 @@ class _EvidenceFiles:
         self._verify()
         record = self._records.get(path)
         if record is None:
-            parent = self._parent(path)
+            parent = (self._root_parent(path) if kind in ("root_result", "root_status")
+                      else self._parent(path))
             name = path.split("/")[-1]
             parent_fd = self._dirs[parent]["fd"]
             descriptor = None
@@ -540,7 +561,7 @@ class _EvidenceFiles:
                 elif not scalar:
                     scalar = True
                     nodes += 1
-                if nodes > _MAX_NODES:
+                if nodes > _METRICS_MAX_NODES:
                     _fail("JSON_INVALID")
             self._check_time()
             value = json.loads(text, object_pairs_hook=_unique_pairs, parse_constant=_bad_constant)
@@ -562,7 +583,7 @@ class _EvidenceFiles:
                     item.encode("utf-8", errors="strict")
                 elif type(item) is float and not math.isfinite(item):
                     _fail("JSON_INVALID")
-                if nodes > _MAX_NODES:
+                if nodes > _METRICS_MAX_NODES:
                     _fail("JSON_INVALID")
             self._verify()
             return value

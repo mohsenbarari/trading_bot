@@ -200,7 +200,13 @@ never permission/type/parent/I/O treated as absence/free.
 ONE owner:8000000 actualbytes,128 artifact paths inclabsence,65536 metadata,
 120s from construction; first artifact metadata pathUTF8+compact ensure_ascii
 JSON key. Cache/alias/count/custody/deadline and immediate failure-chunk charging
-unchanged; no counter reset. Strict metrics JSON2000rows/depth32/nodes100000 and detached raw ordinals,
+unchanged; no counter reset. Strict metrics JSON2000rows/depth32 and detached raw
+ordinals remain. Explicit740R3 amendment: BOTH lexical and parsed metrics-node
+checks use fixed _LIMITS['metrics']//2+1 (=1000001), derived from unchanged2M
+wire cap (valid N-node JSON needs at least2N-1 bytes), not a caller limit.
+Only the former metrics100000-node rule is superseded; nonmetrics attestation
+JSON stays100000. See AE00_ACCEPTED_WORK_PROOFS_CONTRACT.md for this narrow
+exception. All other byte/row/depth/custody/time/API limits remain unchanged;
 consumed-only exact metadata/no bodies or absent hashes, eleven fixed errors,
 privacy/chaining and original-body/fixed-cleanup-note guarantees ALL unchanged. Aux helpers are trusted-wrapper
 internals, not new evidence API; auxiliary pins share counters/FDs, not artifact

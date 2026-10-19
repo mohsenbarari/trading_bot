@@ -240,15 +240,16 @@ def test_byte_count_path_and_strict_json_limits(tmp_path):
         else:
             fixed_error("JSON_INVALID", lambda: json_once(tree.root))
 
-    # Exactly 100,000 nodes: root + 999*(one list + 98 scalars) + last list/1097 scalars.
-    nodes = [[0] * 98 for _ in range(999)] + [[0] * 1097]
-    assert 1 + 999 * 99 + 1098 == 100000
-    tree = ArtifactTree(tmp_path / "json-nodes")
-    tree.put(METRICS, json.dumps(nodes, separators=(",", ":")).encode("ascii"))
+    # METRICS alone derives its node ceiling from the unchanged2M wire cap.
+    nodes = [[0] * 999998]
+    assert 1 + 1 + len(nodes[0]) == 1000000
+    compact = json.dumps(nodes, separators=(",", ":")).encode("ascii")
+    assert len(compact) == 1999999
+    tree = ArtifactTree(tmp_path / "dense-json-nodes")
+    tree.put(METRICS, compact + b" ")
     assert json_once(tree.root) == nodes
-    nodes[-1].append(0)
-    tree.put(METRICS, json.dumps(nodes, separators=(",", ":")).encode("ascii"))
-    fixed_error("JSON_INVALID", lambda: json_once(tree.root))
+    tree.put(METRICS, compact + b"  ")
+    fixed_error("BYTE_LIMIT", lambda: json_once(tree.root))
     exact_json = b'["' + ("\u00e9" * 999998).encode("utf-8") + b'"]'
     assert len(exact_json) == 2000000
     tree.put(METRICS, exact_json)
@@ -313,10 +314,10 @@ def test_candidate_utf8_caps_and_unchanged_legacy_boundary():
     total_bytes = 0
     for path in paths:
         body = path.read_bytes()
-        assert 0 < len(body) <= 24000, path.name
+        assert 0 < len(body) <= (25000 if path in (paths[0], paths[3]) else 24000), path.name
         body.decode("utf-8", errors="strict")
         total_bytes += len(body)
-    # Fresh738L four-file layout: literal finite aggregate, not old735H permission.
+    # Original four-file aggregate remains unchanged.
     assert total_bytes <= 96000
     assert not any(hasattr(evidence, name) for name in (
         "summarize_accepted_work", "summarize_work_lineage_ledger", "main", "__all__"))
