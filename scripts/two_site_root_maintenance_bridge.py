@@ -49,7 +49,7 @@ POSTHOLD_V2 = 'ROOT_CURRENT_SOURCE_MAINTENANCE_HANDOFF_NORMAL_POSTHOLD_V2'
 MAX_RECORD_BYTES = 32768
 MAX_EVIDENCE_BYTES = 200000
 MAX_EVIDENCE_TOTAL = 4000000
-MAX_COMMITS = 65
+MAX_COMMITS = 66
 ERROR = 'root maintenance bridge verification failed'
 RECORD_KEYS = frozenset({
     'schema_version', 'kind', 'prior_checkpoint_sha256', 'prior_head',

@@ -250,19 +250,19 @@ def test_pure_decoder_and_history_count_boundaries_are_not_authority(lab):
         if count==8190:assert len(subject._json(raw,32768)['items'])==count
         else:
             with pytest.raises(subject.RootMaintenanceBridgeError):subject._json(raw,32768)
-    for count in (64,65,66):
+    for count in (64,65,66,67):
         record=copy.deepcopy(lab['record']);rows=[];parent=record['prior_head']
         for n in range(count):
             head=record['repository']['head'] if n==count-1 else format(n+100,'040x')
             rows.append(dict(head=head,parent=parent,evidence_path='.local/two-site-refactor/reviews/LAB_'+str(n)+'.json',evidence_sha256='1'*64));parent=head
         record['commits']=rows;raw=helpers.canonical(record);marker={**lab['marker'],'record_sha256':helpers.sha(raw)}
         args=dict(marker=marker,prior_repository=lab['prior'],current_repository=ap.validate_accepted_repository(lab['repository']),destination_assignment_id=helpers.DESTINATION)
-        if count<=65:assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
+        if count<=66:assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
         else:
             with pytest.raises(subject.RootMaintenanceBridgeError):subject.parse_root_maintenance_bridge_bytes(raw,**args)
 
 
-def test_real_64_65_chain_count_only_66_rejection_then_healthy_restore(lab,monkeypatch):
+def test_real_64_65_66_chain_count_only_67_rejection_then_healthy_restore(lab,monkeypatch):
     root=lab['root'];rows=copy.deepcopy(lab['record']['commits'])
     protected=copy.deepcopy(lab['prior']['protected_refs'])
     checkpoint=(lab['state']/'accepted_checkpoint.json').read_bytes()
@@ -274,7 +274,7 @@ def test_real_64_65_chain_count_only_66_rejection_then_healthy_restore(lab,monke
         snapshot=helpers.custody(lab)
         return (snapshot[:6],snapshot[7],helpers.git(root,'ls-files','--stage'),
             tuple((row['evidence_path'],(root/row['evidence_path']).read_bytes()) for row in rows))
-    for count in range(2,66):
+    for count in range(2,67):
         parent=helpers.git(root,'rev-parse','HEAD')
         path=ap.CONTROL_PATHS[0]
         (root/path).write_text('LAB real sole-parent code provenance '+str(count)+'\n')
@@ -285,7 +285,7 @@ def test_real_64_65_chain_count_only_66_rejection_then_healthy_restore(lab,monke
         evidence=helpers.canonical(dict(LAB=True,head=head,parent=parent,not_Worker_acceptance=True))
         helpers.private(root/evidence_path,evidence)
         rows.append(dict(head=head,parent=parent,evidence_path=evidence_path,evidence_sha256=helpers.sha(evidence)))
-        if count not in (64,65):continue
+        if count not in (64,65,66):continue
         current=ap.validate_accepted_repository(lab['repository_oracle'](root))
         lab['record']['repository']={key:value for key,value in current.items() if key!='assignment_scope'}
         lab['record']['commits']=copy.deepcopy(rows)
@@ -307,27 +307,27 @@ def test_real_64_65_chain_count_only_66_rejection_then_healthy_restore(lab,monke
             lab['record']['prior_head']+'..'+head).splitlines()==[
                 row['head']+' '+row['parent'] for row in rows]
         assert custody()==before and helpers.custody(lab)==full_before
-    assert subject.MAX_COMMITS==65 and len(rows)==65
+    assert subject.MAX_COMMITS==66 and len(rows)==66
     healthy=copy.deepcopy(expected);healthy_custody=custody()
     def add_count_only_row(record):
         synthetic='f'*40
         assert synthetic not in {row['head'] for row in record['commits']}
         record['commits'][0]['parent']=synthetic
         record['commits'].insert(0,dict(head=synthetic,parent=record['prior_head'],
-            evidence_path='.local/two-site-refactor/reviews/LAB_COUNT_ONLY_66.json',evidence_sha256='1'*64))
+            evidence_path='.local/two-site-refactor/reviews/LAB_COUNT_ONLY_67.json',evidence_sha256='1'*64))
     raw,marker=helpers.replace_bundle(lab,record_edit=add_count_only_row)
     args=dict(marker=marker,prior_repository=lab['prior'],
         current_repository=ap.validate_accepted_repository(lab['repository']),
         destination_assignment_id=helpers.DESTINATION)
     record=subject._json(raw,32768)
-    assert len(record['commits'])==66
+    assert len(record['commits'])==67
     with pytest.raises(subject.RootMaintenanceBridgeError):subject.parse_root_maintenance_bridge_bytes(raw,**args)
-    # Reached PURE mutation oracle: identical66 bytes are otherwise valid shape.
-    # The actual reader below runs only after restoration to the real65 bound.
+    # Reached PURE mutation oracle: identical67 bytes are otherwise valid shape.
+    # The actual reader below runs only after restoration to the real66 bound.
     with monkeypatch.context() as pure:
-        pure.setattr(subject,'MAX_COMMITS',66)
+        pure.setattr(subject,'MAX_COMMITS',67)
         assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
-    assert subject.MAX_COMMITS==65
+    assert subject.MAX_COMMITS==66
     actual_parse=subject.parse_root_maintenance_bridge_bytes
     actual_read=subject.bounded_file_bytes;parsed_counts=[];evidence_reads=[]
     evidence_paths={root/row['evidence_path'] for row in record['commits']}
@@ -343,7 +343,7 @@ def test_real_64_65_chain_count_only_66_rejection_then_healthy_restore(lab,monke
         fault.setattr(subject,'parse_root_maintenance_bridge_bytes',parse)
         fault.setattr(subject,'bounded_file_bytes',read)
         helpers.reject_read(lab)
-    assert parsed_counts==[66] and evidence_reads==[] and queries==[]
+    assert parsed_counts==[67] and evidence_reads==[] and queries==[]
     helpers.replace_bundle(lab)
     assert custody()==healthy_custody
     full_before=helpers.custody(lab)

@@ -1,4 +1,10 @@
-# Explicit empty print value: bounded syntax recovery
+# CLI stdin recovery: syntax history and documented NDJSON
+
+The following syntax-recovery design is retained as historical Source65
+context. Source65 was subsequently accepted at
+`7a688d6e61efe130b149fba540de78aadf75aad0` with727 native passes before and
+after application. The later744Q ordinary qualification FAILED; it did not
+turn syntax acceptance into transport qualification.
 
 This unit changes only the generation argv token `--print` to `--print=`.
 The complete nonsecret prompt stays on stdin; mode, sandbox, model, effort,
@@ -55,20 +61,65 @@ the healthy65 chain is restored with checkpoint/ref/source/evidence custody.
 Record32768, JSON8192, Git16384, evidence200000/4000000 and history/current/joint
 128/128/256 limits remain unchanged. No historical acceptance is invented.
 
-## Acceptance and later qualification remain separate
+## Historical closure and continuing safety
 
-Exact Source8 Scope, independent whole-Source review, Root-owned full isolated
-candidate PRE and physical POST, four normal holds, exact sole-parent Git and
-fresh readback are still required. No Source65 acceptance is asserted here.
-All37 historical POST UNKNOWN and603 NOT_MACHINE_ADOPTION remain unchanged.
+The preceding Source8 design was completed by actual Source9 R2 acceptance
+at7a688d6e; it was not live transport qualification. All37 historical POST
+UNKNOWN and603 NOT_MACHINE_ADOPTION remain. Failed742C/744Q identities,
+checkpoint/status/epochs/reservations must not be replayed or reset.
+Diagnostics must flush actual rows before later guards. Announce frozen
+path/SHA before handoff; never rewrite it. Corrections use new artifacts.
 
-Any later qualification requires a genuinely distinct necessary scenario,
-unused identity, explicit bounded authority and the ordinary Broker/Pipeline
-route: complete nonempty Worker input, real native pass, distinct High Reviewer,
-normal process/Broker return and strict cleanup. Do not replay failed742C,
-reset/rebaseline checkpoint/status/epochs/reservations, manufacture CONTINUE or
-claim Stage, goal, health, savings, activation or Source66 authority.
+## Documented NDJSON correction (745S)
 
-Diagnostics must flush actual raw rows before later guards. Announce frozen
-artifact path/SHA before handoff, then never rewrite that evidence; corrections
-use new immutable artifacts. Preserve failed and UNKNOWN observations.
+The pinned1.4.2 CLI in744Q returned an empty-prompt ERROR, and the real Runner
+blocked because the complete input was not written. Its request and semantic
+reservation are consumed; preserve them without replay. There was no accepted
+Worker result, proposal, native proof or Reviewer. The exact-session reader
+reported metadata-row-count drift, so full input, reported64K user counter,
+compiled192K request size, backend generation and paid usage remain UNKNOWN.
+CLI self-reported0turns/usage is not independent billing proof.
+
+The official [stdin contract](https://antigravity.google/docs/cli/headless#stream-prompts-from-stdin)
+uses input/output format `stream-json` without a print/prompt flag. This
+correction sends exactly one `{"event":"user","message":{"content":prompt}}`
+record using the historical default `json.dumps` mechanism, one final LF, and
+the existing capture's close-on-complete-write EOF. Decoding the content must
+recover the whole unchanged prompt, including response-schema data, Unicode,
+quotes, backslashes and newlines. The prompt never enters argv. Existing mode,
+sandbox, model/effort routing, prepared CID/profile, tool0, deadlines, output
+bounds, normal process exit, identity, STOP, custody and cleanup remain intact.
+The output parser is unchanged; actual future qualification must independently
+establish one completed turn and normal return.
+
+A fixed private encoder validates type, UTF8 and logical size before any
+disposable CLI, profile or process setup. Ordinary logical prompt320000 and
+compact-review160000 byte caps are unchanged. Default JSON can expand each
+logical UTF8 byte at most sixfold; fixed envelope plus LF adds46 bytes. Separate
+wire ceilings are1920046 and960046 bytes. These are derived serialization
+bounds, not increases to TaskSources, proposals, Root transport or backend
+64K/192K limits. NUL at the logical boundary reaches the exact wire maximum;
+a targeted serializer fault, not an impossible legal prompt, tests wire+1.
+
+Local fake children first retain complete EOF/wire before deliberate
+downstream rejection. Whole Runner/capture oracles cover both roles, exact
+argv/content/schema/CID/hooks, malformed/duplicate/second-record/tampered
+input, Unicode, before-effect encoder failures, early-input failure, nonzero
+exit, hang, STOP, drift and disposal. These are local protocol regressions,
+not Gemini qualification. Fidelity adds only the exact sixth Source/run-AST/
+context-line tuple; all five historical byte forms and crosspair rejection
+remain. The existing737K test file's manual AFTER cap is25000; the public
+new-test24000 cap is unchanged.
+
+The bridge's ordinary global bound becomes66, with real64/65/66 sole-parent
+Git/evidence chains and count-only67 rejection before evidence/Git reads.
+A scoped PURE67 mutation proves that rejection is the count guard; the actual
+66 bound and healthy66 custody are restored. All other bridge bounds remain.
+
+Exact8 Source Scope, independent review, full42 candidate PRE and physical POST,
+normal ordered holds, Root Git ACK and fresh actual acceptance are still
+required. This document claims neither Source66 acceptance nor working live
+transport. Any later genuine qualification needs its own necessary unused
+scenario, Scope, admission and one-request authority. No replay, checkpoint
+reset, fake CONTINUE, Source67, publication, startup or Stage/health/savings
+authority follows from this correction.

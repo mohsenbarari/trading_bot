@@ -3034,6 +3034,21 @@ def write_json(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
+def _cli_stream_input(prompt: str, *, is_compact_review: bool = False) -> bytes:
+    """Encode one unchanged logical prompt; wire expansion is a separate bound."""
+    if type(prompt) is not str or not prompt or type(is_compact_review) is not bool:
+        raise ProposalError("invalid CLI input prompt")
+    logical_limit = 160_000 if is_compact_review else 2 * MAX_CONTEXT
+    if len(prompt.encode("utf-8")) > logical_limit:
+        raise ProposalError("CLI logical prompt exceeds budget")
+    wire = (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode()
+    # Default JSON string encoding expands each UTF8 input byte by at most six;
+    # the fixed envelope plus final LF is46 bytes. No logical cap is enlarged.
+    if len(wire) > 6 * logical_limit + 46:
+        raise ProposalError("CLI input wire exceeds derived budget")
+    return wire
+
+
 def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         feedback: Path | None = None, proposal: Path | None = None,
         cli: Path | None = None, test_evidence: Path | None = None,
@@ -3255,6 +3270,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     schema_prompt_limit = 160_000 if is_compact_review else 2 * MAX_CONTEXT
     if len(prompt.encode("utf-8")) > schema_prompt_limit:
         raise ProposalError("split task or feedback into a smaller coherent unit")
+    stdin_bytes = _cli_stream_input(prompt, is_compact_review=is_compact_review)
     with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):
         # The lock covers every CLI invocation, including identity probes.
         initial_cli_identity = cli_identity(disposable_cli)
@@ -3302,8 +3318,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             raise ProposalError("response schema binding changed before dispatch")
         meta["response_schema_sha256"] = sha(response_schema_bytes)
         write_json(out / "status.json", meta)
-        command = [str(disposable_cli), "--print=", "--mode", "plan", "--sandbox", "--model", role_model,
-                   *effort_args, "--input-format", "text",
+        command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
+                   *effort_args, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", str(response_schema_path)]
         try:
@@ -3336,7 +3352,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 write_json(out / "status.json", meta)
                 capture_bounded_process(
                     process,
-                    prompt.encode("utf-8"),
+                    stdin_bytes,
                     out / "stream.jsonl",
                     out / "stderr.txt",
                     timeout + 15,

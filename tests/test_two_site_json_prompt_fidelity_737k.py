@@ -30,6 +30,11 @@ _GENERATION_COMMAND = b'command = [str(disposable_cli), "--mode", "plan", "--san
 _PRINT_COMMAND = b'command = [str(disposable_cli), "--print", "--mode", "plan", "--sandbox", "--model", role_model,'
 _EMPTY_PRINT_COMMAND = b'command = [str(disposable_cli), "--print=", "--mode", "plan", "--sandbox", "--model", role_model,'
 
+_NDJSON_SOURCE = "46544061459af3d0df38079abe21817bf59606341bdf6d9100fe9607e79e9cb4"
+_NDJSON_AST = "78ff37fd7f19153e4671f2cb7a000718c4abb28a5c51da2f227df2f16ed733e7"
+_NDJSON_CONTEXT_LINE = 3252
+_NDJSON_REPLACEMENTS = [["def run(root: Path,","def _cli_stream_input(prompt: str, *, is_compact_review: bool = False) -> bytes:\n    \"\"\"Encode one unchanged logical prompt; wire expansion is a separate bound.\"\"\"\n    if type(prompt) is not str or not prompt or type(is_compact_review) is not bool:\n        raise ProposalError(\"invalid CLI input prompt\")\n    logical_limit = 160_000 if is_compact_review else 2 * MAX_CONTEXT\n    if len(prompt.encode(\"utf-8\")) > logical_limit:\n        raise ProposalError(\"CLI logical prompt exceeds budget\")\n    wire = (json.dumps({\"event\": \"user\", \"message\": {\"content\": prompt}}) + \"\\n\").encode()\n    # Default JSON string encoding expands each UTF8 input byte by at most six;\n    # the fixed envelope plus final LF is46 bytes. No logical cap is enlarged.\n    if len(wire) > 6 * logical_limit + 46:\n        raise ProposalError(\"CLI input wire exceeds derived budget\")\n    return wire\n\n\ndef run(root: Path,"],["    with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):","    stdin_bytes = _cli_stream_input(prompt, is_compact_review=is_compact_review)\n    with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):"],["command = [str(disposable_cli), \"--print=\", \"--mode\", \"plan\", \"--sandbox\", \"--model\", role_model,","command = [str(disposable_cli), \"--mode\", \"plan\", \"--sandbox\", \"--model\", role_model,"],["*effort_args, \"--input-format\", \"text\",","*effort_args, \"--input-format\", \"stream-json\","],["                    prompt.encode(\"utf-8\"),","                    stdin_bytes,"]]
+
 
 def _digest(body):
     return hashlib.sha256(body).hexdigest()
@@ -76,9 +81,25 @@ def _apply_repair(source, *, inverse=False):
     return result.encode("utf-8", errors="strict")
 
 
+def _apply_ndjson_transport(source, *, inverse=False):
+    replacements = _NDJSON_REPLACEMENTS
+    result = source.decode("utf-8", errors="strict")
+    for old, new in reversed(replacements) if inverse else replacements:
+        if inverse:
+            old, new = new, old
+        assert result.count(old) == 1, "fixed NDJSON transport fragment is not unique"
+        result = result.replace(old, new, 1)
+    return result.encode("utf-8", errors="strict")
+
+
 def text_baseline_if_needed(source):
     """Invert only exact known print/737K changes, never normalize unknown Source."""
     source_sha = _digest(source)
+    if source_sha == _NDJSON_SOURCE:
+        source = _apply_ndjson_transport(source, inverse=True)
+        assert _digest(source) == _EMPTY_PRINT_SOURCE
+        assert _digest(_apply_ndjson_transport(source)) == _NDJSON_SOURCE
+        source_sha = _digest(source)
     if source_sha == _EMPTY_PRINT_SOURCE:
         assert source.count(_EMPTY_PRINT_COMMAND) == 1
         source = source.replace(_EMPTY_PRINT_COMMAND, _PRINT_COMMAND, 1)
@@ -136,20 +157,26 @@ def _three_versions():
                         (_OLD_AST, _TEXT_AST, FUTURE_RUN_AST_SHA256)))
     expected[_PRINT_SOURCE] = _PRINT_AST
     expected[_EMPTY_PRINT_SOURCE] = _EMPTY_PRINT_AST
+    expected[_NDJSON_SOURCE] = _NDJSON_AST
     assert fidelity._RUNNER_IDENTITIES == expected
     assert fidelity._CONTEXT_CALL_LINES == {
         _OLD_AST: 3190, _TEXT_AST: 3190, FUTURE_RUN_AST_SHA256: FUTURE_CONTEXT_LINE,
         _PRINT_AST: 3237,
         _EMPTY_PRINT_AST: 3237,
+        _NDJSON_AST: _NDJSON_CONTEXT_LINE,
     }
     for body in versions:
         run_ast = ast.dump(_run_node(body), include_attributes=True).encode()
         assert _digest(run_ast) == expected[_digest(body)]
-    assert actual_source in versions or _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE}
+    assert actual_source in versions or _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE, _NDJSON_SOURCE}
     if _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE}:
         assert future.count(_GENERATION_COMMAND) == 1
         command = _EMPTY_PRINT_COMMAND if _digest(actual_source) == _EMPTY_PRINT_SOURCE else _PRINT_COMMAND
         assert future.replace(_GENERATION_COMMAND, command, 1) == actual_source
+    if _digest(actual_source) == _NDJSON_SOURCE:
+        empty = future.replace(_GENERATION_COMMAND, _EMPTY_PRINT_COMMAND, 1)
+        assert _digest(empty) == _EMPTY_PRINT_SOURCE
+        assert _apply_ndjson_transport(empty) == actual_source
     return runner, versions
 
 
@@ -158,9 +185,9 @@ def _unexecuted_original(runner, source):
                         "run", runner.run.__defaults__, runner.run.__closure__)
 
 
-def test_prospective_fixture_is_ascii_and_within_new_test_limit():
+def test_existing_fixture_is_ascii_and_within_explicit_manual_limit():
     body = Path(__file__).read_bytes()
-    assert body.isascii() and len(body) <= 24000
+    assert body.isascii() and len(body) <= 25000
 
 
 @pytest.mark.parametrize("index", [0, 1, 2])
@@ -234,3 +261,26 @@ def test_future_wrong_fixed_context_line_fails_closed(monkeypatch):
     monkeypatch.setitem(fidelity._CONTEXT_CALL_LINES, FUTURE_RUN_AST_SHA256, FUTURE_CONTEXT_LINE + 1)
     with pytest.raises(fidelity.PromptFidelityError, match="CONTEXT JSON call shape drift"):
         fidelity._replace_context_call(_run_node(versions[2]))
+
+def test_sixth_transport_exact_inverse_and_partial_changes_keep_exact_historical_identity():
+    runner, _ = _three_versions()
+    actual = fidelity._read_runner_source()
+    assert _digest(actual) == _NDJSON_SOURCE
+    empty = _apply_ndjson_transport(actual, inverse=True)
+    assert _digest(empty) == _EMPTY_PRINT_SOURCE
+    assert _apply_ndjson_transport(empty) == actual
+    assert _digest(ast.dump(_run_node(actual), include_attributes=True).encode()) == _NDJSON_AST
+    fidelity._validated_run_code(actual, runner.run)
+    for old, new in _NDJSON_REPLACEMENTS:
+        assert empty.count(old.encode()) == actual.count(new.encode()) == 1
+        for partial in (empty.replace(old.encode(), new.encode(), 1),
+                        actual.replace(new.encode(), old.encode(), 1)):
+            # Removing only the print token from Source65 is the already
+            # authenticated737K byte form, not an unknown partial migration.
+            if _digest(partial) == FUTURE_RUNNER_SOURCE_SHA256:
+                assert partial == _three_versions()[1][2]
+                fidelity._validated_run_code(partial, _unexecuted_original(runner, partial))
+                continue
+            assert _digest(partial) not in fidelity._RUNNER_IDENTITIES
+            with pytest.raises(fidelity.PromptFidelityError, match="SDK source pin mismatch"):
+                fidelity._validated_run_code(partial, runner.run)
