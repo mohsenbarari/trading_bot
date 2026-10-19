@@ -50,6 +50,12 @@ def _fail(code):
     raise _EvidenceFilesError(code) from None
 
 
+def _copy_fixed_notes(source, target, allowed):
+    for note in getattr(source, "__notes__", ()):
+        if type(note) is str and note in allowed:
+            target.add_note(note)
+
+
 def _file_mark(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
             info.st_uid, info.st_gid, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
@@ -63,6 +69,23 @@ def _dir_mark(info):
 def _safe_id(value):
     if type(value) is not str or _ID.fullmatch(value) is None:
         _fail("INVALID_KEY")
+    return value
+
+
+def _aux_source_path(value):
+    if type(value) is not str:
+        _fail("INVALID_KEY")
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeError:
+        _fail("UNSAFE_PATH")
+    parts = value.split("/")
+    if (not encoded or len(encoded) > 1024 or value.startswith("/")
+            or any(not p or p in (".", "..") or p.startswith("-")
+                   or p.lower() == ".git" for p in parts)
+            or any(c in value for c in "\\\0:*?[]{}")
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        _fail("UNSAFE_PATH")
     return value
 
 
@@ -124,7 +147,10 @@ class _EvidenceFiles:
         self._handles = set()
         self._dirs = {}
         self._records = {}
+        self._aux_records = {}
+        self._aux_dirs = set()
         self._seen = set()
+        self._metadata_keys = set()
         self._bytes_read = 0
         self._metadata_bytes = 0
 
@@ -258,14 +284,124 @@ class _EvidenceFiles:
             self._open_dir(current, parent, component)
         return current
 
+    def _pin_aux_directory(self, path):
+        # Trusted wrapper only: named repository chain, never an artifact API.
+        current = Path(path.anchor)
+        for component in path.parts[1:]:
+            parent = current
+            current = current / component
+            if current not in self._dirs:
+                self._aux_dirs.add(current)
+            self._open_dir(current, parent, component)
+
+    def _pin_aux_file(self, path, optional=False):
+        if path in self._aux_records:
+            record = self._aux_records[path]
+            self._verify_record(record)
+            return record["data"]
+        current = Path(path.anchor)
+        for component in path.parts[1:-1]:
+            parent = current
+            current = current / component
+            try:
+                os.stat(component, dir_fd=self._dirs[parent]["fd"], follow_symlinks=False)
+            except FileNotFoundError:
+                if not optional:
+                    _fail("UNSAFE_PATH")
+                path, current = current, parent
+                break
+            if current not in self._dirs:
+                self._aux_dirs.add(current)
+            self._open_dir(current, parent, component)
+        self._charge_metadata(("repo", str(path)), len(str(path).encode("utf-8")))
+        descriptor, retained = None, False
+        try:
+            try:
+                descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC |
+                                     os.O_NONBLOCK, dir_fd=self._dirs[current]["fd"])
+            except FileNotFoundError:
+                if not optional:
+                    _fail("UNSAFE_FILE")
+                record = {"fd": None, "mark": None, "data": None, "missing": True,
+                          "parent": current, "name": path.name}
+                self._aux_records[path] = record
+                self._verify_record(record)
+                return None
+            self._handles.add(descriptor)
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.geteuid() or info.st_mode & 0o022):
+                _fail("UNSAFE_FILE")
+            record = {"fd": descriptor, "mark": _file_mark(info), "data": None,
+                      "missing": False, "parent": current, "name": path.name}
+            self._aux_records[path] = record
+            retained = True
+            self._verify_record(record)
+            if info.st_size > 2_000_000:
+                _fail("BYTE_LIMIT")
+            parts, size = [], 0
+            while size < info.st_size:
+                remaining = self._remaining_bytes()
+                if not remaining:
+                    _fail("BYTE_LIMIT")
+                chunk = os.read(descriptor, min(_CHUNK, info.st_size - size, remaining))
+                self._charge_bytes(len(chunk))
+                if not chunk:
+                    _fail("CUSTODY_DRIFT")
+                parts.append(chunk)
+                size += len(chunk)
+            self._verify_record(record)
+            record["data"] = b"".join(parts)
+            return record["data"]
+        except OSError:
+            _fail("UNSAFE_FILE")
+        finally:
+            if descriptor is not None and not retained:
+                self._release_unretained(descriptor)
+
+    def _verify_aux(self):
+        for path in self._aux_dirs:
+            self._verify_dir(path)
+        for record in self._aux_records.values():
+            self._verify_record(record)
+
+    def _remaining_bytes(self):
+        self._ensure_live()
+        return _TOTAL_BYTES - self._bytes_read
+
+    def _charge_bytes(self, count):
+        # Account returned bytes BEFORE a post-read deadline failure.
+        if self._state != "LIVE":
+            _fail("CLOSED_SNAPSHOT")
+        if type(count) is not int or count < 0:
+            _fail("INVALID_KEY")
+        if count > _TOTAL_BYTES - self._bytes_read:
+            _fail("BYTE_LIMIT")
+        self._bytes_read += count
+        self._check_time()
+
+    def _charge_metadata(self, key, charge):
+        self._ensure_live()
+        if type(charge) is not int or charge < 0:
+            _fail("INVALID_KEY")
+        try:
+            known = key in self._metadata_keys
+        except TypeError:
+            _fail("INVALID_KEY")
+        if not known:
+            if self._metadata_bytes + charge > _MAX_METADATA:
+                _fail("COUNT_LIMIT")
+            self._metadata_keys.add(key)
+            self._metadata_bytes += charge
+
     def _observe(self, path, key):
         if path not in self._seen:
             charge = len(path.encode("utf-8")) + len(json.dumps(
                 key, ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
-            if len(self._seen) >= _MAX_OBSERVATIONS or self._metadata_bytes + charge > _MAX_METADATA:
+            if len(self._seen) >= _MAX_OBSERVATIONS:
                 _fail("COUNT_LIMIT")
+            self._charge_metadata(("file", path), charge)
             self._seen.add(path)
-            self._metadata_bytes += charge
 
     def _verify_record(self, record):
         self._check_time()
@@ -352,7 +488,7 @@ class _EvidenceFiles:
                     _fail("BYTE_LIMIT")
                 amount = min(_CHUNK, cap + 1 - size, remaining)
                 chunk = os.read(record["fd"], amount)
-                self._bytes_read += len(chunk)
+                self._charge_bytes(len(chunk))
                 if size + len(chunk) > cap:
                     _fail("BYTE_LIMIT")
                 if not chunk:
@@ -452,6 +588,7 @@ class _EvidenceFiles:
             self._verify_dir(absolute)
         for record in self._records.values():
             self._verify_record(record)
+        self._verify_aux()
         self._check_time()
 
     def _close(self):
@@ -472,8 +609,11 @@ class _EvidenceFiles:
         except _EvidenceFilesError as error:
             problem = problem or error.code
         self._records.clear()
+        self._aux_records.clear()
+        self._aux_dirs.clear()
         self._dirs.clear()
         self._seen.clear()
+        self._metadata_keys.clear()
         self._state = "CLOSED"
         if problem is not None:
             _fail(problem)

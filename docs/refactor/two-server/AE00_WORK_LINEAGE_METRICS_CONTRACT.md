@@ -175,115 +175,115 @@ their numbers alone do not prove a current open or closed requirement.
 No backfill, replay/startup/adoption, activation, Stage/full-goal or savings authority.
 Observer evidence remains prerequisite; denominator UNVERIFIED/null and
 value/cohort NOT_ESTABLISHED remain unchanged.
+## 7. Private SAME-owner custody prerequisites (738L / proposed739M)
 
-## 7. Private file-custody dependency (738L boundary)
+ENTIRE accepted file contract, section7 of
+`b0f8a98427d4e5b5123e9c71a72b7237189ba4f6:docs/refactor/two-server/AE00_WORK_LINEAGE_METRICS_CONTRACT.md`
+remains binding, including every closed artifact family/key/path/cap and F07/F09
+oracle. 738L continues
+unfinished735H without Provider-output adoption.
+739M draft confers no Source/Task/readiness/public-report/collector/writer/
+accepted-flag/discovery/arbitrary-command/cap/callback or activation authority.
 
-`scripts/two_site_accepted_work_evidence.py` is a CODEX FILE-ONLY continuation
-of unfinished 735H, not failed-output adoption or Task/readiness authority.
-Independent exact-byte review, native and Root acceptance are separate gates.
+### Files
 
-### Private interface and closed artifact families
+File factory/API/lifecycle/closed families/keys/paths/caps remain EXACT accepted
+section7 and current evidence._artifact/_LIMITS, including differently capped
+Worker/Reviewer aliases. No arbitrary artifact path; direct/reentry/reuse/
+closed calls still CLOSED_SNAPSHOT. Named fd custody:
+canonicalroot, NOFOLLOW/NONBLOCK regular singlelink owned non-GW-writable files;
+fd AND name9fields(dev,ino,mode,nlink,uid,gid,size,mtime_ns,ctime_ns), directory
+6fields(dev,ino,type,mode,uid,gid), NOT directory times/size/nlink. Safe final
+leaf absence alone MISSING_FILE with negative guard; appearance CUSTODY_DRIFT,
+never permission/type/parent/I/O treated as absence/free.
 
-`_evidence_files(root)` returns a single-use context yielding a private
-`_EvidenceFiles`. Normal construction, reentry, reuse and post-close calls raise
-`CLOSED_SNAPSHOT`; this is not 735H's stdlib-decorated layout.
-This is a supported-API boundary, not hostile same-process Python isolation.
-The only evidence operations are `_read(kind,key=None)->bytes`,
-`_json_list(kind)->list`, `_metadata()->dict` and `_verify()->None`.
-There is no public export/CLI, caller path/cap/callback/parser, Git/subprocess,
-scan/discovery, storage writer, acceptance collector, report or accepted flag.
+ONE owner:8000000 actualbytes,128 artifact paths inclabsence,65536 metadata,
+120s from construction; first artifact metadata pathUTF8+compact ensure_ascii
+JSON key. Cache/alias/count/custody/deadline and immediate failure-chunk charging
+unchanged; no counter reset. Strict metrics JSON2000rows/depth32/nodes100000 and detached raw ordinals,
+consumed-only exact metadata/no bodies or absent hashes, eleven fixed errors,
+privacy/chaining and original-body/fixed-cleanup-note guarantees ALL unchanged. Aux helpers are trusted-wrapper
+internals, not new evidence API; auxiliary pins share counters/FDs, not artifact
+count or exported files.
 
-Root-relative paths; IDs match exact ASCII
-`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`; tuple keys are required where shown.
+### Private Git composition, not proof authority
 
-| Kind / key | Fixed artifact | Raw byte cap |
-| --- | --- | ---: |
-| ledger / None | docs/refactor/two-server/section-1/00-stage-ledger.md | 2000000 |
-| metrics / None | .local/two-site-refactor/autopilot/metrics.json | 2000000 |
-| receipt / ASCII basename ending .json, at most 255 bytes | docs/refactor/two-server/section-1/inventory/&lt;basename&gt; | 2000000 |
-| task / ID | .local/two-site-refactor/tasks/&lt;ID&gt;.json | 160000 |
-| proposal_snapshot / ID | .local/two-site-refactor/proposals/&lt;ID&gt;/task.json | 480000 |
-| worker_result / ID | .local/two-site-refactor/proposals/&lt;ID&gt;/result.json | 160000 |
-| reviewer_result / ID | same canonical result.json family | 64000 |
-| proposal_status / ID | .local/two-site-refactor/proposals/&lt;ID&gt;/status.json | 64000 |
-| native / (ID, exact nonbool integer 0..1999) | .local/two-site-refactor/pipeline/&lt;ID&gt;/pre-review-tests-&lt;index&gt;.json | 160000 |
-| root_result or root_status / (layout, ID) | .local/two-site-refactor/autopilot/runs/&lt;ID&gt;/{result,status}.json for layout runs; omit runs/ for layout flat | 64000 |
+`_proof_snapshot(root)` yields private single-use _ProofSnapshot; same direct/
+reentry/reuse/closed rejection. File operations use SAME live owner. Exact API:
+_git_commit(sha)=>{sha,parents}, parents tuple/header order <=32;
+_git_blob(commit,path)=>None for exact genuine tree absence, else
+{commit,path,mode,git_oid,sha256,data}; immutable bytes, regular100644/100755;
+_git_changes(commit)=>path-sorted tuple of detached
+{path,old_mode,new_mode,old_oid,new_oid}, sole-parent A/M/D only; root/merge=>
+UNSUPPORTED_COMMIT. BOTH additions/deletions absent side000000/40zeroOID;
+duplicate/malformed rows fail, no renames/silent filtering.
+_is_ancestor(older,newer)->bool, merge-base rc1 alone=False.
+_metadata()=>EXACT {schema_version:1,head,protected_refs,files,git_objects,
+bytes_read}; refs exact3-name map, objects OID-sorted {git_oid,sha256,size};
+files unchanged. No Git query in metadata; counter ATCALL. Nested results
+detached, bytes may share. _verify and successful exit repeat six identity
+queries plus all custody; cache hits do not repeat refs.
 
-Families grant custody, not proof.
-Relative names reject absolute/drive/empty/dot/dotdot/.git or leading-dash
-segments, backslashes, NUL/controls and wildcards; not source-name substrings.
+Exact lowercase40 SHA/sha1 format; independently verify raw type/size/SHA1,
+retain SHA256; cache each verified OID once, no author/message export. Canonical Source path<=1024UTF8 plus actual sandbox
+_validate_overlay_path fence: legitimate supported Source incldocs/memory/*.md,
+Makefile/Dockerfile allowed; unsafe/.git and credential/env/state/data/archive/
+tool-secret paths reject, not auth/user substrings. Tree/symlink/gitlink/privacy
+or nonregular mode=>UNSUPPORTED_SOURCE, NEVER None; future proof=>UNKNOWN.
 
-### Custody, limits, JSON and lifecycle
+Trust registered owned commonGitstore and real objectsdir; reject ANY alternates.
+NO per-object loose/pack inode custody/scan: canonical OID is NOT that proof.
+Pin root,.gitdir OR worktree.gitfile,gitdir/common-dir
+chains,backpointer,HEAD,config,packed-refs,currentbranch,protected names. Linked
+gitdir under ancestor.git,common-dir its.git ancestor. Auxiliary leaves same9fd/
+name fields,negative first-missing-component guards,<=2M each; SAME8M/65536,
+not artifact128/exported files. Repository/root/name/HEAD/ref drift=>
+SNAPSHOT_DRIFT; artifact drift=>CUSTODY_DRIFT. Three snapshot._REFS required,
+absence=>GIT_FAILURE. Factory six identity queries, no rawHEAD object load.
 
-Canonical existing root and named no-follow directory chains are held by file
-descriptors. Leaves use O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK and must be
-regular, single-link, effective-user-owned and not group/world writable before
-reading. File custody pins exactly dev, ino, full mode, nlink, uid, gid, size,
-mtime_ns and ctime_ns on both fd and named leaf. Directory custody pins only
-dev, ino, type, mode, uid, gid plus named-chain identity; unrelated directory
-timestamp/size/link-count changes are not file drift.
+Commands/environment EXACT snapshot._argv/_ENV: fixed /usr/bin/git/root;
+identity rev-parse,cat-file type/size/commit/blob,ls-tree,diff-tree raw without
+renames/extdiff/textconv,merge-base ancestry ONLY. Fresh environment disables
+inheritance,lazyfetch,locks,global/system config,prompts,grafts; fixed flags
+disable hooks/fsmonitor/pager/replace/network. No caller argv/env override,
+helper/filter/retry. Installed Git2.43 contains GIT_NO_LAZY_FETCH; actual
+malicious config/promisor test must prove prevention, not literal assertion.
 
-One invocation owns all descriptors, immutable caches and fixed bounds:
-8000000 actual raw bytes, 128 unique attempted artifact paths including guarded
-negative leaves, 65536 validated path/key UTF-8 metadata bytes and a 120-second
-monotonic deadline beginning at factory construction. Metadata charge on first
-observation is path UTF-8 bytes plus compact ensure_ascii=True JSON key bytes.
-Repeats do not recharge count/metadata. Each chunk is charged immediately even
-if later I/O/custody/limit checks fail;
-caught failures never reset consumed bytes. Compatible cached bytes do not
-recharge reads but still verify all custody, deadline and requested-kind caps.
-Worker/Reviewer result aliases cannot bypass their different caps.
-All caches are invocation-local.
+512 attempted commands including factory6;256 unique verified commit/blob
+objects;2M COMBINED stdout+stderr/query;30s child/120s owner include2s reserve.
+ERROR-only cleanup may use2s safety grace, no new work/bytes/reset. Metadata:
+distinct SHA40; (commit,path)
+40+pathUTF8; repository pin canonical absolute-path UTF8. Failed queries
+consume command count and every actual stdout/stderr chunk. No success-only
+charging. At cap NO read+1: only drained POLLHUP without POLLIN proves EOF;
+readable overflow=>BYTE_LIMIT without consuming extra. Final identity bytes
+also count: exhausted8M never waives final verification.
+Nonblocking bounded pipes; WNOWAIT keeps leader UNREAPED through TERM/KILL.
+Then at most2waits share fresh2s safety grace; ANY wait error records failure.
+Preserve primary/fixed notes; attempt close/reap. Permanent OS failure=>
+GIT_FAILURE, NOT all-reaped proof. Success requires original deadline AND reap.
+Snapshot adds GIT_FAILURE,UNSUPPORTED_SOURCE,UNSUPPORTED_COMMIT,SNAPSHOT_DRIFT.
+Fatal I/O/custody/JSON/count/bytes/time/Git errors poison; next call CLOSED;
+caught failure rethrows at otherwise-successful exit. INVALID_KEY,UNSAFE_PATH,
+UNSUPPORTED_SOURCE,UNSUPPORTED_COMMIT,guarded MISSING_FILE recoverable. Clear
+caches at exit.
 
-Only a genuinely absent final leaf under a pinned safe existing parent raises
-`MISSING_FILE`; it retains a negative name guard. Appearance is
-`CUSTODY_DRIFT` on repeat, explicit verification or successful exit. Parent,
-permission, type, link and I/O errors are never absence or zero-cost evidence.
-Verification rechecks every consumed fd/name/directory and negative guard,
-without content rereads. All descriptors are attempted on cleanup and raw
-caches are cleared. Body exceptions remain original; simultaneous cleanup
-failure adds only a fixed enum note. Successful-body cleanup failure raises a
-fixed error. Raw exception bodies are not claimed to be redacted.
+### Verification and remaining obligations
 
-Metrics JSON alone supports `_json_list("metrics")`: strict UTF-8, duplicate
-keys rejected at every level, no NaN/Infinity/nonfinite floats or invalid
-Unicode scalars, actual list of at most 2000 records. Original order and raw
-row values are retained, including malformed-as-proof rows. Depth is at most
-32; nodes (containers, object keys and scalar values) at most 100000, with
-bounded preflight before parsing. Each returned list is independently detached.
+Six Source paths: evidence module,snapshot module,three snapshot tests,THIS
+contract; snapshot<=25000,others<=24000,total<=144000. Native: snapshot3,two
+unchanged file suites,unchanged work_cost_report. ENTIRE accepted738L F07/F09
+matrix remains mandatory (including SAME complete-oracle corruption,
+AssertionError/restoration), not replaced by happy-path Git tests. New actual
+tempGit/production-pump faults cover full values/bytes/OIDs/refs/privacy,
+A/M/D/ancestry/root/merge; malformed parsers/hash/type/size; shared8M/64K/120s,
+queryEOF/cap,commands/objects; config/promisor/alternates/grafts; spawn/stderr/
+nonzero/poll/time/descendant/leader/reap/cleanup/poison. No liveGit mutation;
+test-file count is not work/denominator credit.
 
-Metadata is exactly `{schema_version:1,files,bytes_read}`; files is path-sorted
-`{path,sha256,size}` entries for successfully consumed artifacts only. Empty
-metadata is exactly `{schema_version:1,files:[],bytes_read:0}`. No hash or file
-entry is invented for absence; no source/body/absolute root/HEAD/refs/native
-tail/acceptance field is exported. Every returned nested builtin is detached.
-`_EvidenceFilesError.code` and its string contain only INVALID_ROOT,
-INVALID_KEY, UNSAFE_PATH, UNSAFE_FILE, MISSING_FILE, CUSTODY_DRIFT, BYTE_LIMIT,
-COUNT_LIMIT, TIME_LIMIT, JSON_INVALID or CLOSED_SNAPSHOT. Wrapped errors suppress
-rendered chaining; no claim is made that Python __context__ is absent.
-
-### Verification boundary and explicitly pending work
-
-Selectors: `tests/test_two_site_accepted_work_evidence.py`,
-`tests/test_two_site_accepted_work_evidence_faults.py` and unchanged
-`tests/test_two_site_work_cost_report.py`. The two new tests (each <=24000 UTF-8
-bytes) replace 735H's one-file layout. All four Source files are <=24000 bytes
-each, <=96000 total. F07/F09 remain: every family/layout,
-whole-value metadata/ordinal/cache oracles; exact/limit+1 resource/JSON gates;
-real unsafe-type/link/mode/owner, nine-field/name/directory and partial-I/O
-faults; cleanup/byte charging/negative custody/lifecycle/detachment/privacy;
-SAME complete oracle before corruption, AssertionError and restoration.
-No behavior, savings, Stage or activation credit comes from these tests.
-
-Still PENDING: a full private Git snapshot wrapper must hold THIS SAME live
-reader and integrate fixed read-only Git/HEAD/protected-ref custody into ONE
-shared 8000000-byte invocation allowance, not another additive 8M budget.
-The entire Phase1B actual task/Source/proposal/native/independent Reviewer/Root
-acceptance join, all three reference forms, historical-attested/fresh proof tiers
-and logical-work deduplication remain pending. Entire Phase2 public
-`summarize_accepted_work`, report/windows/cohorts, unchanged observational
-embedding, direct/shared exact rational allocation, conservation and null-cost
-coverage gates remain pending. No placeholder public consumer is introduced.
-Accepted normalizer/selector prerequisites remain closed; denominator
-UNVERIFIED/null and value/cohort NOT_ESTABLISHED stay unchanged. No replay/reset,
-adoption/startup, activation or full-goal authority is conferred.
+PENDING actual Task/Source/proposal/native/independent Reviewer/Root join,
+all3reference forms,historical-attested/fresh tiers,logicalwork dedup; public
+summarize_accepted_work/report/windows/cohorts/observational embedding/
+direct+shared rational costs/conservation/nullcoverage. No placeholderconsumer.
+Normalizer4fd85287/selector5c8e0a5a stay closed; denominator UNVERIFIED/null,
+value/cohort NOT_ESTABLISHED. No replay/reset/adoption/activation/Stage/fullgoal.
