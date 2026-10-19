@@ -18,7 +18,7 @@
 
 | بخش | وضعیت فنی / تصمیم فعلی | کار یا شاهد باقی‌مانده |
 | --- | --- | --- |
-| AE00 | پیش‌نیازهای مشاهده‌ای و اثبات اصلی نرمال‌ساز B194/C176/full607 در `4fd85287` پذیرفته شده‌اند؛ نه کل AE00. | پیوند واقعیِ شواهد پذیرش به کار معنایی، تخصیص مستقیم/مشترک هزینه، زمان فعال/تقویمی و cohortهای قابل‌مقایسه؛ مخرج و صرفه‌جویی هنوز اثبات نشده‌اند. |
+| AE00 | نرمال‌ساز B194/C176/full607 در `4fd85287`، حضانت فایل738L در `b0f8a984`، Snapshot739M در `9a807f33` و [پیوند خصوصی740R3](AE00_ACCEPTED_WORK_PROOFS_CONTRACT.md) در `d0170357` پذیرفته‌اند. [API گزارش741](AE00_ACCEPTED_WORK_COST_REPORT_CONTRACT.md) همین حضانت را ترکیب می‌کند؛ این متن پذیرش Source741 نیست. | legacy19 بدون تغییر؛ گزارش فقط retained/partial را با UNKNOWN پوشش می‌دهد. declaration واقعیِ مشترک، زمان فعال/quota/تقویمی، cohort/value و گیت‌های startup در AE03 بازند؛ نه پایان AE00، تاریخچهٔ کامل یا صرفه‌جویی. |
 | AE01 | پذیرش فنی و پایلوت در [ارزیابی AE01](AE01_EVALUATION_20260923.md) ثبت است. | اثر مصرف/سرعت `UNKNOWN`؛ شکست‌ها و هزینهٔ اصلاحات از مقایسه حذف نشوند. |
 | AE02 | checkpoint و یک warm restart در [ارزیابی AE02](AE02_EVALUATION_20260923.md) اثبات شده‌اند. | این شاهد تاریخی، مجوز startup فعلی نیست؛ اثر بهینه‌سازی هنوز `UNKNOWN` است. |
 | AE03 | تغییر دقیق text-input در `251e679c` پذیرفته شد؛ یک زنجیرهٔ عادی Worker/native/Reviewer در 728Q مشاهده شد. | خروج پایدار CLI، گیت‌های جاری adoption/Start/Monitor و wake/ACK/STOP/crash هنوز بسته نشده‌اند. شکست‌های بعدی، رفع دائمی hang را تأیید نمی‌کنند؛ Supervisor متوقف است. |
@@ -26,7 +26,7 @@
 | AE05 | [تصمیم فعلی](AE05_AE06_GATE_DECISION_20260924.md): آماده‌سازی سریال حفظ شود. | بدون سنجش معتبر گلوگاه و سود خالص، صف draft/هم‌پوشانی ساخته یا فعال نشود. |
 | AE06 | [تصمیم فعلی](AE05_AE06_GATE_DECISION_20260924.md): یک Worker و یک مالک Git حفظ شوند. | تصمیمِ عدم فعال‌سازی فعلاً بسته است؛ پایلوت دو Worker فقط پس از شروط همان تصمیم قابل طرح است، نه الزام برای پایان پلن. |
 
-رسیدهای محلیِ پذیرش، خارج از Git و زیر `.local/two-site-refactor/reviews/` هستند: `AE00_685_ROOT_EXACT_ACCEPTED_COMMIT_20261013.json`، `AE04_701R_ROOT_SOURCE_COMMIT_ACCEPTED_20261017.json` همراه posthold متناظر، `AE03_725B_ROOT_ACCEPTED_OBSERVED_20261018.json` و `AE03_728Q_ROOT_TRANSPORT_QUALIFIED_20261018.json`. این‌ها فایل tracked معرفی نمی‌شوند و جای بررسی bytes/Scope/HEAD فعلی را نمی‌گیرند.
+رسیدهای محلیِ پذیرش، خارج از Git و زیر `.local/two-site-refactor/reviews/` هستند: `AE00_685_ROOT_EXACT_ACCEPTED_COMMIT_20261013.json`، `AE04_701R_ROOT_SOURCE_COMMIT_ACCEPTED_20261017.json` همراه posthold متناظر، `AE03_725B_ROOT_ACCEPTED_OBSERVED_20261018.json` و `AE03_728Q_ROOT_TRANSPORT_QUALIFIED_20261018.json`. این‌ها فایل tracked معرفی نمی‌شوند و جای بررسی bytes/Scope/HEAD فعلی را نمی‌گیرند. رسیدهای محلی738L،739M و740R3 به‌ترتیب `AE00_738L_ROOT_ACCEPTED_OBSERVED_20261019.json`، `AE00_739M_R2_ROOT_ACCEPTED_OBSERVED_20261019.json` و `AE00_740R3_ROOT_ACCEPTED_OBSERVED_20261019.json` هستند. پذیرش Source741 فقط از رسیدهای منطبق Root/pre-post-native/genuine/commit/posthold به‌دست می‌آید، نه از این متن.
 
 تلاش‌های 734F و 735H هیچ Source پذیرفته‌شده یا واحد رفتاری جدیدی نساختند: اولی در گیت اندازهٔ فایل تست متوقف شد؛ دومی پس از پاسخ مدل در CLI timeout شد و آزمون/Reviewer نداشت. شواهد شکست و reservationها حفظ می‌شوند؛ نام تازه یا `SUCCESS` داخل stream، مجوز replay یا پذیرش نیست. این تطبیق مستندات، پایان AE00–AE06، سلامت چرخه یا صرفه‌جویی را اعلام نمی‌کند.
 

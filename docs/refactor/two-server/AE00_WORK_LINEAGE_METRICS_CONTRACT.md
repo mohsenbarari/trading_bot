@@ -293,3 +293,11 @@ summarize_accepted_work/report/windows/cohorts/observational embedding/
 direct+shared rational costs/conservation/nullcoverage. No placeholderconsumer.
 Normalizer4fd85287/selector5c8e0a5a stay closed; denominator UNVERIFIED/null,
 value/cohort NOT_ESTABLISHED. No replay/reset/adoption/activation/Stage/fullgoal.
+
+## Current composition
+740R3/d0170357: local `AE00_740R3_ROOT_ACCEPTED_OBSERVED_20261019.json`;
+[proofs](AE00_ACCEPTED_WORK_PROOFS_CONTRACT.md) + [741 API](AE00_ACCEPTED_WORK_COST_REPORT_CONTRACT.md).
+738L/b0f8a984+739M/9a807f33 custody; legacy19 unchanged, retained/partial only.
+Source acceptance needs matching Root/pre-post-native/genuine/commit/posthold
+receipts, not this text. Shared declaration, active/quota/calendar and cohort/value stay open;
+no Stage/startup authority.
