@@ -155,11 +155,23 @@ free. Retained frames and unconditional byte/stat custody guard inputs, oracles,
 prior reports and raw/persisted files; no privacy sentinel leaks. Four-key
 telemetry tasks confer no six-key Runner/Assignment or acceptance authority.
 
-REQUIRED OPEN: original normalizer B194/C176/full607; grounded denominator/shared
-allocation; active/quota/calendar timing; cohorts/value; 627/628; AE03 live gates
-(including nonaccepted 680), AE04, subsequent AE00–AE06. Revalidate Units B/C/D
-after normalizer repairs; Unit D requires all 13 canonical selectors, fresh
-independent review and Root exact-byte/Git acceptance of both files. No backfill,
-replay/startup/adoption, activation, Stage/full-goal or savings authority.
+Current prerequisite reconciliation (2026-10-19): the original normalizer
+B194/C176/full607 proof was accepted in `4fd85287`; the AE04 canonical-selector
+Source-custody repair was accepted in `5c8e0a5a`. Do not reopen those accepted
+source units from the older OPEN labels. Acceptance evidence is retained locally,
+not in tracked receipt files: `AE00_685_ROOT_EXACT_ACCEPTED_COMMIT_20261013.json`
+and `AE04_701R_ROOT_SOURCE_COMMIT_ACCEPTED_20261017.json` with its normal posthold,
+under `.local/two-site-refactor/reviews/`. Git presence alone is not acceptance.
+
+REQUIRED OPEN: grounded accepted-behavior denominator/shared cost allocation;
+active/quota/calendar timing; comparable cohorts/value; AE03 live gates and
+remaining evidence/application
+gates of AE00–AE06. The accepted normalizer and selector repairs do not close
+these broader obligations. Unit D's full canonical-selector, independent-review
+and exact-byte/Git requirements remain; revalidation belongs to an actual code
+change or new acceptance boundary, not an automatic replay of accepted work.
+Historical references 627/628 and nonaccepted 680 are retained for reconciliation;
+their numbers alone do not prove a current open or closed requirement.
+No backfill, replay/startup/adoption, activation, Stage/full-goal or savings authority.
 Observer evidence remains prerequisite; denominator UNVERIFIED/null and
 value/cohort NOT_ESTABLISHED remain unchanged.
