@@ -15,7 +15,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import FunctionType
 import unittest
 from unittest.mock import patch
 
@@ -31,8 +30,14 @@ ROLE = {
     "verifier": ("gemini-4-argon-high", "high", "22222222-2222-4222-8222-222222222222"),
 }
 PUBLIC_STATUS = {"worker": "PROPOSAL_READY", "verifier": "VERIFIED"}
-PRINT_SOURCE_SHA = "502b26fb4528349d8bf7d3c9c6f7b45eca59e681cb5d05cf71ed88847b7c1f52"
-PRINT_RUN_AST_SHA = "ccc7d3403a6f9ae8a1738a0ef558ff47af8358b0296a286124603d3dd98c06ad"
+BARE_SOURCE_SHA = "502b26fb4528349d8bf7d3c9c6f7b45eca59e681cb5d05cf71ed88847b7c1f52"
+BARE_RUN_AST_SHA = "ccc7d3403a6f9ae8a1738a0ef558ff47af8358b0296a286124603d3dd98c06ad"
+PRINT_SOURCE_SHA = "f53373164b60f700452e1f2b9cbfb3b5e2670abf79b41a25d36d0ea131ef8ccb"
+PRINT_RUN_AST_SHA = "285043997d50c96e9dee72eb030ca82c44663f3ecfd6a5370318438ab6181551"
+BARE_DIAGNOSTIC = (
+    'Error: --print took "--mode" as its prompt, so the intended prompt was left as an argument and ignored.\n'
+    "Attach the prompt to the flag (--print='your prompt') and move --mode elsewhere on the command line.\n"
+)
 
 
 class ExplicitPrintInvocation(unittest.TestCase):
@@ -44,7 +49,7 @@ class ExplicitPrintInvocation(unittest.TestCase):
         self.addCleanup(self.legacy.doCleanups)
         self.original_source = (self.legacy.root / "source.py").read_bytes()
 
-    def invoke(self, role, run_id, *, fault=None, remove_print=False):
+    def invoke(self, role, run_id, *, fault=None, remove_print=False, bare_print=False):
         fixture = self.legacy
         model, effort, cid = ROLE[role]
         trace = {"spawned": [], "fresh": [], "disposed": False, "capture": []}
@@ -80,7 +85,13 @@ class ExplicitPrintInvocation(unittest.TestCase):
             "'auto_update':os.environ.get('AGY_CLI_DISABLE_AUTO_UPDATE'),"
             "'hooks':json.loads((pathlib.Path.cwd()/'.agents/hooks.json').read_text())}\n"
             + "pathlib.Path(" + repr(str(trace_path)) + ").write_text(json.dumps(record))\n"
-            + "if sys.argv.count('--print') != 1:\n"
+            # Downstream argv rejection deliberately follows full input EOF and
+            # trace retention; early-input failures have separate capture tests.
+            + "if '--print' in sys.argv and sys.argv[sys.argv.index('--print')+1:] == []:\n"
+            + " sys.stderr.write('flag needs an argument: -print\\n');sys.exit(2)\n"
+            + "if '--print' in sys.argv and sys.argv[sys.argv.index('--print')+1] == '--mode':\n"
+            + " sys.stderr.write(" + repr(BARE_DIAGNOSTIC) + ");sys.exit(2)\n"
+            + "if sys.argv.count('--print=') != 1 or '--print' in sys.argv:\n"
             + " sys.stderr.write('MISSING_EXPLICIT_PRINT\\n');sys.exit(23)\n"
             + "sys.stdout.buffer.write(" + repr(stream) + ");sys.stdout.buffer.flush()\n"
             + ("time.sleep(5)\n" if fault == "hang" else "")
@@ -140,7 +151,10 @@ class ExplicitPrintInvocation(unittest.TestCase):
             self.assertEqual(kwargs["stderr"], subprocess.PIPE)
             self.assertIs(kwargs["start_new_session"], True)
             self.assertEqual(kwargs["env"]["AGY_CLI_DISABLE_AUTO_UPDATE"], "true")
-            actual = [part for part in command if part != "--print"] if remove_print else command
+            self.assertFalse(remove_print and bare_print)
+            actual = [part for part in command if part != "--print="] if remove_print else command
+            if bare_print:
+                actual = ["--print" if part == "--print=" else part for part in command]
             process = real_popen(actual, **kwargs)
             trace["process"] = process
             return process
@@ -201,7 +215,7 @@ class ExplicitPrintInvocation(unittest.TestCase):
     def whole_invocation_oracle(self, role, out):
         fixture, trace = self.legacy, self.trace
         model, effort, cid = ROLE[role]
-        expected_argv = [str(trace["cli"]), "--print", "--mode", "plan", "--sandbox",
+        expected_argv = [str(trace["cli"]), "--print=", "--mode", "plan", "--sandbox",
                          "--model", model, "--effort", effort, "--input-format", "text",
                          "--output-format", "stream-json", "--print-timeout", "30s",
                          "--json-schema", str(out / "response-schema.json"), "--conversation", cid]
@@ -261,7 +275,7 @@ class ExplicitPrintInvocation(unittest.TestCase):
                 out = self.invoke(role, role + "-print-good")
                 self.whole_invocation_oracle(role, out)
 
-    def test_exact_fourth_fidelity_factory_pair_and_all_historical_crosspairs(self):
+    def test_exact_fifth_fidelity_factory_pair_and_all_historical_crosspairs(self):
         source = fidelity._read_runner_source()
         self.assertEqual(hashlib.sha256(source).hexdigest(), PRINT_SOURCE_SHA)
         nodes = [node for node in ast.parse(source).body
@@ -277,6 +291,7 @@ class ExplicitPrintInvocation(unittest.TestCase):
                 "8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d",
             "cb5f6fa91ce195e6dbd5dffa73183ddbe440e05829bbbdd100c9dfef015b7bf6":
                 "9785eb03a32ac1f13cd6ea197e96b64101eb6c1bfa4d3a7859052a3508dfea94",
+            BARE_SOURCE_SHA: BARE_RUN_AST_SHA,
             PRINT_SOURCE_SHA: PRINT_RUN_AST_SHA,
         })
         before = dict(vars(runner))
@@ -289,21 +304,27 @@ class ExplicitPrintInvocation(unittest.TestCase):
         self.assertIs(private.__globals__["load_prior_worker"], prior_loader)
         self.assertEqual(set(vars(runner)), set(before))
         self.assertTrue(all(vars(runner)[key] is value for key, value in before.items()))
-        _, versions = history._three_versions()
-        for old_source in versions:
-            old = FunctionType(fidelity._compile_run(ast.parse(old_source)), runner.run.__globals__,
-                               "run", runner.run.__defaults__, runner.run.__closure__)
-            with self.subTest(old_sha=hashlib.sha256(old_source).hexdigest()):
-                with self.assertRaisesRegex(fidelity.PromptFidelityError, "actual SDK run code mismatch"):
-                    fidelity._validated_run_code(source, old)
-                with self.assertRaisesRegex(fidelity.PromptFidelityError, "actual SDK run code mismatch"):
-                    fidelity._validated_run_code(old_source, runner.run)
-                old_node = next(node for node in ast.parse(old_source).body
-                                if isinstance(node, ast.FunctionDef) and node.name == "run")
-                old_ast = hashlib.sha256(ast.dump(old_node, include_attributes=True).encode()).hexdigest()
-                with patch.dict(fidelity._RUNNER_IDENTITIES, {PRINT_SOURCE_SHA: old_ast}):
-                    with self.assertRaisesRegex(fidelity.PromptFidelityError, "paired SDK source/run AST pin mismatch"):
-                        fidelity._validated_run_code(source, runner.run)
+        _, historical = history._three_versions()
+        self.assertEqual(source.count(history._EMPTY_PRINT_COMMAND), 1)
+        bare = source.replace(history._EMPTY_PRINT_COMMAND, history._PRINT_COMMAND, 1)
+        self.assertEqual(hashlib.sha256(bare).hexdigest(), BARE_SOURCE_SHA)
+        versions = (*historical, bare, source)
+        for own in versions:
+            original = history._unexecuted_original(runner, own)
+            fidelity._validated_run_code(own, original)
+            for other in versions:
+                if own == other:
+                    continue
+                with self.subTest(own_sha=hashlib.sha256(own).hexdigest(),
+                                  other_sha=hashlib.sha256(other).hexdigest()):
+                    wrong = history._unexecuted_original(runner, other)
+                    with self.assertRaisesRegex(fidelity.PromptFidelityError, "actual SDK run code mismatch"):
+                        fidelity._validated_run_code(own, wrong)
+                    other_ast = hashlib.sha256(ast.dump(history._run_node(other),
+                                                       include_attributes=True).encode()).hexdigest()
+                    with patch.dict(fidelity._RUNNER_IDENTITIES, {hashlib.sha256(own).hexdigest(): other_ast}):
+                        with self.assertRaisesRegex(fidelity.PromptFidelityError, "paired SDK source/run AST pin mismatch"):
+                            fidelity._validated_run_code(own, original)
         with patch.dict(fidelity._CONTEXT_CALL_LINES, {PRINT_RUN_AST_SHA: 3238}):
             with self.assertRaisesRegex(fidelity.PromptFidelityError, "CONTEXT JSON call shape drift"):
                 fidelity._validated_run_code(source, runner.run)
@@ -323,10 +344,10 @@ class ExplicitPrintInvocation(unittest.TestCase):
                 wire, timeout, kwargs = trace["capture"][0]
                 self.assertEqual(child["wire"].encode("utf-8"), wire)
                 self.assertEqual((timeout, kwargs), (45, {}))
-                self.assertEqual(trace["spawned"][0].count("--print"), 1)
-                self.assertNotIn("--print", child["argv"])
+                self.assertEqual(trace["spawned"][0].count("--print="), 1)
+                self.assertNotIn("--print=", child["argv"])
                 self.assertEqual(child["argv"], [part for part in trace["spawned"][0]
-                                                 if part != "--print"])
+                                                 if part != "--print="])
                 self.assertTrue(all(pipe.closed for pipe in (
                     trace["process"].stdin, trace["process"].stdout, trace["process"].stderr)))
                 self.assertEqual(trace["process"].returncode, 23)
@@ -335,6 +356,37 @@ class ExplicitPrintInvocation(unittest.TestCase):
                 self.assertFalse((trace["out"] / "result.json").exists())
                 self.assertEqual(json.loads((trace["out"] / "status.json").read_text())["state"], "BLOCKED")
                 self.whole_invocation_oracle(role, self.invoke(role, role + "-print-restored"))
+
+    def test_reached_actual_bare_flag_grammar_failure_and_same_whole_oracle_restores(self):
+        self.assertEqual(len(BARE_DIAGNOSTIC.encode()), 205)
+        self.assertEqual(hashlib.sha256(BARE_DIAGNOSTIC.encode()).hexdigest(),
+                         "350b176cae58d2e0b8eda4ce36afa96c53cdac05e48089aa1d180101eaa16769")
+        for role in ROLE:
+            with self.subTest(role=role):
+                self.whole_invocation_oracle(role, self.invoke(role, role + "-empty-before"))
+                with self.assertRaisesRegex(runner.ProposalError, "CLI failed with exit 2"):
+                    self.invoke(role, role + "-actual-bare", bare_print=True)
+                trace = self.trace
+                child = json.loads(trace["child_trace_path"].read_text())
+                self.assertIs(child["stdin_eof"], True)
+                self.assertEqual(len(trace["capture"]), 1)
+                wire, timeout, kwargs = trace["capture"][0]
+                self.assertEqual(child["wire"].encode("utf-8"), wire)
+                self.assertEqual((timeout, kwargs), (45, {}))
+                self.assertEqual(trace["spawned"][0].count("--print="), 1)
+                self.assertEqual(child["argv"], ["--print" if part == "--print=" else part
+                                                  for part in trace["spawned"][0]])
+                self.assertEqual(child["argv"][1:4], ["--print", "--mode", "plan"])
+                self.assertEqual(child["schema"], json.loads((trace["out"] / "response-schema.json").read_text()))
+                self.assertTrue(all(pipe.closed for pipe in (
+                    trace["process"].stdin, trace["process"].stdout, trace["process"].stderr)))
+                self.assertEqual(trace["process"].returncode, 2)
+                self.assertTrue(trace["disposed"])
+                self.assertEqual((trace["out"] / "stderr.txt").read_text(), BARE_DIAGNOSTIC)
+                self.assertEqual((trace["out"] / "stream.jsonl").read_bytes(), b"")
+                self.assertFalse((trace["out"] / "result.json").exists())
+                self.assertEqual(json.loads((trace["out"] / "status.json").read_text())["state"], "BLOCKED")
+                self.whole_invocation_oracle(role, self.invoke(role, role + "-empty-restored"))
 
     def test_success_terminal_does_not_bypass_nonzero_or_hanging_process_exit(self):
         for fault, error, message in (("nonzero", runner.ProposalError, "CLI failed with exit 9"),

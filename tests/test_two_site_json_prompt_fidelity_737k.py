@@ -24,8 +24,11 @@ _OLD_AST = "90afa2143a2172212027a01092aa80107cd1b5f19cc6bdf3349671c9add0232b"
 _TEXT_AST = "8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d"
 _PRINT_SOURCE = "502b26fb4528349d8bf7d3c9c6f7b45eca59e681cb5d05cf71ed88847b7c1f52"
 _PRINT_AST = "ccc7d3403a6f9ae8a1738a0ef558ff47af8358b0296a286124603d3dd98c06ad"
+_EMPTY_PRINT_SOURCE = "f53373164b60f700452e1f2b9cbfb3b5e2670abf79b41a25d36d0ea131ef8ccb"
+_EMPTY_PRINT_AST = "285043997d50c96e9dee72eb030ca82c44663f3ecfd6a5370318438ab6181551"
 _GENERATION_COMMAND = b'command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,'
 _PRINT_COMMAND = b'command = [str(disposable_cli), "--print", "--mode", "plan", "--sandbox", "--model", role_model,'
+_EMPTY_PRINT_COMMAND = b'command = [str(disposable_cli), "--print=", "--mode", "plan", "--sandbox", "--model", role_model,'
 
 
 def _digest(body):
@@ -76,6 +79,11 @@ def _apply_repair(source, *, inverse=False):
 def text_baseline_if_needed(source):
     """Invert only exact known print/737K changes, never normalize unknown Source."""
     source_sha = _digest(source)
+    if source_sha == _EMPTY_PRINT_SOURCE:
+        assert source.count(_EMPTY_PRINT_COMMAND) == 1
+        source = source.replace(_EMPTY_PRINT_COMMAND, _PRINT_COMMAND, 1)
+        source_sha = _digest(source)
+        assert source_sha == _PRINT_SOURCE
     if source_sha == _PRINT_SOURCE:
         assert source.count(_PRINT_COMMAND) == 1
         source = source.replace(_PRINT_COMMAND, _GENERATION_COMMAND, 1)
@@ -127,18 +135,21 @@ def _three_versions():
     expected = dict(zip((_OLD_SOURCE, _TEXT_SOURCE, FUTURE_RUNNER_SOURCE_SHA256),
                         (_OLD_AST, _TEXT_AST, FUTURE_RUN_AST_SHA256)))
     expected[_PRINT_SOURCE] = _PRINT_AST
+    expected[_EMPTY_PRINT_SOURCE] = _EMPTY_PRINT_AST
     assert fidelity._RUNNER_IDENTITIES == expected
     assert fidelity._CONTEXT_CALL_LINES == {
         _OLD_AST: 3190, _TEXT_AST: 3190, FUTURE_RUN_AST_SHA256: FUTURE_CONTEXT_LINE,
         _PRINT_AST: 3237,
+        _EMPTY_PRINT_AST: 3237,
     }
     for body in versions:
         run_ast = ast.dump(_run_node(body), include_attributes=True).encode()
         assert _digest(run_ast) == expected[_digest(body)]
-    assert actual_source in versions or _digest(actual_source) == _PRINT_SOURCE
-    if _digest(actual_source) == _PRINT_SOURCE:
+    assert actual_source in versions or _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE}
+    if _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE}:
         assert future.count(_GENERATION_COMMAND) == 1
-        assert future.replace(_GENERATION_COMMAND, _PRINT_COMMAND, 1) == actual_source
+        command = _EMPTY_PRINT_COMMAND if _digest(actual_source) == _EMPTY_PRINT_SOURCE else _PRINT_COMMAND
+        assert future.replace(_GENERATION_COMMAND, command, 1) == actual_source
     return runner, versions
 
 

@@ -3302,7 +3302,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             raise ProposalError("response schema binding changed before dispatch")
         meta["response_schema_sha256"] = sha(response_schema_bytes)
         write_json(out / "status.json", meta)
-        command = [str(disposable_cli), "--print", "--mode", "plan", "--sandbox", "--model", role_model,
+        command = [str(disposable_cli), "--print=", "--mode", "plan", "--sandbox", "--model", role_model,
                    *effort_args, "--input-format", "text",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", str(response_schema_path)]

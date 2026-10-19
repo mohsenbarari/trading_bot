@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import copy
 import os
+os.environ["APP_ENV_FILE"] = "config/unit-test.env.example"
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+install_p1_00_network_fence()
+
 from pathlib import Path
 import tempfile
 import unittest
@@ -22,6 +26,7 @@ from scripts.two_site_maintenance_transition_startup import (
 from scripts.two_site_maintenance_transition_storage import (
     MaintenanceTransitionStorageError,
 )
+from scripts.two_site_root_maintenance_bridge import RootMaintenanceBridgeError
 
 
 def _make_scope() -> AssignmentScope:
@@ -48,7 +53,16 @@ def _make_repo() -> dict[str, object]:
     }
 
 
+@mock.patch(
+    "scripts.two_site_maintenance_transition_startup.read_root_maintenance_bridge_locked",
+    new=lambda *args, **kwargs: None,
+)
 class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
+    """Legacy/quarantine unit fixtures model an authenticated unmarked Root route.
+
+    Their temporary roots have no real Git/Scope/Broker bridge fixture. Marked
+    Root errors and interrupts are tested separately without this boundary.
+    """
     def setUp(self) -> None:
         self.repo = _make_repo()
         self.norm_repo = validate_accepted_repository(self.repo)
@@ -154,11 +168,13 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 side_effect=Exception("signature verification failed"),
-            ):
-                with self.assertRaises(MaintenanceTransitionStartupError):
+            ) as recovery:
+                with self.assertRaisesRegex(MaintenanceTransitionStartupError,
+                                            "^quarantine recovery verification failed$"):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
 
             # Recovery reader returns non-dict
             with mock.patch(
@@ -167,11 +183,13 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 return_value="not an envelope dict",
-            ):
-                with self.assertRaises(MaintenanceTransitionStartupError):
+            ) as recovery:
+                with self.assertRaisesRegex(MaintenanceTransitionStartupError,
+                    "^no reviewed maintenance transition or quarantine recovery record found$"):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
 
             # Missing or non-dict record
             for bad_record in (None, "not a dict", []):
@@ -181,11 +199,13 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
                 ), mock.patch(
                     "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                     return_value={"record": bad_record},
-                ):
-                    with self.assertRaises(MaintenanceTransitionStartupError):
+                ) as recovery:
+                    with self.assertRaisesRegex(MaintenanceTransitionStartupError,
+                                                "^invalid quarantine recovery record$"):
                         require_reviewed_maintenance_transition_locked(
                             root, state_root, self.repo
                         )
+                    recovery.assert_called_once_with(root, state_root)
 
             # Missing or non-dict record.new_repository
             for bad_repo in (None, "not a dict", []):
@@ -195,11 +215,13 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
                 ), mock.patch(
                     "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                     return_value={"record": {"new_repository": bad_repo}},
-                ):
-                    with self.assertRaises(MaintenanceTransitionStartupError):
+                ) as recovery:
+                    with self.assertRaisesRegex(MaintenanceTransitionStartupError,
+                                                "^invalid quarantine recovery record$"):
                         require_reviewed_maintenance_transition_locked(
                             root, state_root, self.repo
                         )
+                    recovery.assert_called_once_with(root, state_root)
 
     def test_recovery_supplied_repo_mismatch_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -213,11 +235,13 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 return_value=recovery_env,
-            ):
-                with self.assertRaises(MaintenanceTransitionStartupError):
+            ) as recovery:
+                with self.assertRaisesRegex(MaintenanceTransitionStartupError,
+                    "^record new_repository does not match current repository$"):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
 
     def test_recovery_live_repo_drift_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -231,14 +255,17 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 return_value=recovery_env,
-            ), mock.patch(
+            ) as recovery, mock.patch(
                 "scripts.two_site_maintenance_transition_startup.validate_repository",
                 return_value=drifted_repo,
-            ):
-                with self.assertRaises(MaintenanceTransitionStartupError):
+            ) as live:
+                with self.assertRaisesRegex(MaintenanceTransitionStartupError,
+                                            "^repository drift detected after broker lock release$"):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
+                live.assert_called_once_with(root, require_clean=True)
 
     def test_recovery_stop_file_present_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -254,14 +281,15 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 return_value=recovery_env,
-            ), mock.patch(
+            ) as recovery, mock.patch(
                 "scripts.two_site_maintenance_transition_startup.validate_repository",
                 return_value=self.repo,
             ):
-                with self.assertRaises(MaintenanceTransitionStartupError):
+                with self.assertRaisesRegex(MaintenanceTransitionStartupError, "^STOP file detected$"):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
             stop_root.unlink()
 
             # state_root / STOP
@@ -273,14 +301,15 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 return_value=recovery_env,
-            ), mock.patch(
+            ) as recovery, mock.patch(
                 "scripts.two_site_maintenance_transition_startup.validate_repository",
                 return_value=self.repo,
             ):
-                with self.assertRaises(MaintenanceTransitionStartupError):
+                with self.assertRaisesRegex(MaintenanceTransitionStartupError, "^STOP file detected$"):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
             stop_state.unlink()
 
     def test_interrupt_propagation(self) -> None:
@@ -292,11 +321,54 @@ class TestQuarantineRecoveryStartupFallback(unittest.TestCase):
             ), mock.patch(
                 "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
                 side_effect=KeyboardInterrupt(),
-            ):
+            ) as recovery:
                 with self.assertRaises(KeyboardInterrupt):
                     require_reviewed_maintenance_transition_locked(
                         root, state_root, self.repo
                     )
+                recovery.assert_called_once_with(root, state_root)
+
+
+class TestRootBridgeRoutingGuards(unittest.TestCase):
+    """No unmarked-route patch: Root rejection cannot reach either fallback.
+
+    Real marked Scope/Git/custody behavior remains covered by all three full
+    Root bridge suites; these tests isolate startup's dispatch/error boundary.
+    """
+
+    def _assert_root_failure_without_fallback(self, failure, expected, message=None):
+        with tempfile.TemporaryDirectory() as td:
+            root, state_root = TestQuarantineRecoveryStartupFallback._setup_workspace(self, td)
+            repo = _make_repo()
+            with mock.patch(
+                "scripts.two_site_maintenance_transition_startup.read_root_maintenance_bridge_locked",
+                side_effect=failure,
+            ) as bridge, mock.patch(
+                "scripts.two_site_maintenance_transition_startup.read_maintenance_transition_locked",
+                side_effect=AssertionError("Root failure must not reach legacy maintenance"),
+            ) as legacy, mock.patch(
+                "scripts.two_site_quarantine_recovery_storage.read_quarantine_recovery_locked",
+                side_effect=AssertionError("Root failure must not reach quarantine"),
+            ) as recovery:
+                assertion = self.assertRaisesRegex(expected, message) if message else self.assertRaises(expected)
+                with assertion as caught:
+                    require_reviewed_maintenance_transition_locked(root, state_root, repo)
+                if not isinstance(failure, RootMaintenanceBridgeError):
+                    self.assertIs(caught.exception, failure)
+                bridge.assert_called_once_with(root, state_root, repo)
+                legacy.assert_not_called()
+                recovery.assert_not_called()
+
+    def test_root_bridge_error_never_falls_back(self):
+        self._assert_root_failure_without_fallback(
+            RootMaintenanceBridgeError("fixture marked Root rejection"),
+            MaintenanceTransitionStartupError, "^root maintenance bridge verification failed$",
+        )
+
+    def test_root_bridge_interrupts_preserve_identity_without_fallback(self):
+        for failure in (KeyboardInterrupt("Root interrupt"), SystemExit(7)):
+            with self.subTest(kind=type(failure).__name__):
+                self._assert_root_failure_without_fallback(failure, type(failure))
 
 
 if __name__ == "__main__":
