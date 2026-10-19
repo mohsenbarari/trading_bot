@@ -14,6 +14,7 @@ import unicodedata
 import pytest
 
 from scripts import two_site_json_prompt_fidelity as fidelity
+from tests.test_two_site_json_prompt_fidelity_737k import text_baseline_if_needed
 
 
 def test_json_without_format_characters_is_byte_identical():
@@ -151,12 +152,15 @@ def test_factory_changes_only_fixed_call_and_two_private_namespace_bindings():
     assert private.__globals__[fidelity._ENCODER_NAME] is fidelity.encode_context_json
     assert before == {name: id(value) for name, value in vars(runner).items()} and runner.run is original
     original_node = _run_node(source)
+    context_line = fidelity._CONTEXT_CALL_LINES[
+        hashlib.sha256(ast.dump(original_node, include_attributes=True).encode()).hexdigest()
+    ]
     changed = fidelity._replace_context_call(original_node)
     names = [node for node in ast.walk(changed) if isinstance(node, ast.Call)
              and isinstance(node.func, ast.Name) and node.func.id == fidelity._ENCODER_NAME]
-    assert len(names) == 1 and names[0].lineno == 3190
+    assert len(names) == 1 and names[0].lineno == context_line
     old_call = next(node for node in ast.walk(original_node) if isinstance(node, ast.Call)
-                    and node.lineno == 3190 and isinstance(node.func, ast.Attribute) and node.func.attr == "dumps")
+                    and node.lineno == context_line and isinstance(node.func, ast.Attribute) and node.func.attr == "dumps")
     names[0].func = copy.deepcopy(old_call.func)
     assert ast.dump(changed, include_attributes=True) == ast.dump(original_node, include_attributes=True)
     assert "2 * MAX_CONTEXT" in ast.get_source_segment(source.decode(), original_node)
@@ -167,7 +171,10 @@ def test_factory_changes_only_fixed_call_and_two_private_namespace_bindings():
 def test_complete_ast_and_closed_call_tampering_fail(tamper):
     _, source = _runner_and_source()
     node = _run_node(source)
-    target = next(part for part in ast.walk(node) if isinstance(part, ast.Call) and part.lineno == 3190
+    context_line = fidelity._CONTEXT_CALL_LINES[
+        hashlib.sha256(ast.dump(node, include_attributes=True).encode()).hexdigest()
+    ]
+    target = next(part for part in ast.walk(node) if isinstance(part, ast.Call) and part.lineno == context_line
                   and isinstance(part.func, ast.Attribute) and part.func.attr == "dumps")
     if tamper == "missing":
         target.func.attr = "loads"
@@ -252,6 +259,7 @@ def test_drafts_and_active_helper_test_sources_contain_no_raw_format_characters(
 
 def _known_runner_versions():
     runner, source = _runner_and_source()
+    source = text_baseline_if_needed(source)
     command = b'*effort_args, "--input-format", "stream-json",'
     stdin = b'(json.dumps({"event": "user", "message": {"content": prompt}}) + "\\n").encode(),'
     new_command = b'*effort_args, "--input-format", "text",'

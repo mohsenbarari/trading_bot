@@ -52,6 +52,9 @@ class PreReviewPytestGateTests(unittest.TestCase):
             test_file = Path(tmpdir) / "test_skip.py"
             test_file.write_text("import pytest\n@pytest.mark.skip\ndef test_s(): pass\n")
             env = dict(os.environ, PYTHONPATH=str(root))
+            # A nested pytest must not publish into its parent's diagnostic FIFO.
+            env.pop("TWO_SITE_PYTEST_DIAGNOSTICS_FIFO", None)
+            self.assertNotIn("TWO_SITE_PYTEST_DIAGNOSTICS_FIFO", env)
             cmd = [
                 sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                 "-p", "scripts.two_site_pre_review_pytest_gate", str(test_file),

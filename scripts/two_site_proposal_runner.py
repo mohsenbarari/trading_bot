@@ -71,12 +71,14 @@ try:
     from scripts.two_site_proposal_transport import (
         TransportPolicyError,
         build_changes_schema,
+        classify_source,
         validate_change_mode,
     )
 except ImportError:
     from two_site_proposal_transport import (
         TransportPolicyError,
         build_changes_schema,
+        classify_source,
         validate_change_mode,
     )
 
@@ -2278,13 +2280,58 @@ def originally_new_paths(task: dict, sources: dict) -> tuple[str, ...]:
     )
 
 
+def _new_test_file_limits(task: dict, original_sources: dict) -> dict[str, int]:
+    """Classify canonical new tests from original bindings, never drafting hints."""
+    try:
+        from scripts.two_site_proposal_byte_profile import (
+            ProposalByteProfileError, parse_proposal_utf8_budget_profile,
+        )
+    except ImportError:
+        from two_site_proposal_byte_profile import (
+            ProposalByteProfileError, parse_proposal_utf8_budget_profile,
+        )
+    try:
+        profile = parse_proposal_utf8_budget_profile(
+            task.get("requirements"), task["allowed_files"], task["allowed_files"]
+        )
+    except ProposalByteProfileError as exc:
+        raise ProposalError(str(exc)) from None
+    try:
+        from scripts.two_site_task_context import _is_python_test_file
+    except ImportError:
+        from two_site_task_context import _is_python_test_file
+    test_only = bool(task["allowed_files"]) and all(
+        _is_python_test_file(path) for path in task["allowed_files"]
+    )
+    limits = {}
+    if not isinstance(original_sources, dict):
+        raise ProposalError("invalid original source bindings")
+    for path in task["allowed_files"]:
+        parts = PurePosixPath(path).parts
+        if not (test_only or (len(parts) >= 2 and parts[0] == "tests"
+                and parts[-1].startswith("test_") and parts[-1].endswith(".py"))):
+            continue
+        try:
+            is_new = classify_source(original_sources[path]) == "new"
+        except (KeyError, TransportPolicyError):
+            raise ProposalError("invalid original source bindings") from None
+        if is_new:
+            cap = 24000
+            if profile is not None:
+                cap = min(cap, profile["file_limits"][path], profile["total_limit"])
+            limits[path] = cap
+    return limits
+
+
 def schema(
     role: str,
     task: dict | None = None,
     sources: dict | None = None,
     force_full_paths: tuple[str, ...] = (),
+    *,
+    original_sources: dict | None = None,
 ) -> dict:
-    if (task is None) != (sources is None):
+    if (task is None) != (sources is None) or (task is None and original_sources is not None):
         raise ProposalError("task and sources must both be provided or both omitted")
     fields = {
         "status": {"type": "string", "enum": ["PROPOSAL_READY", "BLOCKED"] if role == "worker" else ["VERIFIED", "CHANGES_REQUIRED", "BLOCKED"]},
@@ -2317,15 +2364,9 @@ def schema(
             force_full_paths=force_full_paths,
         )
         if role == "worker":
-            notes = task_preparation_notes(task, sources)
-            out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
-            if out_contract.get("test_only_task"):
-                new_tests = set(out_contract.get("new_test_files") or [
-                    p for p in task["allowed_files"]
-                    if sources.get(p, {}).get("content") is None and sources.get(p, {}).get("sha256") is None
-                ])
-                max_new_test = out_contract.get("max_new_test_file_utf8_bytes", 24000)
-                _apply_new_test_max_length(fields["changes"], new_tests, max_new_test)
+            origin = sources if original_sources is None else original_sources
+            for path, cap in _new_test_file_limits(task, origin).items():
+                _apply_new_test_max_length(fields["changes"], {path}, cap)
     return {"type": "object", "additionalProperties": False,
             "required": list(fields), "properties": fields}
 
@@ -2346,7 +2387,9 @@ def _apply_new_test_max_length(node: object, new_tests: set[str], max_len: int) 
                 elif path_schema.get("type") == "string":
                     matched = True
             if matched and isinstance(props["content"], dict):
-                props["content"]["maxLength"] = max_len
+                props["content"]["maxLength"] = min(
+                    props["content"].get("maxLength", max_len), max_len
+                )
         for val in node.values():
             _apply_new_test_max_length(val, new_tests, max_len)
     elif isinstance(node, list):
@@ -2453,6 +2496,8 @@ def validate_result(
     sources: dict,
     role: str,
     enforce_raw_transport: bool = True,
+    *,
+    original_sources: dict | None = None,
 ) -> dict:
     if type(enforce_raw_transport) is not bool:
         raise ProposalError("enforce_raw_transport must be a boolean")
@@ -2478,12 +2523,12 @@ def validate_result(
         raise ProposalError("verifier cannot author changes")
     if role == "worker" and success and not result["changes"]:
         raise ProposalError("plan-only or no-op response is not implementation")
+    origin = sources if original_sources is None else original_sources
+    new_test_limits = _new_test_file_limits(task, origin) if role == "worker" else {}
     notes = task_preparation_notes(task, sources)
     out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
     test_only = bool(out_contract.get("test_only_task"))
     max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
-    max_new_test = out_contract.get("max_new_test_file_utf8_bytes", 24000)
-    new_test_files = set(out_contract.get("new_test_files", []))
 
     if role == "worker" and test_only and enforce_raw_transport:
         raw_transport_bytes = len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
@@ -2505,9 +2550,8 @@ def validate_result(
             raise ProposalError("empty or unchanged file")
         if SECRET.search(change["content"]) or "\0" in change["content"]:
             raise ProposalError("unsafe generated content")
-        if role == "worker" and test_only:
-            is_new = sources[name]["sha256"] is None and sources[name]["content"] is None
-            if (is_new or name in new_test_files) and len(change["content"].encode("utf-8")) > max_new_test:
+        if name in new_test_limits:
+            if len(change["content"].encode("utf-8")) > new_test_limits[name]:
                 raise ProposalError(f"new test file content exceeds budget: {name}")
         if role == "worker" and success and name.endswith(".py"):
             try:
@@ -2776,6 +2820,8 @@ def _parse_stream(
     role: str,
     force_full_paths: tuple[str, ...] = (),
     expected_model: str = MODEL,
+    *,
+    original_sources: dict | None = None,
 ) -> tuple[dict, dict]:
     events = [unique_json(line) for line in raw.splitlines() if line.strip()]
     if any(not isinstance(e, dict) for e in events):
@@ -2911,7 +2957,8 @@ def _parse_stream(
             force_full_paths=force_full_paths,
         )
         result = validate_result(
-            result, task, sources, role, enforce_raw_transport=enforce_raw_transport
+            result, task, sources, role, enforce_raw_transport=enforce_raw_transport,
+            original_sources=original_sources,
         )
     except ProposalError as exc:
         if role == "worker" and _provider_output_is_retryable(exc):
@@ -3195,7 +3242,10 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("split task or feedback into a smaller coherent unit")
     if SECRET.search(prompt):
         raise ProposalError("credential-like content excluded from model input")
-    response_schema = schema(role, task, candidate_sources if candidate_sources is not None else sources, force_full_paths)
+    response_schema = schema(
+        role, task, candidate_sources if candidate_sources is not None else sources,
+        force_full_paths, original_sources=sources,
+    )
     prompt += (
         "\nREQUIRED_RESPONSE_SCHEMA_DATA:\n"
         + json.dumps(response_schema, ensure_ascii=False, separators=(",", ":"))
@@ -3331,7 +3381,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 meta["quota_evidence"] = quota_evidence
                 write_json(out / "status.json", meta)
             result, envelope = _parse_stream(
-                raw, task, active_sources, role, force_full_paths, role_model
+                raw, task, active_sources, role, force_full_paths, role_model,
+                original_sources=sources,
             )
             if envelope["conversation_id"] != profile.conversation_id:
                 raise ProposalError("CLI result differs from prepared runtime session")
@@ -3374,7 +3425,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         ) from exc
                     raise
                 rebased = validate_result(
-                    rebased, task, sources, role, enforce_raw_transport=False
+                    rebased, task, sources, role, enforce_raw_transport=False,
+                    original_sources=sources,
                 )
                 if len(serialize_json(rebased)) > MAX_CONTEXT:
                     raise ProposalError("canonical proposal exceeds the safe context budget")

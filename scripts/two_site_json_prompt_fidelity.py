@@ -19,6 +19,13 @@ _RUNNER_IDENTITIES = {
     RUNNER_SOURCE_SHA256: RUN_AST_SHA256,
     "d786e58266893481c9bbd8447d0228170b2037f91073ac2b0ad447bc1f59367f":
         "8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d",
+    "cb5f6fa91ce195e6dbd5dffa73183ddbe440e05829bbbdd100c9dfef015b7bf6":
+        "9785eb03a32ac1f13cd6ea197e96b64101eb6c1bfa4d3a7859052a3508dfea94",
+}
+_CONTEXT_CALL_LINES = {
+    RUN_AST_SHA256: 3190,
+    "8951f6c504fdfeeaaa047340f4b5557b581514e7d25da2bcafb938d42fa3197d": 3190,
+    "9785eb03a32ac1f13cd6ea197e96b64101eb6c1bfa4d3a7859052a3508dfea94": 3237,
 }
 _ENCODER_NAME = "_root_review_context_json_720f"
 _ROOT = Path(__file__).absolute().parents[1]
@@ -91,7 +98,8 @@ def _replace_context_call(run_node):
     """Transform exactly one pinned call; retain every other AST attribute."""
     _need(isinstance(run_node, ast.FunctionDef) and run_node.name == "run", "wrong SDK function AST")
     original_dump = ast.dump(run_node, include_attributes=True)
-    _need(hashlib.sha256(original_dump.encode()).hexdigest() in _RUNNER_IDENTITIES.values(),
+    run_ast_sha256 = hashlib.sha256(original_dump.encode()).hexdigest()
+    _need(run_ast_sha256 in _RUNNER_IDENTITIES.values() and run_ast_sha256 in _CONTEXT_CALL_LINES,
           "complete SDK run AST pin mismatch")
     transformed = copy.deepcopy(run_node)
     matches = [node for node in ast.walk(transformed) if isinstance(node, ast.Call)
@@ -101,7 +109,8 @@ def _replace_context_call(run_node):
     _need(len(matches) == 1, "CONTEXT JSON call cardinality drift")
     target = matches[0]
     expected = ast.parse("json.dumps(prompt_material, ensure_ascii=False)", mode="eval").body
-    _need(target.lineno == 3190 and ast.dump(target) == ast.dump(expected), "CONTEXT JSON call shape drift")
+    _need(target.lineno == _CONTEXT_CALL_LINES[run_ast_sha256]
+          and ast.dump(target) == ast.dump(expected), "CONTEXT JSON call shape drift")
     old_function = copy.deepcopy(target.func)
     target.func = ast.copy_location(ast.Name(id=_ENCODER_NAME, ctx=ast.Load()), target.func)
     changed_dump = ast.dump(transformed, include_attributes=True)
