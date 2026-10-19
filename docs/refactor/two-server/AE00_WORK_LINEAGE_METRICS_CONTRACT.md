@@ -175,3 +175,115 @@ their numbers alone do not prove a current open or closed requirement.
 No backfill, replay/startup/adoption, activation, Stage/full-goal or savings authority.
 Observer evidence remains prerequisite; denominator UNVERIFIED/null and
 value/cohort NOT_ESTABLISHED remain unchanged.
+
+## 7. Private file-custody dependency (738L boundary)
+
+`scripts/two_site_accepted_work_evidence.py` is a CODEX FILE-ONLY continuation
+of unfinished 735H, not failed-output adoption or Task/readiness authority.
+Independent exact-byte review, native and Root acceptance are separate gates.
+
+### Private interface and closed artifact families
+
+`_evidence_files(root)` returns a single-use context yielding a private
+`_EvidenceFiles`. Normal construction, reentry, reuse and post-close calls raise
+`CLOSED_SNAPSHOT`; this is not 735H's stdlib-decorated layout.
+This is a supported-API boundary, not hostile same-process Python isolation.
+The only evidence operations are `_read(kind,key=None)->bytes`,
+`_json_list(kind)->list`, `_metadata()->dict` and `_verify()->None`.
+There is no public export/CLI, caller path/cap/callback/parser, Git/subprocess,
+scan/discovery, storage writer, acceptance collector, report or accepted flag.
+
+Root-relative paths; IDs match exact ASCII
+`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`; tuple keys are required where shown.
+
+| Kind / key | Fixed artifact | Raw byte cap |
+| --- | --- | ---: |
+| ledger / None | docs/refactor/two-server/section-1/00-stage-ledger.md | 2000000 |
+| metrics / None | .local/two-site-refactor/autopilot/metrics.json | 2000000 |
+| receipt / ASCII basename ending .json, at most 255 bytes | docs/refactor/two-server/section-1/inventory/&lt;basename&gt; | 2000000 |
+| task / ID | .local/two-site-refactor/tasks/&lt;ID&gt;.json | 160000 |
+| proposal_snapshot / ID | .local/two-site-refactor/proposals/&lt;ID&gt;/task.json | 480000 |
+| worker_result / ID | .local/two-site-refactor/proposals/&lt;ID&gt;/result.json | 160000 |
+| reviewer_result / ID | same canonical result.json family | 64000 |
+| proposal_status / ID | .local/two-site-refactor/proposals/&lt;ID&gt;/status.json | 64000 |
+| native / (ID, exact nonbool integer 0..1999) | .local/two-site-refactor/pipeline/&lt;ID&gt;/pre-review-tests-&lt;index&gt;.json | 160000 |
+| root_result or root_status / (layout, ID) | .local/two-site-refactor/autopilot/runs/&lt;ID&gt;/{result,status}.json for layout runs; omit runs/ for layout flat | 64000 |
+
+Families grant custody, not proof.
+Relative names reject absolute/drive/empty/dot/dotdot/.git or leading-dash
+segments, backslashes, NUL/controls and wildcards; not source-name substrings.
+
+### Custody, limits, JSON and lifecycle
+
+Canonical existing root and named no-follow directory chains are held by file
+descriptors. Leaves use O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK and must be
+regular, single-link, effective-user-owned and not group/world writable before
+reading. File custody pins exactly dev, ino, full mode, nlink, uid, gid, size,
+mtime_ns and ctime_ns on both fd and named leaf. Directory custody pins only
+dev, ino, type, mode, uid, gid plus named-chain identity; unrelated directory
+timestamp/size/link-count changes are not file drift.
+
+One invocation owns all descriptors, immutable caches and fixed bounds:
+8000000 actual raw bytes, 128 unique attempted artifact paths including guarded
+negative leaves, 65536 validated path/key UTF-8 metadata bytes and a 120-second
+monotonic deadline beginning at factory construction. Metadata charge on first
+observation is path UTF-8 bytes plus compact ensure_ascii=True JSON key bytes.
+Repeats do not recharge count/metadata. Each chunk is charged immediately even
+if later I/O/custody/limit checks fail;
+caught failures never reset consumed bytes. Compatible cached bytes do not
+recharge reads but still verify all custody, deadline and requested-kind caps.
+Worker/Reviewer result aliases cannot bypass their different caps.
+All caches are invocation-local.
+
+Only a genuinely absent final leaf under a pinned safe existing parent raises
+`MISSING_FILE`; it retains a negative name guard. Appearance is
+`CUSTODY_DRIFT` on repeat, explicit verification or successful exit. Parent,
+permission, type, link and I/O errors are never absence or zero-cost evidence.
+Verification rechecks every consumed fd/name/directory and negative guard,
+without content rereads. All descriptors are attempted on cleanup and raw
+caches are cleared. Body exceptions remain original; simultaneous cleanup
+failure adds only a fixed enum note. Successful-body cleanup failure raises a
+fixed error. Raw exception bodies are not claimed to be redacted.
+
+Metrics JSON alone supports `_json_list("metrics")`: strict UTF-8, duplicate
+keys rejected at every level, no NaN/Infinity/nonfinite floats or invalid
+Unicode scalars, actual list of at most 2000 records. Original order and raw
+row values are retained, including malformed-as-proof rows. Depth is at most
+32; nodes (containers, object keys and scalar values) at most 100000, with
+bounded preflight before parsing. Each returned list is independently detached.
+
+Metadata is exactly `{schema_version:1,files,bytes_read}`; files is path-sorted
+`{path,sha256,size}` entries for successfully consumed artifacts only. Empty
+metadata is exactly `{schema_version:1,files:[],bytes_read:0}`. No hash or file
+entry is invented for absence; no source/body/absolute root/HEAD/refs/native
+tail/acceptance field is exported. Every returned nested builtin is detached.
+`_EvidenceFilesError.code` and its string contain only INVALID_ROOT,
+INVALID_KEY, UNSAFE_PATH, UNSAFE_FILE, MISSING_FILE, CUSTODY_DRIFT, BYTE_LIMIT,
+COUNT_LIMIT, TIME_LIMIT, JSON_INVALID or CLOSED_SNAPSHOT. Wrapped errors suppress
+rendered chaining; no claim is made that Python __context__ is absent.
+
+### Verification boundary and explicitly pending work
+
+Selectors: `tests/test_two_site_accepted_work_evidence.py`,
+`tests/test_two_site_accepted_work_evidence_faults.py` and unchanged
+`tests/test_two_site_work_cost_report.py`. The two new tests (each <=24000 UTF-8
+bytes) replace 735H's one-file layout. All four Source files are <=24000 bytes
+each, <=96000 total. F07/F09 remain: every family/layout,
+whole-value metadata/ordinal/cache oracles; exact/limit+1 resource/JSON gates;
+real unsafe-type/link/mode/owner, nine-field/name/directory and partial-I/O
+faults; cleanup/byte charging/negative custody/lifecycle/detachment/privacy;
+SAME complete oracle before corruption, AssertionError and restoration.
+No behavior, savings, Stage or activation credit comes from these tests.
+
+Still PENDING: a full private Git snapshot wrapper must hold THIS SAME live
+reader and integrate fixed read-only Git/HEAD/protected-ref custody into ONE
+shared 8000000-byte invocation allowance, not another additive 8M budget.
+The entire Phase1B actual task/Source/proposal/native/independent Reviewer/Root
+acceptance join, all three reference forms, historical-attested/fresh proof tiers
+and logical-work deduplication remain pending. Entire Phase2 public
+`summarize_accepted_work`, report/windows/cohorts, unchanged observational
+embedding, direct/shared exact rational allocation, conservation and null-cost
+coverage gates remain pending. No placeholder public consumer is introduced.
+Accepted normalizer/selector prerequisites remain closed; denominator
+UNVERIFIED/null and value/cohort NOT_ESTABLISHED stay unchanged. No replay/reset,
+adoption/startup, activation or full-goal authority is conferred.
