@@ -24,6 +24,7 @@ from scripts import two_site_quota_resume_post_worker_one as post_mod
 from scripts import two_site_quota_resume_post_worker_one_remainder as one
 from scripts.two_site_quota_resume_worker_evidence import load_worker_correction_evidence
 from tests.test_two_site_failure_feedback_transport import full,repo,native_route,git_fixture
+from tests.two_site_generation_fixture import seal_completion_fixture
 
 PATH="tests/test_existing.py"
 BRANCH="scripts.two_site_codex_autopilot.AutopilotError: autopilot requires branch refactor/two-site-architecture"
@@ -144,7 +145,9 @@ class Fixture:
       material["proposal"]=proposal.read_text()
       status.update(input_worker_run_id=prior["run_id"],input_worker_conversation_id=prior["conversation_id"],
                     input_proposal_sha256=r.file_sha256(proposal))
-    if feedback is not None: status["input_feedback_sha256"]=r.file_sha256(feedback)
+    if feedback is not None:
+      status["input_feedback_sha256"]=r.file_sha256(feedback)
+      material["feedback"]=r.unique_json(feedback.read_text())
     if test_evidence is not None:
       raw=test_evidence.read_bytes()
       passed=receipt_mod.validate_test_receipt(r.unique_json(raw.decode()),r.file_sha256(proposal),require_passed=True)
@@ -153,6 +156,7 @@ class Fixture:
       status["input_test_evidence_sha256"]=sha(raw)
     r.write_json(out/"task.json",material)
     r.write_json(out/"status.json",status)
+    seal_completion_fixture(self.root,out)
     return out
 
   def provider(self,*args,**kwargs):

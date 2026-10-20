@@ -93,6 +93,10 @@ def test_malformed_rejection_before_evidence_or_provider(monkeypatch, tmp_path):
     assert not evidence_dir.exists()
 
 
+from scripts import two_site_proposal_runner as generation_runner
+from tests.two_site_generation_fixture import install_current_contract, supported_profile
+
+
 @contextlib.contextmanager
 def _mock_runner_execution(
     root: Path,
@@ -100,6 +104,7 @@ def _mock_runner_execution(
     fail_in_execution: bool = False,
     retryable_failure: bool = False,
 ):
+    install_current_contract(root)
     model_name = "gemini-4-argon-medium" if role == "worker" else "gemini-4-argon-high"
     profile = PreparedProfile("session-xyz", root, model_name, "medium" if role == "worker" else "high")
     task = {
@@ -138,7 +143,7 @@ def _mock_runner_execution(
             return "PROMPT TEMPLATE"
         return path_obj.read_text(encoding="utf-8")
 
-    def fake_capture(process, input_bytes, stdout_path, stderr_path, timeout, max_output=2_000_000):
+    def fake_capture(process, input_bytes, stdout_path, stderr_path, timeout, max_output=2_000_000, *, generation_completion=None):
         if fail_in_execution:
             raise ProposalError("simulated provider failure")
         if retryable_failure:
@@ -200,15 +205,15 @@ def _mock_runner_execution(
     mock_process.__enter__.return_value = mock_process
     mock_process.__exit__.return_value = None
 
-    with mock.patch("scripts.two_site_proposal_runner.validate_runtime_contract", return_value={}), \
+    with mock.patch("scripts.two_site_proposal_runner.validate_runtime_contract", return_value=generation_runner.RUNTIME_CONTRACT), \
          mock.patch("scripts.two_site_proposal_runner.load_task", return_value=(task, sources)), \
          mock.patch("scripts.two_site_proposal_runner.task_preparation_notes", return_value={}), \
          mock.patch("scripts.two_site_proposal_runner.validate_task_readiness", return_value={}), \
          mock.patch("scripts.two_site_proposal_runner.git", side_effect=fake_git), \
          mock.patch("scripts.two_site_proposal_runner.proposal_cli_context", side_effect=fake_proposal_cli_context), \
-         mock.patch("scripts.two_site_proposal_runner.cli_identity", return_value={"path": "cli", "version": "1.0.0", "sha256": "0" * 64}), \
+         mock.patch("scripts.two_site_proposal_runner.cli_identity", return_value={"path": "cli", "version": generation_runner.EXPECTED_CLI_VERSION, "sha256": generation_runner.EXPECTED_CLI_SHA256}), \
          mock.patch("scripts.two_site_proposal_runner.prepare_profile", return_value=profile), \
-         mock.patch("scripts.two_site_proposal_runner.validate_profile", return_value={"native_tools": 0}), \
+         mock.patch("scripts.two_site_proposal_runner.validate_profile", return_value=supported_profile("session-xyz")), \
          mock.patch("scripts.two_site_proposal_runner.bounded_file_text", side_effect=fake_bounded_file_text), \
          mock.patch("scripts.two_site_proposal_runner.capture_bounded_process", side_effect=fake_capture), \
          mock.patch("subprocess.Popen", return_value=mock_process):

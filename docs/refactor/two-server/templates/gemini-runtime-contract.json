@@ -1,10 +1,11 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "provider": "antigravity",
   "model": "gemini-4-argon-high",
   "effort": "high",
   "worker_model": "gemini-4-argon-medium",
   "worker_effort": "medium",
   "cli_version": "1.4.2",
-  "cli_sha256": "085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef"
+  "cli_sha256": "085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef",
+  "completion_policy": "FINAL_FRAME_RECOVERY_V1"
 }

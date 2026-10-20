@@ -22,7 +22,8 @@ try:
         run_provider_session,
     )
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, WORKER_MODEL, file_sha256, write_json,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, RetryableProviderOutputError,
+        bounded_file_bytes, file_sha256, relative_file, write_json,
     )
     from scripts.two_site_semantic_attempts import MARKER
     from scripts.two_site_semantic_task import build_identity
@@ -33,10 +34,13 @@ except ModuleNotFoundError:
         run_provider_session,
     )
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, WORKER_MODEL, file_sha256, write_json,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, RetryableProviderOutputError,
+        bounded_file_bytes, file_sha256, relative_file, write_json,
     )
     from two_site_semantic_attempts import MARKER  # type: ignore[no-redef]
     from two_site_semantic_task import build_identity  # type: ignore[no-redef]
+
+from tests.two_site_generation_fixture import seal_completion_fixture
 
 HEAD = "a" * 40
 
@@ -70,7 +74,6 @@ def passed_receipt(worker_sha: str) -> dict:
 
 def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
     calls = []
-    src_sha = file_sha256(root / "src.py") if (root / "src.py").exists() else None
 
     def mock_run(_r, _t, role, run_id, timeout, feedback=None, proposal=None, cli=None, test_evidence=None):
         task_path = Path(_t) if Path(_t).is_absolute() else (root / _t)
@@ -92,6 +95,26 @@ def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
             raise ProposalError(f"outside-root allowed target: {target}")
         if resolved_target == resolved_root:
             raise ProposalError(f"target cannot be root directory: {target}")
+        # Only form owned test-source bytes here. Full public load_task also
+        # checks Assignment/excerpt Git provenance, which the orchestration
+        # fixture deliberately supplies through its separate pipeline seam.
+        # Reuse its path-safe bounded source readers, not that unrelated gate.
+        snapshot_sources = {}
+        for name in dict.fromkeys(task_data["context_files"] + allowed_files):
+            source_path = relative_file(root, name)
+            if not source_path.exists():
+                if name in task_data["context_files"]:
+                    raise ProposalError("missing fixture context source")
+                snapshot_sources[name] = {"sha256": None, "content": None}
+                continue
+            source_bytes = bounded_file_bytes(root, source_path, MAX_CONTEXT,
+                                              "synthetic fixture source")
+            snapshot_sources[name] = {
+                "sha256": hashlib.sha256(source_bytes).hexdigest(),
+                "content": source_bytes.decode("utf-8"),
+            }
+        if len(json.dumps({"task": task_data, "sources": snapshot_sources}).encode()) > MAX_CONTEXT:
+            raise ProposalError("synthetic fixture task/source budget exceeded")
 
         calls.append((role, run_id, timeout, feedback, proposal, cli))
         resp = responses[len(calls) - 1]
@@ -106,13 +129,23 @@ def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
         fnd = resp.get("findings", []) if st_val in ("CHANGES_REQUIRED", "BLOCKED") else []
         result = resp.get("result_override", {"status": st_val, "summary": f"{role} {run_id}",
                                               "covered_requirements": cov, "findings": fnd, "changes": ch})
+        if role == "worker" and feedback is not None and proposal is not None:
+            prior = json.loads(proposal.read_text())
+            prior_contents = {change["path"]: change["content"] for change in prior["changes"]}
+            desired_contents = {change["path"]: change["content"] for change in result["changes"]}
+            if result["status"] == "PROPOSAL_READY" and desired_contents == prior_contents:
+                # Real Runner rejects an empty candidate-relative correction;
+                # there cannot be a successful proof for this synthetic no-op.
+                raise RetryableProviderOutputError("provider returned unusable proposal transport") from ProposalError("empty or unchanged file")
         write_json(out / "result.json", result)
         res_sha = file_sha256(out / "result.json")
 
         snapshot = {"source_head": source_head, "task": task_data,
-                    "sources": {"src.py": {"sha256": src_sha, "content": "# orig\n"}}}
+                    "sources": snapshot_sources}
         if proposal is not None:
             snapshot["proposal"] = proposal.read_text()
+        if feedback is not None:
+            snapshot["feedback"] = json.loads(feedback.read_text())
         if test_evidence is not None:
             snapshot["test_evidence"] = json.loads(Path(test_evidence).read_text())
         if "task_override" in resp:
@@ -134,6 +167,7 @@ def make_runner(root: Path, responses: list[dict], *, source_head: str = HEAD):
         if "status_override" in resp:
             st.update(resp["status_override"])
         write_json(out / "status.json", st)
+        seal_completion_fixture(root, out)
         return out
 
     return mock_run, calls
@@ -410,14 +444,21 @@ class TestPipeline(unittest.TestCase):
         self.assertNotEqual(self.state["state"], "READY_FOR_CODEX")
 
     def test_unchanged_proposal_and_recurring_findings(self):
-        runner1, _ = make_runner(self.root, [
+        runner1, calls1 = make_runner(self.root, [
             {"content": "# v1\n"}, {"status": "CHANGES_REQUIRED", "findings": ["f1"]},
             {"content": "# v1\n"},
         ])
+        unchanged_state = dict(self.state)
         with patch.object(pipeline, "git", side_effect=fake_git), patch.object(pipeline, "runner_run", side_effect=runner1):
             with self.assertRaises(ProposalError) as ctx1:
-                run_pipeline(self.root, self.task_path, "run-unchg", 300, None, dict(self.state))
-        self.assertIn("unchanged correction proposal", str(ctx1.exception))
+                run_pipeline(self.root, self.task_path, "run-unchg", 300, None, unchanged_state)
+        self.assertEqual("correction worker made no implementation progress", str(ctx1.exception))
+        self.assertIs(type(ctx1.exception.__cause__), RetryableProviderOutputError)
+        self.assertIs(type(ctx1.exception.__cause__.__cause__), ProposalError)
+        self.assertEqual(str(ctx1.exception.__cause__.__cause__), "empty or unchanged file")
+        self.assertEqual([call[0] for call in calls1], ["worker", "verifier", "worker"])
+        self.assertNotEqual(unchanged_state["state"], "READY_FOR_CODEX")
+        self.assertFalse((self.root / ".local/two-site-refactor/proposals/run-unchg-worker-1/result.json").exists())
 
         runner2, calls2 = make_runner(self.root, [
             {"content": "# v1\n"},

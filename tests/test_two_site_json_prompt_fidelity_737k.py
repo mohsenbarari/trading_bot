@@ -11,6 +11,7 @@ from types import FunctionType
 import pytest
 
 from scripts import two_site_json_prompt_fidelity as fidelity
+from tests import two_site_runner_752_fixture as seventh
 
 FUTURE_RUNNER_SOURCE_SHA256 = "cb5f6fa91ce195e6dbd5dffa73183ddbe440e05829bbbdd100c9dfef015b7bf6"
 FUTURE_RUN_AST_SHA256 = "9785eb03a32ac1f13cd6ea197e96b64101eb6c1bfa4d3a7859052a3508dfea94"
@@ -95,6 +96,11 @@ def _apply_ndjson_transport(source, *, inverse=False):
 def text_baseline_if_needed(source):
     """Invert only exact known print/737K changes, never normalize unknown Source."""
     source_sha = _digest(source)
+    if source_sha == seventh.SOURCE_752_SHA:
+        source = seventh.apply_generation_completion_transport(source.decode(), inverse=True).encode()
+        assert _digest(source) == _NDJSON_SOURCE
+        assert _digest(seventh.apply_generation_completion_transport(source.decode()).encode()) == seventh.SOURCE_752_SHA
+        source_sha = _digest(source)
     if source_sha == _NDJSON_SOURCE:
         source = _apply_ndjson_transport(source, inverse=True)
         assert _digest(source) == _EMPTY_PRINT_SOURCE
@@ -158,17 +164,21 @@ def _three_versions():
     expected[_PRINT_SOURCE] = _PRINT_AST
     expected[_EMPTY_PRINT_SOURCE] = _EMPTY_PRINT_AST
     expected[_NDJSON_SOURCE] = _NDJSON_AST
+    expected[seventh.SOURCE_752_SHA] = seventh.RUN_752_AST_SHA
     assert fidelity._RUNNER_IDENTITIES == expected
     assert fidelity._CONTEXT_CALL_LINES == {
         _OLD_AST: 3190, _TEXT_AST: 3190, FUTURE_RUN_AST_SHA256: FUTURE_CONTEXT_LINE,
         _PRINT_AST: 3237,
         _EMPTY_PRINT_AST: 3237,
         _NDJSON_AST: _NDJSON_CONTEXT_LINE,
+        seventh.RUN_752_AST_SHA: seventh.CONTEXT_752_LINE,
     }
     for body in versions:
         run_ast = ast.dump(_run_node(body), include_attributes=True).encode()
         assert _digest(run_ast) == expected[_digest(body)]
-    assert actual_source in versions or _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE, _NDJSON_SOURCE}
+    assert actual_source in versions or _digest(actual_source) in {
+        _PRINT_SOURCE, _EMPTY_PRINT_SOURCE, _NDJSON_SOURCE, seventh.SOURCE_752_SHA,
+    }
     if _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE}:
         assert future.count(_GENERATION_COMMAND) == 1
         command = _EMPTY_PRINT_COMMAND if _digest(actual_source) == _EMPTY_PRINT_SOURCE else _PRINT_COMMAND
@@ -177,17 +187,27 @@ def _three_versions():
         empty = future.replace(_GENERATION_COMMAND, _EMPTY_PRINT_COMMAND, 1)
         assert _digest(empty) == _EMPTY_PRINT_SOURCE
         assert _apply_ndjson_transport(empty) == actual_source
+    if _digest(actual_source) == seventh.SOURCE_752_SHA:
+        empty = future.replace(_GENERATION_COMMAND, _EMPTY_PRINT_COMMAND, 1)
+        ndjson = _apply_ndjson_transport(empty)
+        assert _digest(ndjson) == _NDJSON_SOURCE
+        assert seventh.apply_generation_completion_transport(ndjson.decode()).encode() == actual_source
     return runner, versions
 
 
 def _unexecuted_original(runner, source):
-    return FunctionType(fidelity._compile_run(ast.parse(source)), runner.run.__globals__,
-                        "run", runner.run.__defaults__, runner.run.__closure__)
+    original = FunctionType(fidelity._compile_run(ast.parse(source)), runner.run.__globals__,
+                            "run", runner.run.__defaults__, runner.run.__closure__)
+    # FunctionType does not copy keyword-only defaults. Preserve the exact
+    # shared signature without changing code identity or the actual SDK object.
+    original.__kwdefaults__ = copy.deepcopy(runner.run.__kwdefaults__)
+    return original
 
 
 def test_existing_fixture_is_ascii_and_within_explicit_manual_limit():
     body = Path(__file__).read_bytes()
-    assert body.isascii() and len(body) <= 25000
+    # Source752's explicit existing-file manual slot, NOT public new-test caps.
+    assert body.isascii() and len(body) <= 30000
 
 
 @pytest.mark.parametrize("index", [0, 1, 2])
@@ -265,12 +285,14 @@ def test_future_wrong_fixed_context_line_fails_closed(monkeypatch):
 def test_sixth_transport_exact_inverse_and_partial_changes_keep_exact_historical_identity():
     runner, _ = _three_versions()
     actual = fidelity._read_runner_source()
+    if _digest(actual) == seventh.SOURCE_752_SHA:
+        actual = seventh.apply_generation_completion_transport(actual.decode(), inverse=True).encode()
     assert _digest(actual) == _NDJSON_SOURCE
     empty = _apply_ndjson_transport(actual, inverse=True)
     assert _digest(empty) == _EMPTY_PRINT_SOURCE
     assert _apply_ndjson_transport(empty) == actual
     assert _digest(ast.dump(_run_node(actual), include_attributes=True).encode()) == _NDJSON_AST
-    fidelity._validated_run_code(actual, runner.run)
+    fidelity._validated_run_code(actual, _unexecuted_original(runner, actual))
     for old, new in _NDJSON_REPLACEMENTS:
         assert empty.count(old.encode()) == actual.count(new.encode()) == 1
         for partial in (empty.replace(old.encode(), new.encode(), 1),
@@ -284,3 +306,28 @@ def test_sixth_transport_exact_inverse_and_partial_changes_keep_exact_historical
             assert _digest(partial) not in fidelity._RUNNER_IDENTITIES
             with pytest.raises(fidelity.PromptFidelityError, match="SDK source pin mismatch"):
                 fidelity._validated_run_code(partial, runner.run)
+
+
+def test_seventh_exact_inverse_and_each_partial_hunk_remain_closed():
+    runner, _ = _three_versions()
+    current = fidelity._read_runner_source()
+    assert _digest(current) == seventh.SOURCE_752_SHA
+    old = seventh.apply_generation_completion_transport(current.decode(), inverse=True).encode()
+    assert _digest(old) == _NDJSON_SOURCE
+    assert seventh.apply_generation_completion_transport(old.decode()).encode() == current
+    assert _digest(ast.dump(_run_node(current), include_attributes=True).encode()) == seventh.RUN_752_AST_SHA
+    fidelity._validated_run_code(current, runner.run)
+    asset = Path(seventh.__file__).parent / "fixtures/two_site_runner_752_source_inverse.json"
+    raw = asset.read_bytes()
+    assert len(raw) == seventh.ASSET_BYTES and _digest(raw) == seventh.ASSET_SHA
+    for hunk in json.loads(raw)["hunks"]:
+        before, after = hunk["before"].encode(), hunk["after"].encode()
+        assert old.count(before) == current.count(after) == 1
+        for partial in (old.replace(before, after, 1), current.replace(after, before, 1)):
+            assert _digest(partial) not in fidelity._RUNNER_IDENTITIES
+            with pytest.raises(AssertionError, match="unknown or partial"):
+                seventh.apply_generation_completion_transport(partial.decode())
+            with pytest.raises(fidelity.PromptFidelityError, match="SDK source pin mismatch"):
+                fidelity._validated_run_code(partial, runner.run)
+    with pytest.raises(AssertionError, match="unknown or partial"):
+        seventh.apply_generation_completion_transport(current.decode() + "\n", inverse=True)

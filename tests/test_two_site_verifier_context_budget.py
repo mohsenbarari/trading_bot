@@ -22,6 +22,9 @@ except ImportError:
     import two_site_proposal_runner as runner
 
 
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture
+
+
 SCHEMA_MARKER = "\nREQUIRED_RESPONSE_SCHEMA_DATA:\n"
 SCHEMA_FOOTER = (
     "\nReturn exactly one JSON object directly, no Markdown or fences. "
@@ -73,6 +76,7 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
         source_rel: str = "core/sample.py",
         source_bytes: bytes = b"value = 1\n",
     ) -> tuple[Path, dict, dict, str]:
+        install_current_contract(tmp_dir)
         src_path = tmp_dir / source_rel
         src_path.parent.mkdir(parents=True, exist_ok=True)
         src_path.write_bytes(source_bytes)
@@ -139,6 +143,8 @@ class TwoSiteVerifierContextBudgetTest(unittest.TestCase):
             json.dumps(task_snapshot, ensure_ascii=False), encoding="utf-8"
         )
 
+        (worker_dir / "result.json").write_text(proposal_text, encoding="utf-8")
+        seal_completion_fixture(tmp_dir, worker_dir)
         return proposal_path, proposal_dict, proposal_sha
 
     def _intercept_provider(

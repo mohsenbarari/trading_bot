@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import install_current_contract, supported_profile
 from scripts.two_site_worker_model_routing import (
     OPUS_EFFORT,
     OPUS_MODEL,
@@ -85,6 +86,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         """Execute runner.run with completely hermetic mocks and return commands and status."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
+            install_current_contract(temp_path)
             task_file = temp_path / "task.json"
             task_file.write_text("{}", encoding="utf-8")
             cli_file = temp_path / "mock_agy"
@@ -134,6 +136,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 stderr_path: Path,
                 timeout: float,
                 max_output: int = runner.MAX_OUTPUT,
+                *, generation_completion=None,
             ) -> None:
                 if simulate_error:
                     raise runner.ProposalError("simulated cli bounded process failure")
@@ -157,7 +160,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
 
             prepare_profile_mock = mock.MagicMock(side_effect=mock_prepare_profile)
             validate_profile_mock = mock.MagicMock(
-                side_effect=lambda prof, fresh=True: {"profile": "valid", "fresh": fresh}
+                side_effect=lambda prof, fresh=True: supported_profile(prof.conversation_id)
             )
             capture_mock = mock.MagicMock(side_effect=mock_capture)
 

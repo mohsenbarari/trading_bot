@@ -29,6 +29,9 @@ except ImportError:
     )
 
 
+from tests.two_site_generation_fixture import seal_completion_fixture
+
+
 class TestCanonicalBudgetRunner(unittest.TestCase):
     def setUp(self) -> None:
         self.task = {
@@ -93,6 +96,8 @@ class TestCanonicalBudgetRunner(unittest.TestCase):
                     "conversation_id": "c-1",
                 })
             )
+            prop_path.write_bytes(canonical_bytes)
+            seal_completion_fixture(root, run_dir)
             candidate, worker_status, bound_sha = load_prior_worker(
                 root, prop_path, prop_text, self.task, self.sources, "h1"
             )

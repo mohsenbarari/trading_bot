@@ -29,6 +29,8 @@ except ModuleNotFoundError:
         EXPECTED_RECEIPT_KEYS, validate_test_receipt,
     )
 
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture
+
 HEAD = "a" * 40
 DEFAULT_SELECTOR = "tests/test_two_site_pipeline_pre_review_gate.py"
 
@@ -77,6 +79,7 @@ def build_test_receipt(
 
 
 def make_runner(root: Path, responses: list[dict[str, Any]]):
+    install_current_contract(root)
     calls: list[tuple[Any, ...]] = []
     src_sha = file_sha256(root / "src.py")
 
@@ -129,6 +132,8 @@ def make_runner(root: Path, responses: list[dict[str, Any]]):
         }
         if proposal is not None:
             snapshot["proposal"] = proposal.read_text()
+        if feedback is not None:
+            snapshot["feedback"] = json.loads(feedback.read_text())
         if test_evidence is not None:
             snapshot["test_evidence"] = json.loads(Path(test_evidence).read_text())
         if "task_override" in resp:
@@ -137,6 +142,7 @@ def make_runner(root: Path, responses: list[dict[str, Any]]):
 
         st: dict[str, Any] = {
             "run_id": run_id,
+            "task_id": snapshot["task"].get("task_id"),
             "role": role,
             "head": HEAD,
             "model": WORKER_MODEL if role == "worker" else MODEL,
@@ -158,6 +164,7 @@ def make_runner(root: Path, responses: list[dict[str, Any]]):
         if "status_override" in resp:
             st.update(resp["status_override"])
         write_json(out / "status.json", st)
+        seal_completion_fixture(root, out)
         return out
 
     return mock_run, calls

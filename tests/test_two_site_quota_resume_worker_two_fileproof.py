@@ -709,7 +709,7 @@ def test_materialized_worker_two_bootstrap_read_and_bind_success(
     assert w2_task["source_head"] == fixture["head"]
     assert w2_task["task"]["task_id"] == fixture["loaded_task"]["task_id"]
     assert w2_task["sources"] == ctx["sources"]
-    assert "feedback" not in w2_task
+    assert w2_task["feedback"] == fb2_data
 
     assert res["returned_state"]["state"] == "WORKER_PROPOSAL_READY"
     assert res["returned_state"]["correction_count"] == 2

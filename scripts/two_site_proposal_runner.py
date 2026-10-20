@@ -127,6 +127,19 @@ except ImportError:
     )
 
 
+try:
+    from scripts.two_site_generation_completion import (
+        POLICY as GENERATION_COMPLETION_POLICY, GenerationCompletionError,
+        GenerationRecoveryPolicy, capture_generation_process,
+        normal_observations, validate_observations,
+    )
+except ImportError:
+    from two_site_generation_completion import (
+        POLICY as GENERATION_COMPLETION_POLICY, GenerationCompletionError,
+        GenerationRecoveryPolicy, capture_generation_process,
+        normal_observations, validate_observations,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
@@ -142,7 +155,7 @@ GEMINI_RUNTIME_REFERENCE_PATHS = (
 )
 RUNTIME_CONTRACT_KEYS = frozenset({
     "schema_version", "provider", "model", "effort", "worker_model", "worker_effort",
-    "cli_version", "cli_sha256",
+    "cli_version", "cli_sha256", "completion_policy",
 })
 VALID_EFFORTS = frozenset({"low", "medium", "high"})
 DENY_HOOK = {"proposal-only": {"PreToolUse": [{"matcher": "*", "hooks": [{
@@ -698,10 +711,20 @@ def capture_bounded_process(
     stderr_path: Path,
     timeout: float,
     max_output: int = MAX_OUTPUT,
-) -> None:
+    *,
+    generation_completion: GenerationRecoveryPolicy | None = None,
+) -> dict | None:
     """Drain all pipes concurrently while enforcing one hard stdout+stderr cap."""
     if max_output < 1 or process.stdin is None or process.stdout is None or process.stderr is None:
         raise ProposalError("invalid bounded process configuration")
+    if generation_completion is not None:
+        if type(generation_completion) is not GenerationRecoveryPolicy:
+            raise ProposalError("invalid generation completion policy")
+        return capture_generation_process(
+            process, input_bytes, stdout_path, stderr_path, timeout, max_output,
+            generation_completion, error_type=ProposalError, terminate=terminate_process,
+            stream_chunk_size=STREAM_CHUNK_SIZE,
+        )
     selector = selectors.DefaultSelector()
     deadline = time.monotonic() + timeout
     input_offset = 0
@@ -951,7 +974,8 @@ def load_runtime_contract(root: Path) -> dict[str, str]:
     ))
     if not isinstance(contract, dict) or set(contract) != RUNTIME_CONTRACT_KEYS:
         raise ProposalError("Gemini runtime contract has unexpected keys")
-    if contract.get("schema_version") != "1.2" or contract.get("provider") != "antigravity":
+    if (contract.get("schema_version") != "1.3" or contract.get("provider") != "antigravity"
+            or contract.get("completion_policy") != GENERATION_COMPLETION_POLICY):
         raise ProposalError("Gemini runtime contract has an unsupported schema or provider")
     model = contract.get("model")
     effort = contract.get("effort")
@@ -2598,6 +2622,10 @@ def load_prior_worker(
     )
     if candidate["status"] != "PROPOSAL_READY":
         raise ProposalError("review/correction requires a complete worker proposal")
+    validate_generation_completion(
+        root, proposal_path.parent, task=task, sources=sources, role="worker",
+        status=worker_status, result=candidate,
+    )
     return candidate, worker_status, proposal_sha256
 
 
@@ -2971,6 +2999,294 @@ def _parse_stream(
     return result, envelope
 
 
+def _validate_final_generation_frame(
+    raw: str, task: dict, sources: dict, role: str,
+    force_full_paths: tuple[str, ...], expected_model: str, expected_cid: str,
+    *, original_sources: dict | None = None,
+) -> tuple[dict, dict]:
+    """Recovery-only finality; advertised init.tools is discovery, not execution."""
+    if not raw.endswith("\n"):
+        raise ProposalError("recovery requires a complete final NDJSON frame")
+    events = [unique_json(line) for line in raw.splitlines() if line.strip()]
+    if not events or any(type(event) is not dict for event in events):
+        raise ProposalError("recovery requires complete event objects")
+    initials = [event for event in events if event.get("event") == "init"]
+    terminals = [event for event in events if event.get("event") == "result"]
+    if (len(initials) != 1 or events[0] is not initials[0]
+            or len(terminals) != 1 or events[-1] is not terminals[0]
+            or initials[0].get("conversation_id") != expected_cid
+            or type(initials[0].get("init")) is not dict
+            or initials[0]["init"].get("model") != expected_model):
+        raise ProposalError("recovery final frame identity or ordering mismatch")
+    envelope = terminals[0].get("result")
+    if (type(envelope) is not dict or envelope.get("status") != "SUCCESS"
+            or type(envelope.get("num_turns")) is not int
+            or envelope["num_turns"] != 1
+            or envelope.get("conversation_id") != expected_cid):
+        raise ProposalError("recovery requires exactly one successful completed turn")
+    for event in events:
+        # Do not confuse advertised tools/resources in init with attempted tools.
+        containers = [event]
+        step = event.get("step_update")
+        if type(step) is dict:
+            containers.append(step)
+        if event is terminals[0]:
+            containers.append(envelope)
+        for item in containers:
+            if (item.get("denied_actions")
+                    or any(key in item for key in ("tool_name", "tool_info", "subagent_info"))
+                    or item.get("step_type") in {"tool", "subagent"}):
+                raise ProposalError("tool or denied action invalidates recovered generation")
+    return _parse_stream(
+        raw, task, sources, role, force_full_paths, expected_model,
+        original_sources=original_sources,
+    )
+
+
+_GENERATION_PROOF_NAME = "transport-completion.json"
+_GENERATION_PROOF_LIMIT = 16 * 1024
+
+
+def _generation_contract_sha(root: Path) -> str:
+    contract = validate_runtime_contract(root)
+    if (contract.get("schema_version") != "1.3"
+            or contract.get("completion_policy") != GENERATION_COMPLETION_POLICY):
+        raise ProposalError("current generation completion contract is required")
+    return sha(bounded_file_bytes(
+        root, root / GEMINI_RUNTIME_CONTRACT_REL, 16 * 1024,
+        "generation completion runtime contract",
+    ))
+
+
+def _generation_artifact_bindings(
+    root: Path, run_dir: Path, *, task: dict, sources: dict, role: str,
+    status: dict, result: dict, observations: dict,
+) -> dict:
+    """Recompute retained bytes/schema/correction context; no historical OS query."""
+    if role not in {"worker", "verifier"}:
+        raise ProposalError("invalid completion proof role")
+    snapshot_bytes = bounded_file_bytes(root, run_dir / "task.json", 3 * MAX_CONTEXT,
+                                       "completion task snapshot")
+    snapshot = unique_json(snapshot_bytes.decode("utf-8"))
+    if (type(snapshot) is not dict or snapshot.get("task") != task
+            or snapshot.get("sources") != sources or snapshot.get("source_head") != status.get("head")):
+        raise ProposalError("completion task snapshot binding mismatch")
+    prompt_bytes = bounded_file_bytes(root, run_dir / "prompt.txt", 2 * MAX_CONTEXT,
+                                     "completion logical prompt")
+    compact = status.get("compact_review")
+    if type(compact) is not bool:
+        raise ProposalError("completion compact-review binding is missing")
+    wire = _cli_stream_input(prompt_bytes.decode("utf-8"), is_compact_review=compact)
+    stdout = bounded_file_bytes(root, run_dir / "stream.jsonl", MAX_OUTPUT,
+                                "completion retained stdout")
+    stderr = bounded_file_bytes(root, run_dir / "stderr.txt", MAX_OUTPUT,
+                                "completion retained stderr")
+    if len(stdout) + len(stderr) > MAX_OUTPUT:
+        raise ProposalError("completion combined output exceeds budget")
+    try:
+        normalized_observations = validate_observations(observations, wire, stdout, stderr)
+    except GenerationCompletionError as exc:
+        raise ProposalError(str(exc)) from None
+    result_bytes = bounded_file_bytes(root, run_dir / "result.json", MAX_CONTEXT,
+                                     "completion result")
+    if unique_json(result_bytes.decode("utf-8")) != result:
+        raise ProposalError("completion result bytes mismatch")
+    schema_bytes = bounded_file_bytes(root, run_dir / "response-schema.json", MAX_CONTEXT,
+                                     "completion response schema")
+    if sha(schema_bytes) != status.get("response_schema_sha256"):
+        raise ProposalError("completion dispatched response-schema bytes changed")
+    active_sources, force_full_paths = sources, ()
+    candidate_sha = delta_sha = None
+    prior_identity = None
+    if role == "worker" and "feedback" in snapshot:
+        if type(snapshot.get("proposal")) is not str:
+            raise ProposalError("completion correction prior proposal is missing")
+        prior = unique_json(snapshot["proposal"])
+        validate_result(prior, task, sources, "worker", enforce_raw_transport=False,
+                        original_sources=sources)
+        prior_sha = sha(snapshot["proposal"].encode("utf-8"))
+        if type(snapshot["feedback"]) is not dict:
+            raise ProposalError("completion correction feedback is not normalized")
+        validate_correction_feedback(serialize_json(snapshot["feedback"]).decode("utf-8"), prior_sha)
+        active_sources = build_candidate_sources(task["allowed_files"], sources, prior["changes"])
+        candidate_sha = sha(serialize_json(active_sources))
+        force_full_paths = originally_new_paths(task, sources)
+        prior_identity = {
+            "run_id": status.get("input_worker_run_id"),
+            "conversation_id": status.get("input_worker_conversation_id"),
+            "proposal_sha256": prior_sha,
+        }
+        if (not all(type(prior_identity[key]) is str and prior_identity[key]
+                    for key in ("run_id", "conversation_id"))
+                or prior_identity["run_id"] == status.get("run_id")
+                or prior_identity["conversation_id"] == status.get("conversation_id")
+                or status.get("input_proposal_sha256") != prior_sha
+                or status.get("candidate_sources_sha256") != candidate_sha):
+            raise ProposalError("completion correction candidate/prior binding mismatch")
+    expected_schema = schema(
+        role, task, active_sources, force_full_paths, original_sources=sources,
+    )
+    if unique_json(schema_bytes.decode("utf-8")) != expected_schema:
+        raise ProposalError("completion response schema changed")
+    if (type(status.get("cli_returncode")) is not int
+            or status["cli_returncode"] != normalized_observations["actual_returncode"]
+            or status.get("cli_normal_exit_observed") is not normalized_observations["normal_exit_observed"]
+            or status.get("generation_completion_outcome") != normalized_observations["outcome"]):
+        raise ProposalError("completion status contradicts captured lifecycle")
+    if normalized_observations["outcome"] == "RECOVERED_COMPLETED_RESULT":
+        if stderr:
+            raise ProposalError("stderr invalidates recovered generation")
+        raw_result, envelope = _validate_final_generation_frame(
+            stdout.decode("utf-8"), task, active_sources, role, force_full_paths,
+            status.get("model"), status.get("conversation_id"), original_sources=sources,
+        )
+    else:
+        raw_result, envelope = _parse_stream(
+            stdout.decode("utf-8"), task, active_sources, role, force_full_paths,
+            status.get("model"), original_sources=sources,
+        )
+    if envelope.get("conversation_id") != status.get("conversation_id"):
+        raise ProposalError("completion prepared session differs from final stream")
+    expected_result = raw_result
+    if candidate_sha is not None:
+        delta_bytes = bounded_file_bytes(root, run_dir / "delta-result.json", MAX_CONTEXT,
+                                        "completion correction delta")
+        if unique_json(delta_bytes.decode("utf-8")) != raw_result:
+            raise ProposalError("completion raw correction delta mismatch")
+        delta_sha = sha(delta_bytes)
+        expected_result = rebase_correction_result(
+            raw_result, task["allowed_files"], sources, active_sources,
+        )
+        validate_result(expected_result, task, sources, role, enforce_raw_transport=False,
+                        original_sources=sources)
+        if status.get("delta_result_sha256") != delta_sha:
+            raise ProposalError("completion correction delta SHA mismatch")
+    if expected_result != result:
+        raise ProposalError("completion normalized/rebased result mismatch")
+    profile = status.get("runtime_profile")
+    if (type(profile) is not dict
+            or profile.get("conversation_id") != status.get("conversation_id")
+            or type(profile.get("native_tools")) is not int or profile["native_tools"] != 0
+            or profile.get("command_policy") != "off"
+            or profile.get("actual_executor_checked") is not True):
+        raise ProposalError("completion supported runtime-profile evidence is missing")
+    cli = status.get("cli")
+    if (type(cli) is not dict or cli.get("version") != EXPECTED_CLI_VERSION
+            or cli.get("sha256") != EXPECTED_CLI_SHA256):
+        raise ProposalError("completion CLI pin differs from current contract")
+    requested_effort = status.get("generation_effort_requested")
+    effort_present = status.get("effort_arg_present")
+    if (type(effort_present) is not bool
+            or status.get("prepared_effort") != requested_effort
+            or (effort_present and (type(requested_effort) is not str
+                                    or requested_effort != status.get("effort")))
+            or (not effort_present and requested_effort is not None)):
+        raise ProposalError("completion requested/profile effort binding is inconsistent")
+    recovery_model, recovery_effort = ((WORKER_MODEL, WORKER_EFFORT)
+                                       if role == "worker" else (MODEL, EFFORT))
+    if (normalized_observations["outcome"] == "RECOVERED_COMPLETED_RESULT"
+            and (status.get("model") != recovery_model
+                 or status.get("prepared_effort") != recovery_effort
+                 or status.get("generation_effort_requested") != recovery_effort
+                 or status.get("effort") != recovery_effort
+                 or status.get("effort_arg_present") is not True)):
+        raise ProposalError("recovery requires the pinned Gemini role/profile effort")
+    return {
+        "schema_version": "1.0", "kind": "GENERATION_COMPLETION_V1",
+        "policy": GENERATION_COMPLETION_POLICY,
+        "runtime_contract_sha256": _generation_contract_sha(root),
+        "run_id": status.get("run_id"), "role": role, "head": status.get("head"),
+        "conversation_id": status.get("conversation_id"), "model": status.get("model"),
+        "requested_effort": status.get("generation_effort_requested"),
+        "selected_policy_effort": status.get("effort"),
+        "prepared_effort": status.get("prepared_effort"),
+        "effort_arg_present": status.get("effort_arg_present"),
+        "runtime_profile": profile, "cli": cli, "compact_review": compact,
+        "task_snapshot_sha256": sha(snapshot_bytes), "prompt_sha256": sha(prompt_bytes),
+        "response_schema_sha256": sha(schema_bytes),
+        "raw_result_sha256": sha(serialize_json(raw_result)),
+        "candidate_sources_sha256": candidate_sha, "prior_worker_identity": prior_identity,
+        "delta_result_sha256": delta_sha, "result_sha256": sha(result_bytes),
+        "observations": normalized_observations,
+        "outer_context_exited_normally": True,
+    }
+
+
+def _publish_generation_proof(path: Path, proof: dict) -> str:
+    """One-shot bounded proof, after normal context exit; never status self-hash."""
+    body = serialize_json(proof)
+    if len(body) > _GENERATION_PROOF_LIMIT:
+        raise ProposalError("generation completion proof exceeds budget")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    primary = None
+    try:
+        remaining = memoryview(body)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise ProposalError("generation completion proof short write")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+    except BaseException as exc:
+        primary = exc
+    finally:
+        try:
+            os.close(descriptor)
+        except BaseException as exc:
+            if primary is None:
+                primary = exc
+    if primary is not None:
+        raise primary
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    except BaseException as exc:
+        primary = exc
+    finally:
+        try:
+            os.close(directory)
+        except BaseException as exc:
+            if primary is None:
+                primary = exc
+    if primary is not None:
+        raise primary
+    return sha(body)
+
+
+def validate_generation_completion(
+    root: Path, run_dir: Path, *, task: dict, sources: dict, role: str,
+    status: dict, result: dict,
+) -> dict:
+    """Mandatory current-policy gate; missing markers never select legacy mode."""
+    contract_sha = _generation_contract_sha(root)
+    if (type(status) is not dict or status.get("completion_policy") != GENERATION_COMPLETION_POLICY
+            or status.get("runtime_contract_sha256") != contract_sha
+            or not isinstance(status.get("completion_proof_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", status["completion_proof_sha256"])):
+        raise ProposalError("current generation completion proof is required")
+    path = run_dir / _GENERATION_PROOF_NAME
+    before = path.lstat()
+    if (not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_uid != os.geteuid() or before.st_nlink != 1):
+        raise ProposalError("unsafe generation completion proof")
+    raw = bounded_file_bytes(root, path, _GENERATION_PROOF_LIMIT, "generation completion proof")
+    after = path.lstat()
+    if (file_fingerprint(before) != file_fingerprint(after)
+            or sha(raw) != status["completion_proof_sha256"]):
+        raise ProposalError("generation completion proof drift")
+    proof = unique_json(raw.decode("utf-8"))
+    if type(proof) is not dict or serialize_json(proof) != raw:
+        raise ProposalError("noncanonical generation completion proof")
+    expected = _generation_artifact_bindings(
+        root, run_dir, task=task, sources=sources, role=role,
+        status=status, result=result, observations=proof.get("observations"),
+    )
+    if (proof.get("outer_context_exited_normally") is not True
+            or proof != expected or status.get("result_sha256") != expected["result_sha256"]):
+        raise ProposalError("generation completion proof binding mismatch")
+    return expected
+
+
 def proposal_diff(changes: list, sources: dict) -> str:
     patch = ""
     for change in changes:
@@ -3063,7 +3379,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     autopilot_run_id = controller_run_id_from_environment(os.environ)
     # Contract/document drift must be rejected before task materialization and
     # before the Gemini CLI can consume a token or create a run artifact.
-    validate_runtime_contract(root)
+    runtime_contract_sha = _generation_contract_sha(root)
     task, sources = load_task(root, task_path)
     if role == "worker":
         policy = load_worker_routing_policy(
@@ -3271,96 +3587,183 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     if len(prompt.encode("utf-8")) > schema_prompt_limit:
         raise ProposalError("split task or feedback into a smaller coherent unit")
     stdin_bytes = _cli_stream_input(prompt, is_compact_review=is_compact_review)
-    with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):
-        # The lock covers every CLI invocation, including identity probes.
-        initial_cli_identity = cli_identity(disposable_cli)
-        session_gate = derive_session_gate(prep_notes)
-        out = local / run_id
-        out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
-        write_json(out / "task.json", material)
-        (out / "prompt.txt").write_text(prompt)
-        meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
-                "head": head, "model": role_model, "effort": role_effort, "state": "RUNNING", "started_at": time.time(),
-                "retain_until": time.time() + 7 * 86400,
-                "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
-                "cli": initial_cli_identity, "cli_source": cli_source,
-                "session_gate": session_gate}
-        if autopilot_run_id is not None:
-            meta["controller_run_id"] = autopilot_run_id
-        if prior_status is not None:
-            meta.update(
-                input_worker_run_id=prior_status["run_id"],
-                input_worker_conversation_id=prior_status["conversation_id"],
-                input_proposal_sha256=input_hashes["proposal"],
-            )
-        if feedback is not None:
-            meta["input_feedback_sha256"] = input_hashes["feedback"]
-        if test_evidence is not None:
-            meta["input_test_evidence_sha256"] = input_hashes["test_evidence"]
-        if review_transport_sha is not None:
-            meta["review_transport_sha256"] = review_transport_sha
-        if candidate_sources_sha256 is not None:
-            meta["candidate_sources_sha256"] = candidate_sources_sha256
-        if fallback_from_run_id is not None:
-            meta["fallback_from_run_id"] = fallback_from_run_id
-            meta["fallback_receipt"] = fallback_receipt
-        write_json(out / "status.json", meta)
-        active_sources = candidate_sources if candidate_sources is not None else sources
-        effort_args = ["--effort", role_effort]
-        if role == "worker" and policy.enabled and role_model == policy.model:
-            if role_effort != policy.effort:
-                raise ProposalError("invalid worker model route effort")
-            effort_args = []
-        response_schema_path = out / "response-schema.json"
-        write_json(response_schema_path, response_schema)
-        response_schema_bytes = bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema")
-        if unique_json(response_schema_bytes.decode("utf-8")) != response_schema:
-            raise ProposalError("response schema binding changed before dispatch")
-        meta["response_schema_sha256"] = sha(response_schema_bytes)
-        write_json(out / "status.json", meta)
-        command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
-                   *effort_args, "--input-format", "stream-json",
-                   "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
-                   "--json-schema", str(response_schema_path)]
-        try:
-            runtime_workspace = disposable_cli.parent / "proposal-runtime-workspace"
-            runtime_workspace.mkdir(mode=0o700)
-            (runtime_workspace / ".agents").mkdir(mode=0o700)
-            write_json(runtime_workspace / ".agents/hooks.json", proposal_hooks())
-            profile = prepare_profile(
-                disposable_cli, runtime_workspace, role_model,
-                role_effort if effort_args else None, terminate=terminate_process,
-            )
-            if cli_identity(disposable_cli) != initial_cli_identity:
-                raise ProposalError("CLI identity changed during profile preparation")
-            if prior_status is not None and profile.conversation_id == prior_status["conversation_id"]:
-                raise ProposalError("profile preparation reused the worker session")
-            meta["runtime_profile"] = validate_profile(profile, fresh=True)
-            write_json(out / "status.json", meta)
-            command += ["--conversation", profile.conversation_id]
-            # Auth belongs to the CLI. No credential files are read or copied here.
-            if pre_provider_check is not None:
-                pre_provider_check()
-            validate_profile(profile, fresh=True)
-            if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
-                raise ProposalError("response schema binding changed before dispatch")
-            with subprocess.Popen(command, cwd=profile.workspace, stdin=subprocess.PIPE,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  start_new_session=True,
-                                  env=dict(os.environ, AGY_CLI_DISABLE_AUTO_UPDATE='true')) as process:
-                meta["cli_pid"] = process.pid
+    out = None
+    meta = None
+    generation_process = None
+    generation_policy = None
+    capture_outcome = None
+    completion_observations = None
+    pending_delta = None
+    first_primary = None
+    try:
+        with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):
+            try:
+                # The lock covers every CLI invocation, including identity probes.
+                initial_cli_identity = cli_identity(disposable_cli)
+                session_gate = derive_session_gate(prep_notes)
+                out = local / run_id
+                out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
+                write_json(out / "task.json", material)
+                (out / "prompt.txt").write_text(prompt)
+                meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
+                        "head": head, "model": role_model, "effort": role_effort, "state": "RUNNING", "started_at": time.time(),
+                        "retain_until": time.time() + 7 * 86400,
+                        "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
+                        "completion_policy": GENERATION_COMPLETION_POLICY,
+                        "runtime_contract_sha256": runtime_contract_sha,
+                        "compact_review": is_compact_review,
+                        "cli": initial_cli_identity, "cli_source": cli_source,
+                        "session_gate": session_gate}
+                if autopilot_run_id is not None:
+                    meta["controller_run_id"] = autopilot_run_id
+                if prior_status is not None:
+                    meta.update(
+                        input_worker_run_id=prior_status["run_id"],
+                        input_worker_conversation_id=prior_status["conversation_id"],
+                        input_proposal_sha256=input_hashes["proposal"],
+                    )
+                if feedback is not None:
+                    meta["input_feedback_sha256"] = input_hashes["feedback"]
+                if test_evidence is not None:
+                    meta["input_test_evidence_sha256"] = input_hashes["test_evidence"]
+                if review_transport_sha is not None:
+                    meta["review_transport_sha256"] = review_transport_sha
+                if candidate_sources_sha256 is not None:
+                    meta["candidate_sources_sha256"] = candidate_sources_sha256
+                if fallback_from_run_id is not None:
+                    meta["fallback_from_run_id"] = fallback_from_run_id
+                    meta["fallback_receipt"] = fallback_receipt
                 write_json(out / "status.json", meta)
-                capture_bounded_process(
-                    process,
-                    stdin_bytes,
-                    out / "stream.jsonl",
-                    out / "stderr.txt",
-                    timeout + 15,
+                active_sources = candidate_sources if candidate_sources is not None else sources
+                effort_args = ["--effort", role_effort]
+                if role == "worker" and policy.enabled and role_model == policy.model:
+                    if role_effort != policy.effort:
+                        raise ProposalError("invalid worker model route effort")
+                    effort_args = []
+                meta["generation_effort_requested"] = role_effort if effort_args else None
+                meta["effort_arg_present"] = bool(effort_args)
+                response_schema_path = out / "response-schema.json"
+                write_json(response_schema_path, response_schema)
+                response_schema_bytes = bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema")
+                if unique_json(response_schema_bytes.decode("utf-8")) != response_schema:
+                    raise ProposalError("response schema binding changed before dispatch")
+                meta["response_schema_sha256"] = sha(response_schema_bytes)
+                write_json(out / "status.json", meta)
+                command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
+                           *effort_args, "--input-format", "stream-json",
+                           "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
+                           "--json-schema", str(response_schema_path)]
+                runtime_workspace = disposable_cli.parent / "proposal-runtime-workspace"
+                runtime_workspace.mkdir(mode=0o700)
+                (runtime_workspace / ".agents").mkdir(mode=0o700)
+                write_json(runtime_workspace / ".agents/hooks.json", proposal_hooks())
+                profile = prepare_profile(
+                    disposable_cli, runtime_workspace, role_model,
+                    role_effort if effort_args else None, terminate=terminate_process,
                 )
-            if process.returncode:
-                raw_stream = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
+                if cli_identity(disposable_cli) != initial_cli_identity:
+                    raise ProposalError("CLI identity changed during profile preparation")
+                if prior_status is not None and profile.conversation_id == prior_status["conversation_id"]:
+                    raise ProposalError("profile preparation reused the worker session")
+                if profile.model != role_model or profile.effort != meta["generation_effort_requested"]:
+                    raise ProposalError("prepared role/profile model or requested effort changed")
+                meta["prepared_effort"] = profile.effort
+                meta["runtime_profile"] = validate_profile(profile, fresh=True)
+                write_json(out / "status.json", meta)
+                command += ["--conversation", profile.conversation_id]
+                # Auth belongs to the CLI. No credential files are read or copied here.
+                if pre_provider_check is not None:
+                    pre_provider_check()
+                validate_profile(profile, fresh=True)
+                if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
+                    raise ProposalError("response schema binding changed before dispatch")
+                def final_frame_check(stdout: bytes, stderr: bytes) -> bool:
+                    if stderr:
+                        return False
+                    try:
+                        _validate_final_generation_frame(
+                            stdout.decode("utf-8"), task, active_sources, role,
+                            force_full_paths, role_model, profile.conversation_id,
+                            original_sources=sources,
+                        )
+                    except (ProposalError, UnicodeError):
+                        return False
+                    return True
+
+                if role_model in {WORKER_MODEL, MODEL}:
+                    generation_policy = GenerationRecoveryPolicy(final_frame_check)
+                capture_options = (
+                    {"generation_completion": generation_policy}
+                    if generation_policy is not None else {}
+                )
+                # Capture owns all pipes, bounded reap and failure cleanup. Do not
+                # add Popen.__exit__'s unbounded wait after a failed cleanup.
+                process = subprocess.Popen(
+                    command, cwd=profile.workspace, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    start_new_session=True,
+                    env=dict(os.environ, AGY_CLI_DISABLE_AUTO_UPDATE='true'),
+                )
+                generation_process = process
+                meta["cli_pid"] = process.pid
+                try:
+                    write_json(out / "status.json", meta)
+                    capture_outcome = capture_bounded_process(
+                        process, stdin_bytes, out / "stream.jsonl", out / "stderr.txt",
+                        timeout + 15, **capture_options,
+                    )
+                except BaseException as capture_error:
+                    first_primary = capture_error
+                    # A status-write failure can precede capture ownership.
+                    # Bounded cleanup must not replace the original error.
+                    try:
+                        terminate_process(process)
+                    except BaseException:
+                        pass
+                    for pipe in (process.stdin, process.stdout, process.stderr):
+                        try:
+                            if pipe is not None and not pipe.closed:
+                                pipe.close()
+                        except BaseException:
+                            pass
+                    raise
+                if capture_outcome is not None:
+                    if (type(capture_outcome) is not dict
+                            or capture_outcome.get("outcome") != "RECOVERED_COMPLETED_RESULT"
+                            or capture_outcome.get("actual_returncode") != process.returncode):
+                        raise ProposalError("generation capture returned an invalid recovery outcome")
+                if capture_outcome is None and process.returncode:
+                    raw_stream = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
+                    quota_evidence = classify_gemini_quota_stream(
+                        raw_stream, role_model, datetime.now(timezone.utc)
+                    )
+                    if quota_evidence is not None:
+                        final_cli_identity = cli_identity(disposable_cli)
+                        if final_cli_identity != initial_cli_identity:
+                            raise ProposalError("CLI identity changed during generation")
+                        meta["quota_evidence"] = quota_evidence
+                        write_json(out / "status.json", meta)
+                    if is_retryable_zero_token_stream(raw_stream, role_model):
+                        final_cli_identity = cli_identity(disposable_cli)
+                        if final_cli_identity != initial_cli_identity:
+                            raise ProposalError("CLI identity changed during generation")
+                        raise RetryableProviderSessionError("CLI did not complete one successful session")
+                    if is_retryable_interrupted_stream(raw_stream, role_model):
+                        final_cli_identity = cli_identity(disposable_cli)
+                        if final_cli_identity != initial_cli_identity:
+                            raise ProposalError("CLI identity changed during generation")
+                        raise RetryableProviderSessionError(
+                            "provider stream interrupted before a complete result"
+                        )
+                    raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
+                final_cli_identity = cli_identity(disposable_cli)
+                if final_cli_identity != initial_cli_identity:
+                    raise ProposalError("CLI identity changed during generation")
+                if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
+                    raise ProposalError("response schema binding changed during generation")
+                raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
                 quota_evidence = classify_gemini_quota_stream(
-                    raw_stream, role_model, datetime.now(timezone.utc)
+                    raw, role_model, datetime.now(timezone.utc)
                 )
                 if quota_evidence is not None:
                     final_cli_identity = cli_identity(disposable_cli)
@@ -3368,100 +3771,150 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         raise ProposalError("CLI identity changed during generation")
                     meta["quota_evidence"] = quota_evidence
                     write_json(out / "status.json", meta)
-                if is_retryable_zero_token_stream(raw_stream, role_model):
-                    final_cli_identity = cli_identity(disposable_cli)
-                    if final_cli_identity != initial_cli_identity:
-                        raise ProposalError("CLI identity changed during generation")
-                    raise RetryableProviderSessionError("CLI did not complete one successful session")
-                if is_retryable_interrupted_stream(raw_stream, role_model):
-                    final_cli_identity = cli_identity(disposable_cli)
-                    if final_cli_identity != initial_cli_identity:
-                        raise ProposalError("CLI identity changed during generation")
-                    raise RetryableProviderSessionError(
-                        "provider stream interrupted before a complete result"
+                if capture_outcome is None:
+                    result, envelope = _parse_stream(
+                        raw, task, active_sources, role, force_full_paths, role_model,
+                        original_sources=sources,
                     )
-                raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
-            final_cli_identity = cli_identity(disposable_cli)
-            if final_cli_identity != initial_cli_identity:
-                raise ProposalError("CLI identity changed during generation")
-            if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
-                raise ProposalError("response schema binding changed during generation")
-            raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
-            quota_evidence = classify_gemini_quota_stream(
-                raw, role_model, datetime.now(timezone.utc)
-            )
-            if quota_evidence is not None:
-                final_cli_identity = cli_identity(disposable_cli)
-                if final_cli_identity != initial_cli_identity:
-                    raise ProposalError("CLI identity changed during generation")
-                meta["quota_evidence"] = quota_evidence
-                write_json(out / "status.json", meta)
-            result, envelope = _parse_stream(
-                raw, task, active_sources, role, force_full_paths, role_model,
-                original_sources=sources,
-            )
-            if envelope["conversation_id"] != profile.conversation_id:
-                raise ProposalError("CLI result differs from prepared runtime session")
-            meta["runtime_profile"] = validate_profile(profile, fresh=False)
-            if (prior_status is not None
-                    and envelope["conversation_id"] == prior_status["conversation_id"]):
-                raise ProposalError("review/correction reused the worker session")
-            # A late parent/source change invalidates the entire candidate.
-            if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
-                raise ProposalError("Git state changed during generation")
-            current_task, current_sources = load_task(root, task_path)
-            if current_task != task or current_sources != sources:
-                raise ProposalError("task or source bytes changed during generation")
-            if fallback_from_run_id is not None:
-                rechecked_receipt = _load_bound_opus_fallback_receipt(
-                    root,
-                    fallback_from_run_id,
-                    task,
-                    sources,
-                    head,
-                    autopilot_run_id,
-                )
-                if rechecked_receipt != fallback_receipt:
-                    raise ProposalError("Opus fallback receipt changed during execution")
-            if candidate_sources is not None:
-                if result.get("status") != "PROPOSAL_READY":
-                    raise ProposalError("correction delta proposal is not ready")
-                delta_result = result
-                try:
-                    rebased = rebase_correction_result(
-                        delta_result, task["allowed_files"], sources, candidate_sources
+                else:
+                    result, envelope = _validate_final_generation_frame(
+                        raw, task, active_sources, role, force_full_paths, role_model,
+                        profile.conversation_id, original_sources=sources,
                     )
-                except CorrectionDeltaError as exc:
-                    message = str(exc)
-                    if (message.startswith("complete no-op rejection:")
-                            or " in delta result" in message
-                            or message.startswith("delta result ")):
-                        raise RetryableProviderOutputError(
-                            "provider returned unusable correction delta"
-                        ) from exc
-                    raise
-                rebased = validate_result(
-                    rebased, task, sources, role, enforce_raw_transport=False,
-                    original_sources=sources,
+                    if pre_provider_check is not None:
+                        pre_provider_check()  # Late STOP/drift cannot grant next dispatch.
+                capture_stdout = bounded_file_bytes(root, out / "stream.jsonl", MAX_OUTPUT,
+                                                    "completed generation stdout")
+                capture_stderr = bounded_file_bytes(root, out / "stderr.txt", MAX_OUTPUT,
+                                                    "completed generation stderr")
+                completion_observations = (
+                    normal_observations(process.returncode, stdin_bytes, capture_stdout,
+                                        capture_stderr, timeout + 15)
+                    if capture_outcome is None else validate_observations(
+                        capture_outcome, stdin_bytes, capture_stdout, capture_stderr,
+                    )
                 )
-                if len(serialize_json(rebased)) > MAX_CONTEXT:
-                    raise ProposalError("canonical proposal exceeds the safe context budget")
-                write_json(out / "delta-result.json", delta_result)
-                meta["delta_result_sha256"] = file_sha256(out / "delta-result.json")
-                result = rebased
-            write_json(out / "result.json", result)
-            (out / "proposal.patch").write_text(proposal_diff(result["changes"], sources))
-            meta.update(state=result["status"], conversation_id=envelope["conversation_id"],
-                        duration_seconds=round(time.time() - meta["started_at"], 3),
-                        usage=envelope.get("usage", {}),
-                        result_sha256=file_sha256(out / "result.json"))
-        except BaseException as exc:
-            meta.update(state="BLOCKED", error=type(exc).__name__ + ": " + str(exc),
-                        duration_seconds=round(time.time() - meta["started_at"], 3))
-            write_json(out / "status.json", meta)
-            raise
+                if envelope["conversation_id"] != profile.conversation_id:
+                    raise ProposalError("CLI result differs from prepared runtime session")
+                if (prior_status is not None
+                        and envelope["conversation_id"] == prior_status["conversation_id"]):
+                    raise ProposalError("review/correction reused the worker session")
+                # A late parent/source change invalidates the entire candidate.
+                if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+                    raise ProposalError("Git state changed during generation")
+                current_task, current_sources = load_task(root, task_path)
+                if current_task != task or current_sources != sources:
+                    raise ProposalError("task or source bytes changed during generation")
+                if fallback_from_run_id is not None:
+                    rechecked_receipt = _load_bound_opus_fallback_receipt(
+                        root,
+                        fallback_from_run_id,
+                        task,
+                        sources,
+                        head,
+                        autopilot_run_id,
+                    )
+                    if rechecked_receipt != fallback_receipt:
+                        raise ProposalError("Opus fallback receipt changed during execution")
+                if candidate_sources is not None:
+                    if result.get("status") != "PROPOSAL_READY":
+                        raise ProposalError("correction delta proposal is not ready")
+                    delta_result = result
+                    try:
+                        rebased = rebase_correction_result(
+                            delta_result, task["allowed_files"], sources, candidate_sources
+                        )
+                    except CorrectionDeltaError as exc:
+                        message = str(exc)
+                        if (message.startswith("complete no-op rejection:")
+                                or " in delta result" in message
+                                or message.startswith("delta result ")):
+                            raise RetryableProviderOutputError(
+                                "provider returned unusable correction delta"
+                            ) from exc
+                        raise
+                    rebased = validate_result(
+                        rebased, task, sources, role, enforce_raw_transport=False,
+                        original_sources=sources,
+                    )
+                    if len(serialize_json(rebased)) > MAX_CONTEXT:
+                        raise ProposalError("canonical proposal exceeds the safe context budget")
+                    pending_delta = delta_result
+                    result = rebased
+                # Supported profile/hooks must be checked while this workspace exists.
+                # They cannot be read again after disposable context removal.
+                meta["runtime_profile"] = validate_profile(profile, fresh=False)
+                if completion_observations is None:
+                    raise ProposalError("generation completion observations are missing")
+                validate_runtime_contract(root)
+
+            except BaseException as body_error:
+                if first_primary is None:
+                    first_primary = body_error
+                raise
+        # Actual normal context exit already verified the disposable exit pin,
+        # removed its temporary tree and released the Runner lock.
+        if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+            raise ProposalError("Git state changed before generation publication")
+        current_task, current_sources = load_task(root, task_path)
+        if current_task != task or current_sources != sources:
+            raise ProposalError("task/source bytes changed before generation publication")
+        if _generation_contract_sha(root) != runtime_contract_sha:
+            raise ProposalError("generation contract changed before publication")
+        if capture_outcome is not None and pre_provider_check is not None:
+            pre_provider_check()
+        if pending_delta is not None:
+            write_json(out / "delta-result.json", pending_delta)
+            meta["delta_result_sha256"] = file_sha256(out / "delta-result.json")
+        write_json(out / "result.json", result)
+        (out / "proposal.patch").write_text(proposal_diff(result["changes"], sources))
+        meta.update(
+            state=result["status"], conversation_id=envelope["conversation_id"],
+            duration_seconds=round(time.time() - meta["started_at"], 3),
+            usage=envelope.get("usage", {}), result_sha256=file_sha256(out / "result.json"),
+            cli_returncode=generation_process.returncode,
+            cli_normal_exit_observed=completion_observations["normal_exit_observed"],
+            generation_completion_outcome=completion_observations["outcome"],
+        )
+        proof = _generation_artifact_bindings(
+            root, out, task=task, sources=sources, role=role,
+            status=meta, result=result, observations=completion_observations,
+        )
+        meta["completion_proof_sha256"] = _publish_generation_proof(
+            out / _GENERATION_PROOF_NAME, proof,
+        )
+        # Status is the final eligibility publication and has no self-hash cycle.
         write_json(out / "status.json", meta)
         return out
+    except BaseException as exit_error:
+        primary = first_primary if first_primary is not None else exit_error
+        if meta is not None and out is not None:
+            meta.update(state="BLOCKED", error=type(primary).__name__ + ": " + str(primary),
+                        duration_seconds=round(time.time() - meta["started_at"], 3))
+            if primary is not exit_error:
+                meta["secondary_context_error_type"] = type(exit_error).__name__
+            if generation_policy is not None and generation_policy.failure_facts is not None:
+                meta["generation_capture_failure"] = generation_policy.failure_facts
+            if completion_observations is not None:
+                meta["noneligible_completion_observations"] = completion_observations
+            # These are actual post-close retained digests, distinct from the
+            # observer's accepted-write domain in failure diagnostics.
+            retained = {}
+            for name in ("stream.jsonl", "stderr.txt"):
+                try:
+                    saved = bounded_file_bytes(root, out / name, MAX_OUTPUT,
+                                               "failed generation retained output")
+                    retained[name] = {"utf8_bytes": len(saved), "sha256": sha(saved)}
+                except BaseException as read_error:
+                    retained[name] = {"read_error_type": type(read_error).__name__}
+            meta["failure_retained_outputs"] = retained
+            try:
+                write_json(out / "status.json", meta)
+            except BaseException:
+                pass
+        if primary is exit_error:
+            raise
+        raise primary
 
 
 def run_standalone(

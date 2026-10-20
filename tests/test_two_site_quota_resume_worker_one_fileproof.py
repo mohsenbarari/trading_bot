@@ -149,7 +149,12 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
         r0_status = json.loads(r0_status_path.read_text())
 
         fb_path = self.root / "feedback.json"
-        fb_data = {"reviewer": "gemini", "findings": ["fix bug"]}
+        fb_data = {
+            "reviewer": "gemini",
+            "reviewed_proposal_sha256": w0_sha,
+            "findings": ["fix bug"],
+            "test_evidence": [],
+        }
         fb_path.write_text(json.dumps(fb_data))
         fb_sha = hashlib.sha256(fb_path.read_bytes()).hexdigest()
 
@@ -198,10 +203,7 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
                     "conversation_id": r0_status["conversation_id"],
                 },
                 "reviewer_result": copy.deepcopy(r0_result),
-                "feedback": {
-                    "reviewer": "gemini",
-                    "findings": ["fix bug"],
-                },
+                "feedback": copy.deepcopy(fb_data),
                 "feedback_sha": fb_sha,
             },
         }
@@ -351,7 +353,26 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
                             ],
                         }
                     },
-                    {"content": "# v2\n"},
+                    {
+                        "result_override": {
+                            "status": "PROPOSAL_READY",
+                            "summary": "w1 retained and repaired bootstrap test",
+                            "covered_requirements": [1],
+                            "findings": [],
+                            "changes": [
+                                {"path": "src.py", "original_sha256": src_sha,
+                                 "content": "# v2\n"},
+                                {"path": new_test, "original_sha256": None,
+                                 "content": (
+                                     "import os\n"
+                                     "os.environ['APP_ENV_FILE'] = 'config/unit-test.env.example'\n"
+                                     "from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence\n"
+                                     "install_p1_00_network_fence()\n"
+                                     "import main\n"
+                                 )},
+                            ],
+                        }
+                    },
                 ],
             )
             w0_dir = runner(self.root, task_path, "worker", w0_run_id, 300)
@@ -467,6 +488,8 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
                     "sha256": src_sha,
                     "content": "# orig\n",
                 },
+                **({new_test: {"sha256": None, "content": None}}
+                   if origin == "BOOTSTRAP" else {}),
             },
             "artifacts": artifacts,
             "evidence": {
@@ -492,7 +515,7 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
             "source_head": HEAD,
             "final_worker_run_id": w1_run_id,
             "proposal_sha256": w1_sha,
-            "changed_paths": ["src.py"],
+            "changed_paths": list(task["allowed_files"]),
             "proposal_path": f".local/two-site-refactor/proposals/{w1_run_id}/result.json",
             "correction_count": 1,
             "semantic_task_fingerprint": fingerprint,
@@ -527,8 +550,29 @@ class TestTwoSiteQuotaResumeWorkerOneFileproof(unittest.TestCase):
         self.assertEqual(curr_worker[2], w1_result_text)
         self.assertEqual(curr_worker[3], w1_status["conversation_id"])
 
-        self.assertEqual(bound["returned_state"]["changed_paths"], ["src.py"])
+        new_test = "tests/test_p1_00_characterization_example.py"
+        self.assertEqual(bound["returned_state"]["changed_paths"], ["src.py", new_test])
         self.assertEqual(bound["returned_state"]["proposal_sha256"], w1_sha)
+        canonical = json.loads(w1_result_text)
+        changes = canonical["changes"]
+        self.assertEqual([change["path"] for change in changes], ["src.py", new_test])
+        self.assertEqual(changes[0], {
+            "path": "src.py", "original_sha256": hashlib.sha256(b"# orig\n").hexdigest(),
+            "content": "# v2\n",
+        })
+        self.assertIsNone(changes[1]["original_sha256"])
+        self.assertNotEqual(changes[1]["content"], "import main\n")
+        self.assertEqual(p1_00_characterization_bootstrap_findings(canonical), [])
+        self.assertEqual(ctx["sources"][new_test], {"sha256": None, "content": None})
+        # Raw correction hashes the W0 candidate, not the originally absent file.
+        delta_path = w1_result_path.parent / "delta-result.json"
+        delta_bytes = delta_path.read_bytes()
+        expected_delta = copy.deepcopy(changes)
+        expected_delta[1]["original_sha256"] = hashlib.sha256(b"import main\n").hexdigest()
+        self.assertEqual(json.loads(delta_bytes)["changes"], expected_delta)
+        self.assertEqual(w1_status["delta_result_sha256"], hashlib.sha256(delta_bytes).hexdigest())
+        self.assertFalse((self.root / new_test).exists())
+        self.assertEqual((self.root / "src.py").read_text(), "# orig\n")
 
     def test_read_and_bind_worker_one_test_failed_origin(self) -> None:
         ctx, returned_state, w1_status_path, w1_result_path, _, sig = (

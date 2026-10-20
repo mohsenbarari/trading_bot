@@ -511,6 +511,58 @@ metadata مشترک Git بیرون writable worktree است؛ اولین add/com
 AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا بررسی می‌شوند.
 کپی موقت قبل از آزادشدن lock در موفقیت/خطا/timeout جمع می‌شود؛ adapter 1.1.26 قدیمی است.
 
+
+### تکمیل generation در runtime contract 1.3 — ۲۰ اکتبر ۲۰۲۶
+
+سیاست `FINAL_FRAME_RECOVERY_V1` فقط generationِ pinned Gemini در Runner را opt-in
+می‌کند. capture پیش‌فرضِ identity probe، Broker، Codex و مسیر عادی Opus تغییر
+نمی‌کند. خروج طبیعیِ صفر همچنان `NORMAL_EXIT` است؛ نتیجهٔ نوع‌دار
+`RECOVERED_COMPLETED_RESULT` خروج صفر یا سلامت transport نیست: timeoutِ
+post-final، درخواست واقعی SIGKILL و returncode واقعیِ غیرصفر را حفظ می‌کند.
+این قرارداد جایگزین الزام خروج طبیعی فقط برای حالت محدود زیر است، نه مجوز
+پذیرش پاسخ ناقص یا خاتمهٔ فرایند و ساخت READY.
+
+- تمام input واقعاً نوشته و writer متعلق به Runner بسته شده باشد؛ مشاهدهٔ close
+  پیش از *خواندن* terminal لازم است. این ترتیب، زمان emission یا ingestion در
+  backend را اثبات نمی‌کند. یک init با CID/model دقیق، فقط یک terminal SUCCESS
+  آخر با `num_turns` صحیحِ integer و برابر۱، schema/result معتبر، بدون tail
+  ناقص/رویداد پس از result و بدون tool/subagent attempt یا denied action لازم است.
+  فهرست advertised tools در init ابزارِ اجراشده نیست؛ effort از argv و پروفایل
+  پشتیبانی‌شده bind می‌شود، نه از فیلد خیالی init.
+- فقط CLI هنوز زنده پس از grace ثابت۵ثانیه‌ای post-final واجد بررسی است؛ طبیعی
+  nonzero، parent-exited/inherited-pipe، EOF ناقص، stderr متناقض یا identity نامعلوم
+  بازیابی نمی‌شوند. ورودی/خروجی همان سقف‌ها را دارند و deadline اصلی تمدید نمی‌شود.
+  پس از cleanup، *تمام* stream دوباره بررسی می‌شود: reap فرزند مستقیم، نبود
+  گروه PGID متعلق و pinشده و EOF واقعی هر دو pipe باید پیش از deadline محرز باشد.
+  این primitive نبود همهٔ descendantهای escaped و بدون FD موروثی را اثبات نمی‌کند.
+  cleanup شکست‌خورده یا نامعلوم همواره نامعتبر می‌ماند.
+- profile/hooks و actual executor در workspace زنده بررسی می‌شوند؛ سپس context
+  disposable باید واقعاً و به‌طور عادی خارج شود، شامل exit pin، disposal/temp
+  cleanup و آزادسازی lock. تنها پس از آن result/delta/patch و proof خصوصی ساخته
+  می‌شوند و status واجد شرایط *آخر* منتشر می‌شود. خطای اول با خطای cleanup پوشانده
+  نمی‌شود؛ STOP یا Source/profile/CLI drift مجوز dispatch بعدی نیست.
+- proof برای هر دو outcome اجباری است. Readerهای Runner `load_prior_worker`،
+  Pipeline `validate_run` و Supervisor `_validate_gemini_chain` آن را از قرارداد
+  جاری مطالبه و retained bytes/schema/CID/model/effort و typed observations را
+  مستقل تطبیق می‌دهند؛ حذف هم‌زمان marker و pointer راه legacy باز نمی‌کند.
+  در correction، raw delta، candidate sources و prior identity حفظ و rebase دقیق
+  دوباره محاسبه می‌شود. proof به result/raw/snapshot bind است و status به SHA
+  proof/result؛ وابستگی hash چرخه‌ای به خود status وجود ندارد. Reader مشاهدهٔ
+  تاریخی OS را بازاجرا یا با دادهٔ جدید جایگزین نمی‌کند.
+
+آزمون native و Gemini Reviewer تازه و مستقل، Scope، no-replay، quota، STOP،
+پروفایل/CLI pin، sandbox و همهٔ گیت‌های پذیرش پابرجا هستند. helper stdlib جدید
+`scripts/two_site_generation_completion.py` عضو بیست‌وششم closure واقعی SDK است؛
+۲۵ عضو پیشین حذف یا تعویض نمی‌شوند. انتقال فیزیکی 1.2→1.3 به اعتبارسنجی
+phase-aware دقیقِ قرارداد جدید و SDK26 تازه پس از Source نیاز دارد؛ validator
+قدیمیِ بارگذاری‌شده حق ندارد با monkeypatch/reload ادعای پذیرش 1.3 کند.
+
+746Q شکست تاریخی و مصرف‌شده می‌ماند: پاسخ کامل سپس hang مشاهده شد، اما
+parent-return/PGID/EOF پیش از cleanup ثبت نشد، پس علت دقیق graceful-exit نامعلوم
+است. این تغییر ادعای رفع مشاهده‌شدهٔ آن شکست، qualification زنده، adoption،
+Start/Monitor، سلامت، صرفه‌جویی یا بسته‌شدن AE03/Stage/هدف کلی نیست. کار ضروریِ
+آینده، از جمله شکست‌ها، باید outcome واقعی و هزینه/UNKNOWN را نگه دارد.
+
 Codex CLI نسخهٔ 0.159.2 با SHA ثبت‌شده در Supervisor، از مسیر مستقل این integration:
 `.local/tools/codex-0.159.2-1748767b230ebfc3/codex`.
 این مسیر به پوشهٔ نسخه‌دار افزونه وابسته نیست؛ fallback به PATH یا نسخهٔ تأییدنشده ندارد.

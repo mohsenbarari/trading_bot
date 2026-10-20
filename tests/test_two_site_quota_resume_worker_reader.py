@@ -15,6 +15,7 @@ try:
         MAX_CONTEXT,
         ProposalError,
     )
+    from scripts.two_site_proposal_runner import RetryableProviderOutputError
     from scripts.two_site_quota_resume_worker_reader import (
         load_prior_worker_chain,
         load_prior_worker_zero,
@@ -24,6 +25,7 @@ except ImportError:
         MAX_CONTEXT,
         ProposalError,
     )
+    from two_site_proposal_runner import RetryableProviderOutputError  # type: ignore[no-redef]
     from two_site_quota_resume_worker_reader import (  # type: ignore[no-redef]
         load_prior_worker_chain,
         load_prior_worker_zero,
@@ -360,14 +362,28 @@ class TestTwoSiteQuotaResumeWorkerReader(unittest.TestCase):
             load_prior_worker_chain(self.root, self.task_path, art1)
         self.assertIn("conversation_id", str(ctx.exception))
 
-        art_same, _ = self._create_chain_artifacts(
-            corr=1,
-            orig_prefix="run-same",
-            responses=[{"content": "# same\n"}, {"content": "# same\n"}],
+        # A successful current-policy correction cannot emit an unchanged delta.
+        # Model the real Producer rejection before any completion proof is sealed.
+        with self.assertRaises(RetryableProviderOutputError) as ctx:
+            self._create_chain_artifacts(
+                corr=1,
+                orig_prefix="run-same",
+                responses=[{"content": "# same\n"}, {"content": "# same\n"}],
+            )
+        self.assertEqual(str(ctx.exception), "provider returned unusable proposal transport")
+        self.assertIs(type(ctx.exception.__cause__), ProposalError)
+        self.assertEqual(str(ctx.exception.__cause__), "empty or unchanged file")
+        proposals = self.root / ".local/two-site-refactor/proposals"
+        self.assertTrue((proposals / "run-same-worker-0/transport-completion.json").is_file())
+        self.assertEqual(
+            json.loads((proposals / "run-same-worker-0/result.json").read_text())["changes"][0]["content"],
+            "# same\n",
         )
-        with self.assertRaises(ProposalError) as ctx:
-            load_prior_worker_chain(self.root, self.task_path, art_same)
-        self.assertIn("differ", str(ctx.exception).lower())
+        for leaf in ("result.json", "status.json", "task.json", "transport-completion.json"):
+            self.assertFalse((proposals / "run-same-worker-1" / leaf).exists())
+        self.assertFalse((proposals / "run-same-worker-2").exists())
+        self.assertFalse((proposals / "run-same-reviewer-1").exists())
+        self.assertEqual(self.src_file.read_text(), "# orig\n")
 
     def test_chain_status_drift(self):
         art1, run_dirs1 = self._create_chain_artifacts(corr=1, orig_prefix="run-drift")

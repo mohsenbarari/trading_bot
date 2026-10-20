@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import seal_completion_fixture, supported_profile
 class ProposalContracts(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -80,6 +81,7 @@ class ProposalContracts(unittest.TestCase):
             "conversation_id": conversation_id,
             "result_sha256": runner.file_sha256(proposal),
         })
+        seal_completion_fixture(self.root, directory)
         return proposal
 
     def parse(self, events):
@@ -437,7 +439,7 @@ class ProposalContracts(unittest.TestCase):
                         result=None, events=None, raw_output=None,
                         git_side_effect=None, run_id="run-001",
                         cli_identities=None, feedback=None, proposal=None,
-                        process_returncode=0, pre_provider_check=None):
+                        process_returncode=0, pre_provider_check=None, capture_completion=None):
         process = MagicMock()
         process.__enter__.return_value = process
         process.returncode = process_returncode
@@ -451,6 +453,9 @@ class ProposalContracts(unittest.TestCase):
             self.last_runtime_hooks = json.loads(hook_path.read_text())
             if timeout:
                 runner.terminate_process(fake_process)
+                # Model the completed reap, so a second cleanup sees exit -9.
+                fake_process.returncode = -runner.signal.SIGKILL
+                fake_process.poll.return_value = -runner.signal.SIGKILL
                 raise subprocess.TimeoutExpired("fake-cli", 30)
             if drift:
                 drift()
@@ -522,17 +527,19 @@ class ProposalContracts(unittest.TestCase):
                 output = "\n".join(json.dumps(e) for e in evs).encode()
             stdout_path.write_bytes(output)
             stderr_path.write_bytes(b"")
+            if capture_completion is not None:
+                return capture_completion(fake_process, _input, output)
 
         identity = {"path": str(Path(__file__).resolve()), "version": runner.EXPECTED_CLI_VERSION,
                     "sha256": runner.EXPECTED_CLI_SHA256}
-        git_effects = git_side_effect if git_side_effect is not None else ["head", "", "head", ""]
+        git_effects = git_side_effect if git_side_effect is not None else ["head", "", "head", "", "head", ""]
         identity_patch = (patch.object(runner, "cli_identity", return_value=identity)
                           if cli_identities is None else
                           patch.object(runner, "cli_identity", side_effect=cli_identities))
         with patch.object(runner, "git", side_effect=git_effects), \
                 identity_patch, \
                 patch.object(runner, "prepare_profile", return_value=runner.PreparedProfile("session-one", self.root, runner.WORKER_MODEL, runner.WORKER_EFFORT)), \
-                patch.object(runner, "validate_profile", return_value={"native_tools": 0}), \
+                patch.object(runner, "validate_profile", return_value=supported_profile("session-one")), \
                 patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT), \
                 patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
@@ -782,10 +789,10 @@ class ProposalContracts(unittest.TestCase):
             )
             stderr_path.write_bytes(b"")
 
-        with patch.object(runner, "git", side_effect=["head", "", "head", ""]), \
+        with patch.object(runner, "git", side_effect=["head", "", "head", "", "head", ""]), \
                 patch.object(runner, "cli_identity", return_value=identity), \
                 patch.object(runner, "prepare_profile", return_value=runner.PreparedProfile("session-one", self.root, runner.MODEL, runner.EFFORT)), \
-                patch.object(runner, "validate_profile", return_value={"native_tools": 0}), \
+                patch.object(runner, "validate_profile", return_value=supported_profile("session-one")), \
                 patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process):
             out = runner.run(self.root, self.task_path, "verifier", "verify-001", 30,

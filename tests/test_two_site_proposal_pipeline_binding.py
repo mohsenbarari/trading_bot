@@ -1,5 +1,7 @@
 """Tests for validate_run evidence and conversation binding."""
 from pathlib import Path
+import hashlib
+import json
 import tempfile
 import unittest
 
@@ -12,12 +14,14 @@ except ModuleNotFoundError:
         MODEL, WORKER_MODEL, ProposalError, file_sha256, validate_run, write_json,
     )
 
+from tests.two_site_generation_fixture import seal_completion_fixture
+
 HEAD = "7b3c9ce8bf402db10474faf10556a3fc48c7c151"
 TASK = {"requirements": ["r1"], "allowed_files": ["f.py"]}
-SOURCES = {"f.py": {"sha256": "s0", "content": "c0"}}
+SOURCES = {"f.py": {"sha256": hashlib.sha256(b"c0").hexdigest(), "content": "c0"}}
 WORKER_RES = {
     "status": "PROPOSAL_READY", "summary": "ok", "covered_requirements": [1],
-    "findings": [], "changes": [{"path": "f.py", "original_sha256": "s0", "content": "c1"}],
+    "findings": [], "changes": [{"path": "f.py", "original_sha256": SOURCES["f.py"]["sha256"], "content": "c1"}],
 }
 REVIEWER_RES = {
     "status": "VERIFIED", "summary": "ok", "covered_requirements": [1],
@@ -61,6 +65,7 @@ class TestPipelineBinding(unittest.TestCase):
         st.setdefault("result_sha256", sha)
         write_json(run_dir / "status.json", st)
         write_json(run_dir / "task.json", snapshot)
+        seal_completion_fixture(self.root, run_dir)
         return sha, (run_dir / "result.json").read_text()
 
     def test_valid_baselines_accepted_and_distinct_convs(self):
@@ -103,12 +108,15 @@ class TestPipelineBinding(unittest.TestCase):
             with self.subTest(case=name):
                 mut_dir = self.root / f"m_{idx}"
                 is_w = role_key == "w"
-                st = dict(self.w_st if is_w else self.r_st)
-                sn = dict(self.w_sn if is_w else self.r_sn)
                 res = WORKER_RES if is_w else REVIEWER_RES
-                target = st if file_type == "status" else sn
+                # First form a complete valid baseline. Corruption must then
+                # reach validate_run, never the synthetic proof constructor.
+                self._write_run(mut_dir, self.w_st if is_w else self.r_st,
+                                self.w_sn if is_w else self.r_sn, res)
+                target_path = mut_dir / ("status.json" if file_type == "status" else "task.json")
+                target = json.loads(target_path.read_text())
                 target[field] = val
-                self._write_run(mut_dir, st, sn, res)
+                write_json(target_path, target)
 
                 seen = {"c-seen"} if name == "reused conversation" else set()
                 prior = None if is_w else self.prior

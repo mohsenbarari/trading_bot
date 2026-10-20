@@ -32,6 +32,9 @@ except ModuleNotFoundError:
     )
 
 
+from tests.two_site_generation_fixture import seal_completion_fixture
+
+
 def _make_test_fixture(tmp_path: Path) -> dict:
     root = tmp_path.resolve()
     target_path = "tests/test_canonical_sample.py"
@@ -129,6 +132,8 @@ def _make_test_fixture(tmp_path: Path) -> dict:
         "sources": sources,
     }
     write_json(run_dir / "task.json", task_payload)
+    seal_completion_fixture(root, run_dir)
+    status_payload = json.loads((run_dir / "status.json").read_bytes())
 
     return {
         "root": root,

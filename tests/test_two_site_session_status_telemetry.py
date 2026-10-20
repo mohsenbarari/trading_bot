@@ -229,6 +229,9 @@ class SessionGateStatusTelemetryTests(unittest.TestCase):
         proposal: Path | None = None,
         observed_running: list[dict] | None = None,
     ) -> Path:
+        from tests.two_site_generation_fixture import install_current_contract, supported_profile
+        from scripts import two_site_proposal_runner as generation_runner
+        install_current_contract(root)
         local_proposals = root / ".local/two-site-refactor/proposals"
         local_proposals.mkdir(parents=True, exist_ok=True)
         dummy_cli = root / "fake_cli"
@@ -236,17 +239,33 @@ class SessionGateStatusTelemetryTests(unittest.TestCase):
 
         @contextlib.contextmanager
         def fake_cli_ctx(r: Path, c: Path | None = None):
-            yield local_proposals, dummy_cli, {
-                "path": str(dummy_cli),
-                "version": "1.1.27",
-                "sha256": "0" * 64,
-            }
+            with tempfile.TemporaryDirectory(prefix="telemetry-cli-", dir=r) as directory:
+                disposable_cli = Path(directory) / "fake_cli"
+                disposable_cli.write_bytes(dummy_cli.read_bytes())
+                yield local_proposals, disposable_cli, {
+                    "path": str(disposable_cli),
+                    "version": "1.1.27",
+                    "sha256": "0" * 64,
+                }
 
         def fake_capture(proc, input_bytes, stdout_path, stderr_path, timeout, **kwargs):
             status_path = stdout_path.parent / "status.json"
             if observed_running is not None and status_path.exists():
                 observed_running.append(json.loads(status_path.read_text(encoding="utf-8")))
-            stdout_path.write_bytes(b'{"event":"init"}\n')
+            if fail_stream:
+                stream = b'{"event":"init"}\n'
+            else:
+                cid = f"conv-{run_id}"
+                model = generation_runner.WORKER_MODEL if role == "worker" else generation_runner.MODEL
+                events = [
+                    {"event": "init", "conversation_id": cid, "init": {"model": model}},
+                    {"event": "result", "result": {
+                        "status": "SUCCESS", "conversation_id": cid, "num_turns": 1,
+                        "structured_output": provider_result, "usage": {"prompt_tokens": 10},
+                    }},
+                ]
+                stream = ("\n".join(json.dumps(event) for event in events) + "\n").encode()
+            stdout_path.write_bytes(stream)
             stderr_path.write_bytes(b"")
 
         app_sha = file_sha256(root / "app.py")
@@ -284,22 +303,18 @@ class SessionGateStatusTelemetryTests(unittest.TestCase):
             def __exit__(self, exc_type, exc_val, exc_tb):
                 return False
 
-        with patch("scripts.two_site_proposal_runner.validate_runtime_contract"), \
+        with patch("scripts.two_site_proposal_runner.validate_runtime_contract", return_value=generation_runner.RUNTIME_CONTRACT), \
              patch("scripts.two_site_proposal_runner.git", side_effect=lambda *args: "a" * 40 if args[1] == "rev-parse" else ""), \
              patch("scripts.two_site_proposal_runner.enrich_repository_dependency_context", return_value=prep_notes), \
              patch("scripts.two_site_proposal_runner.validate_task_readiness"), \
              patch("scripts.two_site_proposal_runner.proposal_cli_context", side_effect=fake_cli_ctx), \
-             patch("scripts.two_site_proposal_runner.cli_identity", return_value={"path": str(dummy_cli), "version": "1.1.27", "sha256": "0" * 64}), \
+             patch("scripts.two_site_proposal_runner.cli_identity", side_effect=lambda path: {"path": str(path), "version": generation_runner.EXPECTED_CLI_VERSION, "sha256": generation_runner.EXPECTED_CLI_SHA256}), \
+             patch("scripts.two_site_proposal_runner.prepare_profile", side_effect=lambda cli, ws, model, effort=None, **kw: generation_runner.PreparedProfile(f"conv-{run_id}", ws, model, effort)), \
+             patch("scripts.two_site_proposal_runner.validate_profile", side_effect=lambda prof, **kw: supported_profile(prof.conversation_id)), \
              patch("scripts.two_site_proposal_runner.subprocess.Popen", return_value=FakeProcess()), \
-             patch("scripts.two_site_proposal_runner.capture_bounded_process", side_effect=fake_capture), \
-             patch("scripts.two_site_proposal_runner._parse_stream") as mock_parse:
-            if fail_stream:
-                mock_parse.side_effect = ProposalError("CLI parse failed")
-            else:
-                mock_parse.return_value = (
-                    provider_result,
-                    {"conversation_id": f"conv-{run_id}", "usage": {"prompt_tokens": 10}},
-                )
+             patch("scripts.two_site_proposal_runner.capture_bounded_process", side_effect=fake_capture):
+            # Retained Worker and new Verifier streams must each parse from
+            # their own bytes; no global parser mock may rewrite the old CID.
             return run(root, task_path, role, run_id, 30, cli=dummy_cli, proposal=proposal)
 
     def test_run_status_telemetry_lifecycle_and_prompt_absence(self) -> None:

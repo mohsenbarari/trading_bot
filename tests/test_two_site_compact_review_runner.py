@@ -24,6 +24,7 @@ except ImportError:
     from two_site_agent_sandbox import SandboxError
 
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import seal_completion_fixture, supported_profile
 
 
 class CompactReviewRunnerTests(unittest.TestCase):
@@ -102,6 +103,7 @@ class CompactReviewRunnerTests(unittest.TestCase):
                 "result_sha256": runner.file_sha256(proposal),
             },
         )
+        seal_completion_fixture(self.root, directory)
         return proposal
 
     def create_receipt(self, proposal_sha, *, state="PASSED", returncode=0):
@@ -185,6 +187,8 @@ class CompactReviewRunnerTests(unittest.TestCase):
             patch.object(runner, "git", side_effect=fake_git),
             patch.object(runner, "cli_identity", return_value=identity),
             patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT),
+            patch.object(runner, "prepare_profile", side_effect=lambda cli, ws, model, effort=None, **kw: runner.PreparedProfile("session-verifier", ws, model, effort)),
+            patch.object(runner, "validate_profile", side_effect=lambda prof, **kw: supported_profile(prof.conversation_id)),
             patch.object(runner, "capture_bounded_process", side_effect=capture),
             patch.object(runner.subprocess, "Popen", return_value=process) as popen,
         ):
@@ -244,7 +248,11 @@ class CompactReviewRunnerTests(unittest.TestCase):
             prompt_text,
         )
         self.assertIn("\nROLE: verifier\nCONTEXT_JSON:\n", prompt_text)
-        prompt_json = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1])
+        context_text, schema_text = prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n", 1)
+        prompt_json = json.loads(context_text)
+        prompt_schema, end = json.JSONDecoder().raw_decode(schema_text)
+        self.assertEqual(prompt_schema, json.loads((out / "response-schema.json").read_text()))
+        self.assertEqual(schema_text[end:], "\nReturn exactly one JSON object directly, no Markdown or fences. The same exact schema is supplied to the CLI; no tool, shell or file action is authorized.\n")
         self.assertEqual(
             prompt_json["scope_marker"],
             "EXCERPT_NOT_FULL_SOURCE_CODEX_FULL_REVIEW_REQUIRED",
@@ -280,7 +288,11 @@ class CompactReviewRunnerTests(unittest.TestCase):
 
         prompt_text = (out / "prompt.txt").read_text()
         self.assertNotIn("Compact review notice:", prompt_text)
-        prompt_json = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1])
+        context_text, schema_text = prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n", 1)
+        prompt_json = json.loads(context_text)
+        prompt_schema, end = json.JSONDecoder().raw_decode(schema_text)
+        self.assertEqual(prompt_schema, json.loads((out / "response-schema.json").read_text()))
+        self.assertEqual(schema_text[end:], "\nReturn exactly one JSON object directly, no Markdown or fences. The same exact schema is supplied to the CLI; no tool, shell or file action is authorized.\n")
         self.assertIn("sources", prompt_json)
         self.assertNotIn("exact_original_source_excerpt", prompt_json)
         self.assertEqual(prompt_json["sources"]["source.py"]["content"], self.source_content)

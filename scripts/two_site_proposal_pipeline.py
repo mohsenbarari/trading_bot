@@ -22,7 +22,7 @@ try:
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
-        validate_correction_feedback, validate_result, write_json,
+        validate_correction_feedback, validate_generation_completion, validate_result, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
@@ -31,7 +31,7 @@ except ModuleNotFoundError:
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
-        validate_correction_feedback, validate_result, write_json,
+        validate_correction_feedback, validate_generation_completion, validate_result, write_json,
     )
 
 try:
@@ -813,6 +813,10 @@ def validate_run(
         raise ProposalError(f"conversation_id missing or empty in {expected_run_id}")
     if conv_id in seen_convs:
         raise ProposalError(f"reused conversation_id in {expected_run_id}")
+    validate_generation_completion(
+        root, run_dir, task=expected_task, sources=expected_sources, role=role,
+        status=status, result=result,
+    )
     seen_convs.add(conv_id)
     return result, status, result_sha, result_text
 

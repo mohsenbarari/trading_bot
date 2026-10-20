@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import tempfile
 from unittest import mock
 
 import pytest
@@ -14,6 +15,9 @@ try:
     from scripts import two_site_proposal_runner
 except ImportError:
     import two_site_proposal_runner
+
+
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture, supported_profile
 
 
 @pytest.fixture
@@ -62,9 +66,11 @@ def runner_env(tmp_path, monkeypatch):
     evidence_path = root / "receipt.json"
     evidence_path.write_text(json.dumps(receipt))
 
+    install_current_contract(root)
+    seal_completion_fixture(root, worker_dir)
     monkeypatch.setattr(two_site_proposal_runner, "ROOT", root)
     monkeypatch.setattr(two_site_proposal_runner, "validate_runtime_contract",
-                        lambda r: {"model": two_site_proposal_runner.MODEL, "effort": two_site_proposal_runner.EFFORT})
+                        lambda r: two_site_proposal_runner.RUNTIME_CONTRACT)
     monkeypatch.setattr(two_site_proposal_runner, "git",
                         lambda r, *args: "0" * 40 if args and args[0] == "rev-parse" else "")
 
@@ -72,12 +78,20 @@ def runner_env(tmp_path, monkeypatch):
     def fake_proposal_cli_context(r, cli=None):
         proposals_dir = r / "proposals"
         proposals_dir.mkdir(parents=True, exist_ok=True)
-        yield proposals_dir, Path("/fake/cli"), {"path": "/fake/cli", "sha256": "0" * 64}
+        with tempfile.TemporaryDirectory(prefix="reviewer-cli-", dir=r) as directory:
+            disposable_cli = Path(directory) / "fake-cli"
+            disposable_cli.write_text("# offline CLI fixture; never executed\n")
+            yield proposals_dir, disposable_cli, {"path": str(disposable_cli), "sha256": "0" * 64}
 
     monkeypatch.setattr(two_site_proposal_runner, "proposal_cli_context", fake_proposal_cli_context)
     monkeypatch.setattr(two_site_proposal_runner, "cli_identity",
-                        lambda p: {"path": str(p), "version": two_site_proposal_runner.EXPECTED_CLI_VERSION, "sha256": "0" * 64})
+                        lambda p: {"path": str(p), "version": two_site_proposal_runner.EXPECTED_CLI_VERSION, "sha256": two_site_proposal_runner.EXPECTED_CLI_SHA256})
 
+    monkeypatch.setattr(two_site_proposal_runner, "prepare_profile",
+                        lambda cli, ws, model, effort=None, **kw: two_site_proposal_runner.PreparedProfile(
+                            "conv-verifier-01", ws, model, effort))
+    monkeypatch.setattr(two_site_proposal_runner, "validate_profile",
+                        lambda prof, **kw: supported_profile(prof.conversation_id))
     mock_process = mock.MagicMock(pid=12345, returncode=0)
     mock_process.__enter__.return_value = mock_process
     mock_process.__exit__.return_value = None
@@ -93,7 +107,7 @@ def runner_env(tmp_path, monkeypatch):
         }}),
     ])
 
-    def fake_capture(proc, in_bytes, stdout_path, stderr_path, timeout, max_output=2_000_000):
+    def fake_capture(proc, in_bytes, stdout_path, stderr_path, timeout, max_output=2_000_000, *, generation_completion=None):
         stdout_path.write_text(stream_content)
         stderr_path.write_text("")
 
@@ -128,7 +142,11 @@ def test_verifier_test_evidence_transport_success(runner_env):
     runner_env["mock_popen"].assert_called_once()
 
     prompt_text = (out / "prompt.txt").read_text()
-    prompt_context = json.loads(prompt_text.split("\nCONTEXT_JSON:\n")[1])
+    context_text, schema_text = prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n", 1)
+    prompt_context = json.loads(context_text)
+    prompt_schema, end = json.JSONDecoder().raw_decode(schema_text)
+    assert prompt_schema == json.loads((out / "response-schema.json").read_text())
+    assert schema_text[end:] == "\nReturn exactly one JSON object directly, no Markdown or fences. The same exact schema is supplied to the CLI; no tool, shell or file action is authorized.\n"
     assert prompt_context["pre_review_test_evidence"] == runner_env["receipt"]
 
     task_json = json.loads((out / "task.json").read_text())
@@ -183,7 +201,12 @@ def test_verifier_without_evidence_compatibility(runner_env):
     )
     runner_env["mock_popen"].assert_called_once()
 
-    prompt_context = json.loads((out / "prompt.txt").read_text().split("\nCONTEXT_JSON:\n")[1])
+    prompt_text = (out / "prompt.txt").read_text()
+    context_text, schema_text = prompt_text.split("\nCONTEXT_JSON:\n", 1)[1].split("\nREQUIRED_RESPONSE_SCHEMA_DATA:\n", 1)
+    prompt_context = json.loads(context_text)
+    prompt_schema, end = json.JSONDecoder().raw_decode(schema_text)
+    assert prompt_schema == json.loads((out / "response-schema.json").read_text())
+    assert schema_text[end:] == "\nReturn exactly one JSON object directly, no Markdown or fences. The same exact schema is supplied to the CLI; no tool, shell or file action is authorized.\n"
     assert "pre_review_test_evidence" not in prompt_context
 
     task_json = json.loads((out / "task.json").read_text())

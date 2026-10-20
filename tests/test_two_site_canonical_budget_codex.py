@@ -9,6 +9,7 @@ import pytest
 from scripts import two_site_assignment_scope as scope_mod
 from scripts import two_site_codex_autopilot as autopilot
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import seal_completion_fixture
 
 
 @pytest.fixture
@@ -139,6 +140,8 @@ def canonical_env(tmp_path: Path):
         },
     )
 
+    seal_completion_fixture(tmp_path, worker_dir)
+    seal_completion_fixture(tmp_path, reviewer_dir)
     cycle_result = {
         "gemini_worker_run_id": "w1",
         "gemini_reviewer_run_id": "r1",

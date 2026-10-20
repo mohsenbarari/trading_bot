@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import install_current_contract, supported_profile
 from scripts.two_site_worker_model_routing import (
     OPUS_EFFORT,
     OPUS_MODEL,
@@ -282,6 +283,7 @@ class TestOpusRunnerFallback(unittest.TestCase):
         elif fallback_id is not None:
             failed_id = fallback_id
 
+        install_current_contract(temp_path)
         task_file = temp_path / "task.json"
         task_file.write_text("{}", encoding="utf-8")
         cli_file = temp_path / "mock_agy"
@@ -323,7 +325,7 @@ class TestOpusRunnerFallback(unittest.TestCase):
             captured_commands.append(list(cmd))
             return DummyProcess()
 
-        def default_capture(proc: object, in_b: bytes, out_p: Path, err_p: Path, to: float, max_out: int = runner.MAX_OUTPUT) -> None:
+        def default_capture(proc: object, in_b: bytes, out_p: Path, err_p: Path, to: float, max_out: int = runner.MAX_OUTPUT, *, generation_completion=None) -> None:
             out_p.write_bytes(b"")
             err_p.write_bytes(b"")
 
@@ -345,6 +347,8 @@ class TestOpusRunnerFallback(unittest.TestCase):
             mock.patch.object(runner, "acquire_proposal_lock", return_value=(42, proposals_dir)),
             mock.patch.object(runner, "release_proposal_lock"),
             mock.patch.object(runner, "cli_identity", return_value={"path": str(cli_file), "version": runner.EXPECTED_CLI_VERSION, "sha256": runner.EXPECTED_CLI_SHA256}),
+            mock.patch.object(runner, "prepare_profile", side_effect=lambda cli, ws, model, effort=None, **kw: runner.PreparedProfile("conv-opus-42", ws, model, effort)),
+            mock.patch.object(runner, "validate_profile", side_effect=lambda prof, **kw: supported_profile(prof.conversation_id)),
             mock.patch.object(runner, "capture_bounded_process", side_effect=capture_fn),
             mock.patch.object(runner, "_parse_stream", return_value=(mock_result, mock_envelope)),
             mock.patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT),
@@ -438,7 +442,8 @@ class TestOpusRunnerFallback(unittest.TestCase):
             failed_id = "run-opus-failed-001"
             run_id = f"{failed_id}-gf"
 
-            def mock_capture_tamper(proc: object, in_b: bytes, out_p: Path, err_p: Path, to: float, max_out: int = runner.MAX_OUTPUT) -> None:
+            def mock_capture_tamper(proc: object, in_b: bytes, out_p: Path, err_p: Path, to: float, max_out: int = runner.MAX_OUTPUT, *, generation_completion=None) -> None:
+                self.assertIs(type(generation_completion), runner.GenerationRecoveryPolicy)
                 out_p.write_bytes(b"")
                 err_p.write_bytes(b"")
                 (proposals_dir / failed_id / "stream.jsonl").write_bytes(b'{"event": "corrupt_late"}\n')

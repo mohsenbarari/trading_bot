@@ -434,6 +434,8 @@ def test_remainder(full,monkeypatch,scenario):
     contents[2]='def test_subject():\n    assert True\n'
   calls=[]
 
+  from tests.two_site_generation_fixture import seal_completion_fixture
+
   def local_provider(_root,_task,role,run_id,timeout,feedback=None,proposal=None,cli=None,test_evidence=None):
     calls.append((role,run_id,feedback,proposal,test_evidence))
     output=rt/'.local/two-site-refactor/proposals'/run_id
@@ -448,6 +450,7 @@ def test_remainder(full,monkeypatch,scenario):
       snap['proposal']=proposal.read_text()
       status.update(input_worker_run_id=prior['run_id'],input_worker_conversation_id=prior['conversation_id'],input_proposal_sha256=file_sha(proposal))
     if feedback is not None:
+      snap['feedback']=parse(feedback.read_text())
       status['input_feedback_sha256']=file_sha(feedback)
       saved=parse(feedback.read_text())
       assert saved['reviewed_proposal_sha256']==file_sha(proposal)
@@ -459,6 +462,7 @@ def test_remainder(full,monkeypatch,scenario):
       status['input_test_evidence_sha256']=hashlib.sha256(raw).hexdigest()
     save(output/'task.json',snap)
     save(output/'status.json',status)
+    seal_completion_fixture(rt,output)
     return output
   monkeypatch.setattr(p,'runner_run',local_provider)
   wid=prefix+'-worker-0'

@@ -24,6 +24,7 @@ from scripts import two_site_worker_model_routing as routing
 from scripts import two_site_json_prompt_fidelity as fidelity
 from tests import test_two_site_proposal_runner as fixtures
 from tests import test_two_site_json_prompt_fidelity_737k as history
+from tests import two_site_runner_752_fixture as seventh
 
 
 ROLE = {
@@ -53,10 +54,18 @@ class ExplicitPrintInvocation(unittest.TestCase):
         self.addCleanup(self.legacy.doCleanups)
         self.original_source = (self.legacy.root / "source.py").read_bytes()
 
-    def invoke(self, role, run_id, *, fault=None, legacy_print=None, wire_fault=None):
+    def invoke(self, role, run_id, *, fault=None, legacy_print=None, wire_fault=None,
+               historical_source=None):
         fixture = self.legacy
         model, effort, cid = ROLE[role]
         trace = {"spawned": [], "fresh": [], "disposed": False, "capture": []}
+        trace["policy_expected"] = historical_source is None
+        run_function = runner.run
+        if historical_source is not None:
+            self.assertIn(hashlib.sha256(historical_source).hexdigest(), fidelity._RUNNER_IDENTITIES)
+            self.assertNotEqual(hashlib.sha256(historical_source).hexdigest(), seventh.SOURCE_752_SHA)
+            run_function = history._unexecuted_original(runner, historical_source)
+            fidelity._validated_run_code(historical_source, run_function)
         self.trace = trace
         out = fixture.root / ".local/two-site-refactor/proposals" / run_id
         trace["out"] = out
@@ -75,6 +84,7 @@ class ExplicitPrintInvocation(unittest.TestCase):
                 event["conversation_id"] = cid
             else:
                 event["result"]["conversation_id"] = cid
+                event["result"]["num_turns"] = 1
         if fault == "session":
             events[0]["conversation_id"] = "wrong-prepared-session"
             events[1]["result"]["conversation_id"] = "wrong-prepared-session"
@@ -147,8 +157,11 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
                     executable.chmod(0o700)
                     trace["cli"] = executable
                     trace["disposable"] = disposable
+                    trace["synthetic_executable_sha256"] = hashlib.sha256(child.encode()).hexdigest()
+                    # Identity is an explicit offline mock; never claim this
+                    # synthetic child is the actual pinned Provider executable.
                     identity.update(path=str(executable), version="1.4.2",
-                                    sha256=hashlib.sha256(child.encode()).hexdigest())
+                                    sha256=runner.EXPECTED_CLI_SHA256)
                     yield local, executable, {"source_path": "local-test-fixture", "sha256": identity["sha256"]}
             finally:
                 trace["disposed"] = disposable is not None and not disposable.exists()
@@ -166,7 +179,8 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
             trace["fresh"].append(fresh)
             if fault == "profile" and not fresh:
                 raise ValueError("fixture profile drift")
-            return {"native_tools": 0, "command_policy": "off", "conversation_id": cid}
+            return {"native_tools": 0, "command_policy": "off", "conversation_id": cid,
+                    "actual_executor_checked": not fresh}
 
         identities = 0
 
@@ -204,8 +218,7 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
             trace["capture"].append((wire, timeout, dict(kwargs)))
             self.assertIs(process, trace["process"])
             self.assertEqual((stdout_path, stderr_path), (out / "stream.jsonl", out / "stderr.txt"))
-            self.assertEqual(timeout, 45)
-            self.assertEqual(kwargs, {})
+            self.capture_contract(timeout, kwargs, current=trace["policy_expected"])
             # The actual capture/child/kill/reap path runs. This test-only shortened
             # deadline prevents a deliberately sleeping fake from costing45s;
             # the unchanged45s Runner argument is independently asserted above.
@@ -235,12 +248,13 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
                 if wire_fault in ("missing-event", "wrong-type", "tamper"):
                     actual_wire = (json.dumps(envelope) + "\n").encode()
             trace["sent_wire"] = actual_wire
-            real_capture(process, actual_wire, stdout_path, stderr_path,
-                         1 if fault == "hang" else timeout, **kwargs)
+            capture_outcome = real_capture(process, actual_wire, stdout_path, stderr_path,
+                                           1 if fault == "hang" else timeout, **kwargs)
             if fault == "schema":
                 (out / "response-schema.json").write_text("{}\n")
             elif fault == "source":
                 (fixture.root / "source.py").write_text("VALUE = 99\n")
+            return capture_outcome
 
         def git(root, *args):
             self.assertEqual(root, fixture.root)
@@ -268,14 +282,22 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
             ):
                 stack.enter_context(patcher)
             try:
-                returned = runner.run(fixture.root, fixture.task_path, role, run_id, 30,
-                                      proposal=proposal, pre_provider_check=before_provider)
+                returned = run_function(fixture.root, fixture.task_path, role, run_id, 30,
+                                        proposal=proposal, pre_provider_check=before_provider)
             finally:
                 trace["identity_calls"] = identities
         self.assertEqual(returned, out)
         trace["child"] = json.loads(trace_path.read_text())
         trace["prior_proposal"] = proposal
         return out
+
+    def capture_contract(self, timeout, kwargs, *, current=True):
+        self.assertEqual(timeout, 45)
+        if current:
+            self.assertEqual(set(kwargs), {"generation_completion"})
+            self.assertIs(type(kwargs["generation_completion"]), runner.GenerationRecoveryPolicy)
+        else:
+            self.assertEqual((timeout, kwargs), (45, {}))
 
     def whole_invocation_oracle(self, role, out):
         fixture, trace = self.legacy, self.trace
@@ -298,7 +320,7 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
         self.assertEqual(len(trace["capture"]), 1)
         wire, timeout, kwargs = trace["capture"][0]
         self.assertEqual(wire, trace["child"]["wire"].encode("utf-8"))
-        self.assertEqual((timeout, kwargs), (45, {}))
+        self.capture_contract(timeout, kwargs)
         schema = json.loads((out / "response-schema.json").read_text())
         self.assertEqual(trace["child"]["schema"], schema)
         self.assertEqual(wire.count(b"\n"), 1)
@@ -335,6 +357,15 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
         self.assertEqual((status["state"], status["model"], status["effort"], status["conversation_id"]),
                          (PUBLIC_STATUS[role], model, effort, cid))
         self.assertEqual(status["result_sha256"], runner.file_sha256(out / "result.json"))
+        self.assertEqual(status["generation_completion_outcome"], "NORMAL_EXIT")
+        self.assertIs(status["runtime_profile"]["actual_executor_checked"], True)
+        proof = runner.validate_generation_completion(
+            fixture.root, out, task=fixture.task, sources=fixture.sources,
+            role=role, status=status, result=result,
+        )
+        self.assertIs(proof["observations"]["normal_exit_observed"], True)
+        self.assertEqual(proof["observations"]["actual_returncode"], 0)
+        self.assertEqual(proof["policy"], "FINAL_FRAME_RECOVERY_V1")
         self.assertEqual((out / "stderr.txt").read_bytes(), b"")
         self.assertEqual((fixture.root / "source.py").read_bytes(), self.original_source)
         self.assertFalse((fixture.root / "test_new.py").exists())
@@ -345,8 +376,45 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
                 out = self.invoke(role, role + "-print-good")
                 self.whole_invocation_oracle(role, out)
 
+    def test_all_six_historical_run_factories_keep_real_capture_default_kwargs(self):
+        # Compile only the exact old run functions against an isolated test root;
+        # do not execute old modules or swap the actual runtime-contract file.
+        current = fidelity._read_runner_source()
+        ndjson = seventh.apply_generation_completion_transport(current.decode(), inverse=True).encode()
+        empty = history._apply_ndjson_transport(ndjson, inverse=True)
+        bare = empty.replace(history._EMPTY_PRINT_COMMAND, history._PRINT_COMMAND, 1)
+        _, original_three = history._three_versions()
+        versions = (*original_three, bare, empty, ndjson)
+        self.assertEqual(len({hashlib.sha256(body).hexdigest() for body in versions}), 6)
+        for body in versions:
+            source_sha = hashlib.sha256(body).hexdigest()
+            exit_code = (0 if source_sha in (history._OLD_SOURCE, STREAM_SOURCE_SHA)
+                         else 2 if source_sha in (BARE_SOURCE_SHA, PRINT_SOURCE_SHA) else 23)
+            with self.subTest(source_sha=source_sha):
+                run_id = "historical-capture-" + source_sha[:12]
+                if exit_code:
+                    with self.assertRaisesRegex(runner.ProposalError, "CLI failed with exit " + str(exit_code)):
+                        self.invoke("worker", run_id, historical_source=body)
+                else:
+                    out = self.invoke("worker", run_id, historical_source=body)
+                    status = json.loads((out / "status.json").read_text())
+                    self.assertEqual(status["state"], "PROPOSAL_READY")
+                    self.assertNotIn("completion_proof_sha256", status)
+                trace = self.trace
+                self.assertEqual(len(trace["capture"]), 1)
+                _wire, timeout, kwargs = trace["capture"][0]
+                self.capture_contract(timeout, kwargs, current=False)
+                self.assertEqual(trace["process"].returncode, exit_code)
+                self.assertTrue(trace["disposed"])
+                child = json.loads(trace["child_trace_path"].read_text())
+                self.assertIs(child["stdin_eof"], True)
+                self.assertTrue(all(pipe.closed for pipe in (
+                    trace["process"].stdin, trace["process"].stdout, trace["process"].stderr)))
+
     def test_exact_sixth_fidelity_factory_pair_and_all_historical_crosspairs(self):
-        source = fidelity._read_runner_source()
+        current = fidelity._read_runner_source()
+        self.assertEqual(hashlib.sha256(current).hexdigest(), seventh.SOURCE_752_SHA)
+        source = seventh.apply_generation_completion_transport(current.decode(), inverse=True).encode()
         self.assertEqual(hashlib.sha256(source).hexdigest(), STREAM_SOURCE_SHA)
         nodes = [node for node in ast.parse(source).body
                  if isinstance(node, ast.FunctionDef) and node.name == "run"]
@@ -364,6 +432,7 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
             BARE_SOURCE_SHA: BARE_RUN_AST_SHA,
             PRINT_SOURCE_SHA: PRINT_RUN_AST_SHA,
             STREAM_SOURCE_SHA: STREAM_RUN_AST_SHA,
+            seventh.SOURCE_752_SHA: seventh.RUN_752_AST_SHA,
         })
         before = dict(vars(runner))
 
@@ -381,7 +450,7 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
         self.assertEqual(empty.count(history._EMPTY_PRINT_COMMAND), 1)
         bare = empty.replace(history._EMPTY_PRINT_COMMAND, history._PRINT_COMMAND, 1)
         self.assertEqual(hashlib.sha256(bare).hexdigest(), BARE_SOURCE_SHA)
-        versions = (*historical, bare, empty, source)
+        versions = (*historical, bare, empty, source, current)
         for own in versions:
             original = history._unexecuted_original(runner, own)
             fidelity._validated_run_code(own, original)
@@ -400,7 +469,11 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
                             fidelity._validated_run_code(own, original)
         with patch.dict(fidelity._CONTEXT_CALL_LINES, {STREAM_RUN_AST_SHA: STREAM_CONTEXT_LINE + 1}):
             with self.assertRaisesRegex(fidelity.PromptFidelityError, "CONTEXT JSON call shape drift"):
-                fidelity._validated_run_code(source, runner.run)
+                fidelity._validated_run_code(source, history._unexecuted_original(runner, source))
+        self.assertEqual(fidelity._CONTEXT_CALL_LINES[seventh.RUN_752_AST_SHA], seventh.CONTEXT_752_LINE)
+        with patch.dict(fidelity._CONTEXT_CALL_LINES, {seventh.RUN_752_AST_SHA: seventh.CONTEXT_752_LINE + 1}):
+            with self.assertRaisesRegex(fidelity.PromptFidelityError, "CONTEXT JSON call shape drift"):
+                fidelity._validated_run_code(current, runner.run)
         with self.assertRaisesRegex(fidelity.PromptFidelityError, "SDK source pin mismatch"):
             fidelity._validated_run_code(source + b"\n", runner.run)
 
@@ -416,7 +489,7 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
                 self.assertEqual(len(trace["capture"]), 1)
                 wire, timeout, kwargs = trace["capture"][0]
                 self.assertEqual(child["wire"].encode("utf-8"), trace["sent_wire"])
-                self.assertEqual((timeout, kwargs), (45, {}))
+                self.capture_contract(timeout, kwargs)
                 expected = list(trace["spawned"][0])
                 expected[expected.index("--input-format") + 1] = "text"
                 self.assertEqual(child["argv"], expected)
@@ -444,7 +517,7 @@ sys.stdout.buffer.write(@STREAM@);sys.stdout.buffer.flush()
                 self.assertEqual(len(trace["capture"]), 1)
                 wire, timeout, kwargs = trace["capture"][0]
                 self.assertEqual(child["wire"].encode("utf-8"), trace["sent_wire"])
-                self.assertEqual((timeout, kwargs), (45, {}))
+                self.capture_contract(timeout, kwargs)
                 self.assertNotIn("--print", trace["spawned"][0])
                 expected = [trace["spawned"][0][0], "--print", *trace["spawned"][0][1:]]
                 expected[expected.index("--input-format") + 1] = "text"

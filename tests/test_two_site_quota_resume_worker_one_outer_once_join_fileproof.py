@@ -230,7 +230,16 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
             with pipeline_lock(r):
                 yield ctx
 
-        real_worker_runner, _ = make_runner(self.root, [{"content": "# v2\n"}])
+        # Full canonical desired result is owned by the scenario fixture.
+        # Omitting its originally-new test would request an unsupported deletion.
+        fixture_w1_result = json.loads(env["w1_result_path"].read_text())
+        response = dict(fixture_w1_result, summary=f"synthetic resumed {new_prefix}")
+        expected_paths = list(ctx["task"]["allowed_files"])
+        self.assertEqual([change["path"] for change in response["changes"]], expected_paths)
+        self.assertEqual(response["changes"][0]["content"], "# v2\n")
+        if origin == "BOOTSTRAP":
+            self.assertIsNone(response["changes"][1]["original_sha256"])
+        real_worker_runner, _ = make_runner(self.root, [{"result_override": response}])
         worker_provider_entries: list[str] = []
 
         def fake_once_runner(
@@ -364,6 +373,14 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
         self.assertEqual(w1_status["result_sha256"], new_w1_sha)
         self.assertEqual(w1_status["input_proposal_sha256"], w0_sha)
         self.assertEqual(w1_status["input_feedback_sha256"], fb_sha)
+        self.assertEqual(json.loads(w1_result_bytes), response)
+        self.assertEqual(final_state["changed_paths"], expected_paths)
+        delta = json.loads((w1_dir / "delta-result.json").read_text())
+        self.assertEqual([change["path"] for change in delta["changes"]], expected_paths)
+        if origin == "BOOTSTRAP":
+            self.assertEqual(delta["changes"][1]["content"], response["changes"][1]["content"])
+            self.assertEqual(delta["changes"][1]["original_sha256"],
+                             hashlib.sha256(b"import main\n").hexdigest())
 
         old_w1_id = f"{old_prefix}-worker-1"
         self.assertNotEqual(expected_w1_id, old_w1_id)
@@ -489,7 +506,16 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
             with pipeline_lock(r):
                 yield ctx
 
-        real_worker_runner, _ = make_runner(self.root, [{"content": "# v2\n"}])
+        # Use the same explicit complete desired canonical files, but a
+        # distinct new-run summary. Tamper only AFTER a coherent proof is sealed.
+        fixture_w1_result = json.loads(old_w1_result_bytes)
+        response = dict(fixture_w1_result, summary=f"synthetic resumed fault {new_prefix}")
+        expected_paths = list(ctx["task"]["allowed_files"])
+        self.assertEqual([change["path"] for change in response["changes"]], expected_paths)
+        self.assertEqual(response["changes"][0]["content"], "# v2\n")
+        if origin == "BOOTSTRAP":
+            self.assertIsNone(response["changes"][1]["original_sha256"])
+        real_worker_runner, _ = make_runner(self.root, [{"result_override": response}])
         worker_provider_entries: list[str] = []
 
         def fake_once_runner(
@@ -522,6 +548,15 @@ class TestTwoSiteQuotaResumeWorkerOneOuterOnceJoinFileproof(unittest.TestCase):
                 test_evidence=test_evidence,
                 cli=cli,
             )
+            # Demonstrate the complete canonical/delta construction succeeded
+            # before the intended late feedback-binding corruption.
+            self.assertEqual(json.loads((run_dir / "result.json").read_text()), response)
+            delta = json.loads((run_dir / "delta-result.json").read_text())
+            self.assertEqual([change["path"] for change in delta["changes"]], expected_paths)
+            if origin == "BOOTSTRAP":
+                self.assertEqual(delta["changes"][1]["content"], response["changes"][1]["content"])
+                self.assertEqual(delta["changes"][1]["original_sha256"],
+                                 hashlib.sha256(b"import main\n").hexdigest())
             w1_status_path = run_dir / "status.json"
             st_data = json.loads(w1_status_path.read_text(encoding="utf-8"))
             st_data["input_feedback_sha256"] = "0" * 64

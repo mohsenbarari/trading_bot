@@ -55,7 +55,7 @@ class TestTwoSiteQuotaResumeWorkerOneBootstrapOnceFileproof(unittest.TestCase):
         self.helper.tearDown()
 
     def _prove_origin(self, origin: str) -> None:
-        ctx, _, _, _, fb_sha, _ = (
+        ctx, _, _, fixture_w1_result_path, fb_sha, _ = (
             self.helper._setup_test_gate_scenario(origin)
         )
         self.assertEqual(ctx["artifacts"]["correction_origin"], origin)
@@ -100,7 +100,16 @@ class TestTwoSiteQuotaResumeWorkerOneBootstrapOnceFileproof(unittest.TestCase):
                 yield ctx
 
         expected_w1_run_id = f"{new_prefix}-worker-1"
-        real_runner, _ = make_runner(self.root, [{"content": "# v2\n"}])
+        # This response is CANONICAL against original sources, not a raw
+        # one-path correction. Keep the repaired originally-new test explicitly.
+        fixture_w1_result = json.loads(fixture_w1_result_path.read_text())
+        response = dict(fixture_w1_result, summary=f"synthetic resumed {new_prefix}")
+        expected_paths = list(ctx["task"]["allowed_files"])
+        self.assertEqual([change["path"] for change in response["changes"]], expected_paths)
+        self.assertEqual(response["changes"][0]["content"], "# v2\n")
+        if origin == "BOOTSTRAP":
+            self.assertIsNone(response["changes"][1]["original_sha256"])
+        real_runner, _ = make_runner(self.root, [{"result_override": response}])
         provider_entries: list[str] = []
 
         def fake_runner(
@@ -197,6 +206,17 @@ class TestTwoSiteQuotaResumeWorkerOneBootstrapOnceFileproof(unittest.TestCase):
         self.assertEqual(w1_status["result_sha256"], w1_sha)
         self.assertEqual(w1_status["input_proposal_sha256"], w0_sha)
         self.assertEqual(w1_status["input_feedback_sha256"], fb_sha)
+        self.assertEqual(json.loads(w1_res_text), response)
+        self.assertEqual(result_state["changed_paths"], expected_paths)
+        delta = json.loads((w1_dir / "delta-result.json").read_text())
+        self.assertEqual([change["path"] for change in delta["changes"]], expected_paths)
+        self.assertEqual(delta["changes"][0]["content"], "# v2\n")
+        if origin == "BOOTSTRAP":
+            retained = delta["changes"][1]
+            self.assertEqual(retained["content"], response["changes"][1]["content"])
+            self.assertEqual(retained["original_sha256"],
+                             hashlib.sha256(b"import main\n").hexdigest())
+        self.assertNotEqual(w1_sha, hashlib.sha256(fixture_w1_result_path.read_bytes()).hexdigest())
 
         self.assertNotEqual(expected_w1_run_id, w0_run_id)
         orig_w1_id = f"{ctx['original_run_prefix']}-worker-1"

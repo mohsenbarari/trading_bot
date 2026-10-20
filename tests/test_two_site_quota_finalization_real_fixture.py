@@ -39,6 +39,7 @@ from tests.test_two_site_provider_broker import broker_repo
 from tests.test_two_site_provider_broker_cycle_reservation_read import _setup_cycle_root,_write_startup_json
 from tests.test_two_site_quota_real_source_join_fileproof import _setup_scenario_through_receipt
 from tests.test_two_site_quota_full_tree_repository_facts import SOURCE_ROOT
+from tests.two_site_generation_fixture import seal_completion_fixture
 _SIMULATED_ISOLATION='SIMULATED_EXTERNAL_TEST_OUTCOME_NOT_SANDBOX_PROOF'
 
 def _w0600(path:Path,data:str|bytes) ->bytes:
@@ -134,6 +135,8 @@ def _build_real_finalized_history_fixture(broker_repo_tuple:tuple[Path,Path,Any,
  r_stat= {'run_id':r_run,'role':'verifier','head':sc['head'],'model':GEMINI_MODEL,'state':'VERIFIED','task_id':t_data['task_id'],'input_worker_run_id':w_run,'input_proposal_sha256':prop_sha,'input_test_evidence_sha256':rec_sha,'result_sha256':r_sha,'conversation_id':f'conv-reviewer-{cont_cid}'}
  r_stat_path=r_dir/'status.json'
  _w0600(r_stat_path,_cj(r_stat))
+ seal_completion_fixture(root,w_dir)
+ seal_completion_fixture(root,r_dir)
  inner_ready= {'state':'READY_FOR_CODEX','task_id':t_data['task_id'],'source_head':sc['head'],'run_prefix':resume_req['run_prefix'],'final_worker_run_id':w_run,'final_reviewer_run_id':r_run,'proposal_sha256':prop_sha,'changed_paths': [t_rel],'proposal_path':str(w_res_path.relative_to(root)),'reviewer_path':str(r_res_path.relative_to(root)),'correction_count':0,'blockers': [],'pre_review_test_path':str(rec_path.relative_to(root)),'pre_review_test_sha256':rec_sha,'pre_review_test_state':'PASSED','semantic_task_fingerprint':sc['identity']['fingerprint']}
  continuation_resp=build_continuation_broker_response(resume_req,inner_ready,now_epoch=resp_dt.timestamp())
  publish_terminal_continuation_record(root,resume_req,continuation_resp)
@@ -163,7 +166,7 @@ def _build_real_finalized_history_fixture(broker_repo_tuple:tuple[Path,Path,Any,
 
 def test_simulated_external_outcomes_real_finalization_fixture(broker_repo):
  golden_ast_expected = {
-  '_build_real_finalized_history_fixture': 'e1fc080f19e475b89012b6d27461ab8fd1d3daaad98a6dde796a4c0a57fd3970',
+  '_build_real_finalized_history_fixture': 'a9b6ef9ee3eb6a2dae258bc64a535ab8a4dfcb2b21ea8703a6c818a8050ed31d',
   '_cj': '8374fb6381839f20945da64a69786a82bec9d99b7932ee6c9000fb2810eb32ca',
   '_custody': 'f31e26a8a1513a358fbc3c639df27b4bcf11b95056fe676159a9a0ac0ae88cd3',
   '_git': '8892609546f3195402ffbef9c64b14f52bd6a7ceb4db7ac7c8d33f556583aae4',

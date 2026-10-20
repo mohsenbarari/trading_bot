@@ -364,6 +364,9 @@ def test_correction_active_sha_original_new_caps_and_rebased_retention():
     assert (task, original, candidate) == frozen
 
 
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture, supported_profile
+
+
 def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypatch):
     """Real run/schema/parser/rebase/writers; fake only external CLI/profile/Git boundary."""
     task, original = make_case()
@@ -374,6 +377,7 @@ def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypa
     def one(label, size, fails):
         root = tmp_path / label
         root.mkdir()
+        install_current_contract(root)
         local = root / "proposals"
         local.mkdir()
         cli_home = root / "cli"
@@ -388,13 +392,15 @@ def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypa
         (prior_dir / "status.json").write_text(json.dumps(
             {"role": "worker", "state": "PROPOSAL_READY", "run_id": "prior-worker",
              "conversation_id": "unit-prior", "result_sha256": runner.sha(raw_proposal.encode())}))
+        seal_completion_fixture(root, prior_dir)
         feedback = root / "feedback.json"
         feedback.write_text(json.dumps({"reviewer": "test-gate",
             "reviewed_proposal_sha256": runner.sha(raw_proposal.encode()),
             "findings": ["Synthetic correction."], "test_evidence": []}))
         candidate = build_candidate_sources(task["allowed_files"], original, prior["changes"])
         payload = result(task, candidate, {TEST: text(size)}, raw=True)
-        profile = SimpleNamespace(conversation_id="unit-fresh",
+        profile = SimpleNamespace(conversation_id="unit-fresh", model=runner.WORKER_MODEL,
+                                  effort=runner.WORKER_EFFORT,
                                   workspace=cli_home / "proposal-runtime-workspace")
         @contextmanager
         def cli_context(*args):
@@ -408,7 +414,7 @@ def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypa
                 return self
             def __exit__(self, *args):
                 return False
-        def capture(process, prompt, output, errors, timeout):
+        def capture(process, prompt, output, errors, timeout, *, generation_completion=None):
             output.write_text(stream(payload, model=runner.WORKER_MODEL))
             errors.write_text("")
         def read(root_arg, path, limit, description):
@@ -416,7 +422,7 @@ def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypa
                 return "Hermetic synthetic prompt."
             return real_read(root_arg, path, limit, description)
         with monkeypatch.context() as guard:
-            guard.setattr(runner, "validate_runtime_contract", lambda *_: None)
+            guard.setattr(runner, "validate_runtime_contract", lambda *_: runner.RUNTIME_CONTRACT)
             guard.setattr(runner, "load_task", lambda *_: (task, original))
             guard.setattr(runner, "load_worker_routing_policy", lambda *a, **k: SimpleNamespace(enabled=False))
             guard.setattr(runner, "select_worker_model_route", lambda *a, **k: (runner.WORKER_MODEL, runner.WORKER_EFFORT))
@@ -425,9 +431,10 @@ def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypa
             guard.setattr(runner, "git", lambda r, *a: "a" * 40 if a[:1] == ("rev-parse",) else "")
             guard.setattr(runner, "bounded_file_text", read)
             guard.setattr(runner, "proposal_cli_context", cli_context)
-            guard.setattr(runner, "cli_identity", lambda *_: {"sha256": "b" * 64})
+            guard.setattr(runner, "cli_identity", lambda *_: {"path": "/synthetic/cli",
+                "version": runner.EXPECTED_CLI_VERSION, "sha256": runner.EXPECTED_CLI_SHA256})
             guard.setattr(runner, "prepare_profile", lambda *a, **k: profile)
-            guard.setattr(runner, "validate_profile", lambda *a, **k: {"conversation_id": "unit-fresh"})
+            guard.setattr(runner, "validate_profile", lambda *a, **k: supported_profile("unit-fresh"))
             guard.setattr(runner.subprocess, "Popen", Process)
             guard.setattr(runner, "capture_bounded_process", capture)
             out = local / "unit-worker"

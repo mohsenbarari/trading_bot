@@ -37,6 +37,7 @@ try:
         terminate_process,
         unique_json,
         validate_runtime_contract,
+        validate_generation_completion,
         validate_result as validate_proposal_result,
         write_json,
     )
@@ -55,6 +56,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         terminate_process,
         unique_json,
         validate_runtime_contract,
+        validate_generation_completion,
         validate_result as validate_proposal_result,
         write_json,
     )
@@ -2408,6 +2410,17 @@ def _validate_gemini_chain(
             or not isinstance(reviewer_conversation, str) or not reviewer_conversation.strip()
             or worker_conversation == reviewer_conversation):
         raise AutopilotError("Gemini review did not use an independent fresh session")
+    for run_dir, role, status, proposal_result in (
+        (worker_dir, "worker", worker_status, worker_result),
+        (reviewer_dir, "verifier", reviewer_status, reviewer_result),
+    ):
+        try:
+            validate_generation_completion(
+                root, run_dir, task=task, sources=sources, role=role,
+                status=status, result=proposal_result,
+            )
+        except (ProposalError, OSError, ValueError) as exc:
+            raise AutopilotError("Gemini generation completion proof is invalid") from exc
     return worker_result
 
 

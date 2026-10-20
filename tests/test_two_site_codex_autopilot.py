@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from scripts import two_site_codex_autopilot as autopilot
 from scripts import two_site_proposal_runner as proposal_runner
+from tests.two_site_generation_fixture import seal_completion_fixture
 
 
 class AutopilotContracts(unittest.TestCase):
@@ -108,6 +109,8 @@ class AutopilotContracts(unittest.TestCase):
             "input_proposal_sha256": proposal_runner.file_sha256(worker_dir / "result.json"),
             "result_sha256": proposal_runner.file_sha256(reviewer_dir / "result.json"),
         })
+        seal_completion_fixture(self.root, worker_dir)
+        seal_completion_fixture(self.root, reviewer_dir)
         result = self.result(
             proposal_sha256=proposal_runner.file_sha256(worker_dir / "result.json"),
         )
@@ -467,6 +470,10 @@ class AutopilotContracts(unittest.TestCase):
         reviewer_status = json.loads((reviewer_dir / "status.json").read_text())
         reviewer_status["input_worker_run_id"] = fallback_run_id
         proposal_runner.write_json(reviewer_dir / "status.json", reviewer_status)
+        # Route/task/run identities are positive fixture setup. Seal only once
+        # they are final; the deliberate failed-stream mutation stays below.
+        seal_completion_fixture(self.root, fallback_dir)
+        seal_completion_fixture(self.root, reviewer_dir)
 
         with patch.object(proposal_pipeline, "load_worker_routing_policy", return_value=ENABLED_POLICY):
             validated = autopilot.validate_gemini_chain(self.root, head, result)
@@ -482,6 +489,8 @@ class AutopilotContracts(unittest.TestCase):
         worker_status = json.loads((worker_dir / "status.json").read_text())
         worker_status["model"] = "claude-opus-4-6-thinking"
         proposal_runner.write_json(worker_dir / "status.json", worker_status)
+        seal_completion_fixture(self.root, worker_dir)
+        worker_status = json.loads((worker_dir / "status.json").read_text())
 
         worker_task = json.loads((worker_dir / "task.json").read_text())
         with patch.object(autopilot, "expected_bound_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:

@@ -98,6 +98,9 @@ def setup_test_workspace(
     return root, loaded_task, loaded_sources
 
 
+from tests.two_site_generation_fixture import seal_completion_fixture
+
+
 def make_role_runner(
     root: Path,
     expected_head: str,
@@ -174,10 +177,13 @@ def make_role_runner(
                 input_proposal_sha256=pst["result_sha256"],
             )
         if feedback is not None:
+            snapshot["feedback"] = json.loads(feedback.read_text())
+            write_json(out / "task.json", snapshot)
             st["input_feedback_sha256"] = file_sha256(feedback)
         if test_evidence is not None:
             st["input_test_evidence_sha256"] = file_sha256(test_evidence)
         write_json(out / "status.json", st)
+        seal_completion_fixture(root, out)
         return out
 
     return mock_run
