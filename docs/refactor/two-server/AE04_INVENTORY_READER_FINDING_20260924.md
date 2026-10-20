@@ -38,3 +38,45 @@ The first combined code+tests task 121 hit `MODEL_OUTPUT_TRUNCATED` before a pro
 Test-only task 123 needed one Worker correction for fixture errors; Codex accepted proposal SHA `d7481d519774bef0491825c6b6d98db609f57081ad8faa720ddf9bc30d7c9b1c` after 44 independent focused tests, commit `58f8beae991800d8eca0ef20357c375b6943b42f`. Codex found an overclaim in Reviewer wording: the CLI test sliced stdout only after unbounded `capture_output`. Narrow task 124 corrected capture with the existing streaming hard cap and replaced a nonexistent-hash ancestry test with a real side-branch commit. Proposal SHA `97c68c47871eebf6dccbd0d330a400856af3efa18978ae5987414732f11d0ea8`, 45 independent tests, commit `0983fae6d7eef3fb3de27a30aa6a99f2a5b8a568`.
 
 At committed HEAD `0983fae6`, the exact real CLI request for `BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183` returns `status=VALID`, `seed_count=465`, and `requested_coverage=PROVEN_FOR_REQUESTED_SCENARIO`; the integration tree is clean. No inventory source, baseline, product, production or Supervisor runtime was changed. This closes the AE04 reader regression, not AE03 quota recovery or the empirical efficiency assessment.
+
+## Independent supplemental-source finding (2026-10-20; Scope 767)
+
+At clean accepted base `a082a2846495a78d71ba8a6a95a23c33871f9d74`, the current v1
+manifest declares 18 evidence-source keys: baseline and base, 14 selected numbered
+continuations, and the descriptive independent receipts
+`notification_mark_all_750_path` (accepted 751 accounting packet) and
+`trade_read_prequery_757_path` (accepted 757 accounting packet). Its recorded
+partial counts are 393/465 evidenced and 72 remaining. The existing source-key
+parser accepts only baseline/base and numbered continuation keys, so static
+inspection identifies a rejection before either supplemental record is read.
+This is a new compatibility finding; the September acceptance above remains
+historical and does not establish compatibility with these later receipts.
+
+The bounded reader contract admits descriptive independent `*_path` keys without
+a per-Task list. Every `continuation_*` spelling remains reserved for the existing
+strict numbered grammar. Supplemental documents belong directly under the
+canonical inventory directory as `recent-characterization-*.json`, excluding the
+base and continuation namespaces. They must retain the actual partial integration
+or partial reconciliation envelope: exact integer schema 1, P1-00b, assignment,
+PARTIAL coverage, full-seed acceptance not assessed, closures false, both High
+blockers, and the actual COMPLETE/IN_PROGRESS Stage states. Integration receipts
+bind ancestor source/parent commits; reconciliation receipts bind an ancestor
+inspected HEAD. Base/predecessor links cannot impersonate independent receipts.
+
+All declared supplemental documents and the complete numbered/sparse predecessor
+closure are validated before the existing targeted-record filter. Declared
+supplement records then use the same current/historical Git blob, mode, SHA,
+selector-AST and duplicate checks as other records. An unlisted packet, including
+the accepted business A2 packet currently absent from this manifest, contributes
+no coverage merely by existing. Historical, unsupported or failed proof never
+becomes current coverage. Existing target filtering and UNKNOWN semantics stay
+unchanged. Supplements share the existing 64 continuation-source allowance with
+distinct audited hidden predecessors; base/baseline exemptions, 2,000,000-byte
+per-read and 8,000,000-byte total content limits remain unchanged.
+
+This finding records no new source acceptance, seed/count promotion, Stage/High/
+origin closure, runtime health or savings. The proposed code/tests require exact
+independent nonauthor and Root review, the complete selected hermetic PRE/POST
+union and the real current committed-repository CLI. Git-unavailable fixture
+SKIPs in a hermetic snapshot are not live CLI compatibility evidence. No manifest,
+old receipt or authority state is rewritten by this consumer change.

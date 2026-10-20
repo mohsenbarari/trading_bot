@@ -8,6 +8,7 @@ import pytest
 from scripts import two_site_cycle_tools as ct
 from scripts import two_site_proposal_pipeline as pipeline
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture
 
 
 @pytest.fixture
@@ -27,7 +28,10 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / "gap.md").write_text("# Gap A\nCharacterize method f.\n")
     (tmp_path / "code.py").write_text("import os\nLIMIT = 2\n@staticmethod\ndef f(x):\n    return x + LIMIT\n\ndef unrelated():\n    return 1\n")
     (tmp_path / "tests").mkdir()
-    git("add", "--", ".gitignore", "gap.md", "code.py")
+    install_current_contract(tmp_path)
+    git("add", "--", ".gitignore", "gap.md", "code.py",
+        str(runner.GEMINI_RUNTIME_CONTRACT_REL),
+        *(str(path) for path in runner.GEMINI_RUNTIME_REFERENCE_PATHS))
     git("commit", "-m", "offline fixture")
     return tmp_path, git
 
@@ -252,6 +256,8 @@ def chain(repo):
     runner.write_json(reviewer / "status.json", {"run_id": "r1", "role": "verifier", "head": head,
         "model": runner.MODEL, "state": "VERIFIED", "conversation_id": "rc", "result_sha256": runner.file_sha256(reviewer / "result.json"),
         "input_worker_run_id": "w1", "input_proposal_sha256": digest, "input_worker_conversation_id": "wc"})
+    seal_completion_fixture(root, worker)
+    seal_completion_fixture(root, reviewer)
     return output, digest, result, reviewer
 
 
@@ -313,17 +319,23 @@ def test_correction_worker_requires_fresh_session_and_exact_prior(repo, reuse_co
                 "findings": ["Assertion must reflect true behavior"], "test_evidence": []}
     runner.write_json(worker / "task.json", {**snapshot, "proposal": prior_text, "feedback": feedback})
     status.update(input_worker_run_id="w0", input_proposal_sha256=prior_sha, input_worker_conversation_id="wc0")
+    runner.write_json(worker / "status.json", status)
+    seal_completion_fixture(root, prior)
+    seal_completion_fixture(root, worker)
+    assert ct.review(root, output, "w1", "r1", digest)["state"] == "BINDINGS_VALID"
     if reuse_conversation:
         status["conversation_id"] = "wc0"
         reviewed_status = json.loads((reviewer / "status.json").read_text())
         reviewed_status["input_worker_conversation_id"] = "wc0"
         runner.write_json(reviewer / "status.json", reviewed_status)
-    runner.write_json(worker / "status.json", status)
-    if reuse_conversation:
-        with pytest.raises(ValueError, match="reused conversation"):
+        runner.write_json(worker / "status.json", status)
+        seal_completion_fixture(root, worker)
+        seal_completion_fixture(root, reviewer)
+        with pytest.raises(runner.ProposalError,
+                           match="^Gemini generation completion proof is invalid$") as exc:
             ct.review(root, output, "w1", "r1", digest)
-    else:
-        assert ct.review(root, output, "w1", "r1", digest)["state"] == "BINDINGS_VALID"
+        assert isinstance(exc.value.__cause__, runner.ProposalError)
+        assert str(exc.value.__cause__) == "completion correction candidate/prior binding mismatch"
 
 
 @pytest.mark.parametrize("forged_prior", [False, True])
@@ -374,6 +386,8 @@ def test_correction_worker_model_routing_and_forged_prior_gate(repo, monkeypatch
         input_worker_conversation_id="wc0",
     )
     runner.write_json(worker / "status.json", status)
+    seal_completion_fixture(root, prior)
+    seal_completion_fixture(root, worker)
 
     if forged_prior:
         with pytest.raises(runner.ProposalError, match="prior identity mismatch"):
@@ -464,6 +478,7 @@ def test_review_accepts_sha_bound_passed_test_evidence(repo):
     status_json["input_test_evidence_sha256"] = evidence_sha
     runner.write_json(reviewer / "status.json", status_json)
 
+    seal_completion_fixture(root, reviewer)
     receipt = ct.review(root, output, "w1", "r1", digest)
     assert receipt["state"] == "BINDINGS_VALID"
     assert receipt["tests"] == "NOT_RUN"
@@ -489,6 +504,7 @@ def test_review_rejects_asymmetric_test_evidence(repo, asymmetric_mode):
         status_json["input_test_evidence_sha256"] = evidence_sha
         runner.write_json(reviewer / "status.json", status_json)
 
+    seal_completion_fixture(root, reviewer)
     with pytest.raises(ValueError):
         ct.review(root, output, "w1", "r1", digest)
 
@@ -506,6 +522,7 @@ def test_review_rejects_wrong_evidence_sha(repo):
     status_json["input_test_evidence_sha256"] = "a" * 64
     runner.write_json(reviewer / "status.json", status_json)
 
+    seal_completion_fixture(root, reviewer)
     with pytest.raises(ValueError):
         ct.review(root, output, "w1", "r1", digest)
 
@@ -528,6 +545,7 @@ def test_review_rejects_failed_or_mismatched_test_receipt(repo, invalid_receipt_
     status_json["input_test_evidence_sha256"] = evidence_sha
     runner.write_json(reviewer / "status.json", status_json)
 
+    seal_completion_fixture(root, reviewer)
     with pytest.raises(ValueError):
         ct.review(root, output, "w1", "r1", digest)
 
@@ -543,6 +561,7 @@ def test_review_rejects_free_form_or_non_dict_test_evidence(repo):
     status_json["input_test_evidence_sha256"] = "c" * 64
     runner.write_json(reviewer / "status.json", status_json)
 
+    seal_completion_fixture(root, reviewer)
     with pytest.raises(ValueError):
         ct.review(root, output, "w1", "r1", digest)
 
@@ -552,6 +571,7 @@ def test_review_rejects_free_form_or_non_dict_test_evidence(repo):
     status_json["input_test_evidence_sha256"] = runner.sha(runner.serialize_json(free_form))
     runner.write_json(reviewer / "status.json", status_json)
 
+    seal_completion_fixture(root, reviewer)
     with pytest.raises(ValueError):
         ct.review(root, output, "w1", "r1", digest)
 

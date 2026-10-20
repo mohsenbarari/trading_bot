@@ -640,16 +640,26 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         n_sources = len(sources) - 2
         required_source_keys = {"baseline_path", "base_path", "continuation_path"}
         numbered_sources = {}
+        supplemental_sources = {}
         for key in sources:
             if key in required_source_keys:
                 continue
             match = re.fullmatch(r"continuation_([1-9][0-9]?)_path", key) if type(key) is str else None
-            if match is None or not 2 <= int(match[1]) <= 64:
+            if match is not None and 2 <= int(match[1]) <= 64:
+                numbered_sources[int(match[1])] = sources[key]
+            elif (type(key) is str and not key.startswith("continuation_")
+                  and re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*_path", key)
+                  and type(sources[key]) is str
+                  and re.fullmatch(
+                      r"docs/refactor/two-server/section-1/inventory/"
+                      r"recent-characterization-(?!continuation(?:-|\.))[a-z0-9]+(?:-[a-z0-9]+)*\.json",
+                      sources[key])):
+                supplemental_sources[key] = sources[key]
+            else:
                 raise runner.ProposalError("canonical manifest inventory or sources invalid")
-            numbered_sources[int(match[1])] = sources[key]
         expected_source_keys = required_source_keys | {
             f"continuation_{i}_path" for i in numbered_sources
-        }
+        } | set(supplemental_sources)
         if (
             type(expected) is not int
             or not isinstance(surfaces, list)
@@ -765,6 +775,43 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         for index in sorted(numbered_sources):
             current, _ = audit_continuation(index, numbered_sources[index])
             docs.append(current)
+
+        # Supplements share the existing continuation allowance, including hidden
+        # predecessors, but cannot impersonate a base or a linked continuation.
+        if len(audited) + len(supplemental_sources) > 64:
+            raise runner.ProposalError("canonical predecessor graph invalid")
+        for path in supplemental_sources.values():
+            document, _ = load(path)
+            status = document.get("status")
+            assignment = document.get("assignment_id")
+            high_blockers = document.get("canonical_blockers")
+            source = document.get("source")
+            if (
+                type(document.get("schema_version")) is not int
+                or not canonical_stage(document, records=True)
+                or not isinstance(assignment, str) or not assignment.strip()
+                or assignment != assignment.strip()
+                or status not in ("PARTIAL_CANONICAL_INTEGRATION", "PARTIAL_RECONCILIATION")
+                or (status == "PARTIAL_CANONICAL_INTEGRATION"
+                    and (document.get("receipt_type") != status
+                         or not isinstance(source, dict)
+                         or not ancestor(source.get("accepted_source_commit"))
+                         or not ancestor(source.get("accepted_parent"))))
+                or ("receipt_type" in document and document["receipt_type"] != status)
+                or (status == "PARTIAL_RECONCILIATION"
+                    and not ancestor(document.get("inspected_head")))
+                or ("inspected_head" in document and not ancestor(document["inspected_head"]))
+                or document.get("coverage_status") != "PARTIAL"
+                or document.get("seed_acceptance_status") != "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+                or document.get("closures_authorized") is not False
+                or not isinstance(high_blockers, list)
+                or any(type(item) is not str for item in high_blockers)
+                or not _CANONICAL_BLOCKERS.issubset(high_blockers)
+                or document.get("stages") != {"P1-00": "COMPLETE", "P1-00b": "IN_PROGRESS"}
+                or "base_inventory" in document or "predecessor_inventory" in document
+            ):
+                raise runner.ProposalError(f"independent supplemental receipt invalid: {path}")
+            docs.append(document)
 
         current_seen: set[tuple[str, str]] = set()
         proven: set[str] = set()
