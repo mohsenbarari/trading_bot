@@ -28,13 +28,14 @@
     "continuation_13_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json",
     "continuation_16_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
     "continuation_17_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json",
-    "notification_mark_all_750_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-notification-mark-all-accounting-751.json"
+    "notification_mark_all_750_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-notification-mark-all-accounting-751.json",
+    "trade_read_prequery_757_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-trade-read-prequery-accounting-757.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 255,
-    "evidenced_seed_count": 390,
-    "remaining_seed_count": 75
+    "reconciled_new_seed_count": 258,
+    "evidenced_seed_count": 393,
+    "remaining_seed_count": 72
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [

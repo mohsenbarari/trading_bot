@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-TRADE-READ-PREQUERY-ACCOUNTING-757",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-ROOT-TRADE-ACCOUNTING-20261020-758R",
+  "canonical_gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "acceptance_condition": "This proposed three-seed registration and early accounting take effect only after their own exact scoped nonauthor review, Root semantic/byte checks, actual hermetic PRE/physical POST, clean single-parent acceptance, normal posthold and fresh Root observation. This file asserts no own future accepted commit, Scope hash, native result or receipt and does not accept itself.",
+  "source": {
+    "accepted_source_commit": "7a2554eda0ebfb00541f239e2cc6dc2b810ffc48",
+    "accepted_parent": "3da49d39df9cb58ae7087af2e1577771bae0b09f",
+    "source_assignment_id": "WA-P1-00B-ROOT-TRADE-READ-20261020-757M",
+    "source_scope_sha256": "a70d4c38cca4007bc61ad8230060b4a6b00a8463f0b28a6ea3d621c9879a95fb",
+    "source_scope_raw_sha256": "3e25d55c58f8d51761d9b8cf5d2f37049f075d40a4b752b911722df6ee78ea9f",
+    "source_authority_sha256": "78c03c1a635aa54158fe3f8e6dd29fa473e78ad023668cdbe048659b316191ed",
+    "accepted_file": {
+      "path": "tests/test_p1_00b_characterization_trade_read_prequery_failures.py",
+      "sha256": "05b62536a33f498eea6ba2674a73f64b422998d340c4363dca04cd57780ffe1c",
+      "utf8_bytes": 9686,
+      "mode": "100644"
+    },
+    "handler_source": {
+      "path": "api/routers/trades.py",
+      "sha256": "5311be1f5d612811365b0c8577db73ed4a387b14237ddf159b8dd179584a5433"
+    },
+    "source_author_packet": {
+      "path": ".local/two-site-refactor/reviews/p1-00b-757-trade-read-prequery-candidate/manifest.json",
+      "sha256": "5e53ddf328e9aaa1019f6d2599f926ace42a50a709423bdbb0b29bed02b6034d"
+    },
+    "source_canonical_seed_credit": 0,
+    "source_current_group_was_pending": true
+  },
+  "actor": {
+    "source_author_agent": "/root/geometry_audit",
+    "source_reviewer_agent": "/root/reader_ports",
+    "source_review": {
+      "path": ".local/two-site-refactor/reviews/AE03_757_TRADE_READ_PREQUERY_INDEPENDENT_SOURCE_REVIEW_20261020.json",
+      "sha256": "5e8be2abe90ba82cb3ef23dad4ae79a5048b9476e29eebcd8d286136eaa200bc",
+      "status": "VERIFIED",
+      "findings": []
+    },
+    "source_Root_acceptance": {
+      "path": ".local/two-site-refactor/reviews/AE03_757M_ROOT_SOURCE1_ACCEPTED_OBSERVED_20261020.json",
+      "sha256": "7a1454e3fb4e354a38597fae4406b22bb15bd509835c1aae44fd5408d4d82ae9",
+      "Source_accepted": true,
+      "head": "7a2554eda0ebfb00541f239e2cc6dc2b810ffc48",
+      "parent": "3da49d39df9cb58ae7087af2e1577771bae0b09f"
+    },
+    "source_Root_posthold": {
+      "path": ".local/two-site-refactor/reviews/AE03_757M_ROOT_SOURCE1_ACCEPTANCE_POSTHOLD_20261020.json",
+      "sha256": "3aabb33ddbef218d020ad9754245a1a48be5ac23bbbda32dc65b1e34cb17831e"
+    },
+    "source_protocol_peer_separate_from_Source_review": {
+      "path": ".local/two-site-refactor/reviews/AE03_757M_R3_MANUAL_SOURCE1_PROTOCOL_INDEPENDENT_REVIEW_20261020.json",
+      "sha256": "03179b3d62f9b6720c862bffb0e1e43db469c01aeabae577e5e1312197f23809"
+    },
+    "accounting_author_agent": "/root/geometry_audit",
+    "accounting_independent_nonauthor_review_required": true,
+    "genuine_Gemini_Worker_or_Reviewer_claim": false
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_trade_read_prequery_failures.py",
+      "sha256": "05b62536a33f498eea6ba2674a73f64b422998d340c4363dca04cd57780ffe1c",
+      "last_commit": "7a2554eda0ebfb00541f239e2cc6dc2b810ffc48",
+      "seed_ids": [
+        "API-TRADE-GET-TRADES-GET-MY-TRADES-L5462",
+        "API-TRADE-GET-TRADES-EXPORT-MY-TRADES-L5566",
+        "API-TRADE-GET-TRADES-GET-TRADE-L5626"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_read_prequery_failures.py::TradeReadPrequeryFailureCharacterizationTests::test_get_my_trades_query_builder_exception_precedes_execute",
+        "tests/test_p1_00b_characterization_trade_read_prequery_failures.py::TradeReadPrequeryFailureCharacterizationTests::test_export_my_trades_query_builder_exception_precedes_execute_and_export",
+        "tests/test_p1_00b_characterization_trade_read_prequery_failures.py::TradeReadPrequeryFailureCharacterizationTests::test_get_trade_select_exception_precedes_loading_and_execute"
+      ]
+    }
+  ],
+  "registered_handlers": [
+    {
+      "seed_id": "API-TRADE-GET-TRADES-GET-MY-TRADES-L5462",
+      "canonical_symbol": "api/routers/trades.py:get_my_trades",
+      "scenario_key": "trade-read-my-query-builder-exception-before-execute",
+      "selector": "tests/test_p1_00b_characterization_trade_read_prequery_failures.py::TradeReadPrequeryFailureCharacterizationTests::test_get_my_trades_query_builder_exception_precedes_execute",
+      "source_commit": "7a2554eda0ebfb00541f239e2cc6dc2b810ffc48",
+      "source_file_sha256": "05b62536a33f498eea6ba2674a73f64b422998d340c4363dca04cd57780ffe1c",
+      "observed_contract": "Real handler, explicit arguments and a unique initial builder failure; exact owner ID and all six filter keywords including trade_type to perspective_trade_type; same exception object and zero DB/downstream calls or awaits.",
+      "evidence_limits": [
+        "Synthetic direct real-handler exception identity, exact visible arguments and call/await suppression only.",
+        "No HTTP/Depends/authentication/authorization, real SQL/query/session/transaction/persistence, full-row immutability, export-file delivery, concurrency/retry/reload or origin-cell acceptance.",
+        "Three distinct handler seeds map to three accepted scenarios in ONE Source unit. Partial evidenced membership is separately conditional here; Source757 historical zero canonical credit remains unchanged."
+      ]
+    },
+    {
+      "seed_id": "API-TRADE-GET-TRADES-EXPORT-MY-TRADES-L5566",
+      "canonical_symbol": "api/routers/trades.py:export_my_trades",
+      "scenario_key": "trade-read-my-export-query-builder-exception-before-execute-export",
+      "selector": "tests/test_p1_00b_characterization_trade_read_prequery_failures.py::TradeReadPrequeryFailureCharacterizationTests::test_export_my_trades_query_builder_exception_precedes_execute_and_export",
+      "source_commit": "7a2554eda0ebfb00541f239e2cc6dc2b810ffc48",
+      "source_file_sha256": "05b62536a33f498eea6ba2674a73f64b422998d340c4363dca04cd57780ffe1c",
+      "observed_contract": "Real handler with format=excel and a distinct initial builder failure; exact owner/all-six-filter forwarding without normalization; same exception object and zero execution, rows, export generators, naming or response work.",
+      "evidence_limits": [
+        "Synthetic direct real-handler exception identity, exact visible arguments and call/await suppression only.",
+        "No HTTP/Depends/authentication/authorization, real SQL/query/session/transaction/persistence, full-row immutability, export-file delivery, concurrency/retry/reload or origin-cell acceptance.",
+        "Three distinct handler seeds map to three accepted scenarios in ONE Source unit. Partial evidenced membership is separately conditional here; Source757 historical zero canonical credit remains unchanged."
+      ]
+    },
+    {
+      "seed_id": "API-TRADE-GET-TRADES-GET-TRADE-L5626",
+      "canonical_symbol": "api/routers/trades.py:get_trade",
+      "scenario_key": "trade-read-detail-select-exception-before-loading-execute",
+      "selector": "tests/test_p1_00b_characterization_trade_read_prequery_failures.py::TradeReadPrequeryFailureCharacterizationTests::test_get_trade_select_exception_precedes_loading_and_execute",
+      "source_commit": "7a2554eda0ebfb00541f239e2cc6dc2b810ffc48",
+      "source_file_sha256": "05b62536a33f498eea6ba2674a73f64b422998d340c4363dca04cd57780ffe1c",
+      "observed_contract": "Real handler and third distinct initial select exception; select called once with the actual Trade class; exact exception identity and zero selectinload, DB, access, identity/relation maps, partitioning or serialization.",
+      "evidence_limits": [
+        "Synthetic direct real-handler exception identity, exact visible arguments and call/await suppression only.",
+        "No HTTP/Depends/authentication/authorization, real SQL/query/session/transaction/persistence, full-row immutability, export-file delivery, concurrency/retry/reload or origin-cell acceptance.",
+        "Three distinct handler seeds map to three accepted scenarios in ONE Source unit. Partial evidenced membership is separately conditional here; Source757 historical zero canonical credit remains unchanged."
+      ]
+    }
+  ],
+  "native_source_witness": {
+    "state": "HISTORICAL_ACTUAL_757_SOURCE_EVIDENCE_NOT_THIS_ACCOUNTING_EXECUTION",
+    "selectors": [
+      "tests/test_p1_00b_characterization_trade_read_prequery_failures.py",
+      "tests/test_trades_router_reads.py",
+      "tests/test_trades_router_history_exports.py"
+    ],
+    "PRE": {
+      "sha256": "09596f1e9257fe77b6a4175648257fa99aa77073c9f13e910e1658fe7bfdab10",
+      "passed": 23,
+      "warnings": 12,
+      "seconds": 13.86
+    },
+    "POST": {
+      "sha256": "7766ae23116cc3d4b13a88888427317fdfe86d0c2ee8590a42eb4e9932a19a2a",
+      "passed": 23,
+      "warnings": 12,
+      "seconds": 13.87
+    },
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0,
+    "snapshot_files": 4231,
+    "snapshot_bytes": 68549579,
+    "actual_source_Root_normal_exit_code": 0,
+    "actual_source_Root_fresh_exit_code": 0,
+    "existing_related_whole_modules_are_witnesses_not_added_Source_units": true
+  },
+  "promotion_assessment": {
+    "decision": "ELIGIBLE_FOR_THREE_DISTINCT_PARTIAL_EVIDENCED_MEMBERSHIPS_ON_EXACT_ACCOUNTING_ACCEPTANCE",
+    "criterion": "Actual Root-accepted direct-handler assertions map one-to-one to three canonical surface seeds absent from current390. Use unchanged baseline and ALL manifest-named records[*].seed_ids, not test-count promotion. This is not full-seed/HTTP/origin/High/Stage acceptance.",
+    "surface_inventory_path": "docs/refactor/two-server/section-1/inventory/surface-api.json",
+    "promoted_seed_ids": [
+      "API-TRADE-GET-TRADES-GET-MY-TRADES-L5462",
+      "API-TRADE-GET-TRADES-EXPORT-MY-TRADES-L5566",
+      "API-TRADE-GET-TRADES-GET-TRADE-L5626"
+    ],
+    "delta_distinct_seed_count": 3,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "before_manifest": {
+      "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+      "sha256": "0409de821c074a3e31e8916ad3dec6bcb62580cbfcd4c76be5a636334d7f01dd"
+    },
+    "live_manifest": {
+      "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+      "sha256": "b120bb02097b68c9afa138c95e823860754e65c49212df94335ba4d65a1c944e"
+    },
+    "live_reference_key": "trade_read_prequery_757_path",
+    "membership_proof": {
+      "path": ".local/two-site-refactor/reviews/p1-00b-757-trade-read-prequery-candidate/seed-membership-proof.json",
+      "sha256": "7c19c070131d5b5408e4486e26697a345a47e9f0f67d5c403cf0b91fd72db5b6",
+      "selected_seeds_absent_from_baseline_and_all16_current_record_inputs": true
+    },
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 255,
+      "evidenced": 390,
+      "remaining": 75
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 258,
+      "evidenced": 393,
+      "remaining": 72
+    },
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accounting": {
+    "accepted_Source_units": 1,
+    "accepted_handler_scenarios": 3,
+    "behavior_units_added_by_this_metadata": 0,
+    "inventory_units_reconciled_on_exact_acceptance": 1,
+    "inventory_scenarios_reconciled_on_exact_acceptance": 3,
+    "units_since_reconciliation": 1,
+    "source_acceptance_counter_not_reset": true,
+    "current_group_registration_and_accounting_complete": false,
+    "maximum_accepted_units_before_reconciliation": 5,
+    "current_rule_reference": "docs/refactor/two-server/PROPOSAL_AUTOMATION.md:133",
+    "early_reconciliation_basis": "At most five is not a minimum five. The three distinct seeds belong to ONE already accepted test Source unit. A profile-control unit is not a new P1 business scenario. Actual final Root acceptance alone establishes this group accounting; no own/future result is asserted."
+  },
+  "previous_group_provenance": {
+    "notification751": {
+      "accepted_accounting_commit": "c5d8dd7ce7690d68e3d94c8d5f4a8f325a9a64c6",
+      "Root_sha256": "57318e0c92b2a912144a0284695a9c8e659505d315e2778eb979546de0563dcb",
+      "registration_and_accounting_complete": true,
+      "Source_units": 1,
+      "handler_scenarios": 2,
+      "units_since_reconciliation": 1,
+      "historical_receipt_unchanged": true
+    },
+    "recovery_identity_A_B": {
+      "accepted_closeout_commit": "8b8d23571b04c9907e2e9586941a964629191635",
+      "status": "COMPLETED_PROVENANCE",
+      "Source_units": 5,
+      "handler_scenarios": 7,
+      "pending_five": 5,
+      "units_since_reconciliation": 5,
+      "remaining_behavior_units": 0,
+      "historical_receipts_counters_index_and_deferrals_unchanged": true
+    }
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "exclusions": [
+    "No new product behavior or Source acceptance from metadata, accounting, related tests or test counts.",
+    "No rewrite/reset/reacceptance of historical receipts, groups, provenance counters, deferrals or frozen387/388/389/390 snapshots.",
+    "No accepted accounting operation base is asserted; Root must bind the later actual clean profile-accepted base externally before any operation.",
+    "No Stage/High/origin closure, CP/status/reservation/epoch/private/SDK change, Provider replay, Supervisor start/adoption, production/deploy/DNS/Writer or health/savings claim.",
+    "Existing cycle_tools inspect_canonical_evidence source-key gate already rejects accepted751 descriptive key; no SDK invocation, VALID claim, key relabeling or SDK fix is included."
+  ]
+}
