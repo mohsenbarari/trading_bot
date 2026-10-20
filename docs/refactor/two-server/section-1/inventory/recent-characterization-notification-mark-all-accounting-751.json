@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "receipt_id": "REC-P1-00B-NOTIFICATION-MARK-ALL-ACCOUNTING-751",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-NOTIFICATION-MARK-ALL-ACCOUNTING-20261019-751R",
+  "canonical_gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "acceptance_condition": "This proposed registration, early inventory reconciliation and singleton partial evidenced-seed promotion take effect only after independent nonauthor review, Root semantic/exact-byte checks, real hermetic PRE and physical POST, clean single-parent Git acceptance, normal posthold and fresh actual Root observation. Candidate fields do not accept themselves; no future751 commit or receipt is asserted.",
+  "source": {
+    "accepted_source_commit": "88303d3cb7a8cb629b693496c4f8bb61fc231709",
+    "accepted_parent": "4becf2bb4c482b95178ffc7983ff9607ae15c60b",
+    "source_assignment_id": "WA-P1-00B-NOTIFICATION-MARK-ALL-PREQUERY-20261019-750N",
+    "source_scope_sha256": "3e9bf138ed54a0de38c9daa6e11880e542f4b03be8e0e888b2156f461a9ab243",
+    "accepted_file": {
+      "path": "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py",
+      "sha256": "0656e24fd03450c0bec7990384aff66c3cf84e7024d275bad127a4a3a3fe9e31",
+      "utf8_bytes": 7570,
+      "mode": "100644"
+    },
+    "handler_source": {
+      "path": "api/routers/notifications.py",
+      "sha256": "7f7bffde0dcfeee5227847bfcc78253da0d1b9fcddd05b0192dfe446bfb6618b",
+      "canonical_symbol": "api/routers/notifications.py:mark_all_notifications_read"
+    },
+    "source_author_packet": {
+      "path": ".local/two-site-refactor/reviews/ae03-750n-candidate/AE03_750N_CANDIDATE_MANIFEST_20261019.json",
+      "sha256": "654c3c8774893940e21b84cde038f815a520186a6bdd505ca0062a090dc44eb8"
+    },
+    "source_canonical_seed_credit": 0,
+    "source_current_group_was_pending": true
+  },
+  "actor": {
+    "source_author_agent": "/root/ae741_controls_review",
+    "source_reviewer_agent": "/root/cost_report_review",
+    "source_review": {
+      "path": ".local/two-site-refactor/reviews/AE03_750N_SOURCE_INDEPENDENT_REVIEW_20261019.json",
+      "sha256": "0c2adcd9ccf85500801750fcbd485afa11a58fda71865937077c24b2fbaf48bf",
+      "status": "VERIFIED",
+      "findings": []
+    },
+    "source_Root_acceptance": {
+      "path": ".local/two-site-refactor/reviews/AE03_750N_ROOT_ACCEPTED_OBSERVED_20261019.json",
+      "sha256": "7786f2438cd5caf7f01d29a3af06d3fdd87e8f0f0cd9e8c0b022ed75744757cd",
+      "Source_accepted": true,
+      "head": "88303d3cb7a8cb629b693496c4f8bb61fc231709",
+      "parent": "4becf2bb4c482b95178ffc7983ff9607ae15c60b"
+    },
+    "source_Root_posthold": {
+      "path": ".local/two-site-refactor/reviews/AE03_750N_ROOT_SOURCE1_ACCEPTANCE_POSTHOLD_20261019.json",
+      "sha256": "259ee43336460723ab813721f7c010be012cbda3529a336403b8417cd9319954"
+    },
+    "accounting_author_agent": "/root/ae_remaining_path_audit",
+    "genuine_Gemini_Worker_or_Reviewer_claim": false
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py",
+      "sha256": "0656e24fd03450c0bec7990384aff66c3cf84e7024d275bad127a4a3a3fe9e31",
+      "last_commit": "88303d3cb7a8cb629b693496c4f8bb61fc231709",
+      "seed_ids": [
+        "API-NOTIFY-POST-NOTIFICATIONS-MARK-ALL-NOTIFICATIONS-READ-L318"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py::NotificationMarkAllPrequeryFailureCharacterizationTests::test_select_builder_exception_precedes_database_and_unread_sync",
+        "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py::NotificationMarkAllPrequeryFailureCharacterizationTests::test_initial_execute_exception_precedes_rows_commit_and_unread_sync"
+      ]
+    }
+  ],
+  "registered_handlers": [
+    {
+      "seed_id": "API-NOTIFY-POST-NOTIFICATIONS-MARK-ALL-NOTIFICATIONS-READ-L318",
+      "canonical_symbol": "api/routers/notifications.py:mark_all_notifications_read",
+      "scenario_key": "mark-all-select-builder-exception-before-db",
+      "selector": "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py::NotificationMarkAllPrequeryFailureCharacterizationTests::test_select_builder_exception_precedes_database_and_unread_sync",
+      "source_commit": "88303d3cb7a8cb629b693496c4f8bb61fc231709",
+      "source_file_sha256": "0656e24fd03450c0bec7990384aff66c3cf84e7024d275bad127a4a3a3fe9e31",
+      "observed_contract": "Actual handler select boundary raises a fresh synthetic RuntimeError; exact object escapes; one select(Notification) call; execute zero calls/awaits; no result/scalars/rows/commit/sync or mocked mutation boundary reached.",
+      "evidence_limits": [
+        "Synthetic direct-handler exception identity and visible call/await suppression only.",
+        "Real SQLAlchemy statement construction in the execute-failure case is not database query, transaction, persistence or full-row immutability proof.",
+        "No HTTP, authentication, Depends, authorization, successful mutation, Redis delivery, concurrency, retry, reload or origin-cell acceptance.",
+        "Partial evidenced-seed membership is proposed separately here; Source750's historical zero canonical credit and all original limitations remain unchanged."
+      ]
+    },
+    {
+      "seed_id": "API-NOTIFY-POST-NOTIFICATIONS-MARK-ALL-NOTIFICATIONS-READ-L318",
+      "canonical_symbol": "api/routers/notifications.py:mark_all_notifications_read",
+      "scenario_key": "mark-all-initial-execute-exception-before-row-mutation",
+      "selector": "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py::NotificationMarkAllPrequeryFailureCharacterizationTests::test_initial_execute_exception_precedes_rows_commit_and_unread_sync",
+      "source_commit": "88303d3cb7a8cb629b693496c4f8bb61fc231709",
+      "source_file_sha256": "0656e24fd03450c0bec7990384aff66c3cf84e7024d275bad127a4a3a3fe9e31",
+      "observed_contract": "Real select construction under a wraps spy reaches first awaited execute; fresh RuntimeError object escapes; execute one call/await with the identical statement; owner/unread statement shape checked; no result/scalars/rows/commit/sync or mocked mutation boundary reached.",
+      "evidence_limits": [
+        "Synthetic direct-handler exception identity and visible call/await suppression only.",
+        "Real SQLAlchemy statement construction in the execute-failure case is not database query, transaction, persistence or full-row immutability proof.",
+        "No HTTP, authentication, Depends, authorization, successful mutation, Redis delivery, concurrency, retry, reload or origin-cell acceptance.",
+        "Partial evidenced-seed membership is proposed separately here; Source750's historical zero canonical credit and all original limitations remain unchanged."
+      ]
+    }
+  ],
+  "native_source_witness": {
+    "state": "HISTORICAL_ACTUAL_750_SOURCE_EVIDENCE_NOT_751_EXECUTION",
+    "selectors": [
+      "tests/test_p1_00b_characterization_notification_mark_all_prequery_failures.py",
+      "tests/test_p1_00b_characterization_notification_mark_all.py",
+      "tests/test_notifications_router_mutations.py"
+    ],
+    "PRE": {
+      "sha256": "a10aba0dfb7e03081d35b73b7a2fb2ffa86bf2da26b3b1590bd0f8697781dd6c",
+      "passed": 13,
+      "warnings": 11,
+      "seconds": 11.6
+    },
+    "POST": {
+      "sha256": "7382531b2385aef40209bb78d131dfb873bcb0b51f63428047afbb575b102061",
+      "passed": 13,
+      "warnings": 11,
+      "seconds": 11.56
+    },
+    "diagnostics_and_stderr_empty": true,
+    "snapshot_files": 4222,
+    "snapshot_bytes": 68291249,
+    "older_whole_modules_are_retained_witnesses_not_new_Source_units": true
+  },
+  "promotion_assessment": {
+    "decision": "ELIGIBLE_FOR_SINGLETON_PARTIAL_EVIDENCED_MEMBERSHIP_ON_EXACT_751R_ACCEPTANCE",
+    "criterion": "An actual Root-accepted direct-handler assertion maps unambiguously to one canonical surface seed absent from the prior evidenced union. Canonical membership is derived from all manifest-named records[*].seed_ids plus the unchanged baseline. It does not mean full seed, HTTP, origin, blocker or Stage acceptance.",
+    "seed_id": "API-NOTIFY-POST-NOTIFICATIONS-MARK-ALL-NOTIFICATIONS-READ-L318",
+    "surface_inventory_path": "docs/refactor/two-server/section-1/inventory/surface-api.json",
+    "surface_handler": "notifications.mark_all_notifications_read",
+    "source_independent_remaining76_assessment": {
+      "path": ".local/two-site-refactor/reviews/AE03_750N_SOURCE_INDEPENDENT_REVIEW_20261019.json",
+      "sha256": "0c2adcd9ccf85500801750fcbd485afa11a58fda71865937077c24b2fbaf48bf",
+      "seed_in_current_remaining76": true
+    },
+    "before_manifest": {
+      "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+      "sha256": "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e"
+    },
+    "live_manifest": {
+      "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+      "sha256": "0409de821c074a3e31e8916ad3dec6bcb62580cbfcd4c76be5a636334d7f01dd"
+    },
+    "live_reference_key": "notification_mark_all_750_path",
+    "promoted_seed_ids": [
+      "API-NOTIFY-POST-NOTIFICATIONS-MARK-ALL-NOTIFICATIONS-READ-L318"
+    ],
+    "delta_distinct_seed_count": 1,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 254,
+      "evidenced": 389,
+      "remaining": 76
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 255,
+      "evidenced": 390,
+      "remaining": 75
+    },
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accounting": {
+    "accepted_Source_units": 1,
+    "accepted_handler_scenarios": 2,
+    "behavior_units_added_by_this_metadata_or_witness": 0,
+    "inventory_units_reconciled_on_exact_acceptance": 1,
+    "inventory_scenarios_reconciled_on_exact_acceptance": 2,
+    "units_since_reconciliation": 1,
+    "source_acceptance_counter_not_reset": true,
+    "current_group_global_reconciliation_complete": false,
+    "exact_closeout_authority": "Only Root's actual final acceptance can establish completed current-group accounting; this Source has no self/future commit hash and grants no further behavior.",
+    "maximum_accepted_units_before_reconciliation": 5,
+    "current_rule_reference": "docs/refactor/two-server/PROPOSAL_AUTOMATION.md:133",
+    "early_reconciliation_basis": "The current contract says at most five, not a global minimum. Historical foundation346's five-only recovery-group restriction remains unchanged and is not applied to this new notification group."
+  },
+  "previous_group_provenance": {
+    "accepted_closeout_commit": "8b8d23571b04c9907e2e9586941a964629191635",
+    "Root_sha256": "583e45f2745f60480bcf28662ff94bbb0efcc29d4f8b5343f8f51b0d1b6e26e5",
+    "status": "COMPLETED_PROVENANCE",
+    "Source_units": 5,
+    "handler_scenarios": 7,
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "remaining_behavior_units": 0,
+    "historical_receipts_counters_index_and_deferrals_unchanged": true
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "exclusions": [
+    "Full seed, HTTP/authentication/Depends/authorization or origin-matrix acceptance",
+    "New product behavior from registration, accounting, witness tests or old whole-module validation",
+    "Counter reset, historical receipt rewrite, old recovery-group reopening or rejected artifact reuse",
+    "High blocker or Stage closure, AE03 operational activation, transport qualification, savings or quality-effect claim",
+    "CP/status/reservation/epoch/control/memory/SDK changes, Provider replay, production/deploy/DNS/Web Writer"
+  ]
+}

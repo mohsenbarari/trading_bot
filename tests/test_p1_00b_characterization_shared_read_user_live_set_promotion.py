@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 """
-Live manifest shared read_user promotion witness under P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE.
+Historical389 shared read_user promotion witness under P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE.
+
+The temporary389 projection proves immutable historical membership; the canonical
+mapping separately retains actual current-live bytes before/after custody calls.
+Current live accounting belongs to its generic all-named-source witness.
 
 Scope documentation and deferrals:
 defer_prior_unit=normal169-shared-read-user-custody-promotion-receipt-20261003-c007;
@@ -81,7 +85,7 @@ EXPECTED_SNAPSHOT388_PATH: str = (
 
 
 class SharedReadUserLiveSetPromotionTests(unittest.TestCase):
-    """Live-set accounting witness verifying promotion of shared read_user seed."""
+    """Historical389 singleton proof with separate current-live byte custody."""
 
     def test_live_manifest_promotes_exactly_one_shared_seed_with_custody(self) -> None:
         repo_root = Path(__file__).resolve().parent.parent
@@ -124,6 +128,16 @@ class SharedReadUserLiveSetPromotionTests(unittest.TestCase):
             "evidenced_seed_count": 389,
             "remaining_seed_count": 76,
         }
+
+        # Independently reconstruct the exact accepted389 bytes; do not replace
+        # canonical current-live bytes or require future live coverage to stay389.
+        historical_389_bytes = (
+            json.dumps(expected_389_manifest, indent=2) + "\n"
+        ).encode("utf-8")
+        self.assertEqual(
+            hashlib.sha256(historical_389_bytes).hexdigest(),
+            "3e6b945f82907b24905e168f05f5c58745b5cecaa232abf4fa71997408e9ee0e",
+        )
 
         # Verify C16 singleton record metadata, pin inventory/source SHAs, resolve AST selector
         c16_inv_file = repo_root / EXPECTED_C16_INVENTORY_PATH
@@ -231,7 +245,7 @@ class SharedReadUserLiveSetPromotionTests(unittest.TestCase):
         self.assertTrue(live_manifest_file.is_file(), f"Missing live manifest: {live_manifest_file}")
         live_manifest_bytes = live_manifest_file.read_bytes()
 
-        # Build complete canonical byte mapping
+        # Preserve historical evidence closure AND actual current-live byte custody
         canonical_byte_mapping: dict[str, bytes] = dict(frozen_387)
         canonical_byte_mapping[EXPECTED_SNAPSHOT388_PATH] = snapshot388_bytes
         canonical_byte_mapping[EXPECTED_C16_INVENTORY_PATH] = c16_inv_bytes
@@ -241,8 +255,10 @@ class SharedReadUserLiveSetPromotionTests(unittest.TestCase):
         canonical_byte_mapping[RECONCILIATION_C16_FROM_C15_PATH] = recon_bytes
         canonical_byte_mapping[LIVE_CANARY_RELPATH] = live_manifest_bytes
 
-        # Temporary tree is exact copy of canonical mapping
+        # Project only the temporary LIVE entry to immutable389, as the accepted
+        # frozen388 adapter already does; the canonical LIVE entry remains real.
         temporary_byte_mapping: dict[str, bytes] = dict(canonical_byte_mapping)
+        temporary_byte_mapping[LIVE_CANARY_RELPATH] = historical_389_bytes
 
         # Execute custody adapter call in isolated temporary tree
         temp_dir = tempfile.TemporaryDirectory()
@@ -301,10 +317,10 @@ class SharedReadUserLiveSetPromotionTests(unittest.TestCase):
         self.assertEqual(len(computed_389_seeds), 389)
         self.assertEqual(len(surface_seeds - computed_389_seeds), 76)
 
-        # Build actual live seed union by reading EVERY evidence source named by actual live manifest
-        actual_live_seeds: set[str] = set(baseline_seeds)
-        live_sources = decoded_manifest["evidence_sources"]
-        for src_key, src_path in live_sources.items():
+        # Read EVERY source named by the authenticated historical389 projection
+        historical_389_seeds: set[str] = set(baseline_seeds)
+        historical_sources = decoded_manifest["evidence_sources"]
+        for src_key, src_path in historical_sources.items():
             if src_key == "baseline_path":
                 continue
             self.assertIn(src_path, canonical_byte_mapping, f"Missing evidence source: {src_path}")
@@ -312,10 +328,10 @@ class SharedReadUserLiveSetPromotionTests(unittest.TestCase):
             src_doc = json.loads(src_bytes.decode("utf-8"))
             for rec in src_doc.get("records", []):
                 for s_id in rec.get("seed_ids", []):
-                    actual_live_seeds.add(s_id)
+                    historical_389_seeds.add(s_id)
 
-        # Compare full actual live set to independently computed 389 set
-        self.assertEqual(actual_live_seeds, computed_389_seeds)
+        # Compare full historical389 set to independently computed389 membership
+        self.assertEqual(historical_389_seeds, computed_389_seeds)
 
         # Exact set delta: only the shared seed
         self.assertEqual(computed_389_seeds - computed_388_seeds, {SHARED_SEED_ID})
