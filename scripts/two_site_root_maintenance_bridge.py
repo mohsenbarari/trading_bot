@@ -49,7 +49,12 @@ POSTHOLD_V2 = 'ROOT_CURRENT_SOURCE_MAINTENANCE_HANDOFF_NORMAL_POSTHOLD_V2'
 MAX_RECORD_BYTES = 32768
 MAX_EVIDENCE_BYTES = 200000
 MAX_EVIDENCE_TOTAL = 4000000
-MAX_COMMITS = 66
+# Four fixed row keys, 40/40/64 hex fields and the shortest legal evidence path
+# require 246 canonical JSON bytes (without the array comma or final LF).
+# This conservative wire-derived ceiling is not a promise that 133 rows fit:
+# record/array overhead and unique paths consume the unchanged byte budget too.
+_MIN_COMMIT_ROW_BYTES = 246
+MAX_COMMITS = MAX_RECORD_BYTES // _MIN_COMMIT_ROW_BYTES
 ERROR = 'root maintenance bridge verification failed'
 RECORD_KEYS = frozenset({
     'schema_version', 'kind', 'prior_checkpoint_sha256', 'prior_head',

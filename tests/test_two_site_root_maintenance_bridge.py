@@ -175,6 +175,7 @@ def test_record_and_historical_raw_read_budgets_forward_then_restore(lab,monkeyp
     monkeypatch.setattr(subject,'bounded_file_bytes',observer)
     assert helpers.run(lab)['repository']['head']==lab['marker']['head'] and reads and set(reads)=={200000}
     lab['evidence_path'].write_bytes(body+b'X');reads.clear()
+    helpers.replace_bundle(lab,record_edit=lambda r:r['commits'][0].update(evidence_sha256=helpers.sha(body+b'X')))
     with pytest.raises(subject.RootMaintenanceBridgeError):helpers.run(lab)
     assert reads==[200000]
     lab['evidence_path'].write_bytes(original)
@@ -238,7 +239,9 @@ def test_pure_decoder_and_history_count_boundaries_are_not_authority(lab):
     base=helpers.canonical(dict(padding=''))
     exact=helpers.canonical(dict(padding='x'*(32768-len(base))))
     assert len(exact)==32768 and subject._json(exact,32768)['padding']
-    with pytest.raises(subject.RootMaintenanceBridgeError):subject._json(exact+b' ',32768)
+    plus_one=helpers.canonical(dict(padding='x'*(32769-len(base))))
+    assert len(plus_one)==32769
+    with pytest.raises(subject.RootMaintenanceBridgeError):subject._json(plus_one,32768)
     for count in (32,33):
         value={}
         for _ in range(count):value={'nested':value}
@@ -250,19 +253,19 @@ def test_pure_decoder_and_history_count_boundaries_are_not_authority(lab):
         if count==8190:assert len(subject._json(raw,32768)['items'])==count
         else:
             with pytest.raises(subject.RootMaintenanceBridgeError):subject._json(raw,32768)
-    for count in (64,65,66,67):
+    for count in (64,65,66,67,71,80,100):
         record=copy.deepcopy(lab['record']);rows=[];parent=record['prior_head']
         for n in range(count):
             head=record['repository']['head'] if n==count-1 else format(n+100,'040x')
             rows.append(dict(head=head,parent=parent,evidence_path='.local/two-site-refactor/reviews/LAB_'+str(n)+'.json',evidence_sha256='1'*64));parent=head
         record['commits']=rows;raw=helpers.canonical(record);marker={**lab['marker'],'record_sha256':helpers.sha(raw)}
         args=dict(marker=marker,prior_repository=lab['prior'],current_repository=ap.validate_accepted_repository(lab['repository']),destination_assignment_id=helpers.DESTINATION)
-        if count<=66:assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
-        else:
-            with pytest.raises(subject.RootMaintenanceBridgeError):subject.parse_root_maintenance_bridge_bytes(raw,**args)
+        assert len(raw)<=32768
+        assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
 
 
 def test_real_64_65_66_chain_count_only_67_rejection_then_healthy_restore(lab,monkeypatch):
+    """Keep the historical selector; only fabricated provenance67 still rejects."""
     root=lab['root'];rows=copy.deepcopy(lab['record']['commits'])
     protected=copy.deepcopy(lab['prior']['protected_refs'])
     checkpoint=(lab['state']/'accepted_checkpoint.json').read_bytes()
@@ -274,7 +277,49 @@ def test_real_64_65_66_chain_count_only_67_rejection_then_healthy_restore(lab,mo
         snapshot=helpers.custody(lab)
         return (snapshot[:6],snapshot[7],helpers.git(root,'ls-files','--stage'),
             tuple((row['evidence_path'],(root/row['evidence_path']).read_bytes()) for row in rows))
-    for count in range(2,67):
+
+    def reject_fabricated67_then_restore(expected):
+        healthy_custody=custody()
+        def add_count_only_row(record):
+            synthetic='f'*40
+            assert synthetic not in {row['head'] for row in record['commits']}
+            record['commits'][0]['parent']=synthetic
+            record['commits'].insert(0,dict(head=synthetic,parent=record['prior_head'],
+                evidence_path='.local/two-site-refactor/reviews/LAB_COUNT_ONLY_67.json',evidence_sha256='1'*64))
+        raw,marker=helpers.replace_bundle(lab,record_edit=add_count_only_row)
+        args=dict(marker=marker,prior_repository=lab['prior'],
+            current_repository=ap.validate_accepted_repository(lab['repository']),
+            destination_assignment_id=helpers.DESTINATION)
+        record=subject._json(raw,32768)
+        assert len(record['commits'])==67
+        # Count67 now passes the closed wire schema without changing any SUT cap.
+        # It still supplies no real evidence for the fabricated first commit.
+        assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
+        assert subject.MAX_COMMITS==32768//246==133
+        actual_parse=subject.parse_root_maintenance_bridge_bytes
+        actual_read=subject.bounded_file_bytes;parsed_counts=[];evidence_reads=[]
+        evidence_paths={root/row['evidence_path'] for row in record['commits']}
+        audit_path=lab['directory']/(lab['record']['history_audit_sha256']+'.json')
+        evidence_paths.add(audit_path)
+        def parse(*a,**kw):
+            parsed_counts.append(len(subject._json(a[0],32768)['commits']))
+            return actual_parse(*a,**kw)
+        def read(root_arg,path,*a,**kw):
+            if path in evidence_paths:evidence_reads.append(path)
+            return actual_read(root_arg,path,*a,**kw)
+        queries.clear()
+        with monkeypatch.context() as fault:
+            fault.setattr(subject,'parse_root_maintenance_bridge_bytes',parse)
+            fault.setattr(subject,'bounded_file_bytes',read)
+            helpers.reject_read(lab)
+        assert parsed_counts==[67] and evidence_reads and set(evidence_reads)=={audit_path}
+        assert queries==[]  # Missing owned evidence rejects before Git ancestry.
+        helpers.replace_bundle(lab)
+        assert custody()==healthy_custody
+        full_before=helpers.custody(lab)
+        assert helpers.run(lab)==expected and helpers.custody(lab)==full_before
+
+    for count in range(2,101):
         parent=helpers.git(root,'rev-parse','HEAD')
         path=ap.CONTROL_PATHS[0]
         (root/path).write_text('LAB real sole-parent code provenance '+str(count)+'\n')
@@ -285,7 +330,7 @@ def test_real_64_65_66_chain_count_only_67_rejection_then_healthy_restore(lab,mo
         evidence=helpers.canonical(dict(LAB=True,head=head,parent=parent,not_Worker_acceptance=True))
         helpers.private(root/evidence_path,evidence)
         rows.append(dict(head=head,parent=parent,evidence_path=evidence_path,evidence_sha256=helpers.sha(evidence)))
-        if count not in (64,65,66):continue
+        if count not in (64,65,66,67,71,80,100):continue
         current=ap.validate_accepted_repository(lab['repository_oracle'](root))
         lab['record']['repository']={key:value for key,value in current.items() if key!='assignment_scope'}
         lab['record']['commits']=copy.deepcopy(rows)
@@ -294,7 +339,8 @@ def test_real_64_65_66_chain_count_only_67_rejection_then_healthy_restore(lab,mo
         helpers.private(lab['directory']/(helpers.sha(lab['audit'])+'.json'),lab['audit'])
         lab['record']['history_audit_sha256']=helpers.sha(lab['audit'])
         lab['post']['head']=head;lab['marker']['head']=head
-        helpers.replace_bundle(lab)
+        raw,_=helpers.replace_bundle(lab)
+        assert len(raw)<=32768
         before=custody();full_before=helpers.custody(lab);queries.clear()
         expected={**copy.deepcopy(lab['record']),
             'new_repository':ap.validate_accepted_repository(lab['repository'])}
@@ -307,65 +353,177 @@ def test_real_64_65_66_chain_count_only_67_rejection_then_healthy_restore(lab,mo
             lab['record']['prior_head']+'..'+head).splitlines()==[
                 row['head']+' '+row['parent'] for row in rows]
         assert custody()==before and helpers.custody(lab)==full_before
-    assert subject.MAX_COMMITS==66 and len(rows)==66
-    healthy=copy.deepcopy(expected);healthy_custody=custody()
-    def add_count_only_row(record):
-        synthetic='f'*40
-        assert synthetic not in {row['head'] for row in record['commits']}
-        record['commits'][0]['parent']=synthetic
-        record['commits'].insert(0,dict(head=synthetic,parent=record['prior_head'],
-            evidence_path='.local/two-site-refactor/reviews/LAB_COUNT_ONLY_67.json',evidence_sha256='1'*64))
-    raw,marker=helpers.replace_bundle(lab,record_edit=add_count_only_row)
-    args=dict(marker=marker,prior_repository=lab['prior'],
-        current_repository=ap.validate_accepted_repository(lab['repository']),
-        destination_assignment_id=helpers.DESTINATION)
-    record=subject._json(raw,32768)
-    assert len(record['commits'])==67
-    with pytest.raises(subject.RootMaintenanceBridgeError):subject.parse_root_maintenance_bridge_bytes(raw,**args)
-    # Reached PURE mutation oracle: identical67 bytes are otherwise valid shape.
-    # The actual reader below runs only after restoration to the real66 bound.
-    with monkeypatch.context() as pure:
-        pure.setattr(subject,'MAX_COMMITS',67)
-        assert subject.parse_root_maintenance_bridge_bytes(raw,**args)==record
-    assert subject.MAX_COMMITS==66
-    actual_parse=subject.parse_root_maintenance_bridge_bytes
-    actual_read=subject.bounded_file_bytes;parsed_counts=[];evidence_reads=[]
-    evidence_paths={root/row['evidence_path'] for row in record['commits']}
-    evidence_paths.add(lab['directory']/(lab['record']['history_audit_sha256']+'.json'))
-    def parse(*a,**kw):
-        parsed_counts.append(len(subject._json(a[0],32768)['commits']))
-        return actual_parse(*a,**kw)
-    def read(root_arg,path,*a,**kw):
-        if path in evidence_paths:evidence_reads.append(path)
-        return actual_read(root_arg,path,*a,**kw)
-    queries.clear()
-    with monkeypatch.context() as fault:
-        fault.setattr(subject,'parse_root_maintenance_bridge_bytes',parse)
-        fault.setattr(subject,'bounded_file_bytes',read)
-        helpers.reject_read(lab)
-    assert parsed_counts==[67] and evidence_reads==[] and queries==[]
-    helpers.replace_bundle(lab)
-    assert custody()==healthy_custody
+        if count==66:reject_fabricated67_then_restore(expected)
+    assert subject.MAX_COMMITS==32768//246==133 and len(rows)==100
     full_before=helpers.custody(lab)
-    assert helpers.run(lab)==healthy and helpers.custody(lab)==full_before
+    assert helpers.run(lab)==expected and helpers.custody(lab)==full_before
     assert (lab['state']/'accepted_checkpoint.json').read_bytes()==checkpoint
     assert {ref:helpers.git(root,'rev-parse',ref) for ref in protected}==protected
 
 
 def test_real_shared_four_million_limit_uses_remaining_then_healthy_restore(lab,monkeypatch):
-    body=b'X'*200000;rows=[];parent=lab['record']['prior_head']
-    for n in range(20):
-        head=lab['marker']['head'] if n==19 else format(n+500,'040x')
-        path='.local/two-site-refactor/reviews/LAB_BUDGET_'+str(n)+'.json'
-        helpers.private(lab['root']/path,body)
-        rows.append(dict(head=head,parent=parent,evidence_path=path,evidence_sha256=helpers.sha(body)));parent=head
-    helpers.replace_bundle(lab,record_edit=lambda r:r.update(commits=rows))
-    actual=subject.bounded_file_bytes;limits=[]
+    """Actual20/21-commit LAB chains; all byte failures retain matching SHA facts."""
+    root=lab['root'];rows=copy.deepcopy(lab['record']['commits'])
+    checkpoint=(lab['state']/'accepted_checkpoint.json').read_bytes()
+    protected=copy.deepcopy(lab['prior']['protected_refs'])
+    for count in range(2,21):
+        parent=helpers.git(root,'rev-parse','HEAD');path=ap.CONTROL_PATHS[0]
+        (root/path).write_text('LAB byte-boundary commit '+str(count)+'\n')
+        helpers.git(root,'add','--',path.as_posix())
+        helpers.git(root,'commit','-qm','LAB byte-budget chain, no live acceptance')
+        head=helpers.git(root,'rev-parse','HEAD')
+        evidence_path='.local/two-site-refactor/reviews/LAB_BUDGET_'+str(count)+'.json'
+        rows.append(dict(head=head,parent=parent,evidence_path=evidence_path,evidence_sha256='1'*64))
+    head=rows[-1]['head']
+    lab['audit']=helpers.canonical(dict(LAB=True,head=head,actual_Git_chain_count=20,not_startup_authority=True))
+    helpers.private(lab['directory']/(helpers.sha(lab['audit'])+'.json'),lab['audit'])
+    remainder=4000000-len(lab['audit'])-19*200000
+    assert 0<remainder<200000
+    for index,row in enumerate(rows):
+        body=b'X'*(200000 if index<19 else remainder)
+        helpers.private(root/row['evidence_path'],body);row['evidence_sha256']=helpers.sha(body)
+    current=ap.validate_accepted_repository(lab['repository_oracle'](root))
+    lab['record'].update(repository={k:v for k,v in current.items() if k!='assignment_scope'},
+        commits=copy.deepcopy(rows),history_audit_sha256=helpers.sha(lab['audit']))
+    lab['post']['head']=head;lab['marker']['head']=head
+    helpers.replace_bundle(lab)
+    actual=subject.bounded_file_bytes;actual_query=subject._run_git_query;reads=[];queries=[]
+    paths={root/row['evidence_path'] for row in rows}
+    def observer(root_arg,path,limit,label):
+        if path in paths:reads.append((path,limit))
+        return actual(root_arg,path,limit,label)
+    def query(*args,**kwargs):
+        queries.append((args[1],kwargs));return actual_query(*args,**kwargs)
+    monkeypatch.setattr(subject,'bounded_file_bytes',observer)
+    monkeypatch.setattr(subject,'_run_git_query',query)
+    expected_limits=[200000]*19+[remainder]
+    assert len(lab['audit'])+sum((root/row['evidence_path']).stat().st_size for row in rows)==4000000
+    before=helpers.custody(lab)
+    assert helpers.run(lab)['commits']==rows
+    assert [limit for _,limit in reads]==expected_limits*3
+    assert len(queries)==2 and helpers.custody(lab)==before
+    assert helpers.git(root,'rev-list','--reverse','--parents',lab['record']['prior_head']+'..'+head).splitlines()==[
+        row['head']+' '+row['parent'] for row in rows]
+
+    # A canonical otherwise-valid row binds the actual +1 body, not a stale SHA.
+    last=root/rows[-1]['evidence_path'];last.write_bytes(b'X'*(remainder+1))
+    helpers.replace_bundle(lab,record_edit=lambda r:r['commits'][-1].update(evidence_sha256=helpers.sha(last.read_bytes())))
+    reads.clear();queries.clear();helpers.reject_read(lab)
+    assert [limit for _,limit in reads]==expected_limits+[200000]*38
+    assert queries==[]
+    last.write_bytes(b'X'*remainder);helpers.replace_bundle(lab)
+    reads.clear();queries.clear();before=helpers.custody(lab)
+    assert helpers.run(lab)['commits']==rows and helpers.custody(lab)==before
+
+    # The next real commit must not be read at all when prior leaves total4M.
+    parent=head;path=ap.CONTROL_PATHS[0]
+    (root/path).write_text('LAB real21st byte-boundary commit\n')
+    helpers.git(root,'add','--',path.as_posix())
+    helpers.git(root,'commit','-qm','LAB real21st commit, no startup authority')
+    head=helpers.git(root,'rev-parse','HEAD')
+    extra_path='.local/two-site-refactor/reviews/LAB_BUDGET_21.json'
+    helpers.private(root/extra_path,b'Y')
+    rows.append(dict(head=head,parent=parent,evidence_path=extra_path,evidence_sha256=helpers.sha(b'Y')))
+    paths.add(root/extra_path)
+    current=ap.validate_accepted_repository(lab['repository_oracle'](root))
+    lab['record'].update(repository={k:v for k,v in current.items() if k!='assignment_scope'},commits=copy.deepcopy(rows))
+    lab['post']['head']=head;lab['marker']['head']=head
+    helpers.replace_bundle(lab)
+    reads.clear();queries.clear();helpers.reject_read(lab)
+    assert [limit for _,limit in reads]==expected_limits*3
+    assert root/extra_path not in {path for path,_ in reads} and queries==[]
+    assert helpers.git(root,'rev-list','--reverse','--parents',lab['record']['prior_head']+'..'+head).splitlines()==[
+        row['head']+' '+row['parent'] for row in rows]
+    # Restore healthy21 rows by giving the existing final leaf one byte of room.
+    last.write_bytes(b'X'*(remainder-1));rows[-2]['evidence_sha256']=helpers.sha(last.read_bytes())
+    lab['record']['commits']=copy.deepcopy(rows);helpers.replace_bundle(lab)
+    reads.clear();queries.clear();before=helpers.custody(lab)
+    assert helpers.run(lab)['commits']==rows and helpers.custody(lab)==before
+    assert [limit for _,limit in reads]==([200000]*19+[remainder,1])*3
+    assert len(queries)==2
+    assert (lab['state']/'accepted_checkpoint.json').read_bytes()==checkpoint
+    assert {ref:helpers.git(root,'rev-parse',ref) for ref in protected}==protected
+
+
+def test_closed_row_minimum_derives_only_a_conservative_wire_ceiling(lab):
+    shortest='.local/two-site-refactor/reviews/a.json'
+    row=dict(head=lab['marker']['head'],parent=lab['record']['prior_head'],
+        evidence_path=shortest,evidence_sha256='1'*64)
+    assert len(shortest.encode())==39
+    assert len(helpers.canonical(row)[:-1])==subject._MIN_COMMIT_ROW_BYTES==246
+    assert subject.MAX_COMMITS==subject.MAX_RECORD_BYTES//246==133
+    # Even this ignores mandatory envelope and unique-path overhead.
+    assert 133*246+132>32768
+    record=copy.deepcopy(lab['record']);record['commits']=[row]
+    def parsed(value):
+        raw=helpers.canonical(value);marker={**lab['marker'],'record_sha256':helpers.sha(raw)}
+        return subject.parse_root_maintenance_bridge_bytes(raw,marker=marker,
+            prior_repository=lab['prior'],current_repository=ap.validate_accepted_repository(lab['repository']),
+            destination_assignment_id=helpers.DESTINATION)
+    assert parsed(record)==record
+    edits=[
+        lambda r:r.update(head=r['head'][:-1]),lambda r:r.update(parent=r['parent'][:-1]),
+        lambda r:r.update(evidence_sha256=r['evidence_sha256'][:-1]),
+        lambda r:r.update(evidence_path='.local/two-site-refactor/reviews/.json'),
+        lambda r:r.update(evidence_path='.local/two-site-refactor/review/a.json'),
+        lambda r:r.update(evidence_path=shortest[:-1]),lambda r:r.update(head=1),
+        lambda r:r.update(parent=False),lambda r:r.update(evidence_sha256=[]),
+        lambda r:r.update(evidence_path=False),lambda r:r.update(extra=True),
+        lambda r:r.pop('evidence_sha256'),
+    ]
+    for edit in edits:
+        bad=copy.deepcopy(record);edit(bad['commits'][0])
+        with pytest.raises(subject.RootMaintenanceBridgeError):parsed(bad)
+
+
+def test_closed_valid_record_reaches_exact_wire_limit_and_canonical_plus_one(lab):
+    # Extend only legal unique evidence filename stems, never unknown padding.
+    record=copy.deepcopy(lab['record']);rows=[];parent=record['prior_head']
+    prefix='.local/two-site-refactor/reviews/'
+    for index in range(80):
+        head=record['repository']['head'] if index==79 else format(index+1000,'040x')
+        rows.append(dict(head=head,parent=parent,evidence_path=prefix+'W'+format(index,'03d')+'.json',
+            evidence_sha256='1'*64));parent=head
+    record['commits']=rows
+    remaining=32768-len(helpers.canonical(record));assert remaining>0
+    for row in rows:
+        stem=row['evidence_path'][len(prefix):-5]
+        amount=min(remaining,180-len(stem))
+        row['evidence_path']=prefix+stem+'x'*amount+'.json';remaining-=amount
+    assert remaining==0 and len({row['evidence_path'] for row in rows})==80
+    exact=helpers.canonical(record);assert len(exact)==32768
+    args=dict(prior_repository=lab['prior'],current_repository=ap.validate_accepted_repository(lab['repository']),
+        destination_assignment_id=helpers.DESTINATION)
+    marker={**lab['marker'],'record_sha256':helpers.sha(exact)}
+    assert subject.parse_root_maintenance_bridge_bytes(exact,marker=marker,**args)==record
+    plus=copy.deepcopy(record)
+    row=next(row for row in plus['commits'] if len(row['evidence_path'][len(prefix):-5])<180)
+    row['evidence_path']=row['evidence_path'][:-5]+'y.json'
+    plus_one=helpers.canonical(plus);assert len(plus_one)==32769
+    assert set(plus)==set(record) and len({row['evidence_path'] for row in plus['commits']})==80
+    marker={**lab['marker'],'record_sha256':helpers.sha(plus_one)}
+    with pytest.raises(subject.RootMaintenanceBridgeError):
+        subject.parse_root_maintenance_bridge_bytes(plus_one,marker=marker,**args)
+    assert subject.parse_root_maintenance_bridge_bytes(exact,
+        marker={**lab['marker'],'record_sha256':helpers.sha(exact)},**args)==record
+
+
+def test_audit_leaf_exact_and_matching_sha_plus_one_preserve_custody(lab,monkeypatch):
+    exact=b'A'*200000;plus=exact+b'A'
+    exact_path=lab['directory']/(helpers.sha(exact)+'.json')
+    plus_path=lab['directory']/(helpers.sha(plus)+'.json')
+    helpers.private(exact_path,exact);helpers.private(plus_path,plus)
+    actual=subject.bounded_file_bytes;reads=[]
     def observer(root,path,limit,label):
-        if path.name.startswith('LAB_BUDGET_'):limits.append(limit)
+        if path in (exact_path,plus_path):reads.append((path,limit))
         return actual(root,path,limit,label)
     monkeypatch.setattr(subject,'bounded_file_bytes',observer)
-    with pytest.raises(subject.RootMaintenanceBridgeError):helpers.run(lab)
-    assert limits==[200000]*19+[4000000-len(lab['audit'])-19*200000]+[200000]*38
-    helpers.replace_bundle(lab)
+    helpers.replace_bundle(lab,record_edit=lambda r:r.update(history_audit_sha256=helpers.sha(exact)))
+    before=helpers.custody(lab)
     assert helpers.run(lab)['repository']['head']==lab['marker']['head']
+    assert reads==[(exact_path,200000)]*3 and helpers.custody(lab)==before
+    helpers.replace_bundle(lab,record_edit=lambda r:r.update(history_audit_sha256=helpers.sha(plus)))
+    reads.clear();helpers.reject_read(lab)
+    assert reads==[(plus_path,200000)]
+    helpers.replace_bundle(lab);before=helpers.custody(lab)
+    assert helpers.run(lab)['repository']['head']==lab['marker']['head'] and helpers.custody(lab)==before
