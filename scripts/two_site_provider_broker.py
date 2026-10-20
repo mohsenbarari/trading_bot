@@ -27,6 +27,21 @@ import time
 import uuid
 from typing import Callable, Mapping
 
+# Direct CLI and lazy quota guards must share the signal-owned Broker object.
+# Bind before any project import; never replace a previously imported module.
+if __name__ == "__main__":
+    _cli_module = sys.modules[__name__]
+    _canonical_name = "scripts.two_site_provider_broker"
+    if (_canonical_name in sys.modules
+            and sys.modules[_canonical_name] is not _cli_module):
+        raise RuntimeError("conflicting canonical Broker module before CLI startup")
+    _scripts_package = sys.modules.get("scripts")
+    if (_scripts_package is not None
+            and getattr(_scripts_package, "two_site_provider_broker", _cli_module) is not _cli_module):
+        raise RuntimeError("conflicting canonical Broker package attribute before CLI startup")
+    sys.modules[_canonical_name] = _cli_module
+
+
 try:
     from scripts.two_site_assignment_scope import (
         AssignmentScope,
