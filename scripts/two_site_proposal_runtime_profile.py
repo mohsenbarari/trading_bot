@@ -301,6 +301,68 @@ def trust_choice(text: str, workspace: Path) -> bytes | None:
     return b"1\r"
 
 
+def _initialization_readiness_hint(
+    directory: Path, before: set[str], workspace: Path, model: str,
+    effort: str | None, *, deadline: float,
+) -> tuple[bool, dict]:
+    """Non-authoritative, nonblocking hint; final validate_profile still decides.
+
+    Only this preparation's new sessions are inspected. No UI, message, auth,
+    metadata payload or path is retained in the fixed count/reason observation.
+    """
+    names = _sessions(directory) - before
+    facts = dict(reason="NOT_READY", new_sessions=len(names), valid_profiles=0,
+                 empty_profiles=0, invalid_profiles=0, sqlite_unavailable=0)
+    if not 1 <= len(names) <= MAX_NEW_SESSIONS:
+        facts["reason"] = "NEW_SESSION_COUNT"
+        return False, facts
+    for name in sorted(names):
+        if time.monotonic() >= deadline:
+            facts["reason"] = "DEADLINE"
+            return False, facts
+        candidate = PreparedProfile(name[:-3], workspace, model, effort)
+        database = directory / name
+        try:
+            identity = _regular(database, MAX_DATABASE)
+            with closing(sqlite3.connect(database.as_uri() + "?mode=ro",
+                                         uri=True, timeout=0)) as db:
+                db.execute("PRAGMA query_only=ON")
+                db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+                db.execute("BEGIN")
+                ids = db.execute("SELECT cascade_id,trajectory_type,source FROM trajectory_meta LIMIT 2").fetchall()
+                main = db.execute("SELECT typeof(data),length(data) FROM trajectory_metadata_blob WHERE id='main' LIMIT 2").fetchall()
+                used = db.execute("SELECT 1 FROM steps LIMIT 1").fetchall()
+                empty = ids == [(candidate.conversation_id, 0, 0)] and main == [("blob", 0)] and not used
+                if empty:
+                    facts["empty_profiles"] += 1
+                else:
+                    if (ids != [(candidate.conversation_id, 4, 17)] or used
+                            or len(main) != 1 or main[0][0] != "blob"
+                            or type(main[0][1]) is not int or not 1 <= main[0][1] <= MAX_METADATA):
+                        raise ProposalProfileError("proposal runtime database identity mismatch")
+                    rows = db.execute("SELECT data FROM trajectory_metadata_blob WHERE id='main' AND typeof(data)='blob' AND length(data)<=262144 LIMIT 2").fetchall()
+                    if len(rows) != 1:
+                        raise ProposalProfileError("proposal runtime database identity mismatch")
+                    validate_role_metadata(rows[0][0], candidate)
+            if _regular(database, MAX_DATABASE) != identity:
+                raise ProposalProfileError("proposal runtime database identity drift")
+            if not empty:
+                facts["valid_profiles"] += 1
+        except sqlite3.Error:
+            facts["sqlite_unavailable"] += 1
+        except ProposalProfileError:
+            facts["invalid_profiles"] += 1
+    if time.monotonic() >= deadline:
+        facts["reason"] = "DEADLINE"
+        return False, facts
+    valid = facts["valid_profiles"]
+    facts["reason"] = ("READY" if valid == 1 else "AMBIGUOUS" if valid > 1
+                       else "INITIAL_METADATA_EMPTY" if facts["empty_profiles"]
+                       else "SQLITE_UNAVAILABLE" if facts["sqlite_unavailable"]
+                       else "INVALID_METADATA")
+    return valid == 1, facts
+
+
 def prepare_profile(
     cli: Path, workspace: Path, model: str, effort: str | None,
     *, terminate, cli_home: Path | None = None, timeout: float = 30,
@@ -340,6 +402,7 @@ def prepare_profile(
     selector = selectors.DefaultSelector()
     buffer = bytearray()
     sent = selected = trust_accepted = False
+    last_readiness_hint = None
     try:
         process = subprocess.Popen(
             command, cwd=workspace, stdin=slave, stdout=slave, stderr=slave,
@@ -374,7 +437,12 @@ def prepare_profile(
                     raise ProposalProfileError("proposal runtime inherited legacy agents")
                 os.write(master, b"\x1b[B\r\x1b"); selected = True
             if selected and age >= 20:
-                break
+                ready, last_readiness_hint = _initialization_readiness_hint(
+                    directory, before, workspace, model, effort,
+                    deadline=started + timeout,
+                )
+                if ready:
+                    break
             for _, _mask in selector.select(0.1):
                 try:
                     chunk = os.read(master, min(4096, MAX_UI+1-len(buffer)))
@@ -418,5 +486,17 @@ def prepare_profile(
             continue
         matches.append(candidate)
     if len(matches) != 1:
-        raise ProposalProfileError("proposal runtime selected session is ambiguous or absent")
+        error = ProposalProfileError("proposal runtime selected session is ambiguous or absent")
+        if last_readiness_hint is not None:
+            error.observation = {"last_initialization_readiness_hint": last_readiness_hint,
+                                 "final_new_sessions": len(names), "final_valid_profiles": len(matches)}
+            # The last hint is explicitly not current or final acceptance data.
+            # This fixed count-only suffix survives the unchanged Runner's error
+            # publication without exposing UI/auth/session payloads.
+            if last_readiness_hint["empty_profiles"]:
+                error.args = (str(error) + "; LAST_HINT_INITIAL_METADATA_EMPTY"
+                              + " new=" + str(last_readiness_hint["new_sessions"])
+                              + " empty=" + str(last_readiness_hint["empty_profiles"])
+                              + " final_valid=" + str(len(matches)),)
+        raise error
     return matches[0]
