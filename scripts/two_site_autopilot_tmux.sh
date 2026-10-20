@@ -43,8 +43,18 @@ state_root="$root/.local/two-site-refactor/autopilot"
 export PYTHONPATH="$root"
 
 usage() {
-  printf 'Usage: %s {start|status|stop|stop-now|logs}\n' "$0"
+  printf 'Usage: %s {start [--quota-wait-enabled]|status|stop|stop-now|logs}\n' "$0"
 }
+
+quota_args=()
+broker_quota_args=()
+if [[ "${1:-}" == "start" && "${2:-}" == "--quota-wait-enabled" && "$#" -eq 2 ]]; then
+  quota_args=(--quota-wait-enabled)
+  broker_quota_args=(--quota-continuation-enabled)
+elif [[ "$#" -ne 1 ]]; then
+  usage >&2
+  exit 2
+fi
 
 case "${1:-}" in
   start)
@@ -59,7 +69,7 @@ case "${1:-}" in
       printf -v broker_command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
         PYTHONPATH="$root" \
-        /usr/bin/python3 "$root/scripts/two_site_provider_broker.py" --root "$root" serve
+        /usr/bin/python3 "$root/scripts/two_site_provider_broker.py" --root "$root" serve "${broker_quota_args[@]}"
       tmux new-session -d -s "$broker_session" -c "$root" "$broker_command"
     fi
     broker_ready=false
@@ -74,6 +84,12 @@ case "${1:-}" in
       printf 'ERROR: provider broker did not become healthy\n' >&2
       exit 2
     fi
+    if [[ "${#quota_args[@]}" -eq 1 ]] && ! \
+        /usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" status \
+        | /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("quota_continuation_ready") is True else 2)'; then
+      printf 'ERROR: existing Broker is not quota-enabled; no live Broker will be replaced\n' >&2
+      exit 2
+    fi
     if tmux has-session -t "=$session" 2>/dev/null; then
       printf 'PROVIDER_BROKER=RUNNING session=%s\n' "$broker_session"
       printf 'AUTOPILOT=ALREADY_RUNNING session=%s\n' "$session"
@@ -85,7 +101,7 @@ case "${1:-}" in
       printf -v command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
         PYTHONPATH="$root" \
-        /usr/bin/python3 "$root/scripts/two_site_codex_autopilot.py" --root "$root"
+        /usr/bin/python3 "$root/scripts/two_site_codex_autopilot.py" --root "$root" "${quota_args[@]}"
       tmux new-session -d -s "$session" -c "$root" "$command"
       printf 'PROVIDER_BROKER=RUNNING session=%s\n' "$broker_session"
       printf 'AUTOPILOT=STARTED session=%s\n' "$session"

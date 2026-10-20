@@ -35,8 +35,56 @@ KNOWN_EPOCH_LEAVES = frozenset(
 )
 
 
-def run_preflight(root: Path) -> tuple[bool, str]:
+def _quota_wait_preflight_locked(root: Path, state_root: Path, repo: dict) -> tuple[bool, str] | None:
+    """Read-only due classification; no claim, allocation, submit or launch."""
+    status_path = state_root / STATUS_FILENAME
+    st_status = os.lstat(status_path)
+    if (not stat.S_ISREG(st_status.st_mode) or st_status.st_nlink != 1
+            or st_status.st_uid != os.geteuid() or st_status.st_size > MAX_STATUS_BYTES):
+        return False, "STATUS_INVALID"
+    status = unique_json(bounded_file_text(state_root, status_path,
+                                         MAX_STATUS_BYTES, "status.json"))
+    if type(status) is not dict or status.get("state") != "WAITING_QUOTA":
+        return None
+    from scripts.two_site_quota_supervisor_due_inspect import inspect_durable_quota_wait_due_locked
+    from scripts.two_site_quota_wait_recovery import recover_durable_initial_wait_locked
+    from scripts.two_site_provider_broker import _open_existing_cycle_run_directory
+    from scripts.two_site_quota_resume_claim_storage import QUOTA_RESUME_CLAIM_FILENAME
+    import time
+
+    if status.get("head") != repo.get("head"):
+        return False, "QUOTA_WAIT_BLOCKED"
+    recovered = recover_durable_initial_wait_locked(root)
+    if type(recovered) is not tuple or len(recovered) != 2:
+        return False, "QUOTA_WAIT_BLOCKED"
+    original, record = recovered
+    if (status.get("evidence") != str(state_root / "runs" / original)
+            or status.get("request_id") != record["request_id"]):
+        return False, "QUOTA_WAIT_BLOCKED"
+    with _open_existing_cycle_run_directory(root, original) as (_path, run_fd, verify):
+        verify()
+        try:
+            os.stat(QUOTA_RESUME_CLAIM_FILENAME, dir_fd=run_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            return False, "QUOTA_CLAIM_AMBIGUOUS"
+    due = inspect_durable_quota_wait_due_locked(root, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    if type(due) is not dict or due.get("controller_run_id") != original:
+        return False, "QUOTA_WAIT_BLOCKED"
+    if due["due"]["state"] != "KNOWN_RESET_REVALIDATION_DUE":
+        return False, "QUOTA_NOT_DUE"
+    if os.path.lexists(root / STOP_FILENAME) or os.path.lexists(state_root / STOP_FILENAME):
+        return False, "STOP_PRESENT"
+    if validate_repository(root, require_clean=True) != repo:
+        return False, "REPOSITORY_DRIFT"
+    return True, "QUOTA_READY"
+
+
+def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool, str]:
     """Execute bounded read-only preflight checks and return (status_ok, reason_code)."""
+    if type(quota_wait_enabled) is not bool:
+        return False, "INVALID_QUOTA_OPT_IN"
     if not isinstance(root, Path):
         try:
             root = Path(root)
@@ -92,6 +140,14 @@ def run_preflight(root: Path) -> tuple[bool, str]:
                 repo = validate_repository(root, require_clean=True)
             except Exception:
                 return False, "REPOSITORY_INVALID"
+
+            if quota_wait_enabled:
+                try:
+                    quota = _quota_wait_preflight_locked(root, state_root, repo)
+                except Exception:
+                    return False, "QUOTA_WAIT_BLOCKED"
+                if quota is not None:
+                    return quota  # Existing Supervisor lock exits before caller launch.
 
             try:
                 checkpoint = _load_accepted_checkpoint(state_root)
@@ -232,10 +288,11 @@ def main(argv: list[str] | None = None) -> int:
         description="Two-site autopilot monitor preflight verification.",
     )
     parser.add_argument("--root", required=True, type=Path, help="Canonical workspace root directory.")
+    parser.add_argument("--quota-wait-enabled", action="store_true")
     args = parser.parse_args(argv)
 
     try:
-        ok, reason = run_preflight(args.root)
+        ok, reason = run_preflight(args.root, **({"quota_wait_enabled": True} if args.quota_wait_enabled else {}))
     except Exception:
         ok, reason = False, "PREFLIGHT_ERROR"
 

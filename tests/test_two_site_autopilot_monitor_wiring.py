@@ -58,6 +58,7 @@ def run_shell_block(
     provider_probe: str = "true",
     protected_refs_ok: str = "false",
     action: str = "none",
+    quota_wait_enabled: bool = False,
 ) -> dict:
     runner_script = f"""set -u -o pipefail
 integration_root={repr(str(integration_root))}
@@ -69,6 +70,9 @@ restart_eligible={restart_eligible}
 provider_probe={provider_probe}
 protected_refs_ok={protected_refs_ok}
 action={repr(action)}
+recovery_reason={'quota_wait_due' if quota_wait_enabled else 'none'}
+quota_args=({'--quota-wait-enabled' if quota_wait_enabled else ''})
+broker_quota_args=({'--quota-continuation-enabled' if quota_wait_enabled else ''})
 
 {block}
 
@@ -351,3 +355,41 @@ def test_broker_restart_wiring_static():
     assert status_poll in broker_branch
     assert action_started in broker_branch
     assert broker_branch.index(status_poll) < broker_branch.index(action_started)
+
+
+def test_quota_preflight_exact_ready_passes_opt_in_without_provider_probe(env_roots):
+    integration_root, state_root, report_root, scripts_dir = env_roots
+    helper = scripts_dir / "two_site_autopilot_monitor_preflight.py"
+    helper.write_text("import sys\nassert sys.argv[-1] == '--quota-wait-enabled'\nprint('QUOTA_READY')\n")
+    result = run_shell_block(SUPERVISOR_BLOCK, integration_root, state_root, report_root,
+                             provider_probe="false", quota_wait_enabled=True)
+    assert result == {"protected_refs_ok": "true", "restart_eligible": "true",
+                      "provider_probe": "false", "action": "none"}
+
+
+@pytest.mark.parametrize("payload", [b"READY\n", b"QUOTA_READY\nEXTRA", b"QUOTA_NOT_DUE\n"])
+def test_quota_preflight_rejects_wrong_or_not_due_bytes(env_roots, payload):
+    integration_root, state_root, report_root, scripts_dir = env_roots
+    write_fake_helper(scripts_dir / "two_site_autopilot_monitor_preflight.py", payload)
+    result = run_shell_block(SUPERVISOR_BLOCK, integration_root, state_root, report_root,
+                             provider_probe="false", quota_wait_enabled=True)
+    assert result["restart_eligible"] == "false"
+    assert result["action"] == "preflight_failed"
+
+
+def test_standing_quota_flags_remain_opt_in_across_monitor_tmux_broker():
+    tmux = (SCRIPT_PATH.parent / "two_site_autopilot_tmux.sh").read_text()
+    assert 'quota_args=()' in SCRIPT_TEXT and 'broker_quota_args=()' in SCRIPT_TEXT
+    assert '"${1:-}" == "--quota-wait-enabled"' in SCRIPT_TEXT
+    assert '"$state" == "WAITING_QUOTA" && "${#quota_args[@]}" -eq 1' in SCRIPT_TEXT
+    assert 'two_site_autopilot_tmux.sh" start "${quota_args[@]}"' in SCRIPT_TEXT
+    assert 'serve \\\n            "${broker_quota_args[@]}"' in SCRIPT_TEXT
+    assert '"${1:-}" == "start" && "${2:-}" == "--quota-wait-enabled"' in tmux
+    assert 'serve "${broker_quota_args[@]}"' in tmux
+    assert 'two_site_codex_autopilot.py" --root "$root" "${quota_args[@]}"' in tmux
+    assert 'existing Broker is not quota-enabled; no live Broker will be replaced' in tmux
+    # Existing monitor excludes live Supervisor/tmux and still holds its monitor
+    # flock; an eligible observation never claims, reserves, or enqueues itself.
+    assert '"$tmux_observation" == "absent" && "$supervisor_count" -eq 0' in SCRIPT_TEXT
+    assert '/usr/bin/flock -n 9' in SCRIPT_TEXT
+    assert 'submit_known_reset_resume_once_locked' not in SCRIPT_TEXT + tmux

@@ -22,6 +22,39 @@ from scripts.two_site_codex_autopilot import (
 from scripts.two_site_preparation_contract import PreparationStartup
 
 
+def test_quota_prompt_excludes_ordinary_task_build_and_submit(tmp_path: Path) -> None:
+    root, _codex, _state = _setup_workspace(tmp_path)
+    template = Path(__file__).resolve().parents[1] / "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md"
+    (root / "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md").write_bytes(template.read_bytes())
+    before = _make_before()
+    ready = {"controller_run_id": "cycle-0001-20261020T120000Z-123", "ready": {"state": "READY_FOR_CODEX"}}
+    quota = prompt_for_cycle(root, 1, before, quota_ready=ready)
+    ordinary = prompt_for_cycle(root, 1, before)
+    assert "2Q. QUOTA FINAL REVIEW ONLY" in quota
+    assert "two_site_cycle_tools.py build --spec" not in quota
+    assert "two_site_provider_broker.py submit --task" not in quota
+    assert '"quota_final_review":' in quota
+    assert "ordinary task-selection/RESCOPE instructions below do not apply" in quota
+    assert "2Q. QUOTA FINAL REVIEW ONLY" not in ordinary
+    assert "two_site_cycle_tools.py build --spec" in ordinary
+    assert "two_site_provider_broker.py submit --task" in ordinary
+    assert "ONLY_BEGIN" not in quota + ordinary
+
+
+def test_quota_prompt_requires_exclusive_branch_and_no_callback(tmp_path: Path) -> None:
+    root, codex, state_root = _setup_workspace(tmp_path)
+    with pytest.raises(AutopilotError, match="exclusive template branch"):
+        prompt_for_cycle(root, 1, _make_before(), quota_ready={"ready": {}})
+    with patch("scripts.two_site_codex_autopilot.validate_repository") as repo, \
+         patch("scripts.two_site_codex_autopilot.subprocess.Popen") as child:
+        with pytest.raises(AutopilotError, match="forbids ordinary rescope callback"):
+            run_cycle(root, codex, state_root, 1, 300, before_model=lambda _before: None,
+                      quota_original_controller_run_id="cycle-0001-20261020T120000Z-123")
+    repo.assert_not_called()
+    child.assert_not_called()
+    assert list((state_root / "runs").iterdir()) == []
+
+
 def _make_assignment_scope() -> AssignmentScope:
     return AssignmentScope(
         assignment_id="WA-TEST-SCOPE-001",

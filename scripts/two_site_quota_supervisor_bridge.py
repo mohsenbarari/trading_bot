@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+import hashlib
+import json
 from pathlib import Path
 import re
 import stat
+import time
+import uuid
 from typing import Any
 
 from scripts.two_site_provider_broker import (
@@ -181,3 +186,257 @@ def accept_cycle_quota_disposition_locked(
         raise
     except (BrokerError, QuotaProbeError, WaitAdmissionError, OSError) as exc:
         raise QuotaSupervisorBridgeError(str(exc)) from exc
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def _same(left: object, right: object) -> bool:
+    if type(left) is not type(right):
+        return False
+    if type(left) is dict:
+        return left.keys() == right.keys() and all(_same(left[k], right[k]) for k in left)
+    if type(left) is list:
+        return len(left) == len(right) and all(_same(a, b) for a, b in zip(left, right))
+    return left == right
+
+
+def _check_resume_stop(root: Path) -> None:
+    from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
+    _check_pre_dispatch_stop(root)
+    try:
+        (root / "STOP").lstat()
+    except FileNotFoundError:
+        return
+    raise QuotaSupervisorBridgeError("quota resume stopped")
+
+
+@contextmanager
+def quota_codex_process(command: list[str], root: Path, environment: dict[str, str]):
+    """Quota-only plain Popen owner: no unbounded Popen.__exit__ under holds."""
+    import signal
+    import subprocess
+    from scripts.two_site_proposal_runner import terminate_process
+
+    process = subprocess.Popen(command, cwd=root, env=environment, stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    primary = None
+    try:
+        yield process
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        cleanup_error = None
+        try:
+            if process.returncode is None:
+                try:
+                    terminate_process(process)  # Existing SIGKILL + wait(timeout=10).
+                except BaseException as exc:
+                    cleanup_error = exc
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=10)
+        except BaseException as exc:
+            cleanup_error = cleanup_error or exc
+        for name in ("stdin", "stdout", "stderr"):
+            stream = getattr(process, name, None)
+            if stream is not None:
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_error = cleanup_error or exc
+        if primary is None and cleanup_error is not None:
+            raise cleanup_error
+
+
+def _consume_exact_quota_response(root: Path, acquired: dict) -> None:
+    """Caller holds accepted client quiescence; retain every durable receipt."""
+    from scripts import two_site_provider_broker as broker
+    from scripts.two_site_quota_continuation_terminal_storage import read_terminal_continuation_record
+
+    request = acquired["request"]
+    record = read_terminal_continuation_record(root, request["request_id"], expected_request=request)
+    if (hashlib.sha256(_canonical(record)).hexdigest() != acquired["terminal_receipt_sha256"]
+            or not _same(record["response"], acquired["response"])):
+        raise QuotaSupervisorBridgeError("durable terminal response drift before cleanup")
+    responses = broker.broker_paths(root)[4]
+    path = broker._response_path(responses, request["request_id"])
+    descriptor = os.open(responses, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    failure = None
+    try:
+        parent = os.fstat(descriptor)
+        if (responses.resolve(strict=True) != responses or parent.st_uid != os.geteuid()
+                or stat.S_IMODE(parent.st_mode) != 0o700
+                or (parent.st_dev, parent.st_ino) != (responses.stat().st_dev, responses.stat().st_ino)):
+            raise QuotaSupervisorBridgeError("unsafe response directory")
+        before = os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+        if not _same(broker._safe_read_existing_response(root, path), acquired["response"]):
+            raise QuotaSupervisorBridgeError("queue/terminal response mismatch before cleanup")
+        after = os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+        fingerprint = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid,
+                                  st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if fingerprint(before) != fingerprint(after) or fingerprint(after) != fingerprint(path.lstat()):
+            raise QuotaSupervisorBridgeError("response inode changed before cleanup")
+        _check_resume_stop(root)
+        os.unlink(path.name, dir_fd=descriptor)
+        os.fsync(descriptor)
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            if failure is None:
+                raise
+
+
+@contextmanager
+def quota_codex_review_locked(root: Path, original: str, continuation: str, timeout: int):
+    """One real allocation/claim, strict READY acquisition, then Codex-only hold.
+
+    Caller owns Supervisor. No ordinary reservation/submit/Worker or replay is
+    performed here. A post-claim crash is ambiguous and is never auto-requeued.
+    """
+    from scripts import two_site_provider_broker as broker
+    from scripts.two_site_cold_start_broker_quiescence import hold_idle_broker_client_lock_for_cold_adoption
+    from scripts.two_site_quota_supervisor_resume_submit import submit_known_reset_resume_once_locked
+    from scripts.two_site_quota_supervisor_resume_context import wait_for_known_reset_resume_ready_locked
+
+    if (not broker.CYCLE_RUN_RE.fullmatch(original) or not broker.CYCLE_RUN_RE.fullmatch(continuation)
+            or original == continuation or type(timeout) is not int or not 10 <= timeout <= 900):
+        raise QuotaSupervisorBridgeError("invalid actual quota allocation")
+    _check_resume_stop(root)
+    status = broker._read_broker_status(root, broker.broker_paths(root)[1])
+    identity = (status.get("pid"), status.get("started_at"))
+    if (status.get("state") != "IDLE" or status.get("quota_continuation_ready") is not True
+            or type(identity[0]) is not int or type(identity[1]) not in (int, float)):
+        raise QuotaSupervisorBridgeError("quota Broker is not explicitly ready")
+    submitted = submit_known_reset_resume_once_locked(
+        root, original, continuation, uuid.uuid4().hex,
+        time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), timeout, time.time(),
+    )
+    request = submitted["request"]
+    if request["controller_run_id"] != continuation or request["original_controller_run_id"] != original:
+        raise QuotaSupervisorBridgeError("claim/request allocation mismatch")
+    acquired = wait_for_known_reset_resume_ready_locked(root, request, expected_broker_identity=identity)
+    if not _same(acquired["request"], request):
+        raise QuotaSupervisorBridgeError("strict READY request changed before quiescence")
+    with hold_idle_broker_client_lock_for_cold_adoption(root):
+        current = broker._read_broker_status(root, broker.broker_paths(root)[1])
+        if (current.get("pid"), current.get("started_at")) != identity:
+            raise QuotaSupervisorBridgeError("Broker identity changed before final Codex")
+        _consume_exact_quota_response(root, acquired)
+        _check_resume_stop(root)
+        ready = acquired["ready"]
+        context = {key: request[key] for key in (
+            "controller_run_id", "original_controller_run_id", "request_id", "task_path",
+            "task_sha256", "task_id", "semantic_task_fingerprint", "source_head",
+            "assignment_id", "assignment_sha256", "run_prefix",
+        )}
+        context["ready"] = ready
+        context["terminal_receipt_sha256"] = acquired["terminal_receipt_sha256"]
+        if len(_canonical(context)) > 16000:
+            raise QuotaSupervisorBridgeError("bounded Codex quota handoff exceeded")
+        yield context
+        _check_resume_stop(root)
+
+
+def resume_due_quota_cycle_locked(root, codex, state_root, repository, timeout, preparation_route):
+    """Existing standing Supervisor branch, never ordinary RESCOPE callbacks."""
+    from scripts import two_site_codex_autopilot as ap
+    from scripts import two_site_provider_broker as broker
+    import math
+    from scripts.two_site_quota_supervisor_due_inspect import inspect_durable_quota_wait_due_locked
+    from scripts.two_site_quota_wait_recovery import recover_durable_initial_wait_locked
+
+    try:
+        _check_resume_stop(root)
+        recovered = recover_durable_initial_wait_locked(root)
+        if recovered is None:
+            raise ap.AutopilotError("no durable quota wait record recovered")
+        if type(recovered) is not tuple or len(recovered) != 2:
+            raise ap.AutopilotError("recovered quota wait result must be an exact tuple of length 2")
+        original, record = recovered
+        if type(original) is not str or not ap.RUN_ID.fullmatch(original):
+            raise ap.AutopilotError("recovered controller_run_id is invalid")
+        if type(record) is not dict:
+            raise ap.AutopilotError("recovered quota wait record must be an exact dict")
+        if record.get("state") != "WAITING_QUOTA":
+            raise ap.AutopilotError("recovered quota wait record state must be WAITING_QUOTA")
+        if record.get("controller_run_id") != original:
+            raise ap.AutopilotError("recovered quota wait record controller_run_id mismatch")
+        if type(record.get("request_id")) is not str or not record["request_id"]:
+            raise ap.AutopilotError("recovered quota wait record request_id must be a nonempty str")
+        if type(record.get("schedule")) is not dict:
+            raise ap.AutopilotError("recovered quota wait record schedule must be an exact dict")
+        current = ap.validate_repository(root, require_clean=True)
+        if type(current) is not dict or current != repository:
+            raise ap.AutopilotError("repository facts drifted or invalid during quota wait recovery")
+        if os.path.lexists(state_root / "STOP") or os.path.lexists(root / "STOP"):
+            if os.path.islink(state_root / "STOP") and not (state_root / "STOP").exists():
+                raise ap.AutopilotError("STOP path is a broken symlink")
+            ap.write_supervisor_state(state_root, "STOPPED", cycle=1)
+            return 0
+        due = inspect_durable_quota_wait_due_locked(root, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        if type(due) is not dict or due.get("controller_run_id") != original:
+            raise QuotaSupervisorBridgeError("quota due identity mismatch")
+        if due["due"]["state"] != "KNOWN_RESET_REVALIDATION_DUE":
+            ap.write_supervisor_state(state_root, "WAITING_QUOTA", cycle=1,
+                evidence=str(state_root / "runs" / original), head=repository["head"],
+                request_id=record["request_id"], schedule=record["schedule"],
+                summary="Validated terminal quota; awaiting explicit resume gate.", blockers=[])
+            return 2
+        # A prior claim may have dispatched Provider or Codex. Presence is only
+        # a blocking observation, never a mutable-status replay authorization.
+        from scripts.two_site_quota_resume_claim_storage import QUOTA_RESUME_CLAIM_FILENAME
+        with _open_existing_cycle_run_directory(root, original) as (_path, run_fd, verify):
+            verify()
+            try:
+                os.stat(QUOTA_RESUME_CLAIM_FILENAME, dir_fd=run_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise QuotaSupervisorBridgeError("existing quota claim is ambiguous; never allocate or resubmit")
+        broker_status = root / broker.STATE_REL / "status.json"
+        ready = False
+        if os.path.lexists(broker_status):
+            status = broker._read_broker_status(root, broker_status)
+            updated, started = status.get("updated_at"), status.get("started_at")
+            age = time.time() - updated if type(updated) in (int, float) else float("inf")
+            ready = (status.get("state") == "IDLE" and status.get("quota_continuation_ready") is True
+                and type(status.get("pid")) is int and status["pid"] > 0
+                and type(started) in (int, float) and math.isfinite(started)
+                and math.isfinite(age) and 0 <= age <= broker.STATUS_MAX_AGE_SECONDS)
+        if not ready:
+            ap.write_supervisor_state(state_root, "WAITING_QUOTA", cycle=1,
+                evidence=str(state_root / "runs" / original), head=repository["head"],
+                request_id=record["request_id"], schedule=record["schedule"],
+                summary="Validated terminal quota; awaiting explicit resume gate.", blockers=[])
+            return 2
+        run_dir, result = ap.run_cycle(root, codex, state_root, 1, timeout,
+            preparation_route=preparation_route, quota_original_controller_run_id=original)
+        if result["state"] not in {"CONTINUE", "COMPLETE"}:
+            raise QuotaSupervisorBridgeError("quota final Codex did not complete acceptance")
+        ap.write_supervisor_state(state_root, result["state"], cycle=1,
+            evidence=str(run_dir), head=result["head_after"], summary=result["summary"],
+            next_action=result["next_action"], blockers=[],
+            gemini_worker_run_id=result["gemini_worker_run_id"],
+            gemini_reviewer_run_id=result["gemini_reviewer_run_id"], proposal_sha256=result["proposal_sha256"])
+        return 0 if result["state"] == "COMPLETE" else 2
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        try:
+            ap.write_supervisor_state(state_root, "BLOCKED", cycle=1,
+                head=repository["head"], ambiguous_change=True,
+                summary="Quota resume hard stop; HEAD is validated entry context, not a current observation.",
+                blockers=["quota resume hard stop: " + type(exc).__name__ + ": " + str(exc)[:512]])
+        except Exception as status_error:
+            raise exc from status_error
+        return 2

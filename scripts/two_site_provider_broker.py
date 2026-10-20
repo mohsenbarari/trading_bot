@@ -818,6 +818,8 @@ def _execute_with_heartbeat(
     request: dict,
     task_path: Path | None = None,
     scope: AssignmentScope | None = None,
+    *,
+    broker_started_at: float | None = None,
 ) -> dict:
     stopped = threading.Event()
     heartbeat_errors: list[BaseException] = []
@@ -828,6 +830,7 @@ def _execute_with_heartbeat(
                 _write_status(
                     status_path, "RUNNING", request_id=request["request_id"],
                     run_prefix=request["run_prefix"], source_head=request["source_head"],
+                    **({"started_at": broker_started_at} if broker_started_at is not None else {}),
                 )
             except BaseException as exc:  # Preserve failure after the provider call returns.
                 heartbeat_errors.append(exc)
@@ -1317,15 +1320,17 @@ def serve(
                             status_path, "RUNNING", request_id=validated["request_id"],
                             run_prefix=validated["run_prefix"],
                             source_head=validated["source_head"],
+                            started_at=started_at,
                         )
-                        if _STOP or os.path.lexists(stop_path):
+                        if _STOP or os.path.lexists(stop_path) or os.path.lexists(root / "STOP"):
                             pre_dispatch_stop = True
                             raise BrokerError(
                                 "stop requested before continuation dispatch"
                             ) from None
                         continuation_dispatch_attempted = True
                         response = _execute_with_heartbeat(
-                            status_path, execute_intent_bound_continuation, root, validated
+                            status_path, execute_intent_bound_continuation, root, validated,
+                            broker_started_at=started_at,
                         )
                         if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                             raise BrokerError("broker executor returned an invalid response")
@@ -1357,9 +1362,11 @@ def serve(
                                 status_path, "RUNNING", request_id=validated["request_id"],
                                 run_prefix=validated["run_prefix"],
                                 source_head=validated["source_head"],
+                                started_at=started_at,
                             )
                             response = _execute_with_heartbeat(
-                                status_path, executor, root, validated, task_path, scope
+                                status_path, executor, root, validated, task_path, scope,
+                                broker_started_at=started_at,
                             )
                             if not isinstance(response, dict) or set(response) != RESPONSE_KEYS:
                                 raise BrokerError("broker executor returned an invalid response")
@@ -3061,6 +3068,68 @@ def read_cycle_reservation(root: Path, controller_run_id: str) -> dict:
         return record_payload
 
 
+def _wait_existing_response(
+    root: Path, request: dict, expected_broker_identity: tuple[int, float], timeout: int,
+) -> dict:
+    """Wait only: no lock, reservation, enqueue, retry, echo, unlink or Provider.
+
+    Ordinary submit retains its historical response boundary. Quota additionally
+    requires the same actual server start, STOP safety, and IDLE/claim cleanup
+    within this one original deadline before the caller can take quiescence.
+    """
+    if (type(timeout) is not int or timeout != request.get("timeout")
+            or not 10 <= timeout <= 900
+            or type(expected_broker_identity) is not tuple or len(expected_broker_identity) != 2
+            or type(expected_broker_identity[0]) is not int or expected_broker_identity[0] <= 0):
+        raise BrokerError("invalid existing-response wait binding")
+    quota = request.get("request_type") == "QUOTA_CONTINUATION"
+    start = expected_broker_identity[1]
+    if quota and (type(start) not in (int, float) or not math.isfinite(start)):
+        raise BrokerError("quota wait requires actual broker start identity")
+    _state, status_path, _requests, claimed, responses = broker_paths(root)
+    response_path = _response_path(responses, request["request_id"])
+    deadline = time.monotonic() + _overall_timeout(timeout) + 30
+    last_health_check = 0.0
+    while True:
+        if quota:
+            from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
+            _check_pre_dispatch_stop(root)
+            try:
+                (root / "STOP").lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                raise BrokerError("quota response wait stopped")
+        present = _published_queue_file(response_path, "broker response")
+        if present and not quota:
+            break
+        if time.monotonic() >= deadline:
+            raise BrokerError("provider broker response deadline exceeded")
+        if present or time.monotonic() - last_health_check >= 1:
+            status_value = _read_broker_status(root, status_path)
+            updated = status_value.get("updated_at")
+            age = time.time() - updated if type(updated) in (int, float) else float("inf")
+            if (status_value.get("state") not in {"IDLE", "RUNNING"}
+                    or type(status_value.get("pid")) is not int
+                    or status_value.get("pid") != expected_broker_identity[0]
+                    or (quota and type(status_value.get("started_at")) not in (int, float))
+                    or status_value.get("started_at") != start
+                    or type(status_value.get("updated_at")) not in (int, float)
+                    or not math.isfinite(age) or age > STATUS_MAX_AGE_SECONDS
+                    or (quota and age < 0)
+                    or (status_value.get("state") == "RUNNING"
+                        and status_value.get("request_id") != request["request_id"])):
+                raise BrokerError("provider broker heartbeat is unavailable or mismatched")
+            last_health_check = time.monotonic()
+            if present and status_value["state"] == "IDLE":
+                try:
+                    (claimed / (request["request_id"] + ".json")).lstat()
+                except FileNotFoundError:
+                    break
+        time.sleep(POLL_SECONDS)
+    return validate_response(request, _safe_read_existing_response(root, response_path))
+
+
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
@@ -3087,24 +3156,9 @@ def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: boo
         request_path = requests / f"{request['request_id']}.json"
         response_path = _response_path(responses, request["request_id"])
         _atomic_new_json(request_path, request, MAX_REQUEST_BYTES)
-        deadline = time.monotonic() + _overall_timeout(timeout) + 30
-        last_health_check = 0.0
-        while not _published_queue_file(response_path, "broker response"):
-            if time.monotonic() >= deadline:
-                raise BrokerError("provider broker response deadline exceeded")
-            if time.monotonic() - last_health_check >= 1:
-                current_status = _read_broker_status(root, status_path)
-                if (current_status.get("state") not in {"IDLE", "RUNNING"}
-                        or current_status.get("pid") != status_value["pid"]
-                        or not isinstance(current_status.get("updated_at"), (int, float))
-                        or time.time() - current_status["updated_at"] > STATUS_MAX_AGE_SECONDS
-                        or (current_status.get("state") == "RUNNING"
-                            and current_status.get("request_id") != request["request_id"])):
-                    raise BrokerError("provider broker heartbeat is unavailable or mismatched")
-                last_health_check = time.monotonic()
-            time.sleep(POLL_SECONDS)
-        response = _safe_read_existing_response(root, response_path)
-        validated = validate_response(request, response)
+        validated = _wait_existing_response(
+            root, request, (status_value["pid"], status_value.get("started_at")), timeout,
+        )
         if validated["stdout"]:
             sys.stdout.write(validated["stdout"])
             sys.stdout.flush()
@@ -3170,7 +3224,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("serve")
+    serve_parser = subparsers.add_parser("serve")
+    serve_parser.add_argument("--quota-continuation-enabled", action="store_true")
     submit_parser = subparsers.add_parser("submit")
     submit_parser.add_argument("--task", type=Path, required=True)
     submit_parser.add_argument("--run-prefix", required=True)
@@ -3184,7 +3239,7 @@ def main() -> int:
     root = canonical_root(args.root)
     try:
         if args.command == "serve":
-            return serve(root)
+            return serve(root, **({"quota_continuation_enabled": True} if args.quota_continuation_enabled else {}))
         if args.command == "submit":
             return submit(root, args.task, args.run_prefix, args.timeout)
         if args.command == "submit-maintenance":

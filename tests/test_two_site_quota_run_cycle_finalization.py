@@ -59,6 +59,13 @@ def _fake_validate_transition(_r: Path, _bef: dict, receipt: dict) -> dict[str, 
 
 
 @contextmanager
+def _prior_finalization_only_hold(*_args: Any):
+    # These inherited tests isolate the existing post-Codex finalization hook.
+    # The acquisition/client-hold seam is exercised separately below.
+    yield None
+
+
+@contextmanager
 def _mock_cycle_environment(
     codex: Path,
     validate_repo_side_effect: Any = None,
@@ -97,6 +104,9 @@ def _mock_cycle_environment(
     ), patch(
         "scripts.two_site_cycle_metrics.record_cycle",
         create=True,
+    ), patch(
+        "scripts.two_site_quota_supervisor_bridge.quota_codex_review_locked",
+        side_effect=_prior_finalization_only_hold,
     ):
         yield
 
@@ -591,3 +601,265 @@ def test_default_none_path_skips_finalization_and_no_live_wake(tmp_path: Path) -
     assert result["state"] == "CONTINUE"
     status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
     assert status["state"] == "CONTINUE"
+
+
+def test_quota_actual_allocation_hold_finalization_then_checkpoint(tmp_path: Path) -> None:
+    """Controlled child only; not a claim of live Provider or crash recovery."""
+    root, codex, state_root = _setup_workspace(tmp_path)
+    template = Path(__file__).resolve().parents[1] / "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md"
+    (root / "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md").write_bytes(template.read_bytes())
+    before = _make_before()
+    events: list[str] = []
+    allocated: list[str] = []
+    active = False
+
+    @contextmanager
+    def hold(_root: Path, original: str, continuation: str, timeout: int):
+        nonlocal active
+        assert original == VALID_ORIGINAL_RUN_ID and timeout == 300
+        run_dir = state_root / "runs" / continuation
+        assert len(list((state_root / "runs").iterdir())) == 1
+        startup = json.loads((run_dir / "preparation-startup.json").read_text())
+        assert startup["cycle_id"] == continuation
+        allocated.append(continuation)
+        events.append("acquire_ready_and_client_hold")
+        active = True
+        try:
+            yield {"controller_run_id": continuation, "original_controller_run_id": original,
+                   "ready": {"state": "READY_FOR_CODEX"}}
+        finally:
+            active = False
+            events.append("release_client_hold")
+
+    def capture(_p, _in, out, _err, _t, max_output=0):
+        assert active
+        prompt = (out.parent / "prompt.txt").read_text()
+        assert "2Q. QUOTA FINAL REVIEW ONLY" in prompt
+        assert "two_site_provider_broker.py submit --task" not in prompt
+        events.append("codex")
+        (out.parent / "result.json").write_text(json.dumps(_make_raw_result()))
+
+    def finalize(**kwargs):
+        assert active and kwargs["continuation_controller_run_id"] == allocated[0]
+        assert kwargs["original_controller_run_id"] == VALID_ORIGINAL_RUN_ID
+        events.append("lineage_then_ack")
+
+    def checkpoint(*_args):
+        assert not active
+        events.append("checkpoint")
+
+    def repo(_root, require_clean=True):
+        return dict(before, head="b" * 40) if "codex" in events else before
+
+    with _mock_cycle_environment(codex, repo, capture), \
+         patch("scripts.two_site_quota_supervisor_bridge.quota_codex_review_locked", side_effect=hold), \
+         patch("scripts.two_site_quota_supervisor_finalization.finalize_accepted_quota_continuation_locked", side_effect=finalize), \
+         patch("scripts.two_site_codex_autopilot.publish_accepted_checkpoint", side_effect=checkpoint):
+        run_dir, result = run_cycle(root, codex, state_root, 1, 300,
+                                   quota_original_controller_run_id=VALID_ORIGINAL_RUN_ID)
+    assert allocated == [run_dir.name]
+    assert events == ["acquire_ready_and_client_hold", "codex", "lineage_then_ack", "release_client_hold", "checkpoint"]
+    assert result["state"] == "CONTINUE"
+
+
+@pytest.mark.parametrize("due_state,claim_exists", [
+    ("NOT_DUE", False), ("KNOWN_RESET_REVALIDATION_DUE", False),
+    ("KNOWN_RESET_REVALIDATION_DUE", True),
+])
+def test_standing_quota_due_allocates_once_or_halts_ambiguous(tmp_path: Path, due_state: str, claim_exists: bool) -> None:
+    from scripts import two_site_quota_supervisor_bridge as bridge
+    from scripts import two_site_provider_broker as broker
+    import time
+    root, codex, _unused_state = _setup_workspace(tmp_path)
+    state_root = root / ".local/two-site-refactor/autopilot"
+    original_dir = state_root / "runs" / VALID_ORIGINAL_RUN_ID
+    original_dir.mkdir(parents=True, mode=0o700)
+    original_dir.chmod(0o700)
+    continuation = state_root / "runs/cycle-0001-20261020T120000Z-234"
+    record = {"state": "WAITING_QUOTA", "controller_run_id": VALID_ORIGINAL_RUN_ID,
+              "request_id": "a" * 32, "schedule": {"state": "fixture"}}
+    before = _make_before()
+    broker._atomic_new_json(broker.broker_paths(root)[1], {"state": "IDLE", "pid": os.getpid(),
+        "started_at": time.time(), "updated_at": time.time(), "quota_continuation_ready": True}, broker.MAX_REQUEST_BYTES)
+    if claim_exists:
+        (original_dir / "quota-resume-claim.json").write_text("retained ambiguous claim")
+
+    @contextmanager
+    def pinned(*_args):
+        fd = os.open(original_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            yield original_dir, fd, lambda: None
+        finally:
+            os.close(fd)
+
+    result = dict(_make_raw_result(), head_after="b" * 40)
+    def cycle_once(*_args, **_kwargs):
+        (original_dir / "quota-resume-claim.json").write_text("controlled first claim, not replay authority")
+        return continuation, result
+
+    with patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"), \
+         patch("scripts.two_site_quota_wait_recovery.recover_durable_initial_wait_locked", return_value=(VALID_ORIGINAL_RUN_ID, record)), \
+         patch("scripts.two_site_quota_supervisor_due_inspect.inspect_durable_quota_wait_due_locked", return_value={"controller_run_id": VALID_ORIGINAL_RUN_ID, "due": {"state": due_state}}), \
+         patch.object(bridge, "_open_existing_cycle_run_directory", side_effect=pinned), \
+         patch("scripts.two_site_codex_autopilot.run_cycle", side_effect=cycle_once) as cycle, \
+         patch("scripts.two_site_codex_autopilot.write_supervisor_state") as status, \
+         patch("scripts.two_site_codex_autopilot.git", return_value=before["head"]), \
+         patch("scripts.two_site_codex_autopilot.validate_repository", return_value=before):
+        code = bridge.resume_due_quota_cycle_locked(root, codex, state_root, before, 300, "one_shot")
+        if due_state == "KNOWN_RESET_REVALIDATION_DUE" and not claim_exists:
+            assert status.call_args.args[1] == "CONTINUE"
+            assert bridge.resume_due_quota_cycle_locked(root, codex, state_root, before, 300, "one_shot") == 2
+    assert code == 2
+    if due_state == "KNOWN_RESET_REVALIDATION_DUE" and not claim_exists:
+        cycle.assert_called_once_with(root, codex, state_root, 1, 300,
+            preparation_route="one_shot", quota_original_controller_run_id=VALID_ORIGINAL_RUN_ID)
+        assert status.call_args.args[1] == "BLOCKED"
+        assert status.call_args.kwargs["ambiguous_change"] is True
+    else:
+        cycle.assert_not_called()
+        assert status.call_args.args[1] == ("BLOCKED" if claim_exists else "WAITING_QUOTA")
+        if claim_exists:
+            assert status.call_args.kwargs["ambiguous_change"] is True
+            assert (original_dir / "quota-resume-claim.json").read_text() == "retained ambiguous claim"
+
+
+def test_quota_ready_cleanup_is_under_client_hold_and_uses_canonical_terminal(tmp_path: Path) -> None:
+    from scripts import two_site_quota_supervisor_bridge as bridge
+    from scripts import two_site_provider_broker as broker
+    from tests.test_two_site_quota_broker_claim_recovery import _make_continuation_request
+    request = _make_continuation_request()
+    root = tmp_path.resolve()
+    status = {"state": "IDLE", "pid": 123, "started_at": 100.0, "quota_continuation_ready": True}
+    response = {"request_id": request["request_id"], "fixture": "strict Q1 already checked"}
+    terminal = {"request": request, "response": response}
+    receipt_sha = bridge.hashlib.sha256(bridge._canonical(terminal)).hexdigest()
+    acquired = {"request": request, "response": response, "ready": {"state": "READY_FOR_CODEX"},
+                "terminal_receipt_sha256": receipt_sha}
+    queue = broker.broker_paths(root)[4] / (request["request_id"] + ".json")
+    broker._atomic_new_json(queue, response, broker.MAX_RESPONSE_BYTES)
+    events = []
+
+    @contextmanager
+    def held(_root):
+        events.append("hold")
+        try:
+            yield
+        finally:
+            events.append("release")
+
+    def terminal_read(*_args, **_kwargs):
+        assert events == ["hold"]
+        # Raw indentation/newline is intentionally not the canonical receipt SHA.
+        assert bridge.hashlib.sha256((json.dumps(terminal, indent=2) + "\n").encode()).hexdigest() != receipt_sha
+        return terminal
+
+    with patch.object(broker, "_read_broker_status", return_value=status), \
+         patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"), \
+         patch("scripts.two_site_quota_supervisor_resume_submit.submit_known_reset_resume_once_locked", return_value={"request": request}) as submit, \
+         patch("scripts.two_site_quota_supervisor_resume_context.wait_for_known_reset_resume_ready_locked", return_value=acquired) as wait, \
+         patch("scripts.two_site_cold_start_broker_quiescence.hold_idle_broker_client_lock_for_cold_adoption", side_effect=held), \
+         patch("scripts.two_site_quota_continuation_terminal_storage.read_terminal_continuation_record", side_effect=terminal_read):
+        with bridge.quota_codex_review_locked(root, request["original_controller_run_id"], request["controller_run_id"], 300) as context:
+            assert events == ["hold"] and not queue.exists()
+            assert context["terminal_receipt_sha256"] == receipt_sha
+            assert context["ready"] is acquired["ready"]
+        assert events == ["hold", "release"]
+    submit.assert_called_once()
+    assert submit.call_args.args[2] == request["controller_run_id"]
+    wait.assert_called_once_with(root, request, expected_broker_identity=(123, 100.0))
+
+
+def test_quota_response_drift_never_unlinks_queue(tmp_path: Path) -> None:
+    from scripts import two_site_quota_supervisor_bridge as bridge
+    from scripts import two_site_provider_broker as broker
+    from tests.test_two_site_quota_broker_claim_recovery import _make_continuation_request
+    root = tmp_path.resolve()
+    request = _make_continuation_request()
+    terminal = {"response": {"original": True}}
+    queue = broker.broker_paths(root)[4] / (request["request_id"] + ".json")
+    broker._atomic_new_json(queue, {"drifted": True}, broker.MAX_RESPONSE_BYTES)
+    raw = queue.read_bytes()
+    acquired = {"request": request, "response": terminal["response"],
+                "terminal_receipt_sha256": bridge.hashlib.sha256(bridge._canonical(terminal)).hexdigest()}
+    with patch("scripts.two_site_quota_continuation_terminal_storage.read_terminal_continuation_record", return_value=terminal):
+        with pytest.raises(bridge.QuotaSupervisorBridgeError, match="queue/terminal response mismatch"):
+            bridge._consume_exact_quota_response(root, acquired)
+    assert queue.read_bytes() == raw
+
+
+def test_quota_capture_cleanup_timeout_preserves_first_error_and_releases_hold(tmp_path: Path) -> None:
+    """Never enter Popen.__exit__ while the quota client hold is owned."""
+    from scripts import two_site_quota_supervisor_bridge as bridge
+    import subprocess
+    root, codex, state_root = _setup_workspace(tmp_path)
+    before = _make_before()
+    events = []
+    original = RuntimeError("first capture failure")
+
+    class StuckChild:
+        pid = 98765
+        returncode = None
+        stdin = MagicMock()
+        stdout = MagicMock()
+        stderr = MagicMock()
+        def wait(self, *, timeout):
+            assert timeout == 10
+            events.append("bounded_wait")
+            raise subprocess.TimeoutExpired("controlled child", timeout)
+        def __exit__(self, *_args):
+            raise AssertionError("unbounded Popen exit must never be entered")
+
+    @contextmanager
+    def held(*_args):
+        events.append("hold")
+        try:
+            yield None  # Isolate capture ownership from strict Q1 acquisition.
+        finally:
+            events.append("release")
+
+    stuck = StuckChild()
+    with _mock_cycle_environment(codex, lambda *_a, **_k: before, lambda *_a, **_k: (_ for _ in ()).throw(original)), \
+         patch.object(bridge, "quota_codex_review_locked", side_effect=held), \
+         patch("scripts.two_site_codex_autopilot.subprocess.Popen", return_value=stuck), \
+         patch("scripts.two_site_proposal_runner.terminate_process", side_effect=subprocess.TimeoutExpired("initial cleanup", 10)) as terminate, \
+         patch.object(bridge.os, "killpg") as kill, \
+         patch("scripts.two_site_codex_autopilot.publish_accepted_checkpoint") as checkpoint:
+        with pytest.raises(RuntimeError) as caught:
+            run_cycle(root, codex, state_root, 1, 300,
+                      quota_original_controller_run_id=VALID_ORIGINAL_RUN_ID)
+    assert caught.value is original
+    assert events == ["hold", "bounded_wait", "release"]
+    terminate.assert_called_once_with(stuck)
+    kill.assert_called_once()
+    for stream in (stuck.stdin, stuck.stdout, stuck.stderr):
+        stream.close.assert_called_once()
+    checkpoint.assert_not_called()
+
+
+def test_quota_blocked_status_keeps_entry_context_and_primary_error(tmp_path: Path) -> None:
+    from scripts import two_site_quota_supervisor_bridge as bridge
+    from scripts import two_site_codex_autopilot as ap
+    root, codex, state_root = _setup_workspace(tmp_path)
+    before = _make_before()
+    primary = ValueError("original invalid durable quota wait")
+    secondary = OSError("controlled BLOCKED status write failure")
+    with patch.object(bridge, "_check_resume_stop", side_effect=primary), \
+         patch.object(ap, "git", side_effect=AssertionError("failure publication must not query Git")) as git, \
+         patch.object(ap, "run_cycle", side_effect=AssertionError("no continuation allocation")) as cycle, \
+         patch.object(ap, "publish_accepted_checkpoint", side_effect=AssertionError("no checkpoint")) as checkpoint, \
+         patch("scripts.two_site_quota_supervisor_resume_submit.submit_known_reset_resume_once_locked", side_effect=AssertionError("no claim or submit")) as submit, \
+         patch.object(ap, "write_supervisor_state") as status:
+        assert bridge.resume_due_quota_cycle_locked(root, codex, state_root, before, 300, "one_shot") == 2
+        assert status.call_args.args == (state_root, "BLOCKED")
+        assert status.call_args.kwargs["head"] == before["head"]
+        assert status.call_args.kwargs["ambiguous_change"] is True
+        assert "validated entry context, not a current observation" in status.call_args.kwargs["summary"]
+        assert status.call_args.kwargs["blockers"] == ["quota resume hard stop: ValueError: " + str(primary)]
+        status.side_effect = secondary
+        with pytest.raises(ValueError) as caught:
+            bridge.resume_due_quota_cycle_locked(root, codex, state_root, before, 300, "one_shot")
+        assert caught.value is primary and caught.value.__cause__ is secondary
+    git.assert_not_called()
+    cycle.assert_not_called()
+    checkpoint.assert_not_called()
+    submit.assert_not_called()

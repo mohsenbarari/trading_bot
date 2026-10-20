@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -66,6 +67,68 @@ def _make_result(repo_head: str = "a1b2c3d4e5" * 4) -> dict[str, object]:
 
 
 class TestAutopilotMonitorPreflight(unittest.TestCase):
+    def test_quota_wait_due_opt_in_releases_lock_and_never_submits(self) -> None:
+        from scripts import two_site_autopilot_monitor_preflight as preflight
+        from contextlib import contextmanager
+        with tempfile.TemporaryDirectory() as td:
+            root, state_root, repo, _epoch = self._setup_base_fixture(Path(td))
+            original = "cycle-0001-20261020T120000Z-123"
+            run_dir = state_root / "runs" / original
+            run_dir.mkdir(parents=True, mode=0o700)
+            record = {"request_id": "a" * 32}
+            (state_root / "status.json").write_text(json.dumps({"state": "WAITING_QUOTA", "head": repo["head"],
+                "evidence": str(run_dir), "request_id": record["request_id"]}))
+
+            @contextmanager
+            def pinned(*_args):
+                fd = os.open(run_dir, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    yield run_dir, fd, lambda: None
+                finally:
+                    os.close(fd)
+
+            def due(*_args):
+                with (state_root / "autopilot.lock").open("rb") as lock:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return {"controller_run_id": original, "due": {"state": "KNOWN_RESET_REVALIDATION_DUE"}}
+
+            with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+                 mock.patch("scripts.two_site_quota_wait_recovery.recover_durable_initial_wait_locked", return_value=(original, record)), \
+                 mock.patch("scripts.two_site_quota_supervisor_due_inspect.inspect_durable_quota_wait_due_locked", side_effect=due), \
+                 mock.patch("scripts.two_site_provider_broker._open_existing_cycle_run_directory", side_effect=pinned), \
+                 mock.patch("scripts.two_site_quota_supervisor_resume_submit.submit_known_reset_resume_once_locked", side_effect=AssertionError("preflight must not submit")) as submit:
+                self.assertEqual(run_preflight(root, quota_wait_enabled=True), (True, "QUOTA_READY"))
+                submit.assert_not_called()
+                (run_dir / "quota-resume-claim.json").write_text("retained")
+                self.assertEqual(run_preflight(root, quota_wait_enabled=True), (False, "QUOTA_CLAIM_AMBIGUOUS"))
+            with (state_root / "autopilot.lock").open("rb") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_quota_not_due_stop_and_default_off_never_launch(self) -> None:
+        from scripts import two_site_autopilot_monitor_preflight as preflight
+        with tempfile.TemporaryDirectory() as td:
+            root, state_root, repo, _epoch = self._setup_base_fixture(Path(td))
+            with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+                 mock.patch.object(preflight, "_quota_wait_preflight_locked", return_value=(False, "QUOTA_NOT_DUE")) as quota, \
+                 mock.patch.object(preflight, "_load_accepted_checkpoint", return_value=None), \
+                 mock.patch("scripts.two_site_maintenance_transition_startup.require_reviewed_maintenance_transition_locked", side_effect=ValueError("no match")):
+                self.assertEqual(run_preflight(root), (False, "STALE_CHECKPOINT"))
+                quota.assert_not_called()
+                self.assertEqual(run_preflight(root, quota_wait_enabled=True), (False, "QUOTA_NOT_DUE"))
+                (root / "STOP").symlink_to(root / "missing-stop-target")
+                self.assertEqual(run_preflight(root, quota_wait_enabled=True), (False, "STOP_PRESENT"))
+                self.assertEqual(quota.call_count, 1)
+
+    def test_quota_cli_only_passes_true_when_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            for flag, expected in (([], {}), (["--quota-wait-enabled"], {"quota_wait_enabled": True})):
+                with mock.patch("scripts.two_site_autopilot_monitor_preflight.run_preflight", return_value=(True, "READY")) as preflight, \
+                     mock.patch("sys.stdout", io.StringIO()):
+                    self.assertEqual(main(["--root", str(root), *flag]), 0)
+                preflight.assert_called_once_with(root, **expected)
+
     def _setup_base_fixture(self, tmp_path: Path) -> tuple[Path, Path, dict[str, object], Path]:
         tmp_path.mkdir(parents=True, exist_ok=True)
         root = tmp_path.resolve()

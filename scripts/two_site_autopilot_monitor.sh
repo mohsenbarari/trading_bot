@@ -12,6 +12,15 @@ recovery_file="$report_root/recovery.json"
 antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.4.2-085f43e0d0628a8a.pin"
 expected_antigravity_sha256="085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef"
 running_heartbeat_max_age_seconds=90
+quota_args=()
+broker_quota_args=()
+if [[ "${1:-}" == "--quota-wait-enabled" && "$#" -eq 1 ]]; then
+  quota_args=(--quota-wait-enabled)
+  broker_quota_args=(--quota-continuation-enabled)
+elif [[ "$#" -ne 0 ]]; then
+  printf 'Usage: %s [--quota-wait-enabled]\n' "$0" >&2
+  exit 2
+fi
 
 cd "$integration_root" || exit 1
 export PYTHONPATH="$integration_root"
@@ -181,7 +190,10 @@ if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0
       && "$status_head_compatible" == true
       && ! -e "$state_root/STOP" && ! -L "$state_root/STOP"
       && ! -e "$integration_root/STOP" && ! -L "$integration_root/STOP" ]]; then
-  if [[ "$state" == "RUNNING" || "$state" == "RETRYABLE_FAILURE" ]]; then
+  if [[ "$state" == "WAITING_QUOTA" && "${#quota_args[@]}" -eq 1 ]]; then
+    restart_eligible=true
+    recovery_reason="quota_wait_due"
+  elif [[ "$state" == "RUNNING" || "$state" == "RETRYABLE_FAILURE" ]]; then
     restart_eligible=true
     recovery_reason="unexpected_process_exit"
   elif [[ "$state" == "BLOCKED" && "$status_dirty" == "false"
@@ -236,7 +248,7 @@ if [[ "$supervisor_count" -eq 0 && "$restart_eligible" == true ]]; then
     preflight_stderr_tmp="$(/usr/bin/mktemp "$report_root/.preflight.stderr.XXXXXX")"
     /usr/bin/chmod 0600 "$preflight_stdout_tmp" "$preflight_stderr_tmp" 2>/dev/null || true
     preflight_exit=0
-    (ulimit -f 1024; /usr/bin/timeout 20 /usr/bin/python3 "$integration_root/scripts/two_site_autopilot_monitor_preflight.py" --root "$integration_root" >"$preflight_stdout_tmp" 2>"$preflight_stderr_tmp") || preflight_exit="$?"
+    (ulimit -f 1024; /usr/bin/timeout 20 /usr/bin/python3 "$integration_root/scripts/two_site_autopilot_monitor_preflight.py" --root "$integration_root" "${quota_args[@]}" >"$preflight_stdout_tmp" 2>"$preflight_stderr_tmp") || preflight_exit="$?"
 
     publish_ok=true
     stdout_size="$(/usr/bin/stat -c %s -- "$preflight_stdout_tmp" 2>/dev/null || printf '65537')"
@@ -280,8 +292,10 @@ if [[ "$supervisor_count" -eq 0 && "$restart_eligible" == true ]]; then
     /usr/bin/unlink -- "$preflight_stdout_tmp" 2>/dev/null || true
     /usr/bin/unlink -- "$preflight_stderr_tmp" 2>/dev/null || true
 
+    expected_preflight="READY"
+    if [[ "$recovery_reason" == "quota_wait_due" ]]; then expected_preflight="QUOTA_READY"; fi
     if [[ "$publish_ok" == true && "$preflight_exit" -eq 0 ]] \
-        && /usr/bin/printf 'READY\n' | /usr/bin/cmp -s - "$preflight_stdout_target" \
+        && /usr/bin/printf '%s\n' "$expected_preflight" | /usr/bin/cmp -s - "$preflight_stdout_target" \
         && ! [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
       protected_refs_ok=true
     else
@@ -454,7 +468,8 @@ if [[ "$restart_eligible" == true ]]; then
           printf -v broker_command '%q ' \
             /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
             PYTHONPATH="$integration_root" \
-            /usr/bin/python3 "$integration_root/scripts/two_site_provider_broker.py" --root "$integration_root" serve
+            /usr/bin/python3 "$integration_root/scripts/two_site_provider_broker.py" --root "$integration_root" serve \
+            "${broker_quota_args[@]}"
           if /usr/bin/timeout 15 /usr/bin/tmux new-session -d -s "$broker_session" -c "$integration_root" "$broker_command" >"$restart_tmp" 2>&1; then
             broker_ready=false
             for _attempt in {1..20}; do
@@ -477,7 +492,7 @@ if [[ "$restart_eligible" == true ]]; then
           action="broker_recheck_failed"
         fi
       else
-        if /usr/bin/timeout 45 "$integration_root/scripts/two_site_autopilot_tmux.sh" start >"$restart_tmp" 2>&1; then
+        if /usr/bin/timeout 45 "$integration_root/scripts/two_site_autopilot_tmux.sh" start "${quota_args[@]}" >"$restart_tmp" 2>&1; then
           action="restart_started"
           health="RECOVERING"
         else

@@ -491,3 +491,30 @@ def test_submit_known_reset_resume_stop_after_claim_retains_custody_and_no_repla
     assert not intent_p.exists()
     assert not queue_p.exists()
     assert list(requests_dir.iterdir()) == []
+
+
+
+def test_resume_ready_reader_is_explicit_reexport_not_implicit_submit_phase() -> None:
+    from scripts.two_site_quota_supervisor_resume_context import (
+        wait_for_known_reset_resume_ready_locked,
+    )
+
+    assert submit_mod.wait_for_known_reset_resume_ready_locked is wait_for_known_reset_resume_ready_locked
+
+
+def test_submit_existing_return_contract_does_not_wait_or_republish(
+    broker_repo: tuple[Path, Path, Any, dict[str, str]],
+) -> None:
+    env = _setup_admitted_env(broker_repo)
+    sc = env["sc"]
+    _, status_path, requests_dir, _, _ = broker.broker_paths(sc["root"])
+    broker._write_status(
+        status_path, "IDLE", quota_continuation_ready=True, updated_at=env["now_epoch"]
+    )
+    with patch.object(submit_mod, "wait_for_known_reset_resume_ready_locked",
+                      side_effect=AssertionError("submit must remain enqueue-only")) as wait:
+        with exclusive_supervisor_lock(sc["autopilot_dir"] / "supervisor.lock"):
+            result = _call_submit(env)
+    wait.assert_not_called()
+    assert set(result) == {"claim", "request", "submission_intent", "original_wait_sha256"}
+    assert [p.name for p in requests_dir.iterdir()] == [env["req_id"] + ".json"]

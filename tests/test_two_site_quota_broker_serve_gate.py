@@ -31,6 +31,72 @@ def _valid_response(req: dict[str, Any]) -> dict[str, Any]:
 
 
 class TwoSiteQuotaBrokerServeGateTest(unittest.TestCase):
+    def test_wait_only_requires_same_idle_broker_and_claim_cleanup_without_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _state, _status, requests, claimed, responses = broker.broker_paths(root)
+            req = _make_continuation_request()
+            response = _valid_response(req)
+            response_path = responses / (req["request_id"] + ".json")
+            claim = claimed / (req["request_id"] + ".json")
+            broker._atomic_new_json(response_path, response, broker.MAX_RESPONSE_BYTES)
+            broker._atomic_new_json(claim, req, broker.MAX_REQUEST_BYTES)
+            states = [dict(state="RUNNING", pid=123, started_at=10.0, updated_at=time.time(), request_id=req["request_id"]),
+                      dict(state="IDLE", pid=123, started_at=10.0, updated_at=time.time())]
+
+            def sleep(_seconds):
+                self.assertTrue(response_path.is_file())
+                claim.unlink()  # Controlled fixture simulates Broker's own cleanup.
+
+            with mock.patch.object(broker, "_read_broker_status", side_effect=states), \
+                 mock.patch.object(broker.time, "sleep", side_effect=sleep) as slept, \
+                 mock.patch.object(broker, "_atomic_new_json", side_effect=AssertionError("enqueue forbidden")), \
+                 mock.patch.object(broker, "execute_intent_bound_continuation", side_effect=AssertionError("Provider forbidden")), \
+                 mock.patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"):
+                actual = broker._wait_existing_response(root, req, (123, 10.0), req["timeout"])
+            self.assertEqual(actual, response)
+            slept.assert_called_once_with(broker.POLL_SECONDS)
+            self.assertEqual(list(requests.iterdir()), [])
+            self.assertEqual(response_path.read_text(), json.dumps(response, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+    def test_wait_only_rejects_restart_stop_and_deadline_without_unlink(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _state, _status, _requests, _claimed, responses = broker.broker_paths(root)
+            req = _make_continuation_request()
+            path = responses / (req["request_id"] + ".json")
+            broker._atomic_new_json(path, _valid_response(req), broker.MAX_RESPONSE_BYTES)
+            raw = path.read_bytes()
+            with mock.patch.object(broker, "_read_broker_status", return_value=dict(state="IDLE", pid=123, started_at=11.0, updated_at=time.time())), \
+                 mock.patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"):
+                with self.assertRaisesRegex(broker.BrokerError, "heartbeat.*mismatched"):
+                    broker._wait_existing_response(root, req, (123, 10.0), req["timeout"])
+            with mock.patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop", side_effect=broker.BrokerError("STOP fixture")):
+                with self.assertRaisesRegex(broker.BrokerError, "STOP fixture"):
+                    broker._wait_existing_response(root, req, (123, 10.0), req["timeout"])
+            (root / "STOP").symlink_to(root / "missing-stop-target")
+            with mock.patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"):
+                with self.assertRaisesRegex(broker.BrokerError, "wait stopped"):
+                    broker._wait_existing_response(root, req, (123, 10.0), req["timeout"])
+            (root / "STOP").unlink()
+            with mock.patch.object(broker.time, "monotonic", side_effect=[0.0, 31.0]), \
+                 mock.patch.object(broker, "_overall_timeout", return_value=0) as bound, \
+                 mock.patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"):
+                with self.assertRaisesRegex(broker.BrokerError, "deadline exceeded"):
+                    broker._wait_existing_response(root, req, (123, 10.0), req["timeout"])
+            bound.assert_called_once_with(req["timeout"])
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_cli_opt_in_is_explicit_and_default_off(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td).resolve()
+            for flag, expected in (([], {}), (["--quota-continuation-enabled"], {"quota_continuation_enabled": True})):
+                with mock.patch("sys.argv", ["broker", "--root", str(root), "serve", *flag]), \
+                     mock.patch.object(broker, "canonical_root", return_value=root), \
+                     mock.patch.object(broker, "serve", return_value=0) as serve:
+                    self.assertEqual(broker.main(), 0)
+                serve.assert_called_once_with(root, **expected)
+
     def test_default_off_gate_rejects_without_adapter_or_executor(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -16,9 +16,11 @@ from scripts.two_site_quota_resume_lineage_snapshot_storage import (
 )
 from scripts.two_site_quota_supervisor_resume_context import (
     collect_known_reset_resume_context_locked,
+    wait_for_known_reset_resume_ready_locked,
 )
 
-__all__ = ["submit_known_reset_resume_once_locked"]
+__all__ = ["submit_known_reset_resume_once_locked",
+           "wait_for_known_reset_resume_ready_locked"]
 
 
 def submit_known_reset_resume_once_locked(
