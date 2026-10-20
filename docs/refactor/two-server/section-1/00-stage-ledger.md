@@ -663,3 +663,5 @@ This metadata adds zero behavior. Preserve `units_since_reconciliation=1`, histo
 
 ### 766 A2 — partial reconciliation
 On exact A2 acceptance, `inventory/recent-characterization-business-766-a2.json` reconciles2/5 Sources;3 remain. Preserve pending_five=units_since_reconciliation=5,393/465 and both High/24origins OPEN. No sixth behavior before B3/full closeout.
+
+766 [B3](inventory/recent-characterization-business-766-b3.json): on acceptance5/5 reconciled,pending0;396/465/69;2High/24origins OPEN.
