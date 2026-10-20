@@ -2075,6 +2075,47 @@ def _live_session_roots(contract_text: str, trees: list[tuple[str, ast.Module]])
     return sorted(roots)
 
 
+def _session_text_requests_adapter(contract_text: str) -> bool:
+    """Ignore only a closed grammar of explicit negative Session clauses/lists.
+
+    This is a bounded lexical check, not a general negation parser. Explicit
+    session_context declarations and source-detected adapters retain precedence.
+    """
+    boundary = r"[.;:\n!?]"
+    action = r"\b(?:use|using|reuse|reusing|add|build|create|implement|introduce|provide|include|construct|instantiate|supply|copy|call|invoke|execute|exercise)\b"
+    for match in SESSION_TEXT_RE.finditer(contract_text):
+        if re.search(boundary, match.group()):
+            return True  # Do not let a prohibition cross into another clause.
+        prefix = re.split(boundary, contract_text[max(0, match.start() - 160):match.start()])[-1]
+        negations = list(re.finditer(r"\b(?:do\s+not|don't|no|without|not)\b", prefix, re.IGNORECASE))
+        if len(negations) != 1:
+            return True  # Missing or multiple/possibly double negation fails closed.
+        tail = prefix[negations[0].end():].strip()
+        if negations[0].group().lower() != "no":
+            tail = re.sub("^" + action, "", tail, count=1, flags=re.IGNORECASE).strip()
+        list_tail = SESSION_TEXT_RE.sub("SESSION_ITEM", tail)
+        if not (tail.lower() == "copied handler logic, a" or re.fullmatch(
+                r"(?:SESSION_ITEM\s*(?:,\s*|\s+(?:and|or)\b\s*))*(?:a|an|any|the)?",
+                list_tail, re.IGNORECASE)):
+            return True
+        following = contract_text[match.end():match.end() + 160]
+        clause_end = re.search(boundary, following)
+        if clause_end is None and match.end() + len(following) < len(contract_text):
+            return True  # A clipped window cannot prove a complete negative clause.
+        suffix = re.split(boundary, following, maxsplit=1)[0].strip()
+        # Only a closed negative list may follow; every unknown suffix remains
+        # positive/ambiguous (including renewed actions or permission language).
+        list_suffix = SESSION_TEXT_RE.sub("SESSION_ITEM", suffix)
+        if not (not suffix or suffix.lower() == "or another characterization testcase fixture"
+                or re.fullmatch(
+                    r"(?:\s*(?:,|and|or)\s*(?:(?:a|an|any|the)\s+)?SESSION_ITEM)+\s*",
+                    list_suffix, re.IGNORECASE)):
+            return True
+        if clause_end is not None and clause_end.group() == "?":
+            return True
+    return False
+
+
 def _build_live_session_context(root: Path, task: dict, sources: dict) -> dict:
     supplied, trees = _supplied_python_facts(task, sources)
     contract_text = _task_contract_text(task)
@@ -2103,7 +2144,7 @@ def _build_live_session_context(root: Path, task: dict, sources: dict) -> dict:
     elif (
         test_only
         and LIVE_PATH_RE.search(contract_text)
-        and (SESSION_TEXT_RE.search(contract_text) or adapters)
+        and (_session_text_requests_adapter(contract_text) or adapters)
     ):
         requested = True
         activation_reason = "LEGACY_HEURISTIC"

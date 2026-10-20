@@ -57,6 +57,8 @@ def test_check_and_run_reject_missing_model_context(tmp_path: Path, monkeypatch:
         raise AssertionError("proposal_cli_context must not be reached")
 
     monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    # Unit seam: this test targets readiness after generation-contract admission.
+    monkeypatch.setattr("scripts.two_site_proposal_runner._generation_contract_sha", lambda r: "a" * 64)
     monkeypatch.setattr("scripts.two_site_proposal_runner.proposal_cli_context", _trap_cli_context)
 
     with pytest.raises(ProposalError) as exc_run:
@@ -159,6 +161,8 @@ def test_live_session_closure_rejects_all_missing_symbols_before_provider(
         raise AssertionError("provider boundary must not be reached")
 
     monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    # Unit seam: this test targets readiness after generation-contract admission.
+    monkeypatch.setattr("scripts.two_site_proposal_runner._generation_contract_sha", lambda r: "a" * 64)
     monkeypatch.setattr("scripts.two_site_proposal_runner.proposal_cli_context", _trap_provider)
     with pytest.raises(ProposalError, match="missing live session context"):
         run(root, task_path, "worker", "live-session-gate-run", 60)
@@ -280,6 +284,8 @@ def test_direct_run_cannot_bypass_readiness_gate(tmp_path: Path, monkeypatch: py
         raise AssertionError("cli_identity or provider must not be reached")
 
     monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    # Unit seam: this test targets readiness after generation-contract admission.
+    monkeypatch.setattr("scripts.two_site_proposal_runner._generation_contract_sha", lambda r: "a" * 64)
     monkeypatch.setattr("scripts.two_site_proposal_runner.cli_identity", _trap_cli_probe)
 
     with pytest.raises(ProposalError) as exc:
@@ -522,6 +528,8 @@ def test_explicit_session_invalid_syntax_and_paths_block_before_provider(
         raise AssertionError("provider must not be contacted")
 
     monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    # Unit seam: this test targets readiness after generation-contract admission.
+    monkeypatch.setattr("scripts.two_site_proposal_runner._generation_contract_sha", lambda r: "a" * 64)
     monkeypatch.setattr("scripts.two_site_proposal_runner.proposal_cli_context", _trap_cli)
 
     for idx, (decl, err_msg) in enumerate(invalid_cases):
@@ -577,6 +585,8 @@ def test_explicit_session_missing_adapter_and_closure_block_before_provider(
         raise AssertionError("provider must not be contacted")
 
     monkeypatch.setattr("scripts.two_site_proposal_runner.validate_runtime_contract", lambda r: {})
+    # Unit seam: this test targets readiness after generation-contract admission.
+    monkeypatch.setattr("scripts.two_site_proposal_runner._generation_contract_sha", lambda r: "a" * 64)
     monkeypatch.setattr("scripts.two_site_proposal_runner.proposal_cli_context", _trap_cli)
 
     with pytest.raises(ProposalError, match="missing live session adapter context"):
