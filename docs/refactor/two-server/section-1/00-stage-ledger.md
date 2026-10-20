@@ -660,3 +660,6 @@ Actual CODEX Source757 `7a2554eda0ebfb00541f239e2cc6dc2b810ffc48` (parent `3da49
 Receipt `inventory/recent-characterization-trade-read-prequery-accounting-757.json`, SHA256 `02ac0a5a3540b314bfbec994f8318e5c839651c0451a57308b7fa32edd1de9be`, binds exact Source/peer/three seeds/selectors and limits. Appending only its manifest source proposes exact3 additions/no removals:135+258=393/465,72 remaining, only after this separate758R scoped nonauthor/Root PRE+POST/clean acceptance/normal+fresh gate. Before then390/75 remains authoritative; no own future receipt or commit is asserted.
 
 This metadata adds zero behavior. Preserve `units_since_reconciliation=1`, historical751/recovery counters and deferrals, `PARTIAL`,24 origin cells/two High blockers OPEN and no Stage/health/CP/startup/Provider authority.
+
+### 766 A2 — partial reconciliation
+On exact A2 acceptance, `inventory/recent-characterization-business-766-a2.json` reconciles2/5 Sources;3 remain. Preserve pending_five=units_since_reconciliation=5,393/465 and both High/24origins OPEN. No sixth behavior before B3/full closeout.

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-BUSINESS-20261020-766B",
+  "inspected_head": "04da954fcecbff479528f89f33e4ce38a6a24fb2",
+  "status": "PARTIAL_RECONCILIATION",
+  "records": [
+    {
+      "last_commit": "d98b10a814afb526b2fdd1a8a574df78b1fe5aaa",
+      "path": "tests/test_p1_00b_characterization_admin_market_recipient_lookup_failure.py",
+      "seed_ids": [
+        "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-MARKET-MESSAGE-L204"
+      ],
+      "sha256": "2ccd8414cc20cd4ab5446181fe9bbd7225fa17ed2aa9b9cf0f2c07d61ced5f7a",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_admin_market_recipient_lookup_failure.py::AdminMarketRecipientLookupFailureTests::test_recipient_lookup_exception_precedes_creation_and_all_downstream"
+      ]
+    },
+    {
+      "last_commit": "ddd56726517728d9fe50404a3ee99692f4645d6f",
+      "path": "tests/test_p1_00b_characterization_notification_delete_select_failure.py",
+      "seed_ids": [
+        "API-NOTIFY-DELETE-NOTIFICATIONS-DELETE-NOTIFICATION-L362"
+      ],
+      "sha256": "5110923ebc4403bd1ae136caea6290ae965c980163b59d41164b0c104b063bc4",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_delete_select_failure.py::NotificationDeleteSelectFailureTests::test_select_builder_exception_precedes_database_and_unread_sync"
+      ]
+    }
+  ],
+  "source_acceptances": [
+    {
+      "commit": "d98b10a814afb526b2fdd1a8a574df78b1fe5aaa",
+      "parent": "2d1fbb30c23b8c7370dc0d5ac7e726aa93a6fded",
+      "root_observation": "AE03_766B_ROOT_GENUINE_MAIN_WORK_ACCEPTED_OBSERVED_20261020.json",
+      "root_observation_sha256": "50cbb361377a7f009f754eb20067f7ad0457fedb280ff3d0926902761d16fa14",
+      "actual_exit_code": 2,
+      "exit_qualification": "Expected normal one-cycle CONTINUE exit2; not exit0.",
+      "fresh_exit_code": 0,
+      "worker_run_id": "p1-00b-market-recipient-lookup-766b-c001-worker-0",
+      "worker_result_sha256": "4bae8e7f6bc9b5ea8a967dbe071f391e32d7bb9e490ea967ba766b009394119d",
+      "reviewer_run_id": "p1-00b-market-recipient-lookup-766b-c001-reviewer-0",
+      "reviewer_result_sha256": "0707e4e9e5555629ff0d42840c7d8c9dee2425115bb5d9396841468b704d0963",
+      "native_passed": 150,
+      "native_warnings": 179
+    },
+    {
+      "commit": "ddd56726517728d9fe50404a3ee99692f4645d6f",
+      "parent": "d98b10a814afb526b2fdd1a8a574df78b1fe5aaa",
+      "root_observation": "AE03_766A_ROOT_BUSINESS_ACCEPT_CHECKPOINT_OBSERVED_20261020.json",
+      "root_observation_sha256": "8a52fc706e3fef9b04b630767556748003176ca72ab737f071f107fa0e1c98d3",
+      "actual_exit_code": 0,
+      "fresh_exit_code": 0,
+      "worker_run_id": "p1-00b-notify-delete-select-766b-c001-worker-0",
+      "worker_result_sha256": "ce3cd593c2635b68c292b76478a2a2608dc1f5bd3216e0ca93528a6ef298e14e",
+      "reviewer_run_id": "p1-00b-notify-delete-select-766b-r001-reviewer-0",
+      "reviewer_result_sha256": "d4b393b3781cbf49681c14a271cbf905db5a62bb32be54a6332f7de932d9ebe1",
+      "native_passed": 145,
+      "native_warnings": 179,
+      "preserved_failure": "Original Reviewer0 failed; later distinct genuine r001 accepted. Never call failed role successful or replay it."
+    }
+  ],
+  "pending_group": {
+    "total_behavior_units": 5,
+    "units_since_reconciliation": 5,
+    "pending_five": 5,
+    "reconciled_behavior_units": 2,
+    "remaining_behavior_units": 3,
+    "accepted_source_commits": [
+      "d98b10a814afb526b2fdd1a8a574df78b1fe5aaa",
+      "ddd56726517728d9fe50404a3ee99692f4645d6f",
+      "01e83855551f197f37cff6da995b2620c4b57fee",
+      "b0e945815611bd4b69943ce9a6aa1bbfca2ec8c7",
+      "04da954fcecbff479528f89f33e4ce38a6a24fb2"
+    ],
+    "remaining_behavior_sources": [
+      {
+        "commit": "01e83855551f197f37cff6da995b2620c4b57fee",
+        "path": "tests/test_p1_00b_characterization_trade_my_page_signature_failure.py",
+        "scenario": "my-trade-page-signature-exception"
+      },
+      {
+        "commit": "b0e945815611bd4b69943ce9a6aa1bbfca2ec8c7",
+        "path": "tests/test_p1_00b_characterization_trade_with_user_page_signature_failure.py",
+        "scenario": "with-user-trade-page-signature-exception"
+      },
+      {
+        "commit": "04da954fcecbff479528f89f33e4ce38a6a24fb2",
+        "path": "tests/test_p1_00b_characterization_trade_with_user_page_self_target.py",
+        "scenario": "with-user-trade-page-self-target-empty"
+      }
+    ]
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 258,
+    "evidenced_seed_count": 393,
+    "remaining_seed_count": 72,
+    "expected_seed_count": 465
+  },
+  "seed_accounting": {
+    "pre_reconciled_seed_ids": [
+      "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-MARKET-MESSAGE-L204"
+    ],
+    "eligible_uncredited_seed_ids": [
+      "API-NOTIFY-DELETE-NOTIFICATIONS-DELETE-NOTIFICATION-L362"
+    ],
+    "new_seed_credit_from_A2": 0,
+    "manifest_path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    "manifest_sha256": "b120bb02097b68c9afa138c95e823860754e65c49212df94335ba4d65a1c944e",
+    "registered_in_manifest": false,
+    "qualification": "A2 is partial inventory reconciliation, not canonical seed admission. GateB may append this actual accepted packet and its three-Source companion to the existing manifest only after independent live-union membership/handler assertions review and exact acceptance. Notification L362 is eligible remaining membership, not permanently zero-credit."
+  },
+  "reconciliation_policy": {
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "global_reconciliation_complete": false,
+    "requires_remaining_three_source_reconciliation": true,
+    "source_acceptance_counters_not_reset": true,
+    "accounting_proposal_has_own_acceptance_proof": false
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "unresolved_origin_cells": 24,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "closures_authorized": false,
+  "evidence_limits": [
+    "Direct real-handler early-failure assertions only; no HTTP/Depends/authentication, real database persistence, external delivery, origin or full-seed proof.",
+    "Historical native counts are retained Source witnesses, not this Task's native execution. Neither test-count nor scenario-count creates distinct seed membership.",
+    "This proposed partial packet and ledger pointer assert no own future commit, receipt, acceptance, lifecycle update, Stage/High closure, runtime health or measured savings."
+  ]
+}
