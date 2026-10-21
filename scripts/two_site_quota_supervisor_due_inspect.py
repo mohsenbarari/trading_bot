@@ -57,7 +57,9 @@ def inspect_durable_quota_wait_due_locked(
             "expected repository does not match pending rescope intent repository"
         )
 
-    due_result = evaluate_initial_wait_check(wait_record, expected, now_utc)
+    from scripts.two_site_quota_wait_storage import read_unknown_health_checks
+    checks = read_unknown_health_checks(root, controller_run_id, expected)
+    due_result = evaluate_initial_wait_check(wait_record, expected, now_utc, health_checks=checks)
     return {
         "controller_run_id": controller_run_id,
         "due": due_result,

@@ -22,6 +22,8 @@ def evaluate_initial_wait_check(
     record: object,
     expected: object,
     now_utc: object,
+    *,
+    health_checks: object = None,
 ) -> dict[str, Any]:
     """Pure, observational evaluation of an initial quota wait record.
 
@@ -56,6 +58,33 @@ def evaluate_initial_wait_check(
     except Exception as exc:
         raise WaitDueError(f"Schedule timestamp parsing failed: {exc}") from exc
 
+    checked_count = None
+    if health_checks is not None:
+        if type(health_checks) is not list or len(health_checks) > 5:
+            raise WaitDueError("invalid bounded health observation chain")
+        if reset_kind == "QUOTA_RESET_UNKNOWN":
+            from datetime import timedelta
+            checked_count = len(health_checks)
+            prior = parsed_created
+            for index, check in enumerate(health_checks):
+                if type(check) is not dict or check.get("ordinal") != index + 1:
+                    raise WaitDueError("invalid health observation sequence")
+                parsed = _parse_utc_iso(check["checked_at_utc"])
+                if parsed < prior + timedelta(minutes=(15, 30, 60, 120, 240)[index]):
+                    raise WaitDueError("health observation chronology mismatch")
+                prior = parsed
+            if parsed_now < prior:
+                return {"schema_version": 1, "state": "CLOCK_REGRESSION",
+                        "next_check_at_utc": prior.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "health_checks_completed": checked_count,
+                        "health_checks_remaining": 5 - checked_count}
+            if checked_count == 5:
+                return {"schema_version": 1, "state": "UNKNOWN_HEALTH_CHECKS_EXHAUSTED",
+                        "next_check_at_utc": None, "health_checks_completed": 5,
+                        "health_checks_remaining": 0}
+            parsed_next = prior + timedelta(minutes=(15, 30, 60, 120, 240)[checked_count])
+            next_check_at_utc = parsed_next.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     if parsed_now < parsed_created:
         state = "CLOCK_REGRESSION"
     elif parsed_now < parsed_next:
@@ -68,8 +97,7 @@ def evaluate_initial_wait_check(
         else:
             raise WaitDueError(f"Unsupported schedule reset_kind: {reset_kind!r}")
 
-    return {
-        "schema_version": 1,
-        "state": state,
-        "next_check_at_utc": next_check_at_utc,
-    }
+    result = {"schema_version": 1, "state": state, "next_check_at_utc": next_check_at_utc}
+    if checked_count is not None:
+        result.update(health_checks_completed=checked_count, health_checks_remaining=5 - checked_count)
+    return result

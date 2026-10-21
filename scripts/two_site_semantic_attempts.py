@@ -193,6 +193,8 @@ def reserve_semantic_attempt(
                 or not math.isfinite(created_at)):
             raise SemanticAttemptError("invalid reservation time")
         identity = extract_semantic_identity(task)
+        from scripts.two_site_quota_retention import assert_not_retired
+        assert_not_retired(Path(root), fingerprint=identity['fingerprint'])
         root_path, _, attempts = _canonical_dirs(root, pipeline_dir)
         target = attempts / f"{identity['fingerprint']}.json"
         if os.path.lexists(target):

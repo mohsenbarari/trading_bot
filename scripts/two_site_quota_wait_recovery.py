@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import ExitStack
 from pathlib import Path
 import stat
 import sys
@@ -46,8 +47,9 @@ def _check_stop_absent(root: Path) -> None:
     raise WaitRecoveryError("autopilot STOP sentinel exists")
 
 
-def recover_durable_initial_wait_locked(
+def _recover_durable_initial_wait_unframed(
     root: Path,
+    history_guards: ExitStack,
 ) -> tuple[str, dict] | None:
     """Recover durable initial quota wait record under caller-held Supervisor lock.
 
@@ -68,12 +70,15 @@ def recover_durable_initial_wait_locked(
 
     _check_stop_absent(root)
 
+    pending_error = None
     try:
-        epoch_before, attempt_before, repo_before = read_pending_rescope_intent(root)
-    except WaitIntentError as exc:
-        raise WaitRecoveryError(
-            f"pending rescope intent verification failed: {exc}"
-        ) from exc
+        pending = _pending_or_lawfully_absent(root)
+    except (WaitIntentError, OSError, ValueError) as exc:
+        raise WaitRecoveryError("present pending rescope evidence is invalid") from exc
+    if pending is None:
+        pending_error = WaitIntentError("current pending rescope epoch is lawfully absent")
+    else:
+        epoch_before, attempt_before, repo_before = pending
 
     runs_dir = root / ".local" / "two-site-refactor" / "autopilot" / "runs"
     try:
@@ -107,6 +112,10 @@ def recover_durable_initial_wait_locked(
 
     runs_fd: int | None = None
     candidates: list[str] = []
+    other_runs: list[str] = []
+    validated_continuations: set[str] = set()
+    resolved_histories = 0
+    history_frame_active = False
 
     try:
         try:
@@ -216,6 +225,16 @@ def recover_durable_initial_wait_locked(
                             raise WaitRecoveryError(
                                 f"cannot inspect quota-wait.json in {entry_name!r}: {exc}"
                             ) from exc
+                        partial_resume = False
+                        if not wait_exists:
+                            for leaf in ("quota-resume-claim.json", "quota-resume-lineage-snapshot.json",
+                                         "quota-resume-submission.json", "accepted-lineage.json", "final-ack.json",
+                                         "quota-history-retirement.json", "quota-history-retirement-complete.json"):
+                                try:
+                                    os.stat(leaf, dir_fd=sub_fd, follow_symlinks=False)
+                                except FileNotFoundError:
+                                    continue
+                                partial_resume = True
                     finally:
                         if sub_fd is not None:
                             try:
@@ -227,11 +246,30 @@ def recover_durable_initial_wait_locked(
                                     ) from exc
 
                     if wait_exists:
-                        candidates.append(entry_name)
-                        if len(candidates) > 1:
-                            raise WaitRecoveryError(
-                                f"multiple wait candidates found in runs directory: {candidates}"
-                            )
+                        from scripts.two_site_quota_retention import read_final_ack_history_locked, _current_repository_guard
+                        if not history_frame_active and any(os.path.lexists(runs_dir / entry_name / leaf)
+                                for leaf in ("quota-resume-claim.json", "quota-resume-lineage-snapshot.json",
+                                             "quota-resume-submission.json", "quota-history-retirement.json",
+                                             "quota-history-retirement-complete.json")):
+                            history_guards.enter_context(_current_repository_guard(root))
+                            history_frame_active = True
+                        try:
+                            history = read_final_ack_history_locked(root, entry_name)
+                        except (KeyboardInterrupt, SystemExit):
+                            raise
+                        except Exception as exc:
+                            raise WaitRecoveryError("invalid quota history: " + entry_name) from exc
+                        if history is not None:
+                            resolved_histories += 1
+                            validated_continuations.add(history["ack"]["continuation_controller_run_id"])
+                        else:
+                            candidates.append(entry_name)
+                            if len(candidates) > 1:
+                                raise WaitRecoveryError(
+                                    f"multiple wait candidates found in runs directory: {candidates}"
+                                )
+                    elif partial_resume:
+                        other_runs.append(entry_name)
         except OSError as exc:
             raise WaitRecoveryError(
                 f"error scanning runs directory: {exc}"
@@ -270,6 +308,14 @@ def recover_durable_initial_wait_locked(
                     raise WaitRecoveryError(
                         f"cannot safely close runs directory descriptor: {exc}"
                     ) from exc
+
+    if any(other not in validated_continuations for other in other_runs):
+        raise WaitRecoveryError("orphan or partial quota history")
+    if not candidates and resolved_histories:
+        _check_stop_absent(root)
+        return None  # Observational only: never admission or permission to replay.
+    if pending_error is not None:
+        raise WaitRecoveryError("pending rescope intent verification failed") from pending_error
 
     if not candidates:
         _check_stop_absent(root)
@@ -408,3 +454,37 @@ def recover_durable_initial_wait_locked(
         raise WaitRecoveryError("repository facts drifted during recovery")
 
     return cid, record
+
+
+def _pending_or_lawfully_absent(root: Path):
+    """Keep the accepted pending-reader ABI; suppress only proved fresh absence."""
+    try:
+        return read_pending_rescope_intent(root)
+    except WaitIntentError as pending:
+        from scripts import two_site_codex_autopilot as ap
+        from scripts.two_site_quota_retention import _Pins, _bounded_names, _pin_current_repository
+        with _Pins() as pins:
+            facts = _pin_current_repository(root, pins)
+            state = root / ".local/two-site-refactor/autopilot"
+            pins.directory(state, private=True)
+            epoch = state / ap.rescope_epoch_basename(facts)
+            if os.path.lexists(epoch):
+                pins.directory(epoch, private=True)
+                if _bounded_names(epoch, 6, "current rescope epoch"):
+                    raise pending
+            pins.verify()
+            if os.path.lexists(epoch) and _bounded_names(epoch, 6, "current rescope epoch"):
+                raise WaitIntentError("current rescope epoch appeared during absence proof") from pending
+            return None
+
+
+def recover_durable_initial_wait_locked(root: Path) -> tuple[str, dict] | None:
+    if not isinstance(root, Path):
+        raise WaitRecoveryError("root must be a Path")
+    try:
+        with ExitStack() as history_guards:
+            return _recover_durable_initial_wait_unframed(root, history_guards)
+    except WaitRecoveryError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise WaitRecoveryError("current recovery custody failed") from exc

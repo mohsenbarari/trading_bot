@@ -17,7 +17,7 @@ from tests.test_two_site_provider_broker import broker_repo, make_valid_request
 
 
 def _create_isolated_queue_state(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
-    state_root = tmp_path / "broker_state"
+    state_root = tmp_path / ".local/two-site-refactor/provider-broker"
     requests = state_root / "requests"
     claimed = state_root / "claimed"
     responses = state_root / "responses"

@@ -382,6 +382,11 @@ def publish_terminal_continuation_record(root: Path, request: dict, response: di
     orig_cid = request.get("original_controller_run_id")
     if type(orig_cid) is not str or not orig_cid:
         raise TerminalContinuationStorageError("request missing original_controller_run_id")
+    from scripts.two_site_quota_retention import QuotaRetentionError, assert_not_retired
+    try:
+        assert_not_retired(root, request=request)
+    except QuotaRetentionError as exc:
+        raise TerminalContinuationStorageError("quota identity is retired or uncertain") from exc
     try:
         persisted_intent = read_quota_resume_submission_intent(root, orig_cid, request)
     except Exception:

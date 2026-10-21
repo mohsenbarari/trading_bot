@@ -2,6 +2,7 @@
 """Hermetic tests for durable quota wait supervisor due inspection."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -74,8 +75,14 @@ def test_supervisor_due_inspect_parametrized_kind(
             assert res_created["controller_run_id"] == cycle_id
             assert res_created["due"]["state"] == "NOT_DUE"
             assert res_created["due"] == evaluate_initial_wait_check(
-                rec, expected, created_at
+                rec, expected, created_at, health_checks=[]
             )
+
+            independent_created = {"schema_version": 1, "state": "NOT_DUE",
+                                   "next_check_at_utc": rec["schedule"]["next_check_at_utc"]}
+            if kind == "QUOTA_RESET_UNKNOWN":
+                independent_created.update(health_checks_completed=0, health_checks_remaining=5)
+            assert json.dumps(res_created["due"], sort_keys=True) == json.dumps(independent_created, sort_keys=True)
 
             next_check_at = rec["schedule"]["next_check_at_utc"]
             res_due = inspect_durable_quota_wait_due_locked(root, next_check_at)
@@ -83,8 +90,13 @@ def test_supervisor_due_inspect_parametrized_kind(
             assert res_due["controller_run_id"] == cycle_id
             assert res_due["due"]["state"] == expected_due_state
             assert res_due["due"] == evaluate_initial_wait_check(
-                rec, expected, next_check_at
+                rec, expected, next_check_at, health_checks=[]
             )
+            independent_due = {"schema_version": 1, "state": expected_due_state,
+                               "next_check_at_utc": next_check_at}
+            if kind == "QUOTA_RESET_UNKNOWN":
+                independent_due.update(health_checks_completed=0, health_checks_remaining=5)
+            assert json.dumps(res_due["due"], sort_keys=True) == json.dumps(independent_due, sort_keys=True)
 
 
 def test_supervisor_due_inspect_before_wait_returns_none() -> None:

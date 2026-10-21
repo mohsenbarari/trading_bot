@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
+import sys
 import hashlib
 import json
 import math
@@ -101,6 +104,58 @@ class ContinuationAdmissionError(BrokerError):
     """Raised when quota continuation request admission validation fails."""
 
 
+_NORMAL_PIPELINE_ROOT: ContextVar[Path | None] = ContextVar("two_site_normal_pipeline_root", default=None)
+_LEGACY_PIPELINE = Path(".local/two-site-refactor")
+_NORMAL_PIPELINE = _LEGACY_PIPELINE / "pipeline"
+
+
+def _check_admission_module_identity() -> None:
+    canonical = sys.modules.get("scripts.two_site_quota_continuation_admission")
+    bare = sys.modules.get("two_site_quota_continuation_admission")
+    if canonical is not None and bare is not None and canonical is not bare:
+        raise ContinuationAdmissionError("duplicate canonical/bare admission modules")
+
+
+def quota_semantic_directory(root: Path, pipeline_dir: Path | str = _LEGACY_PIPELINE) -> Path:
+    """Resolve the fixed execution profile; never infer a profile from files."""
+    _check_admission_module_identity()
+    canonical = canonical_root(root)
+    active = _NORMAL_PIPELINE_ROOT.get()
+    if active is None:
+        return Path(pipeline_dir)
+    if canonical != active:
+        raise ContinuationAdmissionError("NORMAL semantic context belongs to another root")
+    supplied = Path(pipeline_dir)
+    if supplied not in {_LEGACY_PIPELINE, _NORMAL_PIPELINE,
+                        active / _LEGACY_PIPELINE, active / _NORMAL_PIPELINE}:
+        raise ContinuationAdmissionError("unknown semantic directory inside NORMAL context")
+    return _NORMAL_PIPELINE
+
+
+@contextmanager
+def normal_pipeline_context(root: Path):
+    """Bind the whole synchronous normal Broker/Supervisor call to NORMAL."""
+    _check_admission_module_identity()
+    canonical = canonical_root(root)
+    active = _NORMAL_PIPELINE_ROOT.get()
+    if active is not None and active != canonical:
+        raise ContinuationAdmissionError("cross-root NORMAL context nesting")
+    token = _NORMAL_PIPELINE_ROOT.set(canonical)
+    primary = None
+    try:
+        yield
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            _NORMAL_PIPELINE_ROOT.reset(token)
+        except BaseException as cleanup:
+            if primary is not None:
+                raise primary from cleanup
+            raise
+
+
 def _type_sensitive_equal(a: Any, b: Any) -> bool:
     if type(a) is not type(b):
         return False
@@ -187,6 +242,13 @@ def validate_quota_continuation_request(
 
     if type(request) is not dict:
         raise ContinuationAdmissionError(f"request must be dict, got {type(request).__name__}")
+
+    pipeline_dir = quota_semantic_directory(c_root, pipeline_dir)
+    from scripts.two_site_quota_retention import QuotaRetentionError, assert_not_retired
+    try:
+        assert_not_retired(c_root, request=request)
+    except QuotaRetentionError as exc:
+        raise ContinuationAdmissionError("quota identity is retired or uncertain") from exc
 
     req_keys = set(request.keys())
     if req_keys != _REQUEST_KEYS:

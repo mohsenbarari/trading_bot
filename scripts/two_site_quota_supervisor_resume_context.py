@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,16 @@ from scripts.two_site_proposal_runner import (
     bounded_file_bytes,
     load_task,
 )
-from scripts.two_site_provider_broker import _task_relative_path
+from scripts.two_site_provider_broker import (
+    _task_relative_path, _open_existing_cycle_run_directory, canonical_root,
+)
+from scripts.two_site_quota_resume_claim_request import ClaimRequestError
+from scripts.two_site_quota_resume_claim_storage import QUOTA_RESUME_CLAIM_FILENAME
 from scripts.two_site_quota_wait_due import evaluate_initial_wait_check
 from scripts.two_site_quota_wait_intent import read_pending_rescope_intent
-from scripts.two_site_quota_wait_recovery import recover_durable_initial_wait_locked
+from scripts.two_site_quota_wait_recovery import (
+    recover_durable_initial_wait_locked, _check_stop_absent,
+)
 from scripts.two_site_quota_wait_sources import collect_initial_wait_source_expected
 from scripts.two_site_quota_wait_storage import read_initial_wait_record_bytes
 from scripts.two_site_semantic_attempts import read_existing_semantic_attempt
@@ -26,6 +33,36 @@ __all__ = ["ResumeContextError", "collect_known_reset_resume_context_locked",
 
 class ResumeContextError(ValueError):
     """Raised when supervisor resume context collection fails."""
+
+
+def _reject_existing_resume_claim_locked(root: Path, controller_run_id: str) -> None:
+    """Deny duplicate intent only; a claim never establishes resolved history."""
+    if canonical_root(root) != root:
+        raise ResumeContextError("root must be exact canonical path")
+
+    def check_stop() -> None:
+        _check_stop_absent(root)
+        try:
+            (root / "STOP").lstat()
+        except FileNotFoundError:
+            return
+        raise ResumeContextError("root STOP sentinel exists")
+
+    check_stop()
+    try:
+        with _open_existing_cycle_run_directory(root, controller_run_id) as (_, run_fd, verify_identity):
+            try:
+                verify_identity()
+                try:
+                    os.stat(QUOTA_RESUME_CLAIM_FILENAME, dir_fd=run_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise ClaimRequestError("quota resume claim already exists; refusing duplicate continuation")
+            finally:
+                verify_identity()
+    finally:
+        check_stop()
 
 
 def collect_known_reset_resume_context_locked(
@@ -42,6 +79,7 @@ def collect_known_reset_resume_context_locked(
         raise ResumeContextError("claimed_at_utc must be a non-empty string")
 
     try:
+        _reject_existing_resume_claim_locked(root, original_controller_run_id)
         recovery = recover_durable_initial_wait_locked(root)
         if recovery is None:
             raise ResumeContextError("no active durable initial wait")
@@ -116,7 +154,8 @@ def collect_known_reset_resume_context_locked(
         if task_bytes_again != task_bytes_initial:
             raise ResumeContextError("task file changed during load_task")
 
-        pipeline_dir = root / ".local" / "two-site-refactor"
+        from scripts.two_site_quota_continuation_admission import quota_semantic_directory
+        pipeline_dir = quota_semantic_directory(root)
         semantic_attempt = read_existing_semantic_attempt(root, pipeline_dir, task, run_prefix)
 
         if not isinstance(task, dict) or "task_id" not in task:
@@ -140,7 +179,7 @@ def collect_known_reset_resume_context_locked(
             "expected_task_id": expected_task_id,
             "due": deepcopy(due),
         }
-    except (KeyboardInterrupt, SystemExit, ResumeContextError):
+    except (KeyboardInterrupt, SystemExit, ResumeContextError, ClaimRequestError):
         raise
     except Exception as exc:
         raise ResumeContextError(f"failed collecting resume context: {exc}") from exc

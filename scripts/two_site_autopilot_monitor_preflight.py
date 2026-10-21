@@ -72,7 +72,7 @@ def _quota_wait_preflight_locked(root: Path, state_root: Path, repo: dict) -> tu
     due = inspect_durable_quota_wait_due_locked(root, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     if type(due) is not dict or due.get("controller_run_id") != original:
         return False, "QUOTA_WAIT_BLOCKED"
-    if due["due"]["state"] != "KNOWN_RESET_REVALIDATION_DUE":
+    if due["due"]["state"] not in {"KNOWN_RESET_REVALIDATION_DUE", "UNKNOWN_BACKOFF_REVIEW_DUE"}:
         return False, "QUOTA_NOT_DUE"
     if os.path.lexists(root / STOP_FILENAME) or os.path.lexists(state_root / STOP_FILENAME):
         return False, "STOP_PRESENT"

@@ -29,6 +29,26 @@ from typing import Callable, Mapping
 
 # Direct CLI and lazy quota guards must share the signal-owned Broker object.
 # Bind before any project import; never replace a previously imported module.
+def _deny_retired_quota(root: Path, request: object) -> None:
+    from scripts.two_site_quota_retention import assert_not_retired
+    try:
+        assert_not_retired(root, request=request)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise BrokerError("quota retirement denies request") from exc
+
+
+def _deny_retired_queue_request(requests: Path, source: Path) -> None:
+    from scripts.two_site_quota_retention import has_retirement_records
+    root = requests.parents[3]
+    if requests != root / STATE_REL / "requests":
+        raise BrokerError("noncanonical broker queue for retirement check")
+    if has_retirement_records(root):
+        request = _read_json_file(root, source, MAX_REQUEST_BYTES, "retirement request")
+        _deny_retired_quota(root, request)
+
+
 if __name__ == "__main__":
     _cli_module = sys.modules[__name__]
     _canonical_name = "scripts.two_site_provider_broker"
@@ -700,6 +720,7 @@ def _overall_timeout(provider_timeout: int) -> int:
 
 
 def execute_pipeline(root: Path, request: dict, task_path: Path, scope: AssignmentScope) -> dict:
+    _deny_retired_quota(root, request)
     state_root, _status_path, _requests, _claimed, _responses = broker_paths(root)
     pipeline = root / PIPELINE_REL
     if (not pipeline.is_file() or pipeline.resolve(strict=True) != pipeline
@@ -877,7 +898,11 @@ def execute_intent_bound_continuation(root: Path, request: object) -> dict:
         from two_site_quota_broker_route import (  # type: ignore[no-redef]
             execute_intent_bound_continuation as _impl,
         )
-    return _impl(root, request)
+    from scripts.two_site_quota_continuation_admission import normal_pipeline_context
+    from scripts.two_site_quota_retention import assert_not_retired
+    with normal_pipeline_context(root):
+        assert_not_retired(root, request=request)
+        return _impl(root, request)
 
 
 def _queue_names(path: Path) -> list[str]:
@@ -971,6 +996,7 @@ def _claim_next(
             if name in continuation_entries:
                 raise BrokerError("terminal continuation record already exists for request")
 
+        _deny_retired_queue_request(requests, source)
         os.replace(source, destination)
         try:
             claimed_stat = os.lstat(destination)
@@ -1128,6 +1154,7 @@ def _recover_interrupted_claims(
         request = _read_json_file(root, path, MAX_REQUEST_BYTES, "claimed broker request")
         request_id = name[:-5]
         _validate_claimed_request_shape(request, request_id)
+        _deny_retired_quota(root, request)
 
         if os.path.lexists(requests / name):
             raise BrokerError("broker request collision in requests directory")
@@ -1631,6 +1658,7 @@ def publish_terminal_quota_record(
     if evidence is None:
         raise BrokerError("terminal quota response not detected")
 
+    _deny_retired_quota(root, request)
     directory = _terminal_quota_directory(root)
     existing_entries = scan_private_record_directory(directory)
     if len(existing_entries) >= MAX_RECORD_SCAN_ENTRIES:
@@ -2820,6 +2848,7 @@ def publish_cycle_reservation(root: Path, request: dict) -> dict:
     if not isinstance(req_id, str):
         req_id = ""
     _validate_claimed_request_shape(request, req_id)
+    _deny_retired_quota(root, request)
 
     controller_run_id = request["controller_run_id"]
     if MAINTENANCE_RUN_RE.fullmatch(controller_run_id):
@@ -3146,6 +3175,7 @@ def _wait_existing_response(
 
 
 def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: bool) -> int:
+    _deny_retired_quota(root, request)
     state_root, status_path, requests, _claimed, responses = broker_paths(root)
     with exclusive_broker_lock(state_root / "client.lock"):
         status_value = _read_broker_status(root, status_path)
@@ -3267,3 +3297,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

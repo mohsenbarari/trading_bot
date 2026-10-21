@@ -40,3 +40,79 @@ The resume route is deliberately **not** implemented by the current observationa
 5. Only then run one necessary live smoke, inspect exact receipts/commit/no-duplicate outcome, and collect comparable 3/10/20-unit cohorts. Missing real quota evidence keeps the quota branch's live effect `UNKNOWN`; synthetic tests do not establish provider behavior or token savings.
 
 If any step cannot prove a unique terminal response and unchanged repository identity, hard-block the affected task while other **dependency-independent** work may continue under the approved Stage DAG. This favors a visible bounded stop over replaying an unknown effect.
+
+
+## Mandatory closeout interpretation (2026-10-20)
+
+Final-ACK histories are independently validated before active-wait cardinality.
+Original Task bytes, full original Assignment Markdown/typed digest, prequeue
+snapshot and old Git/Scope/three-ref/19-control context are historical anchors,
+never inferred acceptance from result.json and never replaced by current HEAD
+or current Scope. A wait-only result is not admission. Partial claim/snapshot/
+submission, missing receipt, orphan lineage/ACK, corruption/link/drift or
+ambiguous custody fails closed without replay. Current repository checks remain
+separate drift guards. COMPLETE/no-change requires null commit/actors/proposal;
+CONTINUE requires the exact independently reviewed scoped child commit.
+
+UNKNOWN intervals 15/30/60/120/240 minutes are LOCAL HEALTH CHECKS, not Provider
+probes or replay/resume permission. Keep the original 15-key wait and immutable
+initial schedule/budgets unchanged. At most five contiguous, canonical,
+no-overwrite quota-unknown-health-{1..5}.json observations bind original wait
+SHA, ordinal, predecessor digest, checked UTC and LOCAL_BINDINGS_UNCHANGED.
+Advance from each actual durable observation; a late tick never catches up.
+The Monitor remains read-only. QUOTA_READY admits only the existing opt-in
+Supervisor branch, which independently rechecks repository/STOP/claim/due
+bindings, publishes one local observation and returns BEFORE allocation,
+Coordinator, claim, or Provider. Exhaustion is visible, not a sixth permission.
+
+The existing NORMAL Broker façade and standing Supervisor review context bind
+the complete synchronous callback lifetime to one root-bound ContextVar owned
+by continuation_admission. NORMAL always selects B/pipeline, including legacy
+explicit B forwarding; unsupported roots/namespaces and distinct canonical/
+bare admission modules are errors. Same-root nesting resets in finally under
+BaseException. Outside NORMAL, existing legacy B default/explicit APIs remain.
+No copied reservations, root fallback, environment mode, shared-SDK mutation,
+second owner, service or replay authority is introduced. History/pruner use
+explicit historical profiles, never ambient execution permission.
+
+The separately approved C4c extension is normative for irreversible history
+supersession and receipt-only maintenance. Preserve every retained anchor and
+semantic reservation. Certified pending/complete histories remain distinct and
+execution-denied; runtime never reconciles a deletion. Root release is explicit
+protected-namespace publication authority, not cryptographic authenticity
+against privileged filesystem replacement. A terminal ACK or file absence
+alone never authorizes maintenance, Provider, claim, stage, replay or budget reset.
+
+
+### UNKNOWN-only publication durability reconciliation (R3 closeout)
+
+The existing PID-named codec temporary leaf is retained through the FIRST
+successful run-directory fsync for an UNKNOWN observation. A visible target
+with its strict same-inode temporary alias is pending local durability, not a
+completed check. A bounded read-only reader validates the canonical row, exact
+wait/predecessor/ordinal/time bindings, alias grammar, regular 0600 owned inode,
+link count, descriptor/path identity and complete chain, but returns only the
+previous durable prefix. It never fsyncs, unlinks, publishes or advances a
+schedule. Malformed/duplicate/drifting aliases fail closed.
+
+Only the existing independently revalidated Supervisor owner may reconcile
+that SAME ordinal: preserve its original bytes and checked UTC, establish the
+no-overwrite target if absent, fsync the held file and target directory while
+the alias remains, then unlink the alias, fsync its cleanup and strictly read
+back. Persistent FIRST directory-fsync failure retains the alias and counts
+zero; success counts exactly once. No new check is appended in that launch.
+A cleanup/readback failure after established target durability is distinguishable
+from FIRST-fsync failure and may be independently validated, never reset.
+
+Only the typed, strictly revalidated pending-durability condition may preserve
+the existing WAITING_QUOTA display so read-only Monitor can admit the same
+Supervisor for local reconciliation. Fresh repository/Scope/ref/control/STOP,
+wait, claim-absence and complete-chain checks still precede that display.
+Generic I/O, close, fingerprint, malformed-row, alias or STOP faults remain
+hard failures; display is never execution authority. Initial wait and retirement
+publication ABIs are unchanged. This introduces no journal, status authority,
+new owner, replay permission or Provider probe.
+
+Readback I/O/close/fingerprint errors propagate as hard failures even when a
+later independent read can observe the already durable prefix. They are not
+the typed FIRST-fsync pending condition and cannot soften display admission.
