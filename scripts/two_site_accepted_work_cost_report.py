@@ -12,9 +12,10 @@ from scripts.two_site_accepted_work_evidence import _EvidenceFilesError, _copy_f
 from scripts.two_site_accepted_work_proofs import _Collector, _AcceptedWorkProofError, _FATAL
 from scripts.two_site_accepted_work_snapshot import _proof_snapshot, _EvidenceSnapshotError
 from scripts.two_site_work_cost_rows import normalize_work_cost_row
+from scripts.two_site_cycle_metrics import _execution_observation
 from scripts.two_site_work_cost_report import summarize_work_lineage_ledger
 
-__all__ = ["AcceptedWorkCostReportError", "summarize_accepted_work"]
+__all__ = ["AcceptedWorkCostReportError", "summarize_accepted_work", "summarize_accepted_work_measurements"]
 
 _ERRORS = _FATAL | {"INVALID_WINDOW"}
 _CODEX = ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens")
@@ -87,6 +88,80 @@ def _normalize(value):
         if type(dimensions["finished_at"]) is float and dimensions["finished_at"] == 0:
             dimensions["finished_at"] = 0.0
     return row
+
+
+_PCOUNTS = ("attempts", "worker_attempts", "reviewer_attempts", "failed_attempts",
+            "successful_correction_rounds")
+_PFIELDS = _PCOUNTS + ("first_pass", "repeated_blocked")
+_REWORK = ("NONE", "REVIEWER_CHANGES_REQUIRED", "ATTEMPT_BLOCKED",
+           "POST_REVIEW_CORRECTION", "MIXED", "UNCLASSIFIED_REWORK", "UNKNOWN")
+_INITIAL = ("FIRST_PASS", "REVIEWER_CHANGES_REQUIRED", "ATTEMPT_BLOCKED",
+            "POST_REVIEW_CORRECTION", "UNCLASSIFIED_REWORK", "UNKNOWN")
+_TERMINAL = ("VERIFIED", "ATTEMPT_BLOCKED", "NO_VERIFIED_CHAIN")
+_KINDS = ("active", "quota_wait", "planned_stop")
+
+
+def _provider_measurements(raw):
+    """Only complete fixed structural counters; no inferred retries or quality."""
+    result = {key: None for key in _PFIELDS}
+    result["rework_taxonomy"] = None
+    if type(raw) is not dict or type(raw.get("state")) is not str or raw.get("state") not in (
+            "OBSERVED_CONTROLLER_ATTEMPTS", "OBSERVED_MATCHING_ATTEMPTS"):
+        return result
+    values = [raw.get(key) for key in _PCOUNTS]
+    if (any(type(value) is not int or not 0 <= value <= 32 for value in values)
+            or values[0] == 0 or values[0] != values[1] + values[2]
+            or values[3] > values[0] or values[4] > values[1]):
+        return result
+    first = raw.get("first_pass")
+    if first is not None and type(first) is not bool:
+        return result
+    if first is True and (values != [2, 1, 1, 0, 0]):
+        return result
+    result.update(zip(_PCOUNTS, values))
+    result.update(first_pass=first, repeated_blocked=values[3] >= 2)
+    taxonomy = raw.get("rework_taxonomy")
+    if (type(taxonomy) is dict and set(taxonomy) == {
+            "state", "initial_outcome", "rework_path", "terminal_outcome"}
+            and all(type(taxonomy[key]) is str for key in taxonomy)
+            and taxonomy["state"] == "OBSERVED" and taxonomy["initial_outcome"] in _INITIAL
+            and taxonomy["rework_path"] in _REWORK and taxonomy["terminal_outcome"] in _TERMINAL):
+        result["rework_taxonomy"] = dict(taxonomy)
+    return result
+
+
+def _measurement_projection(raw):
+    if type(raw) is not dict:
+        return None
+    provider = raw.get("provider_metrics")
+    provider = provider if type(provider) is dict else {}
+    # Compare complete typed raw projections, not Python bool==int or a digest.
+    return _canonical({
+        "observation_present": "execution_observation" in raw,
+        "observation": raw.get("execution_observation"),
+        "provider": {key: {"present": key in provider, "value": provider.get(key)} for key in
+                     ("state", *_PCOUNTS, "first_pass", "rework_taxonomy")},
+    })
+
+
+def _coverage(items):
+    total = Fraction(0)
+    observed = unknown = conflicts = 0
+    for state, value in items:
+        if state == "CONFLICT":
+            conflicts += 1
+        elif value is None:
+            unknown += 1
+        else:
+            observed += 1
+            total += value
+    return {"observed_group_count": observed, "unknown_group_count": unknown,
+            "conflict_group_count": conflicts, "observed_subtotal": _rational(total),
+            "full_total": _rational(total) if observed and not unknown and not conflicts else None}
+
+
+def _as_fraction(value):
+    return Fraction(value["numerator"], value["denominator"]) if value is not None else None
 
 
 class _Costs:
@@ -191,8 +266,9 @@ def _hex(value, length):
 
 
 class _Report:
-    def __init__(self, snapshot, window):
+    def __init__(self, snapshot, window, measurements=False):
         self.snapshot, self.window = snapshot, window
+        self.measurements = measurements
         self.owner = snapshot._files
         self.limits = set(_ALWAYS)
 
@@ -299,6 +375,129 @@ class _Report:
         except (MemoryError, RecursionError):
             raise _EvidenceFilesError("COUNT_LIMIT") from None
 
+    def _measurements(self, records, groups, cost_rows, denominator, allocation, count):
+        rows, spans, overlaps = [], [], set()
+        limits = {"RETAINED_WINDOW_OBSERVATIONS_ONLY", "UTC_ENDPOINTS_NOT_CLOCK_AUTHORITY",
+                  "NO_TYPED_RETRY_CAUSE_ESCAPE_EVIDENCE"}
+        any_conflict = False
+        for group, cost in zip(groups, cost_rows):
+            self.tick()
+            ordinals = group["ordinals"]
+            projections = [_measurement_projection(records[index]) for index in ordinals]
+            conflict = any(item != projections[0] for item in projections)
+            any_conflict |= conflict
+            raw = records[ordinals[0]]
+            run = group["run"]
+            observation = _execution_observation(raw.get("execution_observation"), run) if type(raw) is dict else None
+            provider = _provider_measurements(raw.get("provider_metrics")) if type(raw) is dict else _provider_measurements(None)
+            states, values = {}, {}
+            for kind in _KINDS:
+                pair = observation[kind] if observation else None
+                state, value = "UNOBSERVED", None
+                if conflict:
+                    state = "CONFLICT"
+                elif type(raw) is dict and "execution_observation" in raw and observation is None:
+                    state = "INVALID_OBSERVATION"
+                elif pair is not None:
+                    if pair["end_utc_ns"] is None:
+                        state = "OPEN_INTERVAL"
+                    elif pair["end_utc_ns"] == pair["start_utc_ns"] and pair["end_monotonic_ns"] > pair["start_monotonic_ns"]:
+                        state = "UNLOCATABLE_INTERVAL"
+                    else:
+                        state = "OBSERVED"
+                        value = Fraction(pair["end_monotonic_ns"] - pair["start_monotonic_ns"], 1_000_000_000)
+                        if pair["end_utc_ns"] > pair["start_utc_ns"]:
+                            spans.append((pair["start_utc_ns"], pair["end_utc_ns"], len(rows), kind))
+                        if self.window is not None and not (
+                                self.window["start_utc"] * 1_000_000_000 <= pair["start_utc_ns"]
+                                and pair["end_utc_ns"] <= self.window["end_utc"] * 1_000_000_000):
+                            state, value = "WINDOW_BOUNDARY_UNVERIFIED", None
+                states[kind], values[kind] = state, value
+            # Only these three kinds share a validated run-local clock domain.
+            if observation is not None and not conflict:
+                for position, kind in enumerate(_KINDS):
+                    first = observation[kind]
+                    if first is None or first["end_monotonic_ns"] is None:
+                        continue
+                    for other_kind in _KINDS[position + 1:]:
+                        self.tick()
+                        other = observation[other_kind]
+                        if other is not None and other["end_monotonic_ns"] is not None and max(
+                                first["start_monotonic_ns"], other["start_monotonic_ns"]) < min(
+                                first["end_monotonic_ns"], other["end_monotonic_ns"]):
+                            overlaps.update(((len(rows), kind), (len(rows), other_kind)))
+            if conflict:
+                provider = _provider_measurements(None)
+            rows.append({"metrics_ordinals": list(ordinals), "window_state": cost["window_state"],
+                         "state": "CONFLICT" if conflict else "OBSERVATIONAL",
+                         "timing_states": states, "timing_seconds": values, "provider": provider})
+        # Full history participates: window filtering cannot conceal overlap.
+        previous = None
+        for span in sorted(spans):
+            self.tick()
+            if previous is not None and span[0] < previous[1]:
+                overlaps.update(((span[2], span[3]), (previous[2], previous[3])))
+            if previous is None or span[1] > previous[1]:
+                previous = span
+        for index, kind in overlaps:
+            rows[index]["timing_states"][kind] = "OVERLAPPING_INTERVALS"
+            rows[index]["timing_seconds"][kind] = None
+        selected = [row for row in rows if row["window_state"] == "SELECTED"]
+        timing = {kind + "_seconds": _coverage(
+            (row["state"], row["timing_seconds"][kind]) for row in selected) for kind in _KINDS}
+        calendar = Fraction(self.window["end_utc"] - self.window["start_utc"]) if self.window else None
+        timing["calendar_seconds"] = _rational(calendar) if calendar is not None else None
+        provider = {}
+        for key in _PFIELDS:
+            items = []
+            for row in selected:
+                self.tick()
+                value = row["provider"][key]
+                items.append((row["state"], Fraction(int(value)) if value is not None else None))
+            provider[key] = _coverage(items)
+        rework = dict.fromkeys(_REWORK, 0)
+        rework_unknown = 0
+        for row in selected:
+            self.tick()
+            taxonomy = row["provider"]["rework_taxonomy"]
+            if taxonomy is None:
+                rework_unknown += 1
+            else:
+                rework[taxonomy["rework_path"]] += 1
+        provider["rework_paths"] = {"observed_group_count": sum(rework.values()),
+                                   "unknown_group_count": rework_unknown, "counts": rework}
+        gate = denominator == "COMPLETE_RETAINED_WINDOW" and allocation == "COMPLETE" and count > 0 and not any_conflict
+        def divided(bucket, divisor):
+            value = _as_fraction(bucket["full_total"])
+            return _rational(value / divisor) if gate and value is not None and divisor else None
+        attempts = _as_fraction(provider["attempts"]["full_total"])
+        rates = {
+            "active_seconds_per_accepted_behavior": divided(timing["active_seconds"], count),
+            "accepted_behaviors_per_elapsed_day": _rational(Fraction(count * 86400) / calendar) if gate and calendar else None,
+            "provider_chain_first_pass_rate": divided(provider["first_pass"], provider["first_pass"]["observed_group_count"]),
+            "successful_corrections_per_accepted_behavior": divided(provider["successful_correction_rounds"], count),
+            "blocked_attempt_rate": divided(provider["failed_attempts"], attempts),
+            "repeated_blocked_chain_rate": divided(provider["repeated_blocked"], provider["repeated_blocked"]["observed_group_count"]),
+            "retry_rate": None, "same_cause_failure_rate": None, "review_escape_rate": None,
+        }
+        if any_conflict:
+            limits.add("CONFLICTING_MEASUREMENT_ORDINALS")
+        if overlaps:
+            limits.add("OVERLAPPING_OBSERVATIONS")
+        if any(bucket["full_total"] is None for bucket in
+               [timing[kind + "_seconds"] for kind in _KINDS] + [provider[key] for key in _PFIELDS]):
+            limits.add("INCOMPLETE_MEASUREMENT_COVERAGE")
+        for row in rows:
+            row["timing_seconds"] = {kind: _rational(value) if value is not None else None
+                                      for kind, value in row["timing_seconds"].items()}
+        return {"timing": timing, "provider": provider, "rates": rates, "rows": rows,
+                "coverage": {"selected_group_count": len(selected),
+                    "selected_raw_ordinal_count": sum(len(row["metrics_ordinals"]) for row in selected),
+                    "conflict_group_count": sum(row["state"] == "CONFLICT" for row in rows),
+                    "unsupported_rates": {key: {"observed_group_count": 0, "unknown_group_count": len(selected)}
+                                          for key in ("retry_rate", "same_cause_failure_rate", "review_escape_rate")}},
+                "limitations": sorted(limits)}
+
     def _run(self):
         collector = _Proofs(self.snapshot)
         proofs = collector.run()
@@ -382,6 +581,8 @@ class _Report:
                     ratio[channel] = {key: _rational(source[key] / count) for key in fields}
         public_events = [{**event, "accepted_at_utc": _rational(event["accepted_at_utc"])
                           if event["accepted_at_utc"] is not None else None} for event in events]
+        measurements = self._measurements(records, groups, rows, denominator,
+            costs["allocation_state"], count) if self.measurements else None
         self.snapshot._verify()
         output = {"schema_version": 1, "state": "OBSERVATIONAL_ACCEPTED_WORK_COSTS", "snapshot": self.snapshot._metadata(),
             "window": {"kind": "RETAINED_FULL" if self.window is None else "UTC_HALF_OPEN",
@@ -397,6 +598,9 @@ class _Report:
                 "state": "HISTORICAL_TIMING_UNVERIFIED"}, "token_per_accepted_behavior": ratio,
             "billing_savings": None, "value_state": "NOT_ESTABLISHED", "cohort_comparability": "NOT_ESTABLISHED",
             "limitations": sorted(self.limits)}
+        if self.measurements:
+            output.update(schema_version=2, state="OBSERVATIONAL_ACCEPTED_WORK_MEASUREMENTS",
+                          measurements=measurements)
         # Reserve the owner's seven-digit8M maximum for its final identity drain.
         encoded_size = len(_canonical(output).encode("utf-8"))
         counter_growth = 7 - len(str(output["snapshot"]["bytes_read"]))
@@ -406,12 +610,12 @@ class _Report:
         return copy.deepcopy(output)
 
 
-def summarize_accepted_work(root, *, window=None):
-    """Report corroborated retained work/costs after ONE successful owner exit."""
+def _summarize(root, window, measurements):
+    """One invocation/owner; v1 and v2 never call each other."""
     selected_window = _window(window)
     try:
         with _proof_snapshot(root) as snapshot:
-            result = snapshot._invoke(lambda: _Report(snapshot, selected_window).run())
+            result = snapshot._invoke(lambda: _Report(snapshot, selected_window, measurements).run())
         # Final verification adds bytes, not files/objects; no I/O after close.
         result["snapshot"]["bytes_read"] = snapshot._files._bytes_read
         return result
@@ -419,3 +623,13 @@ def summarize_accepted_work(root, *, window=None):
         pending = AcceptedWorkCostReportError(error.code)
         _copy_fixed_notes(error, pending, _ERRORS)
         raise pending from None
+
+
+def summarize_accepted_work(root, *, window=None):
+    """Unchanged v1 retained accepted-work costs after normal owner exit."""
+    return _summarize(root, window, False)
+
+
+def summarize_accepted_work_measurements(root, *, window=None):
+    """Schema2 prospective observations with explicit per-field coverage."""
+    return _summarize(root, window, True)

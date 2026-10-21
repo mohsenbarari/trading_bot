@@ -1,6 +1,8 @@
 """Small bounded telemetry, not an acceptance gate or billing statement."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+import copy
 import json
 import math
 import os
@@ -8,6 +10,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 
 try:
     from scripts.two_site_proposal_runner import (
@@ -441,6 +444,120 @@ def work_lineage(value: object) -> dict[str, object] | None:
     }
 
 
+# Optional v1 observation: operational elapsed time, never state authority.
+_OBSERVATION_KEYS = {"schema_version", "clock_domain", "active", "quota_wait", "planned_stop"}
+_INTERVAL_KEYS = {"start_utc_ns", "start_monotonic_ns", "end_utc_ns", "end_monotonic_ns"}
+_MAX_NS = 10 ** 21
+
+
+def _execution_observation(value: object, run_id: object) -> dict | None:
+    if (type(value) is not dict or set(value) != _OBSERVATION_KEYS
+            or type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or type(run_id) is not str or not _SAFE_ID_RE.fullmatch(run_id)
+            or type(value["clock_domain"]) is not str or value["clock_domain"] != run_id):
+        return None
+    for kind in ("active", "quota_wait", "planned_stop"):
+        pair = value[kind]
+        if pair is None:
+            continue
+        if type(pair) is not dict or set(pair) != _INTERVAL_KEYS:
+            return None
+        if any(type(pair[key]) is not int or not 0 <= pair[key] <= _MAX_NS
+               for key in ("start_utc_ns", "start_monotonic_ns")):
+            return None
+        ends = (pair["end_utc_ns"], pair["end_monotonic_ns"])
+        if ends[0] is None and ends[1] is None:
+            continue
+        if (any(type(end) is not int or not 0 <= end <= _MAX_NS for end in ends)
+                or ends[0] < pair["start_utc_ns"] or ends[1] < pair["start_monotonic_ns"]):
+            return None
+    return copy.deepcopy(value)
+
+
+def _clock_sample():
+    try:
+        utc, monotonic = time.time_ns(), time.monotonic_ns()
+        if all(type(value) is int and 0 <= value <= _MAX_NS for value in (utc, monotonic)):
+            return utc, monotonic
+    except Exception:
+        pass
+    return None
+
+
+def _interval(start, end=None):
+    if start is None:
+        return None
+    return {"start_utc_ns": start[0], "start_monotonic_ns": start[1],
+            "end_utc_ns": end[0] if end else None,
+            "end_monotonic_ns": end[1] if end else None}
+
+
+@contextmanager
+def _observe_cycle(root, state_root, model, effort):
+    """Fixed AP telemetry boundary; it never retries or adopts the wrapped work."""
+    started = _clock_sample()
+    observation = {}
+    failure = None
+    try:
+        yield observation
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        ended = _clock_sample()
+        run_dir, meta = observation.get("run_dir"), observation.get("meta")
+        if isinstance(run_dir, Path) and type(meta) is dict:
+            try:
+                if failure is not None and "finished_at" not in meta and ended is not None:
+                    meta["finished_at"] = ended[0] / 1_000_000_000
+                raw = {"schema_version": 1, "clock_domain": run_dir.name,
+                       "active": _interval(started, ended),
+                       "quota_wait": None, "planned_stop": None}
+                meta["execution_observation"] = _execution_observation(raw, run_dir.name)
+                record_cycle(root, state_root, run_dir, meta, model, effort)
+            except Exception as exc:
+                meta["metrics_error"] = type(exc).__name__
+            try:
+                atomic_json(root, run_dir / "status.json", meta, 64_000)
+            except Exception:
+                pass
+
+
+def _persist_cycle_record(root, state_root, run_dir, record):
+    if state_root != root / ".local/two-site-refactor/autopilot" or run_dir.parent != state_root / "runs":
+        raise ProposalError("unexpected metrics destination")
+    atomic_json(root, run_dir / "metrics.json", record, 8000)
+    ledger_path = state_root / "metrics.json"
+    ledger = []
+    if os.path.lexists(ledger_path):
+        ledger = unique_json(bounded_file_text(root, ledger_path, MAX_LEDGER, "metrics ledger"))
+        if type(ledger) is not list or any(type(item) is not dict for item in ledger):
+            raise ProposalError("invalid metrics ledger")
+    ledger = [item for item in ledger if item.get("run_id") != record["run_id"]]
+    ledger = (ledger + [record])[-MAX_RECORDS:]
+    while len(json.dumps(ledger, ensure_ascii=True, sort_keys=True).encode()) + 1 > MAX_LEDGER:
+        ledger.pop(0)
+    atomic_json(root, ledger_path, ledger, MAX_LEDGER)
+
+
+def _record_cycle_boundary(root, state_root, run_dir, kind):
+    """Update telemetry only; immutable completed authority artifacts stay untouched."""
+    if not isinstance(run_dir, Path) or kind not in ("quota_wait", "planned_stop"):
+        return
+    if state_root != root / ".local/two-site-refactor/autopilot" or run_dir.parent != state_root / "runs":
+        raise ProposalError("unexpected metrics destination")
+    record = unique_json(bounded_file_text(root, run_dir / "metrics.json", 8000, "cycle metrics"))
+    if type(record) is not dict or record.get("run_id") != run_dir.name:
+        raise ProposalError("invalid boundary metrics")
+    observation = _execution_observation(record.get("execution_observation"), run_dir.name)
+    sample = _clock_sample()
+    if observation is None or sample is None or observation[kind] is not None:
+        return
+    observation[kind] = _interval(sample)
+    record["execution_observation"] = observation
+    _persist_cycle_record(root, state_root, run_dir, record)
+
+
 def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                  model: str, effort: str) -> dict:
     """Called under supervisor lock before pruning, on both success and failure."""
@@ -459,8 +576,15 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
     phases = controller_phase_seconds(meta)
     if phases is not None:
         record["controller_phase_seconds"] = phases
-    prompt = bounded_file_text(root, run_dir / "prompt.txt", 200_000, "metrics prompt")
-    record["prompt_sha256"] = sha(prompt.encode())
+    if "execution_observation" in meta:
+        record["execution_observation"] = _execution_observation(meta["execution_observation"], run_dir.name)
+    try:
+        os.lstat(run_dir / "prompt.txt")
+    except FileNotFoundError:
+        record["prompt_sha256"] = None
+    else:
+        prompt = bounded_file_text(root, run_dir / "prompt.txt", 200_000, "metrics prompt")
+        record["prompt_sha256"] = sha(prompt.encode())
     # IDs and hashes only: no free-form prompts, summaries, source or command output.
     for key in ("gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256"):
         value = meta.get(key)
@@ -555,18 +679,7 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
             record["task_metadata_state"] = "UNAVAILABLE"
             record.pop("semantic_identity", None)
             record.pop("work_lineage", None)
-    atomic_json(root, run_dir / "metrics.json", record, 8000)
-    ledger_path = state_root / "metrics.json"
-    ledger = []
-    if os.path.lexists(ledger_path):
-        ledger = unique_json(bounded_file_text(root, ledger_path, MAX_LEDGER, "metrics ledger"))
-        if not isinstance(ledger, list) or any(not isinstance(x, dict) for x in ledger):
-            raise ProposalError("invalid metrics ledger")
-    ledger = [x for x in ledger if x.get("run_id") != record["run_id"]]
-    ledger = (ledger + [record])[-MAX_RECORDS:]
-    while len(json.dumps(ledger, ensure_ascii=True, sort_keys=True).encode()) + 1 > MAX_LEDGER:
-        ledger.pop(0)
-    atomic_json(root, ledger_path, ledger, MAX_LEDGER)
+    _persist_cycle_record(root, state_root, run_dir, record)
     return record
 
 

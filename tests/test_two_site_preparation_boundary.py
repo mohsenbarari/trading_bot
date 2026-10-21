@@ -14,10 +14,17 @@ from scripts import two_site_proposal_runner as runner
 from scripts.two_site_preparation_boundary import validate_resolved_preparation_boundary
 from scripts.two_site_preparation_contract import PreparationStartup
 from tests.test_two_site_cycle_packet import repo, make_proposal_chain, UPDATED_CODE
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture
 
 
 def _setup_valid_boundary(repo, monkeypatch):
     root, git = repo
+    # This is an offline specimen, not evidence that a Provider was invoked.
+    # Capture the current contract in the actual owned source-head tree FIRST.
+    install_current_contract(root)
+    git("add", "--", str(runner.GEMINI_RUNTIME_CONTRACT_REL),
+        *(str(path) for path in runner.GEMINI_RUNTIME_REFERENCE_PATHS))
+    git("commit", "-m", "current offline generation contract")
     output, digest, result, reviewer_dir, before_head = make_proposal_chain(repo)
     worker_dir = root / ".local/two-site-refactor/proposals/w1"
 
@@ -28,6 +35,11 @@ def _setup_valid_boundary(repo, monkeypatch):
         elif "goal" in data:
             data["goal"] = data["goal"] + " WA-TEST-ROLLBACK-155"
         path.write_text(json.dumps(data))
+
+    # Seal AFTER legitimate task edits; both distinct sessions traverse the real
+    # mandatory completion reader. These synthetic artifacts grant no execution.
+    seal_completion_fixture(root, worker_dir)
+    seal_completion_fixture(root, reviewer_dir)
 
     for change in result["changes"]:
         fp = root / change["path"]
@@ -123,6 +135,11 @@ def _setup_valid_boundary(repo, monkeypatch):
     }
     (state_root / "status.json").write_text(json.dumps(globalstatus, indent=2))
 
+    # Every fault below starts from the same complete, accepted offline control.
+    assert validate_resolved_preparation_boundary(root, state_root) is None
+    for relative in (runner.GEMINI_RUNTIME_CONTRACT_REL, *runner.GEMINI_RUNTIME_REFERENCE_PATHS):
+        assert ap.git_blob(root, before_head, str(relative)) == (root / relative).read_bytes()
+
     return {
         "root": root,
         "state_root": state_root,
@@ -168,7 +185,7 @@ def test_accepts_real_resolved_chain_without_mutation(repo, monkeypatch):
     "meta_HEAD_mismatch", "meta_scope_mismatch", "meta_ref_mismatch",
     "mismatched_worker", "mismatched_proposal_SHA",
     "changed_startup_whitespace", "duplicate_JSON", "size_limit",
-    "symlink", "hardlink", "FIFO",
+    "symlink", "hardlink", "FIFO", "missing_runtime_contract", "missing_completion_proof",
 ])
 def test_rejects_ambiguous_or_tampered_evidence(repo, monkeypatch, mutation):
     ctx = _setup_valid_boundary(repo, monkeypatch)
@@ -251,6 +268,10 @@ def test_rejects_ambiguous_or_tampered_evidence(repo, monkeypatch, mutation):
     elif mutation == "FIFO":
         res_path.unlink()
         os.mkfifo(str(res_path))
+    elif mutation == "missing_runtime_contract":
+        (root / runner.GEMINI_RUNTIME_CONTRACT_REL).unlink()
+    elif mutation == "missing_completion_proof":
+        (ctx["worker_dir"] / "transport-completion.json").unlink()
 
     with pytest.raises(ap.AutopilotError) as exc_info:
         validate_resolved_preparation_boundary(root, state_root)
@@ -341,6 +362,8 @@ def test_real_review_and_commit_proofs_cannot_be_forged(repo, monkeypatch):
     root, state_root, run_dir, git = ctx["root"], ctx["state_root"], ctx["run_dir"], ctx["git"]
     reviewer_dir, worker_dir = ctx["reviewer_dir"], ctx["worker_dir"]
     facts = ctx["facts"]
+    original_reviewer_result = (reviewer_dir / "result.json").read_bytes()
+    original_reviewer_status = (reviewer_dir / "status.json").read_bytes()
 
     rev_res = json.loads((reviewer_dir / "result.json").read_text())
     rev_res["status"] = "CHANGES_REQUIRED"
@@ -350,29 +373,28 @@ def test_real_review_and_commit_proofs_cannot_be_forged(repo, monkeypatch):
     rev_stat["state"] = "CHANGES_REQUIRED"
     rev_stat["result_sha256"] = runner.file_sha256(reviewer_dir / "result.json")
     (reviewer_dir / "status.json").write_text(json.dumps(rev_stat))
-    with pytest.raises(ap.AutopilotError):
+    with pytest.raises(ap.AutopilotError, match="Gemini Worker/Reviewer evidence is not exactly bound"):
         validate_resolved_preparation_boundary(root, state_root)
 
-    rev_res["status"] = "VERIFIED"
-    rev_res["findings"] = []
-    (reviewer_dir / "result.json").write_text(json.dumps(rev_res))
-    rev_stat["state"] = "VERIFIED"
-    rev_stat["result_sha256"] = runner.file_sha256(reviewer_dir / "result.json")
-    (reviewer_dir / "status.json").write_text(json.dumps(rev_stat))
+    # Restore the original sealed bytes, never reseal a forged reviewer result.
+    (reviewer_dir / "result.json").write_bytes(original_reviewer_result)
+    (reviewer_dir / "status.json").write_bytes(original_reviewer_status)
+    assert validate_resolved_preparation_boundary(root, state_root) is None
 
     rev_stat = json.loads((reviewer_dir / "status.json").read_text())
     rev_stat["conversation_id"] = "wc"
     (reviewer_dir / "status.json").write_text(json.dumps(rev_stat))
-    with pytest.raises(ap.AutopilotError):
+    with pytest.raises(ap.AutopilotError, match="independent fresh session"):
         validate_resolved_preparation_boundary(root, state_root)
-    rev_stat["conversation_id"] = "rc"
-    (reviewer_dir / "status.json").write_text(json.dumps(rev_stat))
+    (reviewer_dir / "status.json").write_bytes(original_reviewer_status)
+    assert validate_resolved_preparation_boundary(root, state_root) is None
 
     orig_worker_result = (worker_dir / "result.json").read_text()
     (worker_dir / "result.json").write_text(orig_worker_result + " ")
-    with pytest.raises(ap.AutopilotError):
+    with pytest.raises(ap.AutopilotError, match="Gemini Worker/Reviewer evidence is not exactly bound"):
         validate_resolved_preparation_boundary(root, state_root)
     (worker_dir / "result.json").write_text(orig_worker_result)
+    assert validate_resolved_preparation_boundary(root, state_root) is None
 
     (root / "extra_unrelated.py").write_text("x = 1\n")
     git("add", "--", "extra_unrelated.py")
@@ -387,7 +409,10 @@ def test_real_review_and_commit_proofs_cannot_be_forged(repo, monkeypatch):
     (run_dir / "status.json").write_text(json.dumps(ctx["meta"]))
     ctx["raw_result"]["commit"] = mutated_head
     (run_dir / "result.json").write_text(json.dumps(ctx["raw_result"]))
-    with pytest.raises(ap.AutopilotError):
+    assert ap.validate_scoped_gemini_chain(
+        root, ctx["before_head"], ctx["raw_result"], ctx["scope"]
+    ) == json.loads(orig_worker_result)
+    with pytest.raises(ap.AutopilotError, match="assignment scope validation failed"):
         validate_resolved_preparation_boundary(root, state_root)
 
     git("rm", "--", "extra_unrelated.py")
@@ -404,7 +429,10 @@ def test_real_review_and_commit_proofs_cannot_be_forged(repo, monkeypatch):
     (run_dir / "status.json").write_text(json.dumps(ctx["meta"]))
     ctx["raw_result"]["commit"] = mutated_head
     (run_dir / "result.json").write_text(json.dumps(ctx["raw_result"]))
-    with pytest.raises(ap.AutopilotError):
+    assert ap.validate_scoped_gemini_chain(
+        root, ctx["before_head"], ctx["raw_result"], ctx["scope"]
+    ) == json.loads(orig_worker_result)
+    with pytest.raises(ap.AutopilotError, match="committed bytes differ from the Gemini proposal"):
         validate_resolved_preparation_boundary(root, state_root)
 
     (root / "code.py").write_text(UPDATED_CODE)
@@ -421,7 +449,10 @@ def test_real_review_and_commit_proofs_cannot_be_forged(repo, monkeypatch):
     (run_dir / "status.json").write_text(json.dumps(ctx["meta"]))
     ctx["raw_result"]["commit"] = mutated_head
     (run_dir / "result.json").write_text(json.dumps(ctx["raw_result"]))
-    with pytest.raises(ap.AutopilotError):
+    assert ap.validate_scoped_gemini_chain(
+        root, ctx["before_head"], ctx["raw_result"], ctx["scope"]
+    ) == json.loads(orig_worker_result)
+    with pytest.raises(ap.AutopilotError, match="unreviewed mode change"):
         validate_resolved_preparation_boundary(root, state_root)
     os.chmod(root / "code.py", stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
 

@@ -2747,296 +2747,293 @@ def run_cycle(
     before_model: Callable[[dict[str, object]], None] | None = None,
     quota_original_controller_run_id: str | None = None,
 ) -> tuple[Path, dict]:
-    if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
-        raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
-    if quota_original_controller_run_id is not None and not (
-        type(quota_original_controller_run_id) is str
-        and RUN_ID.fullmatch(quota_original_controller_run_id)
-    ):
-        raise QuotaFinalizationHardStopError("invalid quota_original_controller_run_id")
-    if quota_original_controller_run_id is not None and before_model is not None:
-        raise QuotaFinalizationHardStopError("quota continuation forbids ordinary rescope callback")
-    global _ACTIVE_PROCESS
-    heartbeat_stop: threading.Event | None = None
-    heartbeat_thread: threading.Thread | None = None
-    primary_exception: BaseException | None = None
-    phase_seconds: dict[str, float | None] = {
-        "repository_validation": None,
-        "task_context": None,
-        "codex_readiness": None,
-        "coordinator": None,
-        "post_coordinator_validation": None,
-    }
-    validation_started_at = time.monotonic()
-    before = validate_repository(root, require_clean=True)
-    phase_seconds["repository_validation"] = elapsed_seconds(validation_started_at)
-    scope = before.get("assignment_scope")
-    if not isinstance(scope, AssignmentScope):
-        raise AutopilotError("invalid or missing startup assignment scope")
-    context_started_at = time.monotonic()
-    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
-    if not RUN_ID.fullmatch(run_dir.name) or os.path.isabs(run_dir.name):
-        raise AutopilotError(f"invalid cycle run ID: {run_dir.name}")
-    run_dir.mkdir(mode=0o700)
-    resolved_root = root.resolve(strict=True)
-    resolved_run_dir = run_dir.resolve()
-    if (
-        resolved_run_dir != run_dir
-        or not run_dir.is_dir()
-    ):
-        raise AutopilotError("unsafe run directory")
     try:
-        resolved_run_dir.relative_to(resolved_root)
-    except ValueError:
-        raise AutopilotError("run directory outside canonical root")
-    startup = PreparationStartup(1, preparation_route, run_dir.name, str(before["head"]), scope.sha256)
-    if run_dir.name != startup.cycle_id:
-        raise AutopilotError("run directory does not match startup cycle ID")
-    startup_bytes = json.dumps(
-        startup.to_mapping(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("ascii")
-    startup_file = run_dir / "preparation-startup.json"
-    if os.path.lexists(startup_file):
-        raise AutopilotError("preparation startup target already exists")
-    try:
-        _atomic_new_json(startup_file, startup.to_mapping(), 4096)
-    except BrokerError as exc:
-        raise AutopilotError(f"cannot publish preparation startup: {exc}") from exc
-    prompt = ""
-    if quota_original_controller_run_id is None:
-        prompt = prompt_for_cycle(
-            root, cycle, before, recovery=recovery, continuation=continuation,
-            preparation_startup=startup,
-        )
-        (run_dir / "prompt.txt").write_text(prompt)
-    phase_seconds["task_context"] = elapsed_seconds(context_started_at)
-    readiness_started_at = time.monotonic()
-    codex = codex.resolve(strict=True)
-    identity = codex_identity(codex, run_dir)
-    phase_seconds["codex_readiness"] = elapsed_seconds(readiness_started_at)
-    meta = {
-        "cycle": cycle,
-        "state": "RUNNING",
-        "started_at": time.time(),
-        "phase": "COORDINATOR",
-        "phase_started_at": time.time(),
-        "heartbeat_at": time.time(),
-        "head_before": before["head"],
-        "protected_refs": before["protected_refs"],
-        "codex": identity,
-        "assignment_scope": {
-            "assignment_id": scope.assignment_id,
-            "stage_id": scope.stage_id,
-            "sha256": scope.sha256,
-        },
-        "preparation_startup": startup.to_mapping(),
-        "preparation_startup_sha256": startup.fingerprint,
-        "output_limit_bytes": MAX_CODEX_OUTPUT,
-        "timeout_seconds": timeout,
-        "controller_phase_seconds": phase_seconds,
-    }
-    if recovery is not None:
-        meta["recovery"] = recovery
-    write_json(run_dir / "status.json", meta)
-    command = codex_command(codex, root, run_dir, prompt)
-    environment = os.environ.copy()
-    environment["APP_ENV_FILE"] = "config/unit-test.env.example"
-    environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    environment["TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED"] = "1"
-    environment["TWO_SITE_ASSIGNMENT_ID"] = scope.assignment_id
-    environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
-    environment["TWO_SITE_AUTOPILOT_RUN_ID"] = run_dir.name
-    environment["TWO_SITE_PREPARATION_STARTUP_SHA256"] = startup.fingerprint
-    coordinator_started_at: float | None = None
-    post_validation_started_at: float | None = None
-    try:
-        quota_cm = nullcontext(None)
-        if quota_original_controller_run_id is not None:
-            from scripts.two_site_quota_supervisor_bridge import quota_codex_review_locked
-            quota_cm = quota_codex_review_locked(
-                root, quota_original_controller_run_id, run_dir.name, min(timeout, 900),
+        try:
+            from scripts.two_site_cycle_metrics import _observe_cycle
+        except ModuleNotFoundError:
+            from two_site_cycle_metrics import _observe_cycle
+        telemetry = _observe_cycle(root, state_root, MODEL, REASONING)
+    except Exception:
+        telemetry = nullcontext({})
+    with telemetry as _observation:
+        if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
+            raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
+        if quota_original_controller_run_id is not None and not (
+            type(quota_original_controller_run_id) is str
+            and RUN_ID.fullmatch(quota_original_controller_run_id)
+        ):
+            raise QuotaFinalizationHardStopError("invalid quota_original_controller_run_id")
+        if quota_original_controller_run_id is not None and before_model is not None:
+            raise QuotaFinalizationHardStopError("quota continuation forbids ordinary rescope callback")
+        global _ACTIVE_PROCESS
+        heartbeat_stop: threading.Event | None = None
+        heartbeat_thread: threading.Thread | None = None
+        primary_exception: BaseException | None = None
+        phase_seconds: dict[str, float | None] = {
+            "repository_validation": None,
+            "task_context": None,
+            "codex_readiness": None,
+            "coordinator": None,
+            "post_coordinator_validation": None,
+        }
+        validation_started_at = time.monotonic()
+        before = validate_repository(root, require_clean=True)
+        phase_seconds["repository_validation"] = elapsed_seconds(validation_started_at)
+        scope = before.get("assignment_scope")
+        if not isinstance(scope, AssignmentScope):
+            raise AutopilotError("invalid or missing startup assignment scope")
+        context_started_at = time.monotonic()
+        timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
+        if not RUN_ID.fullmatch(run_dir.name) or os.path.isabs(run_dir.name):
+            raise AutopilotError(f"invalid cycle run ID: {run_dir.name}")
+        run_dir.mkdir(mode=0o700)
+        resolved_root = root.resolve(strict=True)
+        resolved_run_dir = run_dir.resolve()
+        if (
+            resolved_run_dir != run_dir
+            or not run_dir.is_dir()
+        ):
+            raise AutopilotError("unsafe run directory")
+        try:
+            resolved_run_dir.relative_to(resolved_root)
+        except ValueError:
+            raise AutopilotError("run directory outside canonical root")
+        _observation.update(run_dir=run_dir, meta={"cycle": cycle, "state": "FAILED", "head_before": before["head"]})
+        startup = PreparationStartup(1, preparation_route, run_dir.name, str(before["head"]), scope.sha256)
+        if run_dir.name != startup.cycle_id:
+            raise AutopilotError("run directory does not match startup cycle ID")
+        startup_bytes = json.dumps(
+            startup.to_mapping(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+        startup_file = run_dir / "preparation-startup.json"
+        if os.path.lexists(startup_file):
+            raise AutopilotError("preparation startup target already exists")
+        try:
+            _atomic_new_json(startup_file, startup.to_mapping(), 4096)
+        except BrokerError as exc:
+            raise AutopilotError(f"cannot publish preparation startup: {exc}") from exc
+        prompt = ""
+        if quota_original_controller_run_id is None:
+            prompt = prompt_for_cycle(
+                root, cycle, before, recovery=recovery, continuation=continuation,
+                preparation_startup=startup,
             )
-        with quota_cm as quota_ready:
-            if quota_ready is not None:
-                if validate_repository(root, require_clean=True) != before:
-                    raise QuotaFinalizationHardStopError("repository drift before quota Codex review")
-                quota_context_started = time.monotonic()
-                prompt = prompt_for_cycle(root, cycle, before, preparation_startup=startup, quota_ready=quota_ready)
-                (run_dir / "prompt.txt").write_text(prompt)
-                phase_seconds["task_context"] = elapsed_seconds(quota_context_started)
-                command = codex_command(codex, root, run_dir, prompt)
-            if before_model is not None:
-                before_model(before)
-            coordinator_started_at = time.monotonic()
+            (run_dir / "prompt.txt").write_text(prompt)
+        phase_seconds["task_context"] = elapsed_seconds(context_started_at)
+        readiness_started_at = time.monotonic()
+        codex = codex.resolve(strict=True)
+        identity = codex_identity(codex, run_dir)
+        phase_seconds["codex_readiness"] = elapsed_seconds(readiness_started_at)
+        meta = {
+            "cycle": cycle,
+            "state": "RUNNING",
+            "started_at": time.time(),
+            "phase": "COORDINATOR",
+            "phase_started_at": time.time(),
+            "heartbeat_at": time.time(),
+            "head_before": before["head"],
+            "protected_refs": before["protected_refs"],
+            "codex": identity,
+            "assignment_scope": {
+                "assignment_id": scope.assignment_id,
+                "stage_id": scope.stage_id,
+                "sha256": scope.sha256,
+            },
+            "preparation_startup": startup.to_mapping(),
+            "preparation_startup_sha256": startup.fingerprint,
+            "output_limit_bytes": MAX_CODEX_OUTPUT,
+            "timeout_seconds": timeout,
+            "controller_phase_seconds": phase_seconds,
+        }
+        _observation["meta"] = meta
+        if recovery is not None:
+            meta["recovery"] = recovery
+        write_json(run_dir / "status.json", meta)
+        command = codex_command(codex, root, run_dir, prompt)
+        environment = os.environ.copy()
+        environment["APP_ENV_FILE"] = "config/unit-test.env.example"
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        environment["TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED"] = "1"
+        environment["TWO_SITE_ASSIGNMENT_ID"] = scope.assignment_id
+        environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
+        environment["TWO_SITE_AUTOPILOT_RUN_ID"] = run_dir.name
+        environment["TWO_SITE_PREPARATION_STARTUP_SHA256"] = startup.fingerprint
+        coordinator_started_at: float | None = None
+        post_validation_started_at: float | None = None
+        try:
+            quota_cm = nullcontext(None)
             if quota_original_controller_run_id is not None:
-                from scripts.two_site_quota_supervisor_bridge import quota_codex_process
-                child = quota_codex_process(command, root, environment)
-            else:
-                child = subprocess.Popen(
-                    command, cwd=root, env=environment, stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+                from scripts.two_site_quota_supervisor_bridge import quota_codex_review_locked
+                quota_cm = quota_codex_review_locked(
+                    root, quota_original_controller_run_id, run_dir.name, min(timeout, 900),
                 )
-            with child as process:
-                _ACTIVE_PROCESS = process
-                meta["pid"] = process.pid
-                write_json(run_dir / "status.json", meta)
-                phase_started_at = time.time()
-                heartbeat_stop = threading.Event()
-                write_supervisor_state(
-                    state_root, "RUNNING", announce=False, cycle=cycle,
-                    head=before["head"], phase="COORDINATOR",
-                    phase_started_at=phase_started_at, heartbeat_at=phase_started_at,
-                    summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
-                    blockers=[],
-                )
-                heartbeat_thread = threading.Thread(
-                    target=_heartbeat_running_cycle,
-                    args=(heartbeat_stop, state_root, cycle, before["head"], phase_started_at),
-                    name="two-site-supervisor-heartbeat",
-                    daemon=True,
-                )
-                heartbeat_thread.start()
-                capture_bounded_process(
-                    process, b"", run_dir / "stream.jsonl", run_dir / "stderr.txt",
-                    timeout, max_output=MAX_CODEX_OUTPUT,
-                )
-            phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
-            post_validation_started_at = time.monotonic()
-            if process.returncode:
-                raise AutopilotError(f"Codex CLI exited with status {process.returncode}")
-            if file_sha256(codex) != identity["sha256"]:
-                raise AutopilotError("Codex CLI identity changed during the cycle")
-            if codex_runtime_identity(codex) != identity["runtime"]:
-                raise AutopilotError("Codex runtime changed during the cycle")
-            _validate_startup_file(root, startup_file, startup, startup_bytes)
-            result_path = run_dir / "result.json"
-            raw_result = unique_json(
-                bounded_file_text(root, result_path, MAX_RESULT_BYTES, "Codex cycle result")
-            )
-            try:
-                validated_receipt = validate_result(raw_result)
-                advisories: list[str] = []
-            except AutopilotError as exc:
-                if str(exc) == "non-blocked state cannot report blockers":
-                    validated_receipt, advisories = recover_committed_advisory_result(raw_result, exc)
-                elif (
-                    str(exc) == "HALT requires null commit and Gemini acceptance evidence"
-                    and _is_committed_halt_receipt(raw_result)
-                ):
-                    validated_receipt = raw_result
-                    advisories = []
+            with quota_cm as quota_ready:
+                if quota_ready is not None:
+                    if validate_repository(root, require_clean=True) != before:
+                        raise QuotaFinalizationHardStopError("repository drift before quota Codex review")
+                    quota_context_started = time.monotonic()
+                    prompt = prompt_for_cycle(root, cycle, before, preparation_startup=startup, quota_ready=quota_ready)
+                    (run_dir / "prompt.txt").write_text(prompt)
+                    phase_seconds["task_context"] = elapsed_seconds(quota_context_started)
+                    command = codex_command(codex, root, run_dir, prompt)
+                if before_model is not None:
+                    before_model(before)
+                coordinator_started_at = time.monotonic()
+                if quota_original_controller_run_id is not None:
+                    from scripts.two_site_quota_supervisor_bridge import quota_codex_process
+                    child = quota_codex_process(command, root, environment)
                 else:
-                    raise
-            result = validate_transition(root, before, validated_receipt)
-            if quota_original_controller_run_id is not None:
-                try:
-                    if result["state"] not in {"CONTINUE", "COMPLETE"}:
-                        raise AutopilotError(
-                            f"quota continuation requires state CONTINUE or COMPLETE, got {result['state']!r}"
-                        )
-                    quota_repo = validate_repository(root, require_clean=True)
-                    if quota_repo["protected_refs"] != before["protected_refs"]:
-                        raise AutopilotError("protected_refs changed before quota finalization")
-                    if quota_repo["assignment_scope"] != before["assignment_scope"]:
-                        raise AutopilotError("assignment_scope changed before quota finalization")
-                    from scripts.two_site_quota_supervisor_finalization import (
-                        finalize_accepted_quota_continuation_locked,
+                    child = subprocess.Popen(
+                        command, cwd=root, env=environment, stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
                     )
-
-                    finalize_accepted_quota_continuation_locked(
-                        root=root,
-                        original_controller_run_id=quota_original_controller_run_id,
-                        continuation_controller_run_id=run_dir.name,
-                        before_repository=before,
-                        expected_transition_result=result,
-                        acknowledged_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    )
-                except (KeyboardInterrupt, SystemExit):
-                    raise
-                except Exception as exc:
-                    raise QuotaFinalizationHardStopError(
-                        f"quota finalization failed: {exc}"
-                    ) from exc
-        if result["state"] == "CONTINUE":
-            final_repository = validate_repository(root, require_clean=True)
-            if final_repository["protected_refs"] != before["protected_refs"]:
-                raise AutopilotError("protected_refs changed before checkpoint publication")
-            if final_repository["assignment_scope"] != before["assignment_scope"]:
-                raise AutopilotError("assignment_scope changed before checkpoint publication")
-            publish_accepted_checkpoint(state_root, result, final_repository)
-        result["advisories"] = advisories
-        meta.update(
-            state=result["state"],
-            finished_at=time.time(),
-            duration_seconds=round(time.time() - float(meta["started_at"]), 3),
-            head_after=result["head_after"],
-            summary=result["summary"],
-            next_action=result["next_action"],
-            blockers=result["blockers"],
-            advisories=result["advisories"],
-            gemini_worker_run_id=result["gemini_worker_run_id"],
-            gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
-            proposal_sha256=result["proposal_sha256"],
-        )
-        write_json(run_dir / "status.json", meta)
-        phase_seconds["post_coordinator_validation"] = elapsed_seconds(post_validation_started_at)
-        meta["controller_phase_seconds"] = phase_seconds
-        write_json(run_dir / "status.json", meta)
-        return run_dir, result
-    except BaseException as exc:
-        primary_exception = exc
-        meta.update(
-            state="FAILED",
-            error=type(exc).__name__ + ": " + str(exc),
-            finished_at=time.time(),
-            duration_seconds=round(time.time() - float(meta["started_at"]), 3),
-        )
-        write_json(run_dir / "status.json", meta)
-        raise
-    finally:
-        if coordinator_started_at is not None and phase_seconds["coordinator"] is None:
-            phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
-        if (post_validation_started_at is not None
-                and phase_seconds["post_coordinator_validation"] is None):
-            phase_seconds["post_coordinator_validation"] = elapsed_seconds(post_validation_started_at)
-        # A phase may be unavailable only when the cycle failed before that phase.
-        # Metrics accepts only complete timing vectors, so do not publish a partial
-        # breakdown as if it were comparable with successful cycles.
-        if all(value is not None for value in phase_seconds.values()):
-            meta["controller_phase_seconds"] = {
-                key: float(value) for key, value in phase_seconds.items()
-            }
-        else:
-            meta.pop("controller_phase_seconds", None)
-        try:
-            write_json(run_dir / "status.json", meta)
-        except OSError:
-            pass
-        if heartbeat_stop is not None:
-            heartbeat_stop.set()
-        try:
-            if heartbeat_thread is not None:
-                heartbeat_thread.join()
-        except BaseException:
-            if primary_exception is None:
-                raise
-        finally:
-            _ACTIVE_PROCESS = None
-            # Telemetry must neither authorize nor block a valid transition. Persist
-            # before run pruning, including failed/interrupted attempts.
-            try:
-                try:
-                    from scripts.two_site_cycle_metrics import record_cycle
-                except ModuleNotFoundError:
-                    from two_site_cycle_metrics import record_cycle
-                record_cycle(root, state_root, run_dir, meta, MODEL, REASONING)
-            except Exception as exc:
-                meta["metrics_error"] = type(exc).__name__
-                try:
+                with child as process:
+                    _ACTIVE_PROCESS = process
+                    meta["pid"] = process.pid
                     write_json(run_dir / "status.json", meta)
-                except OSError:
-                    pass
+                    phase_started_at = time.time()
+                    heartbeat_stop = threading.Event()
+                    write_supervisor_state(
+                        state_root, "RUNNING", announce=False, cycle=cycle,
+                        head=before["head"], phase="COORDINATOR",
+                        phase_started_at=phase_started_at, heartbeat_at=phase_started_at,
+                        summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                        blockers=[],
+                    )
+                    heartbeat_thread = threading.Thread(
+                        target=_heartbeat_running_cycle,
+                        args=(heartbeat_stop, state_root, cycle, before["head"], phase_started_at),
+                        name="two-site-supervisor-heartbeat",
+                        daemon=True,
+                    )
+                    heartbeat_thread.start()
+                    capture_bounded_process(
+                        process, b"", run_dir / "stream.jsonl", run_dir / "stderr.txt",
+                        timeout, max_output=MAX_CODEX_OUTPUT,
+                    )
+                phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
+                post_validation_started_at = time.monotonic()
+                if process.returncode:
+                    raise AutopilotError(f"Codex CLI exited with status {process.returncode}")
+                if file_sha256(codex) != identity["sha256"]:
+                    raise AutopilotError("Codex CLI identity changed during the cycle")
+                if codex_runtime_identity(codex) != identity["runtime"]:
+                    raise AutopilotError("Codex runtime changed during the cycle")
+                _validate_startup_file(root, startup_file, startup, startup_bytes)
+                result_path = run_dir / "result.json"
+                raw_result = unique_json(
+                    bounded_file_text(root, result_path, MAX_RESULT_BYTES, "Codex cycle result")
+                )
+                try:
+                    validated_receipt = validate_result(raw_result)
+                    advisories: list[str] = []
+                except AutopilotError as exc:
+                    if str(exc) == "non-blocked state cannot report blockers":
+                        validated_receipt, advisories = recover_committed_advisory_result(raw_result, exc)
+                    elif (
+                        str(exc) == "HALT requires null commit and Gemini acceptance evidence"
+                        and _is_committed_halt_receipt(raw_result)
+                    ):
+                        validated_receipt = raw_result
+                        advisories = []
+                    else:
+                        raise
+                result = validate_transition(root, before, validated_receipt)
+                if quota_original_controller_run_id is not None:
+                    try:
+                        if result["state"] not in {"CONTINUE", "COMPLETE"}:
+                            raise AutopilotError(
+                                f"quota continuation requires state CONTINUE or COMPLETE, got {result['state']!r}"
+                            )
+                        quota_repo = validate_repository(root, require_clean=True)
+                        if quota_repo["protected_refs"] != before["protected_refs"]:
+                            raise AutopilotError("protected_refs changed before quota finalization")
+                        if quota_repo["assignment_scope"] != before["assignment_scope"]:
+                            raise AutopilotError("assignment_scope changed before quota finalization")
+                        from scripts.two_site_quota_supervisor_finalization import (
+                            finalize_accepted_quota_continuation_locked,
+                        )
+
+                        finalize_accepted_quota_continuation_locked(
+                            root=root,
+                            original_controller_run_id=quota_original_controller_run_id,
+                            continuation_controller_run_id=run_dir.name,
+                            before_repository=before,
+                            expected_transition_result=result,
+                            acknowledged_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        )
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except Exception as exc:
+                        raise QuotaFinalizationHardStopError(
+                            f"quota finalization failed: {exc}"
+                        ) from exc
+            if result["state"] == "CONTINUE":
+                final_repository = validate_repository(root, require_clean=True)
+                if final_repository["protected_refs"] != before["protected_refs"]:
+                    raise AutopilotError("protected_refs changed before checkpoint publication")
+                if final_repository["assignment_scope"] != before["assignment_scope"]:
+                    raise AutopilotError("assignment_scope changed before checkpoint publication")
+                publish_accepted_checkpoint(state_root, result, final_repository)
+            result["advisories"] = advisories
+            meta.update(
+                state=result["state"],
+                finished_at=time.time(),
+                duration_seconds=round(time.time() - float(meta["started_at"]), 3),
+                head_after=result["head_after"],
+                summary=result["summary"],
+                next_action=result["next_action"],
+                blockers=result["blockers"],
+                advisories=result["advisories"],
+                gemini_worker_run_id=result["gemini_worker_run_id"],
+                gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
+                proposal_sha256=result["proposal_sha256"],
+            )
+            write_json(run_dir / "status.json", meta)
+            phase_seconds["post_coordinator_validation"] = elapsed_seconds(post_validation_started_at)
+            meta["controller_phase_seconds"] = phase_seconds
+            write_json(run_dir / "status.json", meta)
+            return run_dir, result
+        except BaseException as exc:
+            primary_exception = exc
+            meta.update(
+                state="FAILED",
+                error=type(exc).__name__ + ": " + str(exc),
+                finished_at=time.time(),
+                duration_seconds=round(time.time() - float(meta["started_at"]), 3),
+            )
+            write_json(run_dir / "status.json", meta)
+            raise
+        finally:
+            if coordinator_started_at is not None and phase_seconds["coordinator"] is None:
+                phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
+            if (post_validation_started_at is not None
+                    and phase_seconds["post_coordinator_validation"] is None):
+                phase_seconds["post_coordinator_validation"] = elapsed_seconds(post_validation_started_at)
+            # A phase may be unavailable only when the cycle failed before that phase.
+            # Metrics accepts only complete timing vectors, so do not publish a partial
+            # breakdown as if it were comparable with successful cycles.
+            if all(value is not None for value in phase_seconds.values()):
+                meta["controller_phase_seconds"] = {
+                    key: float(value) for key, value in phase_seconds.items()
+                }
+            else:
+                meta.pop("controller_phase_seconds", None)
+            try:
+                write_json(run_dir / "status.json", meta)
+            except OSError:
+                pass
+            if heartbeat_stop is not None:
+                heartbeat_stop.set()
+            try:
+                if heartbeat_thread is not None:
+                    heartbeat_thread.join()
+            except BaseException:
+                if primary_exception is None:
+                    raise
+            finally:
+                _ACTIVE_PROCESS = None
 
 
 def prune_runs(state_root: Path, keep: int = KEEP_RUNS) -> list[str]:
@@ -3117,6 +3114,17 @@ def signal_handler(_signum: int, _frame: object) -> None:
     raise KeyboardInterrupt("autopilot stopped by signal")
 
 
+def _observe_boundary(root, state_root, run_dir, kind):
+    try:
+        try:
+            from scripts.two_site_cycle_metrics import _record_cycle_boundary
+        except ModuleNotFoundError:
+            from two_site_cycle_metrics import _record_cycle_boundary
+        _record_cycle_boundary(root, state_root, run_dir, kind)
+    except Exception:
+        pass
+
+
 def run_loop(
     root: Path,
     codex: Path,
@@ -3180,11 +3188,13 @@ def run_loop(
         recovery_context = startup_recovery
         retryable_failures = 0
         previous_success = None
+        run_dir = None
         for cycle in range(1, max_cycles + 1):
             if os.path.lexists(stop_path):
                 if not stop_path.exists():
                     raise AutopilotError("STOP path is a broken symlink")
                 write_supervisor_state(state_root, "STOPPED", cycle=cycle)
+                _observe_boundary(root, state_root, run_dir, "planned_stop")
                 return 0
             cycle_start_head = git(root, "rev-parse", "HEAD")
             if cycle == 1:
@@ -3198,6 +3208,7 @@ def run_loop(
                 summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
                 blockers=[],
             )
+            run_dir = None
             callback_entered = False
             callback_published = False
 
@@ -3262,6 +3273,7 @@ def run_loop(
                             summary="Validated terminal quota; awaiting explicit resume gate.",
                             blockers=[],
                         )
+                        _observe_boundary(root, state_root, run_dir, "quota_wait")
                         return 2
                 previous_success = None
                 retryable_failures = 0

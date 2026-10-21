@@ -40,6 +40,15 @@ from scripts.two_site_codex_autopilot import (  # noqa: E402
 from scripts.two_site_quota_supervisor_finalization import (  # noqa: E402
     SupervisorFinalizationAmbiguousError,
 )
+# Resolve from-import consumers BEFORE any scoped mock can be retained on first
+# import. In particular, due inspection must keep the real recovery reader and
+# submission/client must keep the real STOP guard after these wiring tests.
+from scripts import two_site_quota_broker_route as quota_route  # noqa: E402
+from scripts import two_site_quota_broker_client as quota_client  # noqa: E402
+from scripts import two_site_quota_wait_recovery as wait_recovery  # noqa: E402
+from scripts import two_site_quota_supervisor_due_inspect as due_inspect  # noqa: E402
+from scripts import two_site_quota_supervisor_resume_context as resume_context  # noqa: E402
+from scripts import two_site_quota_supervisor_resume_submit as resume_submit  # noqa: E402
 from tests.test_two_site_supervisor_preparation_startup import (  # noqa: E402
     _FakePopen,
     _make_before,
@@ -670,6 +679,9 @@ def test_standing_quota_due_allocates_once_or_halts_ambiguous(tmp_path: Path, du
     from scripts import two_site_quota_supervisor_bridge as bridge
     from scripts import two_site_provider_broker as broker
     import time
+    real_recovery = wait_recovery.recover_durable_initial_wait_locked
+    assert due_inspect.recover_durable_initial_wait_locked is real_recovery
+    assert resume_context.recover_durable_initial_wait_locked is real_recovery
     root, codex, _unused_state = _setup_workspace(tmp_path)
     state_root = root / ".local/two-site-refactor/autopilot"
     original_dir = state_root / "runs" / VALID_ORIGINAL_RUN_ID
@@ -698,8 +710,8 @@ def test_standing_quota_due_allocates_once_or_halts_ambiguous(tmp_path: Path, du
         return continuation, result
 
     with patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"), \
-         patch("scripts.two_site_quota_wait_recovery.recover_durable_initial_wait_locked", return_value=(VALID_ORIGINAL_RUN_ID, record)), \
-         patch("scripts.two_site_quota_supervisor_due_inspect.inspect_durable_quota_wait_due_locked", return_value={"controller_run_id": VALID_ORIGINAL_RUN_ID, "due": {"state": due_state}}), \
+         patch.object(wait_recovery, "recover_durable_initial_wait_locked", return_value=(VALID_ORIGINAL_RUN_ID, record)), \
+         patch.object(due_inspect, "inspect_durable_quota_wait_due_locked", return_value={"controller_run_id": VALID_ORIGINAL_RUN_ID, "due": {"state": due_state}}), \
          patch.object(bridge, "_open_existing_cycle_run_directory", side_effect=pinned), \
          patch("scripts.two_site_codex_autopilot.run_cycle", side_effect=cycle_once) as cycle, \
          patch("scripts.two_site_codex_autopilot.write_supervisor_state") as status, \
@@ -709,6 +721,9 @@ def test_standing_quota_due_allocates_once_or_halts_ambiguous(tmp_path: Path, du
         if due_state == "KNOWN_RESET_REVALIDATION_DUE" and not claim_exists:
             assert status.call_args.args[1] == "CONTINUE"
             assert bridge.resume_due_quota_cycle_locked(root, codex, state_root, before, 300, "one_shot") == 2
+    assert wait_recovery.recover_durable_initial_wait_locked is real_recovery
+    assert due_inspect.recover_durable_initial_wait_locked is real_recovery
+    assert resume_context.recover_durable_initial_wait_locked is real_recovery
     assert code == 2
     if due_state == "KNOWN_RESET_REVALIDATION_DUE" and not claim_exists:
         cycle.assert_called_once_with(root, codex, state_root, 1, 300,
@@ -727,6 +742,9 @@ def test_quota_ready_cleanup_is_under_client_hold_and_uses_canonical_terminal(tm
     from scripts import two_site_quota_supervisor_bridge as bridge
     from scripts import two_site_provider_broker as broker
     from tests.test_two_site_quota_broker_claim_recovery import _make_continuation_request
+    real_stop = quota_route._check_pre_dispatch_stop
+    assert resume_submit._check_pre_dispatch_stop is real_stop
+    assert quota_client._check_pre_dispatch_stop is real_stop
     request = _make_continuation_request()
     root = tmp_path.resolve()
     status = {"state": "IDLE", "pid": 123, "started_at": 100.0, "quota_continuation_ready": True}
@@ -755,8 +773,8 @@ def test_quota_ready_cleanup_is_under_client_hold_and_uses_canonical_terminal(tm
 
     with patch.object(broker, "_read_broker_status", return_value=status), \
          patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"), \
-         patch("scripts.two_site_quota_supervisor_resume_submit.submit_known_reset_resume_once_locked", return_value={"request": request}) as submit, \
-         patch("scripts.two_site_quota_supervisor_resume_context.wait_for_known_reset_resume_ready_locked", return_value=acquired) as wait, \
+         patch.object(resume_submit, "submit_known_reset_resume_once_locked", return_value={"request": request}) as submit, \
+         patch.object(resume_context, "wait_for_known_reset_resume_ready_locked", return_value=acquired) as wait, \
          patch("scripts.two_site_cold_start_broker_quiescence.hold_idle_broker_client_lock_for_cold_adoption", side_effect=held), \
          patch("scripts.two_site_quota_continuation_terminal_storage.read_terminal_continuation_record", side_effect=terminal_read):
         with bridge.quota_codex_review_locked(root, request["original_controller_run_id"], request["controller_run_id"], 300) as context:
@@ -764,6 +782,9 @@ def test_quota_ready_cleanup_is_under_client_hold_and_uses_canonical_terminal(tm
             assert context["terminal_receipt_sha256"] == receipt_sha
             assert context["ready"] is acquired["ready"]
         assert events == ["hold", "release"]
+    assert quota_route._check_pre_dispatch_stop is real_stop
+    assert resume_submit._check_pre_dispatch_stop is real_stop
+    assert quota_client._check_pre_dispatch_stop is real_stop
     submit.assert_called_once()
     assert submit.call_args.args[2] == request["controller_run_id"]
     wait.assert_called_once_with(root, request, expected_broker_identity=(123, 100.0))
