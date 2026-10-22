@@ -83,7 +83,7 @@ TERM_REPLIES = (
 
 
 class ProposalProfileError(ValueError):
-    """Fixed, non-payload error; no implicit retry or Default fallback."""
+    """Fixed non-payload error; no generation retry or Default fallback."""
 
 
 @dataclass(frozen=True)
@@ -334,6 +334,8 @@ def _initialization_readiness_hint(
                 used = db.execute("SELECT 1 FROM steps LIMIT 1").fetchall()
                 empty = ids == [(candidate.conversation_id, 0, 0)] and main == [("blob", 0)] and not used
                 if empty:
+                    if db.execute("SELECT 1 FROM executor_metadata LIMIT 1").fetchone() is not None:
+                        raise ProposalProfileError("proposal runtime placeholder is not pristine")
                     facts["empty_profiles"] += 1
                 else:
                     if (ids != [(candidate.conversation_id, 4, 17)] or used
@@ -402,7 +404,19 @@ def prepare_profile(
     selector = selectors.DefaultSelector()
     buffer = bytearray()
     sent = selected = trust_accepted = False
+    reselection_used = False
+    fresh_panel_offset = 0
+    empty_since = None
     last_readiness_hint = None
+
+    def recheck_preparation_files():
+        validate_hooks(workspace)
+        source = folder / "agent.md"
+        identity = _regular(source, 4096)
+        with source.open("rb") as stream:
+            definition = stream.read(4097)
+        if definition != DEFINITION.encode() or _regular(source, 4096) != identity:
+            raise ProposalProfileError("proposal runtime definition mismatch")
     try:
         process = subprocess.Popen(
             command, cwd=workspace, stdin=slave, stdout=slave, stderr=slave,
@@ -418,7 +432,7 @@ def prepare_profile(
             if observed-started >= timeout:
                 break
             age = observed-panel_started
-            text = buffer.decode("utf-8", errors="replace")
+            text = buffer[fresh_panel_offset:].decode("utf-8", errors="replace")
             choice = trust_choice(text, workspace) if not trust_accepted else None
             if choice is not None:
                 # Only this owned, empty, nearest-Git workspace; never global trust.
@@ -428,21 +442,78 @@ def prepare_profile(
                 continue
             if not sent and age >= 7:
                 os.write(master, b"/agents\r"); sent = True
-            # A slow terminal render is not an invalid profile. Keep draining
-            # within the original absolute deadline; never extend it for trust.
-            if sent and not selected and age >= 12 and "Available Agents" in text:
-                if NAME not in text:
-                    raise ProposalProfileError("proposal runtime local profile not discovered")
-                if any(label in text for label in ("two-site-coordinator", "two-site-stage-worker", "two-site-stage-verifier")):
-                    raise ProposalProfileError("proposal runtime inherited legacy agents")
-                os.write(master, b"\x1b[B\r\x1b"); selected = True
-            if selected and age >= 20:
-                ready, last_readiness_hint = _initialization_readiness_hint(
+            # Readiness remains observable while a fresh recovery panel is
+            # pending; a slow first selection may finish without a second one.
+            if (selected or reselection_used) and age >= 20:
+                ready, current_hint = _initialization_readiness_hint(
                     directory, before, workspace, model, effort,
                     deadline=started + timeout,
                 )
-                if ready:
+                # A deadline is not a new initialization observation. Retain
+                # the last meaningful diagnostic, never use it to recover.
+                if current_hint["reason"] == "DEADLINE":
                     break
+                last_readiness_hint = current_hint
+                if ready:
+                    selected = True
+                    break
+                pristine = current_hint == {
+                    "reason": "INITIAL_METADATA_EMPTY", "new_sessions": 1,
+                    "valid_profiles": 0, "empty_profiles": 1,
+                    "invalid_profiles": 0, "sqlite_unavailable": 0,
+                }
+                if pristine:
+                    if empty_since is None:
+                        empty_since = observed
+                else:
+                    empty_since = None
+                if (selected and not reselection_used and empty_since is not None
+                        and observed - empty_since >= 4):
+                    recheck_preparation_files()
+                    # Old panel bytes may still be queued in the nonblocking
+                    # owned PTY. Account/drain them before the new request;
+                    # a buffer-only watermark cannot establish fresh rendering.
+                    drained = False
+                    while time.monotonic() < started + timeout:
+                        try:
+                            chunk = os.read(master, min(4096, MAX_UI+1-len(buffer)))
+                        except BlockingIOError:
+                            drained = True
+                            break
+                        except OSError:
+                            break
+                        if not chunk:
+                            break
+                        buffer.extend(chunk)
+                        if len(buffer) > MAX_UI:
+                            raise ProposalProfileError("proposal runtime UI exceeds limit")
+                        for query, reply in TERM_REPLIES:
+                            if query in chunk:
+                                os.write(master, reply)
+                    if (not drained or process.poll() is not None
+                            or time.monotonic() >= started + timeout):
+                        break
+                    # One local control action, never a generation retry. Keep
+                    # the cumulative UI cap and the original absolute deadline.
+                    fresh_panel_offset = len(buffer)
+                    reselection_used = True
+                    os.write(master, b"/agents\r")
+                    selected = False
+                    continue
+            # Only newly read rendering may authorize recovery selection.
+            if sent and not selected and age >= 12 and "Available Agents" in text:
+                if NAME not in text and not reselection_used:
+                    raise ProposalProfileError("proposal runtime local profile not discovered")
+                if any(label in text for label in ("two-site-coordinator", "two-site-stage-worker", "two-site-stage-verifier")):
+                    raise ProposalProfileError("proposal runtime inherited legacy agents")
+                # Recovery may receive a complete header before the agent name.
+                # Keep draining, without selecting or extending the deadline.
+                if NAME in text:
+                    if reselection_used:
+                        recheck_preparation_files()
+                    if time.monotonic() >= started + timeout:
+                        break
+                    os.write(master, b"\x1b[B\r\x1b"); selected = True
             for _, _mask in selector.select(0.1):
                 try:
                     chunk = os.read(master, min(4096, MAX_UI+1-len(buffer)))
@@ -458,7 +529,7 @@ def prepare_profile(
                 for query, reply in TERM_REPLIES:
                     if query in chunk:
                         os.write(master, reply)
-        if not selected:
+        if not selected and not reselection_used:
             text = buffer.decode("utf-8", errors="replace")
             if sent and observed-started >= timeout and "Available Agents" not in text:
                 error = ProposalProfileError("proposal runtime agent panel label unavailable")

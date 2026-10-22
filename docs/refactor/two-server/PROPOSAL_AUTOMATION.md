@@ -512,6 +512,22 @@ AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا 
 کپی موقت قبل از آزادشدن lock در موفقیت/خطا/timeout جمع می‌شود؛ adapter 1.1.26 قدیمی است.
 
 
+### بازیابی محدودِ آماده‌سازی profile — ۲۲ اکتبر ۲۰۲۶
+
+خطای metadata خالیِ اولیه، پاسخ نامعتبر مدل یا مجوز تکرار درخواست نیست.
+پیش از generation، فقط برای دقیقاً یک نشست تازه با placeholder خالی، بدون
+step یا executor و بدون metadata نامعتبر/مبهم یا خطای SQLite، یک انتخاب مجددِ
+همان agent ثابت در همان PTY مجاز است. نشست کند فرصت تکمیل دارد؛ انتخاب مجدد
+به rendering تازه متکی است، ورودیِ مانده در PTY با همان سقف تجمعی پردازش می‌شود
+و deadline اصلی تمدید نمی‌شود. هیچ prompt کاری، generation، ابزار، Default
+fallback، تغییر model/effort/CLI یا بازنویسی DB در این آماده‌سازی وجود ندارد.
+
+پس از آماده‌سازی نیز validation نهاییِ مستقلِ profile تازه و یکتا، hooks،
+مدل/effort، CLI pin و Source پیش از dispatch الزام است. درخواستِ قبلاً dispatch
+شده، Worker یا pipeline کامل به علت این اصلاح دوباره اجرا نمی‌شود؛ reservation،
+checkpoint و شکست‌های تاریخی حفظ‌اند. خطای باقی‌مانده یا ابهام واقعی همچنان
+fail-closed است؛ این بازیابی تضمین دسترسی دائمی Provider نیست.
+
 ### تکمیل generation در runtime contract 1.3 — ۲۰ اکتبر ۲۰۲۶
 
 سیاست `FINAL_FRAME_RECOVERY_V1` فقط generationِ pinned Gemini در Runner را opt-in
