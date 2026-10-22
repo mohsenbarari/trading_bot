@@ -31,7 +31,9 @@
     "notification_mark_all_750_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-notification-mark-all-accounting-751.json",
     "trade_read_prequery_757_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-trade-read-prequery-accounting-757.json",
     "business_766_a2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-766-a2.json",
-    "business_766_b3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-766-b3.json"
+    "business_766_b3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-766-b3.json",
+    "business_768_market_overrides_a2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-a2.json",
+    "business_768_market_overrides_b3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-b3.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
