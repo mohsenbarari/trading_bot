@@ -31,9 +31,12 @@ class TraceClock:
 
 
 class PreparationTrace:
-    def __init__(self, fixture, events, *, exit_at=None, cleanup_error=None):
+    def __init__(self, fixture, events, *, exit_at=None, cleanup_error=None, metadata_at=20):
         self.fixture = fixture
         self.events = sorted(events)
+        self.metadata_at = metadata_at
+        self.extra_staged = []
+        self.command = None
         self.clock = TraceClock()
         self.drains = []
         self.reads = []
@@ -57,6 +60,10 @@ class PreparationTrace:
 
     def select(self, timeout):
         self.drains.append((self.clock.observed, timeout))
+        if self.metadata_at is not None and self.clock.observed >= self.metadata_at and self.staged.exists():
+            self.staged.rename(self.fixture.db_path)
+            for source, destination in self.extra_staged:
+                source.rename(destination)
         if not self.pending and self.events and self.events[0][0] <= self.clock.observed:
             _, self.pending = self.events.pop(0)
         return [(None, 1)] if self.pending else []
@@ -64,14 +71,14 @@ class PreparationTrace:
     def read(self, fd, size):
         assert fd == 31 and 1 <= size <= 4096
         self.reads.append((self.clock.observed, size))
+        if not self.pending:
+            raise BlockingIOError()
         data, self.pending = self.pending[:size], self.pending[size:]
         return data
 
     def write(self, fd, data):
         assert fd == 31
         self.writes.append((self.clock.observed, data))
-        if data == SELECT:
-            self.staged.rename(self.fixture.db_path)
         return len(data)
 
     def invoke(self, *, timeout=30):
@@ -80,10 +87,17 @@ class PreparationTrace:
         f.db_path.rename(self.staged)
         f.source.unlink()
         f.source.parent.rmdir()
+        def spawn(command, **kwargs):
+            self.command = list(command)
+            assert command == ["/owned/fake-cli", "--mode", "plan", "--sandbox",
+                               "--model", fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(f.work), "--effort", "high"]
+            assert kwargs["cwd"] == f.work and kwargs["start_new_session"]
+            assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"]
+            return self.process
         with ExitStack() as patches:
             for owner, name, kwargs in (
                 (profile.subprocess, "run", {"return_value": mock.Mock(returncode=0)}),
-                (profile.subprocess, "Popen", {"return_value": self.process}),
+                (profile.subprocess, "Popen", {"side_effect": spawn}),
                 (profile.time, "monotonic", {"side_effect": self.clock}),
                 (profile.pty, "openpty", {"return_value": (31, 32)}),
                 (profile.termios, "tcsetwinsize", {}),
@@ -141,14 +155,14 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
         trace.selector.close.assert_called_once()
         self.assertEqual(trace.closed, [32, 31])
         self.assertLess(trace.clock.calls, 1000)
-        self.assertTrue(all(delay == 0.1 for _, delay in trace.drains))
+        self.assertTrue(all(delay in {0, 0.1} for _, delay in trace.drains))
         f = trace.fixture
         current_db = trace.staged if trace.staged.exists() else f.db_path
         self.assertEqual(current_db.read_bytes(), trace.fault_db)
         self.assertEqual(f.source.read_bytes(), trace.original_source)
         self.assertEqual(f.hooks.read_bytes(), trace.original_hooks)
         self.assertIs(f.oracle, trace.original_oracle)
-        allowed = {AGENTS, SELECT, TRUST, b"\x1b[1;1R"}
+        allowed = {TRUST, b"\x1b[1;1R"}
         self.assertTrue(all(data in allowed for _, data in trace.writes))
 
     def positive(self, trace):
@@ -158,8 +172,8 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
             trace.result,
             profile.PreparedProfile(fixtures.CID, trace.fixture.work, fixtures.MODEL, "high"),
         )
-        self.assertEqual([data for _, data in trace.writes].count(AGENTS), 1)
-        self.assertEqual([data for _, data in trace.writes].count(SELECT), 1)
+        self.assertNotIn(AGENTS, [data for _, data in trace.writes])
+        self.assertNotIn(SELECT, [data for _, data in trace.writes])
 
     def negative(self, trace, message):
         self.clean(trace)
@@ -168,95 +182,80 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
         self.assertEqual(str(trace.error), message)
         self.assertNotIn(SELECT, [data for _, data in trace.writes])
 
-    def test_timely_and_late_real_fresh_session(self):
-        for arrival in (9, 14, 16, 22):
-            with self.subTest(arrival=arrival), self.owned([(arrival, PANEL)]) as trace:
+    def test_timely_and_late_real_fresh_session_without_agent_panel(self):
+        for arrival in (1, 14, 24):
+            with self.subTest(arrival=arrival), self.owned([], metadata_at=arrival) as trace:
                 trace.invoke()
                 self.positive(trace)
-                selected_at = next(t for t, data in trace.writes if data == SELECT)
-                self.assertGreaterEqual(selected_at, max(12, arrival))
-                self.assertLess(selected_at, 30)
-                if arrival > 12:
-                    self.assertTrue(any(t > 12 for t, _ in trace.drains))
+                self.assertGreaterEqual(trace.clock.observed, arrival)
+                self.assertLess(trace.clock.observed, 30)
+                self.assertEqual(trace.writes, [])
 
-    def test_fragmented_title_and_terminal_reply(self):
-        events = [(2, b"\x1b[6n"), (10, b"two-site-proposal-only\n"),
-                  (12, b"Available "), (14, b"Agents\n")]
+    def test_fragmented_and_foreign_panels_are_ignored_but_terminal_reply_is_served(self):
+        events = [(2, b"\x1b[6n"), (4, b"Available "),
+                  (6, b"Agents\nDefault two-site-stage-worker\n")]
         with self.owned(events) as trace:
             trace.invoke()
             self.positive(trace)
-            self.assertIn(b"\x1b[1;1R", [data for _, data in trace.writes])
-            self.assertGreaterEqual(next(t for t, data in trace.writes if data == SELECT), 14)
+            self.assertEqual([data for _, data in trace.writes], [b"\x1b[1;1R"])
 
-    def test_absence_drains_to_each_original_deadline(self):
+    def test_absence_drains_to_each_original_deadline_without_any_selection(self):
         for deadline in (20, 30, 45):
             events = [(t, b"neutral\n") for t in range(2, deadline, 3)]
-            with self.subTest(deadline=deadline), self.owned(events) as trace:
+            with self.subTest(deadline=deadline), self.owned(events, metadata_at=None) as trace:
                 trace.invoke(timeout=deadline)
-                self.negative(trace, "proposal runtime agent panel label unavailable")
+                self.negative(trace, "proposal runtime fresh session discovery failed")
                 self.assertGreaterEqual(trace.clock.observed, deadline)
                 self.assertLess(trace.clock.observed, deadline + 0.5)
                 self.assertTrue(any(t > 12 for t, _ in trace.reads))
-                self.assertEqual([data for _, data in trace.writes], [AGENTS])
-                self.assertEqual(trace.error.observation["elapsed_seconds"], deadline)
+                self.assertEqual(trace.writes, [])
 
-    def test_wrong_name_and_every_legacy_guard(self):
-        cases = [(b"Available Agents\nwrong-name", "proposal runtime local profile not discovered")]
-        cases += [(PANEL + name.encode(), "proposal runtime inherited legacy agents")
-                  for name in ("two-site-coordinator", "two-site-stage-worker", "two-site-stage-verifier")]
-        for data, message in cases:
-            with self.subTest(message=message, data=data), self.owned([(13, data)]) as trace:
+    def test_wrong_name_and_every_legacy_role_metadata_remain_rejected(self):
+        for name in ("wrong-name", "Default", "two-site-coordinator",
+                     "two-site-stage-worker", "two-site-stage-verifier"):
+            with self.subTest(name=name), self.owned([]) as trace:
+                trace.fixture.replace_meta(fixtures.literal_metadata(
+                    trace.fixture.work, trace.fixture.body, name=name))
                 trace.invoke()
-                self.negative(trace, message)
-                self.assertLess(trace.clock.observed, 15)
+                self.negative(trace, "proposal runtime selected session is ambiguous or absent")
 
-    def test_late_ui_cannot_accept_used_session_metadata(self):
-        with self.owned([(22, PANEL)]) as trace:
-            f = trace.fixture
-            with sqlite3.connect(f.db_path) as db:
-                db.execute("INSERT INTO steps VALUES(3)")
-                db.execute("INSERT INTO executor_metadata VALUES(?)", (f.executor(),))
-            trace.invoke()
-            self.clean(trace)
-            self.assertIsNone(trace.result)
-            self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent")
-            self.assertIn(SELECT, [data for _, data in trace.writes])
-
-    def test_owned_incremental_trust_resets_panel_age_not_absolute_deadline(self):
+    def test_used_session_metadata_still_rejects_without_generation(self):
         with self.owned([]) as trace:
+            with sqlite3.connect(trace.fixture.db_path) as db:
+                db.execute("INSERT INTO steps VALUES(3)")
+                db.execute("INSERT INTO executor_metadata VALUES(?)", (trace.fixture.executor(),))
+            trace.invoke()
+            self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+
+    def test_owned_incremental_trust_does_not_require_or_select_any_panel(self):
+        with self.owned([], metadata_at=24) as trace:
             path = str(trace.fixture.work).encode()
             trace.events = [(1, b"Do you trust this workspace? " + path),
-                            (3, b" 1. Yes, I trust this folder No Enter to confirm"),
-                            (16, PANEL)]
+                            (3, b" 1. Yes, I trust this folder No Enter to confirm")]
             trace.invoke()
             self.positive(trace)
             answers = [(t, data) for t, data in trace.writes if data == TRUST]
             self.assertEqual(len(answers), 1)
             self.assertGreaterEqual(answers[0][0], 3)
-            self.assertGreaterEqual(next(t for t, data in trace.writes if data == AGENTS), answers[0][0] + 7)
+            self.assertEqual([data for _, data in trace.writes], [TRUST])
 
     def test_slow_trust_cannot_extend_absolute_deadline(self):
         for deadline in (20, 30, 45):
-            with self.subTest(deadline=deadline), self.owned([]) as trace:
+            with self.subTest(deadline=deadline), self.owned([], metadata_at=deadline + 2) as trace:
                 path = str(trace.fixture.work).encode()
                 accepted = deadline - 8
-                dialog = b"Do you trust this workspace? " + path + b" Yes, I trust this folder No Enter"
-                trace.events = [(accepted, dialog), (deadline + 2, PANEL)]
+                trace.events = [(accepted, b"Do you trust this workspace? " + path +
+                                 b" Yes, I trust this folder No Enter")]
                 trace.invoke(timeout=deadline)
-                self.clean(trace)
-                self.assertIsNone(trace.result)
-                self.assertIs(type(trace.error), profile.ProposalProfileError)
-                self.assertEqual([data for _, data in trace.writes].count(TRUST), 1)
-                self.assertNotIn(SELECT, [data for _, data in trace.writes])
+                self.negative(trace, "proposal runtime fresh session discovery failed")
+                self.assertEqual([data for _, data in trace.writes], [TRUST])
                 self.assertGreaterEqual(trace.clock.observed, deadline)
                 self.assertLess(trace.clock.observed, deadline + 0.5)
 
     def test_foreign_and_suffix_trust_reject_before_answer(self):
-        cases = (("-other", b"Yes, I trust this folder"),
-                 ("/foreign", b"Yes, I trust this folder"),
-                 ("", b"Trust everything"))
-        for suffix, choice in cases:
+        for suffix, choice in (("-other", b"Yes, I trust this folder"),
+                               ("/foreign", b"Yes, I trust this folder"),
+                               ("", b"Trust everything")):
             with self.subTest(suffix=suffix, choice=choice), self.owned([]) as trace:
                 path = (str(trace.fixture.work) + suffix).encode()
                 trace.events = [(2, b"Do you trust this workspace? " + path + b" " + choice + b" No Enter")]
@@ -267,7 +266,7 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
     def test_process_exit_and_termination_error_close_all_resources(self):
         with self.owned([], exit_at=5) as trace:
             trace.invoke()
-            self.negative(trace, "proposal runtime profile selection failed")
+            self.negative(trace, "proposal runtime fresh session discovery failed")
         error = OSError("owned termination failed")
         with self.owned([], cleanup_error=error) as trace:
             trace.invoke()
@@ -276,68 +275,47 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
             self.assertIsNone(trace.result)
 
     def test_ui_bound_remains_enforced(self):
-        with self.owned([(1, b"x" * 65537)]) as trace:
+        with self.owned([(1, b"x" * 65537)], metadata_at=None) as trace:
             trace.invoke()
             self.negative(trace, "proposal runtime UI exceeds limit")
 
-    def test_selection_is_not_allowed_at_absolute_deadline(self):
-        with self.owned([(29.5, PANEL)]) as trace:
+    def test_panel_at_deadline_cannot_authorize_acceptance(self):
+        with self.owned([(29.5, PANEL)], metadata_at=32) as trace:
             trace.invoke()
-            self.clean(trace)
-            self.assertIsNone(trace.result)
-            self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertNotIn(SELECT, [data for _, data in trace.writes])
+            self.negative(trace, "proposal runtime fresh session discovery failed")
+            self.assertEqual(trace.writes, [])
 
-    def test_late_panel_multiple_valid_fresh_sessions_rejected(self):
+    def test_multiple_valid_fresh_sessions_rejected_without_arbitrary_choice(self):
         cid2 = "22345678-1234-1234-1234-123456789abc"
-        with self.owned([(14, PANEL)]) as trace:
+        with self.owned([]) as trace:
             f = trace.fixture
             cand2 = profile.PreparedProfile(cid2, f.work, fixtures.MODEL, "high")
             oracle2 = fixtures.literal_metadata(f.work, f.body, root_id=cid2)
             db2_path = f.home / "conversations" / (cid2 + ".db")
             staged2 = f.root / "prepared-fixture2.db"
-            with sqlite3.connect(staged2) as db2:
-                db2.execute("CREATE TABLE trajectory_meta(cascade_id TEXT,trajectory_type INTEGER,source INTEGER)")
-                db2.execute("CREATE TABLE trajectory_metadata_blob(id TEXT,data BLOB)")
-                db2.execute("CREATE TABLE steps(status INTEGER)")
-                db2.execute("CREATE TABLE executor_metadata(data BLOB)")
-                db2.execute("INSERT INTO trajectory_meta VALUES(?,?,?)", (cid2, 4, 17))
-                db2.execute("INSERT INTO trajectory_metadata_blob VALUES('main',?)", (oracle2,))
+            with sqlite3.connect(staged2) as db:
+                db.execute("CREATE TABLE trajectory_meta(cascade_id TEXT,trajectory_type INTEGER,source INTEGER)")
+                db.execute("CREATE TABLE trajectory_metadata_blob(id TEXT,data BLOB)")
+                db.execute("CREATE TABLE steps(status INTEGER)")
+                db.execute("CREATE TABLE executor_metadata(data BLOB)")
+                db.execute("INSERT INTO trajectory_meta VALUES(?,?,?)", (cid2, 4, 17))
+                db.execute("INSERT INTO trajectory_metadata_blob VALUES('main',?)", (oracle2,))
             staged2.chmod(0o600)
             staged2.rename(db2_path)
             try:
-                self.assertEqual(profile.validate_profile(f.candidate, fresh=True, cli_home=f.home), f.expected)
-                self.assertEqual(
-                    profile.validate_profile(cand2, fresh=True, cli_home=f.home),
-                    {**f.expected, "conversation_id": cid2},
-                )
+                self.assertEqual(profile.validate_profile(cand2, fresh=True, cli_home=f.home),
+                                 {**f.expected, "conversation_id": cid2})
             finally:
                 db2_path.rename(staged2)
-            db2_bytes = staged2.read_bytes()
-            orig_write = trace.write
-            def write_with_second(fd, data):
-                ret = orig_write(fd, data)
-                if data == SELECT:
-                    staged2.rename(db2_path)
-                return ret
-            trace.write = write_with_second
+            second_before = staged2.read_bytes()
+            trace.extra_staged = [(staged2, db2_path)]
             try:
                 trace.invoke()
-                self.clean(trace)
-                self.assertIsNone(trace.result)
-                self.assertIs(type(trace.error), profile.ProposalProfileError)
-                self.assertEqual(
-                    str(trace.error),
-                    "proposal runtime selected session is ambiguous or absent",
-                )
-                self.assertEqual([data for _, data in trace.writes].count(AGENTS), 1)
-                self.assertEqual([data for _, data in trace.writes].count(SELECT), 1)
-                self.assertEqual(
-                    profile._sessions(f.home / "conversations"),
-                    {fixtures.CID + ".db", cid2 + ".db"},
-                )
-                self.assertEqual(f.db_path.read_bytes(), trace.original_db)
-                self.assertEqual(db2_path.read_bytes(), db2_bytes)
+                self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+                self.assertEqual(trace.error.observation["final_valid_profiles"], 2)
+                self.assertEqual(profile._sessions(f.home / "conversations"),
+                                 {fixtures.CID + ".db", cid2 + ".db"})
+                self.assertEqual(db2_path.read_bytes(), second_before)
             finally:
                 if db2_path.exists():
                     db2_path.unlink()
@@ -345,29 +323,17 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
                     staged2.unlink()
             f.check_positive()
 
-    def test_late_panel_zero_valid_fresh_sessions_rejected(self):
+    def test_zero_valid_fresh_sessions_rejected_without_any_ui_fallback(self):
         cases = (
-            (lambda f: fixtures.literal_metadata(f.work, f.body, root_id="22345678-1234-1234-1234-123456789abc"), "invalid_root_uuid"),
-            (lambda f: fixtures.literal_metadata(f.work, f.body, name="wrong-agent"), "invalid_role_name"),
+            lambda f: fixtures.literal_metadata(f.work, f.body, root_id="22345678-1234-1234-1234-123456789abc"),
+            lambda f: fixtures.literal_metadata(f.work, f.body, name="wrong-agent"),
         )
-        for builder, label in cases:
-            with self.subTest(case=label), self.owned([(16, PANEL)]) as trace:
+        for builder in cases:
+            with self.owned([]) as trace:
                 f = trace.fixture
-                bad_meta = builder(f)
-                f.replace_meta(bad_meta)
-                fault_bytes = f.db_path.read_bytes()
+                f.replace_meta(builder(f))
+                before = f.db_path.read_bytes()
                 trace.invoke()
-                self.clean(trace)
-                self.assertIsNone(trace.result)
-                self.assertIs(type(trace.error), profile.ProposalProfileError)
-                self.assertEqual(
-                    str(trace.error),
-                    "proposal runtime selected session is ambiguous or absent",
-                )
-                self.assertEqual([data for _, data in trace.writes].count(AGENTS), 1)
-                self.assertEqual([data for _, data in trace.writes].count(SELECT), 1)
-                self.assertEqual(
-                    profile._sessions(f.home / "conversations"),
-                    {fixtures.CID + ".db"},
-                )
-                self.assertEqual(f.db_path.read_bytes(), fault_bytes)
+                self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+                self.assertEqual(trace.error.observation["final_valid_profiles"], 0)
+                self.assertEqual(f.db_path.read_bytes(), before)

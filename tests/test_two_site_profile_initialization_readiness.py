@@ -60,7 +60,8 @@ class OwnedPTYCLI:
         self.fd = os.dup(stdin)
         os.set_blocking(self.fd, False)
         self.stop = threading.Event()
-        self.selected = threading.Event()
+        self.direct_started = threading.Event()
+        self.direct_started.set()
         self.published = threading.Event()
         self.writes = bytearray()
         self.thread_error = None
@@ -81,7 +82,6 @@ class OwnedPTYCLI:
         return 0 if self.stop.is_set() else None
 
     def run(self):
-        panel_sent = False
         try:
             while not self.stop.is_set():
                 readable, _, _ = select.select([self.fd], [], [], 0.005)
@@ -91,12 +91,7 @@ class OwnedPTYCLI:
                     except BlockingIOError:
                         chunk = b""
                     self.writes.extend(chunk)
-                    if b"/agents" in self.writes and not panel_sent:
-                        os.write(self.fd, PANEL)
-                        panel_sent = True
-                    if b"\x1b[B" in self.writes:
-                        self.selected.set()
-                if (self.selected.is_set() and self.ready_at is not None
+                if (self.ready_at is not None
                         and self.clock.peek() >= self.ready_at and not self.published.is_set()):
                     with sqlite3.connect(self.fixture.db_path, timeout=1) as db:
                         db.execute("UPDATE trajectory_meta SET trajectory_type=4,source=17")
@@ -172,7 +167,7 @@ class InitializationReadinessTests(unittest.TestCase):
                 return result
 
             def spawn(command, **kwargs):
-                self.assertEqual(command, ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model", fixtures.MODEL, "--effort", "high"])
+                self.assertEqual(command, ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model", fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(fixture.work), "--effort", "high"])
                 self.assertEqual(kwargs["cwd"], fixture.work)
                 self.assertEqual(kwargs["stdin"], kwargs["stdout"])
                 self.assertEqual(kwargs["stdin"], kwargs["stderr"])
@@ -211,7 +206,9 @@ class InitializationReadinessTests(unittest.TestCase):
                 self.assertEqual(pty.call_count, 1)
                 self.assertEqual(len(processes), 1)
                 self.assertIsNone(processes[0].thread_error)
-                self.assertTrue(processes[0].selected.is_set())
+                self.assertTrue(processes[0].direct_started.is_set())
+                self.assertNotIn(b"/agents", processes[0].writes)
+                self.assertNotIn(b"\x1b[B", processes[0].writes)
                 self.assertEqual(validation_liveness, [False])
                 self.assertLess(clock.calls, 1000)
                 for fd, identity in descriptors:

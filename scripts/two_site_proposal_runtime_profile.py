@@ -369,7 +369,7 @@ def prepare_profile(
     cli: Path, workspace: Path, model: str, effort: str | None,
     *, terminate, cli_home: Path | None = None, timeout: float = 30,
 ) -> PreparedProfile:
-    """Select after authentication and verify the exact pinned role metadata."""
+    """Launch the fixed agent directly; verify fresh metadata before generation."""
     if not workspace.is_absolute() or workspace.resolve(strict=True) != workspace:
         raise ProposalProfileError("invalid proposal runtime workspace")
     st = workspace.lstat()
@@ -397,26 +397,67 @@ def prepare_profile(
     before = _sessions(directory)
     master, slave = pty.openpty()
     termios.tcsetwinsize(master, (30, 120)); os.set_blocking(master, False)
-    command = [str(cli), "--mode", "plan", "--sandbox", "--model", model]
+    # Pinned CLI 1.4.2 documents --agent. No dropdown, cursor position, stale
+    # rendering or local reselection is used to choose the proposal-only role.
+    command = [str(cli), "--mode", "plan", "--sandbox", "--model", model,
+               "--agent", NAME, "--add-dir", str(workspace)]
     if effort is not None:
         command += ["--effort", effort]
     process = None
     selector = selectors.DefaultSelector()
     buffer = bytearray()
-    sent = selected = trust_accepted = False
-    reselection_used = False
-    fresh_panel_offset = 0
-    empty_since = None
+    trust_accepted = False
+    trust_offset = 0
+    pending_trust = False
+    ready_during_preparation = False
     last_readiness_hint = None
 
-    def recheck_preparation_files():
-        validate_hooks(workspace)
-        source = folder / "agent.md"
-        identity = _regular(source, 4096)
-        with source.open("rb") as stream:
-            definition = stream.read(4097)
-        if definition != DEFINITION.encode() or _regular(source, 4096) != identity:
-            raise ProposalProfileError("proposal runtime definition mismatch")
+    def drain_ui(deadline):
+        # Drain the owned nonblocking PTY before AND after metadata reads.
+        # Every byte stays under the same cumulative cap and absolute deadline.
+        while time.monotonic() < deadline:
+            if not any(selector.select(0)):
+                return True
+            try:
+                chunk = os.read(master, min(4096, MAX_UI+1-len(buffer)))
+            except BlockingIOError:
+                return True
+            except OSError:
+                return False
+            if not chunk:
+                return False
+            buffer.extend(chunk)
+            if len(buffer) > MAX_UI:
+                raise ProposalProfileError("proposal runtime UI exceeds limit")
+            for query, reply in TERM_REPLIES:
+                if query in chunk:
+                    os.write(master, reply)
+        return False
+
+    def observe_trust():
+        nonlocal trust_accepted, trust_offset
+        text = buffer[trust_offset:].decode("utf-8", errors="replace")
+        normalized = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+        normalized = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", normalized)
+        # Ignore an incomplete trailing terminal-control sequence when checking
+        # a meaningful partial fixed header; never match a generic word or D/T.
+        normalized = re.sub(r"\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*)?$", "", normalized)
+        marker = "Do you trust"
+        pending = marker in normalized or any(
+            normalized.endswith(marker[:length])
+            for length in range(len("Do you"), len(marker))
+        )
+        if trust_accepted:
+            if pending:
+                raise ProposalProfileError("proposal runtime unexpected additional trust dialog")
+            return False
+        choice = trust_choice(text, workspace)
+        if choice is not None:
+            os.write(master, choice)
+            trust_accepted = True
+            trust_offset = len(buffer)
+            return False
+        return pending
     try:
         process = subprocess.Popen(
             command, cwd=workspace, stdin=slave, stdout=slave, stderr=slave,
@@ -426,116 +467,32 @@ def prepare_profile(
         os.close(slave); slave = -1
         selector.register(master, selectors.EVENT_READ)
         started = time.monotonic()
-        panel_started = started
-        while (observed := time.monotonic())-started < timeout and process.poll() is None:
-            observed = time.monotonic()
-            if observed-started >= timeout:
+        while process.poll() is None:
+            if time.monotonic() >= started + timeout:
                 break
-            age = observed-panel_started
-            text = buffer[fresh_panel_offset:].decode("utf-8", errors="replace")
-            choice = trust_choice(text, workspace) if not trust_accepted else None
-            if choice is not None:
-                # Only this owned, empty, nearest-Git workspace; never global trust.
-                os.write(master, choice)
-                trust_accepted = True
-                panel_started = time.monotonic()
-                continue
-            if not sent and age >= 7:
-                os.write(master, b"/agents\r"); sent = True
-            # Readiness remains observable while a fresh recovery panel is
-            # pending; a slow first selection may finish without a second one.
-            if (selected or reselection_used) and age >= 20:
-                ready, current_hint = _initialization_readiness_hint(
-                    directory, before, workspace, model, effort,
-                    deadline=started + timeout,
-                )
-                # A deadline is not a new initialization observation. Retain
-                # the last meaningful diagnostic, never use it to recover.
-                if current_hint["reason"] == "DEADLINE":
+            if not drain_ui(started + timeout):
+                break
+            pending_trust = observe_trust()
+            # The hint is never acceptance, nor permission to skip queued UI.
+            ready, current_hint = _initialization_readiness_hint(
+                directory, before, workspace, model, effort,
+                deadline=started + timeout,
+            )
+            if current_hint["reason"] == "DEADLINE":
+                break
+            last_readiness_hint = current_hint
+            if ready:
+                if not drain_ui(started + timeout):
                     break
-                last_readiness_hint = current_hint
-                if ready:
-                    selected = True
+                pending_trust = observe_trust()
+                if not pending_trust and time.monotonic() < started + timeout:
+                    ready_during_preparation = True
                     break
-                pristine = current_hint == {
-                    "reason": "INITIAL_METADATA_EMPTY", "new_sessions": 1,
-                    "valid_profiles": 0, "empty_profiles": 1,
-                    "invalid_profiles": 0, "sqlite_unavailable": 0,
-                }
-                if pristine:
-                    if empty_since is None:
-                        empty_since = observed
-                else:
-                    empty_since = None
-                if (selected and not reselection_used and empty_since is not None
-                        and observed - empty_since >= 4):
-                    recheck_preparation_files()
-                    # Old panel bytes may still be queued in the nonblocking
-                    # owned PTY. Account/drain them before the new request;
-                    # a buffer-only watermark cannot establish fresh rendering.
-                    drained = False
-                    while time.monotonic() < started + timeout:
-                        try:
-                            chunk = os.read(master, min(4096, MAX_UI+1-len(buffer)))
-                        except BlockingIOError:
-                            drained = True
-                            break
-                        except OSError:
-                            break
-                        if not chunk:
-                            break
-                        buffer.extend(chunk)
-                        if len(buffer) > MAX_UI:
-                            raise ProposalProfileError("proposal runtime UI exceeds limit")
-                        for query, reply in TERM_REPLIES:
-                            if query in chunk:
-                                os.write(master, reply)
-                    if (not drained or process.poll() is not None
-                            or time.monotonic() >= started + timeout):
-                        break
-                    # One local control action, never a generation retry. Keep
-                    # the cumulative UI cap and the original absolute deadline.
-                    fresh_panel_offset = len(buffer)
-                    reselection_used = True
-                    os.write(master, b"/agents\r")
-                    selected = False
-                    continue
-            # Only newly read rendering may authorize recovery selection.
-            if sent and not selected and age >= 12 and "Available Agents" in text:
-                if NAME not in text and not reselection_used:
-                    raise ProposalProfileError("proposal runtime local profile not discovered")
-                if any(label in text for label in ("two-site-coordinator", "two-site-stage-worker", "two-site-stage-verifier")):
-                    raise ProposalProfileError("proposal runtime inherited legacy agents")
-                # Recovery may receive a complete header before the agent name.
-                # Keep draining, without selecting or extending the deadline.
-                if NAME in text:
-                    if reselection_used:
-                        recheck_preparation_files()
-                    if time.monotonic() >= started + timeout:
-                        break
-                    os.write(master, b"\x1b[B\r\x1b"); selected = True
-            for _, _mask in selector.select(0.1):
-                try:
-                    chunk = os.read(master, min(4096, MAX_UI+1-len(buffer)))
-                except BlockingIOError:
-                    continue
-                except OSError:
-                    chunk = b""
-                if not chunk:
-                    continue
-                buffer.extend(chunk)
-                if len(buffer) > MAX_UI:
-                    raise ProposalProfileError("proposal runtime UI exceeds limit")
-                for query, reply in TERM_REPLIES:
-                    if query in chunk:
-                        os.write(master, reply)
-        if not selected and not reselection_used:
-            text = buffer.decode("utf-8", errors="replace")
-            if sent and observed-started >= timeout and "Available Agents" not in text:
-                error = ProposalProfileError("proposal runtime agent panel label unavailable")
-                error.observation = {"ui_bytes": len(buffer), "fixture_label_present": NAME in text, "agents_word_present": "Agents" in text, "no_agents_label_present": "No agents" in text, "trust_word_present": "trust" in text.lower(), "workspace_word_present": "workspace" in text.lower(), "login_word_present": "login" in text.lower(), "enter_word_present": "enter" in text.lower(), "enter_boundary_present": re.search(r"\benter\b",text,re.IGNORECASE) is not None, "owned_path_present": str(workspace) in text, "trust_accepted": trust_accepted, "elapsed_seconds": round(observed-panel_started, 1), "fixed_trust_choices": {label:label in text for label in ("Trust this workspace", "Do you trust", "Yes, I trust", "Yes", "No", "Continue", "Workspace Trust", "Don't trust", "trust this folder", "1.", "2.")}}
-                raise error
-            raise ProposalProfileError("proposal runtime profile selection failed")
+            # No quiet-period timer and no extension: pending trust must resolve
+            # from actual newly drained bytes before the original deadline.
+            selector.select(0.1)
+        if pending_trust:
+            raise ProposalProfileError("proposal runtime trust dialog incomplete")
     finally:
         try:
             if process is not None:
@@ -556,14 +513,16 @@ def prepare_profile(
         except ProposalProfileError:
             continue
         matches.append(candidate)
-    if len(matches) != 1:
-        error = ProposalProfileError("proposal runtime selected session is ambiguous or absent")
+    if len(matches) != 1 or not ready_during_preparation:
+        # Metadata published only during cleanup cannot create eligibility.
+        reason = ("proposal runtime selected session is ambiguous or absent" if len(matches) != 1
+                  else "proposal runtime profile was not ready during bounded preparation")
+        error = ProposalProfileError(reason)
         if last_readiness_hint is not None:
             error.observation = {"last_initialization_readiness_hint": last_readiness_hint,
-                                 "final_new_sessions": len(names), "final_valid_profiles": len(matches)}
-            # The last hint is explicitly not current or final acceptance data.
-            # This fixed count-only suffix survives the unchanged Runner's error
-            # publication without exposing UI/auth/session payloads.
+                                 "final_new_sessions": len(names), "final_valid_profiles": len(matches),
+                                 "ready_during_preparation": ready_during_preparation}
+            # A last hint is not current/final acceptance. Counts only, no payload.
             if last_readiness_hint["empty_profiles"]:
                 error.args = (str(error) + "; LAST_HINT_INITIAL_METADATA_EMPTY"
                               + " new=" + str(last_readiness_hint["new_sessions"])

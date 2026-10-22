@@ -1,4 +1,4 @@
-"""Owned PTY/SQLite pre-generation recovery; no vendor CLI/auth/provider.
+"""Owned direct-agent PTY/SQLite regression; replaces obsolete reselection traces.
 
 CODEX_AUTHORED by /root/main_empty_sqlite_codex_author. This is test source,
 not a claim that the vendor cause is known or a live recovery was observed.
@@ -41,13 +41,16 @@ class Clock(support.Clock):
 
 
 class OwnedReselectionCLI:
-    """One synthetic CLI on a real PTY; only local selection publishes metadata."""
+    """Synthetic startup publishes metadata without any selection/input."""
 
     def __init__(self, fixture, clock, stdin, *, mode="recover", first_ready=None,
-                 fresh_panel=True, fragmented=False, drift=None, padding=0):
+                 fresh_panel=True, fragmented=False, drift=None, padding=0,
+                 startup_ui=None, synchronous_ready=False, publish_on_terminate=False):
         self.fixture, self.clock = fixture, clock
         self.mode, self.first_ready, self.fresh_panel = mode, first_ready, fresh_panel
         self.fragmented, self.drift, self.padding = fragmented, drift, padding
+        self.startup_ui, self.publish_on_terminate = startup_ui, publish_on_terminate
+        self.trust_completed = False
         self.fd = os.dup(stdin)
         os.set_blocking(self.fd, False)
         self.stop = threading.Event()
@@ -58,7 +61,7 @@ class OwnedReselectionCLI:
         self.terminated_at = None
         self.busy = None
         self._create(fixture.db_path, fixtures.CID)
-        if mode in ("invalid", "used", "executor", "multiple"):
+        if mode in ("invalid", "used", "executor", "multiple", "mixed"):
             with sqlite3.connect(fixture.db_path) as db:
                 if mode == "invalid":
                     db.execute("UPDATE trajectory_meta SET source=99")
@@ -66,8 +69,25 @@ class OwnedReselectionCLI:
                     db.execute("INSERT INTO steps VALUES(3)")
                 elif mode == "executor":
                     db.execute("INSERT INTO executor_metadata VALUES(?)", (b"execution evidence",))
-            if mode == "multiple":
+            if mode in ("multiple", "mixed"):
                 self._create(fixture.home / "conversations" / (SECOND + ".db"), SECOND)
+                if mode == "mixed":
+                    with sqlite3.connect(fixture.home / "conversations" / (SECOND + ".db")) as db:
+                        db.execute("UPDATE trajectory_meta SET trajectory_type=4,source=17")
+                        db.execute("UPDATE trajectory_metadata_blob SET data=?", (b"invalid role metadata",))
+        if synchronous_ready:
+            self._publish()
+            self.published = True
+        if startup_ui == "foreign":
+            self._send(b"Do you trust this workspace? " + str(fixture.work).encode() +
+                       b"-other Yes, I trust this folder No Enter")
+        elif startup_ui in ("partial_foreign", "partial_owned", "prefix_only"):
+            self._send(b"Do you tru")
+        elif startup_ui == "incomplete":
+            self._send(b"Do you trust this workspace? " + str(fixture.work).encode() +
+                       b" Yes, I trust")
+        elif startup_ui == "ordinary_banner":
+            self._send(b"ordinary startupD")
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
@@ -102,6 +122,21 @@ class OwnedReselectionCLI:
             if self.mode == "busy":
                 self.busy = sqlite3.connect(self.fixture.db_path)
                 self.busy.execute("BEGIN EXCLUSIVE")
+            # Unsolicited/stale/fragmented panels are noise, never authority.
+            if self.fresh_panel:
+                self.panels = 1
+                if self.fragmented:
+                    self._send(b"Available Agents\n")
+                    complete_at = self.clock.peek() + 0.5
+                    while self.clock.peek() < complete_at and not self.stop.is_set():
+                        self.stop.wait(0.005)
+                    if self.fragmented == "foreign_name":
+                        self._send(b" foreign-agent\n")
+                    elif self.fragmented != "header_only":
+                        self._send(b" two-site-proposal-only\n")
+                else:
+                    self._send(PANEL)
+                self._send(b"x" * self.padding)
             while not self.stop.is_set():
                 ready, _, _ = select.select([self.fd], [], [], 0.005)
                 if ready:
@@ -109,36 +144,22 @@ class OwnedReselectionCLI:
                         self.received.extend(os.read(self.fd, 4096))
                     except BlockingIOError:
                         pass
-                requested = self.received.count(b"/agents")
-                if requested > self.panels:
-                    self.panels = requested
-                    if requested == 1 or self.fresh_panel:
-                        if requested > 1 and self.fragmented:
-                            full_header = self.fragmented in ("header_first", "header_only", "foreign_name")
-                            self._send(b"Available Agents\n" if full_header else b"Available ")
-                            complete_at = self.clock.peek() + 0.5
-                            while self.clock.peek() < complete_at and not self.stop.is_set():
-                                self.stop.wait(0.005)
-                            if self.fragmented == "header_first":
-                                self._send(b" two-site-proposal-only\n")
-                            elif self.fragmented == "foreign_name":
-                                self._send(b" foreign-agent\n")
-                            elif self.fragmented != "header_only":
-                                self._send(b"Agents\n two-site-proposal-only\n")
-                        else:
-                            self._send(PANEL)
-                        self._send(b"x" * self.padding)
                 self.choices = self.received.count(b"\x1b[B")
                 now = self.clock.peek()
-                if self.drift and self.choices and now >= 23 and not self.drifted:
+                if self.startup_ui in ("partial_foreign", "partial_owned") and now >= 2 and not self.trust_completed:
+                    suffix = b"-other" if self.startup_ui == "partial_foreign" else b""
+                    self._send(b"st this workspace? " + str(self.fixture.work).encode() + suffix +
+                               b" Yes, I trust this folder No Enter")
+                    self.trust_completed = True
+                if self.drift and now >= 23 and not self.drifted:
                     path = self.fixture.hooks if self.drift == "hooks" else self.fixture.source
                     path.write_bytes(b"changed owned fixture\n")
                     self.drifted = True
-                if self.mode == "exit" and self.choices and now >= 22:
+                if self.mode == "exit" and now >= 22:
                     self.stop.set()
-                first_complete = self.first_ready is not None and self.choices >= 1 and now >= self.first_ready
-                recovered = self.choices >= 2 and self.mode in ("recover", "ambiguous")
-                if not self.published and (first_complete or recovered):
+                ready_at = self.first_ready if self.first_ready is not None else 2
+                completes = self.mode in ("recover", "ambiguous") or self.first_ready is not None
+                if not self.published and completes and now >= ready_at:
                     self._publish()
                     if self.mode == "ambiguous":
                         second = self.fixture.home / "conversations" / (SECOND + ".db")
@@ -161,19 +182,22 @@ class OwnedReselectionCLI:
         self.thread.join(timeout=2)
         if self.thread.is_alive():
             raise AssertionError("owned fake CLI cleanup did not finish")
+        if self.publish_on_terminate:
+            self._publish()
+            self.published = True
 
 
 class ProfilePreparationReselectionTests(unittest.TestCase):
     @contextmanager
-    def lab(self, *, cleanup_error=False, timeout=30, queued_stale=False, **options):
+    def lab(self, *, cleanup_error=False, timeout=30, model=fixtures.MODEL, effort="high", after_hint_foreign=False, **options):
         fixture = fixtures.RuntimeProfileContracts("runTest")
         fixture.setUp()
         clock = Clock()
         processes, descriptors, commands, master_writes, validations = [], [], [], [], []
         real_openpty, real_write = profile.pty.openpty, profile.os.write
         real_validate = profile.validate_profile
-        real_hooks = profile.validate_hooks
-        injected_stale = []
+        real_hint = profile._initialization_readiness_hint
+        hint_injections = []
         source_before, hooks_before = fixture.source.read_bytes(), fixture.hooks.read_bytes()
         preexisting = fixture.root / "saved-ready.db"
         fixture.db_path.rename(preexisting)
@@ -192,8 +216,11 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
             return real_write(fd, data)
 
         def spawn(command, **kwargs):
-            self.assertEqual(command, ["/owned/fake-cli", "--mode", "plan", "--sandbox",
-                                      "--model", fixtures.MODEL, "--effort", "high"])
+            expected = ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model", model,
+                        "--agent", profile.NAME, "--add-dir", str(fixture.work)]
+            if effort is not None:
+                expected += ["--effort", effort]
+            self.assertEqual(command, expected)
             self.assertEqual(kwargs["cwd"], fixture.work)
             self.assertTrue(kwargs["start_new_session"])
             self.assertEqual(kwargs["stdin"], kwargs["stdout"])
@@ -208,15 +235,13 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
             if cleanup_error:
                 raise OSError("owned cleanup failed")
 
-        def hooks(workspace):
-            result = real_hooks(workspace)
-            if (queued_stale and processes and not injected_stale
-                    and master_writes.count(AGENTS) == 1 and clock.peek() >= 24):
-                # Called in the subject before its recovery request: inject an
-                # OLD rendering into the actual kernel PTY queue, not buffer.
-                processes[0]._send(PANEL)
+        def hint(*args, **kwargs):
+            result = real_hint(*args, **kwargs)
+            if after_hint_foreign and result[0] and not hint_injections:
+                processes[0]._send(b"Do you trust this workspace? " +
+                                   str(fixture.work).encode() + b"-other Yes, I trust this folder No Enter")
                 self.assertTrue(select.select([descriptors[0][0]], [], [], 0)[0])
-                injected_stale.append(PANEL)
+                hint_injections.append("QUEUED_AFTER_REAL_READY_HINT")
             return result
 
         def validate(*args, **kwargs):
@@ -227,7 +252,8 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
         trace.result = trace.error = None
         trace.fixture, trace.clock = fixture, clock
         trace.processes, trace.writes, trace.validations = processes, master_writes, validations
-        trace.injected_stale = injected_stale
+        trace.commands = commands
+        trace.hint_injections = hint_injections
         try:
             with mock.patch.object(profile.subprocess, "run", return_value=mock.Mock(returncode=0)), \
                  mock.patch.object(profile.subprocess, "Popen", side_effect=spawn), \
@@ -235,10 +261,10 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
                  mock.patch.object(profile.os, "write", side_effect=write), \
                  mock.patch.object(profile.time, "monotonic", side_effect=clock), \
                  mock.patch.object(profile, "validate_profile", side_effect=validate), \
-                 mock.patch.object(profile, "validate_hooks", side_effect=hooks):
+                 mock.patch.object(profile, "_initialization_readiness_hint", side_effect=hint):
                 try:
                     trace.result = profile.prepare_profile(
-                        Path("/owned/fake-cli"), fixture.work, fixtures.MODEL, "high",
+                        Path("/owned/fake-cli"), fixture.work, model, effort,
                         terminate=terminate, cli_home=fixture.home, timeout=timeout,
                     )
                 except BaseException as error:
@@ -248,9 +274,9 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
             self.assertIsNone(processes[0].error)
             self.assertFalse(processes[0].thread.is_alive())
             self.assertLess(clock.calls, 1000)
-            self.assertTrue(all(data in (AGENTS, CHOOSE, b"\x1b[1;1R", b"1\r") for data in master_writes))
-            self.assertLessEqual(master_writes.count(AGENTS), 2)
-            self.assertLessEqual(master_writes.count(CHOOSE), 2)
+            self.assertTrue(all(data in (b"\x1b[1;1R", b"1\r") for data in master_writes))
+            self.assertNotIn(AGENTS, master_writes)
+            self.assertNotIn(CHOOSE, master_writes)
             self.assertTrue(all(alive is False for alive in validations))
             for fd, identity in descriptors:
                 support.InitializationReadinessTests.assert_owned_pty_closed(self, fd, identity)
@@ -269,41 +295,32 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
         self.assertIsNone(trace.result)
         self.assertIs(type(trace.error), profile.ProposalProfileError)
 
-    def test_one_live_reselection_recovers_real_metadata_before_generation(self):
-        for fragmented in (False, True, "header_first"):
-            with self.subTest(fragmented=fragmented), self.lab(fragmented=fragmented) as trace:
+    def test_direct_startup_ignores_present_absent_and_fragmented_panels(self):
+        for fresh_panel, fragmented in ((False, False), (True, False), (True, True),
+                                        (True, "header_only"), (True, "foreign_name")):
+            with self.subTest(panel=fresh_panel, fragmented=fragmented), self.lab(
+                    fresh_panel=fresh_panel, fragmented=fragmented) as trace:
                 self.assertIsNone(trace.error)
                 self.assertEqual(trace.result, trace.fixture.candidate)
-                self.assertEqual(trace.writes.count(AGENTS), 2)
-                self.assertEqual(trace.writes.count(CHOOSE), 2)
+                self.assertEqual(trace.writes, [])
                 self.assertEqual(trace.validations, [False])
                 self.assertTrue(trace.processes[0].published)
-                self.assertLess(trace.processes[0].terminated_at, 30)
+                self.assertLess(trace.processes[0].terminated_at, 20)
                 self.assertEqual(profile.validate_profile(trace.result, fresh=True, cli_home=trace.fixture.home), trace.fixture.expected)
 
-    def test_recovery_header_without_fixed_agent_name_drains_to_original_deadline(self):
-        for fragmented in ("header_only", "foreign_name"):
-            with self.subTest(fragmented=fragmented), self.lab(mode="empty", fragmented=fragmented) as trace:
-                self.assert_rejected(trace)
-                self.assertEqual(trace.writes.count(AGENTS), 2)
-                self.assertEqual(trace.writes.count(CHOOSE), 1)
-                self.assertFalse(trace.processes[0].published)
-                self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
-                self.assertLess(trace.processes[0].terminated_at, 31)
-
-    def test_slow_original_profile_finishes_while_fresh_panel_is_absent(self):
+    def test_slow_direct_profile_finishes_without_any_panel_or_input(self):
         with self.lab(first_ready=24, fresh_panel=False) as trace:
             self.assertIsNone(trace.error)
             self.assertEqual(trace.result, trace.fixture.candidate)
-            self.assertEqual(trace.writes.count(CHOOSE), 1)
+            self.assertEqual(trace.writes, [])
+            self.assertGreaterEqual(trace.processes[0].terminated_at, 24)
             self.assertLess(trace.processes[0].terminated_at, 30)
 
-    def test_no_stale_panel_reuse_and_permanent_empty_keeps_failure_classification(self):
+    def test_permanent_empty_keeps_failure_classification_and_original_deadline(self):
         for fresh_panel in (False, True):
-            with self.subTest(fresh_panel=fresh_panel), self.lab(mode="empty", fresh_panel=fresh_panel) as trace:
+            with self.subTest(panel=fresh_panel), self.lab(mode="empty", fresh_panel=fresh_panel) as trace:
                 self.assert_rejected(trace)
-                self.assertEqual(trace.writes.count(AGENTS), 2)
-                self.assertEqual(trace.writes.count(CHOOSE), 2 if fresh_panel else 1)
+                self.assertEqual(trace.writes, [])
                 self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
                 self.assertEqual(trace.error.observation["last_initialization_readiness_hint"], {
                     "reason": "INITIAL_METADATA_EMPTY", "new_sessions": 1,
@@ -315,52 +332,41 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
                 self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
                 self.assertLess(trace.processes[0].terminated_at, 31)
 
-    def test_queued_old_panel_is_drained_before_new_request_not_reused(self):
-        with self.lab(mode="empty", fresh_panel=False, queued_stale=True) as trace:
-            self.assert_rejected(trace)
-            self.assertEqual(trace.injected_stale, [PANEL])
-            self.assertEqual(trace.writes.count(AGENTS), 2)
-            self.assertEqual(trace.writes.count(CHOOSE), 1)
-            self.assertFalse(trace.processes[0].published)
-            self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
-            self.assertLess(trace.processes[0].terminated_at, 31)
-
-    def test_nonpristine_or_unreadable_placeholders_never_reselect(self):
+    def test_nonpristine_or_unreadable_placeholders_never_gain_acceptance(self):
         for mode in ("invalid", "used", "executor", "multiple", "busy"):
             with self.subTest(mode=mode), self.lab(mode=mode) as trace:
                 self.assert_rejected(trace)
-                self.assertEqual(trace.writes.count(AGENTS), 1)
-                self.assertEqual(trace.writes.count(CHOOSE), 1)
+                self.assertEqual(trace.writes, [])
                 self.assertFalse(trace.processes[0].published)
 
-    def test_two_valid_profiles_after_reselection_are_not_arbitrarily_chosen(self):
+    def test_two_valid_profiles_are_not_arbitrarily_chosen(self):
         with self.lab(mode="ambiguous") as trace:
             self.assert_rejected(trace)
-            self.assertEqual(trace.writes.count(CHOOSE), 2)
+            self.assertEqual(trace.writes, [])
             self.assertEqual(trace.error.observation["final_valid_profiles"], 2)
 
-    def test_hook_and_source_drift_block_before_second_local_control_input(self):
+    def test_hook_and_source_drift_still_block_final_strict_validation(self):
         for drift in ("hooks", "source"):
-            with self.subTest(drift=drift), self.lab(drift=drift) as trace:
+            with self.subTest(drift=drift), self.lab(drift=drift, first_ready=24) as trace:
                 self.assert_rejected(trace)
                 self.assertTrue(trace.processes[0].drifted)
-                self.assertEqual(trace.writes.count(AGENTS), 1)
-                self.assertEqual(trace.validations, [])
+                self.assertEqual(trace.writes, [])
+                self.assertEqual(trace.validations, [False])
 
-    def test_original_deadline_not_extended_for_second_panel(self):
+    def test_original_deadline_not_extended_for_any_initialization(self):
         for timeout in (20, 30, 45):
             with self.subTest(timeout=timeout), self.lab(mode="empty", fresh_panel=False, timeout=timeout) as trace:
                 self.assert_rejected(trace)
                 self.assertGreaterEqual(trace.processes[0].terminated_at, timeout)
                 self.assertLess(trace.processes[0].terminated_at, timeout + 1)
-                self.assertLessEqual(trace.writes.count(AGENTS), 2)
+                self.assertEqual(trace.writes, [])
 
-    def test_cumulative_ui_limit_not_reset_when_history_is_watermarked(self):
-        with self.lab(mode="empty", padding=33000) as trace:
+    def test_cumulative_ui_limit_remains_enforced_without_selection(self):
+        with self.lab(mode="empty", padding=65537) as trace:
             self.assert_rejected(trace)
             self.assertEqual(str(trace.error), "proposal runtime UI exceeds limit")
 
-    def test_cleanup_failure_or_early_exit_never_returns_recovered_profile(self):
+    def test_cleanup_failure_or_early_exit_never_returns_profile(self):
         with self.lab(cleanup_error=True) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), OSError)
@@ -368,7 +374,7 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
             self.assertEqual(trace.validations, [])
         with self.lab(mode="exit") as trace:
             self.assert_rejected(trace)
-            self.assertEqual(trace.writes.count(AGENTS), 1)
+            self.assertEqual(trace.writes, [])
 
 
 if __name__ == "__main__":

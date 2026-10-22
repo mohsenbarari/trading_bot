@@ -512,21 +512,37 @@ AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا 
 کپی موقت قبل از آزادشدن lock در موفقیت/خطا/timeout جمع می‌شود؛ adapter 1.1.26 قدیمی است.
 
 
-### بازیابی محدودِ آماده‌سازی profile — ۲۲ اکتبر ۲۰۲۶
+### آماده‌سازی مستقیم profile — ۲۲ اکتبر ۲۰۲۶
 
-خطای metadata خالیِ اولیه، پاسخ نامعتبر مدل یا مجوز تکرار درخواست نیست.
-پیش از generation، فقط برای دقیقاً یک نشست تازه با placeholder خالی، بدون
-step یا executor و بدون metadata نامعتبر/مبهم یا خطای SQLite، یک انتخاب مجددِ
-همان agent ثابت در همان PTY مجاز است. نشست کند فرصت تکمیل دارد؛ انتخاب مجدد
-به rendering تازه متکی است، ورودیِ مانده در PTY با همان سقف تجمعی پردازش می‌شود
-و deadline اصلی تمدید نمی‌شود. هیچ prompt کاری، generation، ابزار، Default
-fallback، تغییر model/effort/CLI یا بازنویسی DB در این آماده‌سازی وجود ندارد.
+برای حذف وابستگی به منوی تعاملی و زمان‌بندی کلیدها، آماده‌سازی فقط با گزینهٔ
+رسمی CLI پین‌شدهٔ 1.4.2، یعنی `--agent two-site-proposal-only`، آغاز می‌شود؛
+`--add-dir` فقط مسیر دقیق همان workspace تازهٔ 0700 و متعلق به فراخوانی را
+صریحاً به CLI می‌دهد، نه مسیر والد، ریپازیتوری اصلی یا دایرکتوری دیگری.
+هیچ `/agents`، arrow-selection یا reselection اجرا نمی‌شود؛ متن UI مرجع انتخاب
+یا پذیرش agent نیست. تنها پاسخ کنترل‌شدهٔ UI، trust دقیق همان workspace تازه
+و متعلق به فراخوانی و پاسخ‌های ثابت terminal است؛ trust عمومی مجاز نیست.
 
-پس از آماده‌سازی نیز validation نهاییِ مستقلِ profile تازه و یکتا، hooks،
-مدل/effort، CLI pin و Source پیش از dispatch الزام است. درخواستِ قبلاً dispatch
-شده، Worker یا pipeline کامل به علت این اصلاح دوباره اجرا نمی‌شود؛ reservation،
-checkpoint و شکست‌های تاریخی حفظ‌اند. خطای باقی‌مانده یا ابهام واقعی همچنان
-fail-closed است؛ این بازیابی تضمین دسترسی دائمی Provider نیست.
+metadata از آغاز آماده‌سازی بررسی می‌شود؛ پیش و پس از مشاهدهٔ READY، خروجی
+موجود PTY خوانده می‌شود تا trust کامل یا نیمه‌رسیده دور زده نشود. فقط READY
+مشاهده‌شده داخل deadline و پس از بررسی trust می‌تواند واجد پذیرش باشد؛ metadata
+ایجادشده صرفاً هنگام cleanup کافی نیست. deadline پیش‌فرض۳۰ثانیه، دامنهٔ معتبر
+۲۰–۴۵ثانیه و سقف تجمعی UI بدون تغییرند. پس از cleanup واقعی، validation نهایی
+مستقلِ profile تازه و یکتا، Source/BODY/hooks و bindingهای مدل/effort/CLI همچنان
+الزام است. نادیده‌گرفتن `--agent`، Default fallback، metadata نامعتبر یا مبهم،
+session مصرف‌شده و خطای واقعی مجوز/auth/quota راه عبور یا retry کور ندارند.
+
+qualification محدود ۲۲ اکتبر با همین CLI پین‌شده، دو profile تازهٔ Worker و
+Reviewer را با validator اصلی، به‌ترتیب در۰٫۸ و۰٫۷ثانیه آماده تشخیص داد؛ هرکدام
+فقط یک session، صفر ابزار و policy=off داشتند و cleanup عادی مشاهده شد.
+شاهد خصوصی Root، `RUNTIME_772M_DIRECT_AGENT_R3_QUALIFICATION_ROOT_ACCEPTED_20261022.json`،
+فقط سازگاری آماده‌سازی را اثبات می‌کند؛ نه generation، actual executor، علت
+داخلی شکست C004 یا تضمین دائمی سلامت. probe ناموفق قبلی نیز محفوظ است.
+
+این مسیر هیچ prompt کاری یا generation ندارد. generation فقط با `--conversation`
+همان profile پذیرفته‌شده آغاز می‌شود و کنترل actual executor و دیگر گیت‌های
+Runner/Reviewer/native/Codex/Git تغییر نمی‌کنند. Worker یا pipeline قبلی تکرار
+نمی‌شود؛ reservation، checkpoint و همهٔ شکست‌های تاریخی حفظ‌اند. آزمون و
+qualification تازه لازم‌اند؛ این قرارداد تضمین دسترسی دائمی Provider نیست.
 
 ### تکمیل generation در runtime contract 1.3 — ۲۰ اکتبر ۲۰۲۶
 
