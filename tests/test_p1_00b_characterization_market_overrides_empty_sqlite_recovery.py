@@ -7,6 +7,10 @@ sorted serialization/read-only custody and the five select/order_by/execute/
 scalars/all failure boundaries remain mandatory and unproved. No HTTP/auth,
 other-handler, whole-handler PROVEN, seed/origin/High/Stage closure, execution or
 acceptance claim is made. This is not the rejected C001 composite or its output.
+
+Gemini amendment (WA-P1-00B-BUSINESS-LIVE-20261022-786B): closes only the empty
+explicit clean-sync-flush oracle gap and adds its negative witness while
+preserving the historical CODEX_AUTHORED base.
 """
 
 from __future__ import annotations
@@ -72,7 +76,7 @@ class MarketOverridesEmptySQLiteCharacterizationTests(unittest.IsolatedAsyncioTe
         self.assertEqual(schema[8][3], 0)
         return schema, ddl, rows
 
-    async def test_empty_real_sqlite_list_preserves_state_and_call_order(self):
+    async def _run_empty_sqlite_harness(self, invoke_handler=router.list_market_overrides, *, trace_out=None):
         engine = create_engine(
             "sqlite:///:memory:", poolclass=StaticPool,
             connect_args={"check_same_thread": False, "cached_statements": 0},
@@ -98,209 +102,354 @@ class MarketOverridesEmptySQLiteCharacterizationTests(unittest.IsolatedAsyncioTe
                 sqlite_connection = connection.connection.driver_connection
             self.assertIsInstance(sqlite_connection, sqlite3.Connection)
 
-            async with real_async_session(engine) as db:
-                self.assertIsInstance(db, AsyncSession)
-                self.assertEqual(tuple(db.new), ())
-                self.assertEqual(tuple(db.dirty), ())
-                self.assertEqual(tuple(db.deleted), ())
-                events = []
-                selected = []
-                ascending = []
-                ordered = []
-                results = []
-                scalars = []
-                original_select = router.select
-                original_asc = type(MarketScheduleOverride.date).asc
-                original_order_by = Select.order_by
-                original_execute = db.execute
-                original_serializer = router._serialize_market_schedule_override
-                restorations = []
-                listeners = []
-                sql_observations = []
-                sqlite_reads = []
-                sqlite_selects = []
-                denied_actions = []
-                forbidden_calls = []
-
-                def deny(*args, **kwargs):
-                    forbidden_calls.append((args, kwargs))
-                    self.fail("Handler attempted a forbidden mutation/transaction/serializer")
-
-                def authorize(action, argument1, argument2, database, trigger):
-                    if action == sqlite3.SQLITE_SELECT:
-                        sqlite_selects.append((argument1, argument2, database, trigger))
-                        return sqlite3.SQLITE_OK
-                    if (action == sqlite3.SQLITE_READ
-                            and argument1 == "market_schedule_overrides"
-                            and argument2 in _COLUMNS
-                            and database == "main" and trigger is None):
-                        sqlite_reads.append(argument2)
-                        return sqlite3.SQLITE_OK
-                    denied_actions.append((action, argument1, argument2, database, trigger))
-                    return sqlite3.SQLITE_DENY
-
-                def observe_sql(connection, cursor, statement, parameters, context, executemany):
-                    self.assertEqual(len(sql_observations), 0, "Extra physical query")
-                    self.assertEqual(len(ordered), 1)
-                    self.assertIs(context.compiled.statement, ordered[0])
-                    self.assertTrue(context.compiled.statement.is_select)
-                    self.assertFalse(executemany)
-                    self.assertEqual(parameters, ())
-                    sql_observations.append((statement, parameters))
-                    events.append("sql")
-
-                def observe_select(*args, **kwargs):
-                    self.assertEqual(len(selected), 0)
-                    self.assertEqual(len(args), 1)
-                    self.assertIs(args[0], MarketScheduleOverride)
-                    self.assertEqual(kwargs, {})
-                    events.append("select")
-                    statement = original_select(*args, **kwargs)
-                    self.assertIsInstance(statement, Select)
-                    self.assertEqual(tuple(statement._order_by_clauses), ())
-                    self.assertEqual(statement.column_descriptions[0]["entity"], MarketScheduleOverride)
-                    selected.append(statement)
-                    return statement
-
-                def observe_asc(attribute, *args, **kwargs):
-                    self.assertEqual(len(ascending), 0)
-                    self.assertIs(attribute, MarketScheduleOverride.date)
-                    self.assertEqual(args, ())
-                    self.assertEqual(kwargs, {})
-                    events.append("asc")
-                    expression = original_asc(attribute, *args, **kwargs)
-                    self.assertIs(expression.modifier, operators.asc_op)
-                    self.assertTrue(expression.element.compare(MarketScheduleOverride.__table__.c.date))
-                    ascending.append(expression)
-                    return expression
-
-                def observe_order_by(statement, *args, **kwargs):
-                    self.assertEqual(len(ordered), 0)
-                    self.assertIs(statement, selected[0])
-                    self.assertEqual(len(args), 1)
-                    self.assertIs(args[0], ascending[0])
-                    self.assertEqual(kwargs, {})
-                    events.append("order_by")
-                    result = original_order_by(statement, *args, **kwargs)
-                    self.assertIsNot(result, statement)
-                    clauses = tuple(result._order_by_clauses)
-                    self.assertEqual(len(clauses), 1)
-                    self.assertIs(clauses[0], ascending[0])
-                    ordered.append(result)
-                    return result
-
-                # Dynamic observers patch actual result classes, returning actual
-                # results, not a facade. ExitStack lives through the handler await.
-                stack = ExitStack()
-                try:
-                    def install(owner, name, replacement):
-                        previous = getattr(owner, name)
-                        restorations.append((owner, name, previous))
-                        stack.enter_context(patch.object(owner, name, replacement))
-
-                    async def observe_execute(*args, **kwargs):
-                        self.assertEqual(len(results), 0)
-                        self.assertEqual(len(args), 1)
-                        self.assertIs(args[0], ordered[0])
-                        self.assertEqual(kwargs, {})
-                        events.append("execute:await")
-                        result = await original_execute(*args, **kwargs)
-                        results.append(result)
-                        events.append("execute:return")
-                        real_scalars = type(result).scalars
-
-                        def observe_scalars(actual_result, *scalar_args, **scalar_kwargs):
-                            self.assertEqual(len(scalars), 0)
-                            self.assertIs(actual_result, result)
-                            self.assertEqual(scalar_args, ())
-                            self.assertEqual(scalar_kwargs, {})
-                            events.append("scalars")
-                            scalar_result = real_scalars(actual_result, *scalar_args, **scalar_kwargs)
-                            scalars.append(scalar_result)
-                            real_all = type(scalar_result).all
-
-                            def observe_all(actual_scalars, *all_args, **all_kwargs):
-                                self.assertIs(actual_scalars, scalar_result)
-                                self.assertEqual(all_args, ())
-                                self.assertEqual(all_kwargs, {})
-                                events.append("all")
-                                return real_all(actual_scalars, *all_args, **all_kwargs)
-
-                            install(type(scalar_result), "all", observe_all)
-                            return scalar_result
-
-                        install(type(result), "scalars", observe_scalars)
-                        return result
-
-                    execute_spy = AsyncMock(side_effect=observe_execute)
-                    install(router, "select", observe_select)
-                    install(type(MarketScheduleOverride.date), "asc", observe_asc)
-                    install(Select, "order_by", observe_order_by)
-                    install(db, "execute", execute_spy)
-                    install(router, "_serialize_market_schedule_override", deny)
-                    mutators = ("add", "add_all", "delete", "merge", "flush", "commit", "rollback", "refresh")
-                    for owner in (db, db.sync_session):
-                        for name in mutators:
-                            # ORM execute legitimately asks the sync Session for
-                            # an empty no-op autoflush. A real flush is fenced by
-                            # before_flush plus the physical SQLite authorizer.
-                            if owner is db.sync_session and name == "flush":
-                                continue
-                            install(owner, name, deny)
-                    event.listen(db.sync_session, "before_flush", deny)
-                    listeners.append((db.sync_session, "before_flush", deny))
-                    event.listen(engine, "before_cursor_execute", observe_sql)
-                    listeners.append((engine, "before_cursor_execute", observe_sql))
-                    for name in ("commit", "rollback", "savepoint", "rollback_savepoint", "release_savepoint",
-                                 "begin_twophase", "prepare_twophase", "commit_twophase", "rollback_twophase"):
-                        event.listen(engine, name, deny)
-                        listeners.append((engine, name, deny))
-                    sqlite_connection.set_authorizer(authorize)
-                    output = await router.list_market_overrides(db=db)
-                    self.assertIs(type(output), list)
-                    self.assertEqual(output, [])
-                    execute_spy.assert_called_once_with(ordered[0])
-                    execute_spy.assert_awaited_once_with(ordered[0])
-                    self.assertEqual(events, [
-                        "select", "asc", "order_by", "execute:await", "sql",
-                        "execute:return", "scalars", "all",
-                    ])
-                    self.assertEqual(len(results), 1)
-                    self.assertEqual(len(scalars), 1)
-                    self.assertEqual(len(sql_observations), 1)
-                    self.assertEqual(sqlite_selects, [(None, None, None, None)])
-                    self.assertEqual(set(sqlite_reads), set(_COLUMNS))
-                    self.assertEqual(denied_actions, [])
-                    self.assertEqual(forbidden_calls, [])
+            try:
+                async with real_async_session(engine) as db:
+                    self.assertIsInstance(db, AsyncSession)
+                    self.assertTrue(db.sync_session.autoflush)
                     self.assertEqual(tuple(db.new), ())
                     self.assertEqual(tuple(db.dirty), ())
                     self.assertEqual(tuple(db.deleted), ())
-                finally:
-                    # Restore before helper.close() may legitimately roll back
-                    # its read transaction; teardown is not handler activity.
-                    try:
-                        sqlite_connection.set_authorizer(None)
-                    finally:
+                    self.assertEqual(tuple(db.sync_session.new), ())
+                    self.assertEqual(tuple(db.sync_session.dirty), ())
+                    self.assertEqual(tuple(db.sync_session.deleted), ())
+                    self.assertTrue(db.sync_session._is_clean())
+                    events = []
+                    selected = []
+                    ascending = []
+                    ordered = []
+                    results = []
+                    scalars = []
+                    autoflush_calls = []
+                    sync_flush_calls = []
+                    nesting = {"execute": 0, "autoflush": 0}
+                    original_select = router.select
+                    original_asc = type(MarketScheduleOverride.date).asc
+                    original_order_by = Select.order_by
+                    original_execute = db.execute
+                    original_autoflush = db.sync_session._autoflush
+                    original_sync_flush = db.sync_session.flush
+                    original_serializer = router._serialize_market_schedule_override
+                    restorations = []
+                    listeners = []
+                    sql_observations = []
+                    sqlite_reads = []
+                    sqlite_selects = []
+                    denied_actions = []
+                    forbidden_calls = []
+                    if trace_out is not None:
+                        trace_out.update(
+                            events=events,
+                            results=results,
+                            scalars=scalars,
+                            autoflush_calls=autoflush_calls,
+                            sync_flush_calls=sync_flush_calls,
+                            sql_observations=sql_observations,
+                             denied_actions=denied_actions,
+                            forbidden_calls=forbidden_calls,
+                            restored=False,
+                            snapshot_verified=False,
+                        )
+
+                    def _session_is_clean():
+                        return (
+                            db.sync_session.autoflush is True
+                            and tuple(db.new) == ()
+                            and tuple(db.dirty) == ()
+                            and tuple(db.deleted) == ()
+                            and tuple(db.sync_session.new) == ()
+                            and tuple(db.sync_session.dirty) == ()
+                            and tuple(db.sync_session.deleted) == ()
+                            and db.sync_session._is_clean() is True
+                        )
+
+                    def deny(*args, **kwargs):
+                        forbidden_calls.append((args, kwargs))
+                        self.fail("Handler attempted a forbidden mutation/transaction/serializer")
+
+                    def observe_autoflush(*args, **kwargs):
+                        if not (
+                            nesting["execute"] == 1
+                            and nesting["autoflush"] == 0
+                            and len(autoflush_calls) == 0
+                            and args == ()
+                            and kwargs == {}
+                            and _session_is_clean()
+                        ):
+                            forbidden_calls.append(("sync_session._autoflush", args, kwargs))
+                            self.fail("Forbidden or unclean sync_session._autoflush invocation")
+                        autoflush_calls.append((args, kwargs))
+                        events.append("autoflush")
+                        nesting["autoflush"] += 1
                         try:
-                            for owner, name, listener in reversed(listeners):
-                                event.remove(owner, name, listener)
+                            return original_autoflush(*args, **kwargs)
                         finally:
-                            stack.close()
-                    for owner, name, previous in restorations:
-                        restored = getattr(owner, name)
-                        if hasattr(previous, "__self__"):
-                            self.assertIs(restored.__self__, previous.__self__)
-                            self.assertIs(restored.__func__, previous.__func__)
-                        else:
-                            self.assertIs(restored, previous)
-                    self.assertIs(router.select, original_select)
-                    self.assertIs(Select.order_by, original_order_by)
-                    self.assertIs(type(MarketScheduleOverride.date).asc, original_asc)
-                    self.assertIs(router._serialize_market_schedule_override, original_serializer)
-                    for owner, name, listener in listeners:
-                        self.assertFalse(event.contains(owner, name, listener))
-            # Independent connection/full-column read, after handler session close.
-            after = self._snapshot(engine)
-            self.assertEqual(after, before)
+                            nesting["autoflush"] -= 1
+
+                    def observe_sync_flush(*args, **kwargs):
+                        if not (
+                            nesting["execute"] == 1
+                            and nesting["autoflush"] == 1
+                            and len(autoflush_calls) == 1
+                            and len(sync_flush_calls) == 0
+                            and args == ()
+                            and kwargs == {}
+                            and _session_is_clean()
+                        ):
+                            forbidden_calls.append(("sync_session.flush", args, kwargs))
+                            self.fail("Forbidden explicit or non-autoflush sync_session.flush")
+                        sync_flush_calls.append((args, kwargs))
+                        events.append("flush")
+                        return original_sync_flush(*args, **kwargs)
+
+                    def authorize(action, argument1, argument2, database, trigger):
+                        if action == sqlite3.SQLITE_SELECT:
+                            sqlite_selects.append((argument1, argument2, database, trigger))
+                            return sqlite3.SQLITE_OK
+                        if (action == sqlite3.SQLITE_READ
+                                and argument1 == "market_schedule_overrides"
+                                and argument2 in _COLUMNS
+                                and database == "main" and trigger is None):
+                            sqlite_reads.append(argument2)
+                            return sqlite3.SQLITE_OK
+                        denied_actions.append((action, argument1, argument2, database, trigger))
+                        return sqlite3.SQLITE_DENY
+
+                    def observe_sql(connection, cursor, statement, parameters, context, executemany):
+                        self.assertEqual(len(sql_observations), 0, "Extra physical query")
+                        self.assertEqual(len(ordered), 1)
+                        self.assertIs(context.compiled.statement, ordered[0])
+                        self.assertTrue(context.compiled.statement.is_select)
+                        self.assertFalse(executemany)
+                        self.assertEqual(parameters, ())
+                        sql_observations.append((statement, parameters))
+                        events.append("sql")
+
+                    def observe_select(*args, **kwargs):
+                        self.assertEqual(len(selected), 0)
+                        self.assertEqual(len(args), 1)
+                        self.assertIs(args[0], MarketScheduleOverride)
+                        self.assertEqual(kwargs, {})
+                        events.append("select")
+                        statement = original_select(*args, **kwargs)
+                        self.assertIsInstance(statement, Select)
+                        self.assertEqual(tuple(statement._order_by_clauses), ())
+                        self.assertEqual(statement.column_descriptions[0]["entity"], MarketScheduleOverride)
+                        selected.append(statement)
+                        return statement
+
+                    def observe_asc(attribute, *args, **kwargs):
+                        self.assertEqual(len(ascending), 0)
+                        self.assertIs(attribute, MarketScheduleOverride.date)
+                        self.assertEqual(args, ())
+                        self.assertEqual(kwargs, {})
+                        events.append("asc")
+                        expression = original_asc(attribute, *args, **kwargs)
+                        self.assertIs(expression.modifier, operators.asc_op)
+                        self.assertTrue(expression.element.compare(MarketScheduleOverride.__table__.c.date))
+                        ascending.append(expression)
+                        return expression
+
+                    def observe_order_by(statement, *args, **kwargs):
+                        self.assertEqual(len(ordered), 0)
+                        self.assertIs(statement, selected[0])
+                        self.assertEqual(len(args), 1)
+                        self.assertIs(args[0], ascending[0])
+                        self.assertEqual(kwargs, {})
+                        events.append("order_by")
+                        result = original_order_by(statement, *args, **kwargs)
+                        self.assertIsNot(result, statement)
+                        clauses = tuple(result._order_by_clauses)
+                        self.assertEqual(len(clauses), 1)
+                        self.assertIs(clauses[0], ascending[0])
+                        ordered.append(result)
+                        return result
+
+                    # Dynamic observers patch actual result classes, returning actual
+                    # results, not a facade. ExitStack lives through the handler await.
+                    stack = ExitStack()
+                    try:
+                        def install(owner, name, replacement):
+                            previous = getattr(owner, name)
+                            restorations.append((owner, name, previous))
+                            stack.enter_context(patch.object(owner, name, replacement))
+
+                        async def observe_execute(*args, **kwargs):
+                            self.assertEqual(len(results), 0)
+                            self.assertEqual(len(args), 1)
+                            self.assertIs(args[0], ordered[0])
+                            self.assertEqual(kwargs, {})
+                            events.append("execute:await")
+                            nesting["execute"] += 1
+                            try:
+                                result = await original_execute(*args, **kwargs)
+                            finally:
+                                nesting["execute"] -= 1
+                            results.append(result)
+                            events.append("execute:return")
+                            real_scalars = type(result).scalars
+
+                            def observe_scalars(actual_result, *scalar_args, **scalar_kwargs):
+                                self.assertEqual(len(scalars), 0)
+                                self.assertIs(actual_result, result)
+                                self.assertEqual(scalar_args, ())
+                                self.assertEqual(scalar_kwargs, {})
+                                events.append("scalars")
+                                scalar_result = real_scalars(actual_result, *scalar_args, **scalar_kwargs)
+                                scalars.append(scalar_result)
+                                real_all = type(scalar_result).all
+
+                                def observe_all(actual_scalars, *all_args, **all_kwargs):
+                                    self.assertIs(actual_scalars, scalar_result)
+                                    self.assertEqual(all_args, ())
+                                    self.assertEqual(all_kwargs, {})
+                                    events.append("all")
+                                    return real_all(actual_scalars, *all_args, **all_kwargs)
+
+                                install(type(scalar_result), "all", observe_all)
+                                return scalar_result
+
+                            install(type(result), "scalars", observe_scalars)
+                            return result
+
+                        execute_spy = AsyncMock(side_effect=observe_execute)
+                        install(router, "select", observe_select)
+                        install(type(MarketScheduleOverride.date), "asc", observe_asc)
+                        install(Select, "order_by", observe_order_by)
+                        install(db, "execute", execute_spy)
+                        install(router, "_serialize_market_schedule_override", deny)
+                        install(db.sync_session, "_autoflush", observe_autoflush)
+                        install(db.sync_session, "flush", observe_sync_flush)
+                        mutators = ("add", "add_all", "delete", "merge", "flush", "commit", "rollback", "refresh")
+                        for owner in (db, db.sync_session):
+                            for name in mutators:
+                                if owner is db.sync_session and name == "flush":
+                                    continue
+                                install(owner, name, deny)
+                        event.listen(db.sync_session, "before_flush", deny)
+                        listeners.append((db.sync_session, "before_flush", deny))
+                        event.listen(engine, "before_cursor_execute", observe_sql)
+                        listeners.append((engine, "before_cursor_execute", observe_sql))
+                        for name in ("commit", "rollback", "savepoint", "rollback_savepoint", "release_savepoint",
+                                     "begin_twophase", "prepare_twophase", "commit_twophase", "rollback_twophase"):
+                            event.listen(engine, name, deny)
+                            listeners.append((engine, name, deny))
+                        sqlite_connection.set_authorizer(authorize)
+                        output = await invoke_handler(db=db)
+                        self.assertIs(type(output), list)
+                        self.assertEqual(output, [])
+                        execute_spy.assert_called_once_with(ordered[0])
+                        execute_spy.assert_awaited_once_with(ordered[0])
+                        self.assertEqual(events, [
+                            "select", "asc", "order_by", "execute:await", "autoflush",
+                            "flush", "sql", "execute:return", "scalars", "all",
+                        ])
+                        self.assertEqual(autoflush_calls, [((), {})])
+                        self.assertEqual(sync_flush_calls, [((), {})])
+                        self.assertEqual(nesting, {"execute": 0, "autoflush": 0})
+                        self.assertEqual(len(results), 1)
+                        self.assertEqual(len(scalars), 1)
+                        self.assertEqual(len(sql_observations), 1)
+                        self.assertEqual(sqlite_selects, [(None, None, None, None)])
+                        self.assertEqual(set(sqlite_reads), set(_COLUMNS))
+                        self.assertEqual(denied_actions, [])
+                        self.assertEqual(forbidden_calls, [])
+                        self.assertTrue(_session_is_clean())
+                    finally:
+                        # Restore before helper.close() may legitimately roll back
+                        # its read transaction; teardown is not handler activity.
+                        try:
+                            sqlite_connection.set_authorizer(None)
+                        finally:
+                            try:
+                                for owner, name, listener in reversed(listeners):
+                                    event.remove(owner, name, listener)
+                            finally:
+                                stack.close()
+                        for owner, name, previous in restorations:
+                            restored = getattr(owner, name)
+                            if hasattr(previous, "__self__"):
+                                self.assertIs(restored.__self__, previous.__self__)
+                                self.assertIs(restored.__func__, previous.__func__)
+                            else:
+                                self.assertIs(restored, previous)
+                        self.assertIs(router.select, original_select)
+                        self.assertIs(Select.order_by, original_order_by)
+                        self.assertIs(type(MarketScheduleOverride.date).asc, original_asc)
+                        self.assertIs(router._serialize_market_schedule_override, original_serializer)
+                        self.assertIs(db.sync_session._autoflush.__self__, original_autoflush.__self__)
+                        self.assertIs(db.sync_session._autoflush.__func__, original_autoflush.__func__)
+                        self.assertIs(db.sync_session.flush.__self__, original_sync_flush.__self__)
+                        self.assertIs(db.sync_session.flush.__func__, original_sync_flush.__func__)
+                        for owner, name, listener in listeners:
+                            self.assertFalse(event.contains(owner, name, listener))
+                        if trace_out is not None:
+                            trace_out["restored"] = True
+            finally:
+                # Independent connection/full-column read, after handler session close.
+                after = self._snapshot(engine)
+                self.assertEqual(after, before)
+                if trace_out is not None:
+                    trace_out["snapshot_verified"] = True
         finally:
             engine.dispose()
+
+    async def test_empty_real_sqlite_list_preserves_state_and_call_order(self):
+        trace = {}
+        await self._run_empty_sqlite_harness(router.list_market_overrides, trace_out=trace)
+        self.assertTrue(trace["restored"])
+        self.assertTrue(trace["snapshot_verified"])
+        self.assertEqual(trace["autoflush_calls"], [((), {})])
+        self.assertEqual(trace["sync_flush_calls"], [((), {})])
+        self.assertEqual(trace["forbidden_calls"], [])
+
+    async def test_explicit_clean_sync_flush_is_rejected(self):
+        control_trace = {}
+        await self._run_empty_sqlite_harness(router.list_market_overrides, trace_out=control_trace)
+        self.assertTrue(control_trace["restored"])
+        self.assertTrue(control_trace["snapshot_verified"])
+        self.assertEqual(control_trace["autoflush_calls"], [((), {})])
+        self.assertEqual(control_trace["sync_flush_calls"], [((), {})])
+        self.assertEqual(control_trace["forbidden_calls"], [])
+
+        async def explicit_flush_before_handler(*, db):
+            db.sync_session.flush()
+            return await router.list_market_overrides(db=db)
+
+        before_trace = {}
+        with self.assertRaisesRegex(
+            AssertionError,
+            "^Forbidden explicit or non-autoflush sync_session\\.flush$",
+        ):
+            await self._run_empty_sqlite_harness(explicit_flush_before_handler, trace_out=before_trace)
+        self.assertTrue(before_trace["restored"])
+        self.assertTrue(before_trace["snapshot_verified"])
+        self.assertEqual(before_trace["events"], [])
+        self.assertEqual(before_trace["autoflush_calls"], [])
+        self.assertEqual(before_trace["sync_flush_calls"], [])
+        self.assertEqual(before_trace["sql_observations"], [])
+        self.assertEqual(before_trace["denied_actions"], [])
+        self.assertEqual(before_trace["forbidden_calls"], [("sync_session.flush", (), {})])
+
+        async def explicit_flush_after_handler(*, db):
+            output = await router.list_market_overrides(db=db)
+            self.assertEqual(output, [])
+            db.sync_session.flush()
+            return output
+
+        after_trace = {}
+        with self.assertRaisesRegex(
+            AssertionError,
+            "^Forbidden explicit or non-autoflush sync_session\\.flush$",
+        ):
+            await self._run_empty_sqlite_harness(explicit_flush_after_handler, trace_out=after_trace)
+        self.assertTrue(after_trace["restored"])
+        self.assertTrue(after_trace["snapshot_verified"])
+        self.assertEqual(after_trace["events"], [
+            "select", "asc", "order_by", "execute:await", "autoflush",
+            "flush", "sql", "execute:return", "scalars", "all",
+        ])
+        self.assertEqual(after_trace["autoflush_calls"], [((), {})])
+        self.assertEqual(after_trace["sync_flush_calls"], [((), {})])
+        self.assertEqual(len(after_trace["sql_observations"]), 1)
+        self.assertEqual(after_trace["denied_actions"], [])
+        self.assertEqual(after_trace["forbidden_calls"], [("sync_session.flush", (), {})])
