@@ -544,6 +544,47 @@ Runner/Reviewer/native/Codex/Git تغییر نمی‌کنند. Worker یا pipel
 نمی‌شود؛ reservation، checkpoint و همهٔ شکست‌های تاریخی حفظ‌اند. آزمون و
 qualification تازه لازم‌اند؛ این قرارداد تضمین دسترسی دائمی Provider نیست.
 
+### بازیابی محدودِ startup خالی — قرارداد 774M
+
+سناریو: CLI اول پیش از ارسال هر prompt، تا پایان مهلت اصلی خود زنده است اما
+فقط یک SQLite تازه و واقعاً خالی ساخته است. پس از مرگ واقعی همان فرایند و
+cleanup بی‌خطای callback، selector و PTY، حداکثر یک initializer تازه در همان
+`prepare_profile` و همان Runner/reservation مجاز است. setup، Git-root،
+workspace0700، BODY و hooks فقط یک بار ساخته می‌شوند. موفقیت اول مستقیماً
+برمی‌گردد؛ شکست دوم پایان قطعی دارد. این رفتار retry درخواست مدل، Worker،
+Task، generation یا replay هیچ شکست تاریخی نیست.
+
+مجوز دوم از hint قبلی گرفته نمی‌شود: diagnostic باید CAPTURED، UI دقیقاً
+صفر بایت، فرایند پیش از cleanup واقعاً RUNNING و همه نشانه‌های
+trust/auth/network/dependency/READY غایب باشد. سپس snapshot مستقلِ فقط‌خواندنی
+و WAL-visible باید کل `trajectory_meta` را همان CID/type0/source0، کل
+`trajectory_metadata_blob` را فقط main/blob خالی، و steps/executor را بدون
+هیچ ردیف ثابت کند. DB و WAL با identity و hash محدود پیش و پس از خواندن
+کنترل می‌شوند و تا پایان دوم ثابت می‌مانند. SHM فقط lock/index موقت است:
+owner/path/regular/nlink/identity/size آن بررسی می‌شود، نه hash یا mtime آن.
+نشست اول اگر دیر معتبر شود، چه تنها چه همراه دوم، هرگز پذیرفته نمی‌شود.
+CID نهایی فقط عضو یگانه delta دوم است؛ roster سراسری و سقف۸ نیز حفظ می‌شوند.
+
+fingerprint اختیاری فقط برای executable دقیقاً۲۲۱۲۸۶۶۵۶بایتی و SHA پین‌شده
+CLI1.4.2 مجوز recovery می‌دهد. فقدان یا عدم اثبات pin صرفاً NO_RECOVERY
+است، نه خطای مصنوعی startup اول. پس از آغاز hash، بودجهٔ مصرف‌شده فراموش
+نمی‌شود؛ انقضای کل مجوز اجرای اول یا دوم نمی‌دهد. پیش از دوم همان CLI،
+workspace، definition و hooks دوباره بررسی می‌شوند؛ کنترل version/hash
+پیش/پس Runner همچنان مستقل و بدون تغییر است.
+
+بودجهٔ منطقی کل۲۴۰ثانیه شامل setup/hash/SQLite/cleanup است؛ hash اختیاری
+حداکثر۱۰ثانیه فرصت منطقی دارد، و timeout هر initializer همان۲۰–۴۵ثانیه با
+پیش‌فرض۳۰ است. دوم فقط با فرصت کامل timeout اصلی+۱۰ثانیه cleanup آغاز می‌شود.
+timeout معمول SQLite برای callerهای قدیمی۵ثانیه باقی است؛ deadline اختیاری
+آن را فقط به باقیمانده محدود می‌کند. callback موجود Runner همان
+SIGKILL+wait(timeout=10) است؛ hard-real-time برای callback دلخواه یا OS I/O
+گیرکرده ادعا نمی‌شود. UI/metadata نامعتبر یا مبهم، session مصرف‌شده، lock/
+read/schema error، late metadata در cleanup، CLI/Source drift، نشست ناشناخته،
+کمبود بودجه و cleanup نامعلوم همگی fail-closed هستند. هیچ cap، مدل/effort،
+no-tools، trust، strict metadata یا گیت generation/Review/native/Git ضعیف
+نمی‌شود. علت upstream و اثربخشی عملی همچنان نیازمند شاهد واقعی‌اند؛ این
+قرارداد تضمین دائمی Provider یا credit پیشرفت معماری نیست.
+
 ### تکمیل generation در runtime contract 1.3 — ۲۰ اکتبر ۲۰۲۶
 
 سیاست `FINAL_FRAME_RECOVERY_V1` فقط generationِ pinned Gemini در Runner را opt-in

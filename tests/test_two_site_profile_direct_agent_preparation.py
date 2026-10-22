@@ -5,9 +5,12 @@ PTY/SQLite fixture as a module, never import/alias its TestCase for collection.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import sqlite3
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -293,6 +296,421 @@ class DirectAgentPreparationContracts(unittest.TestCase):
             self.assertEqual(trace.writes, [])
             self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
             self.assertLess(trace.processes[0].terminated_at, 31)
+
+
+class _RecoveryCLI(owned.OwnedReselectionCLI):
+    """One real owned PTY and SQLite file per synthetic zero-action startup."""
+
+    def __init__(self, fixture, clock, stdin, cid, **options):
+        self.cid = cid
+        super().__init__(fixture, clock, stdin, fresh_panel=False, **options)
+
+    def _create(self, path, cid):
+        actual = self.cid if path == self.fixture.db_path else cid
+        return super()._create(path, actual)
+
+    def _publish(self, cid=None):
+        actual = self.cid if cid is None else cid
+        path = self.fixture.home / "conversations" / (actual + ".db")
+        metadata = fixtures.literal_metadata(
+            self.fixture.work, self.fixture.body, root_id=actual)
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE trajectory_meta SET trajectory_type=4,source=17")
+            db.execute("UPDATE trajectory_metadata_blob SET data=? WHERE id='main'", (metadata,))
+
+
+class EmptyStartupRecoveryContracts(unittest.TestCase):
+    SECOND = "32345678-1234-1234-1234-123456789abc"
+    UNKNOWN = "42345678-1234-1234-1234-123456789abc"
+
+    @contextmanager
+    def lab(self, *, first=None, second=None, pin=True, drift_pin=False,
+            after_first=None, after_second_spawn=None, cleanup_error=None,
+            leave_alive=False, wal_first=False, timeout=20):
+        fixture = fixtures.RuntimeProfileContracts("runTest")
+        fixture.setUp()
+        clock = owned.Clock()
+        processes, commands, descriptors, writes, setups, holders = [], [], [], [], [], []
+        source_before, hooks_before = fixture.source.read_bytes(), fixture.hooks.read_bytes()
+        saved = fixture.root / "untouched-preexisting.db"
+        fixture.db_path.rename(saved)
+        saved_bytes = saved.read_bytes()
+        fixture.source.unlink(); fixture.source.parent.rmdir()
+        real_openpty, real_write = profile.pty.openpty, profile.os.write
+        identity = ((1, 2, 0o100700, os.geteuid(), os.getegid(), 1,
+                     profile.REVIEWED_CLI_BYTES, 3, 4), profile.REVIEWED_CLI_SHA256)
+        fingerprint = (identity, 240.0)
+        pin_calls = []
+
+        def cli_pin(cli, *, deadline=None):
+            pin_calls.append(deadline)
+            if not pin or (drift_pin and deadline is not None):
+                return None
+            if pin == "unproved":
+                return None, 240.0
+            return fingerprint
+
+        def git(command, **kwargs):
+            self.assertEqual(command, ["/usr/bin/git", "-C", str(fixture.work), "init",
+                                     "-q", "--initial-branch=proposal-runtime-fixture"])
+            self.assertGreater(kwargs["timeout"], 0)
+            self.assertLessEqual(kwargs["timeout"], 10)
+            self.assertEqual(set(kwargs["env"]), {
+                "PATH", "LANG", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL",
+                "GIT_TEMPLATE_DIR", "GIT_TERMINAL_PROMPT"})
+            (fixture.work / ".git").mkdir(mode=0o700)
+            setups.append(command)
+            return mock.Mock(returncode=0)
+
+        def openpty():
+            pair = real_openpty()
+            descriptors.extend((fd, owned.support._fd_identity(fd)) for fd in pair)
+            return pair
+
+        def write(fd, data):
+            if any(fd == item[0] for item in descriptors[::2]):
+                writes.append(data)
+            return real_write(fd, data)
+
+        def spawn(command, **kwargs):
+            self.assertLess(len(processes), 2, "there is never a third initialization")
+            expected = ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model",
+                        fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(fixture.work),
+                        "--effort", "high"]
+            self.assertEqual(command, expected)
+            self.assertEqual(kwargs["cwd"], fixture.work)
+            self.assertTrue(kwargs["start_new_session"])
+            self.assertEqual(kwargs["stdin"], kwargs["stdout"])
+            self.assertEqual(kwargs["stdin"], kwargs["stderr"])
+            number = len(processes)
+            cid = fixtures.CID if number == 0 else self.SECOND
+            options = dict(first or {"mode": "empty"}) if number == 0 else dict(
+                second or {"mode": "recover", "synchronous_ready": True})
+            local = SimpleNamespace(work=fixture.work, home=fixture.home,
+                                    source=fixture.source, hooks=fixture.hooks, body=fixture.body,
+                                    db_path=fixture.home / "conversations" / (cid + ".db"))
+            cli = _RecoveryCLI(local, clock, kwargs["stdin"], cid, **options)
+            cli.spawned_at = clock.peek()
+            commands.append(command); processes.append(cli)
+            if number == 0 and wal_first:
+                connection = sqlite3.connect(fixture.db_path)
+                self.assertEqual(connection.execute("PRAGMA journal_mode=WAL").fetchone(), ("wal",))
+                connection.execute("SELECT * FROM trajectory_meta").fetchall()
+                holders.append(connection)
+                fixture.recovery_wal = connection
+            if number == 1 and after_second_spawn:
+                after_second_spawn(fixture, processes, clock)
+            return cli
+
+        def terminate(cli):
+            if leave_alive and cli is processes[0]:
+                return
+            cli.terminate_owned()
+            if cli is processes[0] and after_first:
+                after_first(fixture, processes, clock)
+            if cleanup_error is not None:
+                raise cleanup_error
+
+        trace = SimpleNamespace(result=None, error=None, fixture=fixture, clock=clock,
+                                processes=processes, commands=commands, writes=writes,
+                                setups=setups, pin_calls=pin_calls)
+        try:
+            with (
+                mock.patch.object(profile, "_recovery_cli_fingerprint", side_effect=cli_pin),
+                mock.patch.object(profile.subprocess, "run", side_effect=git),
+                mock.patch.object(profile.subprocess, "Popen", side_effect=spawn),
+                mock.patch.object(profile.pty, "openpty", side_effect=openpty),
+                mock.patch.object(profile.os, "write", side_effect=write),
+                mock.patch.object(profile.time, "monotonic", side_effect=clock),
+            ):
+                try:
+                    trace.result = profile.prepare_profile(
+                        Path("/owned/fake-cli"), fixture.work, fixtures.MODEL, "high",
+                        terminate=terminate, cli_home=fixture.home, timeout=timeout)
+                except BaseException as error:
+                    trace.error = error
+            self.assertEqual(len(setups), 1)
+            self.assertLessEqual(len(processes), 2)
+            self.assertLess(clock.calls, 1000)
+            self.assertEqual(saved.read_bytes(), saved_bytes)
+            self.assertTrue(all(data in (b"\x1b[1;1R", b"1\r") for data in writes))
+            for cli in processes:
+                self.assertIsNone(cli.error)
+                if not leave_alive:
+                    self.assertFalse(cli.thread.is_alive())
+            for fd, original in descriptors:
+                owned.support.InitializationReadinessTests.assert_owned_pty_closed(
+                    self, fd, original)
+            yield trace
+        finally:
+            for cli in processes:
+                if cli.thread.is_alive():
+                    cli.terminate_owned()
+            for connection in holders:
+                connection.close()
+            fixture.source.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fixture.source.write_bytes(source_before)
+            fixture.hooks.write_bytes(hooks_before)
+            fixture.doCleanups()
+
+    def rejected(self, trace, attempts):
+        self.assertIsNone(trace.result)
+        self.assertIs(type(trace.error), profile.ProposalProfileError)
+        self.assertEqual(len(trace.commands), attempts)
+
+    def test_exact_empty_first_and_valid_second_accept_only_second_cid(self):
+        with self.lab() as trace:
+            self.assertIsNone(trace.error)
+            self.assertEqual(trace.result, profile.PreparedProfile(
+                self.SECOND, trace.fixture.work, fixtures.MODEL, "high"))
+            self.assertEqual(len(trace.commands), 2)
+            self.assertEqual(trace.pin_calls, [None, 240.0])
+            self.assertEqual(trace.writes, [])
+            self.assertGreaterEqual(trace.processes[0].terminated_at, 20)
+            self.assertLess(trace.processes[0].terminated_at, 21)
+            self.assertTrue(trace.processes[1].published)
+            with sqlite3.connect(trace.fixture.db_path) as db:
+                self.assertEqual(db.execute("SELECT * FROM trajectory_meta").fetchall(),
+                                 [(fixtures.CID, 0, 0)])
+                self.assertEqual(db.execute("SELECT * FROM trajectory_metadata_blob").fetchall(),
+                                 [("main", b"")])
+                self.assertEqual(db.execute("SELECT * FROM steps").fetchall(), [])
+                self.assertEqual(db.execute("SELECT * FROM executor_metadata").fetchall(), [])
+            self.assertEqual(profile.validate_profile(
+                trace.result, fresh=True, cli_home=trace.fixture.home)["conversation_id"],
+                self.SECOND)
+
+    def test_first_ready_returns_once_and_unproved_pin_never_retries(self):
+        with self.lab(first={"synchronous_ready": True}) as trace:
+            self.assertIsNone(trace.error)
+            self.assertEqual(trace.result.conversation_id, fixtures.CID)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(trace.pin_calls, [None])
+        with self.lab(pin=False) as trace:
+            self.rejected(trace, 1)
+            self.assertEqual(trace.pin_calls, [None])
+        with self.lab(pin="unproved") as trace:
+            self.rejected(trace, 1)
+            self.assertEqual(trace.pin_calls, [None])
+
+    def test_local_optional_hash_failure_keeps_total_budget_and_overall_expiry_is_terminal(self):
+        fixture = fixtures.RuntimeProfileContracts("runTest")
+        fixture.setUp()
+        try:
+            cli = fixture.root / "owned-executable"
+            cli.write_bytes(b"#!/bin/sh\n")
+            cli.chmod(0o700)
+            real_lstat = Path.lstat
+            info = real_lstat(cli)
+            values = {key: getattr(info, key) for key in (
+                "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+                "st_size", "st_mtime_ns", "st_ctime_ns")}
+            values["st_size"] = profile.REVIEWED_CLI_BYTES
+            size_only_fixture = SimpleNamespace(**values)
+            def lstat(path):
+                return size_only_fixture if path == cli else real_lstat(path)
+            local_error = profile.ProposalProfileError("proposal runtime preparation budget exhausted")
+            with (
+                mock.patch.object(Path, "lstat", new=lstat),
+                mock.patch.object(profile, "_persisted_snapshot", side_effect=local_error),
+                mock.patch.object(profile.time, "monotonic", side_effect=[0, 11]),
+            ):
+                self.assertEqual(profile._recovery_cli_fingerprint(cli), (None, 240))
+            with (
+                mock.patch.object(Path, "lstat", new=lstat),
+                mock.patch.object(profile, "_persisted_snapshot", return_value=((1,), "wrong hash")),
+                mock.patch.object(profile.time, "monotonic", side_effect=[0, 1]),
+            ):
+                self.assertEqual(profile._recovery_cli_fingerprint(cli), (None, 240))
+            fixture.source.unlink(); fixture.source.parent.rmdir()
+            with (
+                mock.patch.object(Path, "lstat", new=lstat),
+                mock.patch.object(profile, "_persisted_snapshot", side_effect=local_error),
+                mock.patch.object(profile.time, "monotonic", side_effect=[0, 241]),
+                mock.patch.object(profile.subprocess, "Popen") as spawn,
+                mock.patch.object(profile.subprocess, "run") as git,
+            ):
+                with self.assertRaises(profile.ProposalProfileError) as caught:
+                    profile.prepare_profile(cli, fixture.work, fixtures.MODEL, "high",
+                        terminate=mock.Mock(), cli_home=fixture.home)
+                self.assertEqual(str(caught.exception), "proposal runtime preparation budget exhausted")
+                spawn.assert_not_called(); git.assert_not_called()
+        finally:
+            fixture.doCleanups()
+
+    def test_second_empty_fails_after_exactly_two_initializations(self):
+        with self.lab(second={"mode": "empty"}) as trace:
+            self.rejected(trace, 2)
+            self.assertIn("LAST_HINT_INITIAL_METADATA_EMPTY", str(trace.error))
+            for cli in trace.processes:
+                self.assertGreaterEqual(cli.terminated_at - cli.spawned_at, 20)
+                self.assertLess(cli.terminated_at - cli.spawned_at, 21)
+            self.assertLess(trace.clock.peek(), 240)
+
+    def test_first_invalid_used_executor_multiple_mixed_and_busy_are_not_recoverable(self):
+        for mode in ("invalid", "used", "executor", "multiple", "mixed", "busy"):
+            with self.subTest(mode=mode), self.lab(first={"mode": mode}) as trace:
+                self.rejected(trace, 1)
+
+    def test_ui_and_unknown_diagnostics_or_observed_validity_never_authorize_recovery(self):
+        with self.lab(first={"mode": "empty", "startup_ui": "ordinary_banner"}) as trace:
+            self.rejected(trace, 1)
+            self.assertGreater(trace.error.preparation_observation["ui_bytes"], 0)
+        with mock.patch.object(profile, "_preparation_failure_observation",
+                               return_value={"capture_state": "UNAVAILABLE"}), self.lab() as trace:
+            self.rejected(trace, 1)
+        with self.lab(first={"mode": "empty", "publish_on_terminate": True}) as trace:
+            self.rejected(trace, 1)
+            self.assertEqual(trace.error.observation["final_valid_profiles"], 1)
+            self.assertIs(trace.error.preparation_observation["ready_during_preparation"], False)
+        with self.lab(first={"mode": "empty", "startup_ui": "foreign"}) as trace:
+            self.rejected(trace, 1)
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(trace.writes, [])
+
+    def test_cleanup_failure_or_still_alive_prevents_second_start(self):
+        sentinel = OSError("owned cleanup sentinel")
+        with self.lab(cleanup_error=sentinel) as trace:
+            self.assertIs(trace.error, sentinel)
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 1)
+        with self.lab(leave_alive=True) as trace:
+            self.rejected(trace, 1)
+            self.assertTrue(trace.processes[0].thread.is_alive())
+
+    def test_inter_attempt_cli_hooks_definition_workspace_or_budget_drift_fails_closed(self):
+        def hooks(fixture, _processes, _clock):
+            fixture.hooks.write_bytes(b"changed\n")
+        def definition(fixture, _processes, _clock):
+            fixture.source.write_bytes(b"changed\n")
+        def workspace(fixture, _processes, _clock):
+            fixture.work.chmod(0o755)
+        def budget(_fixture, _processes, clock):
+            with clock.lock:
+                clock.value = 239
+        with self.lab(drift_pin=True) as trace:
+            self.rejected(trace, 1)
+            self.assertEqual(trace.pin_calls, [None, 240.0])
+        for name, callback in (("hooks", hooks), ("definition", definition),
+                               ("workspace", workspace), ("budget", budget)):
+            with self.subTest(drift=name), self.lab(after_first=callback) as trace:
+                self.rejected(trace, 1)
+
+    def test_authoritative_post_cleanup_entire_metadata_and_no_actions_are_required(self):
+        statements = (
+            ("INSERT INTO trajectory_metadata_blob VALUES('extra',?)", (b"",)),
+            ("UPDATE trajectory_meta SET cascade_id='different'", ()),
+            ("INSERT INTO steps VALUES(3)", ()),
+            ("INSERT INTO executor_metadata VALUES(?)", (b"executor",)),
+        )
+        for sql, values in statements:
+            def mutate(fixture, _processes, _clock, sql=sql, values=values):
+                with sqlite3.connect(fixture.db_path) as db:
+                    db.execute(sql, values)
+            with self.subTest(sql=sql), self.lab(after_first=mutate) as trace:
+                self.rejected(trace, 1)
+
+    def test_unknown_extra_session_before_or_during_second_is_never_ignored(self):
+        def extra(fixture, _processes, _clock):
+            owned.OwnedReselectionCLI._create(
+                fixture.home / "conversations" / (self.UNKNOWN + ".db"), self.UNKNOWN)
+        with self.lab(after_first=extra) as trace:
+            self.rejected(trace, 1)
+        with self.lab(after_second_spawn=extra) as trace:
+            self.rejected(trace, 2)
+
+    def test_late_first_only_and_late_first_plus_valid_second_never_win(self):
+        def late(_fixture, processes, _clock):
+            processes[0]._publish()
+        for second in ({"mode": "empty"}, {"synchronous_ready": True}):
+            with self.subTest(second=second), self.lab(
+                    second=second, after_second_spawn=late) as trace:
+                self.rejected(trace, 2)
+                with sqlite3.connect(trace.fixture.db_path) as db:
+                    self.assertEqual(db.execute("SELECT trajectory_type,source FROM trajectory_meta").fetchall(),
+                                     [(4, 17)])
+
+    def test_first_persisted_identity_or_wal_visible_data_change_during_second_is_rejected(self):
+        def replace(fixture, _processes, _clock):
+            saved = fixture.db_path.with_suffix(".old")
+            fixture.db_path.rename(saved)
+            fixture.db_path.write_bytes(saved.read_bytes())
+            fixture.db_path.chmod(0o600)
+        def wal(sql, values):
+            def mutate(fixture, _processes, _clock):
+                connection = fixture.recovery_wal
+                before = fixture.db_path.read_bytes()
+                identity = profile._identity9(fixture.db_path.lstat())
+                connection.execute(sql, values)
+                connection.commit()
+                self.assertEqual(fixture.db_path.read_bytes(), before)
+                self.assertEqual(profile._identity9(fixture.db_path.lstat()), identity)
+                self.assertTrue(Path(str(fixture.db_path) + "-wal").is_file())
+            return mutate
+        for name, callback in (("identity", replace),
+                ("wal-executor", wal("INSERT INTO executor_metadata VALUES(?)", (b"late WAL executor",))),
+                ("wal-step", wal("INSERT INTO steps VALUES(3)", ()))):
+            with self.subTest(drift=name), self.lab(
+                    wal_first=name.startswith("wal-"), after_second_spawn=callback) as trace:
+                self.rejected(trace, 2)
+
+    def test_quiescent_pristine_wal_and_own_readonly_shm_activity_allow_second(self):
+        with self.lab(wal_first=True) as trace:
+            self.assertIsNone(trace.error)
+            self.assertEqual(trace.result.conversation_id, self.SECOND)
+            self.assertEqual(len(trace.commands), 2)
+            connection = trace.fixture.recovery_wal
+            self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone(), ("wal",))
+            self.assertEqual(connection.execute("SELECT * FROM steps").fetchall(), [])
+            self.assertEqual(connection.execute("SELECT * FROM executor_metadata").fetchall(), [])
+
+    def test_second_metadata_created_only_during_cleanup_is_not_readiness(self):
+        with self.lab(second={"mode": "empty", "publish_on_terminate": True}) as trace:
+            self.rejected(trace, 2)
+            self.assertEqual(trace.error.observation["final_valid_profiles"], 1)
+            self.assertIs(trace.error.preparation_observation["ready_during_preparation"], False)
+
+    def test_pristine_snapshot_ignores_only_ephemeral_shm_content_and_mtime(self):
+        fixture = fixtures.RuntimeProfileContracts("runTest")
+        fixture.setUp()
+        try:
+            fixture.db_path.unlink()
+            owned.OwnedReselectionCLI._create(fixture.db_path, fixtures.CID)
+            shm = Path(str(fixture.db_path) + "-shm")
+            shm.write_bytes(b"ephemeral index before")
+            shm.chmod(0o600)
+            before = profile._pristine_initialization_snapshot(
+                fixture.home / "conversations", fixture.db_path.name, profile.time.monotonic() + 10)
+            shm.write_bytes(b"ephemeral index after!")
+            after = profile._pristine_initialization_snapshot(
+                fixture.home / "conversations", fixture.db_path.name, profile.time.monotonic() + 10)
+            self.assertEqual(before, after)
+        finally:
+            fixture.doCleanups()
+
+    def test_legacy_validation_retains_five_second_timeout_and_deadline_caps_it(self):
+        fixture = fixtures.RuntimeProfileContracts("runTest")
+        fixture.setUp()
+        connect = profile.sqlite3.connect
+        seen = []
+        def observe(*args, **kwargs):
+            seen.append(kwargs["timeout"])
+            return connect(*args, **kwargs)
+        try:
+            with mock.patch.object(profile.sqlite3, "connect", side_effect=observe):
+                profile.validate_profile(fixture.candidate, fresh=True, cli_home=fixture.home)
+                self.assertEqual(seen, [5])
+                deadline = profile.time.monotonic() + 0.5
+                profile.validate_profile(
+                    fixture.candidate, fresh=True, cli_home=fixture.home, deadline=deadline)
+                self.assertGreater(seen[-1], 0)
+                self.assertLessEqual(seen[-1], 0.5)
+                with self.assertRaises(profile.ProposalProfileError):
+                    profile.validate_profile(
+                        fixture.candidate, fresh=True, cli_home=fixture.home, deadline=0)
+                self.assertEqual(len(seen), 2)
+        finally:
+            fixture.doCleanups()
 
 
 if __name__ == "__main__":

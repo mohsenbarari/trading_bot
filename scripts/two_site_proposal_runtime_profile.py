@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import dataclass
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import pty
@@ -74,6 +76,9 @@ MAX_DATABASE = 16_000_000
 MAX_DIRECTORY_ENTRIES = 8192
 MAX_NEW_SESSIONS = 8
 MAX_UI = 65536
+INITIALIZATION_TOTAL_BUDGET = 240
+REVIEWED_CLI_BYTES = 221286656
+REVIEWED_CLI_SHA256 = "085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef"
 TERM_REPLIES = (
     (b"\x1b[6n", b"\x1b[1;1R"), (b"\x1b[c", b"\x1b[?1;2c"),
     (b"\x1b[>c", b"\x1b[>0;10;1c"), (b"\x1b[?u", b"\x1b[?0u"),
@@ -209,8 +214,10 @@ def validate_resource_inventory(data: bytes, profile: PreparedProfile) -> None:
 
 def validate_profile(
     profile: PreparedProfile, *, fresh: bool, cli_home: Path | None = None,
+    deadline: float | None = None,
 ) -> dict:
-    """Bind only the exact prepared session; no authentication material reads."""
+    """Bind only the exact prepared session; legacy callers retain five-second waits."""
+    _budget_remaining(deadline, 5)
     if type(profile) is not PreparedProfile or type(profile.conversation_id) is not str or not UUID.fullmatch(profile.conversation_id):
         raise ProposalProfileError("invalid proposal runtime profile identity")
     if type(fresh) is not bool or not profile.workspace.is_absolute():
@@ -225,7 +232,10 @@ def validate_profile(
     database = home/"conversations"/(profile.conversation_id+".db")
     identity = _regular(database, MAX_DATABASE)
     try:
-        with closing(sqlite3.connect(database.as_uri()+"?mode=ro", uri=True, timeout=5)) as db:
+        with closing(sqlite3.connect(database.as_uri()+"?mode=ro", uri=True,
+                                             timeout=_budget_remaining(deadline, 5))) as db:
+            if deadline is not None:
+                db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute("PRAGMA query_only=ON"); db.execute("BEGIN")
             ids = db.execute("SELECT cascade_id,trajectory_type,source FROM trajectory_meta LIMIT 2").fetchall()
             main_count = db.execute("SELECT COUNT(*) FROM trajectory_metadata_blob WHERE id='main'").fetchone()[0]
@@ -258,6 +268,7 @@ def validate_profile(
         raise
     except (sqlite3.Error, ValueError, TypeError, AttributeError):
         raise ProposalProfileError("proposal runtime database validation failed") from None
+    _budget_remaining(deadline, 5)
     if _regular(database, MAX_DATABASE) != identity:
         raise ProposalProfileError("proposal runtime database identity drift")
     validate_hooks(profile.workspace)
@@ -400,11 +411,182 @@ def _preparation_failure_observation(
     }
 
 
+
+def _budget_remaining(deadline: float | None, maximum: float) -> float:
+    if deadline is None:
+        return maximum
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ProposalProfileError("invalid proposal runtime deadline")
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProposalProfileError("proposal runtime preparation budget exhausted")
+    return min(maximum, remaining)
+
+
+def _identity9(info) -> tuple:
+    return tuple(getattr(info, key) for key in (
+        "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+        "st_size", "st_mtime_ns", "st_ctime_ns"))
+
+
+def _persisted_snapshot(path: Path, deadline: float, limit: int, *, optional=False):
+    _budget_remaining(deadline, 1)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        if optional:
+            return None
+        raise
+    identity = _identity9(info)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_nlink != 1 or info.st_size > limit
+            or path.resolve(strict=True) != path):
+        raise ProposalProfileError("unsafe proposal runtime recovery file")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        if _identity9(os.fstat(fd)) != identity:
+            raise ProposalProfileError("proposal runtime recovery file drift")
+        digest, size = hashlib.sha256(), 0
+        while True:
+            _budget_remaining(deadline, 1)
+            chunk = os.read(fd, min(65536, limit + 1 - size))
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > limit:
+                raise ProposalProfileError("proposal runtime recovery file exceeds limit")
+            digest.update(chunk)
+        if (size != info.st_size or _identity9(os.fstat(fd)) != identity
+                or _identity9(path.lstat()) != identity):
+            raise ProposalProfileError("proposal runtime recovery file drift")
+        return identity, digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def _recovery_cli_fingerprint(cli: Path, *, deadline: float | None = None):
+    """Optional identity; missing/unproved pins never change the original first flow."""
+    try:
+        info = cli.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or info.st_size != REVIEWED_CLI_BYTES
+                or cli.resolve(strict=True) != cli or not os.access(cli, os.X_OK)):
+            return None
+    except (OSError, ValueError):
+        return None
+    now = time.monotonic()
+    total = now + INITIALIZATION_TOTAL_BUDGET if deadline is None else deadline
+    try:
+        snapshot = _persisted_snapshot(cli, min(total, now + 10), REVIEWED_CLI_BYTES)
+    except (OSError, ValueError):
+        # A failed optional ten-second proof is NO_RECOVERY, not a fresh budget.
+        # An OS read may return late; never swallow an expired overall budget.
+        _budget_remaining(total, 1)
+        return None, total
+    _budget_remaining(total, 1)
+    return (snapshot if snapshot[1] == REVIEWED_CLI_SHA256 else None), total
+
+
+def _recovery_workspace(workspace: Path):
+    info = workspace.lstat()
+    if (workspace.resolve(strict=True) != workspace or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ProposalProfileError("unsafe proposal runtime recovery workspace")
+    git = workspace / ".git"
+    git_info = git.lstat()
+    if (git.resolve(strict=True) != git or not stat.S_ISDIR(git_info.st_mode)
+            or git_info.st_uid != os.geteuid()):
+        raise ProposalProfileError("unsafe proposal runtime recovery Git root")
+    source = workspace / ".agents/agents" / NAME / "agent.md"
+    identity = _regular(source, 4096)
+    with source.open("rb") as stream:
+        definition = stream.read(4097)
+    if definition != DEFINITION.encode() or _regular(source, 4096) != identity:
+        raise ProposalProfileError("proposal runtime definition mismatch")
+    validate_hooks(workspace)
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            git_info.st_dev, git_info.st_ino, git_info.st_mode, git_info.st_uid)
+
+
+def _inspect_shm(path: Path, deadline: float):
+    _budget_remaining(deadline, 1)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    # SHM is an ephemeral lock/index; never hash its contents/mtime as persisted data.
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_nlink != 1 or not 0 <= info.st_size <= MAX_DATABASE
+            or path.resolve(strict=True) != path
+            or _identity9(path.lstat())[:7] != _identity9(info)[:7]):
+        raise ProposalProfileError("unsafe proposal runtime recovery SHM")
+
+
+def _pristine_initialization_snapshot(directory: Path, name: str, deadline: float):
+    """Only this call's fresh empty CID; WAL-visible SQL and stable persisted bytes."""
+    if not name.endswith(".db") or not UUID.fullmatch(name[:-3]):
+        raise ProposalProfileError("invalid proposal runtime recovery identity")
+    database = directory / name
+    wal, shm = Path(str(database) + "-wal"), Path(str(database) + "-shm")
+    if os.path.lexists(str(database) + "-journal"):
+        raise ProposalProfileError("proposal runtime recovery journal is unresolved")
+    before = (_persisted_snapshot(database, deadline, MAX_DATABASE),
+              _persisted_snapshot(wal, deadline, MAX_DATABASE, optional=True))
+    _inspect_shm(shm, deadline)
+    _budget_remaining(deadline, 1)
+    try:
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0)) as db:
+            db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            db.execute("PRAGMA query_only=ON"); db.execute("BEGIN")
+            ids = db.execute("SELECT cascade_id,typeof(cascade_id),trajectory_type,typeof(trajectory_type),source,typeof(source) FROM trajectory_meta LIMIT 2").fetchall()
+            metadata = db.execute("SELECT id,typeof(id),typeof(data),length(data) FROM trajectory_metadata_blob LIMIT 2").fetchall()
+            steps = db.execute("SELECT 1 FROM steps LIMIT 1").fetchall()
+            executors = db.execute("SELECT 1 FROM executor_metadata LIMIT 1").fetchall()
+            logical = (ids, metadata, steps, executors)
+            if logical != ([(name[:-3], "text", 0, "integer", 0, "integer")],
+                           [("main", "text", "blob", 0)], [], []):
+                raise ProposalProfileError("proposal runtime recovery is not pristine")
+    except sqlite3.Error:
+        raise ProposalProfileError("proposal runtime recovery database unavailable") from None
+    _budget_remaining(deadline, 1)
+    _inspect_shm(shm, deadline)
+    after = (_persisted_snapshot(database, deadline, MAX_DATABASE),
+             _persisted_snapshot(wal, deadline, MAX_DATABASE, optional=True))
+    if before != after:
+        raise ProposalProfileError("proposal runtime recovery persisted state drift")
+    return before, logical
+
+
+def _empty_recovery_eligible(error: ProposalProfileError, report: dict) -> bool:
+    facts = getattr(error, "preparation_observation", None)
+    required = {
+        "capture_state", "ui_bytes", "process_state_before_cleanup",
+        "trust_answer_sent", "pending_trust", "ready_during_preparation",
+        "agent_not_found_label", "unknown_agent_label", "not_found_label",
+        "fixed_agent_name_present", "trust_marker_present", "owned_workspace_present",
+        "enter_boundary_present", "authentication_prompt_present",
+        "network_error_present", "dependency_missing_present",
+    }
+    fixed = {"capture_state", "ui_bytes", "process_state_before_cleanup"}
+    return bool(
+        type(facts) is dict and set(facts) == required
+        and facts["capture_state"] == "CAPTURED"
+        and type(facts["ui_bytes"]) is int and facts["ui_bytes"] == 0
+        and facts["process_state_before_cleanup"] == "RUNNING"
+        and all(facts[key] is False for key in required - fixed)
+        and report.get("cleanup_normal") is True
+        and report.get("descriptors_closed") is True and report.get("process_dead") is True
+        and report.get("empty_seen") is True and not report.get("bad_seen")
+        and not report.get("ready_seen") and report.get("final_valid_profiles") == 0
+        and len(report.get("names", ())) == 1
+    )
+
+
 def prepare_profile(
     cli: Path, workspace: Path, model: str, effort: str | None,
     *, terminate, cli_home: Path | None = None, timeout: float = 30,
 ) -> PreparedProfile:
-    """Launch the fixed agent directly; verify fresh metadata before generation."""
+    """One setup, at most two zero-action initializers; never retry a model request."""
     if not workspace.is_absolute() or workspace.resolve(strict=True) != workspace:
         raise ProposalProfileError("invalid proposal runtime workspace")
     st = workspace.lstat()
@@ -414,22 +596,79 @@ def prepare_profile(
         raise ProposalProfileError("invalid proposal runtime preparation")
     if type(model) is not str or not model or (effort is not None and type(effort) is not str):
         raise ProposalProfileError("invalid proposal runtime model")
+    fingerprint = _recovery_cli_fingerprint(cli)
+    deadline = fingerprint[1] if fingerprint is not None else None
+    recovery_pinned = fingerprint is not None and fingerprint[0] is not None
     validate_hooks(workspace)
     folder = workspace/".agents/agents"/NAME
+    _budget_remaining(deadline, 10)
     folder.mkdir(parents=True, mode=0o700)
     _new_file(folder/"agent.md", DEFINITION.encode())
-    # A genuine nearest Git root prevents parent .agents/legacy inheritance.
     git = subprocess.run(
         ["/usr/bin/git", "-C", str(workspace), "init", "-q", "--initial-branch=proposal-runtime-fixture"],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        timeout=10, check=False,
+        timeout=_budget_remaining(deadline, 10), check=False,
         env={"PATH":"/usr/bin:/bin", "LANG":"C.UTF-8", "GIT_CONFIG_NOSYSTEM":"1", "GIT_CONFIG_GLOBAL":"/dev/null", "GIT_TEMPLATE_DIR":"", "GIT_TERMINAL_PROMPT":"0"},
     )
     if git.returncode != 0:
         raise ProposalProfileError("proposal runtime workspace initialization failed")
     home = cli_home if cli_home is not None else Path.home()/".gemini/antigravity-cli"
     directory = home/"conversations"
-    before = _sessions(directory)
+    original = _sessions(directory)
+    workspace_identity = _recovery_workspace(workspace) if recovery_pinned else None
+    first = {}
+    try:
+        return _initialize_profile_once(cli, workspace, model, effort, terminate=terminate,
+            home=home, timeout=timeout, before=original, deadline=deadline, report=first)
+    except ProposalProfileError as first_error:
+        if not recovery_pinned or not _empty_recovery_eligible(first_error, first):
+            raise
+        try:
+            _budget_remaining(deadline, 1)
+            names = first["names"]
+            if _sessions(directory) - original != names:
+                raise ProposalProfileError("proposal runtime recovery roster drift")
+            first_name = next(iter(names))
+            pristine = _pristine_initialization_snapshot(directory, first_name, deadline)
+            if _recovery_workspace(workspace) != workspace_identity:
+                raise ProposalProfileError("proposal runtime recovery workspace drift")
+            if _recovery_cli_fingerprint(cli, deadline=deadline) != fingerprint:
+                raise ProposalProfileError("proposal runtime recovery CLI drift")
+            if _pristine_initialization_snapshot(directory, first_name, deadline) != pristine:
+                raise ProposalProfileError("proposal runtime recovery persisted state drift")
+            before_second = _sessions(directory)
+            if before_second - original != names or _budget_remaining(deadline, timeout + 10) < timeout + 10:
+                raise ProposalProfileError("proposal runtime recovery budget or roster unavailable")
+        except (OSError, ValueError):
+            # Optional recovery never reclassifies or renews the failed first task.
+            raise first_error from None
+        second = {}
+        result = _initialize_profile_once(cli, workspace, model, effort, terminate=terminate,
+            home=home, timeout=timeout, before=before_second, deadline=deadline, report=second)
+        global_names = _sessions(directory) - original
+        if (not second.get("cleanup_normal") or not second.get("descriptors_closed")
+                or not second.get("process_dead") or len(second.get("names", ())) != 1
+                or result.conversation_id + ".db" not in second["names"]
+                or global_names != names | second["names"]
+                or not 1 <= len(global_names) <= MAX_NEW_SESSIONS
+                or _pristine_initialization_snapshot(directory, first_name, deadline) != pristine
+                or _recovery_workspace(workspace) != workspace_identity):
+            raise ProposalProfileError("proposal runtime recovery final identity or state mismatch")
+        _budget_remaining(deadline, 5)
+        validate_profile(result, fresh=True, cli_home=home, deadline=deadline)
+        if (_sessions(directory) - original != global_names
+                or _pristine_initialization_snapshot(directory, first_name, deadline) != pristine):
+            raise ProposalProfileError("proposal runtime recovery final state drift")
+        _budget_remaining(deadline, 1)
+        return result
+
+
+def _initialize_profile_once(
+    cli, workspace, model, effort, *, terminate, home, timeout, before, deadline, report,
+):
+    if _budget_remaining(deadline, timeout + 10) < timeout + 10:
+        raise ProposalProfileError("proposal runtime preparation budget exhausted")
+    directory = home/"conversations"
     master, slave = pty.openpty()
     termios.tcsetwinsize(master, (30, 120)); os.set_blocking(master, False)
     # Pinned CLI 1.4.2 documents --agent. No dropdown, cursor position, stale
@@ -446,6 +685,8 @@ def prepare_profile(
     pending_trust = False
     ready_during_preparation = False
     last_readiness_hint = None
+    report.update(empty_seen=False, bad_seen=False, ready_seen=False,
+                  cleanup_normal=False, descriptors_closed=False, process_dead=False)
     preparation_error = None
     preparation_observation = {"capture_state": "UNAVAILABLE"}
 
@@ -515,6 +756,9 @@ def prepare_profile(
                 directory, before, workspace, model, effort,
                 deadline=started + timeout,
             )
+            report["empty_seen"] |= (current_hint["new_sessions"] == 1 and current_hint["empty_profiles"] == 1)
+            report["bad_seen"] |= bool(current_hint["invalid_profiles"] or current_hint["sqlite_unavailable"] or current_hint["new_sessions"] > 1)
+            report["ready_seen"] |= bool(ready or current_hint["valid_profiles"])
             if current_hint["reason"] == "DEADLINE":
                 break
             last_readiness_hint = current_hint
@@ -546,15 +790,36 @@ def prepare_profile(
             if preparation_error is not None:
                 preparation_error.preparation_observation = preparation_observation
         finally:
+            cleanup_error = None
             try:
                 if process is not None:
                     terminate(process)
-            finally:
-                selector.close(); os.close(master)
-                if slave >= 0:
-                    os.close(slave)
-                buffer.clear()  # UI/auth prose is neither logged nor retained.
+            except BaseException as error:
+                cleanup_error = error
+            close_error = None
+            actions = [selector.close, lambda: os.close(master)]
+            if slave >= 0:
+                actions.append(lambda: os.close(slave))
+            for close in actions:
+                try:
+                    close()
+                except BaseException as error:
+                    if close_error is None:
+                        close_error = error
+            report["descriptors_closed"] = close_error is None
+            report["cleanup_normal"] = cleanup_error is None and close_error is None
+            try:
+                report["process_dead"] = process is not None and process.poll() is not None
+            except Exception:
+                report["process_dead"] = False
+            buffer.clear()  # UI/auth prose is neither logged nor retained.
+            if cleanup_error is not None:
+                raise cleanup_error
+            if close_error is not None:
+                raise close_error
+    _budget_remaining(deadline, 5)
     names = _sessions(directory)-before
+    report["names"] = names
     if not (1 <= len(names) <= MAX_NEW_SESSIONS):
         error = ProposalProfileError("proposal runtime fresh session discovery failed")
         error.preparation_observation = preparation_observation
@@ -563,10 +828,15 @@ def prepare_profile(
     for name in sorted(names):
         candidate = PreparedProfile(name[:-3], workspace, model, effort)
         try:
-            validate_profile(candidate, fresh=True, cli_home=home)
+            options = {"fresh": True, "cli_home": home}
+            if deadline is not None:
+                options["deadline"] = deadline
+            validate_profile(candidate, **options)
         except ProposalProfileError:
             continue
         matches.append(candidate)
+    report["final_valid_profiles"] = len(matches)
+    _budget_remaining(deadline, 5)
     if len(matches) != 1 or not ready_during_preparation:
         # Metadata published only during cleanup cannot create eligibility.
         reason = ("proposal runtime selected session is ambiguous or absent" if len(matches) != 1
