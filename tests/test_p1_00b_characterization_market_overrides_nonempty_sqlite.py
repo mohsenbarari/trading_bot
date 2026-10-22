@@ -176,10 +176,20 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
         self.assertEqual(schema[8][3], 0)
         return schema, ddl, rows
 
-    async def test_nonempty_real_sqlite_sorted_serialization_preserves_full_state(self):
+    def _assert_clean_session_state(self, db: AsyncSession) -> None:
+        self.assertEqual(tuple(db.new), ())
+        self.assertEqual(tuple(db.dirty), ())
+        self.assertEqual(tuple(db.deleted), ())
+        self.assertEqual(tuple(db.sync_session.new), ())
+        self.assertEqual(tuple(db.sync_session.dirty), ())
+        self.assertEqual(tuple(db.sync_session.deleted), ())
+        self.assertTrue(db.sync_session._is_clean())
+
+    async def _create_seeded_nonempty_engine(self):
         engine = create_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
+            query_cache_size=0,
             connect_args={"check_same_thread": False, "cached_statements": 0},
         )
         try:
@@ -211,21 +221,29 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                     seed_db.add(MarketScheduleOverride(**seed_row))
                     await seed_db.flush()
                 await seed_db.commit()
+            return engine
+        except Exception:
+            engine.dispose()
+            raise
 
-            before = self._snapshot(engine)
-            with engine.connect() as connection:
-                sqlite_connection = connection.connection.driver_connection
-            self.assertIsInstance(sqlite_connection, sqlite3.Connection)
+    async def _exercise_nonempty_handler(self, engine, invocation=None, trace=None):
+        before = self._snapshot(engine)
+        with engine.connect() as connection:
+            sqlite_connection = connection.connection.driver_connection
+        self.assertIsInstance(sqlite_connection, sqlite3.Connection)
 
+        trace = {} if trace is None else trace
+        trace.clear()
+        try:
             async with real_async_session(engine) as db:
                 self.assertIsInstance(db, AsyncSession)
-                self.assertEqual(tuple(db.new), ())
-                self.assertEqual(tuple(db.dirty), ())
-                self.assertEqual(tuple(db.deleted), ())
+                self._assert_clean_session_state(db)
                 events = []
                 selected = []
                 ascending = []
                 ordered = []
+                autoflush_calls = []
+                sync_flush_calls = []
                 results = []
                 scalars = []
                 all_rows_batches = []
@@ -234,6 +252,8 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                 original_asc = type(MarketScheduleOverride.date).asc
                 original_order_by = Select.order_by
                 original_execute = db.execute
+                original_autoflush = db.sync_session._autoflush
+                original_sync_flush = db.sync_session.flush
                 original_serializer = router._serialize_market_schedule_override
                 restorations = []
                 listeners = []
@@ -242,10 +262,82 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                 sqlite_selects = []
                 denied_actions = []
                 forbidden_calls = []
+                forbidden_sync_flushes = []
+                guard_state = {"in_execute": False, "in_autoflush": False}
+                trace.update(
+                    {
+                        "events": events,
+                        "selected": selected,
+                        "ascending": ascending,
+                        "ordered": ordered,
+                        "autoflush_calls": autoflush_calls,
+                        "sync_flush_calls": sync_flush_calls,
+                        "results": results,
+                        "scalars": scalars,
+                        "all_rows_batches": all_rows_batches,
+                        "serialized_calls": serialized_calls,
+                        "sql_observations": sql_observations,
+                        "sqlite_reads": sqlite_reads,
+                        "sqlite_selects": sqlite_selects,
+                        "denied_actions": denied_actions,
+                        "forbidden_calls": forbidden_calls,
+                        "forbidden_sync_flushes": forbidden_sync_flushes,
+                    }
+                )
 
                 def deny(*args, **kwargs):
                     forbidden_calls.append((args, kwargs))
                     self.fail("Handler attempted a forbidden mutation or transaction")
+
+                def observe_autoflush(*args, **kwargs):
+                    if (
+                        not guard_state["in_execute"]
+                        or guard_state["in_autoflush"]
+                        or len(autoflush_calls) != 0
+                        or len(sync_flush_calls) != 0
+                        or len(sql_observations) != 0
+                        or args != ()
+                        or kwargs != {}
+                    ):
+                        forbidden_calls.append((args, kwargs))
+                        events.append("autoflush:denied")
+                        self.fail("Handler attempted a forbidden or out-of-order _autoflush")
+                    self._assert_clean_session_state(db)
+                    events.append("autoflush")
+                    guard_state["in_autoflush"] = True
+                    try:
+                        outcome = original_autoflush(*args, **kwargs)
+                    finally:
+                        guard_state["in_autoflush"] = False
+                    self.assertIsNone(outcome)
+                    self.assertEqual(len(sync_flush_calls), 1)
+                    self._assert_clean_session_state(db)
+                    autoflush_calls.append((args, kwargs, outcome))
+                    return outcome
+
+                def observe_sync_flush(*args, **kwargs):
+                    if (
+                        not guard_state["in_execute"]
+                        or not guard_state["in_autoflush"]
+                        or len(autoflush_calls) != 0
+                        or len(sync_flush_calls) != 0
+                        or len(sql_observations) != 0
+                        or args != ()
+                        or kwargs != {}
+                    ):
+                        forbidden_sync_flushes.append((args, kwargs))
+                        forbidden_calls.append((args, kwargs))
+                        events.append("sync_flush:denied")
+                        self.fail(
+                            "Handler attempted a forbidden explicit or non-autoflush sync_session.flush"
+                        )
+                    self._assert_clean_session_state(db)
+                    events.append("sync_flush")
+                    outcome = original_sync_flush(*args, **kwargs)
+                    self.assertIsNone(outcome)
+                    self._assert_clean_session_state(db)
+                    sync_flush_calls.append((args, kwargs, outcome))
+                    return outcome
 
                 def authorize(action, argument1, argument2, database, trigger):
                     if action == sqlite3.SQLITE_SELECT:
@@ -343,8 +435,16 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                         self.assertEqual(len(args), 1)
                         self.assertIs(args[0], ordered[0])
                         self.assertEqual(kwargs, {})
+                        self._assert_clean_session_state(db)
                         events.append("execute:await")
-                        result = await original_execute(*args, **kwargs)
+                        guard_state["in_execute"] = True
+                        try:
+                            result = await original_execute(*args, **kwargs)
+                        finally:
+                            guard_state["in_execute"] = False
+                        self.assertEqual(len(autoflush_calls), 1)
+                        self.assertEqual(len(sync_flush_calls), 1)
+                        self._assert_clean_session_state(db)
                         results.append(result)
                         events.append("execute:return")
                         real_scalars = type(result).scalars
@@ -397,8 +497,10 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                     for owner in (db, db.sync_session):
                         for name in mutators:
                             if owner is db.sync_session and name == "flush":
+                                install(owner, name, observe_sync_flush)
                                 continue
                             install(owner, name, deny)
+                    install(db.sync_session, "_autoflush", observe_autoflush)
                     event.listen(db.sync_session, "before_flush", deny)
                     listeners.append((db.sync_session, "before_flush", deny))
                     event.listen(engine, "before_cursor_execute", observe_sql)
@@ -418,7 +520,8 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                         listeners.append((engine, name, deny))
                     sqlite_connection.set_authorizer(authorize)
 
-                    output = await router.list_market_overrides(db=db)
+                    runner = router.list_market_overrides if invocation is None else invocation
+                    output = await runner(db=db)
 
                     self.assertIs(type(output), list)
                     self.assertEqual(len(output), 3)
@@ -452,6 +555,8 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                             "asc",
                             "order_by",
                             "execute:await",
+                            "autoflush",
+                            "sync_flush",
                             "sql",
                             "execute:return",
                             "scalars",
@@ -461,6 +566,8 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                             "serialize:20",
                         ],
                     )
+                    self.assertEqual(autoflush_calls, [((), {}, None)])
+                    self.assertEqual(sync_flush_calls, [((), {}, None)])
                     self.assertEqual(len(results), 1)
                     self.assertEqual(len(scalars), 1)
                     self.assertEqual(len(all_rows_batches), 1)
@@ -470,9 +577,9 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                     self.assertEqual(set(sqlite_reads), set(_COLUMNS))
                     self.assertEqual(denied_actions, [])
                     self.assertEqual(forbidden_calls, [])
-                    self.assertEqual(tuple(db.new), ())
-                    self.assertEqual(tuple(db.dirty), ())
-                    self.assertEqual(tuple(db.deleted), ())
+                    self.assertEqual(forbidden_sync_flushes, [])
+                    self._assert_clean_session_state(db)
+                    trace["output"] = output
                 finally:
                     try:
                         sqlite_connection.set_authorizer(None)
@@ -496,11 +603,152 @@ class MarketOverridesNonemptySQLiteCharacterizationTests(unittest.IsolatedAsynci
                         router._serialize_market_schedule_override,
                         original_serializer,
                     )
+                    self.assertIs(db.execute.__self__, original_execute.__self__)
+                    self.assertIs(db.execute.__func__, original_execute.__func__)
+                    self.assertIs(
+                        db.sync_session._autoflush.__self__,
+                        original_autoflush.__self__,
+                    )
+                    self.assertIs(
+                        db.sync_session._autoflush.__func__,
+                        original_autoflush.__func__,
+                    )
+                    self.assertIs(
+                        db.sync_session.flush.__self__,
+                        original_sync_flush.__self__,
+                    )
+                    self.assertIs(
+                        db.sync_session.flush.__func__,
+                        original_sync_flush.__func__,
+                    )
                     for owner, name, listener in listeners:
                         self.assertFalse(event.contains(owner, name, listener))
-
+                    self._assert_clean_session_state(db)
+                    trace["restored"] = True
+        finally:
             after = self._snapshot(engine)
             self.assertEqual(after, before)
+            trace["post_snapshot"] = after
+        return trace
+
+    async def test_nonempty_real_sqlite_sorted_serialization_preserves_full_state(self):
+        engine = await self._create_seeded_nonempty_engine()
+        try:
+            trace = await self._exercise_nonempty_handler(engine)
+            self.assertTrue(trace["restored"])
+        finally:
+            engine.dispose()
+
+    async def test_explicit_clean_sync_flush_is_rejected(self):
+        engine = await self._create_seeded_nonempty_engine()
+        try:
+            baseline = self._snapshot(engine)
+            control_trace = await self._exercise_nonempty_handler(engine)
+            self.assertTrue(control_trace["restored"])
+            self.assertEqual(control_trace["post_snapshot"], baseline)
+            self.assertEqual(control_trace["autoflush_calls"], [((), {}, None)])
+            self.assertEqual(control_trace["sync_flush_calls"], [((), {}, None)])
+            self.assertEqual(control_trace["forbidden_sync_flushes"], [])
+
+            before_trace = {}
+
+            async def flush_before_handler(*, db: AsyncSession):
+                self._assert_clean_session_state(db)
+                db.sync_session.flush()
+                return await router.list_market_overrides(db=db)
+
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Handler attempted a forbidden explicit or non-autoflush sync_session.flush",
+            ):
+                await self._exercise_nonempty_handler(
+                    engine,
+                    flush_before_handler,
+                    before_trace,
+                )
+            self.assertEqual(before_trace["events"], ["sync_flush:denied"])
+            self.assertEqual(before_trace["selected"], [])
+            self.assertEqual(before_trace["ascending"], [])
+            self.assertEqual(before_trace["ordered"], [])
+            self.assertEqual(before_trace["autoflush_calls"], [])
+            self.assertEqual(before_trace["sync_flush_calls"], [])
+            self.assertEqual(before_trace["results"], [])
+            self.assertEqual(before_trace["scalars"], [])
+            self.assertEqual(before_trace["all_rows_batches"], [])
+            self.assertEqual(before_trace["serialized_calls"], [])
+            self.assertEqual(before_trace["sql_observations"], [])
+            self.assertEqual(before_trace["sqlite_reads"], [])
+            self.assertEqual(before_trace["sqlite_selects"], [])
+            self.assertEqual(before_trace["denied_actions"], [])
+            self.assertEqual(before_trace["forbidden_calls"], [((), {})])
+            self.assertEqual(before_trace["forbidden_sync_flushes"], [((), {})])
+            self.assertTrue(before_trace["restored"])
+            self.assertEqual(before_trace["post_snapshot"], baseline)
+            self.assertNotIn("output", before_trace)
+            self.assertEqual(self._snapshot(engine), baseline)
+
+            after_trace = {}
+            after_events = []
+
+            async def flush_after_handler(*, db: AsyncSession):
+                response = await router.list_market_overrides(db=db)
+                self._assert_clean_session_state(db)
+                after_events.append([item.id for item in response])
+                db.sync_session.flush()
+                return response
+
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Handler attempted a forbidden explicit or non-autoflush sync_session.flush",
+            ):
+                await self._exercise_nonempty_handler(
+                    engine,
+                    flush_after_handler,
+                    after_trace,
+                )
+            self.assertEqual(after_events, [[30, 10, 20]])
+            self.assertEqual(
+                after_trace["events"],
+                [
+                    "select",
+                    "asc",
+                    "order_by",
+                    "execute:await",
+                    "autoflush",
+                    "sync_flush",
+                    "sql",
+                    "execute:return",
+                    "scalars",
+                    "all",
+                    "serialize:30",
+                    "serialize:10",
+                    "serialize:20",
+                    "sync_flush:denied",
+                ],
+            )
+            self.assertEqual(len(after_trace["selected"]), 1)
+            self.assertEqual(len(after_trace["ascending"]), 1)
+            self.assertEqual(len(after_trace["ordered"]), 1)
+            self.assertEqual(after_trace["autoflush_calls"], [((), {}, None)])
+            self.assertEqual(after_trace["sync_flush_calls"], [((), {}, None)])
+            self.assertEqual(len(after_trace["results"]), 1)
+            self.assertEqual(len(after_trace["scalars"]), 1)
+            self.assertEqual(len(after_trace["all_rows_batches"]), 1)
+            self.assertEqual(len(after_trace["serialized_calls"]), 3)
+            self.assertEqual(len(after_trace["sql_observations"]), 1)
+            self.assertEqual(after_trace["sqlite_selects"], [(None, None, None, None)])
+            self.assertEqual(set(after_trace["sqlite_reads"]), set(_COLUMNS))
+            self.assertEqual(after_trace["denied_actions"], [])
+            self.assertEqual(after_trace["forbidden_calls"], [((), {})])
+            self.assertEqual(after_trace["forbidden_sync_flushes"], [((), {})])
+            self.assertTrue(after_trace["restored"])
+            self.assertEqual(after_trace["post_snapshot"], baseline)
+            self.assertNotIn("output", after_trace)
+            self.assertEqual(self._snapshot(engine), baseline)
+
+            control_after = await self._exercise_nonempty_handler(engine)
+            self.assertTrue(control_after["restored"])
+            self.assertEqual(control_after["post_snapshot"], baseline)
         finally:
             engine.dispose()
 
