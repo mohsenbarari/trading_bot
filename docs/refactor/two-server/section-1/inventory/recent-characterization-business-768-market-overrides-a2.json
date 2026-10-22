@@ -1,0 +1,324 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-BUSINESS-20261022-771B",
+  "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "inspected_head": "35eb6764552cfcb538885ec8fe610cb0a890921a",
+  "assignment_base_sha": "3a3b79120496ccbf4bcb36d3c8944e7dca094a00",
+  "assignment_base_parent_sha": "21da94f2dab90a31eb55130b75b615e6dcf6732c",
+  "status": "PARTIAL_RECONCILIATION",
+  "packet_id": "recent-characterization-business-768-market-overrides-a2",
+  "scenario_key": "market-overrides-accepted-empty-nonempty-partial-reconciliation-a2",
+  "gap_reference": "docs/refactor/two-server/section-1/00-stage-ledger.md#p1-00b-execution-status",
+  "canonical_blocker": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "canonical_blockers_status": {
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE": "OPEN",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN": "OPEN"
+  },
+  "stage_status": {
+    "P1-00": "COMPLETE",
+    "P1-00_complete_commit": "a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9",
+    "P1-00b": "IN_PROGRESS",
+    "closures_authorized": false
+  },
+  "reconciliation_window": {
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_in_this_packet": 2,
+    "remaining_in_window": 3,
+    "global_reconciliation_complete": false,
+    "conditional_on_exact_new_packet_acceptance": true,
+    "own_future_commit_or_receipt_claimed": false,
+    "sixth_behavior_authorized_before_all_five_reconciled_and_ledger_manifest_integrated": false,
+    "prior_receipts_and_counters_immutable": true,
+    "added_behavior_units": 0,
+    "added_distinct_seeds": 0,
+    "registered_in_manifest": false,
+    "canonical_ledger_integration_complete": false,
+    "accepted_five_commits_in_order": [
+      "85bd237480b6498ceda72a75fa340989aed0ba8b",
+      "52dfb53a89a87fee549510a4be8d93d64fcdfa9d",
+      "9df2051bf3ae774a8622b15f31eabb1cc517067b",
+      "21da94f2dab90a31eb55130b75b615e6dcf6732c",
+      "35eb6764552cfcb538885ec8fe610cb0a890921a"
+    ],
+    "reconciled_commits_in_a2": [
+      "85bd237480b6498ceda72a75fa340989aed0ba8b",
+      "52dfb53a89a87fee549510a4be8d93d64fcdfa9d"
+    ],
+    "remaining_three_references_only": [
+      {
+        "order_index_in_five": 3,
+        "failure_boundary": "select_failure",
+        "commit": "9df2051bf3ae774a8622b15f31eabb1cc517067b",
+        "path": "tests/test_p1_00b_characterization_market_overrides_select_failure_sqlite.py",
+        "class_name": "MarketOverridesSelectFailureSQLiteCharacterizationTests",
+        "method_name": "test_select_construction_failure_propagates_before_downstream_work",
+        "selector": "tests/test_p1_00b_characterization_market_overrides_select_failure_sqlite.py::MarketOverridesSelectFailureSQLiteCharacterizationTests::test_select_construction_failure_propagates_before_downstream_work",
+        "reconciled_in_a2": false,
+        "status_in_a2": "REFERENCE_ONLY_NOT_RECONCILED_IN_A2"
+      },
+      {
+        "order_index_in_five": 4,
+        "failure_boundary": "order_by_failure",
+        "commit": "21da94f2dab90a31eb55130b75b615e6dcf6732c",
+        "path": "tests/test_p1_00b_characterization_market_overrides_order_by_failure_sqlite.py",
+        "class_name": "MarketOverridesOrderByFailureSQLiteCharacterizationTests",
+        "method_name": "test_order_by_failure_propagates_before_downstream_work",
+        "selector": "tests/test_p1_00b_characterization_market_overrides_order_by_failure_sqlite.py::MarketOverridesOrderByFailureSQLiteCharacterizationTests::test_order_by_failure_propagates_before_downstream_work",
+        "reconciled_in_a2": false,
+        "status_in_a2": "REFERENCE_ONLY_NOT_RECONCILED_IN_A2"
+      },
+      {
+        "order_index_in_five": 5,
+        "failure_boundary": "scalars_failure",
+        "commit": "35eb6764552cfcb538885ec8fe610cb0a890921a",
+        "path": "tests/test_p1_00b_characterization_market_overrides_scalars_failure_sqlite.py",
+        "class_name": "MarketOverridesScalarsFailureSQLiteCharacterizationTests",
+        "method_name": "test_scalars_failure_propagates_after_real_execute_without_downstream_work",
+        "selector": "tests/test_p1_00b_characterization_market_overrides_scalars_failure_sqlite.py::MarketOverridesScalarsFailureSQLiteCharacterizationTests::test_scalars_failure_propagates_after_real_execute_without_downstream_work",
+        "reconciled_in_a2": false,
+        "status_in_a2": "REFERENCE_ONLY_NOT_RECONCILED_IN_A2"
+      }
+    ]
+  },
+  "coverage_accounting": {
+    "coverage_status": "PARTIAL",
+    "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+    "expected_seed_count": 465,
+    "raw_manifest_counts": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 261,
+      "evidenced_seed_count": 396,
+      "remaining_seed_count": 69
+    },
+    "strict_accepted_counts": {
+      "PROVEN_FOR_REQUESTED_SCENARIO": 288,
+      "PARTIAL_OR_SEED_ONLY": 177,
+      "total_seeds": 465
+    },
+    "unresolved_origin_cells": 24,
+    "high_blockers_open_count": 2,
+    "full_seed_proof_inference_forbidden": true
+  },
+  "handler_open_gaps_and_deferrals": {
+    "canonical_symbol": "api/routers/trading_settings.py:list_market_overrides",
+    "seed_id": "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214",
+    "explicit_clean_sync_session_flush_gap": {
+      "status": "OPEN",
+      "applies_to_records": [
+        "list_market_overrides_empty_real_sqlite",
+        "list_market_overrides_nonempty_real_sqlite"
+      ],
+      "qualification": "Both legacy accepted EMPTY and NONEMPTY characterization tests skip fencing db.sync_session.flush (allowing an unfenced explicit clean sync_session.flush to return before before_flush without emitting SQL). Neither file proves full read-only sync_session.flush immutability, and neither file is repaired or reaccepted here."
+    },
+    "all_failure_boundary": {
+      "status": "OPEN",
+      "qualification": "Synchronous ScalarResult.all() failure boundary in list_market_overrides remains unproved and OPEN."
+    },
+    "execute_failure_c006": {
+      "status": "DEFERRED_UNACCEPTED",
+      "terminal_error": "LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0",
+      "pre_review_native_status": "PASS",
+      "reviewer_dispatched": false,
+      "independent_acceptance": false,
+      "disposition_requirement": "Requires separate explicit no-replay disposition; C006 task, worker, native artifacts, reservation, and epoch are preserved as DEFERRED/UNACCEPTED without replay, resume, alias, or reset."
+    },
+    "earlier_deferrals_and_failed_attempts_preserved": true,
+    "whole_handler_acceptance": false,
+    "seed_closure": false,
+    "origin_closure": false,
+    "high_blocker_closure": false,
+    "stage_closure": false
+  },
+  "records": [
+    {
+      "order_index_in_five": 1,
+      "scenario_key": "list_market_overrides_empty_real_sqlite",
+      "path": "tests/test_p1_00b_characterization_market_overrides_empty_sqlite_recovery.py",
+      "last_commit": "85bd237480b6498ceda72a75fa340989aed0ba8b",
+      "parent": "4be119862d5e67a227caf82e79d037264d01abd7",
+      "sha256": "5473f941e2db93b41aed23c59243ba2e39f4d4a4fd6b46594176bfc45e4eb509",
+      "utf8_bytes": 16279,
+      "canonical_symbol": "api/routers/trading_settings.py:list_market_overrides",
+      "seed_ids": [
+        "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_market_overrides_empty_sqlite_recovery.py::MarketOverridesEmptySQLiteCharacterizationTests::test_empty_real_sqlite_list_preserves_state_and_call_order"
+      ],
+      "provenance": {
+        "authorship_mode": "CODEX_AUTHORED",
+        "author_marker": "/root/main_empty_sqlite_codex_author",
+        "review_and_acceptance_origin": "MANUAL_CODEX_INDEPENDENT_REVIEW_AND_ROOT_ACCEPTANCE",
+        "gemini_worker_run_id": null,
+        "gemini_reviewer_run_id": null,
+        "invented_worker_or_root_receipt": false,
+        "qualification": "Manual recovery unit confirmed by issued Assignment WA-P1-00B-BUSINESS-20261022-771B; no synthetic Gemini Worker/Reviewer session or Root receipt invented."
+      },
+      "characterized_evidence_scope": {
+        "database_mode": "isolated_in_memory_real_sqlite_via_real_async_session",
+        "persisted_columns_snapshotted": [
+          "id",
+          "date",
+          "override_type",
+          "open_time_local",
+          "close_time_local",
+          "note",
+          "created_by_user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "schema_and_sqlite_master_ddl_snapshotted": true,
+        "duplicate_model_index_ddl_verified_identical": true,
+        "observed_call_and_event_order": [
+          "select",
+          "asc",
+          "order_by",
+          "execute:await",
+          "sql",
+          "execute:return",
+          "scalars",
+          "all"
+        ],
+        "observed_return_value": [],
+        "serializer_invocations": 0,
+        "physical_sql_select_count": 1,
+        "full_read_only_immutability_claimed": false,
+        "explicit_clean_sync_session_flush_gap_status": "OPEN",
+        "bounded_evidence_limits": [
+          "Characterizes only the empty real-SQLite list_market_overrides outcome returning [] with nine-column, PRAGMA table_info, and sqlite_master DDL before/after snapshots.",
+          "Skips fencing db.sync_session.flush in the mutator loop and relies on before_flush plus SQLite authorizer; does not prove absence of explicit clean sync_session.flush calls and makes no full read-only immutability claim.",
+          "Excludes nonempty serialization, select/order_by/execute/scalars/all failure boundaries, HTTP/Depends/verify_super_admin auth, and whole-handler or seed closure."
+        ]
+      }
+    },
+    {
+      "order_index_in_five": 2,
+      "scenario_key": "list_market_overrides_nonempty_real_sqlite",
+      "path": "tests/test_p1_00b_characterization_market_overrides_nonempty_sqlite.py",
+      "last_commit": "52dfb53a89a87fee549510a4be8d93d64fcdfa9d",
+      "parent": "85bd237480b6498ceda72a75fa340989aed0ba8b",
+      "sha256": "ea976a7c202543a8f6aa36b25b2952827a62438c412b64e104b09fd009cb8e09",
+      "utf8_bytes": 21765,
+      "canonical_symbol": "api/routers/trading_settings.py:list_market_overrides",
+      "seed_ids": [
+        "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_market_overrides_nonempty_sqlite.py::MarketOverridesNonemptySQLiteCharacterizationTests::test_nonempty_real_sqlite_sorted_serialization_preserves_full_state"
+      ],
+      "provenance": {
+        "authorship_mode": "SDK_NORMAL0_WORKER_AND_FRESH_INDEPENDENT_NORMAL0_REVIEWER",
+        "worker": {
+          "run_id": "p1-00b-market-overrides-nonempty-768-c003-worker-0",
+          "controller_run_id": "cycle-0001-20261021T234515Z-642169",
+          "conversation_id": "0fb24d99-8274-4a45-9018-92f1bb8d0e44",
+          "head": "85bd237480b6498ceda72a75fa340989aed0ba8b",
+          "cli_returncode": 0,
+          "input_proposal_sha256": null,
+          "result_sha256": "42b9348b175ce6129d1632750765e1c74ab88581fe9153684b152f7c245b5716",
+          "status_sha256": "4b21dc6b9e531e7f831335223b4a96effa2adb7829256e8eff2fdc3100f56f0d",
+          "state": "PROPOSAL_READY",
+          "result_status": "PROPOSAL_READY",
+          "findings": []
+        },
+        "reviewer": {
+          "run_id": "p1-00b-market-overrides-nonempty-768-c003-reviewer-0",
+          "controller_run_id": "cycle-0001-20261021T234515Z-642169",
+          "conversation_id": "b8f56c90-3f68-4d04-aab6-b333ad7de509",
+          "head": "85bd237480b6498ceda72a75fa340989aed0ba8b",
+          "cli_returncode": 0,
+          "input_proposal_sha256": "42b9348b175ce6129d1632750765e1c74ab88581fe9153684b152f7c245b5716",
+          "result_sha256": "c063e3dd4c829452b0cc94b537a137f8ceffa8f98ff3aba696159f6daafb323d",
+          "status_sha256": "db7489092fe6aadbec8dcbc507c1b79e80bd754f5b2df4f011f0f65f388ecf6a",
+          "state": "VERIFIED",
+          "result_status": "VERIFIED",
+          "findings": []
+        },
+        "historical_native_witness": {
+          "state": "PASSED",
+          "returncode": 0,
+          "passed": 1,
+          "warnings": 11,
+          "unsupported_specs": [],
+          "sha256": "12c598e69207785ef9c5c4459218b371e4b54cd2aebe903694a22223857fd13d",
+          "selectors": [
+            "tests/test_p1_00b_characterization_market_overrides_nonempty_sqlite.py::MarketOverridesNonemptySQLiteCharacterizationTests::test_nonempty_real_sqlite_sorted_serialization_preserves_full_state"
+          ],
+          "qualification": "Historical Source witness from the accepted NONEMPTY unit, not a new test execution claim for this documentation reconciliation task."
+        }
+      },
+      "characterized_evidence_scope": {
+        "database_mode": "isolated_in_memory_real_sqlite_via_real_async_session",
+        "seed_insertion_id_order": [
+          20,
+          30,
+          10
+        ],
+        "persisted_pk_id_order": [
+          10,
+          20,
+          30
+        ],
+        "returned_date_ascending_id_order": [
+          30,
+          10,
+          20
+        ],
+        "serialized_response_fields": [
+          "id",
+          "date",
+          "override_type",
+          "open_time_local",
+          "close_time_local",
+          "note"
+        ],
+        "persisted_columns_snapshotted": [
+          "id",
+          "date",
+          "override_type",
+          "open_time_local",
+          "close_time_local",
+          "note",
+          "created_by_user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "schema_and_sqlite_master_ddl_snapshotted": true,
+        "duplicate_model_index_ddl_verified_identical": true,
+        "observed_call_and_event_order": [
+          "select",
+          "asc",
+          "order_by",
+          "execute:await",
+          "sql",
+          "execute:return",
+          "scalars",
+          "all",
+          "serialize:30",
+          "serialize:10",
+          "serialize:20"
+        ],
+        "serializer_invocations": 3,
+        "physical_sql_select_count": 1,
+        "full_read_only_immutability_claimed": false,
+        "explicit_clean_sync_session_flush_gap_status": "OPEN",
+        "bounded_evidence_limits": [
+          "Characterizes only the nonempty real-SQLite sorted six-field MarketScheduleOverrideResponse serialization in date.asc() order [30, 10, 20] and nine-column, PRAGMA table_info, and sqlite_master DDL before/after snapshots.",
+          "Skips fencing db.sync_session.flush in the mutator loop; explicit clean sync_session.flush oracle gap remains OPEN and no full read-only immutability or whole-handler acceptance is claimed.",
+          "Excludes select/order_by/execute/scalars/all failure boundaries, HTTP/Depends/verify_super_admin auth, and seed/origin/High/Stage closure."
+        ]
+      }
+    }
+  ],
+  "exclusions": [
+    "No source code copied into this receipt.",
+    "No HTTP routing, FastAPI Depends, or verify_super_admin authentication/authorization characterization.",
+    "No full read-only immutability claim; explicit clean sync_session.flush gap remains OPEN across both EMPTY and NONEMPTY legacy Source tests without repairing or reaccepting them here.",
+    "No reconciliation of select, order_by, or scalars failure units in packet A2 (referenced only as the remaining 3 of 5 accepted units).",
+    "No resolution of OPEN all() failure boundary or DEFERRED/UNACCEPTED C006 execute failure boundary, and no replay, resume, alias, or reset of C006 artifacts/reservations.",
+    "No whole-handler, seed, origin-cell, High-blocker, or Stage closure claim, and no runtime, deploy, DNS, Web Writer, network, secret, or control authority claimed."
+  ]
+}
