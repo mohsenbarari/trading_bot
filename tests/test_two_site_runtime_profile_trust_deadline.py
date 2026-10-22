@@ -204,7 +204,7 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
             events = [(t, b"neutral\n") for t in range(2, deadline, 3)]
             with self.subTest(deadline=deadline), self.owned(events, metadata_at=None) as trace:
                 trace.invoke(timeout=deadline)
-                self.negative(trace, "proposal runtime fresh session discovery failed")
+                self.negative(trace, "proposal runtime fresh session discovery failed; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
                 self.assertGreaterEqual(trace.clock.observed, deadline)
                 self.assertLess(trace.clock.observed, deadline + 0.5)
                 self.assertTrue(any(t > 12 for t, _ in trace.reads))
@@ -217,7 +217,7 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
                 trace.fixture.replace_meta(fixtures.literal_metadata(
                     trace.fixture.work, trace.fixture.body, name=name))
                 trace.invoke()
-                self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+                self.negative(trace, "proposal runtime selected session is ambiguous or absent; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=1 sqlite=0 multiple=0 ui=EMPTY")
 
     def test_used_session_metadata_still_rejects_without_generation(self):
         with self.owned([]) as trace:
@@ -225,7 +225,7 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
                 db.execute("INSERT INTO steps VALUES(3)")
                 db.execute("INSERT INTO executor_metadata VALUES(?)", (trace.fixture.executor(),))
             trace.invoke()
-            self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+            self.negative(trace, "proposal runtime selected session is ambiguous or absent; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=1 sqlite=0 multiple=0 ui=EMPTY")
 
     def test_owned_incremental_trust_does_not_require_or_select_any_panel(self):
         with self.owned([], metadata_at=24) as trace:
@@ -247,7 +247,7 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
                 trace.events = [(accepted, b"Do you trust this workspace? " + path +
                                  b" Yes, I trust this folder No Enter")]
                 trace.invoke(timeout=deadline)
-                self.negative(trace, "proposal runtime fresh session discovery failed")
+                self.negative(trace, "proposal runtime fresh session discovery failed; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
                 self.assertEqual([data for _, data in trace.writes], [TRUST])
                 self.assertGreaterEqual(trace.clock.observed, deadline)
                 self.assertLess(trace.clock.observed, deadline + 0.5)
@@ -260,13 +260,13 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
                 path = (str(trace.fixture.work) + suffix).encode()
                 trace.events = [(2, b"Do you trust this workspace? " + path + b" " + choice + b" No Enter")]
                 trace.invoke()
-                self.negative(trace, "proposal runtime trust scope mismatch")
+                self.negative(trace, "proposal runtime trust scope mismatch; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
                 self.assertEqual(trace.writes, [])
 
     def test_process_exit_and_termination_error_close_all_resources(self):
         with self.owned([], exit_at=5) as trace:
             trace.invoke()
-            self.negative(trace, "proposal runtime fresh session discovery failed")
+            self.negative(trace, "proposal runtime fresh session discovery failed; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
         error = OSError("owned termination failed")
         with self.owned([], cleanup_error=error) as trace:
             trace.invoke()
@@ -277,12 +277,12 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
     def test_ui_bound_remains_enforced(self):
         with self.owned([(1, b"x" * 65537)], metadata_at=None) as trace:
             trace.invoke()
-            self.negative(trace, "proposal runtime UI exceeds limit")
+            self.negative(trace, "proposal runtime UI exceeds limit; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=UNKNOWN")
 
     def test_panel_at_deadline_cannot_authorize_acceptance(self):
         with self.owned([(29.5, PANEL)], metadata_at=32) as trace:
             trace.invoke()
-            self.negative(trace, "proposal runtime fresh session discovery failed")
+            self.negative(trace, "proposal runtime fresh session discovery failed; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             self.assertEqual(trace.writes, [])
 
     def test_multiple_valid_fresh_sessions_rejected_without_arbitrary_choice(self):
@@ -311,7 +311,7 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
             trace.extra_staged = [(staged2, db2_path)]
             try:
                 trace.invoke()
-                self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+                self.negative(trace, "proposal runtime selected session is ambiguous or absent; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=1 ui=EMPTY")
                 self.assertEqual(trace.error.observation["final_valid_profiles"], 2)
                 self.assertEqual(profile._sessions(f.home / "conversations"),
                                  {fixtures.CID + ".db", cid2 + ".db"})
@@ -334,6 +334,6 @@ class PreparationTrustDeadlineTests(unittest.TestCase):
                 f.replace_meta(builder(f))
                 before = f.db_path.read_bytes()
                 trace.invoke()
-                self.negative(trace, "proposal runtime selected session is ambiguous or absent")
+                self.negative(trace, "proposal runtime selected session is ambiguous or absent; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=1 sqlite=0 multiple=0 ui=EMPTY")
                 self.assertEqual(trace.error.observation["final_valid_profiles"], 0)
                 self.assertEqual(f.db_path.read_bytes(), before)

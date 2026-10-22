@@ -63,7 +63,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
         with self.lab(mode="mixed", fresh_panel=False) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=2 empty=1 final_valid=0")
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=2 empty=1 final_valid=0; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=1 sqlite=0 multiple=1 ui=EMPTY")
             self.assertEqual(trace.error.observation["last_initialization_readiness_hint"], {
                 "reason": "INITIAL_METADATA_EMPTY", "new_sessions": 2,
                 "valid_profiles": 0, "empty_profiles": 1,
@@ -93,7 +93,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
         with self.lab(synchronous_ready=True, startup_ui="foreign", fresh_panel=False) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             self.assertTrue(trace.processes[0].published)
             self.assertEqual(trace.writes, [])
             self.assertEqual(trace.validations, [])
@@ -102,7 +102,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
         with self.lab(synchronous_ready=True, startup_ui="partial_foreign", fresh_panel=False) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             self.assertTrue(trace.processes[0].trust_completed)
             self.assertEqual(trace.writes, [])
             self.assertEqual(trace.validations, [])
@@ -112,7 +112,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
         with self.lab(synchronous_ready=True, fresh_panel=False, after_hint_foreign=True) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             self.assertEqual(trace.hint_injections, ["QUEUED_AFTER_REAL_READY_HINT"])
             self.assertEqual(trace.writes, [])
             self.assertEqual(trace.validations, [])
@@ -123,7 +123,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
                     synchronous_ready=True, startup_ui=fragment, fresh_panel=False) as trace:
                 self.assertIsNone(trace.result)
                 self.assertIs(type(trace.error), profile.ProposalProfileError)
-                self.assertEqual(str(trace.error), "proposal runtime trust dialog incomplete")
+                self.assertEqual(str(trace.error), "proposal runtime trust dialog incomplete; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
                 self.assertEqual(trace.writes, [])
                 self.assertEqual(trace.validations, [])
                 self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
@@ -143,7 +143,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
         with self.lab(mode="empty", fresh_panel=False, publish_on_terminate=True) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime profile was not ready during bounded preparation; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=1")
+            self.assertEqual(str(trace.error), "proposal runtime profile was not ready during bounded preparation; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=1; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
             self.assertEqual(trace.error.observation["final_valid_profiles"], 1)
             self.assertIs(trace.error.observation["ready_during_preparation"], False)
             self.assertEqual(trace.validations, [False])
@@ -181,7 +181,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
                         Path("/owned/fake-cli"), fixture.work, fixtures.MODEL, "high",
                         terminate=terminate, cli_home=fixture.home,
                     )
-                self.assertEqual(str(caught.exception), "proposal runtime fresh session discovery failed")
+                self.assertEqual(str(caught.exception), "proposal runtime fresh session discovery failed; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
                 read.assert_not_called()
                 self.assertEqual(selector.return_value.select.call_args_list,
                                  [mock.call(0), mock.call(0.1)])
@@ -206,7 +206,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
                 mode="empty", startup_ui="ordinary_banner", fresh_panel=False) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             facts = trace.error.preparation_observation
             self.assertEqual(set(facts), {
                 "capture_state", "ui_bytes", "process_state_before_cleanup",
@@ -250,7 +250,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
         with self.lab(synchronous_ready=True, startup_ui="foreign", fresh_panel=False) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             self.assertEqual(trace.error.preparation_observation["capture_state"], "CAPTURED")
             self.assertIs(trace.error.preparation_observation["trust_marker_present"], True)
             self.assertIs(trace.error.preparation_observation["trust_answer_sent"], False)
@@ -267,7 +267,7 @@ class DirectAgentPreparationContracts(unittest.TestCase):
                 mode="empty", fresh_panel=False) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=UNKNOWN")
             self.assertEqual(trace.error.preparation_observation, {"capture_state": "UNAVAILABLE"})
             self.assertNotIn(str(diagnostic_error), repr(trace.error.__dict__))
             capture.assert_called_once()
@@ -565,7 +565,7 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
             self.assertIs(trace.error.preparation_observation["ready_during_preparation"], False)
         with self.lab(first={"mode": "empty", "startup_ui": "foreign"}) as trace:
             self.rejected(trace, 1)
-            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch; PREP_DIAG phase=FIRST reason=UI_NONEMPTY attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY")
             self.assertEqual(trace.writes, [])
 
     def test_cleanup_failure_or_still_alive_prevents_second_start(self):
@@ -711,6 +711,189 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
                 self.assertEqual(len(seen), 2)
         finally:
             fixture.doCleanups()
+
+
+class SafePreparationDiagnosticContracts(unittest.TestCase):
+    SECOND = EmptyStartupRecoveryContracts.SECOND
+    UNKNOWN = EmptyStartupRecoveryContracts.UNKNOWN
+
+    def lab(self, **options):
+        return EmptyStartupRecoveryContracts.lab(self, **options)
+
+    def diagnostic(self, error):
+        self.assertIs(type(error), profile.ProposalProfileError)
+        prefix, suffix = str(error).split("; PREP_DIAG ")
+        self.assertLessEqual(len(suffix), 512)
+        self.assertTrue(suffix.isascii())
+        self.assertRegex(suffix, r"^phase=(FIRST|PRE_SECOND|SECOND|FINAL) reason=[A-Z_]+ attempts=[12] invalid=(0|1|NA) sqlite=(0|1|NA) multiple=(0|1|NA) ui=(EMPTY|NONEMPTY|UNKNOWN)$")
+        return prefix, suffix
+
+    def test_first_declines_persist_ui_pin_and_separate_history_without_retry(self):
+        cases = (({"startup_ui": "ordinary_banner"}, "UI_NONEMPTY", "invalid=0 sqlite=0 multiple=0"),
+                 ({"mode": "invalid"}, "HISTORY_INVALID", "invalid=1 sqlite=0 multiple=0"),
+                 ({"mode": "multiple"}, "HISTORY_MULTIPLE", "invalid=0 sqlite=0 multiple=1"),
+                 ({"mode": "busy"}, "HISTORY_SQLITE_UNAVAILABLE", "invalid=0 sqlite=1 multiple=0"))
+        for options, reason, history in cases:
+            with self.subTest(reason=reason), self.lab(first={"mode": "empty", **options}) as trace:
+                self.assertIsNone(trace.result)
+                self.assertEqual(len(trace.commands), 1)
+                prefix, suffix = self.diagnostic(trace.error)
+                self.assertTrue(prefix.startswith("proposal runtime selected session is ambiguous or absent"))
+                self.assertIn("phase=FIRST reason=" + reason + " attempts=1", suffix)
+                self.assertIn(history, suffix)
+        for pin in (False, "unproved"):
+            with self.subTest(pin=pin), self.lab(pin=pin) as trace:
+                self.assertIsNone(trace.result)
+                self.assertEqual(len(trace.commands), 1)
+                self.assertEqual(self.diagnostic(trace.error)[1],
+                    "phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
+        with mock.patch.object(profile, "_preparation_failure_observation",
+                               return_value={"capture_state": "UNAVAILABLE"}), self.lab() as trace:
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(self.diagnostic(trace.error)[1],
+                "phase=FIRST reason=DIAGNOSTICS_UNAVAILABLE attempts=1 invalid=0 sqlite=0 multiple=0 ui=UNKNOWN")
+
+    def test_transient_sqlite_hint_stays_a_sticky_recovery_veto(self):
+        actual = profile._initialization_readiness_hint
+        calls = []
+        def hint(*args, **kwargs):
+            ready, facts = actual(*args, **kwargs)
+            calls.append(facts)
+            if len(calls) == 1:
+                return False, dict(facts, reason="SQLITE_UNAVAILABLE", empty_profiles=0,
+                                   sqlite_unavailable=1)
+            return ready, facts
+        with mock.patch.object(profile, "_initialization_readiness_hint", side_effect=hint), self.lab() as trace:
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertGreater(len(calls), 1)
+            self.assertEqual(calls[-1]["empty_profiles"], 1)
+            self.assertEqual(self.diagnostic(trace.error)[1],
+                "phase=FIRST reason=HISTORY_SQLITE_UNAVAILABLE attempts=1 invalid=0 sqlite=1 multiple=0 ui=EMPTY")
+
+    def test_presecond_guard_keeps_the_same_first_error_and_hides_underlying_prose(self):
+        actual = profile._initialize_profile_once
+        first_errors = []
+        def initialize(*args, **kwargs):
+            try:
+                return actual(*args, **kwargs)
+            except profile.ProposalProfileError as error:
+                first_errors.append(error)
+                raise
+        secret = "PRIVATE_GUARD_FAILURE_PATH_CID_PAYLOAD_SENTINEL"
+        with mock.patch.object(profile, "_initialize_profile_once", side_effect=initialize), \
+             mock.patch.object(profile, "_pristine_initialization_snapshot", side_effect=OSError(secret)), \
+             self.lab() as trace:
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(len(first_errors), 1)
+            self.assertIs(trace.error, first_errors[0])
+            prefix, suffix = self.diagnostic(trace.error)
+            self.assertEqual(prefix, "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            self.assertEqual(suffix, "phase=PRE_SECOND reason=PRISTINE attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
+            self.assertNotIn(secret, str(trace.error))
+
+    def test_presecond_pin_and_workspace_failure_reasons_do_not_create_second_start(self):
+        with self.lab(drift_pin=True) as trace:
+            self.assertEqual(len(trace.commands), 1)
+            self.assertIn("phase=PRE_SECOND reason=CLI_PIN attempts=1", self.diagnostic(trace.error)[1])
+        def hooks(fixture, _processes, _clock):
+            fixture.hooks.write_bytes(b"changed\n")
+        with self.lab(after_first=hooks) as trace:
+            self.assertEqual(len(trace.commands), 1)
+            self.assertIn("phase=PRE_SECOND reason=WORKSPACE attempts=1", self.diagnostic(trace.error)[1])
+
+    def test_second_failure_is_distinguished_without_a_third_initializer(self):
+        with self.lab(second={"mode": "empty"}) as trace:
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 2)
+            prefix, suffix = self.diagnostic(trace.error)
+            self.assertEqual(prefix, "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            self.assertEqual(suffix, "phase=SECOND reason=INITIALIZER_FAILED attempts=2 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
+
+    def test_final_state_guard_preserves_late_first_rejection(self):
+        def late(_fixture, processes, _clock):
+            processes[0]._publish()
+        with self.lab(after_second_spawn=late) as trace:
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 2)
+            self.assertIn("phase=FINAL reason=FINAL_IDENTITY_STATE attempts=2", self.diagnostic(trace.error)[1])
+
+    def test_final_validation_failure_keeps_its_original_identity_and_prefix(self):
+        actual = profile.validate_profile
+        second_calls = []
+        sentinel = profile.ProposalProfileError("fixed final validation sentinel")
+        def validate(candidate, **kwargs):
+            if candidate.conversation_id == self.SECOND:
+                second_calls.append(candidate)
+                if len(second_calls) == 2:
+                    raise sentinel
+            return actual(candidate, **kwargs)
+        with mock.patch.object(profile, "validate_profile", side_effect=validate), self.lab() as trace:
+            self.assertIsNone(trace.result)
+            self.assertIs(trace.error, sentinel)
+            self.assertEqual(len(trace.commands), 2)
+            self.assertEqual(len(second_calls), 2)
+            self.assertEqual(self.diagnostic(trace.error), (
+                "fixed final validation sentinel",
+                "phase=FINAL reason=FINAL_VALIDATE attempts=2 invalid=0 sqlite=0 multiple=0 ui=UNKNOWN"))
+
+    def test_cleanup_uncertainty_and_primary_cleanup_identity_are_preserved(self):
+        with self.lab(leave_alive=True) as trace:
+            self.assertEqual(len(trace.commands), 1)
+            self.assertIn("phase=FIRST reason=CLEANUP_UNCERTAIN attempts=1", self.diagnostic(trace.error)[1])
+        sentinel = profile.ProposalProfileError("fixed primary cleanup sentinel")
+        with self.lab(cleanup_error=sentinel) as trace:
+            self.assertIs(trace.error, sentinel)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(self.diagnostic(trace.error)[0], "fixed primary cleanup sentinel")
+            self.assertIn("reason=CLEANUP_UNCERTAIN", self.diagnostic(trace.error)[1])
+        ordinary = OSError("owned original cleanup sentinel")
+        with self.lab(cleanup_error=ordinary) as trace:
+            self.assertIs(trace.error, ordinary)
+            self.assertEqual(str(trace.error), "owned original cleanup sentinel")
+            self.assertEqual(len(trace.commands), 1)
+
+    def test_diagnostic_formatter_cannot_throw_replace_failure_or_format_payloads(self):
+        prefix = "fixed original preparation failure"
+        error = profile.ProposalProfileError(prefix)
+        report = {"cleanup_normal": True, "descriptors_closed": True,
+                  "process_dead": True, "empty_seen": True, "bad_seen": False,
+                  "ready_seen": False, "final_valid_profiles": 0,
+                  "invalid_seen": False, "sqlite_seen": False, "multiple_seen": False}
+        secret = "PRIVATE_UI_ENV_PATH_CID_DB_SENTINEL"
+        error.preparation_observation = {
+            "capture_state": "CAPTURED", "ui_bytes": 0,
+            "process_state_before_cleanup": "RUNNING", "payload_not_a_fact": secret}
+        profile._append_preparation_diagnostic(error, phase="FIRST", reason=[],
+            attempts=1, report=report, pinned=True)
+        self.assertEqual(error.args, (prefix,))
+        profile._append_preparation_diagnostic(error, phase="FIRST", reason="INELIGIBLE",
+            attempts=1, report=report, pinned=True)
+        self.assertEqual(self.diagnostic(error), (prefix,
+            "phase=FIRST reason=INELIGIBLE_OTHER attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY"))
+        self.assertNotIn(secret, str(error))
+        once = error.args
+        profile._append_preparation_diagnostic(error, phase="SECOND", reason="INITIALIZER_FAILED",
+            attempts=2, report=report, pinned=True)
+        self.assertEqual(error.args, once)
+        invalid_args = profile.ProposalProfileError(prefix, object())
+        original = invalid_args.args
+        profile._append_preparation_diagnostic(invalid_args, phase="FIRST", reason="INELIGIBLE",
+            attempts=1, report=report, pinned=True)
+        self.assertIs(invalid_args.args, original)
+
+    def test_valid_first_and_valid_second_never_invoke_failure_diagnostics(self):
+        with mock.patch.object(profile, "_append_preparation_diagnostic",
+                               side_effect=AssertionError("diagnostic used on success")):
+            with self.lab(first={"synchronous_ready": True}) as trace:
+                self.assertIsNone(trace.error)
+                self.assertEqual(trace.result.conversation_id, fixtures.CID)
+                self.assertEqual(len(trace.commands), 1)
+            with self.lab() as trace:
+                self.assertIsNone(trace.error)
+                self.assertEqual(trace.result.conversation_id, self.SECOND)
+                self.assertEqual(len(trace.commands), 2)
 
 
 if __name__ == "__main__":

@@ -582,6 +582,77 @@ def _empty_recovery_eligible(error: ProposalProfileError, report: dict) -> bool:
     )
 
 
+def _append_preparation_diagnostic(
+    error: ProposalProfileError, *, phase: str, reason: str, attempts: int,
+    report: dict, pinned: bool,
+) -> None:
+    """Best-effort fixed facts survive Runner's existing type+str boundary.
+
+    No payload or underlying exception text is formatted. This never decides
+    eligibility, retries a request, or replaces the original exception.
+    """
+    try:
+        phases = {"FIRST", "PRE_SECOND", "SECOND", "FINAL"}
+        reasons = {"INELIGIBLE", "BUDGET", "ROSTER", "PRISTINE", "WORKSPACE",
+                   "CLI_PIN", "BUDGET_OR_ROSTER", "INITIALIZER_FAILED",
+                   "FINAL_IDENTITY_STATE", "FINAL_VALIDATE", "FINAL_ROSTER_STATE"}
+        if (not isinstance(error, ProposalProfileError) or phase not in phases
+                or reason not in reasons or type(attempts) is not int
+                or attempts not in (1, 2) or type(pinned) is not bool):
+            return
+        args = error.args
+        if (len(args) != 1 or type(args[0]) is not str
+                or len(args[0]) > 2048 or "; PREP_DIAG " in args[0]):
+            return
+        data = report if type(report) is dict else {}
+        facts = getattr(error, "preparation_observation", None)
+        facts = facts if type(facts) is dict else {}
+        ui_bytes = facts.get("ui_bytes")
+        ui = ("EMPTY" if type(ui_bytes) is int and ui_bytes == 0 else
+              "NONEMPTY" if type(ui_bytes) is int and 0 < ui_bytes <= MAX_UI else "UNKNOWN")
+        if reason == "INELIGIBLE":
+            if not pinned:
+                reason = "NO_PIN"
+            elif any(data.get(key) is not True for key in (
+                    "cleanup_normal", "descriptors_closed", "process_dead")):
+                reason = "CLEANUP_UNCERTAIN"
+            elif facts.get("capture_state") != "CAPTURED":
+                reason = "DIAGNOSTICS_UNAVAILABLE"
+            elif ui != "EMPTY":
+                reason = "UI_NONEMPTY" if ui == "NONEMPTY" else "UI_UNKNOWN"
+            elif facts.get("process_state_before_cleanup") != "RUNNING":
+                reason = "PROCESS_NOT_RUNNING"
+            elif data.get("invalid_seen") is True:
+                reason = "HISTORY_INVALID"
+            elif data.get("multiple_seen") is True:
+                reason = "HISTORY_MULTIPLE"
+            elif data.get("sqlite_seen") is True:
+                reason = "HISTORY_SQLITE_UNAVAILABLE"
+            elif data.get("bad_seen") is True:
+                reason = "HISTORY_OTHER"
+            elif data.get("ready_seen") is True:
+                reason = "OBSERVED_READY"
+            elif data.get("empty_seen") is not True:
+                reason = "NO_EMPTY_OBSERVATION"
+            elif data.get("final_valid_profiles") != 0:
+                reason = "FINAL_VALID_OR_UNKNOWN"
+            else:
+                reason = "INELIGIBLE_OTHER"
+        flags = []
+        for label, key in (("invalid", "invalid_seen"), ("sqlite", "sqlite_seen"),
+                           ("multiple", "multiple_seen")):
+            value = data.get(key)
+            flags.append(label + "=" + ("1" if value is True else "0" if value is False else "NA"))
+        suffix = ("; PREP_DIAG phase=" + phase + " reason=" + reason
+                  + " attempts=" + str(attempts) + " " + " ".join(flags)
+                  + " ui=" + ui)
+        if len(suffix) <= 512 and suffix.isascii():
+            error.args = (args[0] + suffix,)
+    except Exception:
+        # Malformed diagnostic state must not mask the original failure.
+        return
+
+
 def prepare_profile(
     cli: Path, workspace: Path, model: str, effort: str | None,
     *, terminate, cli_home: Path | None = None, timeout: float = 30,
@@ -622,45 +693,71 @@ def prepare_profile(
             home=home, timeout=timeout, before=original, deadline=deadline, report=first)
     except ProposalProfileError as first_error:
         if not recovery_pinned or not _empty_recovery_eligible(first_error, first):
+            _append_preparation_diagnostic(first_error, phase="FIRST", reason="INELIGIBLE",
+                attempts=1, report=first, pinned=recovery_pinned)
             raise
+        guard = "BUDGET"
         try:
             _budget_remaining(deadline, 1)
             names = first["names"]
+            guard = "ROSTER"
             if _sessions(directory) - original != names:
                 raise ProposalProfileError("proposal runtime recovery roster drift")
             first_name = next(iter(names))
+            guard = "PRISTINE"
             pristine = _pristine_initialization_snapshot(directory, first_name, deadline)
+            guard = "WORKSPACE"
             if _recovery_workspace(workspace) != workspace_identity:
                 raise ProposalProfileError("proposal runtime recovery workspace drift")
+            guard = "CLI_PIN"
             if _recovery_cli_fingerprint(cli, deadline=deadline) != fingerprint:
                 raise ProposalProfileError("proposal runtime recovery CLI drift")
+            guard = "PRISTINE"
             if _pristine_initialization_snapshot(directory, first_name, deadline) != pristine:
                 raise ProposalProfileError("proposal runtime recovery persisted state drift")
+            guard = "BUDGET_OR_ROSTER"
             before_second = _sessions(directory)
             if before_second - original != names or _budget_remaining(deadline, timeout + 10) < timeout + 10:
                 raise ProposalProfileError("proposal runtime recovery budget or roster unavailable")
         except (OSError, ValueError):
             # Optional recovery never reclassifies or renews the failed first task.
+            _append_preparation_diagnostic(first_error, phase="PRE_SECOND", reason=guard,
+                attempts=1, report=first, pinned=recovery_pinned)
             raise first_error from None
         second = {}
-        result = _initialize_profile_once(cli, workspace, model, effort, terminate=terminate,
-            home=home, timeout=timeout, before=before_second, deadline=deadline, report=second)
-        global_names = _sessions(directory) - original
-        if (not second.get("cleanup_normal") or not second.get("descriptors_closed")
-                or not second.get("process_dead") or len(second.get("names", ())) != 1
-                or result.conversation_id + ".db" not in second["names"]
-                or global_names != names | second["names"]
-                or not 1 <= len(global_names) <= MAX_NEW_SESSIONS
-                or _pristine_initialization_snapshot(directory, first_name, deadline) != pristine
-                or _recovery_workspace(workspace) != workspace_identity):
-            raise ProposalProfileError("proposal runtime recovery final identity or state mismatch")
-        _budget_remaining(deadline, 5)
-        validate_profile(result, fresh=True, cli_home=home, deadline=deadline)
-        if (_sessions(directory) - original != global_names
-                or _pristine_initialization_snapshot(directory, first_name, deadline) != pristine):
-            raise ProposalProfileError("proposal runtime recovery final state drift")
-        _budget_remaining(deadline, 1)
-        return result
+        try:
+            result = _initialize_profile_once(cli, workspace, model, effort, terminate=terminate,
+                home=home, timeout=timeout, before=before_second, deadline=deadline, report=second)
+        except ProposalProfileError as second_error:
+            _append_preparation_diagnostic(second_error, phase="SECOND", reason="INITIALIZER_FAILED",
+                attempts=2, report=second, pinned=recovery_pinned)
+            raise
+        guard = "FINAL_IDENTITY_STATE"
+        try:
+            global_names = _sessions(directory) - original
+            if (not second.get("cleanup_normal") or not second.get("descriptors_closed")
+                    or not second.get("process_dead") or len(second.get("names", ())) != 1
+                    or result.conversation_id + ".db" not in second["names"]
+                    or global_names != names | second["names"]
+                    or not 1 <= len(global_names) <= MAX_NEW_SESSIONS
+                    or _pristine_initialization_snapshot(directory, first_name, deadline) != pristine
+                    or _recovery_workspace(workspace) != workspace_identity):
+                raise ProposalProfileError("proposal runtime recovery final identity or state mismatch")
+            guard = "BUDGET"
+            _budget_remaining(deadline, 5)
+            guard = "FINAL_VALIDATE"
+            validate_profile(result, fresh=True, cli_home=home, deadline=deadline)
+            guard = "FINAL_ROSTER_STATE"
+            if (_sessions(directory) - original != global_names
+                    or _pristine_initialization_snapshot(directory, first_name, deadline) != pristine):
+                raise ProposalProfileError("proposal runtime recovery final state drift")
+            guard = "BUDGET"
+            _budget_remaining(deadline, 1)
+            return result
+        except ProposalProfileError as final_error:
+            _append_preparation_diagnostic(final_error, phase="FINAL", reason=guard,
+                attempts=2, report=second, pinned=recovery_pinned)
+            raise
 
 
 def _initialize_profile_once(
@@ -686,6 +783,7 @@ def _initialize_profile_once(
     ready_during_preparation = False
     last_readiness_hint = None
     report.update(empty_seen=False, bad_seen=False, ready_seen=False,
+                  invalid_seen=False, sqlite_seen=False, multiple_seen=False,
                   cleanup_normal=False, descriptors_closed=False, process_dead=False)
     preparation_error = None
     preparation_observation = {"capture_state": "UNAVAILABLE"}
@@ -758,6 +856,9 @@ def _initialize_profile_once(
             )
             report["empty_seen"] |= (current_hint["new_sessions"] == 1 and current_hint["empty_profiles"] == 1)
             report["bad_seen"] |= bool(current_hint["invalid_profiles"] or current_hint["sqlite_unavailable"] or current_hint["new_sessions"] > 1)
+            report["invalid_seen"] |= bool(current_hint["invalid_profiles"])
+            report["sqlite_seen"] |= bool(current_hint["sqlite_unavailable"])
+            report["multiple_seen"] |= current_hint["new_sessions"] > 1
             report["ready_seen"] |= bool(ready or current_hint["valid_profiles"])
             if current_hint["reason"] == "DEADLINE":
                 break

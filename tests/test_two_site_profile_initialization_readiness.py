@@ -245,7 +245,7 @@ class InitializationReadinessTests(unittest.TestCase):
         with self.preparation(ready_at=None) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
             self.assertFalse(trace.processes[0].published.is_set())
             self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
             self.assertLess(trace.processes[0].terminated_at, 31)
@@ -261,7 +261,7 @@ class InitializationReadinessTests(unittest.TestCase):
         with self.preparation(ready_at=24, after_terminate=drift) as trace:
             self.assertIsNone(trace.result)
             self.assertIs(type(trace.error), profile.ProposalProfileError)
-            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent")
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
             self.assertTrue(trace.processes[0].published_while_alive)
             self.assertEqual(trace.error.observation["last_initialization_readiness_hint"]["reason"], "READY")
             self.assertEqual(trace.error.observation["final_valid_profiles"], 0)

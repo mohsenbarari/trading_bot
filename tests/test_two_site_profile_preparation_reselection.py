@@ -321,7 +321,7 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
             with self.subTest(panel=fresh_panel), self.lab(mode="empty", fresh_panel=fresh_panel) as trace:
                 self.assert_rejected(trace)
                 self.assertEqual(trace.writes, [])
-                self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+                self.assertEqual(str(trace.error), 'proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0' + ('; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=NONEMPTY' if fresh_panel else '; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY'))
                 self.assertEqual(trace.error.observation["last_initialization_readiness_hint"], {
                     "reason": "INITIAL_METADATA_EMPTY", "new_sessions": 1,
                     "valid_profiles": 0, "empty_profiles": 1,
@@ -364,7 +364,7 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
     def test_cumulative_ui_limit_remains_enforced_without_selection(self):
         with self.lab(mode="empty", padding=65537) as trace:
             self.assert_rejected(trace)
-            self.assertEqual(str(trace.error), "proposal runtime UI exceeds limit")
+            self.assertEqual(str(trace.error), "proposal runtime UI exceeds limit; PREP_DIAG phase=FIRST reason=NO_PIN attempts=1 invalid=0 sqlite=0 multiple=0 ui=UNKNOWN")
 
     def test_cleanup_failure_or_early_exit_never_returns_profile(self):
         with self.lab(cleanup_error=True) as trace:
