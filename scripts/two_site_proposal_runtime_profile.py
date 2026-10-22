@@ -365,6 +365,41 @@ def _initialization_readiness_hint(
     return valid == 1, facts
 
 
+def _preparation_failure_observation(
+    buffer: bytearray, process, workspace: Path, trust_accepted: bool,
+    pending_trust: bool, ready_during_preparation: bool,
+) -> dict:
+    """Fixed diagnostics only; never retain volatile UI/prose/path or grant readiness."""
+    text = buffer.decode("utf-8", errors="replace")
+    normalized = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    normalized = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", normalized)
+    lower = normalized.casefold()
+    code = process.poll() if process is not None else None
+    state = ("NOT_STARTED" if process is None else "RUNNING" if code is None
+             else "EXITED_ZERO" if type(code) is int and code == 0
+             else "EXITED_NONZERO" if type(code) is int else "UNKNOWN")
+    return {
+        "capture_state": "CAPTURED", "ui_bytes": len(buffer),
+        "process_state_before_cleanup": state,
+        "trust_answer_sent": trust_accepted, "pending_trust": pending_trust,
+        "ready_during_preparation": ready_during_preparation,
+        "agent_not_found_label": "agent not found" in lower,
+        "unknown_agent_label": "unknown agent" in lower,
+        "not_found_label": "not found" in lower,
+        "fixed_agent_name_present": NAME in normalized,
+        "trust_marker_present": "Do you trust" in normalized,
+        "owned_workspace_present": str(workspace) in normalized,
+        "enter_boundary_present": re.search(r"\benter\b", normalized, re.IGNORECASE) is not None,
+        "authentication_prompt_present": any(label in lower for label in (
+            "sign in", "sign-in", "log in", "authentication required")),
+        "network_error_present": any(label in lower for label in (
+            "connection refused", "connection reset", "tls handshake timeout",
+            "context deadline exceeded", "failed to connect")),
+        "dependency_missing_present": any(label in lower for label in (
+            "executable file not found", "command not found", "no such file or directory")),
+    }
+
+
 def prepare_profile(
     cli: Path, workspace: Path, model: str, effort: str | None,
     *, terminate, cli_home: Path | None = None, timeout: float = 30,
@@ -411,6 +446,8 @@ def prepare_profile(
     pending_trust = False
     ready_during_preparation = False
     last_readiness_hint = None
+    preparation_error = None
+    preparation_observation = {"capture_state": "UNAVAILABLE"}
 
     def drain_ui(deadline):
         # Drain the owned nonblocking PTY before AND after metadata reads.
@@ -493,18 +530,35 @@ def prepare_profile(
             selector.select(0.1)
         if pending_trust:
             raise ProposalProfileError("proposal runtime trust dialog incomplete")
+    except ProposalProfileError as error:
+        preparation_error = error
+        raise
     finally:
         try:
-            if process is not None:
-                terminate(process)
+            try:
+                preparation_observation = _preparation_failure_observation(
+                    buffer, process, workspace, trust_accepted, pending_trust,
+                    ready_during_preparation,
+                )
+            except Exception:
+                # Diagnostics must never replace the preparation/cleanup failure.
+                preparation_observation = {"capture_state": "UNAVAILABLE"}
+            if preparation_error is not None:
+                preparation_error.preparation_observation = preparation_observation
         finally:
-            selector.close(); os.close(master)
-            if slave >= 0:
-                os.close(slave)
-            buffer.clear()  # UI/auth prose is neither logged nor retained.
+            try:
+                if process is not None:
+                    terminate(process)
+            finally:
+                selector.close(); os.close(master)
+                if slave >= 0:
+                    os.close(slave)
+                buffer.clear()  # UI/auth prose is neither logged nor retained.
     names = _sessions(directory)-before
     if not (1 <= len(names) <= MAX_NEW_SESSIONS):
-        raise ProposalProfileError("proposal runtime fresh session discovery failed")
+        error = ProposalProfileError("proposal runtime fresh session discovery failed")
+        error.preparation_observation = preparation_observation
+        raise error
     matches = []
     for name in sorted(names):
         candidate = PreparedProfile(name[:-3], workspace, model, effort)
@@ -518,6 +572,7 @@ def prepare_profile(
         reason = ("proposal runtime selected session is ambiguous or absent" if len(matches) != 1
                   else "proposal runtime profile was not ready during bounded preparation")
         error = ProposalProfileError(reason)
+        error.preparation_observation = preparation_observation
         if last_readiness_hint is not None:
             error.observation = {"last_initialization_readiness_hint": last_readiness_hint,
                                  "final_new_sessions": len(names), "final_valid_profiles": len(matches),

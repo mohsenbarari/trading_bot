@@ -5,6 +5,7 @@ PTY/SQLite fixture as a module, never import/alias its TestCase for collection.
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import unittest
@@ -188,6 +189,110 @@ class DirectAgentPreparationContracts(unittest.TestCase):
             fixture.check_positive()
         finally:
             fixture.doCleanups()
+
+
+    def test_failure_diagnostics_are_fixed_bounded_and_never_leak_ui_or_workspace(self):
+        original_send = owned.OwnedReselectionCLI._send
+        secret = "PRIVATE_DIAGNOSTIC_SENTINEL_NOT_A_REAL_CREDENTIAL"
+        def send(cli, data):
+            payload = ("\n" + secret + " " + str(cli.fixture.work) +
+                       " Agent not found unknown agent " + profile.NAME +
+                       " Enter sign in connection refused command not found\n").encode()
+            return original_send(cli, data + payload)
+        with mock.patch.object(owned.OwnedReselectionCLI, "_send", new=send), self.lab(
+                mode="empty", startup_ui="ordinary_banner", fresh_panel=False) as trace:
+            self.assertIsNone(trace.result)
+            self.assertIs(type(trace.error), profile.ProposalProfileError)
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            facts = trace.error.preparation_observation
+            self.assertEqual(set(facts), {
+                "capture_state", "ui_bytes", "process_state_before_cleanup",
+                "trust_answer_sent", "pending_trust", "ready_during_preparation",
+                "agent_not_found_label", "unknown_agent_label", "not_found_label",
+                "fixed_agent_name_present", "trust_marker_present",
+                "owned_workspace_present", "enter_boundary_present",
+                "authentication_prompt_present", "network_error_present",
+                "dependency_missing_present",
+            })
+            self.assertEqual(facts["capture_state"], "CAPTURED")
+            self.assertEqual(facts["process_state_before_cleanup"], "RUNNING")
+            self.assertIs(type(facts["ui_bytes"]), int)
+            self.assertGreater(facts["ui_bytes"], len(secret))
+            self.assertLessEqual(facts["ui_bytes"], 65536)
+            for name in set(facts) - {"capture_state", "ui_bytes", "process_state_before_cleanup"}:
+                self.assertIs(type(facts[name]), bool)
+            for name in ("agent_not_found_label", "unknown_agent_label", "not_found_label",
+                         "fixed_agent_name_present", "owned_workspace_present",
+                         "enter_boundary_present", "authentication_prompt_present",
+                         "network_error_present", "dependency_missing_present"):
+                self.assertIs(facts[name], True, name)
+            for name in ("trust_answer_sent", "pending_trust", "ready_during_preparation",
+                         "trust_marker_present"):
+                self.assertIs(facts[name], False, name)
+            serialized = json.dumps(trace.error.__dict__, sort_keys=True)
+            for sensitive in (secret, str(trace.fixture.work), profile.NAME,
+                              "Agent not found unknown agent", "connection refused"):
+                self.assertNotIn(sensitive, serialized)
+                self.assertNotIn(sensitive, str(trace.error))
+            self.assertEqual(trace.error.observation["final_valid_profiles"], 0)
+            self.assertEqual(trace.writes, [])
+            self.assertEqual(len(trace.commands), 1)
+            self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
+            self.assertLess(trace.processes[0].terminated_at, 31)
+            # Detached facts survive actual cleanup; no buffer/prose is retained.
+            self.assertFalse(trace.processes[0].thread.is_alive())
+            self.assertEqual(facts["process_state_before_cleanup"], "RUNNING")
+
+    def test_diagnostics_cannot_convert_valid_metadata_with_foreign_trust_into_success(self):
+        with self.lab(synchronous_ready=True, startup_ui="foreign", fresh_panel=False) as trace:
+            self.assertIsNone(trace.result)
+            self.assertIs(type(trace.error), profile.ProposalProfileError)
+            self.assertEqual(str(trace.error), "proposal runtime trust scope mismatch")
+            self.assertEqual(trace.error.preparation_observation["capture_state"], "CAPTURED")
+            self.assertIs(trace.error.preparation_observation["trust_marker_present"], True)
+            self.assertIs(trace.error.preparation_observation["trust_answer_sent"], False)
+            self.assertIs(trace.error.preparation_observation["ready_during_preparation"], False)
+            self.assertTrue(trace.processes[0].published)
+            self.assertEqual(trace.validations, [])
+            self.assertEqual(trace.writes, [])
+            self.assertEqual(len(trace.commands), 1)
+
+    def test_diagnostic_capture_failure_preserves_profile_error_and_all_gates(self):
+        diagnostic_error = RuntimeError("PRIVATE_DIAGNOSTIC_FAILURE_PROSE")
+        with mock.patch.object(profile, "_preparation_failure_observation",
+                               side_effect=diagnostic_error) as capture, self.lab(
+                mode="empty", fresh_panel=False) as trace:
+            self.assertIsNone(trace.result)
+            self.assertIs(type(trace.error), profile.ProposalProfileError)
+            self.assertEqual(str(trace.error), "proposal runtime selected session is ambiguous or absent; LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0")
+            self.assertEqual(trace.error.preparation_observation, {"capture_state": "UNAVAILABLE"})
+            self.assertNotIn(str(diagnostic_error), repr(trace.error.__dict__))
+            capture.assert_called_once()
+            self.assertEqual(trace.error.observation["final_valid_profiles"], 0)
+            self.assertEqual(trace.writes, [])
+            self.assertEqual(len(trace.commands), 1)
+            self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
+            self.assertLess(trace.processes[0].terminated_at, 31)
+
+    def test_diagnostic_failure_never_masks_original_cleanup_error_or_skips_cleanup(self):
+        cleanup_error = OSError("owned primary cleanup error")
+        original_terminate = owned.OwnedReselectionCLI.terminate_owned
+        def terminate(cli):
+            original_terminate(cli)
+            raise cleanup_error
+        with mock.patch.object(profile, "_preparation_failure_observation",
+                               side_effect=RuntimeError("PRIVATE_DIAGNOSTIC_FAILURE_PROSE")) as capture, \
+             mock.patch.object(owned.OwnedReselectionCLI, "terminate_owned", new=terminate), \
+             self.lab(mode="empty", fresh_panel=False) as trace:
+            self.assertIsNone(trace.result)
+            self.assertIs(trace.error, cleanup_error)
+            self.assertEqual(str(trace.error), "owned primary cleanup error")
+            capture.assert_called_once()
+            self.assertFalse(trace.processes[0].thread.is_alive())
+            self.assertEqual(trace.validations, [])
+            self.assertEqual(trace.writes, [])
+            self.assertGreaterEqual(trace.processes[0].terminated_at, 30)
+            self.assertLess(trace.processes[0].terminated_at, 31)
 
 
 if __name__ == "__main__":
