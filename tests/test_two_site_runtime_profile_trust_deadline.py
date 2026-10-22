@@ -90,7 +90,8 @@ class PreparationTrace:
         def spawn(command, **kwargs):
             self.command = list(command)
             assert command == ["/owned/fake-cli", "--mode", "plan", "--sandbox",
-                               "--model", fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(f.work), "--effort", "high"]
+                               "--model", fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(f.work), "--effort", "high",
+                               "--input-format", "stream-json", "--output-format", "stream-json"]
             assert kwargs["cwd"] == f.work and kwargs["start_new_session"]
             assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"]
             return self.process

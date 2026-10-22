@@ -435,7 +435,10 @@ class RuntimeProfileContracts(unittest.TestCase):
             selector.return_value.close.assert_called_once()
             write.assert_not_called()
             command=popen.call_args.args[0]
-            self.assertNotIn("--input-format",command)
+            self.assertEqual(command.count("--input-format"),1)
+            self.assertEqual(command[command.index("--input-format")+1],"stream-json")
+            self.assertEqual(command.count("--output-format"),1)
+            self.assertEqual(command[command.index("--output-format")+1],"stream-json")
             self.assertNotIn("--dangerously-skip-permissions",command)
 
     def test_preparation_termination_failure_still_closes_local_descriptors(self):

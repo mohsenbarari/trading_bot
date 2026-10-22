@@ -38,16 +38,51 @@ class DirectAgentPreparationContracts(unittest.TestCase):
                             "--agent", "two-site-proposal-only", "--add-dir", str(trace.fixture.work)]
                 if effort is not None:
                     expected += ["--effort", effort]
+                expected += ["--input-format", "stream-json", "--output-format", "stream-json"]
                 self.assertEqual(trace.commands, [expected])
                 self.assertEqual(len(trace.processes), 1)
                 self.assertEqual(trace.writes, [])
-                self.assertNotIn("--input-format", expected)
+                self.assertEqual(expected.count("--input-format"), 1)
+                self.assertEqual(expected[expected.index("--input-format") + 1], "stream-json")
+                self.assertEqual(expected.count("--output-format"), 1)
+                self.assertEqual(expected[expected.index("--output-format") + 1], "stream-json")
                 self.assertNotIn("--print", expected)
+                self.assertNotIn("--prompt", expected)
+                self.assertNotIn("--continue", expected)
                 self.assertNotIn("--conversation", expected)
+                self.assertNotIn("--resume", expected)
                 self.assertNotIn("--dangerously-skip-permissions", expected)
                 self.assertEqual(trace.fixture.source.read_text(), profile.DEFINITION)
                 self.assertEqual(trace.fixture.hooks.read_bytes(), profile.HOOK_DEFINITION)
                 self.assertEqual(trace.validations, [False])
+
+    def test_stream_initialization_needs_no_user_event_or_terminal_input(self):
+        with self.lab(synchronous_ready=True, fresh_panel=False) as trace:
+            self.assertIsNone(trace.error)
+            self.assertEqual(trace.result, trace.fixture.candidate)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertTrue(trace.processes[0].published)
+            self.assertEqual(trace.writes, [])
+            self.assertEqual(bytes(trace.processes[0].received), b"")
+            self.assertEqual(trace.validations, [False])
+            with sqlite3.connect(trace.fixture.db_path) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM steps").fetchone(), (0,))
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM executor_metadata").fetchone(), (0,))
+            self.assertEqual(profile.validate_profile(
+                trace.result, fresh=True, cli_home=trace.fixture.home), trace.fixture.expected)
+        # Even the preserved fixed terminal/trust replies cannot encode a
+        # stream user-event object; only the later Runner supplies that object.
+        dialog = "Do you trust this workspace? /owned/work Yes, I trust this folder Enter"
+        replies = [reply for _query, reply in profile.TERM_REPLIES]
+        replies.append(profile.trust_choice(dialog, Path("/owned/work")))
+        self.assertEqual(replies[-1], b"1\r")
+        for reply in replies:
+            with self.subTest(reply=reply):
+                try:
+                    value = json.loads(reply)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                self.assertNotIsInstance(value, dict)
 
     def test_readiness_is_observed_from_startup_not_after_old_age20_threshold(self):
         with self.lab(first_ready=2, fresh_panel=False) as trace:
@@ -376,7 +411,8 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
             self.assertLess(len(processes), 2, "there is never a third initialization")
             expected = ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model",
                         fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(fixture.work),
-                        "--effort", "high"]
+                        "--effort", "high", "--input-format", "stream-json",
+                        "--output-format", "stream-json"]
             self.assertEqual(command, expected)
             self.assertEqual(kwargs["cwd"], fixture.work)
             self.assertTrue(kwargs["start_new_session"])

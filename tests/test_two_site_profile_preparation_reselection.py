@@ -220,6 +220,7 @@ class ProfilePreparationReselectionTests(unittest.TestCase):
                         "--agent", profile.NAME, "--add-dir", str(fixture.work)]
             if effort is not None:
                 expected += ["--effort", effort]
+            expected += ["--input-format", "stream-json", "--output-format", "stream-json"]
             self.assertEqual(command, expected)
             self.assertEqual(kwargs["cwd"], fixture.work)
             self.assertTrue(kwargs["start_new_session"])

@@ -167,7 +167,7 @@ class InitializationReadinessTests(unittest.TestCase):
                 return result
 
             def spawn(command, **kwargs):
-                self.assertEqual(command, ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model", fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(fixture.work), "--effort", "high"])
+                self.assertEqual(command, ["/owned/fake-cli", "--mode", "plan", "--sandbox", "--model", fixtures.MODEL, "--agent", profile.NAME, "--add-dir", str(fixture.work), "--effort", "high", "--input-format", "stream-json", "--output-format", "stream-json"])
                 self.assertEqual(kwargs["cwd"], fixture.work)
                 self.assertEqual(kwargs["stdin"], kwargs["stdout"])
                 self.assertEqual(kwargs["stdin"], kwargs["stderr"])

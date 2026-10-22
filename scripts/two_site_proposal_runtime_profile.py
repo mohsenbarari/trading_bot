@@ -774,6 +774,9 @@ def _initialize_profile_once(
                "--agent", NAME, "--add-dir", str(workspace)]
     if effort is not None:
         command += ["--effort", effort]
+    # Stream formats select the pinned CLI's headless session initializer.
+    # No user event is written; owned PTY custody and metadata gates stay intact.
+    command += ["--input-format", "stream-json", "--output-format", "stream-json"]
     process = None
     selector = selectors.DefaultSelector()
     buffer = bytearray()
