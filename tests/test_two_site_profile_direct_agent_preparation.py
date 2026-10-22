@@ -5,11 +5,15 @@ PTY/SQLite fixture as a module, never import/alias its TestCase for collection.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
+import select
+import signal
 import sqlite3
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -91,6 +95,20 @@ class DirectAgentPreparationContracts(unittest.TestCase):
             self.assertTrue(trace.processes[0].published)
             self.assertLess(trace.processes[0].terminated_at, 10)
             self.assertEqual(trace.writes, [])
+
+    def test_init_classification_cannot_replace_real_selected_agent_metadata(self):
+        # Even the strongest fixed classification is not profile readiness and
+        # cannot make an unpinned, empty owned fixture eligible for recovery.
+        with mock.patch.object(profile, "_headless_initialization_state",
+                               return_value="OWNED_INIT_ONLY") as classify, self.lab(
+                mode="empty", startup_ui="ordinary_banner", fresh_panel=False) as trace:
+            self.assertIsNone(trace.result)
+            self.assertIs(type(trace.error), profile.ProposalProfileError)
+            self.assertEqual(trace.error.observation["final_valid_profiles"], 0)
+            self.assertIs(trace.error.preparation_observation["ready_during_preparation"], False)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(trace.writes, [])
+            classify.assert_called_once()
 
     def test_actual_c004_count_shape_cannot_be_accepted_or_trigger_a_retry(self):
         # C004 exposed only2new/1empty/0final-valid; this invalid second blob
@@ -366,6 +384,7 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
         fixture.setUp()
         clock = owned.Clock()
         processes, commands, descriptors, writes, setups, holders = [], [], [], [], [], []
+        master_keepers = []
         source_before, hooks_before = fixture.source.read_bytes(), fixture.hooks.read_bytes()
         saved = fixture.root / "untouched-preexisting.db"
         fixture.db_path.rename(saved)
@@ -440,6 +459,15 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
 
         def terminate(cli):
             if leave_alive and cli is processes[0]:
+                # Keep this deliberately live fake from observing slave EIO
+                # after Source closes its OWN master. No I/O uses this duplicate.
+                self.assertEqual(master_keepers, [])
+                keeper = os.dup(descriptors[0][0])
+                try:
+                    master_keepers.append((keeper, owned.support._fd_identity(keeper)))
+                except BaseException:
+                    os.close(keeper)
+                    raise
                 return
             cli.terminate_owned()
             if cli is processes[0] and after_first:
@@ -472,22 +500,42 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
             self.assertTrue(all(data in (b"\x1b[1;1R", b"1\r") for data in writes))
             for cli in processes:
                 self.assertIsNone(cli.error)
-                if not leave_alive:
+                if leave_alive and cli is processes[0]:
+                    self.assertTrue(cli.thread.is_alive())
+                    self.assertIsNone(cli.poll())
+                else:
                     self.assertFalse(cli.thread.is_alive())
             for fd, original in descriptors:
                 owned.support.InitializationReadinessTests.assert_owned_pty_closed(
                     self, fd, original)
             yield trace
         finally:
-            for cli in processes:
+            def reap_fixture_cli(cli):
                 if cli.thread.is_alive():
                     cli.terminate_owned()
-            for connection in holders:
-                connection.close()
-            fixture.source.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            fixture.source.write_bytes(source_before)
-            fixture.hooks.write_bytes(hooks_before)
-            fixture.doCleanups()
+                self.assertFalse(cli.thread.is_alive())
+                self.assertIsNone(cli.error)
+
+            def close_master_keeper(fd, identity):
+                self.assertEqual(owned.support._fd_identity(fd), identity)
+                os.close(fd)
+                owned.support.InitializationReadinessTests.assert_owned_pty_closed(
+                    self, fd, identity)
+
+            # ExitStack runs EVERY owned cleanup even if another cleanup fails:
+            # reap/join before keeper close, then SQLite and fixture restoration.
+            with ExitStack() as cleanup:
+                cleanup.callback(fixture.doCleanups)
+                cleanup.callback(fixture.hooks.write_bytes, hooks_before)
+                cleanup.callback(fixture.source.write_bytes, source_before)
+                cleanup.callback(fixture.source.parent.mkdir, parents=True,
+                                 exist_ok=True, mode=0o700)
+                for connection in holders:
+                    cleanup.callback(connection.close)
+                for fd, identity in master_keepers:
+                    cleanup.callback(close_master_keeper, fd, identity)
+                for cli in processes:
+                    cleanup.callback(reap_fixture_cli, cli)
 
     def rejected(self, trace, attempts):
         self.assertIsNone(trace.result)
@@ -930,6 +978,222 @@ class SafePreparationDiagnosticContracts(unittest.TestCase):
                 self.assertIsNone(trace.error)
                 self.assertEqual(trace.result.conversation_id, self.SECOND)
                 self.assertEqual(len(trace.commands), 2)
+
+
+
+class PristineWalRecoveryDiagnosticContracts(unittest.TestCase):
+    """Actual SQLite/owned PTY recovery and fixed existing-wire veto reasons."""
+    SECOND = EmptyStartupRecoveryContracts.SECOND
+    UNKNOWN = EmptyStartupRecoveryContracts.UNKNOWN
+
+    def lab(self, **options):
+        return EmptyStartupRecoveryContracts.lab(self, **options)
+
+    def orphan_wal(self, fixture, nonempty):
+        # The fixture owns this holder; close it before the child creates its
+        # genuinely orphaned WAL. No process or descriptor reaches Source.
+        fixture.recovery_wal.close()
+        read_fd, write_fd = os.pipe()
+        descriptors = {read_fd, write_fd}
+        child = None
+        def reap(seconds):
+            until = time.perf_counter() + seconds  # Not Source's mocked clock.
+            while time.perf_counter() < until:
+                found, status_code = os.waitpid(child, os.WNOHANG)
+                if found == child:
+                    return status_code
+                time.sleep(0.01)
+            return None
+        try:
+            child = os.fork()
+            if child == 0:
+                try:
+                    os.close(read_fd)
+                    producer = sqlite3.connect(fixture.db_path)
+                    if producer.execute("PRAGMA journal_mode=WAL").fetchone() != ("wal",):
+                        os._exit(2)
+                    if producer.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() != (0, 0, 0):
+                        os._exit(2)
+                    if nonempty:
+                        producer.execute("CREATE TABLE recovery_wal_marker(id INTEGER)")
+                        producer.execute("INSERT INTO recovery_wal_marker VALUES(1)")
+                        producer.commit()
+                    os.write(write_fd, b"R")
+                    os._exit(0)  # Do not close SQLite: preserve the orphan WAL.
+                except BaseException:
+                    os._exit(2)
+            os.close(write_fd); descriptors.remove(write_fd)
+            self.assertTrue(select.select([read_fd], [], [], 5)[0], "owned producer readiness deadline")
+            self.assertEqual(os.read(read_fd, 1), b"R")
+            os.close(read_fd); descriptors.remove(read_fd)
+            status_code = reap(5)
+            self.assertIsNotNone(status_code, "owned producer exit deadline")
+            child = None
+            self.assertEqual(os.waitstatus_to_exitcode(status_code), 0)
+        finally:
+            failures = []
+            if child is not None:
+                try:
+                    try:
+                        os.kill(child, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    self.assertIsNotNone(reap(2), "owned producer cleanup deadline")
+                except BaseException as error:
+                    failures.append(error)
+            for descriptor in descriptors:
+                try:
+                    os.close(descriptor)
+                except BaseException as error:
+                    failures.append(error)
+            if failures:
+                raise failures[0]
+
+    def test_real_zero_and_nonempty_wal_recover_without_input_and_keep_four_pristine_checks(self):
+        for writer_live, nonempty in ((False, False), (False, True), (True, False), (True, True)):
+            snapshots = []
+            actual = profile._pristine_initialization_snapshot
+            def prepare_wal(fixture, _processes, _clock):
+                if writer_live:
+                    writer = fixture.recovery_wal
+                    self.assertEqual(writer.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone(),
+                                     (0, 0, 0))
+                    if nonempty:
+                        writer.execute("CREATE TABLE recovery_wal_marker(id INTEGER)")
+                        writer.execute("INSERT INTO recovery_wal_marker VALUES(1)")
+                        writer.commit()
+                else:
+                    self.orphan_wal(fixture, nonempty)
+                wal = Path(str(fixture.db_path) + "-wal")
+                self.assertEqual(wal.stat().st_size > 0, nonempty)
+            def observe(directory, name, deadline):
+                result = actual(directory, name, deadline)
+                database = directory / name
+                wal = Path(str(database) + "-wal")
+                self.assertEqual(result[0][0], (
+                    profile._identity9(database.lstat()),
+                    hashlib.sha256(database.read_bytes()).hexdigest()))
+                self.assertEqual(result[0][1], (
+                    profile._identity9(wal.lstat())[:8],
+                    hashlib.sha256(wal.read_bytes()).hexdigest()))
+                self.assertEqual(len(result[0][0][0]), 9)
+                self.assertEqual(len(result[0][1][0]), 8)
+                snapshots.append((name, result))
+                return result
+            with self.subTest(writer_live=writer_live, nonempty=nonempty), mock.patch.object(
+                    profile, "_pristine_initialization_snapshot", side_effect=observe), self.lab(
+                    wal_first=True, after_first=prepare_wal) as trace:
+                self.assertIsNone(trace.error)
+                self.assertEqual(trace.result.conversation_id, self.SECOND)
+                self.assertEqual(len(trace.commands), 2)
+                self.assertEqual(trace.writes, [])
+                self.assertTrue(all(bytes(process.received) == b"" for process in trace.processes))
+                self.assertEqual(len(snapshots), 4)
+                self.assertEqual({name for name, _result in snapshots}, {fixtures.CID + ".db"})
+                self.assertTrue(all(result == snapshots[0][1] for _name, result in snapshots))
+                self.assertEqual(profile.validate_profile(
+                    trace.result, fresh=True, cli_home=trace.fixture.home)["conversation_id"],
+                    self.SECOND)
+
+    def test_actual_pristine_veto_is_visible_at_formatter_call_and_preserves_first_error(self):
+        first_errors, diagnostic_calls = [], []
+        initialize = profile._initialize_profile_once
+        diagnostic = profile._append_preparation_diagnostic
+        secret = "PRIVATE_PRISTINE_RAW_METADATA_SENTINEL"
+        def remember_first(*args, **kwargs):
+            try:
+                return initialize(*args, **kwargs)
+            except profile.ProposalProfileError as error:
+                first_errors.append((error, error.args))
+                raise
+        def remember_diagnostic(error, **kwargs):
+            diagnostic_calls.append(dict(kwargs))
+            return diagnostic(error, **kwargs)
+        def nonpristine(fixture, _processes, _clock):
+            with sqlite3.connect(fixture.db_path) as db:
+                db.execute("INSERT INTO trajectory_metadata_blob VALUES('extra',?)",
+                           (secret.encode(),))
+        with mock.patch.object(profile, "_initialize_profile_once", side_effect=remember_first), \
+             mock.patch.object(profile, "_append_preparation_diagnostic",
+                               side_effect=remember_diagnostic), self.lab(
+                                   after_first=nonpristine) as trace:
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(len(first_errors), 1)
+            self.assertIs(trace.error, first_errors[0][0])
+            self.assertTrue(str(trace.error).startswith(first_errors[0][1][0] + "; PREP_DIAG "))
+            self.assertEqual(len(diagnostic_calls), 1)
+            actual = diagnostic_calls[0]
+            self.assertEqual((actual["phase"], actual["reason"], actual["attempts"], actual["pinned"]),
+                             ("PRE_SECOND", "PRISTINE_FIRST_LOGICAL_MAIN_CONTRACT", 1, True))
+            self.assertLessEqual(len(actual["reason"]), 64)
+            self.assertTrue(actual["reason"].isascii())
+            self.assertIn("reason=" + actual["reason"] + " attempts=1", str(trace.error))
+            self.assertNotIn(secret, str(trace.error))
+            self.assertNotIn(str(trace.fixture.work), str(trace.error))
+
+    def test_untagged_and_malformed_veto_codes_keep_exact_legacy_pristine_reason(self):
+        class CannotFormat:
+            def __str__(self):
+                raise AssertionError("diagnostic must not format payload")
+            def __repr__(self):
+                raise AssertionError("diagnostic must not format payload")
+        secret = "PRIVATE_PRISTINE_OS_PATH_PAYLOAD_SENTINEL"
+        for code in (None, CannotFormat(), "WAL_BEFORE_OS_" + secret):
+            veto = OSError(secret)
+            if code is not None:
+                veto.pristine_veto_code = code
+            with self.subTest(tag_type=type(code).__name__), mock.patch.object(
+                    profile, "_pristine_initialization_snapshot", side_effect=veto), self.lab() as trace:
+                self.assertIsNone(trace.result)
+                self.assertEqual(len(trace.commands), 1)
+                self.assertIs(type(trace.error), profile.ProposalProfileError)
+                self.assertEqual(str(trace.error).split("; PREP_DIAG ")[1],
+                    "phase=PRE_SECOND reason=PRISTINE attempts=1 invalid=0 sqlite=0 multiple=0 ui=EMPTY")
+                self.assertNotIn(secret, str(trace.error))
+
+    def test_recheck_return_drift_has_fixed_reason_and_never_starts_second_initializer(self):
+        actual = profile._pristine_initialization_snapshot
+        calls = []
+        def observe(directory, name, deadline):
+            calls.append(name)
+            if len(calls) == 2:
+                database = directory / name
+                info = database.lstat()
+                os.utime(database, ns=(info.st_atime_ns, info.st_mtime_ns + 1))
+            return actual(directory, name, deadline)
+        with mock.patch.object(profile, "_pristine_initialization_snapshot",
+                               side_effect=observe), self.lab() as trace:
+            self.assertIsNone(trace.result)
+            self.assertEqual(len(trace.commands), 1)
+            self.assertEqual(calls, [fixtures.CID + ".db"] * 2)
+            self.assertIn("phase=PRE_SECOND reason=PRISTINE_RECHECK_RETURN_DRIFT attempts=1",
+                          str(trace.error))
+
+    def test_pristine_formatter_accepts_only_closed_codes_in_existing_presecond_wire(self):
+        report = {"invalid_seen": False, "sqlite_seen": False, "multiple_seen": False}
+        self.assertTrue(profile._PRISTINE_WIRE_REASONS)
+        for reason in profile._PRISTINE_WIRE_REASONS:
+            with self.subTest(reason=reason):
+                self.assertTrue(reason.isascii())
+                self.assertLessEqual(len(reason), 64)
+                error = profile.ProposalProfileError("fixed original failure")
+                profile._append_preparation_diagnostic(error, phase="PRE_SECOND", reason=reason,
+                    attempts=1, report=report, pinned=True)
+                self.assertIn("phase=PRE_SECOND reason=" + reason + " attempts=1", str(error))
+                suffix = str(error).split("; PREP_DIAG ")[1]
+                self.assertTrue(suffix.isascii())
+                self.assertLessEqual(len(suffix), 512)
+                wrong_phase = profile.ProposalProfileError("fixed original failure")
+                profile._append_preparation_diagnostic(wrong_phase, phase="FIRST", reason=reason,
+                    attempts=1, report=report, pinned=True)
+                self.assertEqual(wrong_phase.args, ("fixed original failure",))
+        for reason in ("PRISTINE_FIRST_PRIVATE_PAYLOAD", "PRISTINE_" + "X" * 65,
+                       "PRISTINE_FIRST_\u202e", None, [], {}):
+            error = profile.ProposalProfileError("fixed original failure")
+            profile._append_preparation_diagnostic(error, phase="PRE_SECOND", reason=reason,
+                attempts=1, report=report, pinned=True)
+            self.assertEqual(error.args, ("fixed original failure",))
 
 
 if __name__ == "__main__":

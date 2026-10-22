@@ -522,39 +522,164 @@ def _inspect_shm(path: Path, deadline: float):
         raise ProposalProfileError("unsafe proposal runtime recovery SHM")
 
 
+_PRISTINE_VETO_OPERATIONS = frozenset({
+    "IDENTITY", "JOURNAL", "DB_BEFORE", "WAL_BEFORE", "SHM_BEFORE",
+    "BUDGET", "SQL", "SQL_BUSY", "SQL_LOCKED", "SQL_INTERRUPTED",
+    "SQL_UNAVAILABLE", "LOGICAL_TRAJECTORY", "LOGICAL_MAIN",
+    "LOGICAL_STEPS", "LOGICAL_EXECUTORS", "SHM_AFTER", "DB_AFTER",
+    "WAL_AFTER", "PERSISTED_DB", "PERSISTED_WAL",
+})
+_PRISTINE_VETO_CODES = frozenset(
+    operation + "_" + kind for operation in _PRISTINE_VETO_OPERATIONS
+    for kind in ("OS", "CONTRACT"))
+_PRISTINE_WIRE_REASONS = frozenset(
+    "PRISTINE_" + checkpoint + "_" + code
+    for checkpoint in ("FIRST", "RECHECK") for code in _PRISTINE_VETO_CODES
+) | {"PRISTINE_RECHECK_RETURN_DRIFT"}
+
+
+def _pristine_wal_comparison(snapshot):
+    """WAL equivalence only: retain first eight identity fields and exact bytes.
+
+    SQLite's read-only WAL locking can change ctime even with no byte/other
+    identity change. Each underlying _persisted_snapshot still checks all nine
+    fields for its entire bounded read; DB and CLI snapshots stay full-nine.
+    """
+    return None if snapshot is None else (snapshot[0][:8], snapshot[1])
+
+
 def _pristine_initialization_snapshot(directory: Path, name: str, deadline: float):
     """Only this call's fresh empty CID; WAL-visible SQL and stable persisted bytes."""
-    if not name.endswith(".db") or not UUID.fullmatch(name[:-3]):
-        raise ProposalProfileError("invalid proposal runtime recovery identity")
-    database = directory / name
-    wal, shm = Path(str(database) + "-wal"), Path(str(database) + "-shm")
-    if os.path.lexists(str(database) + "-journal"):
-        raise ProposalProfileError("proposal runtime recovery journal is unresolved")
-    before = (_persisted_snapshot(database, deadline, MAX_DATABASE),
-              _persisted_snapshot(wal, deadline, MAX_DATABASE, optional=True))
-    _inspect_shm(shm, deadline)
-    _budget_remaining(deadline, 1)
+    operation = "IDENTITY"
     try:
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0)) as db:
-            db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
-            db.execute("PRAGMA query_only=ON"); db.execute("BEGIN")
-            ids = db.execute("SELECT cascade_id,typeof(cascade_id),trajectory_type,typeof(trajectory_type),source,typeof(source) FROM trajectory_meta LIMIT 2").fetchall()
-            metadata = db.execute("SELECT id,typeof(id),typeof(data),length(data) FROM trajectory_metadata_blob LIMIT 2").fetchall()
-            steps = db.execute("SELECT 1 FROM steps LIMIT 1").fetchall()
-            executors = db.execute("SELECT 1 FROM executor_metadata LIMIT 1").fetchall()
-            logical = (ids, metadata, steps, executors)
-            if logical != ([(name[:-3], "text", 0, "integer", 0, "integer")],
-                           [("main", "text", "blob", 0)], [], []):
-                raise ProposalProfileError("proposal runtime recovery is not pristine")
-    except sqlite3.Error:
-        raise ProposalProfileError("proposal runtime recovery database unavailable") from None
-    _budget_remaining(deadline, 1)
-    _inspect_shm(shm, deadline)
-    after = (_persisted_snapshot(database, deadline, MAX_DATABASE),
-             _persisted_snapshot(wal, deadline, MAX_DATABASE, optional=True))
-    if before != after:
-        raise ProposalProfileError("proposal runtime recovery persisted state drift")
-    return before, logical
+        if not name.endswith(".db") or not UUID.fullmatch(name[:-3]):
+            raise ProposalProfileError("invalid proposal runtime recovery identity")
+        database = directory / name
+        wal, shm = Path(str(database) + "-wal"), Path(str(database) + "-shm")
+        operation = "JOURNAL"
+        if os.path.lexists(str(database) + "-journal"):
+            raise ProposalProfileError("proposal runtime recovery journal is unresolved")
+        operation = "DB_BEFORE"
+        before_db = _persisted_snapshot(database, deadline, MAX_DATABASE)
+        operation = "WAL_BEFORE"
+        before_wal = _persisted_snapshot(wal, deadline, MAX_DATABASE, optional=True)
+        before = (before_db, _pristine_wal_comparison(before_wal))
+        operation = "SHM_BEFORE"
+        _inspect_shm(shm, deadline)
+        operation = "BUDGET"
+        _budget_remaining(deadline, 1)
+        operation = "SQL"
+        try:
+            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=0)) as db:
+                db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+                db.execute("PRAGMA query_only=ON"); db.execute("BEGIN")
+                ids = db.execute("SELECT cascade_id,typeof(cascade_id),trajectory_type,typeof(trajectory_type),source,typeof(source) FROM trajectory_meta LIMIT 2").fetchall()
+                metadata = db.execute("SELECT id,typeof(id),typeof(data),length(data) FROM trajectory_metadata_blob LIMIT 2").fetchall()
+                steps = db.execute("SELECT 1 FROM steps LIMIT 1").fetchall()
+                executors = db.execute("SELECT 1 FROM executor_metadata LIMIT 1").fetchall()
+                logical = (ids, metadata, steps, executors)
+                if logical != ([(name[:-3], "text", 0, "integer", 0, "integer")],
+                               [("main", "text", "blob", 0)], [], []):
+                    operation = (
+                        "LOGICAL_TRAJECTORY" if ids != [(name[:-3], "text", 0, "integer", 0, "integer")]
+                        else "LOGICAL_MAIN" if metadata != [("main", "text", "blob", 0)]
+                        else "LOGICAL_STEPS" if steps else "LOGICAL_EXECUTORS")
+                    raise ProposalProfileError("proposal runtime recovery is not pristine")
+        except sqlite3.Error as sql_error:
+            code = getattr(sql_error, "sqlite_errorcode", None)
+            primary = code & 255 if type(code) is int else None
+            operation = {sqlite3.SQLITE_BUSY: "SQL_BUSY", sqlite3.SQLITE_LOCKED: "SQL_LOCKED",
+                         sqlite3.SQLITE_INTERRUPT: "SQL_INTERRUPTED"}.get(primary, "SQL_UNAVAILABLE")
+            raise ProposalProfileError("proposal runtime recovery database unavailable") from None
+        operation = "BUDGET"
+        _budget_remaining(deadline, 1)
+        operation = "SHM_AFTER"
+        _inspect_shm(shm, deadline)
+        operation = "DB_AFTER"
+        after_db = _persisted_snapshot(database, deadline, MAX_DATABASE)
+        operation = "WAL_AFTER"
+        after_wal = _persisted_snapshot(wal, deadline, MAX_DATABASE, optional=True)
+        after = (after_db, _pristine_wal_comparison(after_wal))
+        if before != after:
+            operation = "PERSISTED_DB" if before_db != after_db else "PERSISTED_WAL"
+            raise ProposalProfileError("proposal runtime recovery persisted state drift")
+        return before, logical
+    except (OSError, ValueError) as error:
+        # Fixed diagnostics only. Never replace the veto, parse prose, or decide
+        # recovery here; the unchanged caller still reraises its original error.
+        try:
+            code = operation + ("_OS" if isinstance(error, OSError) else "_CONTRACT")
+            if code in _PRISTINE_VETO_CODES:
+                error.pristine_veto_code = code
+        except Exception:
+            pass
+        raise
+
+
+def _headless_initialization_state(
+    buffer: bytearray, workspace: Path, model: str, names: set[str],
+) -> str:
+    """Classify captured bytes only; init never proves selected-agent readiness.
+
+    Actual zero-input 791Q observed event/conversation_id/init and the closed
+    agent/cwd/model/permission_mode/tools payload; json_schema was absent.
+    Agent was observed as a string, not value/equality proof: conservatively
+    require the requested fixed NAME, then qualify both real roles separately.
+    Advertised tool names are discovery, never attempted tool events.
+    Return fixed enums only; no UI, CID, model or path is retained here.
+    """
+    if not buffer:
+        return "EMPTY"
+    if not buffer.lstrip(b" ").startswith(b"{"):
+        return "NON_JSON"
+    if len(buffer) > MAX_UI:
+        return "LIMIT"
+    if not buffer.endswith(b"\n"):
+        return "INCOMPLETE"
+    line = bytes(buffer[:-1])
+    if line.endswith(b"\r"):
+        line = line[:-1]  # The owned PTY may translate its sole LF to CRLF.
+    if any(byte < 32 or byte == 127 for byte in line):
+        return "CONTROL_OR_EXTRA_FRAME"
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+
+    def no_constant(_value):
+        raise ValueError()
+
+    try:
+        event = json.loads(line.decode("utf-8"), object_pairs_hook=unique_object,
+                           parse_constant=no_constant)
+    except (ValueError, UnicodeError, RecursionError):
+        return "MALFORMED"
+    if (type(event) is not dict
+            or set(event) != {"event", "conversation_id", "init"}
+            or event["event"] != "init" or type(event["init"]) is not dict):
+        return "UNEXPECTED_ENVELOPE"
+    payload = event["init"]
+    if set(payload) != {"agent", "model", "cwd", "tools", "permission_mode"}:
+        return "UNEXPECTED_PAYLOAD"
+    tools = payload["tools"]
+    if (type(tools) is not list or len(tools) > 128
+            or any(type(tool) is not str or not 1 <= len(tool) <= 128
+                   or not tool.isascii() or any(not 33 <= ord(c) <= 126 for c in tool)
+                   for tool in tools)
+            or len(set(tools)) != len(tools)):
+        return "UNEXPECTED_TOOLS"
+    cid = event["conversation_id"]
+    if (type(cid) is not str or UUID.fullmatch(cid) is None
+            or names != {cid + ".db"}
+            or payload["model"] != model or payload["cwd"] != str(workspace)
+            or payload["permission_mode"] != "request-review"
+            or type(payload["agent"]) is not str or payload["agent"] != NAME):
+        return "UNOWNED_IDENTITY"
+    return "OWNED_INIT_ONLY"
 
 
 def _empty_recovery_eligible(error: ProposalProfileError, report: dict) -> bool:
@@ -568,18 +693,40 @@ def _empty_recovery_eligible(error: ProposalProfileError, report: dict) -> bool:
         "network_error_present", "dependency_missing_present",
     }
     fixed = {"capture_state", "ui_bytes", "process_state_before_cleanup"}
-    return bool(
+    common = bool(
         type(facts) is dict and set(facts) == required
         and facts["capture_state"] == "CAPTURED"
-        and type(facts["ui_bytes"]) is int and facts["ui_bytes"] == 0
+        and type(facts["ui_bytes"]) is int
         and facts["process_state_before_cleanup"] == "RUNNING"
-        and all(facts[key] is False for key in required - fixed)
         and report.get("cleanup_normal") is True
         and report.get("descriptors_closed") is True and report.get("process_dead") is True
-        and report.get("empty_seen") is True and not report.get("bad_seen")
+        and report.get("empty_seen") is True
         and not report.get("ready_seen") and report.get("final_valid_profiles") == 0
         and len(report.get("names", ())) == 1
     )
+    if not common:
+        return False
+    # Preserve the original zero-output branch and its sticky SQLite veto.
+    legacy_empty = (facts["ui_bytes"] == 0 and not report.get("bad_seen")
+                    and all(facts[key] is False for key in required - fixed))
+    # Only a current owned init frame can reclassify a transient SQLite hint.
+    # This is eligibility for the unchanged authoritative pristine DB/WAL proof,
+    # never acceptance of a profile or permission to retry a model request.
+    owned_init = (
+        0 < facts["ui_bytes"] <= MAX_UI
+        and report.get("headless_init_state") == "OWNED_INIT_ONLY"
+        and report.get("headless_init_names") == frozenset(report["names"])
+        and facts["owned_workspace_present"] is True
+        # Exact decoded agent identity is already bound by OWNED_INIT_ONLY.
+        # Its raw name may be present or JSON-escaped; neither grants readiness.
+        and type(facts["fixed_agent_name_present"]) is bool
+        and all(facts[key] is False for key in required - fixed - {
+            "owned_workspace_present", "fixed_agent_name_present"})
+        and report.get("invalid_seen") is False and report.get("multiple_seen") is False
+        and type(report.get("sqlite_seen")) is bool
+        and report.get("bad_seen") is report["sqlite_seen"]
+    )
+    return bool(legacy_empty or owned_init)
 
 
 def _append_preparation_diagnostic(
@@ -597,7 +744,9 @@ def _append_preparation_diagnostic(
                    "CLI_PIN", "BUDGET_OR_ROSTER", "INITIALIZER_FAILED",
                    "FINAL_IDENTITY_STATE", "FINAL_VALIDATE", "FINAL_ROSTER_STATE"}
         if (not isinstance(error, ProposalProfileError) or phase not in phases
-                or reason not in reasons or type(attempts) is not int
+                or (reason not in reasons and not (
+                    phase == "PRE_SECOND" and reason in _PRISTINE_WIRE_REASONS))
+                or type(attempts) is not int
                 or attempts not in (1, 2) or type(pinned) is not bool):
             return
         args = error.args
@@ -646,6 +795,11 @@ def _append_preparation_diagnostic(
         suffix = ("; PREP_DIAG phase=" + phase + " reason=" + reason
                   + " attempts=" + str(attempts) + " " + " ".join(flags)
                   + " ui=" + ui)
+        init_state = data.get("headless_init_state")
+        if init_state in {"LIMIT", "INCOMPLETE", "CONTROL_OR_EXTRA_FRAME", "MALFORMED",
+                          "UNEXPECTED_ENVELOPE", "UNEXPECTED_PAYLOAD", "UNEXPECTED_TOOLS",
+                          "UNOWNED_IDENTITY", "OWNED_INIT_ONLY"}:
+            suffix += " init=" + init_state
         if len(suffix) <= 512 and suffix.isascii():
             error.args = (args[0] + suffix,)
     except Exception:
@@ -705,6 +859,7 @@ def prepare_profile(
                 raise ProposalProfileError("proposal runtime recovery roster drift")
             first_name = next(iter(names))
             guard = "PRISTINE"
+            pristine_checkpoint = "FIRST"
             pristine = _pristine_initialization_snapshot(directory, first_name, deadline)
             guard = "WORKSPACE"
             if _recovery_workspace(workspace) != workspace_identity:
@@ -713,13 +868,24 @@ def prepare_profile(
             if _recovery_cli_fingerprint(cli, deadline=deadline) != fingerprint:
                 raise ProposalProfileError("proposal runtime recovery CLI drift")
             guard = "PRISTINE"
+            pristine_checkpoint = "RECHECK"
             if _pristine_initialization_snapshot(directory, first_name, deadline) != pristine:
+                guard = "PRISTINE_RECHECK_RETURN_DRIFT"
                 raise ProposalProfileError("proposal runtime recovery persisted state drift")
             guard = "BUDGET_OR_ROSTER"
             before_second = _sessions(directory)
             if before_second - original != names or _budget_remaining(deadline, timeout + 10) < timeout + 10:
                 raise ProposalProfileError("proposal runtime recovery budget or roster unavailable")
-        except (OSError, ValueError):
+        except (OSError, ValueError) as veto:
+            # Resolve only Source's fixed code BEFORE the formatter call: the
+            # existing physical observer already records its reason argument.
+            if guard == "PRISTINE":
+                try:
+                    code = getattr(veto, "pristine_veto_code", None)
+                    if type(code) is str and code in _PRISTINE_VETO_CODES:
+                        guard = "PRISTINE_" + pristine_checkpoint + "_" + code
+                except Exception:
+                    pass
             # Optional recovery never reclassifies or renews the failed first task.
             _append_preparation_diagnostic(first_error, phase="PRE_SECOND", reason=guard,
                 attempts=1, report=first, pinned=recovery_pinned)
@@ -787,7 +953,8 @@ def _initialize_profile_once(
     last_readiness_hint = None
     report.update(empty_seen=False, bad_seen=False, ready_seen=False,
                   invalid_seen=False, sqlite_seen=False, multiple_seen=False,
-                  cleanup_normal=False, descriptors_closed=False, process_dead=False)
+                  cleanup_normal=False, descriptors_closed=False, process_dead=False,
+                  headless_init_state="UNAVAILABLE", headless_init_names=frozenset())
     preparation_error = None
     preparation_observation = {"capture_state": "UNAVAILABLE"}
 
@@ -888,6 +1055,14 @@ def _initialize_profile_once(
                     buffer, process, workspace, trust_accepted, pending_trust,
                     ready_during_preparation,
                 )
+                if buffer:
+                    observed_names = _sessions(directory) - before
+                    report["headless_init_state"] = _headless_initialization_state(
+                        buffer, workspace, model, observed_names)
+                    if report["headless_init_state"] == "OWNED_INIT_ONLY":
+                        report["headless_init_names"] = frozenset(observed_names)
+                else:
+                    report["headless_init_state"] = "EMPTY"
             except Exception:
                 # Diagnostics must never replace the preparation/cleanup failure.
                 preparation_observation = {"capture_state": "UNAVAILABLE"}

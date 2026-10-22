@@ -585,6 +585,63 @@ no-tools، trust، strict metadata یا گیت generation/Review/native/Git ضع
 نمی‌شود. علت upstream و اثربخشی عملی همچنان نیازمند شاهد واقعی‌اند؛ این
 قرارداد تضمین دائمی Provider یا credit پیشرفت معماری نیست.
 
+### تکمیل محدود recovery برای init رسمی headless — شاهد 791Q و اصلاح 793M
+
+PRE واقعی792M با118 قبولی و7 شکست پذیرفته نشد؛ هیچ Source apply، POST، qualification
+یا Git برای آن انجام نشد. شش شکست نشان دادند نام agent صحیح در frame، نشانهٔ
+متنی fixed_agent_name_present را true می‌کند ولی شرط recovery قبلی همان را رد
+می‌کرد. اصلاح793M فقط این تداخل تشخیص متنی/هویت ساختاری را می‌بندد و fixture
+آزمونِ cleanup نامعلوم را از EIO ناشی از بستن master متعلق Source جدا می‌کند؛
+هیچ شکست یا آزمون قبلی حذف یا به قبولی تعبیر نمی‌شود.
+
+بخش شناخت frame مطابق شاهد واقعی791Q تصحیح می‌شود؛ اصلاح eligibility فقط
+استثنای محدود boolean نام را دارد و سقف‌ها و دیگر گیت‌های recovery همان‌اند.
+شکل چهارفیلدی قبلی787M/789M برای CLI واقعی کافی نبود:
+در آزمون فیزیکی789M هر دو نقش UNEXPECTED_PAYLOAD داشتند؛ Worker با metadata واقعی
+READY شد ولی Reviewer نشد و qualification کلی شکست خورد. Native124 قبلی شاهد
+baseline است، نه پذیرش Source/Git یا اثبات درست‌بودن شناخت پروتکل؛ شکست حفظ می‌شود.
+
+شاهد ساختاری واقعی بدون ورودی791Q در
+`RUNTIME_791Q_SAFE_SCHEMA_ONLY_REVIEWER_ROOT_ACCEPTED_20261022.json` با SHA256
+`15604ec2e5fbd660aba41dd0c39f6a11e667624746a1f0abd9a54050d71a0746`
+envelope دقیق `event/conversation_id/init` و payload بستهٔ پنج‌فیلدی
+`agent/cwd/model/permission_mode/tools` را نشان داد. چهار فیلد اول string و tools
+فهرست60string بود؛ json_schema واقعاً غایب بود. مقادیر خام ذخیره نشدند و مقدار
+agent یا برابری آن با agent درخواستی مشاهده/اثبات نشده است. نبود flag یا tag
+omitempty به‌تنهایی برای استنتاج این شکل کافی نیست.
+
+فقط یک frame کامل NDJSON با `event=init`، CID یگانهٔ تازهٔ همین فراخوانی،
+مدل/workspace دقیق و permission_mode=`request-review` مجاز است. agent باید string
+و دقیقاً برابر NAME ثابتِ درخواستی `two-site-proposal-only` باشد؛ این شرط محافظه‌کارانه
+است، نه ادعای مقدار مشاهده‌شده. هر دو نقش واقعی باید پیش از پذیرش Source/Git زیر
+همین شرط OWNED_INIT_ONLY شوند؛ metadataِ READY همراه UNEXPECTED_PAYLOAD کافی نیست.
+tools فقط فهرست محدود، غیرتکراری و ASCIIِ advertised است، نه اجرای ابزار.
+
+هر json_schema با هر مقدار، حتی null، و هر فیلد اضافه/ناقص، agent غایب/غلط/نوع‌غلط،
+event دوم، user/control/step/result/error/auth/trust، کلید تکراری، NaN، UTF8 نامعتبر،
+surrogate، خروجی ناقص، control/ANSI یا newline میانی رد می‌شود. تنها LF پایانی یا
+تبدیل واقعی آن به CRLF توسط PTY مجاز است. init هرگز اثبات انتخاب agent یا READY نیست.
+
+این شاخه فقط به فرایند هنوز RUNNING و cleanup/FD/reap واقعی و بی‌ابهام، بدون
+هیچ invalid/multiple/READY یا نشانهٔ trust/auth/network/dependency اجازهٔ بررسی
+می‌دهد. cwd دقیق همچنان owned_workspace_present=true می‌خواهد. در شاخهٔ
+OWNED_INIT_ONLY، نام agent از JSON کامل و decodeشده دقیقاً با NAME تطبیق یافته؛
+بنابراین fixed_agent_name_present فقط باید boolean باشد و حضور یا نبودن متن خام
+نام مانع نیست: JSON می‌تواند حروف نام را با \uXXXX نمایش دهد. فقط همین دو نشانهٔ
+نام/cwd از الزام false استثنا دارند؛ دیگر نشانه‌های خطر همگی false می‌مانند.
+این استثنا برای خروجی خالی قدیمی یا banner/agent نامعتبر مجاز نیست. CID مشاهده‌شده
+پیش از cleanup باید با delta نهایی
+یکسان بماند. سپس همان snapshot واقعیِ مستقل، WAL-visible، کامل و pinشدهٔ
+774M باید DB نخست را pristine و فاقد هر step/executor ثابت کند؛ خطای SQLite
+پایدار، DB/WAL/roster/CLI/workspace drift یا metadata دیرهنگام همچنان مانع است.
+hint گذرای SQLite فقط با این init متعلق و تمام شواهد قطعی بعدی غیرمرجع است.
+
+سقف دو initializer، کل۲۴۰ثانیه، پیش‌فرض۳۰/دامنه۲۰–۴۵، cleanup ده‌ثانیه‌ای و
+تمام validationهای metadata قبل و بعد از cleanup بدون تغییرند. enum ثابت
+`init=...` صرفاً تشخیص خروجی ساختاری را نگه می‌دارد؛ payload/CID/path/UI ذخیره
+نمی‌شود. این طراحی بایت‌های تاریخی C003 یا دیگر شکست‌ها را حدس یا بازپذیرش
+نمی‌کند، replay مدل/Task/Worker/Reviewer مجاز نمی‌سازد و تضمین سلامت دائمی نیست.
+
 ### تکمیل generation در runtime contract 1.3 — ۲۰ اکتبر ۲۰۲۶
 
 سیاست `FINAL_FRAME_RECOVERY_V1` فقط generationِ pinned Gemini در Runner را opt-in
@@ -721,3 +778,47 @@ output برابر9,558 و زمان470.4ثانیه. نوع کارها یکسان 
 شاهد جاری هر اجرا همان SHAها، test evidence و transition اعتبارسنجی‌شده است.
 تست آفلاین قرارداد ابزار را می‌سنجد؛ سلامت live، Stage COMPLETE، deploy و آمادگی
 عملیاتی هرکدام شواهد مخصوص خود را می‌خواهند. هیچ‌کدام از متن این سند نتیجه نمی‌شوند.
+
+## 794M — برابری محدود WAL در آماده‌سازی بدون ورودی
+
+این اصلاح فقط قرارداد pristine مربوط به initializer بدون رویداد را تصحیح می‌کند.
+شاهد مصنوعیِ مستقل
+`RUNTIME_793M_SYNTHETIC_SQLITE_READONLY_WAL_CUSTODY_ACTUAL_20261022.json`
+با SHA-256
+`70a5365be30e6ed71d811713e8d75848568beadfd7aeab5ee8079ed4ce972799`
+در SQLite 3.45.1 هر چهار حالت «نویسندهٔ زنده/خارج‌شده × WAL صفر/غیرصفر»
+را پوشش می‌دهد: اجرای SQL فقط‌خواندنی می‌تواند فقط ctime فایل WAL را تغییر دهد؛
+بایت‌ها و هشت مؤلفهٔ دیگر WAL، کل هویت نُه‌تایی DB و شکل منطقیِ خالی ثابت می‌مانند.
+این شاهد، سازوکار را اثبات می‌کند؛ علت دقیق شکست تاریخیِ 793M را عطف‌به‌ماسبق
+قطعی نمی‌کند و جایگزین شواهد مصرف‌شده یا qualification جدید نیست.
+
+دامنهٔ استثنا فقط مقایسهٔ WAL در دو سوی SQL فقط‌خواندنی و snapshotهای pristine
+بعدی است: WAL به صورت `(identity[:8], sha256)` مقایسه می‌شود؛ نبود/وجود،
+device، inode، mode، uid، gid، nlink، size، mtime و هش دقیق بایت‌ها همچنان باید برابر
+باشند. این tuple یک هویت مقایسه‌ایِ هشت‌تایی است، نه گزارش جعلیِ full9.
+فقط ctimeِ WAL از این برابریِ بین‌خواندن‌ها کنار گذاشته می‌شود. محدودکردن به WAL
+صفر کافی نیست، زیرا همان سازوکار برای WAL غیرصفر نیز واقعاً مشاهده شده است.
+`_persisted_snapshot` در طول تک‌تک خواندن‌های محدود، همچنان هر نُه مؤلفه را
+پیش/پس از خواندن کنترل می‌کند؛ DB، CLI و همهٔ کنترل‌های فایل دیگر full9 می‌مانند.
+بایت، اندازه، مالکیت، hardlink، symlink، journal، WALِ جدید/حذف‌شده، roster،
+metadata کامل، صفر بودن step/executor و cleanup هیچ استثنای تازه‌ای ندارند.
+
+برای جلوگیری از شکستِ دوباره با علت نامشخص، veto واقعیِ pristine فقط یک کد ثابت
+و بسته را پیش از فراخوانی formatter به همان فیلد موجود `reason` می‌رساند؛
+برای نمونه `PRISTINE_FIRST_LOGICAL_MAIN_CONTRACT`. نام عملیات و نوع ثابت خطا
+از مقادیر کنترل‌شده ساخته می‌شوند؛ متن خطای زیرین، SQL row، CID، مسیر،
+payload و اطلاعات احراز هویت وارد کد نمی‌شوند. reason حداکثر ۶۴ کاراکتر ASCII
+و suffix همچنان حداکثر ۵۱۲ کاراکتر است. exception اصلیِ initializer اول با همان
+identity دوباره بالا می‌رود. veto بی‌برچسب یا برچسب نامعتبر همان reason قدیمیِ
+`PRISTINE` را حفظ می‌کند. observer موجود همان `phase/reason/attempts/pinned`
+را در CALL واقعی دریافت می‌کند؛ schema یا پروتکل qualifier تغییر نمی‌کند.
+این تشخیص، مجوز retry نیست و هیچ timeout، بودجه، تعداد initializer یا شرط پذیرشی
+را تغییر نمی‌دهد.
+
+آزمون‌های تازه باید SQLite واقعیِ چهارحالت، حفظ تمام فیلدهای باقی‌مانده و هش،
+منفی‌های تغییر WAL/DB و ctime حین یک خواندن، بازیابی PTY بدون ورودی، حفظ
+exception اصلی و fallback تشخیصی را پوشش دهند. همهٔ ۱۲۶ هویت آزمون قبلی و
+گاردهای منفی حفظ می‌شوند. پذیرش عملی به Native تازه، qualification واقعیِ مستقل
+هر دو نقش با frame شناخته‌شده و READY، cleanup عادی، گیت Git و شواهد واقعی Root
+نیاز دارد؛ موفقیتِ synthetic یا متن این سند به‌تنهایی سلامت چرخه، پذیرش Source،
+پیشرفت Stage یا صرفه‌جویی را اثبات نمی‌کند.
