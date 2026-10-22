@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-MANUAL-783-ASSOCIATION-20261022-788D",
+  "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "packet_id": "recent-characterization-business-768-live786-manual783-provenance",
+  "status": "DOCUMENTATION_ONLY_PROPOSAL_PENDING_EXACT_ACCEPTANCE",
+  "inspected_source_snapshot": "dead25e559f3fbdeaddd986e3db232192a96d45b",
+  "scenario_key": "manual783-accepted-all-failure-source-provenance-association",
+  "gap_reference": "docs/refactor/two-server/section-1/00-stage-ledger.md#live786-manual783-provenance-association-788d",
+  "own_future_commit_or_receipt_claimed": false,
+  "conditional_on_exact_new_packet_acceptance": true,
+  "source": {
+    "accepted_source_commit": "563ce20195caf3e21dca416b63170470e6f87042",
+    "accepted_parent": "58c6388574a54a80296baabc23f64c5b8b66458a",
+    "accepted_file": {
+      "path": "tests/test_p1_00b_characterization_market_overrides_all_failure_sqlite.py",
+      "sha256": "29effa3f16a5fc125f1cc50b291e2af8cb9bcebc76ad16bb15d47e9ef5e7b778",
+      "utf8_bytes": 23877,
+      "mode": "100644"
+    },
+    "accepted_source_scope_id": "WA-P1-00B-MANUAL-ALL-FAILURE-20261022-783M",
+    "accepted_source_scope_sha256": "802bac3c9899ca327678a71480ae3deb9be1c2ce8afece48cae4ce436680b27f",
+    "Root_source_acceptance": {
+      "path": ".local/two-site-refactor/reviews/RUNTIME_783M_MANUAL_ALL_FAILURE_SOURCE_ROOT_ACCEPTED_20261022.json",
+      "sha256": "3ad23bb65c6335631053b473f273bf749d164e7bb820020c20adbc43f74ab706"
+    },
+    "Root_native_acceptance": {
+      "path": ".local/two-site-refactor/reviews/RUNTIME_783M_MANUAL_ALL_FAILURE_NATIVE_ROOT_ACCEPTED_20261022.json",
+      "sha256": "f3501ce4112a123634edea9139184624a306b475a1b0bebc0e040a19e6f2ef2f"
+    },
+    "historical_native": {
+      "pre_selected_tests_passed": 10,
+      "physical_post_selected_tests_passed": 10,
+      "pre_seconds": 13.66,
+      "post_seconds": 13.27,
+      "not_788D_native_execution": true
+    },
+    "source_added_full_seed_credit": 0
+  },
+  "actor": {
+    "source_authorship": "CODEX_AUTHORED",
+    "source_author_agent": "/root/cli_static_cause",
+    "source_independent_reviewer_agent": "/root/post_durable_author",
+    "source_final_acceptance": "/root",
+    "genuine_Gemini_Worker_or_Reviewer_source_claim": false,
+    "source_SDK_TASK_READY_or_CONTINUE_claim": false,
+    "document_authorship": "CODEX_AUTHORED",
+    "document_author_agent": "/root/cli_static_cause",
+    "document_independent_review_and_Root_acceptance": "PENDING; fresh separate manual Scope, exact nonauthor review, native PRE/physical POST and Root ordinary scoped Git required. This packet cannot accept itself.",
+    "failed_C003_Worker_proposal_adopted": false
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_market_overrides_all_failure_sqlite.py",
+      "sha256": "29effa3f16a5fc125f1cc50b291e2af8cb9bcebc76ad16bb15d47e9ef5e7b778",
+      "utf8_bytes": 23877,
+      "mode": "100644",
+      "last_commit": "563ce20195caf3e21dca416b63170470e6f87042",
+      "parent": "58c6388574a54a80296baabc23f64c5b8b66458a",
+      "canonical_symbol": "api/routers/trading_settings.py:list_market_overrides",
+      "seed_ids": [
+        "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_market_overrides_all_failure_sqlite.py::MarketOverridesAllFailureSQLiteCharacterizationTests::test_all_failure_propagates_after_real_scalars_without_downstream_work"
+      ],
+      "scenario_key": "market-overrides-all-failure-after-real-scalars-sqlite",
+      "provenance": {
+        "source_pointer": "/source",
+        "actor_pointer": "/actor",
+        "evidence_limits_pointer": "/evidence_limits",
+        "authorship": "CODEX_AUTHORED",
+        "Root_source_acceptance": {
+          "path": ".local/two-site-refactor/reviews/RUNTIME_783M_MANUAL_ALL_FAILURE_SOURCE_ROOT_ACCEPTED_20261022.json",
+          "sha256": "3ad23bb65c6335631053b473f273bf749d164e7bb820020c20adbc43f74ab706"
+        },
+        "Root_native_acceptance": {
+          "path": ".local/two-site-refactor/reviews/RUNTIME_783M_MANUAL_ALL_FAILURE_NATIVE_ROOT_ACCEPTED_20261022.json",
+          "sha256": "f3501ce4112a123634edea9139184624a306b475a1b0bebc0e040a19e6f2ef2f"
+        }
+      },
+      "characterized_evidence_scope": "Only direct-handler synchronous ScalarResult.all() exception propagation after genuine SQLite select/asc/order/awaited execute/scalars, with independent literal state/schema/index/audit, order, zero downstream work, read-only flush/mutation and restoration/lifecycle oracles."
+    }
+  ],
+  "manifest_registration": {
+    "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    "prior_sha256": "fd213d83b63c00feae1f1a248905964d95742aec533952b2294a9fa5ab66d558",
+    "only_added_mapping": {
+      "business_768_live786_manual783_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-manual783-provenance.json"
+    },
+    "all_existing_mappings_and_counts_unchanged": true,
+    "same_seed_already_present_in_accepted_A2_B3": true,
+    "added_distinct_seed_count": 0
+  },
+  "previous_group_provenance": {
+    "accepted_closeout_commit": "70b26f7a0da489b09f48ba702222a147c2ebc82c",
+    "status": "COMPLETED_PROVENANCE",
+    "Root_receipt": {
+      "path": ".local/two-site-refactor/reviews/RUNTIME_775D_MANUAL_LEDGER_ROOT_ACCEPTED_20261022.json",
+      "sha256": "4735f643da3ae5ef31d1ecd88103705796748f10c60bb3b458098f2dbd4edf8d"
+    },
+    "Source_units": 5,
+    "handler_scenarios": 5,
+    "pending_five_historical": 5,
+    "units_since_reconciliation_historical": 5,
+    "remaining_behavior_units": 0,
+    "reopened_reconciled_again_or_counter_reset": false,
+    "all_old_receipts_and_flags_immutable": true
+  },
+  "accounting": {
+    "existing_accepted_Source_units_associated_by_this_packet": 1,
+    "existing_accepted_handler_scenarios_associated": 1,
+    "behavior_units_added_by_this_metadata_or_witness": 0,
+    "added_distinct_seeds": 0,
+    "current_window_actual_accepted_business_units": 3,
+    "maximum_accepted_units_before_reconciliation": 5,
+    "current_window_global_reconciliation_complete": false,
+    "manual_SDK_counter_or_checkpoint_edits": false,
+    "current_window": [
+      {
+        "unit": 1,
+        "commit": "563ce20195caf3e21dca416b63170470e6f87042",
+        "outcome": "manual783-all-failure",
+        "associated_here": true
+      },
+      {
+        "unit": 2,
+        "commit": "446288e2f8d549809fbd5a9b00faea32e7d0bfa5",
+        "outcome": "EMPTY-explicit-clean-sync-flush",
+        "associated_here": false
+      },
+      {
+        "unit": 3,
+        "commit": "dead25e559f3fbdeaddd986e3db232192a96d45b",
+        "outcome": "NONEMPTY-explicit-clean-sync-flush",
+        "associated_here": false
+      }
+    ],
+    "strict_accepted_counts": {
+      "PROVEN_FOR_REQUESTED_SCENARIO": 288,
+      "PARTIAL_OR_SEED_ONLY": 177,
+      "total_seeds": 465
+    },
+    "raw_manifest_counts": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 261,
+      "evidenced_seed_count": 396,
+      "remaining_seed_count": 69
+    }
+  },
+  "immutable_failures_and_deferrals": {
+    "consumed_776B_C001": {
+      "task_id": "p1-00b-market-overrides-all-failure-776b-c001",
+      "reservation": "c675b33f135ac2385897bd37600e9539afcb75711a85ad4ca228f7547340991e",
+      "status": "FAILED_UNACCEPTED",
+      "manual783_does_not_accept_or_replay_it": true
+    },
+    "consumed_live786_C003": {
+      "task_id": "p1-00b-live786-manual783-provenance-c003-20261022",
+      "reservation": "52b45b49fd2b270aa92898d591460a61ce0deaec7e2f29215d47e3678712bcb3",
+      "status": "BLOCKED_UNACCEPTED",
+      "Reviewer_initialization_failed_before_independent_acceptance": true,
+      "Worker_candidate_and_native_PASS_are_not_acceptance": true,
+      "not_replayed_adopted_aliased_renamed_reset_or_released": true
+    },
+    "C004_and_772B_failures_retained": true,
+    "C006_execute_failure": "DEFERRED_UNACCEPTED",
+    "all_role_native_Task_reservation_epoch_artifacts_immutable": true
+  },
+  "evidence_limits": {
+    "accepted_boundary": "Only the exact manual783 all() exception outcome above supersedes historical all()-OPEN wording for that bounded case after genuine Source783 acceptance; old packets remain byte-for-byte immutable.",
+    "EMPTY_NONEMPTY_new_flush_acceptances_are_context_only_not_registered_here": true,
+    "no_HTTP_Depends_auth_verify_super_admin_concurrency_retry_reload_or_origin_closure": true,
+    "no_whole_handler_full_seed_High_Stage_or_operational_economic_credit": true,
+    "current_rerun_cannot_expand_historical_Source_scope": true
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
