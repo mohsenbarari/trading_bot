@@ -517,7 +517,7 @@ if [ "$restore_smoke" = "1" ]; then
   else
     restore_error='temporary restore volume could not be created'
   fi
-  if [ "$volume_created" = "1" ] && docker run -d --name "$restore_name" --label "trading-bot.production-backup-run=$run_id" --mount "type=volume,source=$restore_volume,target=/var/lib/postgresql/data" -e POSTGRES_USER=restore -e POSTGRES_PASSWORD=restore -e POSTGRES_DB=restore postgres:15-alpine >/dev/null; then
+  if [ "$volume_created" = "1" ] && docker run -d --network none --pull never --memory 1g --cpus 1 --pids-limit 256 --name "$restore_name" --label "trading-bot.production-backup-run=$run_id" --mount "type=volume,source=$restore_volume,target=/var/lib/postgresql/data" -e POSTGRES_USER=restore -e POSTGRES_PASSWORD=restore -e POSTGRES_DB=restore postgres:15-alpine >/dev/null; then
     restore_ready=0
     restore_ready_hits=0
     for _ in $(seq 1 60); do

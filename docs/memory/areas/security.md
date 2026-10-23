@@ -1,40 +1,29 @@
 # Security remediation
 
-- 2026-10-23 | Security fixes are an architecture-independent workstream; preserve
-  Web/Bot contracts and do not silently mix them into topology-only acceptance.
-  Source/test completion does not mean running services are patched. Current
-  evidence and pending activation gates: `docs/security/2026-10-23-remediation.md`.
-- Upgrade FastAPI/Starlette/Pydantic and aiogram/aiohttp as a resolver-verified
-  family. Old FastAPI and aiogram bounds exclude fixed transitive versions.
-  Require actual parser/upload tests, not only a clean dependency resolver.
-- Resolve every frontend file response, including SPA/root fallback, inside the
-  trusted immutable build directory. Upload clients must not write that directory.
-- Pillow 13 fixes pre-check APNG canvas allocation. Retain bounded input bytes,
-  preflight ordinary PNG dimensions and check decoded pixels before EXIF/load;
-  safety failures must never fall back to persisting the original image.
-- Update both image OS and separate certifi CA stores; host updates alone do not
-  fix immutable containers. The offline build gate checks known CA distrust only,
-  not all image CVEs. Security verification never disables TLS validation.
-- Node vendor backports can retain an old Brotli version string. Verify the exact
-  fixed Node release, not that dependency version alone. Repository/CI pins do not
-  upgrade already-running host tools.
-- Deployment must use the same Node policy before cache lookup. Bootstrap is
-  pinned/SHA-verified, bounded and checkout-local with scoped PATH; never replace
-  global Node or overwrite an invalid existing bundle to make a release pass.
-- User explicitly authorized publishing existing main history plus reviewed
-  security commits. This does not authorize activating unrelated Market changes;
-  preserve LEGACY consumer mode, producer ownership and snapshot mounts.
-- Datastore proofs need complete publisher/chat/message fixture identity; preserve
-  production guards and missing-owner negative assertions. Check PostgreSQL and
-  real multiworker Redis before repushing. CI steps do not inherit subprocess
-  environment: load the public unit config before imports and bind scratch targets.
-- Kernel/Docker/containerd maintenance must preserve active DB, Bot/Executor,
-  Writer and sync ownership. Never reboot or upgrade the daemon as a side effect
-  of a CLI-only update; plan quiescence, restore and smoke checks separately.
-- Browser CI must prepare all active Compose host binds under disposable CI paths;
-  keep snapshot mounts empty/read-only and production create-host-path guards.
-  A mandatory pre-fan-out contract prevents repeating bootstrap-only failures.
-- The private release-control directory is an active attached-volume bind, despite
-  its historical source-directory name. Never prune it as an old backup. Inode
-  migration recovery requires authentic transfer evidence and crash-safe identity
-  re-attestation; never delete the persistent marker or weaken normal guards.
+- 2026-10-23 | Security is separate from topology acceptance; preserve Web/Bot
+  behavior. Source/test completion is not production remediation. Evidence and
+  activation blockers: `docs/security/2026-10-23-remediation.md` and linked reports.
+- Upgrade FastAPI/Starlette/Pydantic and aiogram/aiohttp as compatible families;
+  require parser/upload tests. Bound image bytes/pixels before EXIF/decode;
+  never persist the original after a safety failure. All frontend responses,
+  including SPA fallback, must remain inside immutable trusted dist.
+- Patch image OS and certifi separately. The CA build gate is not a full CVE
+  scan; never disable TLS verification. Verify exact vendor Node releases, not
+  bundled Brotli strings. Enforce one Node policy before cache lookup; bootstrap
+  stays pinned/SHA-verified, bounded, checkout-local and scoped-PATH, not global.
+- Publishing existing main history plus reviewed security commits is authorized,
+  not unrelated Market activation. Preserve LEGACY, capture owners and mounts.
+- Publisher/chat/message fixtures must be complete; retain missing-owner negative
+  assertions. Require PostgreSQL and real multiworker Redis. Each CI subprocess
+  needs public unit config before imports and explicit scratch targets. Browser
+  CI prepares every bind under disposable paths; keep snapshots empty/read-only
+  and production create-host-path guards; check the contract before fan-out.
+- Kernel/daemon work needs separate quiescence, restore and smoke checks; preserve
+  DB, Bot/Executor, Writer and sync. CLI updates never imply reboot permission.
+- Private control storage is an ACTIVE attached-volume bind despite its historical
+  source name: never prune it. Identity recovery requires authentic evidence and
+  crash safety, never persistent-marker deletion or weaker normal guards.
+- Live inventory differs from the old quiesced handoff: the group unit projects
+  facts; private-gold/public still collect Telegram. Preserve ingestion until
+  ownership is reconciled. Identity-only recovery must refuse; stopping units
+  solely to pass is not reconciliation.
