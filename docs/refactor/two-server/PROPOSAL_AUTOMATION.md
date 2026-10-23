@@ -881,3 +881,32 @@ symlink، hardlink، جایگزینی، مالک نامعتبر، اندازهٔ
 readiness واقعی پیش از cleanup، کنترل process/FD/CLI و سقف 240 ثانیه/حداکثر دو
 initializer بدون تغییر باقی می‌مانند. این بخش شرح تغییر پیشنهادی است، نه ادعای
 قبولی Native، qualification زنده، استقرار یا پایان توقف.
+
+## 802R — پایان پاک فرایند هم‌زمان با درخواست shutdown
+
+در اجرای عادی801/C002، آماده‌سازی Worker و Reviewer موفق شد، اما Reviewer
+با `generation shutdown exit race is ambiguous` متوقف شد. شواهد موجود نشان
+می‌دهد درخواست SIGKILL واقعاً برگشته بود، فرایند مستقیم exit0 داشت، هر دو
+کانال EOF بودند، کل ورودی نوشته و بسته شده بود و گروه متعلق به اجرا باقی
+نمانده بود. این شواهد شکست قبلی را به پذیرش تبدیل نمی‌کند؛ Task، reservation
+و خروجی C002 همچنان نامعتبر و دست‌نخورده می‌مانند.
+
+قرارداد محدود جدید، فقط یک حالت صریح به همان
+`RECOVERED_COMPLETED_RESULT` اضافه می‌کند: syscall درخواست سیگنال برگشته،
+returncode دقیقاً int0 است و `timeout_kind=POST_FINAL_EXIT_RACE` ثبت می‌شود.
+این حالت `NORMAL_EXIT` نیست؛ `normal_exit_observed=false` و
+`signal_attempted=true` می‌مانند و `cleanup_signal=9` سیگنال درخواستی را
+نشان می‌دهد، نه ادعای اینکه سیگنال علت exit0 بوده است.
+
+حالت قبلی فقط زوج دقیق `-SIGKILL / POST_FINAL_SHUTDOWN` است و حالت جدید
+فقط زوج دقیق `0 / POST_FINAL_EXIT_RACE`؛ تغییر یکی از دو مقدار، boolean به‌جای
+int، ESRCH بدون بازگشت موفق syscall، خروج nonzero/unknown، گروه زنده یا نامعلوم،
+ورودی ناقص، writer باز، terminal پیش از بسته‌شدن ورودی، EOF ناقص، stderr،
+tail نامعتبر، frame ناسازگار یا انقضای deadline همچنان رد می‌شوند.
+
+هر دو حالت از همان بررسی کامل frame و همان readiness/CLI/role/model/CID و
+کنترل‌های فعلی Runner، Pipeline و Supervisor عبور می‌کنند. بودجهٔ کلی،
+مهلت پنج‌ثانیه‌ای پس از terminal، cap ورودی/خروجی، retry و cohort مدل تغییر
+نمی‌کند. این اصلاح مجوز ارسال دوباره یا پذیرش خروجی شکست‌خورده نیست.
+آزمون مصنوعی واقعی فقط رفتار فرایندهای متعلق به تست را اثبات می‌کند؛
+پذیرش Source و سلامت چرخه نیازمند شواهد واقعی مستقل Root هستند.

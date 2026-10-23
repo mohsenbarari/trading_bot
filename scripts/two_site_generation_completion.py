@@ -289,7 +289,9 @@ class GenerationRecoveryPolicy:
                stderr_eof: bool, written: int) -> dict | None:
         if not self._signal_attempted:
             return None
-        _need(self._signal_sent and process.returncode == -signal.SIGKILL,
+        actual_returncode = process.returncode
+        _need(self._signal_sent and type(actual_returncode) is int
+              and actual_returncode in (-signal.SIGKILL, 0),
               "generation shutdown exit race is ambiguous")
         _need(stdout_eof and stderr_eof and written == len(self._input)
               and self._closed_at is not None and self._terminal_read_at is not None
@@ -310,10 +312,15 @@ class GenerationRecoveryPolicy:
             remaining = self._remaining()
             _need(remaining > 0, "generation group quiescence deadline exhausted")
             time.sleep(min(0.01, remaining))
+        _need(self._remaining() > 0, "generation group quiescence deadline exhausted")
         return {
             "outcome": OUTCOME_RECOVERED, "normal_exit_observed": False,
-            "actual_returncode": process.returncode, "shutdown_timeout_observed": True,
-            "timeout_kind": "POST_FINAL_SHUTDOWN", "cleanup_signal": int(signal.SIGKILL),
+            "actual_returncode": actual_returncode, "shutdown_timeout_observed": True,
+            # A returned signal request does not prove it caused child exit.
+            # Keep race observations recovered, never claim ordinary natural exit.
+            "timeout_kind": ("POST_FINAL_EXIT_RACE" if actual_returncode == 0
+                             else "POST_FINAL_SHUTDOWN"),
+            "cleanup_signal": int(signal.SIGKILL),
             "signal_attempted": True, "direct_child_reaped": True,
             "owned_group_absent": True, "stdout_eof": True, "stderr_eof": True,
             "full_input_written": True, "input_writer_closed": True,
@@ -351,10 +358,12 @@ def validate_observations(value: object, input_bytes: bytes, stdout: bytes,
         _need(
             type(value["normal_exit_observed"]) is bool and value["normal_exit_observed"] is False
             and type(value["actual_returncode"]) is int
-            and value["actual_returncode"] == -signal.SIGKILL
+            and ((value["actual_returncode"] == -signal.SIGKILL
+                  and value["timeout_kind"] == "POST_FINAL_SHUTDOWN")
+                 or (value["actual_returncode"] == 0
+                     and value["timeout_kind"] == "POST_FINAL_EXIT_RACE"))
             and type(value["cleanup_signal"]) is int
             and value["cleanup_signal"] == signal.SIGKILL
-            and value["timeout_kind"] == "POST_FINAL_SHUTDOWN"
             and type(value["post_final_grace_seconds"]) is float
             and value["post_final_grace_seconds"] == POST_FINAL_GRACE_SECONDS
             and not stderr,
