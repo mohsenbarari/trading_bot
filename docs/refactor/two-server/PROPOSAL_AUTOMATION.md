@@ -853,3 +853,31 @@ Opus path changes. This budget error is still not an OUTPUT retry: avoiding a
 known-wrong 915-second wait does not authorize automatic correction or replay.
 Any next legitimate unit must independently produce an in-budget proposal and
 pass review, Native tests, normal Git and SDK checkpoint acceptance.
+
+## 800R — پایداری SHM موقت و تشخیص دقیق‌تر توقف آماده‌سازی
+
+C014 پیش از تولید پاسخ مدل با علت ثبت‌شدهٔ
+`PRE_SECOND / PRISTINE_RECHECK_SHM_AFTER_CONTRACT` متوقف شد. این شاهد
+شرط جزئی شکست SHM را مشخص نمی‌کند؛ آن را عطف‌به‌ماسبق به race بی‌ضرر، تغییر
+اندازه، حذف فایل یا مشکل سهمیه نسبت نمی‌دهیم. Task و reservation شکست‌خورده
+دست‌نخورده می‌مانند و دوباره ارسال یا با نام دیگر بازپخش نمی‌شوند.
+
+بازتولید مستقل با SQLite مصنوعیِ تحت مالکیت آزمایش نشان می‌دهد WAL index
+می‌تواند از 32768 به 65536 بایت رشد کند، در حالی که device/inode/mode/uid/gid/nlink
+ثابت‌اند؛ بستن آخرین اتصال هم می‌تواند SHM را حذف کند. آزمون رشد از نوشتن روی
+جدول مصنوعی استفاده می‌کند و اثبات pristine بودن DB/WAL یا علت تاریخی C014 نیست.
+
+کنترل SHM فقط این تغییرپذیری موقت را می‌پذیرد: اندازهٔ هر مشاهده باید همچنان
+در حد مجاز باشد، اما دو اندازه لازم نیست برابر باشند. نوع regular، مالک جاری،
+تک‌لینکی بودن، مسیر و parent canonical، و شش فیلد هویت امنیتی شیء موجود ثابت
+می‌مانند. حذف تنها پس از بررسی یک شیء امن و تأیید دوبارهٔ نبود فایل مجاز است؛
+symlink، hardlink، جایگزینی، مالک نامعتبر، اندازهٔ خارج حد و خطاهای دسترسی هرگز
+به نبود فایل تعبیر نمی‌شوند. SHM خوانده یا hash نمی‌شود.
+
+علت‌های ثابت و غیرمحرمانهٔ `BUDGET/TYPE/OWNER/LINKS/SIZE/PATH/IDENTITY/REAPPEARED`
+در مرحلهٔ `SHM_BEFORE` یا `SHM_AFTER` ثبت می‌شوند؛ خطاهای قدیمی یا ناشناخته
+همچنان fallback بستهٔ قبلی `OS/CONTRACT` را دارند. این تشخیص، مجوز recovery نیست.
+اثبات کامل DB، مقایسهٔ محدود و قبلاً مصوب WAL، صفر بودن steps/executors،
+readiness واقعی پیش از cleanup، کنترل process/FD/CLI و سقف 240 ثانیه/حداکثر دو
+initializer بدون تغییر باقی می‌مانند. این بخش شرح تغییر پیشنهادی است، نه ادعای
+قبولی Native، qualification زنده، استقرار یا پایان توقف.

@@ -508,18 +508,64 @@ def _recovery_workspace(workspace: Path):
             git_info.st_dev, git_info.st_ino, git_info.st_mode, git_info.st_uid)
 
 
+_SHM_VETO_REASONS = frozenset({
+    "BUDGET", "TYPE", "OWNER", "LINKS", "SIZE", "PATH", "IDENTITY", "REAPPEARED",
+})
+
+
 def _inspect_shm(path: Path, deadline: float):
-    _budget_remaining(deadline, 1)
+    # SQLite may grow or unlink its ephemeral WAL index. Never read/hash SHM
+    # bytes or treat its size/mtime/ctime as persisted DB/WAL identity.
+    def reject(reason):
+        error = ProposalProfileError("unsafe proposal runtime recovery SHM")
+        error.shm_veto_code = reason
+        raise error
+
+    def security_identity(info):
+        if not stat.S_ISREG(info.st_mode):
+            reject("TYPE")
+        if info.st_uid != os.geteuid():
+            reject("OWNER")
+        if info.st_nlink != 1:
+            reject("LINKS")
+        if not 0 <= info.st_size <= MAX_DATABASE:
+            reject("SIZE")
+        return _identity9(info)[:6]
+
+    def check_budget():
+        try:
+            _budget_remaining(deadline, 1)
+        except ProposalProfileError as error:
+            error.shm_veto_code = "BUDGET"
+            raise
+
+    check_budget()
+    if path.parent.resolve(strict=True) != path.parent:
+        reject("PATH")
     try:
         info = path.lstat()
     except FileNotFoundError:
+        check_budget()
         return
-    # SHM is an ephemeral lock/index; never hash its contents/mtime as persisted data.
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-            or info.st_nlink != 1 or not 0 <= info.st_size <= MAX_DATABASE
-            or path.resolve(strict=True) != path
-            or _identity9(path.lstat())[:7] != _identity9(info)[:7]):
-        raise ProposalProfileError("unsafe proposal runtime recovery SHM")
+    identity = security_identity(info)
+    try:
+        if path.resolve(strict=True) != path:
+            reject("PATH")
+        after = path.lstat()
+    except FileNotFoundError:
+        # Only a validated own regular single-link object may disappear.
+        # A fresh lstat, not lexists(), distinguishes absence from denied I/O.
+        # A dangling symlink/unsafe replacement must never become "absent".
+        try:
+            replacement = path.lstat()
+        except FileNotFoundError:
+            check_budget()
+            return
+        security_identity(replacement)
+        reject("REAPPEARED")
+    if security_identity(after) != identity:
+        reject("IDENTITY")
+    check_budget()
 
 
 _PRISTINE_VETO_OPERATIONS = frozenset({
@@ -531,7 +577,9 @@ _PRISTINE_VETO_OPERATIONS = frozenset({
 })
 _PRISTINE_VETO_CODES = frozenset(
     operation + "_" + kind for operation in _PRISTINE_VETO_OPERATIONS
-    for kind in ("OS", "CONTRACT"))
+    for kind in ("OS", "CONTRACT")) | frozenset(
+        operation + "_" + reason for operation in ("SHM_BEFORE", "SHM_AFTER")
+        for reason in _SHM_VETO_REASONS)
 _PRISTINE_WIRE_REASONS = frozenset(
     "PRISTINE_" + checkpoint + "_" + code
     for checkpoint in ("FIRST", "RECHECK") for code in _PRISTINE_VETO_CODES
@@ -609,6 +657,10 @@ def _pristine_initialization_snapshot(directory: Path, name: str, deadline: floa
         # recovery here; the unchanged caller still reraises its original error.
         try:
             code = operation + ("_OS" if isinstance(error, OSError) else "_CONTRACT")
+            detail = getattr(error, "shm_veto_code", None)
+            if (operation in {"SHM_BEFORE", "SHM_AFTER"} and type(detail) is str
+                    and detail in _SHM_VETO_REASONS):
+                code = operation + "_" + detail
             if code in _PRISTINE_VETO_CODES:
                 error.pristine_veto_code = code
         except Exception:
