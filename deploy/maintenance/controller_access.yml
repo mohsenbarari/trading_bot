@@ -110,9 +110,27 @@
           - hostvars.controller_web.ansible_host == '65.109.220.59'
           - hostvars.controller_web.ansible_port | int == 37067
           - hostvars.controller_web.ansible_user == 'root'
+          - hostvars.controller_web.ansible_ssh_private_key_file == '/root/.ssh/id_ed25519_iran'
           - hostvars.controller_web.ansible_ssh_common_args == '-o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes'
           - controller_access_action in ['check', 'setup', 'cleanup']
           - controller_access_action == 'check' or controller_access_confirmation == 'TEMPORARY-ROOT-SSH-20261024T013000Z'
+
+    - name: Inspect persistent native to Web identity metadata without opening its bytes
+      ansible.builtin.stat:
+        path: /root/.ssh/id_ed25519_iran
+        follow: false
+        get_checksum: false
+        get_mime: false
+      register: controller_native_identity
+
+    - name: Require persistent owned identity for operation and postboot cleanup
+      ansible.builtin.assert:
+        that:
+          - controller_native_identity.stat.isreg
+          - not controller_native_identity.stat.islnk
+          - controller_native_identity.stat.uid == 0
+          - controller_native_identity.stat.nlink == 1
+          - controller_native_identity.stat.mode == '0600'
 
     - name: Read only native Bot safety metadata and trusted public host key
       ansible.builtin.command:

@@ -17,6 +17,11 @@ and is deliberately absent from this package.
    with **new task ID `host-patch-02`**. Old `host-patch-01` was cleaned and is
    not reusable. Its private key is generated and stays **on Web only**; only
    SSH itself uses it. Agents/Ansible never read, checksum or transfer its bytes.
+   The opposite native Bot→Web lane explicitly uses the existing persistent
+   `/root/.ssh/id_ed25519_iran` identity (the name is historical, not the target).
+   Metadata-only admission checks it; minimal-environment, config-free strict SSH
+   was proved before setup. The durable runner intentionally ignores SSH config;
+   an inherited agent or ordinary interactive success is not cleanup readiness.
 2. Default `reboot_bootstrap.yml` is read-only: check exact existing hosts,
    native Web identity, Python **3.14.4 x86_64, GIL enabled**, and workspace
    metadata. `setup` explicitly provisions only a private task-scoped Web venv.

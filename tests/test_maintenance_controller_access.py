@@ -52,10 +52,27 @@ class ControllerPlaybookContracts(unittest.TestCase):
         self.assertEqual(end["when"], "controller_access_action == 'check' or ansible_check_mode")
         self.assertEqual(end["ansible.builtin.meta"], "end_play")
         for value in TASKS[:TASKS.index(end)]:
-            self.assertTrue(set(value) & {"ansible.builtin.command", "ansible.builtin.assert"})
+            self.assertTrue(set(value) & {"ansible.builtin.command", "ansible.builtin.assert", "ansible.builtin.stat"})
             if "ansible.builtin.command" in value:
                 self.assertEqual(value["ansible.builtin.command"]["argv"][:4], ["/usr/bin/python3", "-I", "-B", "-c"])
                 self.assertIs(value["changed_when"], False)
+
+    def test_persistent_native_identity_is_explicit_and_metadata_only(self):
+        hosts = INVENTORY["all"]["hosts"]
+        identity = "/root/.ssh/id_ed25519_iran"
+        self.assertEqual(hosts["controller_web"]["ansible_ssh_private_key_file"], identity)
+        guards = TASKS[0]["ansible.builtin.assert"]["that"]
+        self.assertIn(f"hostvars.controller_web.ansible_ssh_private_key_file == '{identity}'", guards)
+        inspection = task("Inspect persistent native to Web identity metadata without opening its bytes")
+        self.assertEqual(inspection["ansible.builtin.stat"], {
+            "path": identity, "follow": False, "get_checksum": False, "get_mime": False,
+        })
+        checks = task("Require persistent owned identity for operation and postboot cleanup")["ansible.builtin.assert"]["that"]
+        for condition in ("controller_native_identity.stat.isreg", "not controller_native_identity.stat.islnk",
+                          "controller_native_identity.stat.uid == 0", "controller_native_identity.stat.nlink == 1",
+                          "controller_native_identity.stat.mode == '0600'"):
+            self.assertIn(condition, checks)
+        self.assertLess(TASKS.index(inspection), TASKS.index(task("Read only Web native safety and owned workspace metadata")))
 
     def test_explicit_fixed_window_and_native_host_guards(self):
         guards = TASKS[0]["ansible.builtin.assert"]["that"]
