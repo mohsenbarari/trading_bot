@@ -41,7 +41,7 @@ PACKAGES = {
 INSPECT = ('{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},'
            '"running":{{json .State.Running}},"restart_policy":{{json .HostConfig.RestartPolicy}},'
            '"project":{{json (index .Config.Labels "com.docker.compose.project")}},'
-           '"mounts":{{json .Mounts}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}')
+           '"mounts":{{json .Mounts}},"health":{{with index .State "Health"}}{{json .Status}}{{else}}null{{end}}}')
 CONTAINER_HTTP_PROBE = '''import sys, urllib.request
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, url):
@@ -101,9 +101,14 @@ def command(argv):
     info = binary.stat()
     require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022, 'untrusted_binary')
     with tempfile.TemporaryFile() as output:
-        subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL,
-                       timeout=25, check=True, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'DOCKER_HOST': 'unix:///var/run/docker.sock'},
-                       preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (2 * 1024 * 1024, 2 * 1024 * 1024)))
+        try:
+            subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.DEVNULL,
+                           timeout=25, check=True, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8', 'DOCKER_HOST': 'unix:///var/run/docker.sock'},
+                           preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (2 * 1024 * 1024, 2 * 1024 * 1024)))
+        except subprocess.CalledProcessError:
+            raise Refusal('native_command_failed_' + binary.name) from None
+        except subprocess.TimeoutExpired:
+            raise Refusal('native_command_timeout_' + binary.name) from None
         require(output.tell() <= 2 * 1024 * 1024, 'command_output_bound')
         output.seek(0)
         return output.read(2 * 1024 * 1024).decode('utf-8').strip()
@@ -227,6 +232,12 @@ def owners(plan, digest):
         require(any('FLOCK' in line and 'WRITE' in line and str(reservation['pid']) == line.split()[4] and key == line.split()[5] for line in locks.splitlines() if len(line.split()) >= 8), 'operation_fence_lost')
 
 
+def canonical_mounts(mounts):
+    rows = [{key: mount[key] for key in ('Destination', 'Mode', 'Propagation', 'RW', 'Source', 'Type')} for mount in mounts]
+    require(len({row['Destination'] for row in rows}) == len(rows), 'duplicate_mount_destination')
+    return sorted(rows, key=lambda row: row['Destination'])
+
+
 def runtime(plan, phase, recovery=False):
     baseline = bound_document(plan, plan['runtime_snapshot'])
     require(baseline['schema'] == 'security_runtime_snapshot/1.0' and baseline['containers'], 'snapshot_invalid')
@@ -239,8 +250,8 @@ def runtime(plan, phase, recovery=False):
     require(command(['/usr/bin/docker', 'info', '--format', '{{.DockerRootDir}}']) == plan['docker_root'], 'docker_data_root_changed')
     for ident, before in expected.items():
         current = json.loads(command(['/usr/bin/docker', 'inspect', '--format', INSPECT, ident]))
-        current['mounts'] = [{key: mount[key] for key in ('Destination', 'Mode', 'Propagation', 'RW', 'Source', 'Type')} for mount in current['mounts']]
-        require(all(current[key] == before[key] for key in ('id', 'name', 'image', 'project', 'mounts')), 'container_identity_changed')
+        require(all(current[key] == before[key] for key in ('id', 'name', 'image', 'project')), 'container_identity_changed')
+        require(canonical_mounts(current['mounts']) == canonical_mounts(before['mounts']), 'container_identity_changed')
         allowed = [before['restart_policy']] if phase in {'preflight', 'complete'} else [{'Name': 'no', 'MaximumRetryCount': 0}]
         if phase == 'recoverable':
             allowed.append(before['restart_policy'])

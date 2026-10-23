@@ -32,7 +32,7 @@ def fixture():
              'Mode': 'rw', 'Propagation': 'rprivate', 'Type': 'volume'}
     before = {'id': IDENT, 'name': '/owned-db', 'image': 'sha256:' + 'b' * 64,
               'running': True, 'restart_policy': {'Name': 'unless-stopped', 'MaximumRetryCount': 0},
-              'project': 'owned', 'mounts': [mount], 'started_at': 'prior-time'}
+              'project': 'owned', 'mounts': [mount, dict(mount, Destination='/archive', Source='/owned/archive')], 'started_at': 'prior-time'}
     plan = {'runtime_snapshot': '/snapshot', 'managed_project_labels': ['owned'],
             'docker_root': '/owned/docker',
             'health_probes': [{'id': IDENT, 'url': 'http://127.0.0.1:8000/api/config'}],
@@ -85,6 +85,29 @@ class RuntimeGuardTests(unittest.TestCase):
     def test_exact_baseline_and_real_docker_volume_extra_metadata(self):
         self.invoke('preflight')
         self.invoke('complete')
+
+    def test_mount_order_is_not_identity_and_duplicate_destinations_are_refused(self):
+        self.invoke('preflight', lambda c: c['mounts'].reverse())
+        with self.assertRaisesRegex(guard.Refusal, 'duplicate_mount_destination'):
+            self.invoke('preflight', lambda c: c['mounts'].append(deepcopy(c['mounts'][0])))
+        _, snapshot = fixture()
+        mounts = snapshot['containers'][0]['mounts']
+        with self.assertRaisesRegex(guard.Refusal, 'duplicate_mount_destination'):
+            guard.canonical_mounts(mounts + [deepcopy(mounts[0])])
+
+    def test_every_frozen_mount_field_remains_significant_after_sorting(self):
+        mutations = {'Destination': '/other', 'Mode': 'ro', 'Propagation': 'shared',
+                     'RW': False, 'Source': '/wrong', 'Type': 'bind'}
+        for field, value in mutations.items():
+            with self.subTest(field=field), self.assertRaisesRegex(guard.Refusal, 'container_identity_changed'):
+                self.invoke('preflight', lambda c: c['mounts'][0].update({field: value}))
+
+    def test_missing_optional_health_uses_safe_map_index_without_weakening_configured_health(self):
+        self.assertIn('{{with index .State "Health"}}{{json .Status}}{{else}}null{{end}}', guard.INSPECT)
+        self.assertNotIn('.State.Health', guard.INSPECT)
+        self.invoke('healthy', lambda c: c.update(health=None))
+        with self.assertRaisesRegex(guard.Refusal, 'container_unhealthy'):
+            self.invoke('healthy', lambda c: c.update(health='starting'))
 
     def test_oneshot_transient_state_does_not_create_false_drift(self):
         self.invoke('complete')  # oneshot reports active; intended timer is active.
@@ -281,6 +304,15 @@ class FileAndAtomicGuardTests(unittest.TestCase):
         with patch.object(guard.os, 'write', return_value=0), self.assertRaisesRegex(guard.Refusal, 'no_progress'):
             guard.write_all(12, b'x')
 
+    def test_native_command_errors_have_public_binary_category_without_sensitive_details(self):
+        failures = [(subprocess.CalledProcessError(7, ['private-argument'], output=b'private-output', stderr=b'private-error'), 'native_command_failed_true'),
+                    (subprocess.TimeoutExpired(['private-argument'], 25, output=b'private-output'), 'native_command_timeout_true')]
+        for failure, code in failures:
+            with self.subTest(code=code), patch.object(guard.subprocess, 'run', side_effect=failure), self.assertRaises(guard.Refusal) as error:
+                guard.command(['/usr/bin/true', 'private-argument'])
+            self.assertEqual(str(error.exception), code)
+            self.assertNotIn('private-', str(error.exception))
+
     def test_required_mount_coverage_cannot_be_empty_incomplete_or_duplicated(self):
         plan = {'source_root': '/source', 'docker_root': '/docker', 'mounts': []}
         for mounts in ([], [{'path': '/source'}], [{'path': '/source'}, {'path': '/source'}]):
@@ -394,6 +426,14 @@ class PlaybookContractTests(unittest.TestCase):
         self.assertTrue(installs[0]['fail_on_autoremove'])
         self.assertFalse(installs[0]['allow_downgrade'])
         self.assertFalse(installs[0]['allow_unauthenticated'])
+
+    def test_datastore_optional_health_template_uses_safe_map_index(self):
+        wait = next(task for task in self.tasks() if task['name'] == 'Wait for datastores to be running and health-ready where configured')
+        argv = wait['ansible.builtin.command']['argv']
+        template = argv[argv.index('--format') + 1]
+        self.assertIn('{{with index .State "Health"}}{{.Status}}{{else}}healthy{{end}}', template)
+        self.assertNotIn('.State.Health', template)
+        self.assertEqual(wait['until'], "datastore_ready.stdout == 'true healthy'")
 
     def test_timers_stop_first_and_oneshot_is_never_manually_started(self):
         block = next(task['block'] for task in self.play['tasks'] if 'block' in task)

@@ -165,7 +165,7 @@
 
     - name: Wait for datastores to be running and health-ready where configured
       ansible.builtin.command:
-        argv: [/usr/bin/docker, inspect, --format, '{% raw %}{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}{% endraw %}', "{{ item }}"]
+        argv: [/usr/bin/docker, inspect, --format, '{% raw %}{{.State.Running}} {{with index .State "Health"}}{{.Status}}{{else}}healthy{{end}}{% endraw %}', "{{ item }}"]
       loop: "{{ plan.datastore_ids }}"
       register: datastore_ready
       until: datastore_ready.stdout == 'true healthy'
