@@ -1,0 +1,157 @@
+---
+# Never invoke directly. The guarded parent owns three inherited flocks.
+- name: One pinned Web Docker vendor transition preserving the existing store
+  hosts: web_engine_local
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    guard: "{{ playbook_dir }}/web_engine_controller.py"
+  tasks:
+    - name: Require the externally bound manifest and forbid Ansible check mutation
+      ansible.builtin.assert:
+        that:
+          - web_engine_manifest is defined
+          - web_engine_manifest_sha256 is defined
+          - not ansible_check_mode
+
+    - name: Validate the live parent fences and read only public runtime metadata
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", inspect, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      register: inspected
+      changed_when: false
+      no_log: true
+
+    - name: Use only the validated exact container and unit inventory
+      ansible.builtin.set_fact:
+        runtime: "{{ inspected.stdout | from_json }}"
+      no_log: true
+
+    - name: Durably record intent before the first runtime write
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, quiescing, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+
+    - name: Stop frozen trigger timers first without changing enablement
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: stopped
+      loop: "{{ runtime.units | selectattr('kind', 'equalto', 'timer') | list }}"
+
+    - name: Drain only the recorded native capture projection and watchdog targets
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: stopped
+      loop: "{{ runtime.units | rejectattr('kind', 'equalto', 'timer') | list }}"
+
+    - name: Disable restart on all twenty-seven exact original containers
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, update, --restart=no, "{{ item.id }}"]
+      loop: "{{ runtime.containers }}"
+
+    - name: Gracefully stop prior-running non-datastores and keep eight databases available
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, stop, --time, '45', "{{ item.id }}"]
+      loop: "{{ runtime.containers | selectattr('running', 'equalto', true) | rejectattr('id', 'in', runtime.datastore_ids) | list }}"
+      timeout: 60
+
+    - name: Prove only frozen datastores remain running and all external writers are stopped
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, writers_quiesced, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+
+    - name: Create strict Market dump restore parity and cleanup proof under this reservation
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", market-backup, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+      timeout: 3000
+
+    - name: Stop exact prior-running datastores only after verified Market restore
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, stop, --time, '45', "{{ item }}"]
+      loop: "{{ runtime.datastore_ids }}"
+      timeout: 60
+
+    - name: Prove complete original identity and all writers quiescent
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, quiesced, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+
+    - name: Stop socket and Docker before containerd
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: [docker.socket, docker.service, containerd.service]
+
+    - name: Compare quiesced stores encrypt verify and actually fsync the offhost copy
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", backup, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+      timeout: 3600
+
+    - name: Reverify offhost evidence and install the exact offline transaction
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", install, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+      timeout: 1200
+
+    - name: Start the same containerd store without recreating any container
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: started
+      loop: [containerd.service, docker.socket, docker.service]
+
+    - name: Prove all twenty-seven IDs and stopped policies before starting data services
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, engines_verified, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
+
+    - name: Start only the prior-running exact datastores
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, start, "{{ item }}"]
+      loop: "{{ runtime.datastore_ids }}"
+
+    - name: Require real database readiness before application processes
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, datastores, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      register: databases
+      until: databases.rc == 0
+      retries: 30
+      delay: 2
+      no_log: true
+
+    - name: Restore remaining prior-running containers and leave migration stopped
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, start, "{{ item.id }}"]
+      loop: "{{ runtime.containers | selectattr('running', 'equalto', true) | rejectattr('id', 'in', runtime.datastore_ids) | list }}"
+
+    - name: Require patched servers complete container health and container-loopback API smoke
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, healthy, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      register: application_health
+      until: application_health.rc == 0
+      retries: 30
+      delay: 2
+      no_log: true
+
+    - name: Restore exact captured restart intent without changing container identities
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, update, "--restart={{ item.restart_policy.Name }}{{ (':' ~ item.restart_policy.MaximumRetryCount) if item.restart_policy.Name == 'on-failure' and item.restart_policy.MaximumRetryCount > 0 else '' }}", "{{ item.id }}"]
+      loop: "{{ runtime.containers }}"
+
+    - name: Restore only previously active native non-timer targets
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: started
+      loop: "{{ runtime.units | rejectattr('kind', 'equalto', 'timer') | rejectattr('kind', 'equalto', 'oneshot') | selectattr('active', 'equalto', true) | list }}"
+
+    - name: Restore only previously active timers last
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: started
+      loop: "{{ runtime.units | selectattr('kind', 'equalto', 'timer') | selectattr('active', 'equalto', true) | list }}"
+
+    - name: Durably record complete identity health and restored intent
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", checkpoint, --phase, complete, --manifest, "{{ web_engine_manifest }}", --manifest-sha256, "{{ web_engine_manifest_sha256 }}"]
+      no_log: true
