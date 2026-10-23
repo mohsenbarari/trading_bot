@@ -1,0 +1,402 @@
+---
+# Invoke on native Bot with existing controller_inventory.example.yml.
+# The reviewed controller_access.yml must first SETUP host-patch-02 (not old01).
+- name: Prepare independent Web-only Ansible runner without copying keys or env
+  hosts: controller_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - reboot_wheels.yml
+  vars:
+    reboot_bootstrap_action: check
+    reboot_bootstrap_confirmation: ''
+    reboot_web_root: /root/.local/security-kernel-reboot-20261023-task02
+    reboot_wheel_stage: /root/trading-bot/trading_bot/.local/security-kernel-reboot-task02-wheels
+    reboot_assets: [reboot_controller.py, reboot_external.yml, reboot_inventory.yml, reboot_ansible.cfg, reboot_requirements.txt, reboot_wheels.yml]
+  tasks:
+    - name: Enforce exact existing two hosts and deliberate preparation or launch
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['controller_bot', 'controller_web']
+          - ansible_connection == 'local'
+          - hostvars.controller_bot.ansible_host == '65.109.216.187'
+          - hostvars.controller_web.ansible_host == '65.109.220.59'
+          - hostvars.controller_web.ansible_port | int == 37067
+          - hostvars.controller_web.ansible_user == 'root'
+          - hostvars.controller_web.ansible_ssh_common_args == '-o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes'
+          - reboot_web_root == '/root/.local/security-kernel-reboot-20261023-task02'
+          - reboot_wheel_stage == '/root/trading-bot/trading_bot/.local/security-kernel-reboot-task02-wheels'
+          - reboot_assets == ['reboot_controller.py', 'reboot_external.yml', 'reboot_inventory.yml', 'reboot_ansible.cfg', 'reboot_requirements.txt', 'reboot_wheels.yml']
+          - reboot_bootstrap_action in ['check', 'setup', 'start']
+          - reboot_bootstrap_action == 'check' or reboot_bootstrap_confirmation == 'EXTERNAL-BOT-REBOOT-20261023'
+
+    - name: Record current immutable source revision without changing Git
+      ansible.builtin.command:
+        argv: [/usr/bin/git, -C, '{{ playbook_dir }}/../..', rev-parse, HEAD]
+      changed_when: false
+      register: reboot_source_head
+
+    - name: Inspect independent native Web Python and private-parent metadata only
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import json,os,pathlib,platform,stat,sys,sysconfig,venv
+            assert os.geteuid()==0 and sys.version_info[:3]==(3,14,4) and platform.machine()=='x86_64'
+            assert not sysconfig.get_config_var('Py_GIL_DISABLED')
+            assert pathlib.Path('/proc/1/exe').readlink().name=='systemd'
+            assert not any(pathlib.Path(p).exists() for p in ('/.dockerenv','/run/.containerenv'))
+            for ns in ('pid','mnt','user'): assert os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns)
+            for p in ('/root','/root/.local'):
+                s=os.lstat(p); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+            p=pathlib.Path('/root/.local/security-kernel-reboot-20261023-task02')
+            if os.path.lexists(p):
+                s=p.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700
+                assert not (p/'controller-intent.json').exists()
+                receipt=p/'workspace.json'; s=receipt.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600 and s.st_size<1024
+                assert json.loads(receipt.read_bytes())=={'schema':'security_reboot_workspace/1','task_id':'host-patch-02','inode':p.stat().st_ino}
+                for name in ('wheels','venv'):
+                    q=p/name
+                    if os.path.lexists(q):
+                        s=q.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+            print(json.dumps({'web_machine_id':pathlib.Path('/etc/machine-id').read_text().strip(),'web_boot_id':pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'workspace_exists':p.exists()}))
+      delegate_to: controller_web
+      changed_when: false
+      check_mode: false
+      register: reboot_web_facts
+
+    - name: Default and check mode create no venv wheels credentials or running controller
+      ansible.builtin.meta: end_play
+      when: reboot_bootstrap_action == 'check' or ansible_check_mode
+
+    - name: Refuse redirected or unsafe native task-wheel stage before any file action
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib,stat
+            p=pathlib.Path('/root/trading-bot/trading_bot/.local/security-kernel-reboot-task02-wheels')
+            for q in (p.parent,*p.parents):
+                s=q.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+            if os.path.lexists(p):
+                s=p.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700
+                for q in p.iterdir():
+                    s=q.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600 and q.name in __import__('sys').argv[1].splitlines()
+          - '{{ reboot_wheels | map(attribute="filename") | join("\n") }}'
+      changed_when: false
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Build explicit public-only transfer list without repository globs
+      ansible.builtin.set_fact:
+        reboot_public_file_list: []
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Enumerate only the ten pinned public wheel files
+      ansible.builtin.set_fact:
+        reboot_public_file_list: '{{ reboot_public_file_list + [{"source": reboot_wheel_stage ~ "/" ~ item.filename, "destination": reboot_web_root ~ "/wheels/" ~ item.filename}] }}'
+      loop: '{{ reboot_wheels }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Enumerate only six reviewed public runner assets
+      ansible.builtin.set_fact:
+        reboot_public_file_list: '{{ reboot_public_file_list + [{"source": playbook_dir ~ "/" ~ item, "destination": reboot_web_root ~ "/" ~ item}] }}'
+      loop: '{{ reboot_assets }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Prepare only task-scoped private artifact directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop: ['{{ reboot_web_root }}', '{{ reboot_web_root }}/wheels']
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Prepare only task-scoped native public-wheel stage
+      ansible.builtin.file:
+        path: '{{ reboot_wheel_stage }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Claim only newly-created or already-owned task workspace
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import json,os,pathlib,stat
+            p=pathlib.Path('/root/.local/security-kernel-reboot-20261023-task02')
+            s=p.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700
+            r=p/'workspace.json'; value={'schema':'security_reboot_workspace/1','task_id':'host-patch-02','inode':s.st_ino}
+            if os.path.lexists(r):
+                s=r.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_nlink==1 and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o600 and s.st_size<1024
+                assert json.loads(r.read_bytes())==value
+            else:
+                assert sorted(x.name for x in p.iterdir())==['wheels']
+                fd=os.open(r,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                try:
+                    data=(json.dumps(value,sort_keys=True)+'\n').encode(); assert os.write(fd,data)==len(data); os.fsync(fd)
+                finally: os.close(fd)
+                fd=os.open(p,os.O_RDONLY|os.O_DIRECTORY); os.fsync(fd); os.close(fd)
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Check retained public Ansible wheel metadata before any copy
+      ansible.builtin.stat:
+        path: '{{ item.retained }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      loop: '{{ reboot_wheels | selectattr("retained", "defined") | list }}'
+      register: reboot_retained_metadata
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Refuse oversized redirected or linked retained source before copying
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.size == item.item.size
+      loop: '{{ reboot_retained_metadata.results }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Reuse existing official verified Ansible wheel never global CLI installation
+      ansible.builtin.copy:
+        src: '{{ item.retained }}'
+        dest: '{{ reboot_wheel_stage }}/{{ item.filename }}'
+        mode: '0600'
+        force: false
+        follow: false
+      loop: '{{ reboot_wheels | selectattr("retained", "defined") | list }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Download exact public wheels with EARLY file-size wall-time and SHA limits
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ playbook_dir }}/reboot_fetch_wheel.py', --url, '{{ item.url }}', --filename, '{{ item.filename }}', --size, '{{ item.size }}', --sha256, '{{ item.sha256 }}']
+      loop: '{{ reboot_wheels | selectattr("url", "defined") | list }}'
+      timeout: 90
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Verify every staged public wheel including retained core before transfer
+      ansible.builtin.stat:
+        path: '{{ reboot_wheel_stage }}/{{ item.filename }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop: '{{ reboot_wheels }}'
+      register: reboot_wheel_metadata
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Require exact regular single-link root-owned public artifacts
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.size == item.item.size
+          - item.stat.checksum == item.item.sha256
+      loop: '{{ reboot_wheel_metadata.results }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Transfer only the enumerated public wheels and source assets never keys or env
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '{{ item.destination }}'
+        mode: '0600'
+        follow: false
+      loop: '{{ reboot_copy_files }}'
+      vars:
+        reboot_copy_files: '{{ reboot_public_file_list }}'
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Create venv only in the private Web task workspace
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -m, venv, --without-pip, '{{ reboot_web_root }}/venv']
+        creates: '{{ reboot_web_root }}/venv/bin/python3'
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Install only pinned wheels offline without resolving executing builds or caching
+      ansible.builtin.command:
+        argv:
+          - '{{ reboot_web_root }}/venv/bin/python3'
+          - -I
+          - -B
+          - -c
+          - |
+            import hashlib,pathlib,runpy,sys
+            root=pathlib.Path('/root/.local/security-kernel-reboot-20261023-task02')
+            wheel=root/'wheels/pip-26.2.2-py3-none-any.whl'
+            assert hashlib.sha256(wheel.read_bytes()).hexdigest()=='fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70'
+            sys.path.insert(0,str(wheel))
+            sys.argv=['pip','--disable-pip-version-check','install','--no-cache-dir','--no-index','--no-deps','--only-binary=:all:','--require-hashes','--find-links',str(root/'wheels'),'-r',str(root/'reboot_requirements.txt')]
+            runpy.run_module('pip',run_name='__main__')
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Require actual coherent installed controller dependency family
+      ansible.builtin.command:
+        argv: ['{{ reboot_web_root }}/venv/bin/python3', -I, -m, pip, --disable-pip-version-check, check]
+      delegate_to: controller_web
+      changed_when: false
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Require actual Ansible and pip versions not a receipt-only declaration
+      ansible.builtin.command:
+        argv: ['{{ reboot_web_root }}/venv/bin/python3', -I, -B, -c, "import importlib.metadata as m; assert m.version('ansible-core')=='2.21.5' and m.version('pip')=='26.2.2'"]
+      delegate_to: controller_web
+      changed_when: false
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Inspect only private-key and pin metadata never checksum MIME or contents
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      loop: [/root/.ssh/security-controller-20261023-host-patch-02/id_ed25519, /root/.ssh/security-controller-20261023-host-patch-02/known_hosts]
+      delegate_to: controller_web
+      register: reboot_ssh_metadata
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Require existing reviewed task02 credential metadata before strict roundtrip
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.mode == '0600'
+      loop: '{{ reboot_ssh_metadata.results }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Prove strict reverse SSH with Web-local private key never reading its bytes
+      ansible.builtin.command:
+        argv: [/usr/bin/ssh, -F, /dev/null, -i, /root/.ssh/security-controller-20261023-host-patch-02/id_ed25519, -p, '22', -o, BatchMode=yes, -o, IdentitiesOnly=yes, -o, ForwardAgent=no, -o, StrictHostKeyChecking=yes, -o, GlobalKnownHostsFile=/dev/null, -o, UserKnownHostsFile=/root/.ssh/security-controller-20261023-host-patch-02/known_hosts, -o, HostKeyAlgorithms=ssh-ed25519, -o, ConnectTimeout=10, root@65.109.216.187, /usr/bin/true]
+      delegate_to: controller_web
+      changed_when: false
+      timeout: 20
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Hash only enumerated public source assets never SSH private keys
+      ansible.builtin.stat:
+        path: '{{ playbook_dir }}/{{ item }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop: '{{ reboot_assets }}'
+      register: reboot_asset_metadata
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Build public content-addressed source inventory
+      ansible.builtin.set_fact:
+        reboot_asset_digests: '{{ reboot_asset_digests | default({}) | combine({item.item: item.stat.checksum}) }}'
+      loop: '{{ reboot_asset_metadata.results }}'
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Write only public asset integrity and independent controller-ready receipts
+      ansible.builtin.copy:
+        dest: '{{ reboot_web_root }}/{{ item.name }}'
+        content: '{{ item.payload | to_nice_json }}'
+        mode: '0600'
+        follow: false
+      loop:
+        - name: reboot_assets.json
+          payload: '{{ reboot_asset_digests }}'
+        - name: controller_ready.json
+          payload:
+            schema: security_reboot_controller_ready/1
+            status: ready
+            task_id: host-patch-02
+            source_revision: '{{ reboot_source_head.stdout }}'
+            ansible_version: 2.21.5
+            strict_reverse_ssh: true
+            web_machine_id: '{{ (reboot_web_facts.stdout | from_json).web_machine_id }}'
+            web_boot_id: '{{ (reboot_web_facts.stdout | from_json).web_boot_id }}'
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Bound public ready receipt before slurping never a private credential
+      ansible.builtin.stat:
+        path: '{{ reboot_web_root }}/controller_ready.json'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      delegate_to: controller_web
+      register: reboot_ready_metadata
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Require tiny public regular single-link owned ready evidence
+      ansible.builtin.assert:
+        that:
+          - reboot_ready_metadata.stat.isreg
+          - not reboot_ready_metadata.stat.islnk
+          - reboot_ready_metadata.stat.uid == 0
+          - reboot_ready_metadata.stat.nlink == 1
+          - reboot_ready_metadata.stat.mode == '0600'
+          - reboot_ready_metadata.stat.size < 4096
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Read only public ready receipt no keys environment or application data
+      ansible.builtin.slurp:
+        src: '{{ reboot_web_root }}/controller_ready.json'
+      delegate_to: controller_web
+      register: reboot_ready_receipt
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Retain public ready evidence on native controller for manifest binding
+      ansible.builtin.copy:
+        dest: /root/trading-bot/trading_bot/.local/security-maintenance-20261023-reboot-controller-ready.json
+        content: '{{ reboot_ready_receipt.content | b64decode }}'
+        mode: '0600'
+        follow: false
+      when: reboot_bootstrap_action == 'setup'
+
+    - name: Require explicit bound native manifest SHA nonce and published source before launch
+      ansible.builtin.assert:
+        that:
+          - reboot_manifest_sha256 is match('^[a-f0-9]{64}$')
+          - reboot_nonce is match('^[a-f0-9-]{36}$')
+      when: reboot_bootstrap_action == 'start'
+
+    - name: Revalidate native exact current manifest before any durable controller launch
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ playbook_dir }}/reboot_guard.py', check, --manifest, /root/secure-envs/trading-bot/release-control/security-kernel-reboot-20261023-02.manifest.json, --manifest-sha256, '{{ reboot_manifest_sha256 }}']
+      changed_when: false
+      no_log: true
+      when: reboot_bootstrap_action == 'start'
+
+    - name: Transfer only the scoped public control manifest without runtime data or env
+      ansible.builtin.copy:
+        src: /root/secure-envs/trading-bot/release-control/security-kernel-reboot-20261023-02.manifest.json
+        dest: '{{ reboot_web_root }}/reboot_manifest.json'
+        mode: '0600'
+        force: false
+        follow: false
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'start'
+
+    - name: Start only the reviewed task02 durable runner after native manifest preflight
+      ansible.builtin.command:
+        argv: [/usr/bin/systemd-run, '--unit=security-kernel-reboot-task02-{{ reboot_nonce }}', --property=Type=exec, --property=Restart=no, --property=RuntimeMaxSec=3600, --property=TimeoutStopSec=20, --property=KillMode=control-group, --property=UMask=0077, '--property=WorkingDirectory={{ reboot_web_root }}', --property=NoNewPrivileges=yes, --property=ProtectSystem=strict, '--property=ReadWritePaths={{ reboot_web_root }}', '{{ reboot_web_root }}/venv/bin/python3', -I, -B, '{{ reboot_web_root }}/reboot_controller.py', --apply, ONE-BOT-KERNEL-REBOOT-20261023, --manifest-sha256, '{{ reboot_manifest_sha256 }}', --nonce, '{{ reboot_nonce }}', --source-revision, '{{ reboot_source_head.stdout }}']
+      delegate_to: controller_web
+      when: reboot_bootstrap_action == 'start'

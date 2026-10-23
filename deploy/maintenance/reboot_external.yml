@@ -1,0 +1,47 @@
+---
+# Runs ON WEB under its independent durable oneshot, not in the Codex session.
+- name: One guarded native Bot reboot followed by independent restoration
+  hosts: reboot_bot
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse implicit apply third targets and a mismatched fixed operation
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['reboot_bot']
+          - ansible_host == '65.109.216.187'
+          - ansible_port | int == 22
+          - ansible_user == 'root'
+          - reboot_apply | default(false)
+          - reboot_manifest == '/root/secure-envs/trading-bot/release-control/security-kernel-reboot-20261023-02.manifest.json'
+          - reboot_manifest_sha256 is match('^[a-f0-9]{64}$')
+
+    - name: Require fresh native preflight before exactly one reboot request
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, /root/trading-bot/trading_bot/deploy/maintenance/reboot_guard.py, check, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}']
+      changed_when: false
+      no_log: true
+
+    - name: Quiesce under native fences then reboot once and prove boot ID changed
+      ansible.builtin.reboot:
+        reboot_command: '/usr/bin/python3 -I -B /root/trading-bot/trading_bot/deploy/maintenance/reboot_guard.py prepare --manifest {{ reboot_manifest | quote }} --manifest-sha256 {{ reboot_manifest_sha256 | quote }} --apply'
+        boot_time_command: /usr/bin/cat /proc/sys/kernel/random/boot_id
+        test_command: /usr/bin/true
+        connect_timeout: 5
+        reboot_timeout: 900
+        pre_reboot_delay: 0
+        post_reboot_delay: 2
+      no_log: true
+
+    - name: Independently verify new kernel mounts identities and restore exact runtime
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, /root/trading-bot/trading_bot/deploy/maintenance/reboot_guard.py, restore, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}', --apply]
+      timeout: 1800
+      no_log: true
+
+    - name: Retrieve only the bounded public completed receipt before credential cleanup
+      ansible.builtin.fetch:
+        src: /root/secure-envs/trading-bot/release-control/security-kernel-reboot-20261023-02.result.json
+        dest: '{{ playbook_dir }}/native-result.json'
+        flat: true
+        validate_checksum: true

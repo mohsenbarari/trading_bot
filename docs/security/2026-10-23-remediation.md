@@ -350,6 +350,24 @@ pull/import/build غیرضروری روی این میزبان پرهیز شود.
 
 ### حادثهٔ آزمون و پیشگیری از تکرار
 
+پیگیری آزمون‌های CI: سه fixture دیگر بدون تغییر گاردهای production اصلاح شدند:
+مدل UID فقط مقصد SSH ساختگی؛ دستکاری صریح فایل read-only توسط مالک؛ و حذف
+downgrade نامرتبط از teardown دیتابیس scratch که runner مالک حذف آن است.
+۵ آزمون هدفمند واقعاً با UID65534، شبکه‌بسته و mountهای فقط‌خواندنی پاس شد
+(81.956s، exit0)؛ اجرای PostgreSQL پنج suite هنوز اثبات نشده است. اجرای قبلی
+با وجود پایان تست‌ها به timeout بیرونی رسید و pass کامل فرمان محسوب نمی‌شود.
+دو locator مرورگر با منوی واقعی Excel/PDF و attribute واقعی feedback تطبیق
+یافتند؛ ۱۸ سناریو collect شد، نه اینکه اجرای مرورگر موفق اعلام شود. شکست
+viewport جداگانه هنوز باز است و حداقل فاصلهٔ 12px کاهش داده نشده است.
+حداقل نسخهٔ bootstrap بسته‌های pip/setuptools/wheel و pin صریح anyio4.15.1/
+cryptography50.0.2 مانع مصرف wheel سازگار ولی آسیب‌پذیر می‌شود؛ ۹ آزمون codec/
+dependency با warnings=error پاس شدند. این‌ها شواهد سورس‌اند، نه فعال‌سازی اپ.
+
+بستهٔ مستقل reboot کرنل Bot با دو بازبین، ۴۶ آزمون hermetic و سه syntax-check
+Ansible پذیرفته شد؛ source و runbook در `deploy/maintenance/reboot_*` و
+`docs/security/2026-10-23-external-kernel-reboot.md` هستند. تا دریافت receipt
+واقعیِ کرنل147 و سلامت همان runtime، رفع عملیاتی این finding اعلام نمی‌شود.
+
 در اجرای اولیهٔ fixture اصلاح‌شده، اضافه‌شدن عضو پنجم به tuple چهارعضویِ
 context باعث شد `_run` mock نشود و systemctl واقعی به پنج واحد Bot برسد.
 آزمون متوقف شد. دقیقاً سه enablement ثبت‌شدهٔ قبلی و اجرای سرویس/timerها
