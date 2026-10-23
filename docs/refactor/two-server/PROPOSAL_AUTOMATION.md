@@ -822,3 +822,34 @@ exception اصلی و fallback تشخیصی را پوشش دهند. همهٔ ۱�
 هر دو نقش با frame شناخته‌شده و READY، cleanup عادی، گیت Git و شواهد واقعی Root
 نیاز دارد؛ موفقیتِ synthetic یا متن این سند به‌تنهایی سلامت چرخه، پذیرش Source،
 پیشرفت Stage یا صرفه‌جویی را اثبات نمی‌کند.
+
+### 797R — complete terminal budget rejection is not provider silence
+
+The consumed C004 Worker returned a complete SUCCESS envelope in about 115.096
+seconds. Its new test was 14,714 UTF-8 bytes against an immutable 12,000-byte
+limit. Input was fully written, stderr was empty, and stdout was retained, but
+the final-frame callback suppressed that definite validation error and capture
+waited for the 915-second deadline. That failed Task/reservation remains
+unaccepted and immutable: this repair neither replays nor adopts its response.
+
+The existing new-test byte gate now attaches private, in-memory provenance to
+the same original ProposalError. Only the exact worker error, private token,
+canonical new-file path, immutable cap and actual UTF-8 excess may escape the
+strict final-frame callback. The original exception type, message and identity
+are preserved. This marker is never serialized into a proposal, completion
+observation or status contract. Unmarked/lookalike/subclass errors, existing or
+unknown paths, non-worker roles, framing/CID/model/tool failures, partial output
+and stderr do not gain recovery eligibility.
+
+A fast rejection is not successful completion, EOF, recovery or acceptance.
+The existing failure path still kills the owned process group, reaps the direct
+child, closes every owned pipe/file, disposes the private CLI and publishes only
+BLOCKED evidence. No result, proposal patch or accepted completion proof may be
+published. Valid final results retain the real five-second shutdown grace and
+all existing finality, cleanup and proof gates.
+
+No byte cap, model, retry limit, completion schema/outcome, default capture or
+Opus path changes. This budget error is still not an OUTPUT retry: avoiding a
+known-wrong 915-second wait does not authorize automatic correction or replay.
+Any next legitimate unit must independently produce an in-budget proposal and
+pass review, Native tests, normal Git and SDK checkpoint acceptance.

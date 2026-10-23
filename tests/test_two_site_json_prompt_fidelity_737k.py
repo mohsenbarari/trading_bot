@@ -12,6 +12,10 @@ import pytest
 
 from scripts import two_site_json_prompt_fidelity as fidelity
 from tests import two_site_runner_752_fixture as seventh
+from tests.test_two_site_terminal_output_rejection import (
+    _PRE797_SOURCE, _PRE797_AST, _SOURCE797, _AST797,
+    _fixed_797_pair, _historical752_source,
+)
 
 FUTURE_RUNNER_SOURCE_SHA256 = "cb5f6fa91ce195e6dbd5dffa73183ddbe440e05829bbbdd100c9dfef015b7bf6"
 FUTURE_RUN_AST_SHA256 = "9785eb03a32ac1f13cd6ea197e96b64101eb6c1bfa4d3a7859052a3508dfea94"
@@ -96,6 +100,9 @@ def _apply_ndjson_transport(source, *, inverse=False):
 def text_baseline_if_needed(source):
     """Invert only exact known print/737K changes, never normalize unknown Source."""
     source_sha = _digest(source)
+    if source_sha in {_SOURCE797, _PRE797_SOURCE}:
+        source = _historical752_source(source)
+        source_sha = _digest(source)
     if source_sha == seventh.SOURCE_752_SHA:
         source = seventh.apply_generation_completion_transport(source.decode(), inverse=True).encode()
         assert _digest(source) == _NDJSON_SOURCE
@@ -165,6 +172,8 @@ def _three_versions():
     expected[_EMPTY_PRINT_SOURCE] = _EMPTY_PRINT_AST
     expected[_NDJSON_SOURCE] = _NDJSON_AST
     expected[seventh.SOURCE_752_SHA] = seventh.RUN_752_AST_SHA
+    expected[_PRE797_SOURCE] = _PRE797_AST
+    expected[_SOURCE797] = _AST797
     assert fidelity._RUNNER_IDENTITIES == expected
     assert fidelity._CONTEXT_CALL_LINES == {
         _OLD_AST: 3190, _TEXT_AST: 3190, FUTURE_RUN_AST_SHA256: FUTURE_CONTEXT_LINE,
@@ -172,12 +181,14 @@ def _three_versions():
         _EMPTY_PRINT_AST: 3237,
         _NDJSON_AST: _NDJSON_CONTEXT_LINE,
         seventh.RUN_752_AST_SHA: seventh.CONTEXT_752_LINE,
+        _PRE797_AST: 3609, _AST797: 3653,
     }
     for body in versions:
         run_ast = ast.dump(_run_node(body), include_attributes=True).encode()
         assert _digest(run_ast) == expected[_digest(body)]
     assert actual_source in versions or _digest(actual_source) in {
         _PRINT_SOURCE, _EMPTY_PRINT_SOURCE, _NDJSON_SOURCE, seventh.SOURCE_752_SHA,
+        _PRE797_SOURCE, _SOURCE797,
     }
     if _digest(actual_source) in {_PRINT_SOURCE, _EMPTY_PRINT_SOURCE}:
         assert future.count(_GENERATION_COMMAND) == 1
@@ -187,11 +198,12 @@ def _three_versions():
         empty = future.replace(_GENERATION_COMMAND, _EMPTY_PRINT_COMMAND, 1)
         assert _digest(empty) == _EMPTY_PRINT_SOURCE
         assert _apply_ndjson_transport(empty) == actual_source
-    if _digest(actual_source) == seventh.SOURCE_752_SHA:
+    if _digest(actual_source) in {seventh.SOURCE_752_SHA, _PRE797_SOURCE, _SOURCE797}:
+        historical = _historical752_source(actual_source)
         empty = future.replace(_GENERATION_COMMAND, _EMPTY_PRINT_COMMAND, 1)
         ndjson = _apply_ndjson_transport(empty)
         assert _digest(ndjson) == _NDJSON_SOURCE
-        assert seventh.apply_generation_completion_transport(ndjson.decode()).encode() == actual_source
+        assert seventh.apply_generation_completion_transport(ndjson.decode()).encode() == historical
     return runner, versions
 
 
@@ -285,6 +297,8 @@ def test_future_wrong_fixed_context_line_fails_closed(monkeypatch):
 def test_sixth_transport_exact_inverse_and_partial_changes_keep_exact_historical_identity():
     runner, _ = _three_versions()
     actual = fidelity._read_runner_source()
+    if _digest(actual) in {_PRE797_SOURCE, _SOURCE797}:
+        actual = _historical752_source(actual)
     if _digest(actual) == seventh.SOURCE_752_SHA:
         actual = seventh.apply_generation_completion_transport(actual.decode(), inverse=True).encode()
     assert _digest(actual) == _NDJSON_SOURCE
@@ -310,13 +324,15 @@ def test_sixth_transport_exact_inverse_and_partial_changes_keep_exact_historical
 
 def test_seventh_exact_inverse_and_each_partial_hunk_remain_closed():
     runner, _ = _three_versions()
-    current = fidelity._read_runner_source()
+    actual = fidelity._read_runner_source()
+    current = (_historical752_source(actual)
+               if _digest(actual) in {_PRE797_SOURCE, _SOURCE797} else actual)
     assert _digest(current) == seventh.SOURCE_752_SHA
     old = seventh.apply_generation_completion_transport(current.decode(), inverse=True).encode()
     assert _digest(old) == _NDJSON_SOURCE
     assert seventh.apply_generation_completion_transport(old.decode()).encode() == current
     assert _digest(ast.dump(_run_node(current), include_attributes=True).encode()) == seventh.RUN_752_AST_SHA
-    fidelity._validated_run_code(current, runner.run)
+    fidelity._validated_run_code(current, _unexecuted_original(runner, current))
     asset = Path(seventh.__file__).parent / "fixtures/two_site_runner_752_source_inverse.json"
     raw = asset.read_bytes()
     assert len(raw) == seventh.ASSET_BYTES and _digest(raw) == seventh.ASSET_SHA
@@ -331,3 +347,7 @@ def test_seventh_exact_inverse_and_each_partial_hunk_remain_closed():
                 fidelity._validated_run_code(partial, runner.run)
     with pytest.raises(AssertionError, match="unknown or partial"):
         seventh.apply_generation_completion_transport(current.decode() + "\n", inverse=True)
+
+def test_actual797_and_preexisting_session_fix_have_exact_inverse_and_actual_code_binding():
+    from tests.test_two_site_terminal_output_rejection import _assert_actual797_compatibility
+    _assert_actual797_compatibility()

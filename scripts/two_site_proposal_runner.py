@@ -2555,6 +2555,10 @@ def normalize_result(
     return normalized_result
 
 
+# Private provenance for one already-validated terminal rejection; never serialized.
+_TERMINAL_NEW_TEST_BUDGET = object()
+
+
 def validate_result(
     result: dict,
     task: dict,
@@ -2616,8 +2620,13 @@ def validate_result(
         if SECRET.search(change["content"]) or "\0" in change["content"]:
             raise ProposalError("unsafe generated content")
         if name in new_test_limits:
-            if len(change["content"].encode("utf-8")) > new_test_limits[name]:
-                raise ProposalError(f"new test file content exceeds budget: {name}")
+            actual_bytes = len(change["content"].encode("utf-8"))
+            if actual_bytes > new_test_limits[name]:
+                error = ProposalError(f"new test file content exceeds budget: {name}")
+                error._terminal_new_test_budget = (
+                    _TERMINAL_NEW_TEST_BUDGET, name, new_test_limits[name], actual_bytes,
+                )
+                raise error
         if role == "worker" and success and name.endswith(".py"):
             try:
                 compile(change["content"], name, "exec", dont_inherit=True)
@@ -3082,6 +3091,41 @@ def _validate_final_generation_frame(
         raw, task, sources, role, force_full_paths, expected_model,
         original_sources=original_sources,
     )
+
+
+def _generation_final_frame_check(
+    stdout: bytes, stderr: bytes, task: dict, sources: dict, role: str,
+    force_full_paths: tuple[str, ...], expected_model: str, expected_cid: str,
+    *, original_sources: dict | None = None,
+) -> bool:
+    """Keep recovery closed; promptly reject only the owned worker byte gate."""
+    if stderr:
+        return False
+    try:
+        _validate_final_generation_frame(
+            stdout.decode("utf-8"), task, sources, role, force_full_paths,
+            expected_model, expected_cid, original_sources=original_sources,
+        )
+    except ProposalError as error:
+        if type(error) is ProposalError and role == "worker":
+            evidence = error.__dict__.get("_terminal_new_test_budget")
+            if (type(evidence) is tuple and len(evidence) == 4
+                    and evidence[0] is _TERMINAL_NEW_TEST_BUDGET
+                    and type(evidence[1]) is str
+                    and type(evidence[2]) is int and type(evidence[3]) is int
+                    and 0 < evidence[2] < evidence[3]
+                    and str(error) == "new test file content exceeds budget: " + evidence[1]):
+                origin = sources if original_sources is None else original_sources
+                try:
+                    limits = _new_test_file_limits(task, origin)
+                except ProposalError:
+                    return False
+                if limits.get(evidence[1]) == evidence[2]:
+                    raise
+        return False
+    except UnicodeError:
+        return False
+    return True
 
 
 _GENERATION_PROOF_NAME = "transport-completion.json"
@@ -3719,17 +3763,11 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
                     raise ProposalError("response schema binding changed before dispatch")
                 def final_frame_check(stdout: bytes, stderr: bytes) -> bool:
-                    if stderr:
-                        return False
-                    try:
-                        _validate_final_generation_frame(
-                            stdout.decode("utf-8"), task, active_sources, role,
-                            force_full_paths, role_model, profile.conversation_id,
-                            original_sources=sources,
-                        )
-                    except (ProposalError, UnicodeError):
-                        return False
-                    return True
+                    return _generation_final_frame_check(
+                        stdout, stderr, task, active_sources, role,
+                        force_full_paths, role_model, profile.conversation_id,
+                        original_sources=sources,
+                    )
 
                 if role_model in {WORKER_MODEL, MODEL}:
                     generation_policy = GenerationRecoveryPolicy(final_frame_check)
