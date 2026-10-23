@@ -656,7 +656,13 @@ async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture)
   }, fixture)
   await gotoWithWebKitRetry(page, '/')
   await expect(page).not.toHaveURL(/\/login$/)
-  await expect(page.locator('button.notif-btn[aria-label="اعلان‌ها"]:visible').first()).toBeVisible()
+  const notificationButton = page.locator('button.notif-btn:visible')
+  await expect(notificationButton).toHaveCount(1)
+  await expect(notificationButton).toBeVisible()
+  await expect(notificationButton).toHaveAttribute(
+    'aria-label',
+    /^(?:اعلان‌ها|اعلان‌های خوانده‌نشده)$/u,
+  )
 }
 
 function chatMessageContent(page: Page, content: string) {

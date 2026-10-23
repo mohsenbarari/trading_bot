@@ -188,3 +188,32 @@ alone is not proof of dependency compatibility; old/new comparisons above have
 deliberately limited scope. Mutation's original pytest error and the full-suite
 expiry interaction remain open, and complete passing release evidence is still
 required.
+
+## Browser follow-up after bind-path recovery
+
+On `8dcf27b1`, run `39998590240` passed the three initial gates and reached real
+browser assertions. At diagnosis, five browser shards had passed; Chromium
+shard 4 reported 18 failures, one flaky retry-pass, 26 skipped and 29 passed;
+Firefox shard 4 reported 19 failures, 26 skipped and 29 passed. These are not
+complete passing E2E results. The responsive 414px case was flaky, not the final
+failure attributed to it.
+
+The observed blockers were stale notification/registration selectors and absent
+host-side mutation authorization. The notification login helper expected only
+the read-state label although the existing UI legitimately renders the unread
+label. Registration expected obsolete spelling/ARIA/status text and used an
+expired fixed invitation fixture. Six trade-history cases correctly refused
+mutation because the Playwright process did not receive the required target and
+confirmation. A container's `.env` never supplies that process authorization.
+
+The focused correction changes only E2E tests and both hosted-runner workflows:
+require a unique visible notification control with one of the two exact labels;
+use current exact registration labels, a future invitation and its exact rendered
+expiry; authorize mutation explicitly for the disposable local Docker stack,
+loopback backend and exact app/Redis names. `mutationRuntime` and product code
+are unchanged. No assertion/negative case, skip, retry or timeout is relaxed.
+
+Seven hermetic CI/selector contracts passed independently and in root's rerun.
+Playwright collected 15 cases in two affected files with the existing toolchain;
+collection is not browser execution. A new full CI run must establish actual
+browser acceptance; the unrelated coverage blockers above remain open.

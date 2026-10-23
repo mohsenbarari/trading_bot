@@ -299,6 +299,12 @@ jobs:
         env:
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
+          # Explicitly authorize only this hosted runner's disposable stack.
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+          E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+          E2E_APP_CONTAINER_NAME: trading_bot_app
+          E2E_REDIS_CONTAINER_NAME: trading_bot_redis
         shell: bash
         run: |
           case "${{ matrix.browser }}" in
