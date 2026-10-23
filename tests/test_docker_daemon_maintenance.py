@@ -16,6 +16,7 @@ import sys
 import time
 import unittest
 from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import yaml
 
@@ -34,6 +35,7 @@ def fixture():
               'project': 'owned', 'mounts': [mount], 'started_at': 'prior-time'}
     plan = {'runtime_snapshot': '/snapshot', 'managed_project_labels': ['owned'],
             'docker_root': '/owned/docker',
+            'health_probes': [{'id': IDENT, 'url': 'http://127.0.0.1:8000/api/config'}],
             'rollback_packages': [{'name': name, 'version': 'old'} for name in guard.PACKAGES],
             'datastore_ids': [IDENT], 'datastore_probes': [{'id': IDENT, 'kind': 'redis'}], 'units': [
                 {'name': 'owned.timer', 'kind': 'timer', 'enabled': 'enabled', 'active': True},
@@ -42,7 +44,7 @@ def fixture():
 
 
 class RuntimeGuardTests(unittest.TestCase):
-    def invoke(self, phase, mutate=None, ids=None, unit_active='active', docker='29.9.2', containerd='2.4.2', installed=None, pong='PONG', recovery=False):
+    def invoke(self, phase, mutate=None, ids=None, unit_active='active', docker='29.9.2', containerd='2.4.2', installed=None, pong='PONG', httpstatus='200', recovery=False):
         plan, snapshot = fixture()
         current = deepcopy(snapshot['containers'][0])
         current['health'] = 'healthy'
@@ -66,7 +68,9 @@ class RuntimeGuardTests(unittest.TestCase):
             if argv[1] == 'inspect':
                 return json.dumps(current)
             if argv[1] == 'exec':
-                return pong
+                if argv[3] == '/usr/local/bin/python' and isinstance(httpstatus, Exception):
+                    raise httpstatus
+                return httpstatus if argv[3] == '/usr/local/bin/python' else pong
             if argv[1] == 'version':
                 return docker
             if argv[1] == 'info':
@@ -132,6 +136,67 @@ class RuntimeGuardTests(unittest.TestCase):
     def test_real_redis_pong_contract_is_not_just_container_running(self):
         with self.assertRaisesRegex(guard.Refusal, 'redis_not_ready'):
             self.invoke('healthy', pong='NOAUTH')
+
+    def test_frozen_container_loopback_health_success_and_failure(self):
+        self.invoke('healthy')
+        with self.assertRaisesRegex(guard.Refusal, 'container_health_probe_failed'):
+            self.invoke('healthy', httpstatus='404')
+        with self.assertRaisesRegex(guard.Refusal, 'container_health_probe_failed'):
+            self.invoke('healthy', httpstatus=subprocess.CalledProcessError(1, 'public-probe'))
+
+    def test_health_probe_requires_exact_prior_running_container_and_public_url(self):
+        plan, snapshot = fixture()
+        guard.health_contract(plan, snapshot['containers'])
+        plan['health_probes'][0]['id'] = 'f' * 64
+        with self.assertRaisesRegex(guard.Refusal, 'health_container_not_prior_running'):
+            guard.health_contract(plan, snapshot['containers'])
+        plan['health_probes'][0]['id'] = IDENT
+        snapshot['containers'][0]['running'] = False
+        with self.assertRaisesRegex(guard.Refusal, 'health_container_not_prior_running'):
+            guard.health_contract(plan, snapshot['containers'])
+        snapshot['containers'][0]['running'] = True
+        for url in ('https://outside.example/api/config', 'http://127.0.0.1:8000/api/config?token=x',
+                    'http://user:secret@127.0.0.1:8000/api/config', 'http://127.0.0.1:99999/api/config'):
+            plan['health_probes'][0]['url'] = url
+            with self.subTest(url=url), self.assertRaisesRegex(guard.Refusal, 'health_target_invalid'):
+                guard.health_contract(plan, snapshot['containers'])
+
+    def test_at_least_one_combined_host_or_container_health_target_is_required(self):
+        plan, snapshot = fixture()
+        plan['health_probes'] = []
+        with self.assertRaisesRegex(guard.Refusal, 'health_targets_required'):
+            guard.health_contract(plan, snapshot['containers'])
+        plan['health_urls'] = ['http://127.0.0.1:8000/api/config']
+        guard.health_contract(plan, snapshot['containers'])
+
+    def test_container_probe_is_status_only_no_environment_body_or_redirect_follow(self):
+        self.assertIn('ProxyHandler({})', guard.CONTAINER_HTTP_PROBE)
+        self.assertIn('timeout=5', guard.CONTAINER_HTTP_PROBE)
+        self.assertIn('return None', guard.CONTAINER_HTTP_PROBE)
+        self.assertNotIn('.read(', guard.CONTAINER_HTTP_PROBE)
+        self.assertNotIn('environ', guard.CONTAINER_HTTP_PROBE)
+        self.assertNotIn('Authorization', guard.CONTAINER_HTTP_PROBE)
+
+    def test_actual_stdlib_probe_does_not_read_body_environment_or_accept_non200(self):
+        for status in (200, 301, 404):
+            opener = MagicMock()
+            response = opener.open.return_value.__enter__.return_value
+            response.status = status
+            response.read.side_effect = AssertionError('Body read forbidden')
+            namespace = {}
+            with patch('sys.argv', ['probe', 'http://127.0.0.1:8000/api/config']), patch('urllib.request.build_opener', return_value=opener) as factory, patch('urllib.request.getproxies', side_effect=AssertionError('Environment proxy read forbidden')), patch('builtins.print') as emit:
+                if status == 200:
+                    exec(compile(guard.CONTAINER_HTTP_PROBE, '<public-health-fixture>', 'exec'), namespace)
+                    emit.assert_called_once_with('200')
+                    handler = factory.call_args.args[1]
+                    self.assertIsNone(handler.redirect_request(None, None, 301, None, None, 'http://outside.example'))
+                else:
+                    with self.assertRaises(SystemExit) as error:
+                        exec(compile(guard.CONTAINER_HTTP_PROBE, '<public-health-fixture>', 'exec'), namespace)
+                    self.assertEqual(error.exception.code, 1)
+                    emit.assert_not_called()
+                opener.open.assert_called_once_with('http://127.0.0.1:8000/api/config', timeout=5)
+                response.read.assert_not_called()
 
 
 class FileAndAtomicGuardTests(unittest.TestCase):

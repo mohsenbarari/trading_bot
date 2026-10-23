@@ -43,7 +43,7 @@ Kernel and remote Ubuntu host remediation remain separate, unresolved operations
    IDs first. Require real `pg_isready`/`redis-cli ping` and any image health checks.
 8. Start only remaining prior-running IDs; require identity/mount parity, installed
    five target versions, actual Docker server29.9.2/containerd server2.4.2, and public
-   localhost API200. Only then restore restart policies, previously active daemons
+   API200 from its explicitly frozen loopback surface. Only then restore restart policies, previously active daemons
    and timers. Originally stopped IDs remain stopped; oneshots are not double-run.
 
 ## Private manifest contract
@@ -73,11 +73,19 @@ receipt parents must not be symlinked or writable by another identity.
 | `docker_root`, `mounts` | Actual DockerRootDir and active directories `{path,device,inode,mount_id}`; minimum coverage includes checkout, secure-envs, `/srv/trading-bot/production-data`, DockerRootDir, backup directory and verified Golden SQLite parent `/root/golden_bot`. `mount_id` is native `findmnt -n -o ID -T PATH` output. Never replace or relocate the active attached-volume bind. |
 | `datastore_ids` | Unique, previously running PostgreSQL/Redis IDs; never container names or newly created substitutes. |
 | `datastore_probes` | Exactly one per ID: `{id,kind:redis}` or `{id,kind:postgres,user,database}`; public identifiers only, no password or environment reads. |
-| `health_urls` | Explicit public `http://127.0.0.1:PORT/path` smoke URLs, no credentials, queries, redirects or response logging. |
+| `health_urls` | Optional host-loopback public `http://127.0.0.1:PORT/path` URLs, no credentials, queries, redirects or response logging. |
+| `health_probes` | Optional `{id,url}` probes inside exact prior-running frozen containers: `/usr/local/bin/python -I -B` uses only stdlib urllib, explicit no-proxy/no-redirect, five-second timeout, status200 only, and never reads/logs response body or runtime environment. At least one host or container probe combined is mandatory. |
 
 The protected paths are hardcoded in the guard. **Do not repair** stale marker or
 journal inode data, renew receipts, adopt an old reservation or run inode recovery
 as part of this maintenance. The current marker/journal bytes are bound as-is.
+
+The foreign API intentionally rejects a published-host-port request that arrives
+from the Docker bridge rather than trusted loopback. Its `/api/config`404 is not
+patched or bypassed: bind the exact existing application container and probe its
+own `127.0.0.1:8000/api/config`, which returns200. This is container-local health,
+not a claim that the host-published endpoint must return200; role/auth guards and
+headers remain unchanged.
 
 ## Invocation and validation
 

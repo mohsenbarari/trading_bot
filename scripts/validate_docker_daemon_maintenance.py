@@ -42,6 +42,20 @@ INSPECT = ('{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},'
            '"running":{{json .State.Running}},"restart_policy":{{json .HostConfig.RestartPolicy}},'
            '"project":{{json (index .Config.Labels "com.docker.compose.project")}},'
            '"mounts":{{json .Mounts}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}')
+CONTAINER_HTTP_PROBE = '''import sys, urllib.request
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, url):
+        return None
+try:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    with opener.open(sys.argv[1], timeout=5) as response:
+        status = response.status
+    if status != 200:
+        raise SystemExit(1)
+except Exception:
+    raise SystemExit(1) from None
+print('200')
+'''
 
 
 class Refusal(RuntimeError):
@@ -136,6 +150,17 @@ def mount_fence(plan):
         require(command(['/usr/bin/findmnt', '-n', '-o', 'ID', '-T', mount['path']]) == mount['mount_id'], 'mount_changed')
 
 
+def health_contract(plan, containers):
+    urls, probes = plan.get('health_urls', []), plan.get('health_probes', [])
+    require(isinstance(urls, list) and isinstance(probes, list) and 1 <= len(urls) + len(probes) <= 16, 'health_targets_required')
+    require(len(set(urls)) == len(urls) and len({(p['id'], p['url']) for p in probes}) == len(probes), 'duplicate_health_target')
+    prior_running = {c['id'] for c in containers if c['running']}
+    require(all(p['id'] in prior_running for p in probes), 'health_container_not_prior_running')
+    for url in urls + [p['url'] for p in probes]:
+        match = re.fullmatch(r'http://127\.0\.0\.1:([0-9]{1,5})/[a-zA-Z0-9/_-]+', url)
+        require(match is not None and 1 <= int(match[1]) <= 65535, 'health_target_invalid')
+
+
 def invariants(plan):
     require(os.geteuid() == 0 and Path('/proc/1/exe').readlink().name == 'systemd', 'native_root_required')
     require(not any(Path(p).exists() for p in ('/.dockerenv', '/run/.containerenv', '/run/systemd/container')), 'container_refused')
@@ -183,7 +208,7 @@ def invariants(plan):
     require(set(plan['datastore_ids']) and all(re.fullmatch('[a-f0-9]{64}', value) for value in plan['datastore_ids']), 'datastore_inventory_invalid')
     require(len(set(plan['datastore_ids'])) == len(plan['datastore_ids']) == len(plan['datastore_probes']) and {p['id'] for p in plan['datastore_probes']} == set(plan['datastore_ids']), 'datastore_probes_incomplete')
     require(all(p['kind'] in {'postgres', 'redis'} and (p['kind'] == 'redis' or all(re.fullmatch('[a-zA-Z0-9_]{1,63}', p[k]) for k in ('user', 'database'))) for p in plan['datastore_probes']), 'datastore_probe_invalid')
-    require(plan['health_urls'] and all(re.fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}/[a-zA-Z0-9/_-]+', url) for url in plan['health_urls']), 'health_target_invalid')
+    health_contract(plan, bound_document(plan, plan['runtime_snapshot'])['containers'])
     command(['/usr/bin/python3', '-I', '-B', '-c', 'import apt, apt_pkg'])
     simulation = command(['/usr/bin/apt-get', '--simulate', '--no-remove', 'install', *(f'{name}={version}' for name, version in PACKAGES.items())])
     require(not re.search(r'^Remv ', simulation, re.MULTILINE) and set(re.findall(r'^Inst ([a-z0-9.+-]+)', simulation, re.MULTILINE)) <= set(PACKAGES), 'apt_transaction_scope_changed')
@@ -205,6 +230,7 @@ def owners(plan, digest):
 def runtime(plan, phase, recovery=False):
     baseline = bound_document(plan, plan['runtime_snapshot'])
     require(baseline['schema'] == 'security_runtime_snapshot/1.0' and baseline['containers'], 'snapshot_invalid')
+    health_contract(plan, baseline['containers'])
     expected = {c['id']: c for c in baseline['containers']}
     require(len(expected) == len(baseline['containers']), 'duplicate_snapshot_container')
     require(set(command(['/usr/bin/docker', 'container', 'ls', '-aq', '--no-trunc']).splitlines()) == set(expected), 'container_set_changed')
@@ -241,6 +267,13 @@ def runtime(plan, phase, recovery=False):
     if phase in {'healthy', 'complete'} and not recovery:
         require(command(['/usr/bin/docker', 'version', '--format', '{{.Server.Version}}']) == '29.9.2', 'docker_daemon_version_mismatch')
         require(re.search(r'^Server:\s*\n\s*Version:\s*v?2\.4\.2\s*$', command(['/usr/bin/ctr', '--address', '/run/containerd/containerd.sock', 'version']), re.MULTILINE) is not None, 'containerd_server_version_mismatch')
+    if phase in {'healthy', 'complete'}:
+        for probe in plan.get('health_probes', []):
+            try:
+                status = command(['/usr/bin/docker', 'exec', probe['id'], '/usr/local/bin/python', '-I', '-B', '-c', CONTAINER_HTTP_PROBE, probe['url']])
+            except (OSError, subprocess.SubprocessError):
+                raise Refusal('container_health_probe_failed') from None
+            require(status == '200', 'container_health_probe_failed')
     return baseline
 
 

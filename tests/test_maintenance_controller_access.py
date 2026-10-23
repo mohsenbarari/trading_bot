@@ -191,6 +191,41 @@ class PublicValidatorFixtures(unittest.TestCase):
         path.chmod(0o600)
         self.assertEqual(self.functions["public"](path), KEY)
 
+    def test_root_home_0755_and_private_ssh_directory_are_allowed(self):
+        home = self.root / "home"
+        home.mkdir(mode=0o755)
+        home.chmod(0o755)
+        ssh = home / ".ssh"
+        ssh.mkdir(mode=0o700)
+        self.functions["ssh_parent"](home)
+        self.functions["ssh_parent"](ssh, private=True)
+        self.assertIn("ssh_parent('/root')", SOURCE)
+        self.assertIn("ssh_parent('/root/.ssh', private=True)", SOURCE)
+
+    def test_ssh_directory_0755_and_writable_home_are_refused(self):
+        directory = self.root / "parent"
+        directory.mkdir(mode=0o755)
+        directory.chmod(0o755)
+        with self.assertRaisesRegex(SystemExit, "private SSH parent"):
+            self.functions["ssh_parent"](directory, private=True)
+        directory.chmod(0o775)
+        with self.assertRaisesRegex(SystemExit, "unsafe writable permissions"):
+            self.functions["ssh_parent"](directory)
+
+    def test_parent_symlink_and_nonroot_owner_remain_refused(self):
+        directory = self.root / "parent"
+        directory.mkdir(mode=0o700)
+        link = self.root / "linked-parent"
+        link.symlink_to(directory)
+        for private in (False, True):
+            with self.subTest(private=private), self.assertRaisesRegex(SystemExit, "unsafe owner or symlink"):
+                self.functions["ssh_parent"](link, private=private)
+        unsafe = types.SimpleNamespace(st_uid=1001, st_mode=stat.S_IFDIR | 0o700)
+        with patch("os.lstat", return_value=unsafe):
+            for private in (False, True):
+                with self.subTest(private=private), self.assertRaisesRegex(SystemExit, "unsafe owner or symlink"):
+                    self.functions["ssh_parent"](directory, private=private)
+
 
 if __name__ == "__main__":
     unittest.main()

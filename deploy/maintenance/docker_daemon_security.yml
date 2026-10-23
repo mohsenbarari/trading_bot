@@ -206,7 +206,8 @@
         return_content: false
         follow_redirects: none
         timeout: 10
-      loop: "{{ plan.health_urls }}"
+      loop: "{{ plan.health_urls | default([]) }}"
+      when: plan.health_urls | default([]) | length > 0
       register: api_smoke
       until: api_smoke.status == 200
       retries: 12

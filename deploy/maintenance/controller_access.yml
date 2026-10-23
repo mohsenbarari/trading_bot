@@ -57,9 +57,13 @@
           blob = base64.b64decode(parts[1], validate=True)
           require(len(blob) == 51 and blob[:19] == struct.pack('>I', 11) + b'ssh-ed25519' + struct.pack('>I', 32), 'malformed ED25519 key')
           return ' '.join(parts[:2])
-      for parent in ('/root', '/root/.ssh'):
-          info = metadata(parent, True)
-          require(not stat.S_IMODE(info.st_mode) & 0o077, 'private root/SSH parent required')
+      def ssh_parent(path, private=False):
+          info = metadata(path, True)
+          require(not private or not stat.S_IMODE(info.st_mode) & 0o077, 'private SSH parent required')
+      # OpenSSH StrictModes allows root-owned 0755 home, never writable 022;
+      # the SSH directory itself must additionally stay private.
+      ssh_parent('/root')
+      ssh_parent('/root/.ssh', private=True)
       comment = 'security-controller-20261023-' + ident
       directory = pathlib.Path('/root/.ssh') / comment
       if role == 'bot':
