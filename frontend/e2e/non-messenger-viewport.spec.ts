@@ -227,7 +227,7 @@ async function expectLastControlClearOfBottomChrome(page: Page, label: string) {
     }
     window.scrollTo(0, document.documentElement.scrollHeight)
 
-    const fixedBottomElements = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+    const fixedBottomNodes = Array.from(document.querySelectorAll<HTMLElement>('body *'))
       .filter((element) => {
         if (!isVisible(element)) return false
         const style = window.getComputedStyle(element)
@@ -239,6 +239,7 @@ async function expectLastControlClearOfBottomChrome(page: Page, label: string) {
         const isKnownBottomChrome = element.matches('.bottom-nav-bar, .market-action-bar, .fab-container')
         return isBottomFixed || isKnownBottomChrome
       })
+    const fixedBottomElements = fixedBottomNodes
       .map((element) => {
         const rect = element.getBoundingClientRect()
         return {
@@ -259,12 +260,11 @@ async function expectLastControlClearOfBottomChrome(page: Page, label: string) {
     const focusables = Array.from(document.querySelectorAll<HTMLElement>(focusableSelector))
       .filter((element) => {
         if (!isVisible(element)) return false
-        const isInsideBottomChrome = fixedBottomElements.some((chrome) => {
-          const rect = element.getBoundingClientRect()
-          const overlapsX = rect.right > chrome.left && rect.left < chrome.right
-          const overlapsY = rect.bottom > chrome.top && rect.top < chrome.bottom
-          return overlapsX && overlapsY
-        })
+        // Obscured route controls must be audited, not misclassified as navigation.
+        // Only the chrome itself and its actual descendants are exempt.
+        const isInsideBottomChrome = fixedBottomNodes.some((chrome) => (
+          chrome === element || chrome.contains(element)
+        ))
         return !isInsideBottomChrome
       })
 

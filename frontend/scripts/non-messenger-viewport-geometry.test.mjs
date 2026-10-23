@@ -1,0 +1,71 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import ts from 'typescript'
+
+const source = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../e2e/non-messenger-viewport.spec.ts'), 'utf8')
+const syntax = ts.createSourceFile('viewport.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+const audit = syntax.statements.find(node => (
+  ts.isFunctionDeclaration(node) && node.name?.text === 'expectLastControlClearOfBottomChrome'
+))
+const metricDeclaration = audit?.body?.statements.find(node => ts.isVariableStatement(node))
+const evaluateCall = metricDeclaration?.declarationList.declarations[0]?.initializer?.expression
+if (!evaluateCall || !ts.isCallExpression(evaluateCall) || evaluateCall.expression.getText(syntax) !== 'page.evaluate') {
+  throw new Error('viewport geometry regression must execute the actual page.evaluate callback')
+}
+const callback = ts.transpileModule(`(${evaluateCall.arguments[0].getText(syntax)})`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+}).outputText
+
+// Execute the browser audit itself, not a copied approximation of its rules.
+function geometry({ lastTop = 700, navControlTop = 830 } = {}) {
+  document.body.innerHTML = '<main><button id="early">earlier control</button>'
+    + '<button id="last">final product control</button></main>'
+    + '<nav class="bottom-nav-bar" style="position:fixed"><a id="nav-item" href="/">home</a></nav>'
+  vi.stubGlobal('innerHeight', 896)
+  vi.stubGlobal('innerWidth', 414)
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const top = this.id === 'early' ? 100
+      : this.id === 'last' ? lastTop
+        : this.id === 'nav-item' ? navControlTop
+          : this.matches('nav') ? 816 : 0
+    const height = this.matches('nav') ? 80 : 48
+    return { x: 0, y: top, top, bottom: top + height, left: 0, right: 414, width: 414, height, toJSON() {} }
+  })
+  return window.eval(callback)()
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  document.body.replaceChildren()
+})
+
+describe('actual non-messenger viewport geometry callback', () => {
+  it('keeps a clear final route control and excludes the navigation itself', () => {
+    const metrics = geometry()
+    expect(metrics.lastControl.text).toBe('final product control')
+    expect(metrics.bottomChromeTop).toBe(816)
+    expect(metrics.gap).toBe(68)
+    expect(metrics.gap).toBeGreaterThanOrEqual(12)
+  })
+
+  it('never discards product controls merely because the bottom chrome overlaps them', () => {
+    const metrics = geometry({ lastTop: 800 })
+    expect(metrics.lastControl.text).toBe('final product control')
+    expect(metrics.gap).toBe(-32)
+    expect(metrics.gap).toBeLessThan(12)
+  })
+
+  it('excludes actual navigation descendants even when they extend outside its rectangle', () => {
+    const metrics = geometry({ navControlTop: 200 })
+    expect(metrics.lastControl.text).toBe('final product control')
+    expect(metrics.gap).toBe(68)
+  })
+
+  it('preserves the production viewport test minimum clearance assertion', () => {
+    expect(source).toContain(').toBeGreaterThanOrEqual(12)')
+  })
+})
