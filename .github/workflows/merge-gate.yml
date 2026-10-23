@@ -191,6 +191,7 @@ jobs:
           else
             make observability-gate
           fi
+          python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
 
   frontend-browser-matrix:
     name: frontend-browser-matrix (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
@@ -202,6 +203,8 @@ jobs:
     timeout-minutes: 75
     env:
       CERTS_HOST_PATH: /tmp/trading-bot-ci-certs
+      PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR: /tmp/trading-bot-ci-coin-inference
+      PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR: /tmp/trading-bot-ci-product-estimator
 
     strategy:
       fail-fast: false
@@ -250,7 +253,10 @@ jobs:
           EOF
 
       - name: Prepare CI host paths
-        run: mkdir -p /tmp/trading-bot-ci-certs
+        run: |
+          mkdir -p -- "$CERTS_HOST_PATH" \
+            "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" \
+            "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
 
       - name: Install frontend dependencies
         working-directory: frontend

@@ -31,3 +31,10 @@
 - Kernel/Docker/containerd maintenance must preserve active DB, Bot/Executor,
   Writer and sync ownership. Never reboot or upgrade the daemon as a side effect
   of a CLI-only update; plan quiescence, restore and smoke checks separately.
+- Browser CI must prepare all active Compose host binds under disposable CI paths;
+  keep snapshot mounts empty/read-only and production create-host-path guards.
+  A mandatory pre-fan-out contract prevents repeating bootstrap-only failures.
+- The private release-control directory is an active attached-volume bind, despite
+  its historical source-directory name. Never prune it as an old backup. Inode
+  migration recovery requires authentic transfer evidence and crash-safe identity
+  re-attestation; never delete the persistent marker or weaken normal guards.
