@@ -912,11 +912,15 @@ test.describe('Notification regressions', () => {
     await loginWithSeededSession(page, fixture.viewer)
     await page.waitForTimeout(1200)
 
-    await executeTrade(request, fixture.viewer, fixture.offerId, fixture.offerQuantity)
-
-    const toast = page.locator('.toast-card-floating').filter({ hasText: fixture.relationDisplayName })
+    const trade = await executeTrade(request, fixture.viewer, fixture.offerId, fixture.offerQuantity)
+    const tradeNumber = Number(trade.trade_number)
+    expect(Number.isSafeInteger(tradeNumber) && tradeNumber > 0).toBe(true)
+    const toast = page.locator('.toast-card-floating')
+      .filter({ hasText: 'معامله انجام شد' })
+      .filter({ hasText: `معامله شماره ${tradeNumber.toLocaleString('fa-IR', { useGrouping: false })} با موفقیت ثبت شد.` })
     await expect(toast).toBeVisible({ timeout: 30000 })
     await expect(toast).not.toContainText(fixture.accountantAccountName)
+    await expect(toast).not.toContainText(fixture.relationDisplayName)
 
     await page.getByRole('button', { name: 'اعلان‌ها' }).click()
     await expect(page).toHaveURL(/\/account\/notifications$/)

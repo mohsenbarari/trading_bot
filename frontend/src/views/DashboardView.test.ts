@@ -12,6 +12,7 @@ import {
   cacheCurrentUserSummary,
   clearCurrentUserSummary,
   currentUserSummary,
+  primeCurrentUserSummary,
 } from '../utils/currentUser'
 // @ts-expect-error The production guard helper is intentionally shipped as plain ESM.
 import { DASHBOARD_MARKET_REGION_SHA256, dashboardMarketRegionEvidence } from '../../scripts/lib/stage3-protected-region-guard.mjs'
@@ -110,6 +111,37 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     resetMarketRuntimeForTests()
     clearCurrentUserSummary()
     localStorage.clear()
+  })
+
+  it('keeps Home identity ready when shell priming joins its in-flight authority request', async () => {
+    let resolveHome!: (value: ReturnType<typeof makeJsonResponse>) => void
+    let resolveShell: ((value: ReturnType<typeof makeJsonResponse>) => void) | undefined
+    dashboardViewMocks.apiFetchMock
+      .mockReturnValueOnce(new Promise((resolve) => { resolveHome = resolve }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveShell = resolve }))
+    const identity = {
+      id: 70,
+      role: 'عادی',
+      account_name: 'authoritative70',
+      full_name: 'هویت معتبر سرور',
+      account_status: 'active',
+      is_accountant: false,
+      is_customer: false,
+    }
+    const wrapper = mountDashboard()
+    const shellPrime = primeCurrentUserSummary()
+    resolveHome(makeJsonResponse(identity))
+    await flushPromises()
+    resolveShell?.(makeJsonResponse(identity))
+    await shellPrime
+    await flushPromises()
+
+    expect(currentUserSummary.value?.id).toBe(70)
+    expect(wrapper.find('.dashboard-identity-error').exists()).toBe(false)
+    expect(wrapper.find('button.notif-btn').exists()).toBe(true)
+    expect(wrapper.text()).toContain(identity.full_name)
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('leaves loading for a cause-neutral identity error and retries the only Home request', async () => {

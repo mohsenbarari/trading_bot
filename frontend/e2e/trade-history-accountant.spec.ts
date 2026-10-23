@@ -44,6 +44,8 @@ interface PublicProfileHistoryFilterFixture {
   viewer: SessionUser
   targetUserId: number
   targetAccountName: string
+  targetMobileNumber: string
+  targetAddress: string
   goldCommodityName: string
   silverCommodityName: string
   recentMutualTradeNumber: number
@@ -503,6 +505,8 @@ async def main():
     },
     'targetUserId': target.id,
     'targetAccountName': target.account_name,
+    'targetMobileNumber': target.mobile_number,
+    'targetAddress': target.address,
     'goldCommodityName': gold.name,
     'silverCommodityName': silver.name,
     'recentMutualTradeNumber': recent_mutual.trade_number,
@@ -846,7 +850,7 @@ test.describe('Trade history accountant context', () => {
     await expect(profileView).toContainText(fixture.counterpartyOwnerAccountName)
   })
 
-  test('trade-created realtime keeps relation-aware toast, history rows, and owner profile targets stable', async ({ page, request }) => {
+  test('trade-created realtime keeps canonical toast, relation-aware history rows, and owner profile targets stable', async ({ page, request }) => {
     await waitForBackendReady(request)
     const fixture = seedTradeRealtimeFixture('trade_created_realtime')
 
@@ -856,11 +860,15 @@ test.describe('Trade history accountant context', () => {
     ))
     await expectIdOnlyPublicProfileUrl(page, fixture.viewer.userId)
 
-    await executeTrade(request, fixture.viewer.accessToken, fixture.offerId, fixture.offerQuantity)
-
-    const toast = page.locator('.toast-card-floating').filter({ hasText: fixture.relationDisplayName })
+    const trade = await executeTrade(request, fixture.viewer.accessToken, fixture.offerId, fixture.offerQuantity)
+    const tradeNumber = Number(trade.trade_number)
+    expect(Number.isSafeInteger(tradeNumber) && tradeNumber > 0).toBe(true)
+    const toast = page.locator('.toast-card-floating')
+      .filter({ hasText: 'معامله انجام شد' })
+      .filter({ hasText: `معامله شماره ${tradeNumber.toLocaleString('fa-IR', { useGrouping: false })} با موفقیت ثبت شد.` })
     await expect(toast).toBeVisible({ timeout: 30000 })
     await expect(toast).not.toContainText(fixture.counterpartyAccountantAccountName)
+    await expect(toast).not.toContainText(fixture.relationDisplayName)
 
     await expect
       .poll(async () => {
@@ -926,7 +934,9 @@ test.describe('Trade history accountant context', () => {
 
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.targetAccountName)
-    await expect(profileView).toContainText('آدرس، وضعیت حضور، عضویت و جزئیات معاملات این کاربر در پروفایل عمومی نمایش داده نمی‌شود.')
+    await expect(profileView.locator('.info-row').filter({ hasText: 'شماره تماس' })).toContainText(fixture.targetMobileNumber)
+    await expect(profileView.locator('.address-row')).toContainText(fixture.targetAddress)
+    await expect(profileView.locator('.profile-presence-status')).toHaveCount(0)
     await expect(profileView.locator('.history-section-card')).toHaveCount(0)
     await expect(profileView.locator('.mini-trade-card')).toHaveCount(0)
     expect(peerHistoryRequests).toEqual([])
@@ -951,7 +961,7 @@ test.describe('Trade history accountant context', () => {
     const presetResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
       const url = new URL(response.url())
-      return url.pathname === '/api/trades/my' && Boolean(url.searchParams.get('from_date')) && Boolean(url.searchParams.get('to_date'))
+      return url.pathname === '/api/trades/my/page' && Boolean(url.searchParams.get('from_date')) && Boolean(url.searchParams.get('to_date'))
     })
     await page.getByRole('tab', { name: '۳ ماه' }).click()
     const presetResponse = await presetResponsePromise
@@ -976,7 +986,7 @@ test.describe('Trade history accountant context', () => {
     const customResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
       const url = new URL(response.url())
-      return url.pathname === '/api/trades/my' && url.searchParams.get('from_date') === fixture.wideFromDate && url.searchParams.get('to_date') === fixture.wideToDate
+      return url.pathname === '/api/trades/my/page' && url.searchParams.get('from_date') === fixture.wideFromDate && url.searchParams.get('to_date') === fixture.wideToDate
     })
     await page.getByRole('button', { name: 'اعمال فیلتر' }).click()
     await customResponsePromise
@@ -1034,18 +1044,20 @@ test.describe('Trade history accountant context', () => {
     const blockButton = page.getByRole('button', { name: /بلاک کاربر/ }).first()
     await expect(blockButton).toBeVisible()
 
-    const dialogMessages: string[] = []
-    const dialogHandler = async (dialog: any) => {
-      dialogMessages.push(dialog.message())
-      await dialog.accept()
-    }
-    page.on('dialog', dialogHandler)
     await blockButton.click()
-    await expect.poll(() => dialogMessages.length, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
-    page.off('dialog', dialogHandler)
-
-    expect(dialogMessages[0]).toContain(`بلاک کاربر ${fixture.targetAccountName}`)
-    expect(dialogMessages[1]).toContain('مسدود شد')
+    const confirmation = page.getByRole('dialog', { name: 'بلاک کاربر؟', exact: true })
+    await expect(confirmation).toBeVisible()
+    await expect(confirmation).toContainText('وضعیت فقط با پاسخ معتبر سرور به‌روزرسانی می‌شود.')
+    const [blockResponse] = await Promise.all([
+      page.waitForResponse((response) => (
+        response.request().method() === 'POST'
+        && new URL(response.url()).pathname === `/api/blocks/${fixture.targetUserId}`
+      )),
+      confirmation.getByRole('button', { name: 'تأیید بلاک', exact: true }).click(),
+    ])
+    expect(blockResponse.ok()).toBeTruthy()
+    await expect(confirmation).not.toBeVisible()
+    await expect(page.getByTestId('public-block-feedback')).toHaveText('کاربر با موفقیت بلاک شد.')
 
     await expect(page.getByRole('button', { name: /رفع بلاک/ }).first()).toBeVisible()
 
