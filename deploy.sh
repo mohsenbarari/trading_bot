@@ -536,6 +536,10 @@ hash_file_or_dir() {
 }
 
 frontend_build_signature() {
+    node "$FRONTEND_DIR/scripts/check-node-security-baseline.mjs" >/dev/null 2>&1 || {
+        echo "Frontend security baseline rejected the Node runtime before cache lookup." >&2
+        return 1
+    }
     {
         printf 'node=%s\n' "$(node -p 'process.versions.node' 2>/dev/null || true)"
         printf 'npm=%s\n' "$(npm --version 2>/dev/null || true)"
@@ -544,6 +548,7 @@ frontend_build_signature() {
         for rel in \
             frontend/package.json \
             frontend/package-lock.json \
+            frontend/scripts/check-node-security-baseline.mjs \
             frontend/vite.config.ts \
             frontend/tsconfig.json \
             frontend/tsconfig.app.json \
@@ -643,7 +648,9 @@ build_frontend() {
         cd "$PROJECT_DIR"
         return 0
     fi
-    run_with_local_resource_guard "Frontend build" bash -lc "cd \"$FRONTEND_DIR\" && if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS=\"--max-old-space-size=1024\" npm run build"
+    # Do not start a login shell: its profile can replace the scoped, verified
+    # Node PATH inherited from the official release controller.
+    run_with_local_resource_guard "Frontend build" bash -c 'cd -- "$1" && if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS="--max-old-space-size=1024" npm run build' frontend-build "$FRONTEND_DIR"
 
     if [ ! -d "$DIST_DIR" ]; then
         echo "❌ Build directory ($DIST_DIR) not found!"

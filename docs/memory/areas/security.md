@@ -18,6 +18,12 @@
 - Node vendor backports can retain an old Brotli version string. Verify the exact
   fixed Node release, not that dependency version alone. Repository/CI pins do not
   upgrade already-running host tools.
+- Deployment must use the same Node policy before cache lookup. Bootstrap is
+  pinned/SHA-verified, bounded and checkout-local with scoped PATH; never replace
+  global Node or overwrite an invalid existing bundle to make a release pass.
+- User explicitly authorized publishing existing main history plus reviewed
+  security commits. This does not authorize activating unrelated Market changes;
+  preserve LEGACY consumer mode, producer ownership and snapshot mounts.
 - Kernel/Docker/containerd maintenance must preserve active DB, Bot/Executor,
   Writer and sync ownership. Never reboot or upgrade the daemon as a side effect
   of a CLI-only update; plan quiescence, restore and smoke checks separately.
