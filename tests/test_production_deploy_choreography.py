@@ -797,7 +797,21 @@ IRAN_DEPLOY_BASE_DIR="$3"
 IRAN_RUNTIME_ENV_PATH="$4"
 IRAN_SSH_TARGET="mock@production-host"
 RELEASE_ARTIFACT_DIR="$5"
-ssh_iran() { bash -c "$1"; }
+ssh_iran() {
+    # Model only the synthetic remote destination's root UID. Hosted CI is
+    # non-root; production's hard root check and every other stat stay intact.
+    bash -c '
+fixture_destination="$2"
+stat() {
+    if [[ "$#" == 3 && "$1" == "-c" && "$2" == "%u" && "$3" == "$fixture_destination" ]]; then
+        printf "0\\n"
+    else
+        command stat "$@"
+    fi
+}
+eval "$1"
+' fixture-ssh "$1" "$IRAN_PROJECT_DIR"
+}
 scp_iran() { local source="$1" destination="${2#*:}"; cp -- "$source" "$destination"; }
 atomic_install_iran_runtime_env
 """,
@@ -807,6 +821,7 @@ atomic_install_iran_runtime_env
                 str(artifacts),
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("= '0' ] || exit 28", RELEASE_SCRIPT.read_text(encoding="utf-8"))
             self.assertNotIn("sensitive-value", result.stdout + result.stderr)
             self.assertEqual((project / ".env").read_bytes(), new_payload)
             self.assertEqual(stat.S_IMODE((project / ".env").stat().st_mode), 0o600)

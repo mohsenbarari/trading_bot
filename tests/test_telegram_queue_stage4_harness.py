@@ -1312,7 +1312,11 @@ class TelegramQueueStage4HarnessTests(unittest.TestCase):
             _private, public = _write_passing_live_evidence(root)
             report = _read_json(root / "security_scan.json")
             report["scanned_file_manifest_sha256"] = "d" * 64
+            # The verifier publishes a read-only artifact. Model owner tampering
+            # explicitly instead of relying on root bypassing file permissions.
+            (root / "security_scan.json").chmod(0o600)
             _write_json(root / "security_scan.json", report)
+            (root / "security_scan.json").chmod(0o444)
             with self.assertRaisesRegex(
                 Stage4HarnessValidationError, "security_scan_incomplete"
             ):

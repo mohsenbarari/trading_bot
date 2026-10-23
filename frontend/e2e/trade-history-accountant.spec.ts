@@ -975,7 +975,8 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === '/api/trades/my/export' && url.searchParams.get('format') === 'excel'
     })
-    await page.getByRole('button', { name: 'خروجی Excel' }).click()
+    await profileView.getByRole('button', { name: 'اقدام‌های دیگر تاریخچه', exact: true }).click()
+    await profileView.getByRole('menuitem', { name: 'خروجی Excel', exact: true }).click()
     const presetExportResponse = await presetExportPromise
     const presetExportUrl = new URL(presetExportResponse.url())
     expect(presetExportUrl.searchParams.get('from_date')).toBe(presetUrl.searchParams.get('from_date'))
@@ -999,7 +1000,8 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === '/api/trades/my/export' && url.searchParams.get('format') === 'pdf'
     })
-    await page.getByRole('button', { name: 'خروجی PDF' }).click()
+    await profileView.getByRole('button', { name: 'اقدام‌های دیگر تاریخچه', exact: true }).click()
+    await profileView.getByRole('menuitem', { name: 'خروجی PDF', exact: true }).click()
     const customExportResponse = await customExportPromise
     const customExportUrl = new URL(customExportResponse.url())
     expect(customExportUrl.searchParams.get('from_date')).toBe(fixture.wideFromDate)
@@ -1057,7 +1059,7 @@ test.describe('Trade history accountant context', () => {
     ])
     expect(blockResponse.ok()).toBeTruthy()
     await expect(confirmation).not.toBeVisible()
-    await expect(page.getByTestId('public-block-feedback')).toHaveText('کاربر با موفقیت بلاک شد.')
+    await expect(page.locator('[data-test="public-block-feedback"]')).toHaveText('کاربر با موفقیت بلاک شد.')
 
     await expect(page.getByRole('button', { name: /رفع بلاک/ }).first()).toBeVisible()
 
