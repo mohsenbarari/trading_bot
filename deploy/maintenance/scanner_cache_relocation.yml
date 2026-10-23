@@ -1,0 +1,121 @@
+---
+# Three reproducible PUBLIC scanner files only; findings/provenance stay native.
+- name: Relocate the completed scanner cache to free offhost backup capacity
+  hosts: controller_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    scanner_relocation_apply: false
+    scanner_source: /srv/trading-bot/production-data/security-vulnerability-audit-20261023
+    scanner_destination: /srv/trading-bot/security-scanner-20261023
+    scanner_files:
+      - {name: bin/trivy, size: 176029856, mode: '0700', sha256: d1dfca6ae10a1ad4540bb94e64f0510077c47008920a9b554986b39dca573d83}
+      - {name: cache/db/trivy.db, size: 1628737536, sha256: 6fd7f9c44ff3120e0d15d5b5b2234e1ff1c9e7a6b56b4e776041f93faf1f6f17}
+      - {name: cache/db/metadata.json, size: 150, sha256: ff018d762e62cb0ffde5f662c40424f058a0402f7f663ee354f30019d821698e}
+    scanner_verify: |
+      import hashlib,json,os,pathlib,stat,sys
+      root=pathlib.Path(sys.argv[1]); entries=json.loads(sys.argv[2]); mode=sys.argv[3]
+      assert mode in ('source','destination','fsync','cleanup')
+      assert str(root) in ('/srv/trading-bot/production-data/security-vulnerability-audit-20261023','/srv/trading-bot/security-scanner-20261023')
+      assert mode!='cleanup' or str(root)=='/srv/trading-bot/production-data/security-vulnerability-audit-20261023'
+      assert [(v['name'],v['size'],v['sha256']) for v in entries]==[
+          ('bin/trivy',176029856,'d1dfca6ae10a1ad4540bb94e64f0510077c47008920a9b554986b39dca573d83'),
+          ('cache/db/trivy.db',1628737536,'6fd7f9c44ff3120e0d15d5b5b2234e1ff1c9e7a6b56b4e776041f93faf1f6f17'),
+          ('cache/db/metadata.json',150,'ff018d762e62cb0ffde5f662c40424f058a0402f7f663ee354f30019d821698e')]
+      verified=[]
+      for entry in entries:
+          path=root/entry['name']; assert path.resolve(strict=True)==path
+          for parent in path.parents:
+              st=parent.lstat(); assert stat.S_ISDIR(st.st_mode) and st.st_uid==0 and not st.st_mode&0o022
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==0 and before.st_nlink==1 and not before.st_mode&0o077 and before.st_size==entry['size']
+              digest=hashlib.sha256(); count=0
+              while chunk:=os.read(fd,min(1024*1024,entry['size']+1-count)):
+                  count+=len(chunk); digest.update(chunk); assert count<=entry['size']
+              ident=lambda v:(v.st_dev,v.st_ino,v.st_size,v.st_mtime_ns,v.st_ctime_ns,v.st_mode,v.st_uid,v.st_nlink)
+              assert count==entry['size'] and digest.hexdigest()==entry['sha256'] and ident(before)==ident(os.fstat(fd))==ident(path.lstat())
+              verified.append((path,ident(before)))
+              if mode=='fsync': os.fsync(fd)
+          finally: os.close(fd)
+      if mode=='cleanup':
+          for path,identity in verified:
+              assert ident(path.lstat())==identity
+              os.unlink(path)  # Never recursive removal, even if a path is replaced.
+      if mode in ('fsync','cleanup'):
+          for directory in (root/'bin',root/'cache/db',root/'cache',root):
+              fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)
+      print(json.dumps({'status':'verified','files':3,'mode':mode}))
+  tasks:
+    - name: Admit only the fixed existing native and Web hosts
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['controller_bot', 'controller_web']
+          - ansible_connection == 'local'
+          - hostvars.controller_bot.ansible_host == '65.109.216.187'
+          - hostvars.controller_web.ansible_host == '65.109.220.59'
+          - hostvars.controller_web.ansible_port | int == 37067
+          - scanner_source == '/srv/trading-bot/production-data/security-vulnerability-audit-20261023'
+          - scanner_destination == '/srv/trading-bot/security-scanner-20261023'
+
+    - name: Verify all three owned public source files before any write
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ scanner_verify }}', '{{ scanner_source }}', '{{ scanner_files | to_json }}', source]
+      changed_when: false
+      check_mode: false
+      timeout: 60
+
+    - name: Default and check mode never create copy or delete files
+      ansible.builtin.meta: end_play
+      when: not (scanner_relocation_apply | bool) or ansible_check_mode
+
+    - name: Refuse existing destination or insufficient space before copying
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib,stat
+            p=pathlib.Path('/srv/trading-bot/security-scanner-20261023'); assert not os.path.lexists(p)
+            for parent in p.parents:
+                st=parent.lstat(); assert stat.S_ISDIR(st.st_mode) and st.st_uid==0 and not st.st_mode&0o022
+            v=os.statvfs(p.parent); assert v.f_bavail*v.f_frsize>=46*1024**3
+      changed_when: false
+      delegate_to: controller_web
+
+    - name: Create only the fixed private destination directories
+      ansible.builtin.file:
+        path: '{{ scanner_destination }}/{{ item }}'
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+      loop: ['', bin, cache, cache/db]
+      delegate_to: controller_web
+
+    - name: Copy only the three exact public artifacts never reports or credentials
+      ansible.builtin.copy:
+        src: '{{ scanner_source }}/{{ item.name }}'
+        dest: '{{ scanner_destination }}/{{ item.name }}'
+        mode: '{{ item.mode | default("0600") }}'
+        owner: root
+        group: root
+        force: false
+        follow: false
+      loop: '{{ scanner_files }}'
+      delegate_to: controller_web
+
+    - name: Verify streamed SHA size ownership and fsync every destination artifact
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ scanner_verify }}', '{{ scanner_destination }}', '{{ scanner_files | to_json }}', fsync]
+      changed_when: false
+      delegate_to: controller_web
+      timeout: 60
+
+    - name: Reverify and unlink only the three redundant regular source files
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ scanner_verify }}', '{{ scanner_source }}', '{{ scanner_files | to_json }}', cleanup]
+      timeout: 60
