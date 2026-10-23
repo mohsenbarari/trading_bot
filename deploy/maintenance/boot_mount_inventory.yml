@@ -1,0 +1,43 @@
+---
+# Frozen public native-Bot scope. Paths are mounts, never environment values.
+all:
+  hosts:
+    boot_mount_bot:
+      ansible_connection: local
+      ansible_host: 65.109.216.187
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+  vars:
+    boot_mount_service_paths:
+      # All-container source union: data-root + secure/control + staging binds.
+      docker.service:
+        - /srv/trading-bot/production-data
+        - /root/secure-envs/trading-bot
+        - /srv/trading-bot/staging-data
+      # ReadWritePaths / EnvironmentFiles consume production data; two readers
+      # additionally declare ReadOnlyPaths inside the separate staging bind.
+      coin-group-event-telegram.service:
+        - /srv/trading-bot/production-data
+        - /srv/trading-bot/staging-data
+      trading-bot-private-gold-collector.service:
+        - /srv/trading-bot/production-data
+      coin-public-market-telegram.service:
+        - /srv/trading-bot/production-data
+      coin-rate-estimator-dashboard.service:
+        - /srv/trading-bot/production-data
+      coin-intelligence-production-snapshot-relay.service:
+        - /srv/trading-bot/production-data
+      coin-private-shadow-legacy-estimator-bridge.service:
+        - /srv/trading-bot/production-data
+        - /srv/trading-bot/staging-data
+      coin-intelligence-staging-market-input-bridge.service:
+        - /srv/trading-bot/production-data
+      coin-intelligence-staging-snapshot-publish.service:
+        - /srv/trading-bot/production-data
+      # Public ExecStart path arguments prove these consumers' actual inputs.
+      coin-intelligence-staging-snapshot-relay.service:
+        - /srv/trading-bot/production-data
+        - /srv/trading-bot/staging-data
+      market-pipeline-watchdog.service:
+        - /srv/trading-bot/staging-data
+        - /root/secure-envs/trading-bot

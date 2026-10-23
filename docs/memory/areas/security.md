@@ -18,8 +18,10 @@
   needs public unit config before imports and explicit scratch targets. Browser
   CI prepares every bind under disposable paths; keep snapshots empty/read-only
   and production create-host-path guards; check the contract before fan-out.
-- Kernel/daemon work needs separate quiescence, restore and smoke checks; preserve
-  DB, Bot/Executor, Writer and sync. CLI updates never imply reboot permission.
+- Host maintenance needs quiescence, restore and smoke proofs; never infer patch
+  activation from CLI or installed kernel. Bot Docker/containerd now run29.9.2/2.4.2
+  with same15containerIDs/images and both projects restored; kernel138, Web vendor
+  fixes and application activation remain open. See dated security report.
 - Private control storage is an ACTIVE attached-volume bind despite its historical
   source name: never prune it. Identity recovery requires authentic evidence and
   crash safety, never persistent-marker deletion or weaker normal guards.

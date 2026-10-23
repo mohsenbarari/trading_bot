@@ -1,0 +1,249 @@
+---
+- name: Native Bot attached-volume boot dependencies without restart or reboot
+  hosts: boot_mount_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    boot_mount_action: check
+    boot_mount_confirmation: ''
+    boot_mount_validator: |
+      import configparser, json, os, pathlib, re, resource, shlex, stat, subprocess, sys, tempfile
+      PRIMARY = '/srv/trading-bot/production-data'
+      SECURE = '/root/secure-envs/trading-bot'
+      STAGING = '/srv/trading-bot/staging-data'
+      UUID = '9d19fc8e-f71a-4089-b826-5dddfe83ea28'
+      NAME = '90-security-20261023-mount-gates.conf'
+      SYSTEMD_ROOT = '/etc/systemd/system'
+      EXPECTED = {
+          'docker.service': [PRIMARY, SECURE, STAGING],
+          'coin-group-event-telegram.service': [PRIMARY, STAGING],
+          'trading-bot-private-gold-collector.service': [PRIMARY],
+          'coin-public-market-telegram.service': [PRIMARY],
+          'coin-rate-estimator-dashboard.service': [PRIMARY],
+          'coin-intelligence-production-snapshot-relay.service': [PRIMARY],
+          'coin-private-shadow-legacy-estimator-bridge.service': [PRIMARY, STAGING],
+          'coin-intelligence-staging-market-input-bridge.service': [PRIMARY],
+          'coin-intelligence-staging-snapshot-publish.service': [PRIMARY],
+          'coin-intelligence-staging-snapshot-relay.service': [PRIMARY, STAGING],
+          'market-pipeline-watchdog.service': [STAGING, SECURE],
+      }
+      def require(ok, message):
+          if not ok: raise SystemExit(message)
+      def run(argv):
+          maximum = 2 * 1024 * 1024
+          def limit_output():
+              resource.setrlimit(resource.RLIMIT_FSIZE, (maximum, maximum))
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+          with tempfile.TemporaryFile() as output:
+              try:
+                  with subprocess.Popen(argv, stdout=output, stderr=subprocess.DEVNULL, preexec_fn=limit_output) as child:
+                      try: status = child.wait(timeout=15)
+                      except subprocess.TimeoutExpired:
+                          child.kill(); child.wait()
+                          raise SystemExit('PUBLIC_METADATA_TIMEOUT')
+              except (OSError, subprocess.SubprocessError): raise SystemExit('PUBLIC_METADATA_EXEC_FAILED')
+              require(status == 0, 'PUBLIC_METADATA_COMMAND_FAILED')
+              output.seek(0)
+              raw = output.read(maximum + 1)
+              # Hitting the cap can be a successful short write after RLIMIT;
+              # refuse that ambiguous/truncated result even with exit status 0.
+              require(len(raw) < maximum, 'PUBLIC_METADATA_OUTPUT_LIMIT')
+              try: return raw.decode('utf-8')
+              except UnicodeError: raise SystemExit('PUBLIC_METADATA_ENCODING')
+      def metadata(path, directory=False):
+          value = os.lstat(path)
+          require(value.st_uid == 0 and not stat.S_ISLNK(value.st_mode), 'unsafe owner/symlink: ' + str(path))
+          require(stat.S_ISDIR(value.st_mode) if directory else stat.S_ISREG(value.st_mode), 'wrong file type: ' + str(path))
+          require(not value.st_mode & 0o022, 'unsafe writable path: ' + str(path))
+          if not directory: require(value.st_nlink == 1, 'hardlink refused: ' + str(path))
+          return value
+      def public_read(path):
+          value = metadata(path)
+          require(value.st_size <= 65536, 'oversized public control file')
+          fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+          try:
+              opened = os.fstat(fd)
+              def identity(info): return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+              require(identity(opened) == identity(value), 'public control file changed')
+              raw = os.read(fd, 65537)
+              require(len(raw) <= 65536, 'oversized public control file')
+              require(identity(os.fstat(fd)) == identity(value) == identity(os.lstat(path)) and len(raw) == value.st_size, 'public control file changed during read')
+              return raw.decode('utf-8')
+          finally: os.close(fd)
+      def properties(unit):
+          output = run(['/usr/bin/systemctl', 'show', unit, '--property=LoadState,UnitFileState,FragmentPath,DropInPaths,RequiresMountsFor,NeedDaemonReload,ReadWritePaths,ReadOnlyPaths,WorkingDirectory'])
+          return dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
+      def content(paths):
+          return '# Owned by reviewed 2026-10-23 Bot boot-mount gates; exact-file cleanup only.\n[Unit]\nRequiresMountsFor=' + ' '.join(paths) + '\n' + ''.join('AssertPathIsMountPoint=' + path + '\n' for path in paths)
+      def verify_mount(path, root):
+          found = json.loads(run(['/usr/bin/findmnt', '--json', '--mountpoint', path, '--output', 'TARGET,SOURCE,FSTYPE,UUID,OPTIONS']))['filesystems']
+          require(len(found) == 1, 'ambiguous mount: ' + path)
+          value = found[0]
+          require(value['target'] == path and value['uuid'] == UUID and value['fstype'] == 'ext4' and 'rw' in value['options'].split(','), 'wrong attached volume: ' + path)
+          device = value['source'].split('[', 1)[0]
+          require(device.startswith('/dev/'), 'unexpected mount device')
+          expected_source = device if path == PRIMARY else device + '[' + root + ']'
+          require(value['source'] == expected_source, 'wrong bind source: ' + path)
+          unit = run(['/usr/bin/systemd-escape', '--path', '--suffix=mount', path]).strip()
+          state = properties(unit)
+          require(state['LoadState'] == 'loaded', 'missing mount unit')
+          require(not state['DropInPaths'] and state['NeedDaemonReload'] == 'no', 'mount configuration drift/pending reload')
+          if path == PRIMARY:
+              require(state['UnitFileState'] == 'generated', 'unexpected primary mount authority')
+              entries = [line.split() for line in public_read('/etc/fstab').splitlines() if line.strip() and not line.lstrip().startswith('#')]
+              matching = [entry for entry in entries if len(entry) >= 4 and entry[1] == PRIMARY]
+              require(len(matching) == 1 and matching[0][:3] == ['UUID=' + UUID, PRIMARY, 'ext4'], 'primary fstab identity drift')
+          else:
+              require(state['UnitFileState'] == 'enabled' and PRIMARY in shlex.split(state['RequiresMountsFor']), 'bind mount not enabled/dependent on primary')
+              parser = configparser.ConfigParser(interpolation=None, strict=False)
+              parser.read_string(public_read(state['FragmentPath']))
+              require(parser['Mount']['What'] == PRIMARY + root and parser['Mount']['Where'] == path and parser['Mount']['Type'] == 'none' and parser['Mount']['Options'] == 'bind', 'bind unit source drift')
+          return device
+      def docker_source_roots():
+          # Source PATHS only: never .Config.Env, destinations, file contents or
+          # a whole inspect payload. Local Unix socket is explicit, not env-selected.
+          command = ['/usr/bin/docker', '--host=unix:///var/run/docker.sock']
+          # Assemble Docker's braces at runtime, not as Ansible/Jinja templates.
+          def go(expression): return '{' * 2 + expression + '}' * 2
+          require(run(command + ['info', '--format', go('.DockerRootDir')]).strip() == PRIMARY + '/docker-data', 'Docker data-root drift')
+          identifiers = run(command + ['ps', '--all', '--quiet', '--no-trunc']).split()
+          require(0 < len(identifiers) <= 64 and all(len(item) == 64 and set(item) <= set('0123456789abcdef') for item in identifiers), 'invalid/broad Docker container inventory')
+          roots = set()
+          for identifier in identifiers:
+              sources = run(command + ['inspect', '--type', 'container', '--format', ''.join(go(part) for part in ('range .Mounts', 'println .Source', 'end')), identifier]).splitlines()
+              require(len(sources) <= 128, 'unexpected mount count')
+              for source in filter(None, sources):
+                  require(source.startswith('/') and len(source) <= 4096, 'invalid Docker source path')
+                  matches = json.loads(run(['/usr/bin/findmnt', '--json', '--target', source, '--output', 'TARGET,SOURCE,UUID']))['filesystems']
+                  require(len(matches) == 1, 'ambiguous Docker source mount')
+                  found = matches[0]
+                  if source == PRIMARY or source.startswith(PRIMARY + '/'):
+                      # Docker-managed named-volume submounts are created by
+                      # Docker, not independent boot prerequisites/cyclic units.
+                      named = re.fullmatch(re.escape(PRIMARY + '/docker-data/volumes/') + r'[A-Za-z0-9][A-Za-z0-9_.-]*/_data', found['target'])
+                      require(found['uuid'] == UUID and (found['target'] == PRIMARY or bool(named)), 'unknown nested Docker-data mount')
+                      roots.add(PRIMARY)
+                  elif found['target'] in (SECURE, STAGING):
+                      require(found['uuid'] == UUID, 'Docker bind volume UUID drift')
+                      roots.add(found['target'])
+                  else:
+                      require(found['target'] == '/' and found['uuid'] == '64f6fb02-4fed-4836-a33b-86e8993afdfa', 'uncovered Docker source mount')
+          require(roots <= set(EXPECTED['docker.service']), 'Docker source mount not gated')
+          return {'containers_checked': len(identifiers), 'nonroot_source_mounts': sorted(roots)}
+      def inspect_consumer(service, paths, phase):
+          state = properties(service)
+          require(state['LoadState'] == 'loaded', 'missing exact consumer: ' + service)
+          metadata(state['FragmentPath'])
+          if service != 'docker.service':
+              declared = shlex.split(state.get('ReadWritePaths', '')) + shlex.split(state.get('ReadOnlyPaths', '')) + [state.get('WorkingDirectory', '')]
+              # Public unit source only; extract path tokens, NEVER return full
+              # command lines, Environment directives or environment-file data.
+              for unit_file in [state['FragmentPath']] + shlex.split(state['DropInPaths']):
+                  require(os.path.lexists(unit_file), 'public unit source missing')
+                  for line in public_read(unit_file).splitlines():
+                      if line.startswith('ExecStart='):
+                          declared.extend(re.findall(r'/(?:root|srv)/[A-Za-z0-9_./@-]+', line))
+              for path in paths:
+                  require(any(value == path or value.startswith(path + '/') for value in declared), 'consumer path scope drift: ' + service)
+          directory = pathlib.Path(SYSTEMD_ROOT) / (service + '.d')
+          directory_missing = not os.path.lexists(directory)
+          if not directory_missing: metadata(directory, True)
+          destination = directory / NAME
+          exists = os.path.lexists(destination)
+          desired = content(paths)
+          if exists:
+              info = metadata(destination)
+              require(stat.S_IMODE(info.st_mode) == 0o644 and info.st_gid == 0 and public_read(destination) == desired, 'foreign/changed owned filename: ' + service)
+          if phase == 'verify_setup':
+              require(exists and str(destination) in shlex.split(state['DropInPaths']) and state['NeedDaemonReload'] == 'no', 'drop-in not loaded: ' + service)
+              require(set(paths) <= set(shlex.split(state['RequiresMountsFor'])), 'required mount dependency absent')
+              object_path = json.loads(run(['/usr/bin/busctl', '--json=short', 'call', 'org.freedesktop.systemd1', '/org/freedesktop/systemd1', 'org.freedesktop.systemd1.Manager', 'GetUnit', 's', service]))['data'][0]
+              assertions = json.loads(run(['/usr/bin/busctl', '--json=short', 'get-property', 'org.freedesktop.systemd1', object_path, 'org.freedesktop.systemd1.Unit', 'Asserts']))['data']
+              for path in paths:
+                  require(any(item[:4] == ['AssertPathIsMountPoint', False, False, path] for item in assertions), 'mount assertion absent: ' + service)
+          if phase == 'verify_cleanup':
+              require(not exists and str(destination) not in shlex.split(state['DropInPaths']) and state['NeedDaemonReload'] == 'no', 'owned drop-in cleanup incomplete')
+          return {'service': service, 'directory': str(directory), 'destination': str(destination), 'directory_missing': directory_missing, 'exists': exists, 'content': desired}
+      phase, mapping = sys.argv[1], json.loads(sys.argv[2])
+      require(phase in ('check', 'verify_setup', 'verify_cleanup'), 'invalid phase')
+      require(mapping == EXPECTED, 'service/mount scope drift')
+      require(os.geteuid() == 0, 'native root required')
+      require(not pathlib.Path('/.dockerenv').exists() and not pathlib.Path('/run/.containerenv').exists(), 'container refused')
+      require(pathlib.Path('/proc/1/exe').resolve().name == 'systemd', 'native systemd PID1 required')
+      for ns in ('pid', 'mnt', 'user'):
+          require(os.readlink('/proc/self/ns/' + ns) == os.readlink('/proc/1/ns/' + ns), 'namespace mismatch')
+      interfaces = json.loads(run(['/usr/sbin/ip', '-j', 'address']))
+      require(any(value.get('local') == '65.109.216.187' for link in interfaces for value in link.get('addr_info', [])), 'wrong native Bot')
+      primary_device = verify_mount(PRIMARY, '')
+      for path, root in [(SECURE, '/host-retained/rootfs-20260906/secure-envs-trading-bot'), (STAGING, '/host-retained/rootfs-20260906/staging-data')]:
+          require(verify_mount(path, root) == primary_device, 'bind device mismatch')
+      for path in ('/etc', '/etc/systemd', SYSTEMD_ROOT): metadata(path, True)
+      docker_mount_evidence = docker_source_roots()
+      entries = [inspect_consumer(service, paths, phase) for service, paths in EXPECTED.items()]
+      print(json.dumps({'entries': entries, 'phase': phase, 'docker_mount_evidence': docker_mount_evidence, 'runtime_restart_performed': False}))
+  tasks:
+    - name: Enforce frozen native inventory explicit action and confirmation
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['boot_mount_bot']
+          - ansible_play_hosts_all == ['boot_mount_bot']
+          - ansible_connection == 'local'
+          - ansible_host == '65.109.216.187'
+          - ansible_user == 'root'
+          - boot_mount_action in ['check', 'setup', 'cleanup']
+          - boot_mount_action == 'check' or boot_mount_confirmation == 'BOT-MOUNT-GATES-20261023'
+
+    - name: Inspect exact mount identities existing units and owned paths without writes
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ boot_mount_validator }}', check, '{{ boot_mount_service_paths | to_json }}']
+      register: boot_mount_checked
+      changed_when: false
+      check_mode: false
+
+    - name: Default and check mode stop before any owned path or daemon change
+      ansible.builtin.meta: end_play
+      when: boot_mount_action == 'check' or ansible_check_mode
+
+    - name: Create only missing exact drop-in directories without changing existing ones
+      ansible.builtin.file:
+        path: '{{ item.directory }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: '{{ (boot_mount_checked.stdout | from_json).entries }}'
+      when: boot_mount_action == 'setup' and item.directory_missing
+
+    - name: Recheck safe destinations and immutable mount facts immediately before mutations
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ boot_mount_validator }}', check, '{{ boot_mount_service_paths | to_json }}']
+      changed_when: false
+
+    - name: Install only new owned exact drop-ins never overwrite foreign bytes
+      ansible.builtin.copy:
+        dest: '{{ item.destination }}'
+        content: '{{ item.content }}'
+        owner: root
+        group: root
+        mode: '0644'
+        force: false
+        follow: false
+        unsafe_writes: false
+      loop: '{{ (boot_mount_checked.stdout | from_json).entries }}'
+      when: boot_mount_action == 'setup'
+
+    - name: Remove only exact revalidated owned files leaving directories and other drop-ins
+      ansible.builtin.file:
+        path: '{{ item.destination }}'
+        state: absent
+      loop: '{{ (boot_mount_checked.stdout | from_json).entries }}'
+      when: boot_mount_action == 'cleanup' and item.exists
+
+    - name: Reload dependency definitions without starting stopping or restarting anything
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Verify loaded dependencies and assertions or exact owned-file cleanup
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ boot_mount_validator }}', '{{ "verify_setup" if boot_mount_action == "setup" else "verify_cleanup" }}', '{{ boot_mount_service_paths | to_json }}']
+      changed_when: false

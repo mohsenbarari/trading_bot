@@ -6,8 +6,8 @@
 `95283032898dd2a2318dd06e94521f12ba482934` است. کاربر صریحاً ادغام اصلاحات
 امنیتی در `main` و ارسال تاریخچهٔ موجود آن، شامل ۲۴ کامیت محلیِ قبلاً ارسال‌نشده،
 را مجاز کرده است. این اجازه معادل فعال‌سازی تغییرات بازار نیست؛ worktree فعال
-ریفکتور در این کار تغییر نمی‌کند. وضعیت فعلی **اصلاحات منبع آزموده و بازبینی شده؛ هنوز
-مستقر نشده و رفع کامل میزبان/سرویس‌ها باز است**.
+ریفکتور در این کار تغییر نمی‌کند. وضعیت فعلی **اصلاحات اپ آزموده و بازبینی شده، ولی
+هنوز مستقر نشده؛ Docker/containerd میزبان بات ارتقا یافته و رفع کامل باقی باز است**.
 نباید نتیجهٔ آزمون کد یا lockfile را به‌عنوان پاک‌بودن سرویس‌های جاری گزارش کرد.
 اصل بسته در دو کامیت `0a5e21e5` و `3f6682e6` با fast-forward در main ادغام و
 به remote ارسال شد. تغییر کامیت‌نشدهٔ retention کاربر عیناً حفظ شد. اجرای CI
@@ -190,18 +190,17 @@ Market در هر دو مرحلهٔ assembly/runtime از همان `patched-base`
 - کاربر پنجرهٔ نگهداری شب ۲۳ تا صبح ۲۴ اکتبر را صریحاً برای توقف هر دو پروژهٔ
   trading-bot و golden_bot تأیید کرد. این مجوز تاریخ‌دار جای backup قابل restore،
   حفظ بسته‌های قبلی، بازگشت سرویس‌ها یا کنترل پس از reboot را نمی‌گیرد و برای
-  پنجره‌های بعدی مجوز دائمی محسوب نمی‌شود. ارتقای daemon/reboot هنوز اجرا نشده.
+  پنجره‌های بعدی مجوز دائمی محسوب نمی‌شود. ارتقای daemon انجام شد؛ reboot هنوز
+  اجرا نشده است. جزئیات اثبات‌شده در بخش نگهداری زیر آمده است.
 
 1. **استقرار اپ و فرانت:** ایمیج‌های زنده همچنان قدیمی‌اند. ساخت/آزمون این شاخه
    مجوز اعلام «production امن شد» نیست. frontend تولیدشده نیز تا استقرار و
    اثبات digest/SBOM همان frontend عملیاتی محسوب نمی‌شود.
-2. **Docker/containerd:** ارتقای CLI Buildx جایگزین ارتقای daemon نیست. Docker
-   محلی 29.7.2 باید به نسخهٔ vendor اصلاح‌شده (حداقل 29.8.2) ارتقا یابد؛ وضعیت
-   backport توزیع سرور وب جداگانه اثبات شود. اصلاحات containerd به feature و
-   backport وابسته‌اند؛ نسخهٔ upstream به‌تنهایی برای verdict کافی نیست.
-   `live-restore` میزبان محلی خاموش است. پس از refresh metadata، Docker 29.9.2
-   و containerd 2.4.2 در مخزن موجودند، ولی patch هم‌شاخهٔ containerd 2.3.7
-   موجود نیست؛ ارتقای daemon بدون برنامهٔ توقف/بازگشت اجرا نشد.
+2. **Docker/containerd:** میزبان بات اکنون واقعاً Docker 29.9.2 و containerd
+   2.4.2 اجرا می‌کند؛ صرف ارتقای CLI گزارش نشده است. وضعیت backport توزیع سرور
+   وب همچنان جداگانه باز است. اصلاحات containerd به feature و backport وابسته‌اند؛
+   نسخهٔ upstream به‌تنهایی برای verdict کافی نیست. شواهد و محدودیت‌های هر دو
+   میزبان در بخش نگهداری زیر تفکیک شده‌اند.
 3. **کرنل:** کرنل اصلاح‌شده نصب شده ولی کرنل فعال قدیمی است. reboot بدون پنجرهٔ
    نگهداری، بررسی backup/restore، quiescence و کنترل مالکیت بات/سینک انجام نشود.
 4. **Brotli میزبان و stage قدیمی:** Node 20 و Python/OS Brotli قدیمی با نصب ابزار
@@ -236,6 +235,66 @@ Market در هر دو مرحلهٔ assembly/runtime از همان `patched-base`
     اجرا نشد. ابزار محدود اکنون آزموده و بازبینی شده، ولی ناسازگاری inventory
     زندهٔ بالا مستقل از inode مانع اجراست. مالکیت capture و projection موجود
     باید حفظ شود؛ حذف قفل، تغییر دستی receipt یا خاموش‌کردن guard ممنوع است.
+
+## نگهداری واقعی میزبان بات — ۲۳ اکتبر، ساعت ۱۹:۰۴ UTC
+
+- هر دو production backup با restore-smoke بدون شبکه و cleanup موفق تکمیل شد؛
+  چهار archive هر سایت جداگانه اعتبارسنجی شدند. Golden با API آنلاین SQLite
+  backup گرفته شد، نه کپی خام فایل زنده؛ quick_check نسخهٔ backup موفق بود.
+- پنج بستهٔ قدیمی از مخزن رسمی، با نام/نسخه/معماری/اندازه و SHA شاخص رسمی
+  تطبیق داده و حفظ شدند. مجموع ۱۰ فایل شامل چهار archive سایت foreign، پنج
+  بسته و backup Golden، برابر ۱۱۸٬۳۱۲٬۲۹۷ بایت، با SSH strict به سرور وب منتقل
+  و hash/size و fsync آن تأیید شد. چهار archive سایت Iran نیز به کنترلر کشیده
+  و با receipt اصلی تطبیق داده شد. هیچ backup قبلی حذف نشد.
+- بستهٔ Ansible و guard ابتدا مستقل بازبینی شد؛ در آخرین نسخه، **۵۷ آزمون
+  hermetic بدون skip** پاس شد. preflight واقعی، ترتیب نامعین mountها، Health
+  اختیاری Docker و تفاوت loopback داخل کانتینر با پورت منتشرشدهٔ Foreign را
+  پیش از توقف گرفت؛ اصلاح‌ها هیچ گارد نقش/احراز هویت را ضعیف نکردند.
+- اجرای واقعی از `b577c5e5` و manifest خصوصی با SHA
+  `587eb4bc43c2ccf12c5d5517a55daeebc93d53e7bb42d4825fa5dde718424b37`
+  پس از preflight کامل انجام شد. Ansible: ۲۹ task موفق، ۱۳ تغییر، صفر failure،
+  صفر rescue. receipt مستقل `docker_daemon_maintenance_result/1` در
+  `security-host-daemon-20261023-01.daemon-maintenance-result.json` وضعیت
+  `completed` را در `2026-10-23T19:04:16.866321+00:00` ثبت کرد.
+- Docker server **29.9.2** و containerd server **2.4.2** به‌صورت واقعی بررسی
+  شدند. هر ۱۵ کانتینر با همان ID، image ID، project، mount و restart policy
+  بازگشتند. چهار DB/Redis با pg_isready/PONG، سلامت کانتینرهای دارای healthcheck،
+  API `/api/config` از loopback داخل همان کانتینر و ۲۱ واحد/تایمر بررسی شدند.
+  Golden فعال است و quick_check دیتابیس زندهٔ آن نیز `ok` بود.
+- marker و journal قدیمی عیناً حفظ شدند؛ reservation موقت عملیات پس از اثبات
+  سلامت حذف شد، نه قفل پایدار انتشار. Writer، DNS، capture owner، schema و
+  ایمیج اپ تغییر نکردند. کرنل هنوز **6.8.0-138-generic** است؛ نصب کرنل جدید
+  معادل اجرای آن نیست. راهنمای اجرا و محدودیت‌ها:
+  [daemon maintenance](2026-10-23-daemon-maintenance.md).
+- اتصال موقت Web→Bot با public key محدود به IP وب و انقضای پایان همین پنجره،
+  بدون انتقال/خواندن کلید خصوصی، واقعاً تأیید شد. این اثبات SSH است، نه اثبات
+  وجود runner مستقلِ پایدار برای reboot. پاکسازی دسترسی باید جداگانه ثبت شود.
+  [راهنمای دسترسی موقت](2026-10-23-temporary-controller-access.md).
+- CI روی `00588776` هنوز مجوز انتشار اپ نمی‌دهد: coverage ناموفق شد و سه shard
+  مرورگر شمارهٔ ۴ شکست خوردند؛ بخشی از matrix هنوز در حال اجرا بود. گیت‌های
+  PostgreSQL، Redis و observability موفق‌اند، اما موفقیت آن‌ها جای پذیرش همهٔ
+  آزمون‌های لازم را نمی‌گیرد. triage خطاهای باقی‌مانده جداگانه ادامه دارد.
+
+### محدودیت حل‌نشدهٔ سرور وب Ubuntu 26.04
+
+بستهٔ رسمی Docker.io-app همچنان `29.1.3-0ubuntu4.1` است. containerd-app موجود
+`2.2.2-0ubuntu1.1` و candidate برابر `.1.2` است؛ تغییر candidate فقط اصلاح
+ShutdownSandbox را نشان می‌دهد و مدرک رفع advisories تازه نیست. بستهٔ
+containerd-stable همان توزیع نیز راه‌حل اثبات‌شده‌ای ارائه نمی‌کند.
+برای [CVE-2026-92543](https://ubuntu.com/security/CVE-2026-92543) و
+[CVE-2026-53493](https://ubuntu.com/security/CVE-2026-53493) ارزیابی vendor
+همچنان باز است؛ وضعیت [CVE-2026-46680](https://ubuntu.com/security/CVE-2026-46680)
+نیز باید با reachability واقعی بررسی شود. patch توزیع برای همهٔ این موارد
+تأیید نشده؛ «سرور وب امن شد» گفته نمی‌شود.
+
+phasing اجباری، مخزن توزیع دیگر یا مهاجرت CE بدون طرح سازگاری انجام نشد.
+تعویض صرف نام بسته به stable هم این finding را نمی‌بندد. تا رفع vendor، از
+pull/import/build غیرضروری روی این میزبان پرهیز شود. برای advisory registry،
+اعتماد به image digest به‌تنهایی کافی نیست؛ DNS مورد اعتماد یا محدودسازی egress
+باید جداگانه، بدون شکستن registry/CDNهای موردنیاز، طراحی و آزموده شود. منابع:
+[Moby advisory](https://github.com/moby/moby/security/advisories/GHSA-7cfq-22r6-qp73)،
+[containerd advisory](https://github.com/containerd/containerd/security/advisories/GHSA-vwhp-8p66-mq4f)،
+[changelog رسمی Ubuntu](https://git.launchpad.net/ubuntu/+source/containerd-app/plain/debian/changelog?h=applied/ubuntu/resolute-updates).
 
 ## ترتیب فعال‌سازی ایمن
 
