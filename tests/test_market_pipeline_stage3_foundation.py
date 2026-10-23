@@ -427,20 +427,32 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
                 key: str(secret) for key in manager.SECRET_ENV_KEYS["bot"]
             }
             secret_info = secret.stat()
-            with patch.object(
-                manager, "SECRET_FILE_GID", secret_info.st_gid
-            ):
+            parent_info = root.stat()
+            fixture_owners = {
+                "SECRET_PARENT_UID": parent_info.st_uid,
+                "SECRET_PARENT_GID": parent_info.st_gid,
+                "SECRET_FILE_UID": secret_info.st_uid,
+                "SECRET_FILE_GID": secret_info.st_gid,
+            }
+            with patch.multiple(manager, **fixture_owners):
                 findings = manager.inspect_secret_contract("bot", environment)
             self.assertTrue(all(item["status"] == "ok" for item in findings))
             os.chmod(secret, 0o444)
-            with patch.object(
-                manager, "SECRET_FILE_GID", secret_info.st_gid
-            ):
+            with patch.multiple(manager, **fixture_owners):
                 findings = manager.inspect_secret_contract("bot", environment)
             self.assertTrue(
                 all(item["status"] == "file_mode_mismatch" for item in findings)
             )
-            self.assertEqual(manager.SECRET_FILE_GID, 10001)
+            os.chmod(secret, 0o440)
+            fixture_owners["SECRET_FILE_UID"] = secret_info.st_uid + 1
+            with patch.multiple(manager, **fixture_owners):
+                findings = manager.inspect_secret_contract("bot", environment)
+            self.assertTrue(all(item["status"] != "ok" for item in findings))
+            self.assertEqual(
+                (manager.SECRET_PARENT_UID, manager.SECRET_PARENT_GID,
+                 manager.SECRET_FILE_UID, manager.SECRET_FILE_GID),
+                (0, 0, 0, 10001),
+            )
 
 
 if __name__ == "__main__":

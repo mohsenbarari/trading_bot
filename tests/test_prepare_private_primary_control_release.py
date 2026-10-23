@@ -63,7 +63,9 @@ def _json(path: Path, document: dict[str, object]) -> Path:
 
 class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.workspace = Path(tempfile.mkdtemp(prefix="pp-prep-", dir="/root"))
+        # Private inputs must be outside the checkout and /tmp, but a hosted
+        # runner does not own /root. Its actual home is an owned fixture base.
+        self.workspace = Path(tempfile.mkdtemp(prefix="pp-prep-", dir=Path.home()))
         os.chmod(self.workspace, 0o700)
         self.payload = self.workspace / "payload"
         self.payload.mkdir(mode=0o700)

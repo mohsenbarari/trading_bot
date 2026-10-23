@@ -174,7 +174,7 @@ def _account_config(account: str) -> dict[str, object]:
 
 class ProvisionPrivatePrimarySecretsTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.workspace = Path(tempfile.mkdtemp(prefix="pp-secret-", dir="/root"))
+        self.workspace = Path(tempfile.mkdtemp(prefix="pp-secret-", dir=Path.home()))
         os.chmod(self.workspace, 0o700)
         self.sources = self.workspace / "live-secrets"
         self.sources.mkdir(mode=0o700)
@@ -350,7 +350,7 @@ class ProvisionPrivatePrimarySecretsTests(unittest.TestCase):
 
 class RuntimeContinuityTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.workspace = Path(tempfile.mkdtemp(prefix="pp-cont-", dir="/root"))
+        self.workspace = Path(tempfile.mkdtemp(prefix="pp-cont-", dir=Path.home()))
         os.chmod(self.workspace, 0o700)
 
     def tearDown(self) -> None:

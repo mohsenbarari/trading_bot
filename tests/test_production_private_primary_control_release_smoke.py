@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -69,7 +70,7 @@ class ControlReleaseHelpSmokeTests(unittest.TestCase):
                 tool = REPO_ROOT / relative
                 self.assertTrue(tool.is_file(), relative)
                 completed = subprocess.run(
-                    ["/usr/bin/python3", str(tool), "--help"],
+                    [sys.executable, str(tool), "--help"],
                     cwd=str(isolated),
                     env=environment,
                     stdin=subprocess.DEVNULL,

@@ -54,6 +54,9 @@ def _sandbox_relay_installer(
     source_lock.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     rendered = source.read_text(encoding="utf-8")
     replacements = {
+        # Only this isolated test copy may run as the fixture owner. The shipped
+        # installer's root-only guard remains unchanged and is asserted below.
+        '[[ "$(id -u)" == "0" ]]': f'[[ "$(id -u)" == "{os.geteuid()}" ]]',
         'SYSTEMD_DIR="/etc/systemd/system"': f'SYSTEMD_DIR="{systemd_dir}"',
         'BACKUP_ROOT="/var/backups/trading-bot/systemd"': f'BACKUP_ROOT="{backup_root}"',
         'PRODUCTION_OPERATION_LOCK_DIR="/root/secure-envs/trading-bot/queue-cutover-artifacts"': f'PRODUCTION_OPERATION_LOCK_DIR="{root / "operation-locks"}"',
@@ -802,6 +805,7 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
 
     def test_installer_requires_explicit_confirmation_and_production_paths(self) -> None:
         installer = (REPO_ROOT / "scripts/install_production_coin_inference_snapshot_relay.sh").read_text()
+        self.assertIn('[[ "$(id -u)" == "0" ]]', installer)
         self.assertIn('PRODUCTION_COIN_INFERENCE_CONFIRM:-', installer)
         self.assertIn(PRODUCTION_CONFIRMATION, installer)
         self.assertIn("production-runtime", installer)

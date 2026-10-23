@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from contextlib import contextmanager
 import fcntl
 import json
 import os
@@ -25,8 +26,40 @@ from scripts import quiesce_production_legacy_market_collectors as handoff
 RELEASE = "a" * 40
 
 
+def _unit_file_metadata_fixture(systemd: Path, *, owner: int = 0):
+    """Model root-owned unit files, never remap authority/data file ownership."""
+    original = Path.lstat
+
+    def fixture_lstat(path):
+        info = original(path)
+        if path.parent == systemd and path.name in handoff.UNITS:
+            fields = list(info)
+            fields[4] = owner
+            return os.stat_result(fields)
+        return info
+
+    return patch.object(Path, "lstat", fixture_lstat)
+
+
+@contextmanager
+def _systemd_fixture(systemd: Path):
+    with (
+        _unit_file_metadata_fixture(systemd),
+        patch.object(handoff, "SYSTEMD_ROOT", systemd),
+    ):
+        yield
+
+
 class LegacyMarketCollectorHandoffTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Defense in depth: a missing per-test command mock must never execute
+        # host systemctl, including when this suite is run with root privileges.
+        denied = patch.object(
+            handoff.subprocess, "run",
+            side_effect=AssertionError("unmocked_host_command_forbidden"),
+        )
+        denied.start()
+        self.addCleanup(denied.stop)
         self.temporary = tempfile.TemporaryDirectory(prefix="collector-handoff-")
         self.root = Path(self.temporary.name)
         self.approved = self.root / "secure"
@@ -48,6 +81,10 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_missing_command_fixture_cannot_execute_host_systemctl(self):
+        with self.assertRaisesRegex(AssertionError, "unmocked_host_command_forbidden"):
+            handoff._run(["systemctl", "is-active", handoff.ROLE_UNITS["bot"][0]])
 
     def command(self, arguments, *, allow=(0,)):
         action = arguments[1]
@@ -74,10 +111,25 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
     def context(self):
         return (
             patch.object(handoff, "APPROVED_ROOT", self.approved),
-            patch.object(handoff, "SYSTEMD_ROOT", self.systemd),
+            _systemd_fixture(self.systemd),
             patch.object(handoff, "OPERATION_LOCK_PATH", self.operation_lock),
             patch.object(handoff, "_run", side_effect=self.command),
         )
+
+    def test_unit_owner_requirement_is_not_relaxed_for_nonroot_runner(self):
+        outside = self.root / "outside"
+        outside.touch()
+        actual_owner = outside.lstat().st_uid
+        unit = self.systemd / handoff.ROLE_UNITS[self.host_role][0]
+        with _unit_file_metadata_fixture(self.systemd):
+            self.assertEqual(unit.lstat().st_uid, 0)
+            self.assertEqual(outside.lstat().st_uid, actual_owner)
+        with (
+            patch.object(handoff, "SYSTEMD_ROOT", self.systemd),
+            _unit_file_metadata_fixture(self.systemd, owner=12345),
+            self.assertRaisesRegex(handoff.CollectorHandoffError, "unit_invalid"),
+        ):
+            handoff._inventory(self.host_role)
 
     def common(self) -> dict[str, object]:
         return {
@@ -360,6 +412,7 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
             return self.command(arguments, allow=allow)
 
         with (
+            _unit_file_metadata_fixture(self.systemd),
             patch.object(handoff, "APPROVED_ROOT", self.approved),
             patch.object(handoff, "SYSTEMD_ROOT", self.systemd),
             patch.object(handoff, "OPERATION_LOCK_PATH", self.operation_lock),
@@ -1040,6 +1093,7 @@ import json, os, sys, time
 from pathlib import Path
 from unittest.mock import patch
 from scripts import quiesce_production_legacy_market_collectors as handoff
+from tests.test_quiesce_production_legacy_market_collectors import _unit_file_metadata_fixture
 approved, systemd, lock, journal, ready, release, role = sys.argv[1:8]
 active = {unit: True for unit in handoff.ROLE_UNITS[role]}
 enabled = {unit: True for unit in handoff.ROLE_UNITS[role]}
@@ -1065,7 +1119,8 @@ def hang(**kwargs):
     Path(ready).write_text("prepared\n", encoding="utf-8")
     time.sleep(60)
     return real_complete(**kwargs)
-with patch.object(handoff, "APPROVED_ROOT", Path(approved)), \
+with _unit_file_metadata_fixture(Path(systemd)), \
+     patch.object(handoff, "APPROVED_ROOT", Path(approved)), \
      patch.object(handoff, "SYSTEMD_ROOT", Path(systemd)), \
      patch.object(handoff, "OPERATION_LOCK_PATH", Path(lock)), \
      patch.object(handoff, "_run", side_effect=command), \
