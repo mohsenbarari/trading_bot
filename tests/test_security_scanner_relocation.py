@@ -94,6 +94,18 @@ class ScannerRelocationTests(unittest.TestCase):
         self.assertIn('before.st_uid==0', self.code)
         self.assertIn('st.st_uid==0', self.code)
 
+    def test_vendor_public_modes_allowed_only_on_public_source(self):
+        for index, entry in enumerate(self.entries):
+            (self.source / entry['name']).chmod(0o755 if index == 0 else 0o644)
+        self.assertEqual(self.run_verifier()['status'], 'verified')
+        (self.destination / self.entries[0]['name']).chmod(0o755)
+        with self.assertRaises(AssertionError):
+            self.run_verifier(self.destination, 'fsync')
+        (self.source / self.entries[0]['name']).chmod(0o777)
+        with patch('os.unlink') as unlink, self.assertRaises(AssertionError):
+            self.run_verifier(mode='cleanup')
+        unlink.assert_not_called()
+
     def test_corrupt_last_file_prevents_every_source_unlink(self):
         (self.source / self.entries[-1]['name']).write_bytes(b'wrong')
         with patch('os.unlink') as unlink, self.assertRaises(AssertionError):
