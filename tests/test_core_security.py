@@ -1,7 +1,7 @@
 from datetime import timedelta
 import unittest
 
-from jose import jwt
+from core.jwt_codec import jwt
 
 from core import security
 

@@ -7,6 +7,7 @@ from starlette.responses import FileResponse
 
 from api.routers.chat import get_chat_file, get_stickers, upload_chat_media
 from core.enums import ChatType
+from core.jwt_codec import JWTError
 
 
 class FakeUploadFile:
@@ -110,7 +111,7 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_chat_file_handles_invalid_jwt_and_missing_resources(self):
         db = FakeDB()
 
-        with patch("api.routers.chat.jwt.decode", side_effect=__import__("jose").JWTError()):
+        with patch("api.routers.chat.jwt.decode", side_effect=JWTError()):
             with self.assertRaises(HTTPException) as exc_info:
                 await get_chat_file("file-1", db=db, token="bad")
         self.assertEqual(exc_info.exception.status_code, 401)

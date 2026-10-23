@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from jose import JWTError, jwt
+from core.jwt_codec import JWTError, jwt
 from sqlalchemy.exc import IntegrityError
 from api.routers import (
     auth, invitations, commodities, users, notifications, 

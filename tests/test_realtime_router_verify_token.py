@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from jose import JWTError
+from core.jwt_codec import JWTError
 
 from api.routers.realtime import verify_ws_token
 

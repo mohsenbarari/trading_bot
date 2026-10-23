@@ -11,8 +11,8 @@ class SecurityDependencyContractTests(unittest.TestCase):
     def test_security_fixed_dependency_floors_are_installed(self):
         floors = {
             "starlette": "1.3.1", "Pillow": "13.0.0", "aiohttp": "3.14.3",
-            "urllib3": "2.8.0", "pyasn1": "0.6.4", "certifi": "2026.10.23",
-            "python-multipart": "0.0.32", "python-jose": "3.5.0",
+            "urllib3": "2.8.0", "certifi": "2026.10.23",
+            "python-multipart": "0.0.32", "PyJWT": "2.15.1",
         }
         for name, floor in floors.items():
             with self.subTest(package=name):

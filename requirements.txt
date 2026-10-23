@@ -14,10 +14,9 @@ alembic==1.13.2
 pydantic-settings==2.3.4
 aiogram==3.31.0
 aiohttp==3.14.5
-# 3.5 fixes earlier JOSE issues, NOT CVE-2026-85394: callers must still supply a
-# fixed algorithm allowlist and never use an asymmetric public key as an HMAC key.
-python-jose[cryptography]==3.5.0
-pyasn1==0.6.4
+# Retire python-jose/ecdsa (unpatched advisories). PyJWT >=2.14 also fixes its
+# own PEM/HMAC confusion advisory; callers still supply fixed allowlists.
+PyJWT==2.15.1
 passlib[bcrypt]==1.7.4
 httpx==0.27.0
 jdatetime

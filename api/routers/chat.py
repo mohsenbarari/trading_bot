@@ -14,7 +14,7 @@ import uuid
 import asyncio
 import aiofiles
 import magic
-from jose import jwt, JWTError
+from core.jwt_codec import jwt, JWTError
 
 from core.db import AsyncSessionLocal, get_db
 from core.config import settings

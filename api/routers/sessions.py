@@ -628,7 +628,7 @@ async def get_pending_requests(
     await ensure_non_accountant_session_management(db, current_user)
     current_session_id = None
     try:
-        from jose import jwt as jose_jwt
+        from core.jwt_codec import jwt as jose_jwt
         from core.config import settings
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
@@ -1054,7 +1054,7 @@ async def list_active_sessions(
     # Extract session_id from JWT to mark current session
     current_session_id = None
     try:
-        from jose import jwt as jose_jwt
+        from core.jwt_codec import jwt as jose_jwt
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
@@ -1087,7 +1087,7 @@ async def terminate_session(
     await ensure_non_accountant_session_management(db, current_user)
     current_session_id_str = None
     try:
-        from jose import jwt as jose_jwt
+        from core.jwt_codec import jwt as jose_jwt
         from core.config import settings
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
@@ -1153,7 +1153,7 @@ async def logout_all_sessions(
     await ensure_non_accountant_session_management(db, current_user)
     current_session_id_str = None
     try:
-        from jose import jwt as jose_jwt
+        from core.jwt_codec import jwt as jose_jwt
         from core.config import settings
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
