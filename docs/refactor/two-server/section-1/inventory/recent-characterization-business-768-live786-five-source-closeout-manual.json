@@ -1,0 +1,270 @@
+{
+ "schema_version": 1,
+ "stage": "P1-00b",
+ "assignment_id": "WA-P1-00B-FIVE-SOURCE-RECONCILIATION-20261023-798D",
+ "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+ "scenario_key": "live786-five-accepted-source-seven-scenario-atomic-manual-closeout",
+ "status": "DOCUMENTATION_ONLY_PROPOSAL_PENDING_EXACT_ACCEPTANCE",
+ "inspected_source_snapshot": "a47494a02451e13df07d6b7464197af6333508d8",
+ "own_future_commit_or_receipt_claimed": false,
+ "conditional_on_exact_four_path_acceptance": true,
+ "document_provenance": {
+  "authorship": "CODEX_AUTHORED",
+  "author": "/root/post_durable_author",
+  "independent_nonauthor_review": "PENDING actual independent review; this document cannot accept itself",
+  "final_acceptance": "Root only after fresh798D Scope/intent, exact4path review, actual hermetic PRE/physicalPOST, normal scoped singleparentGit and actualnormalcustody/host0",
+  "Gemini_Worker_Reviewer_TASK_READY_or_CONTINUE_claimed_for_this_document": false,
+  "rejected_provider_output_adopted": false
+ },
+ "records": [
+  {
+   "unit": 1,
+   "path": "tests/test_p1_00b_characterization_market_overrides_all_failure_sqlite.py",
+   "sha256": "29effa3f16a5fc125f1cc50b291e2af8cb9bcebc76ad16bb15d47e9ef5e7b778",
+   "utf8_bytes": 23877,
+   "mode": "100644",
+   "last_commit": "563ce20195caf3e21dca416b63170470e6f87042",
+   "parent": "58c6388574a54a80296baabc23f64c5b8b66458a",
+   "canonical_symbols": [
+    "api/routers/trading_settings.py:list_market_overrides"
+   ],
+   "seed_ids": [
+    "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+   ],
+   "test_selectors": [
+    "tests/test_p1_00b_characterization_market_overrides_all_failure_sqlite.py::MarketOverridesAllFailureSQLiteCharacterizationTests::test_all_failure_propagates_after_real_scalars_without_downstream_work"
+   ],
+   "scenario_key": "manual783-all-failure-after-real-scalars",
+   "source_authorship": "CODEX_AUTHORED",
+   "evidence_limit": "Only direct-handler identical synchronous all() exception after genuine SQLite select/order/awaited execute/scalars; independent state/schema/index/audit/order/flush/mutation/restoration/lifecycle assertions. Not execute-failure, HTTP/auth, concurrency, origin or whole-handler acceptance.",
+   "historical_evidence": {
+    "source_acceptance": {
+     "path": ".local/two-site-refactor/reviews/RUNTIME_783M_MANUAL_ALL_FAILURE_SOURCE_ROOT_ACCEPTED_20261022.json",
+     "sha256": "3ad23bb65c6335631053b473f273bf749d164e7bb820020c20adbc43f74ab706"
+    },
+    "native_acceptance": {
+     "path": ".local/two-site-refactor/reviews/RUNTIME_783M_MANUAL_ALL_FAILURE_NATIVE_ROOT_ACCEPTED_20261022.json",
+     "sha256": "f3501ce4112a123634edea9139184624a306b475a1b0bebc0e040a19e6f2ef2f"
+    },
+    "authorship": "/root/cli_static_cause; independent /root/post_durable_author; final /root; NO Gemini or SDK CONTINUE invented",
+    "existing_association_commit": "f1c2ec5b11cba5352cf5b188667243f8ae356819"
+   }
+  },
+  {
+   "unit": 2,
+   "path": "tests/test_p1_00b_characterization_market_overrides_empty_sqlite_recovery.py",
+   "sha256": "9147db87a11804da1a9a1d28dffaf56dd7ba8e564e6ba90b6aa8e4a88de8ebcc",
+   "utf8_bytes": 24887,
+   "mode": "100644",
+   "last_commit": "446288e2f8d549809fbd5a9b00faea32e7d0bfa5",
+   "parent": "1b2913ebd031f63a76f8513f7f7fedd96993313e",
+   "canonical_symbols": [
+    "api/routers/trading_settings.py:list_market_overrides"
+   ],
+   "seed_ids": [
+    "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+   ],
+   "test_selectors": [
+    "tests/test_p1_00b_characterization_market_overrides_empty_sqlite_recovery.py::MarketOverridesEmptySQLiteCharacterizationTests::test_explicit_clean_sync_flush_is_rejected"
+   ],
+   "scenario_key": "EMPTY-explicit-clean-sync-flush-amendment",
+   "source_authorship": "GEMINI_AUTHORED_AMENDMENT_TO_CODEX_AUTHORED_BASE",
+   "evidence_limit": "Only accepted explicit clean sync flush rejection before/after empty real-SQLite handler with exactly one legitimate nested ORM autoflush/flush positive control, unchanged independent snapshots and restored guards. Does not reaccept original EMPTY behavior or whole handler.",
+   "historical_evidence": {
+    "sdk_result": {
+     "path": ".local/two-site-refactor/autopilot/runs/cycle-0001-20261022T152907Z-1797051/result.json",
+     "sha256": "d19fa20221e69f499da2732d64abdd6de040e7378be67e4ab3b03cc532e3873f"
+    },
+    "worker_run_id": "live786-empty-clean-sync-flush-c001-20261022-worker-0",
+    "reviewer_run_id": "live786-empty-clean-sync-flush-c001-20261022-reviewer-0",
+    "proposal_sha256": "0337a9f9e0c53ce577b4ef06189904632353b28efff8745eb6ca0b5aa0fa9668",
+    "native": {
+     "path": ".local/two-site-refactor/pipeline/live786-empty-clean-sync-flush-c001-20261022/pre-review-tests-0.json",
+     "sha256": "d2b24923ac1f6b123d93a74a27ec175da0b12abe378b4ea6fa4070aba75bb0ca"
+    }
+   }
+  },
+  {
+   "unit": 3,
+   "path": "tests/test_p1_00b_characterization_market_overrides_nonempty_sqlite.py",
+   "sha256": "f296c4ee7e9f821b426e26004fd59d5ce72f4cb2dfea69e4af06113e45218947",
+   "utf8_bytes": 33752,
+   "mode": "100644",
+   "last_commit": "dead25e559f3fbdeaddd986e3db232192a96d45b",
+   "parent": "446288e2f8d549809fbd5a9b00faea32e7d0bfa5",
+   "canonical_symbols": [
+    "api/routers/trading_settings.py:list_market_overrides"
+   ],
+   "seed_ids": [
+    "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+   ],
+   "test_selectors": [
+    "tests/test_p1_00b_characterization_market_overrides_nonempty_sqlite.py::MarketOverridesNonemptySQLiteCharacterizationTests::test_explicit_clean_sync_flush_is_rejected"
+   ],
+   "scenario_key": "NONEMPTY-explicit-clean-sync-flush-amendment",
+   "source_authorship": "GEMINI_AUTHORED",
+   "evidence_limit": "Only accepted explicit clean sync flush rejection before/after nonempty real-SQLite handler with legitimate normal autoflush/flush control, original sorted serialization/state oracles and restoration retained. First failed native attempt remains failed; successful native is attempt1, not attempt0.",
+   "historical_evidence": {
+    "sdk_result": {
+     "path": ".local/two-site-refactor/autopilot/runs/cycle-0002-20261022T154012Z-1797051/result.json",
+     "sha256": "870b4db6189fb7d4a6485c1ae81e9513010013d568f8933bd4cc5416305aff6d"
+    },
+    "worker_run_id": "live786-nonempty-clean-sync-flush-c002-20261022-worker-1",
+    "reviewer_run_id": "live786-nonempty-clean-sync-flush-c002-20261022-reviewer-1",
+    "proposal_sha256": "06d91d313cd536913fe221bbd88224a652b7ef5d6360666e843b89f45e57fa56",
+    "native": {
+     "path": ".local/two-site-refactor/pipeline/live786-nonempty-clean-sync-flush-c002-20261022/pre-review-tests-1.json",
+     "sha256": "a1337345498e131a497adea46cafd42e358c04dffc0dc4a102c70e29c8077a9d"
+    }
+   }
+  },
+  {
+   "unit": 4,
+   "path": "tests/test_p1_00b_characterization_trading_settings_read_dependency_failures_batch.py",
+   "sha256": "9e759e3fccf7c8e716c02dacbbad6319893ca8375befc8321b4bc55b59af0002",
+   "utf8_bytes": 7662,
+   "mode": "100644",
+   "last_commit": "401462d8af10e4ee3feadb1a392eecf6387b76a7",
+   "parent": "f1c2ec5b11cba5352cf5b188667243f8ae356819",
+   "canonical_symbols": [
+    "api/routers/trading_settings.py:get_settings",
+    "api/routers/trading_settings.py:get_market_state"
+   ],
+   "seed_ids": [
+    "API-ADMIN-GET-TRADING-SETTINGS-GET-SETTINGS-L195",
+    "API-ADMIN-GET-TRADING-SETTINGS-GET-MARKET-STATE-L202"
+   ],
+   "test_selectors": [
+    "tests/test_p1_00b_characterization_trading_settings_read_dependency_failures_batch.py::TradingSettingsReadDependencyFailuresCharacterizationTests::test_get_settings_propagates_loader_failure_before_serialization",
+    "tests/test_p1_00b_characterization_trading_settings_read_dependency_failures_batch.py::TradingSettingsReadDependencyFailuresCharacterizationTests::test_get_market_state_propagates_runtime_view_failure_before_response"
+   ],
+   "scenario_key": "P1-00B-BATCH-V1.trading-settings-read-dependency-failures",
+   "source_authorship": "GEMINI_AUTHORED",
+   "evidence_limit": "Two direct-handler synthetic dependency-error identities, exact call/await arguments/counts and zero downstream/unrelated work under opaque mocked boundaries. No successful mapping, HTTP/Depends/auth or real DB/query/session/cache/schedule/persistence proof.",
+   "historical_evidence": {
+    "sdk_result": {
+     "path": ".local/two-site-refactor/autopilot/runs/cycle-0001-20261022T225427Z-2327977/result.json",
+     "sha256": "887672a98374e07b445e274973fec2330eca8cad63a69ff729f65e5969375e09"
+    },
+    "worker_run_id": "p1-00b-790b-c001-read-failures-20261022-worker-0",
+    "reviewer_run_id": "p1-00b-790b-c001-read-failures-20261022-reviewer-0",
+    "proposal_sha256": "0466dff64d08939479b4273b5b26bcbb92f52fadc969ea838f07d8968e824386",
+    "native": {
+     "path": ".local/two-site-refactor/pipeline/p1-00b-790b-c001-read-failures-20261022/pre-review-tests-0.json",
+     "sha256": "a612520a6ef22377caa0fd60406c995aa35ebe0c6b912b2b6c28222cb341758c"
+    }
+   }
+  },
+  {
+   "unit": 5,
+   "path": "tests/test_p1_00b_characterization_admin_users_cancel_fsm_clear_failures_batch.py",
+   "sha256": "f1f5fcb5aa7fa1d01c08f2a33b4595c04021242036f4544860afd35382d5ceec",
+   "utf8_bytes": 9528,
+   "mode": "100644",
+   "last_commit": "a47494a02451e13df07d6b7464197af6333508d8",
+   "parent": "401462d8af10e4ee3feadb1a392eecf6387b76a7",
+   "canonical_symbols": [
+    "bot/handlers/admin_users.py:handle_limit_cancel",
+    "bot/handlers/admin_users.py:handle_user_search_cancel"
+   ],
+   "seed_ids": [
+    "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CANCEL-L1563",
+    "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SEARCH-CANCEL-L657"
+   ],
+   "test_selectors": [
+    "tests/test_p1_00b_characterization_admin_users_cancel_fsm_clear_failures_batch.py::AdminUsersCancelFSMClearFailuresCharacterizationTests::test_limit_cancel_propagates_fsm_clear_failure_before_session_or_delivery",
+    "tests/test_p1_00b_characterization_admin_users_cancel_fsm_clear_failures_batch.py::AdminUsersCancelFSMClearFailuresCharacterizationTests::test_user_search_cancel_propagates_fsm_clear_failure_before_navigation_or_delivery"
+   ],
+   "scenario_key": "P1-00B-BATCH-V1.admin-users-cancel-fsm-clear-failures",
+   "source_authorship": "GEMINI_AUTHORED",
+   "evidence_limit": "Two direct cancel-handler identical synthetic FSM clear exceptions after real permission helper/linked fixture, exact get_data→clear order and zero later session/navigation/state update/delivery work. No successful cancellation, real DB/FSM persistence, authorization matrix, retries or origin proof.",
+   "historical_evidence": {
+    "sdk_result": {
+     "path": ".local/two-site-refactor/autopilot/runs/cycle-0002-20261022T230337Z-2327977/result.json",
+     "sha256": "fbb3927e981ebcb967214b9a65af07edcde9f04421204a1444a9c5bf7852b102"
+    },
+    "worker_run_id": "p1-00b-790b-c002-cancel-fsm-clear-20261022-worker-0",
+    "reviewer_run_id": "p1-00b-790b-c002-cancel-fsm-clear-20261022-reviewer-0",
+    "proposal_sha256": "513fd24217cb202fe639eb1678636c9ea0677df8749e45f3e4a9a3dd23790d65",
+    "native": {
+     "path": ".local/two-site-refactor/pipeline/p1-00b-790b-c002-cancel-fsm-clear-20261022/pre-review-tests-0.json",
+     "sha256": "6a4f304a1a07494c41f1babf7d948aff136f0cfe0a9c2db8c51bb1415c385a05"
+    }
+   }
+  }
+ ],
+ "existing_manual783_association": {
+  "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-manual783-provenance.json",
+  "sha256": "685032585be7452977b4fda3bf4dbb2cbaf37c127131743a69c1fdf233ac9a5f",
+  "utf8_bytes": 9112,
+  "accepted_commit": "f1c2ec5b11cba5352cf5b188667243f8ae356819",
+  "unchanged_and_not_repeated": true
+ },
+ "accounting": {
+  "pending_five": 5,
+  "units_since_reconciliation": 5,
+  "total_behavior_units": 5,
+  "total_handler_scenarios": 7,
+  "reconciled_behavior_units_on_exact_acceptance": 5,
+  "reconciled_handler_scenarios_on_exact_acceptance": 7,
+  "remaining_behavior_units_on_exact_acceptance": 0,
+  "remaining_handler_scenarios_on_exact_acceptance": 0,
+  "behavior_units_added": 0,
+  "added_distinct_seeds": 0,
+  "current_group_global_reconciliation_complete_on_exact_acceptance": true,
+  "canonical_manifest_and_ledger_integration_complete_on_exact_acceptance": true,
+  "global_project_reconciliation_complete": false,
+  "manual_SDK_counter_or_checkpoint_edits": false,
+  "previous_775_group": "COMPLETED_PROVENANCE; never reopened or counted again",
+  "historical_pending_counts_and_false_flags_unchanged": true
+ },
+ "manifest_registration": {
+  "path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+  "prior_sha256": "5ba41aba13a6e400da96ec97ee1a1d272cba0daa26ec872a98e64b8bb88bc909",
+  "only_added_mapping": {
+   "business_768_live786_five_source_closeout_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json"
+  },
+  "prior_mappings_values_and_counts_unchanged": true
+ },
+ "ledger_integration": {
+  "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+  "prior_utf8_bytes": 103009,
+  "prior_sha256": "0d1f820028719ebffad3167619cba05e6153e9ce6a9618217ce34881b0f9e54e",
+  "append_anchor": "live786-five-source-atomic-closeout-798d",
+  "exact_prefix_unchanged": true
+ },
+ "counts": {
+  "strict_PROVEN_FOR_REQUESTED_SCENARIO": 288,
+  "strict_PARTIAL_OR_SEED_ONLY": 177,
+  "total_seeds": 465,
+  "baseline_evidenced_seed_count": 135,
+  "reconciled_new_seed_count": 261,
+  "evidenced_seed_count": 396,
+  "remaining_seed_count": 69
+ },
+ "coverage_status": "PARTIAL",
+ "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+ "origin_matrix_unresolved_cells": 24,
+ "canonical_blockers": [
+  "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+ ],
+ "closures_authorized": false,
+ "stages": {
+  "P1-00": "COMPLETE",
+  "P1-00b": "IN_PROGRESS"
+ },
+ "retained_failures": {
+  "old_manual783_C003_reservation": "52b45b49fd2b270aa92898d591460a61ce0deaec7e2f29215d47e3678712bcb3 remains BLOCKED_UNACCEPTED",
+  "failed_790_cycle3": "p1-00b-790b-c003-live786-flush-a2b-20261022: rejected test exceeded14000B; no Reviewer/native/commit acceptance",
+  "failed_790_cycle4": "p1-00b-live786-empty-flush-a1-reconciliation-c004-20261022: Worker915s timeout, recovery false; no independent Reviewer/native/commit acceptance",
+  "C006": "DEFERRED_UNACCEPTED; not adopted/replayed/reset",
+  "all_Task_role_reservation_epoch_artifacts": "Immutable; none released, renamed, reset, replayed or granted fabricated Gemini acceptance"
+ },
+ "evidence_limits": [
+  "Seven selectors identify FIVE previously accepted Source units, not seven units or five new seeds. All five distinct seed IDs were already in baseline135; raw membership is unchanged.",
+  "Historical role/native/result receipt references are retained Source provenance, not fresh798D execution. Root verifies them outside hermetic snapshot; the new stdlib witness validates on-disk Source bytes/AST and packet/manifest/ledger accounting, not provider execution.",
+  "This atomic current-group closeout takes effect only after exact four-path acceptance; no partial A1/A2/B3 completion or sixth behavior is authorized by a draft. Root actual external acceptance receipt may bind the eventual commit and full AFTER hashes without self-referential future claims in this packet.",
+  "No whole-handler/full-seed/origin/HIGH/Stage closure, implementation/product/persistence/HTTP/auth/concurrency/retry/reload, health/economic/SDK lifecycle/private bridge/startup/production/deploy/DNS/Writer authority."
+ ]
+}

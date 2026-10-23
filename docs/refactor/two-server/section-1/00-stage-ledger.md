@@ -718,3 +718,39 @@ On exact acceptance, [manual783 packet](inventory/recent-characterization-busine
 775D's previous5/5 group remains COMPLETED_PROVENANCE/remaining0; old pending5/units_since5/flags/packets are immutable, not reset or reconciled twice. New window has3 accepted units: manual783, EMPTY446288e2f8d549809fbd5a9b00faea32e7d0bfa5 and NONEMPTYdead25e559f3fbdeaddd986e3db232192a96d45b; only783 is associated here. No premature five-unit closeout; reconcile by5. C003 reservation52b45b49fd2b270aa92898d591460a61ce0deaec7e2f29215d47e3678712bcb3 stays BLOCKED_UNACCEPTED despite its candidate/native PASS;776/C004/772 failures and C006 DEFERRED_UNACCEPTED stay intact. No replay/alias/reset/release or SDK state edit.
 
 Added behavior/seeds=0; strict288/177 over465, raw396/69,24 origin cells/two High OPEN, PARTIAL/FULL_SEED_ACCEPTANCE_NOT_ASSESSED and P1-00 COMPLETE/P1-00b IN_PROGRESS remain. No HTTP/auth/Depends/concurrency/retry/reload/origin/full-seed/High/Stage closure, permanent health, savings, deploy/DNS/Writer/control authority follows.
+
+### 2026-10-23 UTC — Live786 five-Source atomic reconciliation <a id="live786-five-source-atomic-closeout-798d"></a>
+
+This documentation-only CODEX_AUTHORED proposal is one COMPLETE current-group closeout, not a retry/alias/adoption of failed790 C003 A2 or C004 A1. It takes effect ONLY on fresh798D authority, independent nonauthor and Root semantic/exact-byte review, actual hermetic PRE and physical POST, ordinary scoped single-parent Git and observed normal custody/host0. It does not accept itself, claim its own future commit/receipt or manufacture Gemini Worker/Reviewer/TASK_READY/CONTINUE. Runtime797, when separately accepted, adds no behavior and does not alter the five accepted source files below.
+
+Preserve the complete prior103009-byte ledger prefix SHA256 `0d1f820028719ebffad3167619cba05e6153e9ce6a9618217ce34881b0f9e54e`. All previous counts, false/partial flags, packets, deferrals and older completed groups remain byte-for-byte unchanged.
+
+#### Exact five-Source / seven-scenario union
+
+The complete data index is [the fresh five-source packet](inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json), SHA256 `46b231dbcf808f556bb5f798c50fc9444a4e6fc7ce1dfa8ec5e6d8855567a4d3`, 15542 UTF-8 bytes. Its five `records` bind full Source bytes/mode100644, exact parents, seven AST-resolvable selectors, original evidence limits and historical provenance. They are FIVE existing accepted units, NOT seven units or five new seeds:
+
+1. Manual783 all() failure: `563ce20195caf3e21dca416b63170470e6f87042`, one selector. Existing manual788 association at `f1c2ec5b11cba5352cf5b188667243f8ae356819` and its9112-byte packet SHA685032585be7452977b4fda3bf4dbb2cbaf37c127131743a69c1fdf233ac9a5f remain immutable; association is not repeated or counted again.
+2. EMPTY explicit-clean-sync-flush amendment: `446288e2f8d549809fbd5a9b00faea32e7d0bfa5`, one selector; retain CODEX_AUTHORED original base versus actual Gemini-authored amendment.
+3. NONEMPTY explicit-clean-sync-flush amendment: `dead25e559f3fbdeaddd986e3db232192a96d45b`, one selector. Successful historical native is attempt1; failed attempt0 is not relabeled.
+4. Trading-settings read dependency failures: `401462d8af10e4ee3feadb1a392eecf6387b76a7`, two direct-handler exception/negative-work selectors.
+5. Admin-users cancellation FSM-clear failures: `a47494a02451e13df07d6b7464197af6333508d8`, two direct-handler exception/order/negative-work selectors.
+
+Historical Source/native/role/result pointers are provenance, NOT fresh798D execution. The accepting Root separately verifies those original receipts and retains fresh actual witness results; no .local receipt is fabricated inside the hermetic snapshot. The four ordinary accepted sources retain actual Gemini run/proposal identities; manual783 and this document keep truthful CODEX authorship.
+
+#### Atomic accounting and canonical integration
+
+On EXACT four-path acceptance, this CURRENT group is complete: 5/5 Source units;7/7 scenarios; remaining0. Inventory registration, canonical ledger integration and current-group reconciliation complete together; no partial A1/A2/B3 phase or additional self-referential closeout is required. An external Root acceptance receipt records the actual new commit and exact AFTER hashes, not a future claim embedded in this document.
+
+Retain `pending_five=5`, `units_since_reconciliation=5` and `total_behavior_units=5` as immutable group provenance, never a counter reset or a new five-unit debt. Earlier775's5/5 group stays COMPLETED_PROVENANCE/remaining0. This unit adds zero behavior and zero distinct seeds. Its acceptance supersedes ONLY the current window's pending reconciliation presentation and stale next-action obligation; no sixth behavior is authorized by a draft or partial result. Subsequent legitimate work needs the normal actual Scope and all existing acceptance gates, with SDK alone owning lifecycle/checkpoints.
+
+The manifest adds ONLY `business_768_live786_five_source_closeout_path`. All prior mappings/field values/counts stay intact. All five distinct target seed IDs are already in baseline135; the actual named-record union remains135+261=396 evidenced/69 remaining/465 total. Strict288 PROVEN_FOR_REQUESTED_SCENARIO/177 PARTIAL_OR_SEED_ONLY remains separate and unchanged. PARTIAL/FULL_SEED_ACCEPTANCE_NOT_ASSESSED,24 origin cells/two HIGH blockers OPEN, closures_authorized=false, P1-00 COMPLETE/P1-00b IN_PROGRESS remain.
+
+The three bounded market-overrides outcomes above close ONLY their exact accepted all()-exception and explicit-clean-flush oracle omissions. They do not prove every handler boundary, execute-failure C006, HTTP/Depends/auth, concurrency/retry/reload/origin, whole-handler/full-seed/HIGH/Stage acceptance or new economic/health benefits. The read/FSM scenarios remain synthetic dependency-failure evidence, not successful persistence/delivery.
+
+#### Failure custody and minimal prevention
+
+Failed790 C003 A2 exceeded its declared witness budget before Reviewer/native acceptance; failed790 C004 A1 timed out915s without recovery eligibility, accepted proposal, Reviewer, native or commit. Their exact Task/role/reservation/epoch artifacts remain FAILED/UNACCEPTED and are never replayed, renamed, released, reset or adopted. Preserve older failed manual783 C003 reservation52b45b49fd2b270aa92898d591460a61ce0deaec7e2f29215d47e3678712bcb3,776/C004/772 failures and C006 DEFERRED_UNACCEPTED.
+
+For documentation-only reconciliation, reuse one compact shared physical-data validator (actual Source bytes/AST, exact packet/manifest/ledger accounting) with bounded positive/negative witnesses and the FULL real accepted behavior-selector set. Do not copy the SQLite/handler harness into a documentation witness or invent arbitrarily low test ceilings. Measure the complete necessary input and final UTF-8/canonical proposal before dispatch under unchanged normal bounds; do not omit context, weaken review, raise caps or accept partial evidence to conceal a size problem. This is narrow prevention guidance, not a new framework, runtime budget or permission to bypass quality.
+
+No Source implementation, main/protected refs, SDK/CP/status/reservation/epoch, bridge publication/startup, provider/profile policy, production/deploy/DNS/Web Writer or memory change is granted.
