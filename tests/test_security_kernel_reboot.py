@@ -1,4 +1,5 @@
 """Hermetic reboot contracts: no live service, Docker, SSH, network or private IO."""
+import ast
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -9,11 +10,13 @@ from pathlib import Path
 import socket
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import urllib.request
 
 import yaml
+from jinja2 import Environment
 
 PROJECT = Path(__file__).resolve().parents[1]
 HERE = PROJECT / 'deploy/maintenance'
@@ -516,6 +519,50 @@ class PublicSourceContracts(FencedCase):
         tasks = self.bootstrap['tasks']
         boundary = next(i for i, t in enumerate(tasks) if t.get('ansible.builtin.meta') == 'end_play')
         self.assertTrue(all(not any(key in task for key in ('ansible.builtin.copy', 'ansible.builtin.file', 'ansible.builtin.get_url')) for task in tasks[:boundary]))
+
+    def staged_wheel_validator(self):
+        task = next(t for t in self.bootstrap['tasks'] if t['name'] == 'Refuse redirected or unsafe native task-wheel stage before any file action')
+        argv = task['ansible.builtin.command']['argv']
+        wheels = yaml.safe_load((HERE / 'reboot_wheels.yml').read_text())['reboot_wheels']
+        environment = Environment(autoescape=False)
+        environment.filters['to_json'] = json.dumps
+        rendered = environment.from_string(argv[-1]).render(reboot_wheels=wheels)
+        # Execute the actual inline validator with a closed metadata-only
+        # filesystem fixture. Imports alone are replaced; its checks are intact.
+        tree = ast.parse(argv[-2])
+        tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
+        program = compile(tree, 'reviewed_stage_validator_fixture', 'exec')
+        return wheels, rendered, program
+
+    def execute_staged_wheel_validator(self, program, rendered, entries):
+        directory = SimpleNamespace(st_mode=0o040700, st_uid=0)
+        parent = SimpleNamespace(lstat=lambda: directory)
+        stage = SimpleNamespace(parent=parent, parents=(parent,), lstat=lambda: directory, iterdir=lambda: iter(entries))
+        namespace = {'json': json, 'stat': __import__('stat'), 'sys': SimpleNamespace(argv=['validator', rendered]),
+                     'os': SimpleNamespace(path=SimpleNamespace(lexists=lambda p: p is stage)),
+                     'pathlib': SimpleNamespace(Path=lambda path: stage)}
+        exec(program, namespace)
+
+    def test_real_jinja_json_argv_roundtrip_accepts_existing_ten_wheel_stage(self):
+        wheels, rendered, program = self.staged_wheel_validator()
+        expected = [wheel['filename'] for wheel in wheels]
+        self.assertEqual(json.loads(rendered), expected)
+        self.assertEqual(len(expected), 10)
+        entries = [SimpleNamespace(name=name, lstat=lambda: SimpleNamespace(st_mode=0o100600, st_uid=0, st_nlink=1)) for name in expected]
+        self.execute_staged_wheel_validator(program, rendered, entries)
+
+    def test_rendered_stage_validator_still_refuses_unknown_linked_or_unsafe_files(self):
+        wheels, rendered, program = self.staged_wheel_validator()
+        for name, mode, uid, links in [('../outside.whl', 0o100600, 0, 1),
+                                       ('unknown.whl', 0o100600, 0, 1),
+                                       (wheels[0]['filename'], 0o120600, 0, 1),
+                                       (wheels[0]['filename'], 0o100600, 0, 2),
+                                       (wheels[0]['filename'], 0o100644, 0, 1),
+                                       (wheels[0]['filename'], 0o100600, 12345, 1)]:
+            value = SimpleNamespace(st_mode=mode, st_uid=uid, st_nlink=links)
+            entry = SimpleNamespace(name=name, lstat=lambda: value)
+            with self.subTest(name=name, mode=mode, uid=uid, links=links), self.assertRaises(AssertionError):
+                self.execute_staged_wheel_validator(program, rendered, [entry])
 
     def test_without_ensurepip_offline_hashlocked_install_and_actual_versions(self):
         raw = (HERE / 'reboot_bootstrap.yml').read_text()
