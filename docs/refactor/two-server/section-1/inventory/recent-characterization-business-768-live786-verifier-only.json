@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-BUSINESS-LIVE-20261023-799B",
+  "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-799b-c010-verifier-only-reconciliation",
+  "scenario_key": "P1-00B-RECONCILE-V1.internal-verifier-only-799",
+  "source_head": "c9e9b30cd919472b1e253bc9b6da53da644171a8",
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+      "sha256": "6ed021334ea4384e5f1b98897a1aeb6c45f0cfed29105bb90e9a227ff8d803c8",
+      "utf8_bytes": 10936,
+      "mode": "100644",
+      "last_commit": "9a3bfcebe29399253b7ee60c605e72cf73e19d82",
+      "parent": "777ed75419ed7083d875c262da2beb8103017d03",
+      "canonical_symbols": [
+        "api/routers/sessions.py:internal_reset_user_sessions",
+        "api/routers/sessions.py:internal_replace_user_sessions"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ],
+      "scenarios": [
+        "reset_verifier_exception_before_sql_and_reset",
+        "replace_verifier_exception_before_sql_and_revoke"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_reset_verifier_exception_stops_before_sql_and_reset",
+        "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_replace_verifier_exception_stops_before_sql_and_revoke"
+      ],
+      "historical_provenance": {
+        "authorship": "GEMINI_WORKER",
+        "worker_run_id": "p1-00b-799b-c002-session-verifier-worker-0",
+        "worker_conversation_id": "e3bd97ba-a3ed-4e7d-9b38-bfcc9b5cb287",
+        "proposal_sha256": "63527dbee338e08f91e50576f734adcba1aa00d8add9724da6dc28a376174861",
+        "native_evidence_path": ".local/two-site-refactor/pipeline/p1-00b-799b-c002-session-verifier/pre-review-tests-0.json",
+        "native_evidence_sha256": "cc2786582c7b9e1415524adcc1b3fca113316d14c33e5effb497043d8fc371af",
+        "native_state": "PASSED",
+        "native_selectors": [
+          "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_reset_verifier_exception_stops_before_sql_and_reset",
+          "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_replace_verifier_exception_stops_before_sql_and_revoke"
+        ],
+        "unsupported_specs": [],
+        "reviewer_run_id": "p1-00b-799b-c002-session-verifier-reviewer-0",
+        "reviewer_conversation_id": "63814c9f-720e-42e8-9589-1d3ec0929bce",
+        "reviewer_result_sha256": "65e2c48e8ab2c0d78f6d6dbba71b54d26c11e8a93a236bf30321f5edcf749f33",
+        "reviewer_state": "VERIFIED"
+      },
+      "characterized_contract": {
+        "entrypoints": [
+          "api/routers/sessions.py:internal_reset_user_sessions",
+          "api/routers/sessions.py:internal_replace_user_sessions"
+        ],
+        "exception_propagation": "Synthetic direct-handler call awaits request.body() once, reads X-Timestamp, X-Signature, and X-API-Key via request.headers.get in source order, calls synchronous verify_session_authority_signature once with the identical body bytes object and keyword arguments, and propagates the identical precreated RuntimeError before SQL construction or session reset/revocation side effects.",
+        "ordered_events": [
+          "request.body",
+          "headers.get:X-Timestamp",
+          "headers.get:X-Signature",
+          "headers.get:X-API-Key",
+          "verify_session_authority_signature"
+        ],
+        "request_and_verifier_arguments": {
+          "body_call_count": 1,
+          "body_await_count": 1,
+          "headers_property_access_count": 3,
+          "header_get_keys": [
+            "X-Timestamp",
+            "X-Signature",
+            "X-API-Key"
+          ],
+          "verifier_call_count": 1,
+          "verifier_positional_args_count": 1,
+          "verifier_body_identity_preserved": true,
+          "verifier_kwargs_keys": [
+            "timestamp",
+            "signature",
+            "api_key"
+          ],
+          "db_argument": "inert object() without custom Session"
+        },
+        "zero_side_effect_and_fence_invariants": {
+          "select_calls": 0,
+          "reset_user_session_state_calls": 0,
+          "reset_user_session_state_awaits": 0,
+          "force_clear_sessions_calls": 0,
+          "force_clear_sessions_awaits": 0,
+          "network_denied_connects_delta": 0,
+          "live_redis_constructs_delta": 0,
+          "handler_identities_unchanged": true
+        }
+      },
+      "exclusions": [
+        "Actual verify_session_authority_signature HMAC, timestamp, and API-key validation internals",
+        "request.body() failure paths",
+        "SQL statement construction, db.execute, and scalar_one_or_none result consumption",
+        "FastAPI HTTP routing, Depends(get_db), and 401/404/409 response branches",
+        "Successful session reset or revocation side effects in reset_user_session_state and force_clear_sessions",
+        "Persistence, retry, process-reload, concurrency, origin-matrix, full-seed, High-blocker, and Stage acceptance"
+      ]
+    }
+  ],
+  "registered_handlers": [
+    {
+      "scenario": "reset_verifier_exception_before_sql_and_reset",
+      "scenario_key": "reset_verifier_exception_before_sql_and_reset",
+      "selector": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_reset_verifier_exception_stops_before_sql_and_reset",
+      "canonical_symbol": "api/routers/sessions.py:internal_reset_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "source_path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+      "source_file_sha256": "6ed021334ea4384e5f1b98897a1aeb6c45f0cfed29105bb90e9a227ff8d803c8",
+      "source_commit": "9a3bfcebe29399253b7ee60c605e72cf73e19d82"
+    },
+    {
+      "scenario": "replace_verifier_exception_before_sql_and_revoke",
+      "scenario_key": "replace_verifier_exception_before_sql_and_revoke",
+      "selector": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_replace_verifier_exception_stops_before_sql_and_revoke",
+      "canonical_symbol": "api/routers/sessions.py:internal_replace_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "source_path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+      "source_file_sha256": "6ed021334ea4384e5f1b98897a1aeb6c45f0cfed29105bb90e9a227ff8d803c8",
+      "source_commit": "9a3bfcebe29399253b7ee60c605e72cf73e19d82"
+    }
+  ],
+  "promotion_assessment": {
+    "promoted_seed_ids": [],
+    "already_registered_seed_ids": [
+      "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+    ],
+    "delta_distinct_seed_count": 0,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "before_manifest_sha256": "70ccb37b5aefa9c92c284927752e8e15053b054e81a6f79125150a10024c136b",
+    "before_manifest_utf8_bytes": 4218,
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accounting": {
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "total_handler_scenarios": 7,
+    "prior_reconciled_singleton_provenance": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json",
+      "sha256": "cf251e42b72c41490e205499dbc269704d75ba422dbf730ef1027d29101d579c",
+      "utf8_bytes": 9738,
+      "accepted_commit": "c9e9b30cd919472b1e253bc9b6da53da644171a8",
+      "cumulative_reconciled_units": 2,
+      "cumulative_reconciled_scenarios": 2
+    },
+    "reconciled_units_in_this_packet_on_exact_acceptance": 1,
+    "reconciled_scenarios_in_this_packet_on_exact_acceptance": 2,
+    "cumulative_reconciled_units_on_exact_acceptance": 3,
+    "cumulative_reconciled_scenarios_on_exact_acceptance": 4,
+    "remaining_unreconciled_units_on_exact_acceptance": 2,
+    "remaining_unreconciled_scenarios_on_exact_acceptance": 3,
+    "group_reconciliation_complete": false,
+    "canonical_manifest_and_ledger_integration_complete": false,
+    "ledger_integration_status": "PENDING",
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0,
+    "unreconciled_units_after_verifier_on_exact_acceptance": [
+      {
+        "path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+        "sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+        "source_commit": "777ed75419ed7083d875c262da2beb8103017d03",
+        "handler_scenarios": 2
+      },
+      {
+        "path": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py",
+        "sha256": "d7a60d5f329d0889a2fcba3d52b28cb0b41c72c51c913e278f3bfdf3637903d1",
+        "source_commit": "f4dd10018ef832881894e276bfa214e070ce7422",
+        "handler_scenarios": 1
+      }
+    ],
+    "preserved_deferred_and_failed_reservations": {
+      "deferred_a2_task_id": "p1-00b-799b-c006-session-prequery-reconciliation-a2",
+      "deferred_a2_status": "UNACCEPTED_RESERVED_NEVER_REPLAY_OR_RELEASE",
+      "failed_authority_singleton_task_id": "p1-00b-799b-c009-authority-execute-singleton-reconciliation",
+      "failed_authority_singleton_status": "UNACCEPTED_RESERVED_NEVER_REPLAY_OR_RELEASE"
+    },
+    "previous_completed_group_provenance": {
+      "assignment_id": "WA-P1-00B-FIVE-SOURCE-RECONCILIATION-20261023-798D",
+      "accepted_closeout_commit": "e5c08c61895961bce399da9d8c69f561d7538ea1",
+      "status": "COMPLETED_PROVENANCE",
+      "reconciled_behavior_units": 5,
+      "reconciled_handler_scenarios": 7,
+      "remaining_in_group": 0
+    },
+    "ledger_prefix_binding": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "unchanged_ledger_sha256": "a25deecb4880ed4c7ceb905ae5db5048c8d3fc7b58129bc6cfdcf4d31d2c05c2",
+      "unchanged_ledger_utf8_bytes": 109329
+    }
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}

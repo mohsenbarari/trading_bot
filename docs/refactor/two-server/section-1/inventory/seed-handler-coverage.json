@@ -37,7 +37,8 @@
     "business_768_live786_manual783_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-manual783-provenance.json",
     "business_768_live786_five_source_closeout_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json",
     "business_768_live786_reset_execute_singleton_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json",
-    "business_768_live786_replace_execute_singleton_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json"
+    "business_768_live786_replace_execute_singleton_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json",
+    "business_768_live786_verifier_only_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-verifier-only.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
