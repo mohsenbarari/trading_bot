@@ -8,6 +8,7 @@ import json
 import stat
 import unittest
 
+from tests.test_p1_00b_characterization_ledger_prefix_helper import read_ledger_prefix
 import tests.test_p1_00b_characterization_notification_mark_all_accounting as accounting
 
 PACKET_KEY = "business_768_live786_verifier_only_path"
@@ -82,15 +83,11 @@ class VerifierReconciliationTests(unittest.TestCase):
         )
 
     def _read_ledger_prefix(self) -> bytes:
-        path = accounting.ROOT / LEDGER_PATH
-        self.assertFalse(path.is_symlink())
-        info = path.stat()
-        self.assertTrue(stat.S_ISREG(info.st_mode))
-        self.assertGreaterEqual(info.st_size, LEDGER_PREFIX_BYTES)
-        with path.open("rb") as handle:
-            prefix = handle.read(LEDGER_PREFIX_BYTES)
-        self.assertEqual(len(prefix), LEDGER_PREFIX_BYTES)
-        return prefix
+        return read_ledger_prefix(
+            accounting.ROOT / LEDGER_PATH,
+            LEDGER_PREFIX_BYTES,
+            LEDGER_PREFIX_SHA,
+        )
 
     def _reconstruct_before_manifest(self, manifest: dict) -> tuple[dict, bytes]:
         evidence = manifest["evidence_sources"]
