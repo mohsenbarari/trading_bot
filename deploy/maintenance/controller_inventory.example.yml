@@ -1,0 +1,17 @@
+---
+# Run on the native Bot host. The Web connection must already have a trusted pin.
+all:
+  hosts:
+    controller_bot:
+      ansible_connection: local
+      ansible_host: 65.109.216.187
+      ansible_port: 22
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+    controller_web:
+      ansible_connection: ssh
+      ansible_host: 65.109.220.59
+      ansible_port: 37067
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+      ansible_ssh_common_args: -o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes

@@ -1,0 +1,246 @@
+---
+# SOURCE ONLY until reviewed. Native Bot is the controller; private key stays on Web.
+- name: Temporary pinned Web to Bot maintenance access
+  hosts: controller_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    controller_access_action: check
+    controller_access_id: security-maintenance
+    controller_access_confirmation: ''
+    controller_comment: "security-controller-20261023-{{ controller_access_id }}"
+    controller_directory: "/root/.ssh/{{ controller_comment }}"
+    controller_key: "{{ controller_directory }}/id_ed25519"
+    controller_pin: "{{ controller_directory }}/known_hosts"
+    # Read-only validation: never opens, hashes, slurps or copies a private key.
+    controller_validator: |
+      import base64, datetime, json, os, pathlib, re, stat, struct, subprocess, sys
+      action, role, ident, expected = sys.argv[1:]
+      def require(ok, message):
+          if not ok: raise SystemExit(message)
+      require(action in ('check', 'setup', 'cleanup'), 'invalid action')
+      require(role in ('bot', 'web'), 'invalid role')
+      require(re.fullmatch(r'[a-z0-9][a-z0-9-]{0,47}', ident), 'invalid task identifier')
+      require(os.geteuid() == 0, 'native root required')
+      require(not pathlib.Path('/.dockerenv').exists() and not pathlib.Path('/run/.containerenv').exists(), 'container refused')
+      require(pathlib.Path('/proc/1/exe').resolve().name == 'systemd', 'native systemd PID1 required')
+      for namespace in ('pid', 'mnt', 'user'):
+          require(os.readlink('/proc/self/ns/' + namespace) == os.readlink('/proc/1/ns/' + namespace), 'namespace mismatch')
+      addresses = json.loads(subprocess.check_output(['/usr/sbin/ip', '-j', 'address'], timeout=5))
+      expected_address = '65.109.216.187' if role == 'bot' else '65.109.220.59'
+      require(any(value.get('local') == expected_address for link in addresses for value in link.get('addr_info', [])), 'wrong native host address')
+      if action == 'setup':
+          require(datetime.datetime.now(datetime.timezone.utc) < datetime.datetime(2026, 10, 24, 1, 30, tzinfo=datetime.timezone.utc), 'setup window expired')
+      def metadata(path, directory=False):
+          value = os.lstat(path)
+          require(value.st_uid == 0 and not stat.S_ISLNK(value.st_mode), 'unsafe owner or symlink')
+          require(stat.S_ISDIR(value.st_mode) if directory else stat.S_ISREG(value.st_mode), 'wrong file type')
+          require(not value.st_mode & 0o022, 'unsafe writable permissions')
+          if not directory: require(value.st_nlink == 1, 'hardlink refused')
+          return value
+      def public(path, maximum=16384):
+          value = metadata(path)
+          require(value.st_size <= maximum, 'public file too large')
+          fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+          try:
+              opened = os.fstat(fd)
+              require((opened.st_dev, opened.st_ino) == (value.st_dev, value.st_ino), 'file changed')
+              data = os.read(fd, maximum + 1)
+              require(len(data) <= maximum, 'public file too large')
+              return data.decode('ascii')
+          finally: os.close(fd)
+      def ed25519(text, comment=None):
+          require(len(text.splitlines()) == 1, 'one public key line required')
+          parts = text.split()
+          require(len(parts) in (2, 3) and parts[0] == 'ssh-ed25519', 'ED25519 public key required')
+          if comment is not None: require(len(parts) == 3 and parts[2] == comment, 'public key ownership mismatch')
+          blob = base64.b64decode(parts[1], validate=True)
+          require(len(blob) == 51 and blob[:19] == struct.pack('>I', 11) + b'ssh-ed25519' + struct.pack('>I', 32), 'malformed ED25519 key')
+          return ' '.join(parts[:2])
+      for parent in ('/root', '/root/.ssh'):
+          info = metadata(parent, True)
+          require(not stat.S_IMODE(info.st_mode) & 0o077, 'private root/SSH parent required')
+      comment = 'security-controller-20261023-' + ident
+      directory = pathlib.Path('/root/.ssh') / comment
+      if role == 'bot':
+          for parent in ('/etc', '/etc/ssh'): metadata(parent, True)
+          host_key = ed25519(public('/etc/ssh/ssh_host_ed25519_key.pub'))
+          authorized = public('/root/.ssh/authorized_keys', 1048576)
+          # Match only our final comment field, never arbitrary substrings.
+          own = [line for line in authorized.splitlines() if line.split() and line.split()[-1] == comment]
+          require(len(own) <= 1, 'ambiguous managed key')
+          if action == 'setup': require(not own, 'managed key already exists; clean up first')
+          if action == 'cleanup': require(not own or (expected and own == [expected]), 'exact managed key unavailable or changed')
+          print(json.dumps({'host_key': host_key, 'managed_key_present': bool(own)}))
+      else:
+          exists = os.path.lexists(directory)
+          if action == 'setup': require(not exists, 'workspace exists; choose a fresh id or clean up first')
+          result = {'exists': exists, 'public_key': '', 'files': []}
+          if exists:
+              info = metadata(directory, True)
+              require(stat.S_IMODE(info.st_mode) == 0o700, 'workspace must be 0700')
+              names = sorted(os.listdir(directory))
+              require(set(names) <= {'id_ed25519', 'id_ed25519.pub', 'known_hosts'}, 'unknown workspace file')
+              for name in names:
+                  info = metadata(directory / name)
+                  if name != 'id_ed25519.pub': require(stat.S_IMODE(info.st_mode) == 0o600, 'private/pin mode must be 0600')
+              if 'id_ed25519.pub' in names:
+                  key = ed25519(public(directory / 'id_ed25519.pub'), comment)
+                  result['public_key'] = key + ' ' + comment
+              else: require(not names, 'missing ownership public key')
+              if 'known_hosts' in names:
+                  require(public(directory / 'known_hosts') == '65.109.216.187 ' + expected + '\n', 'trusted host pin changed')
+              result['files'] = names
+          print(json.dumps(result))
+  tasks:
+    - name: Refuse additional hosts connection overrides and implicit mutation
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['controller_bot', 'controller_web']
+          - ansible_play_hosts_all == ['controller_bot']
+          - hostvars.controller_bot.ansible_connection == 'local'
+          - hostvars.controller_bot.ansible_host == '65.109.216.187'
+          - hostvars.controller_bot.ansible_port | int == 22
+          - hostvars.controller_bot.ansible_user == 'root'
+          - hostvars.controller_web.ansible_connection == 'ssh'
+          - hostvars.controller_web.ansible_host == '65.109.220.59'
+          - hostvars.controller_web.ansible_port | int == 37067
+          - hostvars.controller_web.ansible_user == 'root'
+          - hostvars.controller_web.ansible_ssh_common_args == '-o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes'
+          - controller_access_action in ['check', 'setup', 'cleanup']
+          - controller_access_action == 'check' or controller_access_confirmation == 'TEMPORARY-ROOT-SSH-20261024T013000Z'
+
+    - name: Read only native Bot safety metadata and trusted public host key
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ controller_validator }}', check, bot, '{{ controller_access_id }}', '']
+      changed_when: false
+      check_mode: false
+      register: controller_bot_checked
+
+    - name: Read only Web native safety and owned workspace metadata
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ controller_validator }}', '{{ controller_access_action }}', web, '{{ controller_access_id }}', '{{ (controller_bot_checked.stdout | from_json).host_key }}']
+      delegate_to: controller_web
+      changed_when: false
+      check_mode: false
+      register: controller_web_checked
+
+    - name: Default and Ansible check modes make no managed changes
+      ansible.builtin.meta: end_play
+      when: controller_access_action == 'check' or ansible_check_mode
+
+    - name: Create fresh Web-only private workspace
+      ansible.builtin.file:
+        path: '{{ controller_directory }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      delegate_to: controller_web
+      when: controller_access_action == 'setup'
+
+    - name: Generate private key only on Web without returning its bytes
+      ansible.builtin.command:
+        argv: [/usr/bin/ssh-keygen, -q, -t, ed25519, -N, '', -C, '{{ controller_comment }}', -f, '{{ controller_key }}']
+        creates: '{{ controller_key }}'
+      delegate_to: controller_web
+      no_log: true
+      when: controller_access_action == 'setup'
+
+    - name: Install only trusted public Bot host pin in scoped Web file
+      ansible.builtin.copy:
+        dest: '{{ controller_pin }}'
+        content: "65.109.216.187 {{ (controller_bot_checked.stdout | from_json).host_key }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      delegate_to: controller_web
+      when: controller_access_action == 'setup'
+
+    - name: Inspect private key metadata without checksums MIME detection or following links
+      ansible.builtin.stat:
+        path: '{{ controller_key }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      delegate_to: controller_web
+      register: controller_private_metadata
+
+    - name: Validate generated or retained public-only workspace ownership
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ controller_validator }}', cleanup, web, '{{ controller_access_id }}', '{{ (controller_bot_checked.stdout | from_json).host_key }}']
+      delegate_to: controller_web
+      changed_when: false
+      register: controller_web_owned
+
+    - name: Derive exactly one options-prefixed managed public key
+      ansible.builtin.set_fact:
+        controller_managed_line: "{{ ('restrict,from=\"65.109.220.59\",expiry-time=\"20261024013000Z\" ' + (controller_web_owned.stdout | from_json).public_key) if (controller_web_owned.stdout | from_json).public_key else '' }}"
+
+    - name: Require private key and exact public file set for setup
+      ansible.builtin.assert:
+        that:
+          - controller_private_metadata.stat.exists
+          - (controller_web_owned.stdout | from_json).files == ['id_ed25519', 'id_ed25519.pub', 'known_hosts']
+      when: controller_access_action == 'setup'
+
+    - name: Revalidate native Bot paths and exact managed-line ownership immediately before mutation
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ controller_validator }}', '{{ controller_access_action }}', bot, '{{ controller_access_id }}', '{{ controller_managed_line }}']
+      changed_when: false
+
+    - name: Snapshot authorized keys metadata without reading private material
+      ansible.builtin.stat:
+        path: /root/.ssh/authorized_keys
+        follow: false
+        get_checksum: false
+        get_mime: false
+      register: controller_authorized_metadata
+
+    - name: Refuse unsafe authorized keys metadata immediately before line edit
+      ansible.builtin.assert:
+        that:
+          - controller_authorized_metadata.stat.exists
+          - controller_authorized_metadata.stat.isreg
+          - not controller_authorized_metadata.stat.islnk
+          - controller_authorized_metadata.stat.uid == 0
+          - controller_authorized_metadata.stat.nlink == 1
+          - controller_authorized_metadata.stat.mode in ['0400', '0600', '0640', '0644']
+
+    - name: Append or remove only the exact owned timed public key preserving other lines
+      ansible.builtin.lineinfile:
+        path: /root/.ssh/authorized_keys
+        line: '{{ controller_managed_line }}'
+        regexp: "^{{ controller_managed_line | regex_escape }}$"
+        state: "{{ 'present' if controller_access_action == 'setup' else 'absent' }}"
+        create: false
+        backrefs: false
+        unsafe_writes: false
+        owner: '{{ controller_authorized_metadata.stat.uid }}'
+        group: '{{ controller_authorized_metadata.stat.gid }}'
+        mode: '{{ controller_authorized_metadata.stat.mode }}'
+      when: controller_managed_line | length > 0
+
+    - name: Prove source restriction and strict public host pin via Web to Bot round trip
+      ansible.builtin.command:
+        argv: [/usr/bin/ssh, -F, /dev/null, -p, '22', -i, '{{ controller_key }}', -o, BatchMode=yes, -o, IdentitiesOnly=yes, -o, ForwardAgent=no, -o, RequestTTY=no, -o, StrictHostKeyChecking=yes, -o, 'UserKnownHostsFile={{ controller_pin }}', -o, GlobalKnownHostsFile=/dev/null, -o, HostKeyAlgorithms=ssh-ed25519, -o, ConnectTimeout=10, root@65.109.216.187, /usr/bin/true]
+      delegate_to: controller_web
+      changed_when: false
+      timeout: 20
+      when: controller_access_action == 'setup'
+
+    - name: Remove only individually validated owned workspace files after key revocation
+      ansible.builtin.file:
+        path: '{{ controller_directory }}/{{ item }}'
+        state: absent
+      # Keep the public ownership proof until all other owned files are gone.
+      loop: [id_ed25519, known_hosts, id_ed25519.pub]
+      delegate_to: controller_web
+      when: controller_access_action == 'cleanup' and item in (controller_web_owned.stdout | from_json).files
+
+    - name: Remove only the empty owned workspace never recursively
+      ansible.builtin.command:
+        argv: [/usr/bin/rmdir, '{{ controller_directory }}']
+      delegate_to: controller_web
+      when: controller_access_action == 'cleanup' and (controller_web_owned.stdout | from_json).exists

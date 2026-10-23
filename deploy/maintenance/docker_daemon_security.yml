@@ -1,0 +1,254 @@
+---
+# Daemon-only operation. Invoke through the guarded parent, never ansible directly.
+- name: Pinned local Docker security maintenance without reboot or application release
+  hosts: docker_security_local
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    maintenance_apply: false
+    guard: "{{ playbook_dir }}/../../scripts/validate_docker_daemon_maintenance.py"
+    package_pins:
+      - docker-ce=5:29.9.2-1~ubuntu.24.04~noble
+      - docker-ce-cli=5:29.9.2-1~ubuntu.24.04~noble
+      - docker-ce-rootless-extras=5:29.9.2-1~ubuntu.24.04~noble
+      - containerd.io=2.4.2-3~ubuntu.24.04~noble
+      - docker-compose-plugin=5.6.1-1~ubuntu.24.04~noble
+  tasks:
+    - name: Require explicit content-addressed private manifest
+      ansible.builtin.assert:
+        that:
+          - maintenance_manifest is defined
+          - maintenance_sha256 is defined
+          - maintenance_apply is boolean
+
+    - name: Validate native host window evidence ownership source and complete baseline
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - "{{ guard }}"
+          - check
+          - --manifest
+          - "{{ maintenance_manifest }}"
+          - --manifest-sha256
+          - "{{ maintenance_sha256 }}"
+          - --phase
+          - preflight
+      register: validated
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Load only validated metadata
+      ansible.builtin.set_fact:
+        plan: "{{ (validated.stdout | from_json).plan }}"
+        containers: "{{ (validated.stdout | from_json).containers }}"
+      no_log: true
+
+    - name: Default and check mode are read-only preflight
+      ansible.builtin.meta: end_play
+      when: not maintenance_apply or ansible_check_mode
+
+    - name: Download only the pinned five-package transaction before downtime
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/apt-get', '--download-only', '--no-remove', '--yes', 'install'] + package_pins }}"
+      changed_when: false
+      timeout: 180
+
+    - name: Freeze successful-path versus recovered-failure reporting
+      ansible.builtin.set_fact:
+        transaction_failed: false
+
+    - name: Revalidate all baseline immediately before first runtime write
+      ansible.builtin.command: &preflight
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", check, --manifest, "{{ maintenance_manifest }}", --manifest-sha256, "{{ maintenance_sha256 }}", --phase, preflight]
+      changed_when: false
+      no_log: true
+
+    - name: Controlled daemon transaction with conservative runtime restoration
+      block:
+        - name: Stop recorded trigger timers first
+          ansible.builtin.systemd_service:
+            name: "{{ item.name }}"
+            state: stopped
+          loop: "{{ plan.units | selectattr('kind', 'equalto', 'timer') | list }}"
+
+        - name: Drain or gracefully stop only recorded daemons and triggered services
+          ansible.builtin.systemd_service:
+            name: "{{ item.name }}"
+            state: stopped
+          loop: "{{ plan.units | rejectattr('kind', 'equalto', 'timer') | list }}"
+
+        - name: Disable auto-restart only on frozen exact container IDs
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, update, --restart=no, "{{ item.id }}"]
+          loop: "{{ containers }}"
+
+        - name: Gracefully stop exact previously running containers
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, stop, --time, '45', "{{ item.id }}"]
+          loop: "{{ containers | selectattr('running', 'equalto', true) | list }}"
+          timeout: 60
+
+        - name: Prove unchanged IDs images projects mounts with every container quiescent
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, "{{ guard }}", check, --manifest, "{{ maintenance_manifest }}", --manifest-sha256, "{{ maintenance_sha256 }}", --phase, quiesced]
+          changed_when: false
+          no_log: true
+
+        - name: Stop Docker socket and daemon before containerd
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+          loop: [docker.socket, docker.service, containerd.service]
+
+        - name: Fence immutable evidence window source and operation immediately before packages
+          ansible.builtin.command: &invariants
+            argv: [/usr/bin/python3, -I, -B, "{{ guard }}", check, --manifest, "{{ maintenance_manifest }}", --manifest-sha256, "{{ maintenance_sha256 }}", --phase, invariants]
+          changed_when: false
+          no_log: true
+
+        - name: Install exactly pinned transaction without automatic service starts or removals
+          ansible.builtin.apt:
+            name: "{{ package_pins }}"
+            state: present
+            update_cache: false
+            force_apt_get: true
+            fail_on_autoremove: true
+            allow_unauthenticated: false
+            allow_downgrade: false
+            auto_install_module_deps: false
+            policy_rc_d: 101
+            lock_timeout: 60
+          environment:
+            NEEDRESTART_MODE: l
+
+        - name: Recheck operation and immutable control state before restarting runtime
+          ansible.builtin.command: *invariants
+          changed_when: false
+          no_log: true
+
+        - name: Start container runtime without recreating containers
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+          loop: [containerd.service, docker.socket, docker.service]
+
+        - name: Prove daemon did not resurrect containers or alter identity
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, "{{ guard }}", check, --manifest, "{{ maintenance_manifest }}", --manifest-sha256, "{{ maintenance_sha256 }}", --phase, quiesced]
+          changed_when: false
+          no_log: true
+
+      rescue:
+        - name: Permit recovery only if daemon responds and exact frozen identities remain
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, "{{ guard }}", check, --manifest, "{{ maintenance_manifest }}", --manifest-sha256, "{{ maintenance_sha256 }}", --phase, recoverable]
+          changed_when: false
+          no_log: true
+
+        - name: Record failure despite possible safe runtime recovery
+          ansible.builtin.set_fact:
+            transaction_failed: true
+
+    - name: Normalize captured restart protection before healthy restoration
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, update, --restart=no, "{{ item.id }}"]
+      loop: "{{ containers }}"
+
+    - name: Start only frozen prior-running datastore containers first
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, start, "{{ item }}"]
+      loop: "{{ plan.datastore_ids }}"
+
+    - name: Wait for datastores to be running and health-ready where configured
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, inspect, --format, '{% raw %}{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}{% endraw %}', "{{ item }}"]
+      loop: "{{ plan.datastore_ids }}"
+      register: datastore_ready
+      until: datastore_ready.stdout == 'true healthy'
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Require real PostgreSQL and Redis readiness before application containers
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, "{{ guard }}", check, --manifest, "{{ maintenance_manifest }}", --manifest-sha256, "{{ maintenance_sha256 }}", --phase, datastores]
+      register: datastores_ready
+      until: datastores_ready.rc == 0
+      retries: 20
+      delay: 2
+      changed_when: false
+      no_log: true
+
+    - name: Start remaining exact previously running containers
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, start, "{{ item.id }}"]
+      loop: "{{ containers | selectattr('running', 'equalto', true) | rejectattr('id', 'in', plan.datastore_ids) | list }}"
+
+    - name: Wait for captured runtime identities and health before protection restoration
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/python3', '-I', '-B', guard, 'check', '--manifest', maintenance_manifest, '--manifest-sha256', maintenance_sha256, '--phase', 'healthy'] + (['--recovery'] if transaction_failed else []) }}"
+      register: healthy
+      until: healthy.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+      no_log: true
+
+    - name: Require public local API smoke without response logging
+      ansible.builtin.uri:
+        url: "{{ item }}"
+        method: GET
+        status_code: 200
+        return_content: false
+        follow_redirects: none
+        timeout: 10
+      loop: "{{ plan.health_urls }}"
+      register: api_smoke
+      until: api_smoke.status == 200
+      retries: 12
+      delay: 2
+      no_log: true
+
+    - name: Read actual installed five-package versions without environment output
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/dpkg-query', '-W', '-f=${Package}=${Version}\\n'] + package_pins | map('regex_replace', '=.*$', '') | list }}"
+      register: installed_packages
+      changed_when: false
+      when: not transaction_failed
+
+    - name: Require target versions before claiming successful patch
+      ansible.builtin.assert:
+        that: installed_packages.stdout_lines | sort == package_pins | sort
+      when: not transaction_failed
+
+    - name: Restore captured container restart policies only after healthy smoke
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, update, "--restart={{ item.restart_policy.Name }}{{ ':' ~ item.restart_policy.MaximumRetryCount if item.restart_policy.Name == 'on-failure' and item.restart_policy.MaximumRetryCount > 0 else '' }}", "{{ item.id }}"]
+      loop: "{{ containers }}"
+
+    - name: Restore only previously active long-running services
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: started
+      loop: "{{ plan.units | selectattr('kind', 'equalto', 'daemon') | selectattr('active', 'equalto', true) | list }}"
+
+    - name: Restore only previously active timers without manually launching oneshot jobs
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: started
+      loop: "{{ plan.units | selectattr('kind', 'equalto', 'timer') | selectattr('active', 'equalto', true) | list }}"
+
+    - name: Prove exact restored identities policies unit intent and immutable control state
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/python3', '-I', '-B', guard, 'check', '--manifest', maintenance_manifest, '--manifest-sha256', maintenance_sha256, '--phase', 'complete'] + (['--recovery'] if transaction_failed else []) }}"
+      changed_when: false
+      no_log: true
+
+    - name: Never report failed transaction as a successful security patch
+      ansible.builtin.fail:
+        msg: Transaction failed; exact prior runtime was recovered without package downgrade.
+      when: transaction_failed
