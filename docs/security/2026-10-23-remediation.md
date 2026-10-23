@@ -1,0 +1,165 @@
+# اصلاحات امنیتی ۲۳ اکتبر ۲۰۲۶
+
+## دامنه و وضعیت
+
+این کار مستقل از ریفکتور معماری است. مبنای شاخهٔ امنیتی، کامیت
+`95283032898dd2a2318dd06e94521f12ba482934` است؛ `main` و worktree فعال
+ریفکتور تغییر نمی‌کنند. وضعیت فعلی **اصلاحات منبع آزموده و بازبینی شده؛ هنوز
+مستقر نشده و رفع کامل میزبان/سرویس‌ها باز است**.
+نباید نتیجهٔ آزمون کد یا lockfile را به‌عنوان پاک‌بودن سرویس‌های جاری گزارش کرد.
+
+## تغییرات و سناریوهای پذیرش
+
+| مسیر | خطر مشاهده‌شده | اصلاح | اثبات لازم |
+| --- | --- | --- | --- |
+| فایل‌های وب | مسیر catch-all بدون containment | resolve زیر ریشهٔ build برای فایل و index؛ رد traversal، مسیر مطلق و symlink بیرونی | درخواست واقعی ASGI با مسیر خام/encoded و خروجی 404؛ حفظ SPA، هدرها و JS قدیمی 410 |
+| فرم/API | Starlette قدیمی بدون محدودیت مؤثر برخی فیلدها | ارتقای سازگار خانوادهٔ FastAPI/Starlette/Pydantic | ورودی تکه‌تکهٔ urlencoded/multipart بیش‌ازحد رد شود؛ فرم و فایل عادی پذیرفته شوند |
+| دریافت تصویر | Pillow قدیمی؛ canvas بزرگ APNG پیش از کنترل اندازه | Pillow 13، کنترل PNG و پیکسل‌ها، عدم ذخیرهٔ اصل تصویر ردشده | fixture کوچک بدون تخصیص بزرگ؛ EXIF/JPEG/PNG عادی بدون تغییر رفتار |
+| بات و HTTP client | aiohttp قدیمی؛ محدودیت نسخهٔ aiogram مانع patch | ارتقای هماهنگ aiogram/aiohttp؛ urllib3 و pyasn1 اصلاح‌شده | resolver، آزمون قراردادها و API/Bot، بدون شبکهٔ واقعی |
+| فرانت و ابزار ساخت | هشدارهای npm از جمله Vite/Vitest | lock تازه و هماهنگ؛ حذف وابستگی قدیمی tinypool با Vitest 4 | اسکن نام/نسخه، build، همهٔ unitها و guardهای UI؛ بدون حذف assertion |
+| پایهٔ ایمیج | Bullseye پایان‌یافته، CA قدیمی | Python 3.11.17 روی Bookworm با digest؛ دریافت OS updates از مخزن رسمی | ساخت و آزمون واقعی ایمیج؛ CA سیستم و certifi جداگانه بررسی شوند |
+| Node | Node 20 پایان‌یافته و Brotli آسیب‌پذیر | ابزار آزمون مستقل، `.nvmrc` و CI روی 24.22.1؛ guard نسخهٔ امن هنگام build/test | Node قدیمی رد و نسخهٔ اصلاح‌شده پذیرفته شود؛ تغییر PATH میزبان ادعا نشود |
+
+FastAPI جدید با Starlette جدید و aiogram جدید با aiohttp جدید باید با هم نصب
+شوند؛ force-upgrade ترانزیتیو برخلاف محدودیت والد پذیرفته نیست. پین‌های نسخهٔ
+هدف امنیتی در `requirements.txt` و lock فرانت در `frontend/package-lock.json`
+قرار دارند. requirements فعلی، lock هش‌دار کامل همهٔ وابستگی‌های ترانزیتیو نیست.
+
+### مثال تصویر مخرب و تصویر معتبر
+
+فایل APNG کوچکی که اندازهٔ canvas بسیار بزرگی ادعا می‌کند نباید وارد مسیر
+decode/EXIF/نوشتن فایل یا fallback ذخیرهٔ اصل شود. آزمون‌ها canvas کوچک و
+محدودیت کوچک دارند و تخصیص خطرناک را mock می‌کنند؛ هیچ PoC پرمصرفی روی سرویس
+واقعی اجرا نمی‌شود. PNG با IHDR تکراری/جابه‌جا نیز باید قبل از decode به کنترل
+پیکسل برسد. Pillow 13 تخصیص اولیهٔ آسیب‌پذیر را به تعویق انداخته است؛ یک parser
+جدید و پیچیدهٔ PNG جایگزین آن نشده است.
+
+عکس عادی با orientation باید همچنان درست بچرخد؛ PNG شفاف، نوع فایل، ابعاد و
+جریان album تغییری نمی‌کنند. فایل بیش‌ازحد با پاسخ 413 و بدون ذخیره رد می‌شود.
+
+### مثال trust store
+
+به‌روزرسانی CA میزبان، trust store کانتینر قدیمی یا certifi را تغییر نمی‌دهد.
+`scripts/verify_image_trust.py` هنگام build نبودن ریشهٔ سلب‌اعتمادشدهٔ
+`emSign ECC Root CA - G3` را در store مؤثر سیستم و، برای اپ، certifi بررسی می‌کند.
+خالی‌بودن store یا نبودن certifi الزامی خطاست. شکست gate نباید با خاموش‌کردن
+TLS verification یا حذف بررسی دور زده شود. این یک gate محدود CA است، نه اسکن
+کامل آسیب‌پذیری همهٔ لایه‌ها.
+
+Market در هر دو مرحلهٔ assembly/runtime از همان `patched-base` استفاده می‌کند؛
+اسکریپت gate در امضای ورودی ایمیج و payload کنترل نسخه قرار گرفته است. داده،
+مدل، checkpoint و مالکیت session تلگرام تغییر نمی‌کنند.
+
+## شواهد تأییدشده تا این مرحله
+
+- ۱۱ آزمون مستقل containment فایل‌ها پاس شد؛ به build موجود یا import اپ زنده
+  وابسته نیستند و در نبود dist نیز skip نمی‌شوند.
+- اسکن تکمیلی فرانت با ارسال فقط ۸۸۸ نام/نسخهٔ عمومی به endpoint رسمی npm،
+  پاسخ HTTP 200 و `{}` داد. ۵۸ شناسهٔ GHSA متمایز اسکن قبلی در پاسخ جدید نیستند؛
+  این عدد معادل ۵۸ exploit عملیاتی یا CVE مستقل نیست.
+- مجموعهٔ جدید بک‌اند در venv مستقل resolve و dependency-check شد. import اپ و
+  OpenAPI با ۱۸۸ مسیر و ۱۸۰ schema، بدون lifespan و با شبکهٔ مسدود، پاس شد.
+- پایهٔ واقعی Python 3.11.17 ساخته و در کانتینر موقت بدون شبکه/mount اجرا شد:
+  CA نسخهٔ `20250419~deb12u2`، OpenSSL `3.0.22-1~deb12u1` و gate CA پاس شدند.
+- Buildx میزبان از 0.36.1 به 0.38.1 ارتقا یافت. فقط همان بسته تغییر کرد؛
+  `NEEDRESTART_MODE=l` مانع restartهای جانبی شد. PID daemon و شناسه/uptime هر
+  ۱۵ کانتینر قبل/بعد ثابت ماندند. این به معنی رفع Docker/containerd/kernel نیست.
+- آزمون گستردهٔ بک‌اند: ۱۳۴۶ تست و ۲۱۱ subtest پاس شد؛ تکرار نهایی آپلود/امنیت
+  با تست‌های جدید نیز ۴۱ تست و ۳۴ subtest پاس شد.
+- ایمیج کامل آزمایشی اپ با شناسهٔ
+  `sha256:61e83a73ebd37b8582140a4c0cc9abcd8895a8b0b4f5289dc1fd07d2bae78f34`
+  ساخته شد: ۸۲ تست امنیت/آپلود/API روی Python 3.11.17 پاس شد. ۱۸۹ مسیر OpenAPI
+  با dist، در برابر ۱۸۸ مسیر بدون dist، و ۱۸۰ schema ساخته شد؛ lifespan اجرا
+  نشد. این ایمیجِ validation است، نه release مجاز برای production.
+- HTTP 200 و رفت‌وبرگشت واقعی WebSocket روی همان ایمیج، با Uvicorn 0.30.1 و
+  websockets 17.3 پاس شد؛ فقط loopback کانتینر بدون شبکهٔ خارجی استفاده شد.
+- پس از اجازهٔ صریح کاربر، metadata رسمی PyPI برای ۸۸ وابستگی محیط آزمون و
+  سه ابزار bootstrap متفاوت ایمیج بررسی شد. هر ۸۷ توزیع Python در ایمیج واقعی
+  پوشش داده شد؛ دو CVE متمایز باقی است، نه چهار آسیب ناشی از چهار alias:
+  `CVE-2026-85394` در python-jose و `CVE-2024-23342` در ecdsa.
+- مجموعهٔ کامل نهایی فرانت با دو worker: ۱۷۰ فایل و ۲۰۰۸ تست، همه پاس، در
+  ۲۲۸٫۳۱ ثانیه. build با guard نسخهٔ Node در ۳۴٫۱۰ ثانیه، guardهای محافظ UI و
+  بررسی سازگاری peerها نیز پاس شدند. بازبین مستقل ۹۹ تست هدفمند را دوباره
+  اجرا و نبود حذف assertion/skip را بررسی کرد.
+- اجرای اختیاری coverage چهار-worker به علت رقابت منابع و timeout یک آزمون
+  قطع شد؛ موفق اعلام نمی‌شود. اجرای کامل دو-worker بالا بدون افزایش timeout
+  پاس شد. مرورگرهای E2E محلی نصب نبودند و دانلود حجیم انجام نشد.
+- دو بازبین مستقل تغییرات محدودهٔ خود را پذیرفتند. `git diff --check`، syntax
+  شل و قراردادهای سورس/ایمیج پاس شدند. `MemoryCustodian check` یک هشدار قدیمی
+  دارد: `decisions.md` موجود ۸۸۶/۸۰۰ token است؛ این فایل در این بسته تغییر
+  نکرده و پاکسازی حافظهٔ نامرتبط انجام نشده است.
+- کش npm مخصوص همین آزمون (حدود ۳۸۳MB) و archive نصب Node (حدود ۳۲MB) حذف شد؛
+  هیچ داده، backup، log عملیاتی، volume یا ایمیج فعال حذف نشد. حدود ۵٫۲GB روی
+  دیسک اصلی و ۱۳GB روی دیسک داده آزاد باقی ماند. ابزار/venv و ایمیج‌های
+  validation فقط تا نیاز به بازبینی/انتشار نگهداری شوند؛ بازبینی پاکسازی
+  artifacts این کار حداکثر تا ۲۰۲۶-۱۰-۳۰، با حفظ evidence رخداد باز، لازم است.
+
+آزمون‌های importکنندهٔ اپ باید پیش از import،
+`APP_ENV_FILE=config/unit-test.env.example` را تنظیم و دسترسی شبکهٔ واقعی را
+مسدود کنند. هیچ `.env`، دادهٔ کاربر یا دیتابیس عملیاتی برای آزمون بارگذاری نشود.
+گزارش‌های موقت فقط در `.local/` همان worktree قرار می‌گیرند؛ کش‌های دانلود
+آزمایش پس از استفاده قابل حذف‌اند و نباید به artifact دائمی تبدیل شوند.
+
+## مواردی که هنوز بسته نیستند
+
+1. **استقرار اپ و فرانت:** ایمیج‌های زنده همچنان قدیمی‌اند. ساخت/آزمون این شاخه
+   مجوز اعلام «production امن شد» نیست. frontend تولیدشده نیز تا استقرار و
+   اثبات digest/SBOM همان frontend عملیاتی محسوب نمی‌شود.
+2. **Docker/containerd:** ارتقای CLI Buildx جایگزین ارتقای daemon نیست. Docker
+   محلی 29.7.2 باید به نسخهٔ vendor اصلاح‌شده (حداقل 29.8.2) ارتقا یابد؛ وضعیت
+   backport توزیع سرور وب جداگانه اثبات شود. اصلاحات containerd به feature و
+   backport وابسته‌اند؛ نسخهٔ upstream به‌تنهایی برای verdict کافی نیست.
+3. **کرنل:** کرنل اصلاح‌شده نصب شده ولی کرنل فعال قدیمی است. reboot بدون پنجرهٔ
+   نگهداری، بررسی backup/restore، quiescence و کنترل مالکیت بات/سینک انجام نشود.
+4. **Brotli میزبان و stage قدیمی:** Node 20 و Python/OS Brotli قدیمی با نصب ابزار
+   side-by-side یا تغییر فایل repo رفع نمی‌شوند. برای هر مصرف‌کننده، ارتقای
+   vendor و restart/retirement کنترل‌شده لازم است. رشتهٔ نسخهٔ Brotli در Node
+   vendor-patched ممکن است همچنان قدیمی بماند؛ release دقیق مبناست.
+5. **JOSE/ECDSA:** نسخهٔ 3.5 مشکلات قبلی را رفع می‌کند، اما برای CVE-2026-85394 patch
+   اعلام‌شده‌ای تأیید نشده است. allowlist ثابت الگوریتم و کلید HMAC مستقل حفظ
+   شود؛ public key نامتقارن نباید کلید HMAC باشد. آزمایش قرارداد JWT و ارزیابی
+   مسیر واقعی، جای ادعای «بستهٔ کاملاً پاک» را نمی‌گیرد. ecdsa 0.19.2 نیز هشدار
+   timing هنگام signing/key generation/ECDH بدون patch دارد؛ verification
+   مشمول همان مشکل نیست. کد فعلی HS256 و backend انتخاب‌شدهٔ JOSE از cryptography
+   استفاده می‌کند؛ مسیر آسیب‌پذیر signing بومی ECDSA مشاهده نشد. این ارزیابی
+   reachability است، نه حذف هشدار کتابخانه.
+6. **پوشش اسکن:** تمام OS packageها/لایه‌های همهٔ ایمیج‌ها اسکن نشده‌اند. پوشش
+   metadata پکیج‌های Python مربوط به ایمیج آزمایشی جدید است، نه هر ایمیج عملیاتی.
+   مشکل قبلی مجوز PyPI با تأیید کاربر رفع و اسکن فوق تکمیل شد.
+7. **میزبان هدف جدید:** دسترسی SSH ممیزی قبلی پذیرفته نشد؛ وضعیت امنیتی آن
+   «نامعلوم» است، نه سالم. از تعویض کلید یا غیرفعال‌کردن host verification پرهیز شود.
+8. **Nginx:** پیش‌شرط برخی advisories تازه در پیکربندی ممیزی‌شده وجود نداشت؛
+   این معادل پاک‌بودن همهٔ server blockها، TLS inheritance و buildها نیست.
+9. **اعتبارسنجی مرورگر:** unit و build جای E2E واقعی را نمی‌گیرند. در ممیزی
+   مشخص شد مسیر قدیمی ImageEditor از شکل callback برای `Fabric.Image.fromURL`
+   استفاده می‌کند، در حالی که امضای هر دو Fabric 7.3.1 قبلی و 7.4.0 جدید
+   Promise است. این نقص از قبل وجود دارد و در این بستهٔ امنیتی UI بازنویسی
+   نشده است؛ برای آن بررسی/رفع مستقل و آزمون مرورگر پیش از ادعای سلامت کامل
+   ویرایش تصویر لازم است.
+
+## ترتیب فعال‌سازی ایمن
+
+1. بازبینی مستقل تغییرات، تکمیل همهٔ آزمون‌ها و ثبت کامیت همین شاخه.
+2. ساخت release دقیق و ثبت image digest، dependency inventory و frontend artifact؛
+   برنامهٔ rollback به digest قبلی، بدون حذف داده/backup.
+3. rehearsal ایزولهٔ API، login/OTP، upload/album، بات، sync و مدل؛ هیچ session
+   واقعی تلگرام با مالک دوم اجرا نشود.
+4. فعال‌سازی طبق قرارداد انتشار هر سایت، بدون Writer/DNS change، با کنترل خطا،
+   صف، latency و امکان بازگشت. schema/migration جدیدی در این بسته وجود ندارد.
+5. ارتقای میزبان/daemon و reboot در پنجرهٔ کنترل‌شدهٔ جدا؛ سپس اجرای مجدد ممیزی
+   نسخهٔ واقعی کرنل، runtime و trust stores. هیچ «رفع کامل» پیش از این مرحله ثبت نشود.
+
+## منابع اصلی
+
+- [Starlette multipart DoS](https://github.com/Kludex/starlette/security/advisories/GHSA-f96h-pmfr-66vw)
+  و [urlencoded limits](https://github.com/Kludex/starlette/security/advisories/GHSA-82w8-qh3p-5jfq).
+- [Pillow APNG](https://github.com/python-pillow/Pillow/security/advisories/GHSA-5xm2-6676-qcp9).
+- [aiohttp response parser](https://github.com/aio-libs/aiohttp/security/advisories/GHSA-cq5v-8q36-5273).
+- [JOSE algorithm confusion](https://github.com/mpdavis/python-jose/issues/414)
+  و [ECDSA timing](https://github.com/tlsfuzzer/python-ecdsa/security/advisories/GHSA-wj6h-64fc-37mp).
+- [Node 24.22.1 security release](https://nodejs.org/en/blog/release/v24.22.1).
+- [CA distrust در Ubuntu](https://ubuntu.com/security/notices/USN-8944-1)
+  و [Debian Bookworm](https://security-tracker.debian.org/tracker/DLA-4845-1).
+- [Docker insecure-registry](https://github.com/moby/moby/security/advisories/GHSA-7cfq-22r6-qp73)،
+  [Buildx bake](https://github.com/docker/buildx/security/advisories/GHSA-gwr2-q96m-6682)،
+  [Ubuntu kernel](https://ubuntu.com/security/CVE-2026-53266).

@@ -50,6 +50,11 @@ logger = logging.getLogger(__name__)
 
 CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
+# Match Pillow's default decompression-warning boundary, but reject rather than
+# decode or save the original when an image exceeds it. Compressed bytes alone
+# do not bound an image's decoded memory. Pillow >=13 is also required: older
+# APNG readers can allocate a canvas *inside* Image.open(), before this check.
+CHAT_MEDIA_MAX_IMAGE_PIXELS = 89_478_485
 UPLOAD_BATCH_LIFETIME = timedelta(hours=24)
 UPLOAD_SESSION_LIFETIME = timedelta(hours=24)
 UPLOAD_SESSION_ROOT = os.path.join("uploads", "chat_sessions")
@@ -84,6 +89,22 @@ ALLOWED_UPLOAD_TYPES = {
     "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
+
+
+class _UnsafeImageError(ValueError):
+    """Image decoding would exceed the upload safety boundary."""
+
+
+def _check_png_canvas_size(raw: bytes) -> None:
+    # Reject the normal PNG IHDR layout before invoking a codec. This is only a
+    # cheap fast path, not a PNG parser: Pillow also tolerates unusual IHDR
+    # placement, so pinned Pillow >=13 and the post-open size check remain
+    # mandatory. Never change process-global warning filters in worker threads.
+    if len(raw) >= 24 and raw[:8] == b"\x89PNG\r\n\x1a\n" and raw[12:16] == b"IHDR":
+        width = int.from_bytes(raw[16:20], "big")
+        height = int.from_bytes(raw[20:24], "big")
+        if width * height > CHAT_MEDIA_MAX_IMAGE_PIXELS:
+            raise _UnsafeImageError("Image exceeds decoded pixel limit")
 
 
 @dataclass(frozen=True)
@@ -522,6 +543,10 @@ async def persist_chat_media_file_bytes(
     contents: bytes,
     thumbnail: str | None = None,
 ) -> UploadFilePersistenceResult:
+    size = len(contents)
+    if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
+
     base_content_type = (declared_content_type or "application/octet-stream").split(";")[0].strip()
     if base_content_type not in ALLOWED_UPLOAD_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {declared_content_type}")
@@ -535,10 +560,6 @@ async def persist_chat_media_file_bytes(
             detail=f"Invalid file content. Real type is {mime} and base type is {base_content_type}",
         )
 
-    size = len(contents)
-    if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
-
     img_width = None
     img_height = None
     if mime.startswith("image/") and mime != "image/gif":
@@ -546,33 +567,49 @@ async def persist_chat_media_file_bytes(
             from PIL import Image as PILImage, ImageOps
             import io as _io
 
-            pil_img = PILImage.open(_io.BytesIO(raw))
-            pil_img = ImageOps.exif_transpose(pil_img)
-            width, height = pil_img.size
-            buf = _io.BytesIO()
-            if mime_type in ("image/jpeg", "image/jpg"):
-                fmt = "JPEG"
-                output_mime = "image/jpeg"
-                output_ext = "jpg"
-            elif mime_type == "image/png":
-                fmt = "PNG"
-                output_mime = "image/png"
-                output_ext = "png"
-            else:
-                fmt = "WEBP"
-                output_mime = "image/webp"
-                output_ext = "webp"
-            pil_img.save(buf, format=fmt, quality=90)
-            return buf.getvalue(), width, height, output_mime, output_ext
+            _check_png_canvas_size(raw)
+            try:
+                with PILImage.open(_io.BytesIO(raw)) as source:
+                    if source.width * source.height > CHAT_MEDIA_MAX_IMAGE_PIXELS:
+                        raise _UnsafeImageError("Image exceeds decoded pixel limit")
+                    pil_img = ImageOps.exif_transpose(source)
+                    try:
+                        width, height = pil_img.size
+                        with _io.BytesIO() as buf:
+                            if mime_type in ("image/jpeg", "image/jpg"):
+                                fmt = "JPEG"
+                                output_mime = "image/jpeg"
+                                output_ext = "jpg"
+                            elif mime_type == "image/png":
+                                fmt = "PNG"
+                                output_mime = "image/png"
+                                output_ext = "png"
+                            else:
+                                fmt = "WEBP"
+                                output_mime = "image/webp"
+                                output_ext = "webp"
+                            pil_img.save(buf, format=fmt, quality=90)
+                            return buf.getvalue(), width, height, output_mime, output_ext
+                    finally:
+                        pil_img.close()
+            except (PILImage.DecompressionBombError, PILImage.DecompressionBombWarning) as exc:
+                raise _UnsafeImageError("Image exceeds decoded pixel limit") from exc
 
         try:
             contents, img_width, img_height, mime, ext = await asyncio.to_thread(_exif_transpose_sync, contents, mime)
             size = len(contents)
+        except _UnsafeImageError as exc:
+            # Never let the compatibility fallback persist a rejected bomb for
+            # later processing by browsers, Telegram, thumbnails or operators.
+            raise HTTPException(status_code=413, detail="Image dimensions exceed the safe limit") from exc
         except Exception as exc:
             logger.warning("Pillow EXIF transpose failed, saving original: %s", exc)
             ext = file_name.split(".")[-1] if file_name and "." in file_name else mime.split("/")[-1]
     else:
         ext = file_name.split(".")[-1] if file_name and "." in file_name else mime.split("/")[-1]
+
+    if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
 
     file_uuid = str(uuid.uuid4())
     upload_dir = os.path.join("uploads", "chat_files", str(uploader_id))

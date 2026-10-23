@@ -241,7 +241,11 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         web = (DEPLOY / "compose.web.yml").read_text(encoding="utf-8")
         bot = (DEPLOY / "compose.bot.yml").read_text(encoding="utf-8")
         dockerfile = (DEPLOY / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("python:3.11-slim-bookworm@sha256:", dockerfile)
+        self.assertIn(
+            "python:3.11.17-slim-bookworm@sha256:"
+            "f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf",
+            dockerfile,
+        )
         self.assertIn("USER 10001:10001", dockerfile)
         self.assertIn("postgres:15-alpine@sha256:", base)
         self.assertIn("read_only: true", base)

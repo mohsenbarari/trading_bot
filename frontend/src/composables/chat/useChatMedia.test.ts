@@ -170,6 +170,7 @@ function mountHarness(initialMessages: Message[] = [], selectedUser: number | nu
 }
 
 describe('useChatMedia', () => {
+  const originalCreateElement = document.createElement.bind(document)
   const originalCreateObjectURL = URL.createObjectURL
   const originalRevokeObjectURL = URL.revokeObjectURL
   const originalCreateImageBitmap = globalThis.createImageBitmap
@@ -265,7 +266,6 @@ describe('useChatMedia', () => {
   }
 
   function installVideoElementFactory(videoElements: HTMLVideoElement[]) {
-    const realCreateElement = document.createElement.bind(document)
     vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
       if (String(tagName).toLowerCase() === 'video') {
         const nextVideo = videoElements.shift()
@@ -275,7 +275,7 @@ describe('useChatMedia', () => {
         return nextVideo as unknown as HTMLElement
       }
 
-      return realCreateElement(tagName as keyof HTMLElementTagNameMap, options)
+      return originalCreateElement(tagName as keyof HTMLElementTagNameMap, options)
     }) as typeof document.createElement)
   }
 

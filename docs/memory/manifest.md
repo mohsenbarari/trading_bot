@@ -60,6 +60,8 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
+- `areas/security.md` — load for security audits, dependency vulnerability remediation,
+  static/upload containment, runtime trust stores, or security release verification.
 - `areas/two-server-refactor.md` — load for the two-server master plan, Finland
   consolidation/runtime/data merge, human Writer handover, or its cutover gates.
 - `areas/documentation-execution.md` — load for developer onboarding,

@@ -12,6 +12,9 @@ describe('chatFiles utilities', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.stubGlobal('fetch', vi.fn())
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      throw new Error('Image-element preprocessing is unavailable in this fallback fixture')
+    })
     processImageInWorkerMock.mockRejectedValue(new Error('worker unavailable'))
   })
 

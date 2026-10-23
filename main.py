@@ -7,8 +7,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from sqlalchemy.exc import IntegrityError
 from api.routers import (
@@ -60,6 +59,7 @@ from core.audit_logger import audit_log
 from core.security import constant_time_secret_equals
 from core.request_logging import install_request_logging_middleware
 from core.public_webapp_url import public_webapp_url_for_links
+from core.frontend_static import frontend_static_response
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -574,45 +574,18 @@ async def get_metrics(request: Request):
 # -------------------------------------------------------
 # مسیر بیلد شده Frontend (dist)
 static_dir = Path("mini_app_dist")
-frontend_document_headers = {"Referrer-Policy": "no-referrer"}
-blocked_frontend_probe_paths = {
-    "openapi.json",
-    "docs",
-    "redoc",
-}
 
 if static_dir.exists():
     
     # Catch-all for SPA (Vue Router)
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        # اگر درخواست API بود و هندل نشده بود -> 404 بده (به index.html نفرست)
-        if full_path.startswith("api/"):
-            return JSONResponse({"detail": "Not Found"}, status_code=404)
-
-        if full_path in blocked_frontend_probe_paths or full_path.startswith("docs/") or full_path.startswith("redoc/"):
-            return JSONResponse({"detail": "Not Found"}, status_code=404)
-             
-        # اگر فایل استاتیک بود و وجود داشت -> سرو کن (تمام asset ها و عکس ها)
-        file_path = static_dir / full_path
-        if file_path.is_file():
-            return FileResponse(file_path, headers=frontend_document_headers)
-        
-        # اگر کاربر یک فایل .js از نسخه قدیمی را درخواست کرد (PWA Cache stale):
-        if full_path.startswith("assets/") and full_path.endswith(".js"):
-             logger.warning("Old JS chunk requested; returning a bounded 410 response.")
-             return Response(
-                 status_code=410,
-                 headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
-             )
-             
-        # در غیر این صورت -> index.html (برای Vue Router)
-        return FileResponse(static_dir / "index.html", headers=frontend_document_headers)
+        return frontend_static_response(static_dir, full_path)
 else:
     logger.warning("⚠️ Frontend build directory not found. Run 'npm run build' first.")
 
 @app.get("/")
 async def root():
     if static_dir.exists():
-        return FileResponse(static_dir / "index.html", headers=frontend_document_headers)
+        return frontend_static_response(static_dir, "")
     return {"message": "Trading Bot API is running 🚀"}
