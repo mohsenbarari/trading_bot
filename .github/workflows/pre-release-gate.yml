@@ -96,7 +96,14 @@ jobs:
       - name: Run real multi-worker Redis proof
         shell: bash
         env:
+          APP_ENV_FILE: config/unit-test.env.example
+          ENVIRONMENT: test
+          SERVER_MODE: foreign
           MARKET_STAGE14_TEST_REDIS_URL: redis://127.0.0.1:6379/14
+          REDIS_URL: redis://127.0.0.1:6379/14
+          POSTGRES_DB: postgres
+          POSTGRES_USER: market_ci
+          POSTGRES_PASSWORD: market_ci
           DATABASE_URL: postgresql+asyncpg://market_ci:market_ci@127.0.0.1:5432/postgres
           SYNC_DATABASE_URL: postgresql+psycopg2://market_ci:market_ci@127.0.0.1:5432/postgres
           FRONTEND_URL: http://127.0.0.1:4173

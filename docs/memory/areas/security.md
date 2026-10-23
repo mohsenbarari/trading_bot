@@ -24,10 +24,10 @@
 - User explicitly authorized publishing existing main history plus reviewed
   security commits. This does not authorize activating unrelated Market changes;
   preserve LEGACY consumer mode, producer ownership and snapshot mounts.
-- Datastore proofs must seed complete publisher/chat/message identity. Repair
-  stale fixtures, not production triggers/defaults or missing-owner negative
-  assertions. Run related PostgreSQL proofs together before repushing, not one
-  failure per CI run.
+- Datastore proofs need complete publisher/chat/message fixture identity; preserve
+  production guards and missing-owner negative assertions. Check PostgreSQL and
+  real multiworker Redis before repushing. CI steps do not inherit subprocess
+  environment: load the public unit config before imports and bind scratch targets.
 - Kernel/Docker/containerd maintenance must preserve active DB, Bot/Executor,
   Writer and sync ownership. Never reboot or upgrade the daemon as a side effect
   of a CLI-only update; plan quiescence, restore and smoke checks separately.
