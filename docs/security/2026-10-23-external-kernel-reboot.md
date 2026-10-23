@@ -167,3 +167,28 @@ read-only defaults, durable runner, credential/source scope and phase ordering.
 Tests unconditionally deny subprocesses, TCP/DNS/urllib and control-file opens
 outside their temporary fixture. Ansible syntax checks are separate. These
 tests do not reboot a host or prove a live maintenance success.
+
+## Exact owned continuation after inactive-unit metadata garbage collection
+
+The attempt with nonce `672348cb-0415-47f4-95f2-a4702478451d` stopped all15
+recorded containers but refused the final quiescence check before requesting any
+reboot. A stopped static unit was garbage-collected between `systemctl show`
+and D-Bus `GetUnit`. The existing reservation, token, manifest and failed runner
+remain evidence; this is not eligible for pre-reservation retirement or replay.
+
+The finite `reboot_owned_resume.py` binds that exact nonce, manifest digest,
+canonical revision and original guard digest. A private, persistent D-Bus
+`RefUnit` connection keeps metadata loaded without starting/enabling units.
+Actual read-only verification passed the unchanged full invariants, disabled
+unit intent and15-container quiescence under these references. A separate
+reviewed continuation may reacquire all three existing inode flocks, prove the
+prior owner gone and the same quiescent state twice, publish exclusive intent,
+then change only its state owner PID and run the original full phase check.
+It requests one first actual reboot and wraps original restore/cleanup with
+the same temporary metadata references. No canonical source/HEAD, mount check,
+authority receipt or original guard is changed to make this pass.
+
+The separate Web unit cannot restart automatically, refuses replay and caps its
+new private output at8MiB. Source/fixture tests and this procedure are not a
+reboot completion or security-closure receipt; actual new-kernel/runtime proof
+is still required.

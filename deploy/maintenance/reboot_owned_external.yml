@@ -1,0 +1,55 @@
+---
+# One explicit continuation of the already-owned, fully quiesced transaction.
+# Never retry this playbook or call the original prepare/reserve action again.
+- name: Finish the exact owned native reboot from independent Web
+  hosts: reboot_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    owned_guard: /root/trading-bot/trading_bot/.local/security-kernel-reboot-owned-resume-20261023/reboot_owned_resume.py
+    original_guard: /root/trading-bot/trading_bot/deploy/maintenance/reboot_guard.py
+    manifest_path: /root/secure-envs/trading-bot/release-control/security-kernel-reboot-20261023-02.manifest.json
+    manifest_digest: 7807c3a490002b0bc932d114bb4a6fc4e3ed8464b070c3ee5db5b12739e419ed
+  tasks:
+    - name: Refuse another host or an implicit continuation
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['reboot_bot']
+          - ansible_host == '65.109.216.187' and ansible_port | int == 22
+          - ansible_user == 'root'
+          - owned_resume_apply | default(false)
+
+    - name: Require the full unchanged quiesced contract before any continuation
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ owned_guard }}', check]
+      changed_when: false
+      no_log: true
+
+    - name: Resume only this owned reservation and request its first actual reboot
+      ansible.builtin.reboot:
+        reboot_command: '/usr/bin/python3 -I -B {{ owned_guard }} resume --apply RESUME-OWNED-KERNEL-20261023-02'
+        boot_time_command: /usr/bin/cat /proc/sys/kernel/random/boot_id
+        test_command: /usr/bin/true
+        connect_timeout: 5
+        reboot_timeout: 900
+        pre_reboot_delay: 0
+        post_reboot_delay: 2
+      no_log: true
+
+    - name: Restore through the unchanged original guard with stable metadata references
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ owned_guard }}', restore, --apply, RESUME-OWNED-KERNEL-20261023-02]
+      timeout: 1800
+      no_log: true
+
+    - name: Retain the actual bounded public native result
+      ansible.builtin.fetch:
+        src: /root/secure-envs/trading-bot/release-control/security-kernel-reboot-20261023-02.result.json
+        dest: '{{ playbook_dir }}/owned-resume-native-result.json'
+        flat: true
+        validate_checksum: true
+
+    - name: Revoke only the now-completed original temporary controller credential
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ owned_guard }}', cleanup, --apply, RESUME-OWNED-KERNEL-20261023-02]
+      no_log: true
