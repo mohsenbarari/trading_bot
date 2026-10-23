@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-BUSINESS-LIVE-20261023-799B",
+  "parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-799b-c008-replace-execute-singleton-reconciliation",
+  "scenario_key": "P1-00B-RECONCILE-V1.internal-replace-execute-singleton-799",
+  "source_head": "226e3b111a393bb834c4f8a91ac473f2d766f915",
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_internal_replace_execute_failure.py",
+      "sha256": "6a3ce45d737994d88d811f38226431801e495ffdb92ab13a4817ea5bc385e8a3",
+      "utf8_bytes": 15384,
+      "mode": "100644",
+      "last_commit": "973e2a28092a8718c412718135eab181c3ecd4fd",
+      "parent": "0bfd5783775a8612f9bf97d63a12e24c85ae9279",
+      "canonical_symbol": "api/routers/sessions.py:internal_replace_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ],
+      "scenario": "internal_replace_execute_exception_before_revocation",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_replace_execute_failure.py::InternalReplaceExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_revocation_side_effects"
+      ],
+      "historical_provenance": {
+        "authorship": "GEMINI_WORKER",
+        "worker_run_id": "p1-00b-799b-c004-replace-execute-worker-0",
+        "worker_conversation_id": "e4983790-f40c-41bd-a268-31242e43fb54",
+        "proposal_sha256": "4fcd5c9b43ebcdeff03c65d1313ef589b3a7043ace16ac1f3116f958c8d86d8b",
+        "native_evidence_path": ".local/two-site-refactor/pipeline/p1-00b-799b-c004-replace-execute/pre-review-tests-0.json",
+        "native_evidence_sha256": "4a0ee646f1d07f63bf4c31b78f9a444812140a11acef5ac98b1f2b16c7ee0370",
+        "native_state": "PASSED",
+        "native_selectors": [
+          "tests/test_p1_00b_characterization_internal_replace_execute_failure.py::InternalReplaceExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_revocation_side_effects"
+        ],
+        "reviewer_run_id": "p1-00b-799b-c004-replace-execute-reviewer-0",
+        "reviewer_conversation_id": "c94bd9a0-630d-4095-a4cb-c51df1de163a",
+        "reviewer_result_sha256": "296347e249ae1f9c5725c2496fc364eea0d949f094b77b94ab3af0aaa59bf39b",
+        "reviewer_state": "VERIFIED",
+        "unsupported_specs": []
+      },
+      "characterized_contract": {
+        "entrypoint": "api/routers/sessions.py:internal_replace_user_sessions",
+        "exception_propagation": "Signature-accepted synthetic direct-handler call raises sentinel RuntimeError from Session.do_orm_execute hook and propagates the identical exception instance before result consumption or revocation side effects.",
+        "ordered_events": [
+          "body_call",
+          "body_await",
+          "header:X-Timestamp",
+          "header:X-Signature",
+          "header:X-API-Key",
+          "verifier",
+          "orm_execute"
+        ],
+        "request_and_verifier_arguments": {
+          "body_call_count": 1,
+          "body_await_count": 1,
+          "header_get_calls": [
+            [
+              "X-Timestamp",
+              null
+            ],
+            [
+              "X-Signature",
+              null
+            ],
+            [
+              "X-API-Key",
+              null
+            ]
+          ],
+          "verifier_positional_args_count": 1,
+          "verifier_kwargs_keys": [
+            "api_key",
+            "signature",
+            "timestamp"
+          ]
+        },
+        "orm_statement": {
+          "is_select": true,
+          "is_column_load": false,
+          "is_relationship_load": false,
+          "entity": "User",
+          "table": "users",
+          "where_clause": "users.id = :id_1",
+          "compiled_params": {
+            "id_1": 4079
+          }
+        },
+        "zero_side_effect_and_cleanup_deltas": {
+          "driver_sql_statements": 0,
+          "force_clear_sessions_calls": 0,
+          "force_clear_sessions_awaits": 0,
+          "async_session_mutations": [
+            "add",
+            "add_all",
+            "delete",
+            "flush",
+            "commit",
+            "rollback",
+            "refresh"
+          ],
+          "sync_session_mutations": [
+            "add",
+            "add_all",
+            "delete",
+            "flush",
+            "commit",
+            "rollback",
+            "refresh"
+          ],
+          "session_state_new_dirty_deleted": [
+            0,
+            0,
+            0
+          ],
+          "network_denied_connects_delta": 0,
+          "live_redis_constructs_delta": 0,
+          "cleanup": "Removes do_orm_execute and before_cursor_execute listeners in finally blocks and disposes in-memory SQLite StaticPool engine."
+        }
+      },
+      "exclusions": [
+        "verify_session_authority_signature HMAC/timestamp/API-key verification internals",
+        "FastAPI HTTP routing and Depends(get_db) dependency wiring",
+        "Post-execute scalar_one_or_none result-consumption failures, 401 invalid-signature, 404 missing-user, and 409 mobile-mismatch outcomes",
+        "Successful session revocation and persistence side effects in force_clear_sessions, deactivate_active_sessions, get_active_sessions, publish_session_revocation, and blacklist_session",
+        "Persistence, retry, process-reload, concurrency, and origin-matrix interactions"
+      ]
+    }
+  ],
+  "promotion_assessment": {
+    "promoted_seed_ids": [
+      "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+    ],
+    "delta_distinct_seed_count": 1,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "before_manifest_sha256": "0df6d76791eb445b0d59c9c87b16def7a53102b15292e89f64db2c4429a65d1d",
+    "before_manifest_utf8_bytes": 4035,
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 262,
+      "evidenced": 397,
+      "remaining": 68
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 1,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accounting": {
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "total_handler_scenarios": 7,
+    "prior_reconciled_singleton_provenance": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json",
+      "sha256": "4ef4ffe40f33dfe4328573bdca380b220e33306e1bee5f18d5baf54aef7170a2",
+      "utf8_bytes": 9510,
+      "accepted_commit": "226e3b111a393bb834c4f8a91ac473f2d766f915",
+      "unit_count": 1,
+      "scenario_count": 1
+    },
+    "reconciled_units_in_this_packet_on_exact_acceptance": 1,
+    "reconciled_scenarios_in_this_packet_on_exact_acceptance": 1,
+    "cumulative_reconciled_units_on_exact_acceptance": 2,
+    "cumulative_reconciled_scenarios_on_exact_acceptance": 2,
+    "remaining_unreconciled_units_on_exact_acceptance": 3,
+    "remaining_unreconciled_scenarios_on_exact_acceptance": 5,
+    "group_reconciliation_complete": false,
+    "canonical_manifest_and_ledger_integration_complete": false,
+    "ledger_integration_status": "PENDING",
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 1,
+    "unreconciled_units_after_singleton_on_exact_acceptance": [
+      {
+        "path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+        "sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+        "source_commit": "777ed75419ed7083d875c262da2beb8103017d03",
+        "handler_scenarios": 2
+      },
+      {
+        "path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+        "sha256": "6ed021334ea4384e5f1b98897a1aeb6c45f0cfed29105bb90e9a227ff8d803c8",
+        "source_commit": "9a3bfcebe29399253b7ee60c605e72cf73e19d82",
+        "handler_scenarios": 2
+      },
+      {
+        "path": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py",
+        "sha256": "d7a60d5f329d0889a2fcba3d52b28cb0b41c72c51c913e278f3bfdf3637903d1",
+        "source_commit": "f4dd10018ef832881894e276bfa214e070ce7422",
+        "handler_scenarios": 1
+      }
+    ],
+    "preserved_deferred_and_failed_reservations": {
+      "deferred_a2_task_id": "p1-00b-799b-c006-session-prequery-reconciliation-a2",
+      "deferred_a2_status": "UNACCEPTED_RESERVED_NEVER_REPLAY_OR_RELEASE"
+    },
+    "previous_completed_group_provenance": {
+      "assignment_id": "WA-P1-00B-FIVE-SOURCE-RECONCILIATION-20261023-798D",
+      "accepted_closeout_commit": "e5c08c61895961bce399da9d8c69f561d7538ea1",
+      "status": "COMPLETED_PROVENANCE",
+      "reconciled_behavior_units": 5,
+      "reconciled_handler_scenarios": 7,
+      "remaining_in_group": 0
+    },
+    "ledger_prefix_binding": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "unchanged_ledger_sha256": "a25deecb4880ed4c7ceb905ae5db5048c8d3fc7b58129bc6cfdcf4d31d2c05c2",
+      "unchanged_ledger_utf8_bytes": 109329
+    }
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
