@@ -301,8 +301,17 @@ containerd-stable همان توزیع نیز راه‌حل اثبات‌شده�
 نیز باید با reachability واقعی بررسی شود. patch توزیع برای همهٔ این موارد
 تأیید نشده؛ «سرور وب امن شد» گفته نمی‌شود.
 
+بررسی بعدی، پشتیبانی رسمی Docker CE از **همان Ubuntu 26.04/Resolute** را
+تأیید کرد؛ به مخزن توزیع دیگر نیاز نیست. InRelease و index رسمی CE با کلید
+Docker و metadata چهار بستهٔ بازگشت Ubuntu با archive keyring مستقل تطبیق
+شدند. بسته‌های هدف CE29.9.2/containerd2.4.2 موجودند؛ payload هنوز نصب نشده.
+وب ۲۷ کانتینر، ۲۶ فعال و پنج project دارد و از قبل containerd image store
+است؛ تبدیل صوری به overlay2 یا اتکا به backup صرفاً `/var/lib/docker` مجاز
+نیست. طرح باید هر دو store موجود و وضعیت کانتینر متوقف را حفظ کند.
+[پشتیبانی رسمی Docker](https://docs.docker.com/engine/install/ubuntu/).
+
 phasing اجباری، مخزن توزیع دیگر یا مهاجرت CE بدون طرح سازگاری انجام نشد.
-تعویض صرف نام بسته به stable هم این finding را نمی‌بندد. تا رفع vendor، از
+تعویض صرف نام بسته به stable هم این finding را نمی‌بندد. تا فعال‌سازی معتبر، از
 pull/import/build غیرضروری روی این میزبان پرهیز شود. برای advisory registry،
 اعتماد به image digest به‌تنهایی کافی نیست؛ DNS مورد اعتماد یا محدودسازی egress
 باید جداگانه، بدون شکستن registry/CDNهای موردنیاز، طراحی و آزموده شود. منابع:
@@ -311,6 +320,52 @@ pull/import/build غیرضروری روی این میزبان پرهیز شود.
 [changelog رسمی Ubuntu](https://git.launchpad.net/ubuntu/+source/containerd-app/plain/debian/changelog?h=applied/ubuntu/resolute-updates).
 
 ## ترتیب فعال‌سازی ایمن
+
+### پیگیری همین شب: سورس و آزمون، نه ادعای استقرار
+
+- JOSE/ECDSA بدون patch از requirements اپ حذف و با PyJWT 2.15.1 جایگزین
+  شدند. همهٔ decoderها allowlist قبلی را نگه می‌دارند؛ exception مشترک از
+  `core/jwt_codec.py` می‌آید. توکن ساختگیِ تولیدشده با JOSE قدیمی، با همان
+  امضا/claims پذیرفته می‌شود؛ future-iat نامعتبر برخلاف JOSE قدیمی رد می‌شود،
+  نه اینکه برای سازگاری بررسی claim خاموش شود. advisory خود PyJWT در نسخه‌های
+  تا 2.13 نیز لحاظ شد؛ نسخهٔ جایگزین از آن بازه نیست.
+  [advisory رسمی](https://github.com/advisories/GHSA-ffc3-869f-jxw9)،
+  [نسخهٔ رسمی](https://github.com/jpadilla/pyjwt/releases/tag/2.15.1).
+- در venv جدا، دو کتابخانهٔ بازنشسته واقعاً حذف شدند و dependency-check پاس شد.
+  ۹ تست codec/dependency با warnings=error و ۴۷ زیرآزمون پاس شد؛ بازبین مستقل
+  نیز همین نتیجه را گرفت. ۱۲۲ تست مسیرهای auth/session/chat/WebSocket و
+  ۶۷ زیرآزمون با TCP/DNS مسدود پاس شدند؛ ۱۴ تست media نیز پاس شد. هشدارهای
+  قدیمی Pydantic/datetime در مجموعهٔ اپ باقی‌اند؛ اجرای اولیهٔ آن با
+  warnings=error در collection شکست خورد و موفق اعلام نمی‌شود.
+- فرانت: URL دارای توکن WebSocket، browser error خام و خطای parser دارای
+  payload دیگر لاگ نمی‌شوند. race دریافت هویت Dashboard/BottomNav با حفظ
+  force/token/logout fences اصلاح شد. ۱۷۰ فایل/۲۰۱۶ unit، build و گاردهای UI
+  پاس شدند؛ بازبین مستقل ۵۰ تست هدفمند را پاس کرد. ۴۲ تست سه مرورگر فقط
+  collect شدند؛ پذیرش واقعی مرورگر و CI جدید همچنان لازم‌اند.
+- شش fixture کنترل انتشار برای runner غیر-root اصلاح شدند؛ production
+  root/ownership/symlink guards تغییر نکردند. ۱۵۹ تست و ۶ زیرآزمون پاس شد؛
+  بررسی مستقل شبکه‌بسته ۱۵۸ تست را پاس کرد و یک مورد mTLS ساختگیِ loopback
+  را طبق fence رد کرد، نه اینکه موفق یا skip اعلام کند. smoke بیست‌ویک
+  ابزار با interpreter نصب‌شدهٔ آزمون، نه Python سیستم فاقد dependencies، پاس شد.
+
+### حادثهٔ آزمون و پیشگیری از تکرار
+
+در اجرای اولیهٔ fixture اصلاح‌شده، اضافه‌شدن عضو پنجم به tuple چهارعضویِ
+context باعث شد `_run` mock نشود و systemctl واقعی به پنج واحد Bot برسد.
+آزمون متوقف شد. دقیقاً سه enablement ثبت‌شدهٔ قبلی و اجرای سرویس/timerها
+بازگردانده شد؛ دو oneshot در `2026-10-23T19:34:43Z` مجدداً موفق شدند.
+سپس کنترل واقعی baseline هر ۱۵ کانتینر، policies، DB/Redis/API و intent
+سرویس‌ها پاس شد. هیچ تغییر اختیار Writer/DNS یا journal عملیاتی لازم نبود.
+tuple چهارعضوی حفظ و mock ترکیبی نام‌دار شد؛ `subprocess.run` در setup این
+suite بدون استثنا deny است مگر همان mock فرمان ساختگی. آزمون منفیِ حذف mock
+باید پیش از رسیدن به میزبان خطا بدهد. این حادثه از گزارش حذف نمی‌شود.
+
+### شرط بازگشت چرخه
+
+طبق درخواست کاربر، چرخهٔ ریفکتور تا رفع و فعال‌سازی/راستی‌آزمایی یافته‌های
+امنیتی شناسایی‌شده باز نمی‌گردد. سپس پایش باید ۳۰ واحد کاری واقعاً کامل و
+پذیرفته‌شدهٔ بدون خطا را مشاهده کند؛ poll سلامت یا درخواست ناموفق واحد کامل
+نیست. شکست‌ها باید رفع و با شواهد نگهداری شوند، نه با waiver یا reset تاریخچه.
 
 1. بازبینی مستقل تغییرات، تکمیل آزمون‌ها، ثبت کامیت و ادغام/ارسال معمول main
    طبق مجوز صریح کاربر؛ سپس بررسی نتیجهٔ CI همان SHA. تغییر کامیت‌نشدهٔ کاربر

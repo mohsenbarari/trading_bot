@@ -29,3 +29,10 @@
   facts; private-gold/public still collect Telegram. Preserve ingestion until
   ownership is reconciled. Identity-only recovery must refuse; stopping units
   solely to pass is not reconciliation.
+- 2026-10-23 | Root-run fixture context drift accidentally reached systemctl;
+  exact baseline collectors/timers were restored and real runtime/DB/API plus
+  fresh oneshots passed. Synthetic maintenance suites must unconditionally deny
+  unmocked host commands; keep named contexts, never shift positional mock tuples.
+- Resume refactor only after identified security findings are remediated and
+  activated/verified. Then monitor30 genuinely accepted completed units, not
+  health polls; failures must be repaired, never waived or counted as success.
