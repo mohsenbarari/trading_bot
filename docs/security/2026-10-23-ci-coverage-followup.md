@@ -217,3 +217,39 @@ Seven hermetic CI/selector contracts passed independently and in root's rerun.
 Playwright collected 15 cases in two affected files with the existing toolchain;
 collection is not browser execution. A new full CI run must establish actual
 browser acceptance; the unrelated coverage blockers above remain open.
+
+## Actual follow-up on `00588776`
+
+Run `40004366645` reached browser assertions after the corrections: shard4
+Chromium reported8failed/2flaky/38passed/26skipped, Firefox10failed/38passed/
+26skipped, and WebKit6failed/2flaky/40passed/26skipped. These are failed shards,
+not approval. Failures remain in notification login/control/toast cases and
+trade-history profile/block/load-more cases. The login/realtime cause and
+dependency-upgrade attribution remain unresolved.
+
+Three trade-history test-contract mismatches are source-proven on both the
+pre-security `95283032` and CI source: the profile assertion expects removed
+privacy copy, blocking expects native page.dialog although the UI uses
+AppConfirmDialog, and load-more waits for `/api/trades/my` although the component
+requests `/api/trades/my/page`. This limited comparison does not prove every
+browser failure pre-existing or authorize weaker assertions/UI changes.
+
+Coverage run `40004366552` failed:6,666unittests still report14failures,
+82errors and350skips, with the same three additional root-fixture pytest errors.
+Stage9's missing INV-004 evidence is a demonstrated cascade: the scratch-suite
+runner stops when the counter suite's deliberately forbidden downgrade fails,
+before running Stage3 registration. Do not weaken the registry or migration guard.
+
+Artifact `12524338036` (`repository-coverage-1029`,25,784,060bytes) was read only
+in bounded RAM; the26,295byte mutation log still reports
+BadTestExecutionCommandsException during baseline pytest statistics. Its
+underlying pytest exception is not preserved with mutmut debug off. Nine files
+were mutated but results marked not checked are not genuine survivor evidence.
+
+A network-none/read-only/nonroot resource-bounded probe of the existing cached
+security validation image found pytest absent. The container was auto-removed
+and its absence verified; no dependency was installed, and the selected eight
+baseline tests were **not run**. A reproduction needs the actual test toolchain;
+do not repeat a production-image attempt or substitute unittest as pytest proof.
+Host maintenance and boot-mount setup completed independently; none of these
+remaining application acceptance gates was waived.
