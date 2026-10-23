@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts import inventory_private_primary_active_runtime as inventory
 from scripts import prepare_private_primary_control_release as preparer
@@ -87,6 +88,16 @@ def _openssl(*arguments: str) -> None:
 
 
 def _make_pki(directory: Path, *, bot_ip: str, web_ip: str) -> None:
+    # Some cases intentionally replace synthetic placeholder PEMs (0440).
+    # Re-issuance is an explicit owner action, never implicit root DAC bypass.
+    assert directory.resolve() == directory and directory.parent.name.startswith("pp-secret-")
+    for name in ("transport-ca.pem", "bot-transport-key.pem", "bot-transport-cert.pem",
+                 "web-transport-key.pem", "web-transport-cert.pem"):
+        output = directory / name
+        if output.exists():
+            info = output.lstat()
+            assert not output.is_symlink() and output.is_file() and info.st_uid == os.geteuid() and info.st_nlink == 1
+            output.chmod(0o600)
     ca_key = directory / "ca.key"
     ca_cert = directory / "transport-ca.pem"
     _openssl("genrsa", "-out", str(ca_key), "2048")
@@ -172,8 +183,19 @@ def _account_config(account: str) -> dict[str, object]:
     }
 
 
+class ProductionSecretOwnershipContractTests(unittest.TestCase):
+    def test_real_secret_owner_contract_is_not_relaxed(self) -> None:
+        self.assertEqual((provisioner.SECRET_FILE_UID, provisioner.SECRET_FILE_GID), (0, 10001))
+        self.assertEqual(provisioner.SECRET_FILE_MODE, 0o440)
+
+
 class ProvisionPrivatePrimarySecretsTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Only this owned synthetic fixture models its runner's UID/GID.
+        # Production root:10001 and strict ownership checks remain untouched.
+        ownership = patch.multiple(provisioner, SECRET_FILE_UID=os.geteuid(), SECRET_FILE_GID=os.getegid())
+        ownership.start()
+        self.addCleanup(ownership.stop)
         self.workspace = Path(tempfile.mkdtemp(prefix="pp-secret-", dir=Path.home()))
         os.chmod(self.workspace, 0o700)
         self.sources = self.workspace / "live-secrets"
@@ -196,6 +218,12 @@ class ProvisionPrivatePrimarySecretsTests(unittest.TestCase):
             self.assertNotIn(SECRET.decode(), encoded)
             self.assertFalse(payload["generated"])
             self.assertFalse(payload["secrets_disclosed"])
+
+    def test_synthetic_foreign_owner_is_still_rejected(self) -> None:
+        source = _write(self.sources / "hmac-active", SECRET)
+        self.assertTrue(provisioner.inspect_file(source)["metadata_ok"])
+        with patch.object(provisioner, "SECRET_FILE_UID", os.geteuid() + 1):
+            self.assertFalse(provisioner.inspect_file(source)["metadata_ok"])
 
     def test_atomic_install_reuses_and_refuses_invalid(self) -> None:
         source = _write(self.sources / "hmac-active", SECRET)
