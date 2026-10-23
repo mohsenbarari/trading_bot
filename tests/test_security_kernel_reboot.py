@@ -32,7 +32,8 @@ W = module('_security_reboot_fetch_test', 'reboot_fetch_wheel.py')
 
 
 def known_monitor_cron():
-    return ('*/15 * * * * /usr/bin/tmux set-environment -g PYTHONPATH ' + str(G.INTEGRATION) +
+    return ('PYTHONPATH=' + str(G.INTEGRATION) + '\n' +
+            '*/15 * * * * /usr/bin/tmux set-environment -g PYTHONPATH ' + str(G.INTEGRATION) +
             ' >/dev/null 2>&1 ; /usr/bin/bash ' + str(G.MONITOR) + ' --quota-wait-enabled >/dev/null 2>&1\n')
 
 
@@ -205,9 +206,19 @@ class NativeRebootTests(FencedCase):
     def test_known_cron_is_classified_without_storing_commands(self):
         raw = '@reboot /usr/bin/systemctl restart golden_bot\n' + known_monitor_cron()
         result = G.launcher_inventory(raw)
-        self.assertEqual([item['kind'] for item in result], ['golden', 'monitor'])
+        self.assertEqual([item['kind'] for item in result], ['golden', 'monitor', 'monitor_pythonpath'])
         self.assertNotIn('tmux', json.dumps(result))
         self.assertNotIn('systemctl', json.dumps(result))
+
+    def test_only_exact_project_pythonpath_assignment_is_admitted(self):
+        prefix = '@reboot /usr/bin/systemctl restart golden_bot\n'
+        monitor = known_monitor_cron().splitlines()[-1] + '\n'
+        env = 'PYTHONPATH=' + str(G.INTEGRATION)
+        for assignment in (env + '; true', env + ' extra', env + ':untrusted',
+                           'PYTHONPATH=other-two-site-refactor', env + '\n' + env,
+                           env + '\nPYTHONPATH=/tmp', env + '\nPYTHONPATH = /tmp'):
+            with self.subTest(assignment=assignment), self.assertRaises(G.B.Refusal):
+                G.launcher_inventory(prefix + assignment + '\n' + monitor)
 
     def test_unknown_or_chained_golden_cron_refused(self):
         for suffix in ('; /usr/bin/true', ' && /usr/bin/true', ' --now', '.service'):
@@ -230,7 +241,7 @@ class NativeRebootTests(FencedCase):
              patch.object(G.B, 'command', return_value=raw):
             raw = '@reboot /usr/bin/systemctl restart golden_bot\n' + known_monitor_cron()
             with patch.object(G.B, 'command', return_value=raw):
-                self.assertEqual(len(G.admission()), 2)
+                self.assertEqual(len(G.admission()), 3)
             status.chmod(0o664)
             with self.assertRaisesRegex(G.B.Refusal, 'file_mode_or_bound'):
                 G.admission()

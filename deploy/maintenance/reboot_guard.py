@@ -171,11 +171,16 @@ def launcher_inventory(raw):
     for line in raw.splitlines():
         if not line.strip() or line.lstrip().startswith('#'):
             continue
-        if not any(word in line for word in ('trading-bot', 'trading_bot', 'golden_bot', 'two-site-refactor')):
+        if (not re.match(r'^\s*PYTHONPATH\s*=', line) and
+                not any(word in line for word in ('trading-bot', 'trading_bot', 'golden_bot', 'two-site-refactor'))):
             continue
         lexer = shlex.shlex(line, posix=True, punctuation_chars=';&|<>')
         lexer.whitespace_split = True
         tokens = list(lexer)
+        if tokens[:1] == ['PYTHONPATH=' + str(INTEGRATION)]:
+            require(len(tokens) == 1, 'unknown_project_environment')
+            result.append({'kind': 'monitor_pythonpath', 'value': str(INTEGRATION)})
+            continue
         if tokens[:1] == ['@reboot']:
             require(len(tokens) == 4 and Path(tokens[1]).name == 'systemctl' and
                     tokens[2:] == ['restart', 'golden_bot'], 'unknown_reboot_launcher')
@@ -189,7 +194,7 @@ def launcher_inventory(raw):
                     command[11:19] == ['/usr/bin/bash', str(MONITOR), '--quota-wait-enabled',
                                        '>', '/dev/null', '2', '>&', '1'], 'unknown_project_cron_launcher')
             result.append({'kind': 'monitor', 'schedule': '*/15 * * * *', 'script': str(MONITOR)})
-    require(sorted(value['kind'] for value in result) == ['golden', 'monitor'], 'project_launcher_scope_changed')
+    require(sorted(value['kind'] for value in result) == ['golden', 'monitor', 'monitor_pythonpath'], 'project_launcher_scope_changed')
     return sorted(result, key=lambda value: value['kind'])
 
 

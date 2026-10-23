@@ -62,6 +62,10 @@ and is deliberately absent from this package.
    the direct monitor command and `/dev/null` redirects; extra shell commands
    are refused, not normalized away. Private cron bytes are neither retained
    nor hashed in the manifest.
+   Its existing separate `PYTHONPATH` assignment is admitted only as one exact
+   canonical-path token and separately bound; chained/extra/duplicate assignments
+   are refused. A real preflight caught this missing environment-line contract
+   before any runtime writes; the cron itself was not changed to pass the guard.
 7. Web's built-in Ansible reboot action requests exactly one native reboot and
    waits for a different boot ID. That is only connectivity evidence. Native
    postcheck separately requires the same machine, new boot, **active
