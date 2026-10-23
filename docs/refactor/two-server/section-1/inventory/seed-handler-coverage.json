@@ -35,13 +35,14 @@
     "business_768_market_overrides_a2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-a2.json",
     "business_768_market_overrides_b3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-b3.json",
     "business_768_live786_manual783_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-manual783-provenance.json",
-    "business_768_live786_five_source_closeout_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json"
+    "business_768_live786_five_source_closeout_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json",
+    "business_768_live786_reset_execute_singleton_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 261,
-    "evidenced_seed_count": 396,
-    "remaining_seed_count": 69
+    "reconciled_new_seed_count": 262,
+    "evidenced_seed_count": 397,
+    "remaining_seed_count": 68
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [
