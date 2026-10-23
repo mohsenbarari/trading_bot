@@ -6,6 +6,7 @@
   any_errors_fatal: true
   tasks:
     - name: Refuse implicit apply third targets and a mismatched fixed operation
+      tags: [controller_preflight]
       ansible.builtin.assert:
         that:
           - groups['all'] == ['reboot_bot']
@@ -17,6 +18,7 @@
           - reboot_manifest_sha256 is match('^[a-f0-9]{64}$')
 
     - name: Require fresh native preflight before exactly one reboot request
+      tags: [controller_preflight]
       ansible.builtin.command:
         argv: [/usr/bin/python3, -I, -B, /root/trading-bot/trading_bot/deploy/maintenance/reboot_guard.py, check, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}']
       changed_when: false

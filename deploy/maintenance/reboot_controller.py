@@ -120,15 +120,20 @@ def main():
     require(set(assets) == ASSETS, 'controller_asset_scope')
     for name, expected in assets.items():
         require(sha256(read(ROOT / name)).hexdigest() == expected, 'controller_asset_changed')
-    publish('controller-intent.json', {'schema': 'security_kernel_reboot_controller_intent/1',
-            'operation_id': OPERATION, 'manifest_sha256': digest, 'nonce': manifest['nonce'],
-            'source_revision': manifest['source_revision'], 'status': 'single_attempt_started'})
     environment = {'PATH': str(ROOT / 'venv/bin') + ':/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8',
                    'ANSIBLE_CONFIG': str(ROOT / 'reboot_ansible.cfg'), 'ANSIBLE_HOME': str(ROOT / 'ansible-home'),
                    'ANSIBLE_LOCAL_TEMP': str(ROOT / 'ansible-tmp')}
     variables = {'reboot_apply': True, 'reboot_manifest': NATIVE_MANIFEST, 'reboot_manifest_sha256': digest}
-    status = execute([str(ROOT / 'venv/bin/ansible-playbook'), '-i', str(ROOT / 'reboot_inventory.yml'),
-                      str(ROOT / 'reboot_external.yml'), '-e', json.dumps(variables)], environment, 'ansible.log', 3200)
+    command = [str(ROOT / 'venv/bin/ansible-playbook'), '-i', str(ROOT / 'reboot_inventory.yml'),
+               str(ROOT / 'reboot_external.yml'), '-e', json.dumps(variables)]
+    # Exercise the real Ansible SSH/SFTP/command-module lane in this exact
+    # durable runner's sandbox before any single-attempt/reboot intent exists.
+    require(execute(command + ['--tags', 'controller_preflight'], environment, 'preflight.log', 180) == 0,
+            'external_command_preflight_failed_no_reboot_intent')
+    publish('controller-intent.json', {'schema': 'security_kernel_reboot_controller_intent/1',
+            'operation_id': OPERATION, 'manifest_sha256': digest, 'nonce': manifest['nonce'],
+            'source_revision': manifest['source_revision'], 'status': 'single_attempt_started'})
+    status = execute(command, environment, 'ansible.log', 3200)
     require(status == 0, 'external_ansible_failed_no_automatic_reboot_retry')
     result = json.loads(read(ROOT / 'native-result.json'))
     require(result['status'] == 'completed' and result['manifest_sha256'] == digest and

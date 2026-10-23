@@ -119,6 +119,24 @@ current native flocks, reservation and boot-bound state.
 
 ## Failure and recovery boundaries
 
+- The first durable attempt failed at its initial Ansible SSH admission: Ansible
+  appended `-tt` despite OpenSSH `RequestTTY=no`, while the intentionally
+  restricted credential forbids PTY. No native state/reservation/token/result
+  existed; the original full runtime check passed again. `usetty=False` fixes
+  the actual Ansible option. A real command-module/SFTP no-op, not just raw SSH,
+  passed inside the identical systemd sandbox with this option.
+- `reboot_retire_failed_preflight.py` is a finite **operator-invoked** check/apply
+  for this exact pre-mutation failure. It uses the old canonical guard and
+  requires the same original boot, complete baseline, absent native operation
+  state and a dead failed external unit. Exact hash/nonce-bound intent, log and
+  transferred manifest are archived, never deleted; intent moves last. Native
+  original manifest and a durable receipt are preserved too. It cannot reboot,
+  rearm or reset a failed unit. Publish the reviewed helper on the security
+  branch first; do not fast-forward canonical source until retirement completes.
+  A subsequent fresh manifest/nonce is a new deliberate operation, never an
+  automatic retry after quiescence. New runners exercise the actual tagged
+  Ansible command preflight **before** writing a single-attempt intent.
+
 - Unknown container/unit/source/cron/STOP/receipt/mount change, another operation,
   expired deadline, wrong active kernel or ownership mismatch refuses safely.
 - A crash before full reservation publication cannot expose a partial canonical
