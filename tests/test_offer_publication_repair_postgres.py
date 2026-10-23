@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from api.routers.sync import _apply_item, _build_upsert_stmt
 from core import offer_publication_worker as worker
 from core.services import offer_publication_reconciliation_service as reconciliation
+from core.services.offer_publication_state_service import (
+    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
+)
 from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
 from core.utils import utc_now
 from models.commodity import Commodity
@@ -217,6 +220,8 @@ class OfferPublicationRepairPostgresTests(unittest.IsolatedAsyncioTestCase):
                         surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
                         publication_owner_server="foreign",
                         status=OfferPublicationStatus.FAILED,
+                        # Fairness cases exercise send retries, not identity repair.
+                        publisher_bot_identity=TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
                         dedupe_key=f"offer-publication:telegram_channel:{public_id}",
                         offer_version_id=offer.version_id,
                         last_known_offer_status=OfferStatus.ACTIVE.value,

@@ -223,11 +223,25 @@ class ObservabilityConfigTests(unittest.TestCase):
         for expected in (
             "local_node_version_ok",
             "install_local_node_runtime",
+            "frontend}/scripts/check-node-security-baseline.mjs",
+            'node "$policy" >/dev/null 2>&1',
+            'local node_version="24.22.1"',
+            "DEPLOY_NODE_VERSION:-24.22.1",
+            'bundle_root="node-v${node_version}-linux-${node_arch}"',
+            "https://nodejs.org/dist/v${node_version}/${bundle_root}.tar.xz",
+            "Only the audited Node 24.22.1 bootstrap is supported.",
+            "Node.js does not satisfy the frontend security baseline",
+            "Unsafe Node runtime refused before frontend cache lookup.",
+        ):
+            with self.subTest(expected=expected):
+                self.assertTrue(expected in script, f"Missing secure Node contract: {expected}")
+
+        for obsolete in (
             "DEPLOY_NODE_VERSION:-22.12.0",
-            "node-v${node_version}-linux-${node_arch}.tar.xz",
             "Frontend build requires Node.js 20.19+ or 22.12+",
         ):
-            self.assertIn(expected, script)
+            with self.subTest(obsolete=obsolete):
+                self.assertFalse(obsolete in script, f"Obsolete insecure Node contract: {obsolete}")
 
     def test_iran_operator_commands_support_docker_compose_v1_fallback(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
