@@ -6,7 +6,7 @@ RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends ca-certificates libpq-dev build-essential libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade 'pip>=26.2.2' 'setuptools>=78.1.1' 'wheel>=0.46.2'
 # Copy pre-downloaded packages (downloaded on fast German server)
 COPY pip_packages/ /tmp/pip_packages/
 COPY requirements.txt .

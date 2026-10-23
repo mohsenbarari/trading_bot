@@ -2,6 +2,9 @@
 # Starlette/aiohttp versions. Do not force-upgrade their transitive dependencies.
 fastapi==0.161.1
 starlette==1.9.0
+# Explicit transitive pins prevent compatible but vulnerable offline wheels.
+anyio==4.15.1
+cryptography==50.0.2
 pydantic==2.13.4
 python-multipart==0.0.32
 uvicorn[standard]==0.30.1

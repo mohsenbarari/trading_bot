@@ -13,6 +13,7 @@ class SecurityDependencyContractTests(unittest.TestCase):
             "starlette": "1.3.1", "Pillow": "13.0.0", "aiohttp": "3.14.3",
             "urllib3": "2.8.0", "certifi": "2026.10.23",
             "python-multipart": "0.0.32", "PyJWT": "2.15.1",
+            "anyio": "4.14.2", "cryptography": "50.0.2",
         }
         for name, floor in floors.items():
             with self.subTest(package=name):
