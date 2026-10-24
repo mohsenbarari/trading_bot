@@ -225,6 +225,35 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
                         good+'#define USE_LIBMOUNT_MOUNTFD_SUPPORT 1\n',good+'#define USE_LIBMOUNT_MOUNTFD_SUPPORT 0\n'):
             with self.assertRaises(RuntimeError):B.disabled_configuration(invalid)
 
+    def install_capsule_fixture(self):
+        tree=next(ast.parse(block) for block in blocks() if 'def install_capsule(' in block)
+        node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='install_capsule')
+        namespace={'os':os,'pathlib':__import__('pathlib'),'stat':__import__('stat'),'json':__import__('json'),'sha256':sha256}
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'<actual-public-install-capsule>','exec'),namespace)
+        root=self.root/'ci';root.mkdir(mode=0o700);source=root/'output/artifacts';source.mkdir(parents=True,mode=0o700)
+        records=[]
+        for name in sorted(B.SELECTED):
+            raw=('public-package-'+name).encode();path=source/(name+'.deb');path.write_bytes(raw);path.chmod(0o644)
+            records.append({'name':name,'path':path.name,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
+        receipt={'selected_runtime_packages':sorted(B.SELECTED),'all_family_packages':records}
+        (source/'build-receipt.json').write_text(__import__('json').dumps(receipt));(source/'build-receipt.json').chmod(0o644)
+        (source/'not-an-install-input.log').write_text('excluded public build detail')
+        return namespace['install_capsule'],root,source,receipt
+
+    def test_public_install_capsule_preserves_private_tree_and_exposes_exact_ten_inputs(self):
+        create,root,source,receipt=self.install_capsule_fixture();target=create(root,receipt)
+        self.assertEqual(target.stat().st_mode&0o777,0o755)
+        self.assertEqual(source.stat().st_mode&0o777,0o700);self.assertEqual(root.stat().st_mode&0o777,0o700)
+        self.assertEqual({p.name for p in target.iterdir()},{'build-receipt.json'}|{r['path'] for r in receipt['all_family_packages']})
+        for path in target.iterdir():
+            self.assertEqual(path.stat().st_mode&0o777,0o644);self.assertEqual(path.read_bytes(),(source/path.name).read_bytes())
+
+    def test_public_install_capsule_refuses_changed_package_before_any_directory_creation(self):
+        create,root,source,receipt=self.install_capsule_fixture()
+        (source/receipt['all_family_packages'][0]['path']).write_bytes(b'wrong-public-bytes')
+        with self.assertRaises(AssertionError):create(root,receipt)
+        self.assertFalse((root/'install-public').exists())
+
     def test_negative_control_that_unexpectedly_passes_is_a_failure(self):
         with patch.object(S.B, 'command'), patch.object(S.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)):
             with self.assertRaisesRegex(RuntimeError, 'compiled_negative_control_failed'):

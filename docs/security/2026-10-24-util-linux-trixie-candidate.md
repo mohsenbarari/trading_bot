@@ -1,5 +1,20 @@
 # Stable Trixie util-linux candidate: build evidence only
 
+Continuation CI40087272190 actually passed full-family compilation, the six
+old-caller ABI probes, the mountfd-disabled variant and compiled old/fixed
+source negative controls. Its upstream report counted340 suite scripts and162
+skip-status lines; this does not prove privileged/kernel coverage. Public
+artifact12557508721 retains those actual receipts and the nine packages.
+The job then failed disposable runtime installation with EACCES opening
+`/packages/build-receipt.json`: the bound source directory was nonroot-owned
+0700 and the installer correctly had no DAC-override capabilities. A closed
+ten-file public installation capsule now uses0755/0644 below the private0700
+parent, retaining the original private artifact directory. No capabilities,
+scanner gate or production settings are relaxed. A corrected actual install
+and raw scan remain required. Do not rebuild successful compilation merely
+to obtain this missing installation evidence; reuse the bound public artifact
+through a separately checked CI-only installation path.
+
 Actual diagnostic CI40083981841 completed the coherent Debian family, six
 old-caller ABI probes and normal distclean, then failed the isolated disabled
 variant at `configure: error: libblkid is needed to build libmount`.
@@ -7,12 +22,12 @@ variant at `configure: error: libblkid is needed to build libmount`.
 enables both libblkid and its libmount consumer. The actual generated config
 must prove both libraries enabled and mountfd undefined. This changes only the
 separate feature-regression build, not the full Debian package configuration.
-Successful execution of the corrected variant is still required; no build or
-security pass is inferred from this source fix.
+That source fix alone proved no build or security pass; later CI40087272190
+provided the actual disabled-variant execution evidence described above.
 
-Status: the complete candidate job has not passed. Full-family compilation and
-six old-caller ABI checks actually passed, but the later disabled variant and
-compiled source regressions still need a successful corrected CI execution.
+Status: the complete candidate job has not passed. Compilation, six old-caller
+ABI checks, the disabled variant and source regressions passed in40087272190;
+the public-capsule correction still needs actual installation/scan evidence.
 No production package installation or activation is asserted.
 
 First actual CI40082608496 failed during builder preparation. All seven
