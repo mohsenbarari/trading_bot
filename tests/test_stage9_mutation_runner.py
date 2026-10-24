@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import tempfile
@@ -28,6 +29,23 @@ class Stage9MutationRunnerTests(unittest.TestCase):
     def test_instrumented_baseline_keeps_original_pytest_error_visible(self):
         config = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["mutmut"]
         self.assertIs(config["debug"], True)
+
+    def test_every_selected_mutation_test_still_exists_without_importing_product_code(self):
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["mutmut"]
+        selectors = config["pytest_add_cli_args_test_selection"]
+        self.assertTrue(selectors)
+        self.assertEqual(len(selectors), len(set(selectors)))
+        for selector in selectors:
+            with self.subTest(selector=selector):
+                filename, *qualified = selector.split("::")
+                path = (ROOT / filename).resolve()
+                self.assertTrue(path.is_relative_to(ROOT / "tests"))
+                self.assertTrue(path.is_file())
+                body = ast.parse(path.read_text(encoding="utf-8")).body
+                for name in qualified:
+                    nodes = [node for node in body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
+                    self.assertEqual(len(nodes), 1, f"stale mutation selector: {selector}")
+                    body = nodes[0].body
 
     def test_parser_and_grouping_require_every_matching_mutant_killed(self):
         raw = "\n".join(
