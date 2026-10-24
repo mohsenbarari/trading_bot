@@ -124,16 +124,69 @@ def safe_member(name):
                 and all(ord(char) >= 32 for char in name))
 
 
-def closed_inventory_diagnostic(unexpected, wrong_directory_type):
-    """Bound public archive names only; admission still refuses afterward."""
+def unexpected_blob_metadata(bundle, members, unexpected):
+    """Read small public exporter metadata only; never emit config values."""
+    records = []
+    for name in sorted(unexpected)[:32]:
+        if not re.fullmatch(r'blobs/sha256/[a-f0-9]{64}', name):
+            continue
+        member = members[name]
+        record = {'name': name, 'size': member.size, 'sha256': None, 'sha256_matches_name': None,
+                  'keys': None, 'id': None, 'parent': None, 'created': None, 'os': None}
+        records.append(record)
+        if not member.isfile() or not 0 < member.size <= 64 * 1024:
+            continue
+        with bundle.extractfile(member) as source:
+            raw = source.read(member.size + 1)
+        if len(raw) != member.size:
+            continue
+        content_sha256 = sha256(raw).hexdigest()
+        record['sha256_matches_name'] = content_sha256 == name.removeprefix('blobs/sha256/')
+        if record['sha256_matches_name']:
+            # The full content digest is already in the name; retain an
+            # explicit verification result without repeating those 64 bytes.
+            del record['sha256']
+        else:
+            record['sha256'] = content_sha256
+        try:
+            value = document(raw)
+        except (ValueError, TypeError, RuntimeError):
+            continue
+        if type(value) is not dict:
+            continue
+        record['keys'] = [key[:64] for key in sorted(value)[:32]]
+        for key in ('id', 'parent'):
+            item = value.get(key)
+            if type(item) is str and re.fullmatch(r'(?:sha256:)?[a-f0-9]{64}', item):
+                record[key] = item
+        if type(value.get('created')) is str and re.fullmatch(r'[0-9TZ:+.\-]{1,64}', value['created']):
+            record['created'] = value['created']
+        if value.get('os') in ('linux', 'windows', 'freebsd'):
+            record['os'] = value['os']
+    return records
+
+
+def closed_inventory_diagnostic(unexpected, wrong_directory_type, blob_metadata=None):
+    """Bound public names/metadata only; admission still refuses afterward."""
     names = {'unexpected_names': sorted(unexpected),
              'wrong_directory_type_names': sorted(wrong_directory_type)}
     record = {'code': 'reuse_tar_closed_inventory',
               'unexpected_count': len(unexpected), 'unexpected_names': [],
               'wrong_directory_type_count': len(wrong_directory_type),
               'wrong_directory_type_names': [], 'names_or_characters_omitted': False}
+    if blob_metadata is not None:
+        record['unexpected_blob_metadata'] = []
+        record['blob_metadata_omitted'] = False
     def encode():
         return json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
+    if blob_metadata is not None:
+        for value in blob_metadata[:32]:
+            record['unexpected_blob_metadata'].append(value)
+            if len(encode().encode('ascii')) + 1 > 16 * 1024:
+                record['unexpected_blob_metadata'].pop()
+                break
+        candidates = sum(bool(re.fullmatch(r'blobs/sha256/[a-f0-9]{64}', name)) for name in unexpected)
+        record['blob_metadata_omitted'] = len(record['unexpected_blob_metadata']) < candidates
     full = False
     for index in range(32):
         for key, values in names.items():
@@ -267,7 +320,8 @@ def validate_docker_archive(path):
         wrong_directory_type = {name for name, member in members.items()
                                 if member.isdir() != (name in directories)}
         if unexpected or wrong_directory_type:
-            closed_inventory_diagnostic(unexpected, wrong_directory_type)
+            closed_inventory_diagnostic(unexpected, wrong_directory_type,
+                                        unexpected_blob_metadata(bundle, members, unexpected))
             raise RuntimeError('reuse_tar_closed_inventory')
         stream.seek(0)
         archive_sha = digest(stream, size)

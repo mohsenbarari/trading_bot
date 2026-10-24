@@ -307,6 +307,113 @@ class ComponentImageReuseTests(unittest.TestCase):
         self.assertEqual(record['wrong_directory_type_names'], ['directory-%03d' % index for index in range(32)])
         self.assertLessEqual(len(error.getvalue().encode()), 16 * 1024)
 
+    def test_small_unexpected_blob_metadata_is_bounded_public_and_still_refused(self):
+        _, entries = self.image(oci=True)
+        private_marker = 'PUBLIC_FIXTURE_CONFIG_VALUE_MUST_NOT_BE_EMITTED'
+        extras = []
+        for index in range(33):
+            value = {'id': '%064x' % index, 'parent': '%064x' % max(0, index-1),
+                     'created': '1970-01-01T00:00:00Z', 'os': 'linux',
+                     'container_config': {'Env': [private_marker]},
+                     'unrequested_value': private_marker}
+            raw = json.dumps(value, sort_keys=True).encode()
+            extras.append(('blobs/sha256/'+sha256(raw).hexdigest(), raw, tarfile.REGTYPE))
+        path = self.root/'unexpected-public-legacy-metadata.tar'
+        path.write_bytes(self.tar(entries+extras)); path.chmod(0o600)
+        error = io.StringIO()
+        with patch.object(M.sys, 'stderr', error):
+            with self.assertRaisesRegex(RuntimeError, '^reuse_tar_closed_inventory$'):
+                M.validate_docker_archive(path)
+        emitted = error.getvalue(); record = json.loads(emitted)
+        self.assertLessEqual(len(emitted.encode()), 16*1024)
+        self.assertNotIn(private_marker, emitted)
+        self.assertNotIn('Env', emitted)
+        self.assertEqual(record['unexpected_count'], 33)
+        metadata = record['unexpected_blob_metadata']
+        self.assertGreater(len(metadata), 0); self.assertLessEqual(len(metadata), 32)
+        allowed = {'name', 'size', 'sha256_matches_name', 'keys', 'id', 'parent', 'created', 'os'}
+        source = {name: data for name, data, _ in extras}
+        for item in metadata:
+            self.assertEqual(set(item), allowed)
+            self.assertTrue(item['sha256_matches_name'])
+            self.assertEqual(item['name'].removeprefix('blobs/sha256/'), sha256(source[item['name']]).hexdigest())
+            self.assertEqual(item['size'], len(source[item['name']]))
+            self.assertEqual(item['keys'], sorted(json.loads(source[item['name']])))
+            self.assertRegex(item['id'], '^[a-f0-9]{64}$')
+            self.assertEqual(item['created'], '1970-01-01T00:00:00Z')
+        self.assertTrue(record['blob_metadata_omitted'])
+
+    def test_all_thirty_one_realistic_legacy_metadata_rows_fit_the_hard_budget(self):
+        _, entries = self.image(oci=True)
+        extras = []
+        for index in range(31):
+            value = {'id': '%064x' % (index+1), 'created': '1970-01-01T00:00:00Z',
+                     'container_config': {}, 'os': 'linux'}
+            if index:
+                value['parent'] = '%064x' % index
+            if index == 30:
+                value.update(created='2026-10-24T12:34:56.123456789Z', architecture='amd64',
+                             config={'Env': ['PUBLIC_CONFIG_VALUE_NEVER_PRINTED']})
+            raw = json.dumps(value, sort_keys=True).encode()
+            extras.append(('blobs/sha256/'+sha256(raw).hexdigest(), raw, tarfile.REGTYPE))
+        path = self.root/'thirty-one-public-metadata.tar'
+        path.write_bytes(self.tar(entries+extras)); path.chmod(0o600)
+        error = io.StringIO()
+        with patch.object(M.sys, 'stderr', error):
+            with self.assertRaisesRegex(RuntimeError, '^reuse_tar_closed_inventory$'):
+                M.validate_docker_archive(path)
+        record = json.loads(error.getvalue())
+        self.assertEqual(len(record['unexpected_blob_metadata']), 31)
+        self.assertEqual(len(record['unexpected_names']), 31)
+        self.assertFalse(record['blob_metadata_omitted'])
+        self.assertFalse(record['names_or_characters_omitted'])
+        self.assertTrue(all(item['sha256_matches_name'] for item in record['unexpected_blob_metadata']))
+        self.assertEqual([item['created'] for item in record['unexpected_blob_metadata']].count('2026-10-24T12:34:56.123456789Z'), 1)
+        self.assertLessEqual(len(error.getvalue().encode()), 16*1024)
+        self.assertNotIn('PUBLIC_CONFIG_VALUE_NEVER_PRINTED', error.getvalue())
+
+    def test_blob_metadata_never_decodes_more_than_64k_or_more_than_32_members(self):
+        oversized = b'x'*(64*1024+1)
+        name = 'blobs/sha256/'+sha256(oversized).hexdigest()
+        member = tarfile.TarInfo(name); member.size = len(oversized)
+        bundle = MagicMock()
+        bundle.extractfile.side_effect = AssertionError('oversized_metadata_read')
+        record = M.unexpected_blob_metadata(bundle, {name: member}, {name})[0]
+        self.assertIsNone(record['sha256']); self.assertIsNone(record['keys'])
+        self.assertIsNone(record['sha256_matches_name'])
+        self.assertEqual(record['size'], len(oversized))
+        raw = b'{"created":"1970-01-01T00:00:00Z","id":"invalid-value","os":"private-value"}'
+        names = ['blobs/sha256/%064x' % index for index in range(40)]
+        members = {}
+        for item in names:
+            value = tarfile.TarInfo(item); value.size = len(raw); members[item] = value
+        bundle.extractfile.side_effect = lambda member: io.BytesIO(raw)
+        records = M.unexpected_blob_metadata(bundle, members, set(names))
+        self.assertEqual(len(records), 32)
+        self.assertTrue(all(item['id'] is None and item['os'] is None for item in records))
+        self.assertTrue(all(item['sha256_matches_name'] is False and item['sha256'] == sha256(raw).hexdigest() for item in records))
+
+    def test_adversarial_long_json_keys_cannot_expand_metadata_diagnostic_budget(self):
+        _, entries = self.image(oci=True)
+        extras = []
+        for index in range(32):
+            value = {'key-%02d-' % key + '\U0001f642'*128: 'value-never-emitted' for key in range(32)}
+            value['id'] = '%064x' % index
+            raw = json.dumps(value, ensure_ascii=False).encode()
+            self.assertLessEqual(len(raw), 64*1024)
+            extras.append(('blobs/sha256/'+sha256(raw).hexdigest(), raw, tarfile.REGTYPE))
+        path = self.root/'adversarial-public-metadata.tar'
+        path.write_bytes(self.tar(entries+extras)); path.chmod(0o600)
+        error = io.StringIO()
+        with patch.object(M.sys, 'stderr', error):
+            with self.assertRaisesRegex(RuntimeError, '^reuse_tar_closed_inventory$'):
+                M.validate_docker_archive(path)
+        emitted = error.getvalue(); record = json.loads(emitted)
+        self.assertLessEqual(len(emitted.encode()), 16*1024)
+        self.assertTrue(record['blob_metadata_omitted'])
+        self.assertEqual(record['unexpected_count'], 32)
+        self.assertNotIn('value-never-emitted', emitted)
+
     def test_config_digest_and_layer_content_are_both_required(self):
         raw, entries = self.image()
         path = self.root / 'changed.tar'

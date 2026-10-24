@@ -1,8 +1,11 @@
 # Ordinary ACL and tar vendor candidates for Trixie
 
-This is a source-only CI packet. No source build, ABI caller, ACL operation,
-archive roundtrip, package installation or scanner pass is claimed by its
-hermetic tests. Security acceptance and production installation remain false.
+Actual [CI run40115339187](https://github.com/mohsenbarari/trading_bot/actions/runs/40115339187),
+job120935349518, completed the vendor builds, ordinary compatibility checks,
+isolated package installation and unfiltered scans. Root independently checked
+the published artifact sizes/digests, package bytes, receipt chain, compiler
+identity and scanner/SBOM image bindings. This evidence is separate from the
+hermetic source tests. Security acceptance and production installation remain false.
 No custom vulnerability reproducer, source repair, malformed archive or attack
 fixture is part of this packet. Actual App payload tests and the unfiltered
 HIGH/CRITICAL release gate remain separate requirements.
@@ -88,8 +91,51 @@ prepends `noexec`; merely omitting that option from the caller did not make
 The executable temporary directory permits normal vendor-built test libraries
 and programs. Compiler identity, capability removal, network isolation,
 read-only root and `nosuid,nodev` remain required. Installer temporary mounts
-retain their existing options. No vendor test is skipped; a fresh actual build
-must establish its result before any family-build or runtime evidence is claimed.
+retain their existing options. No vendor test is skipped; the fresh actual build
+established the result recorded below. The first failed job remains part of the
+incident history.
+
+## Independently verified actual result
+
+The successful run used source commit
+`ec6131f41d9719bbaf2f45b3100b5b4a74f4f693`. The recipe hashes are Dockerfile
+`bdb71aeb882256bb30e788c20cf56f23aeb38f51b12adacd92cc4325ab142094`, build.py
+`88b76dd8217c03967f3653dc806b176468a2ca7ed6ffd281c64d023cc0e52fbe`, and
+verify.py `ed12c60e817268c04e8dd3224c460753724f76a926a057d7937ca7591531b6e9`.
+
+The tar build receipt has SHA256
+`c0114c344ec6103c1d8053421f5e63dc06721b16d8e318f21cde95608d9b465c` and binds
+the ACL build receipt
+`04a7e8f89a037d5a471c46d604d796b63f98ce9b6a0e0a01b450dc3af977e029`.
+The compiler provenance records candidate ACL2.4 runtime/development versions
+and the same actual library hash that passed both compatibility phases. All41
+old versioned ACL exports remain; the unchanged old caller, valid-file ACL
+operations and old/new tar PAX roundtrips passed. These are compatibility
+results, not a security assessment of legacy pathname APIs or privileged code.
+
+The final disposable runtime image is
+`sha256:029c98c9a8a69604dfa18b32be1acca0423fe5682edc257102f85658ca4cec82`.
+Only these two runtime packages were exported:
+
+| Package | Version | Bytes | SHA256 |
+|---|---|---:|---|
+| libacl1 |2.4.0-1~trixie+gold1|37076|bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1|
+| tar |1.35+dfsg-5~trixie+gold1|814984|b6a5715adc801680c94ab653641668d03f429dddc1efa822015b6395482195c4|
+
+Public artifact12567979094 is933904 bytes, ZIP SHA256
+`d367fb3c1b92f069538a6e90a77ea110efec6dccd9286a8f0e1359b285bc1765`.
+Raw scanner/SBOM artifact12568581282 is123320 bytes, ZIP SHA256
+`fe8b439de985074a1c0f175d441b800499dcb8a80f29ba8ef2934164360d328b`.
+Both scans bind the actual image, and the SBOM records both exact new versions.
+
+The raw vulnerability report SHA256 is
+`581dffc71d78dd43eb124677fff47a4d6df32808e4e1d50265ca528c0f1bc406`:
+46 HIGH and0 CRITICAL. ACL still has one `affected` row for CVE-2026-54369
+without a fixed-version value, even with2.4 installed. The other45 rows concern
+unchanged util-linux36, ncurses4, systemd2, Perl1 and package-test-base pip2.
+This scan is of the isolated package candidate, not the final composed App.
+No raw row was filtered and no release gate was waived. Resolving the ACL
+advisory and legacy-file-API implications remains a separate acceptance task.
 
 ## Ordinary compatibility and final installation
 
