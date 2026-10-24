@@ -607,3 +607,12 @@ maintenance-window receipt. Completion still leaves security/deployment acceptan
 false, preserves known health incidents, and performs no reboot. The older boot
 guard accepts only completed C07, so a separately reviewed OP08 completion binding
 is still required before persistent boot-guard work or any later kernel reboot.
+
+The normal v1.4 artifact is validated with its exact four-field contract,
+including `format:postgres_custom`, before the stopped-engine cold phase.
+Owned mutable journal/watch controls tolerate only the closed retained-FD/path
+replacement race from legitimate atomic publication, for at most three reads
+within 0.75 seconds. Every successful buffer is checked again against its exact
+schema, operation, nonce and manifest; stable wrong ownership, invalid typed
+phase/flags, or persistent instability still refuses and retains fences.
+Immutable source/window/history controls receive no such retry or adoption.
