@@ -65,7 +65,31 @@ DOCKER = ['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 EVIDENCE_REPORTS = {'base-admission.json':2*1024**2,'baseline-inventory.json':2*1024**2,
     'candidate-inventory.json':2*1024**2,'before-run.log':2*1024**2,'after-run.log':2*1024**2,
     'native-run.log':2*1024**2,'focused-run.log':2*1024**2,'focused-tests.json':65536,
-    'component-presence.json':131072,'build.log':32*1024**2}
+    'component-presence.json':131072,'build.log':32*1024**2,'builder-inspect.log':65536}
+PUBLIC_FAILURE_CODES = frozenset((
+    'acl_parent_pin','application_or_python_changed','archive_config','archive_config_bound','archive_config_digest',
+    'archive_config_name','archive_manifest','artifact_digest','artifact_download_failed','artifact_size','base_admission_scope',
+    'base_alias','base_alias_changed','base_alias_cleanup_owner','base_archive_changed','base_daemon_layers_changed',
+    'base_user_or_onbuild','baseline_layer_prefix_changed','builder_inspect_shape','candidate_identity','ci_identity','ci_root',
+    'combined_package_inventory','command_failed','command_output_bound','command_timeout','component_receipt_bound',
+    'component_receipt_identity','component_receipt_scope','composition_baseline_changed','composition_evidence_changed',
+    'composition_image_changed','composition_state','compressed_export_bound','container_cleanup_owner','container_cleanup_unknown',
+    'container_exit','container_identity','controller_source_changed','document_invalid','download_exists','export_byte_bound',
+    'export_failed','export_timeout','focused_test_result','github_ci_only','image_identity','image_inspect','input_bound',
+    'input_changed','input_metadata','input_path','input_unavailable','installed_delta_changed','installed_version_changed',
+    'io_failure','libc_changed','local_docker_builder_required','package_bytes','package_path','package_pin','package_receipt_pin',
+    'package_receipt_state','package_runtime_inventory','package_zip_identity','package_zip_inventory','package_zip_member',
+    'phase_invalid','phase_state_invalid','probe_changed','raw_report_config','raw_report_identity','runner_space',
+    'runtime_config_changed','sbom_image_identity','sbom_package_version','sealed_inventory','sealed_source_changed','stream_bound',
+    'stream_size','test_blob_identity','test_blob_metadata','test_evidence_pin','test_proof_identity','test_proof_inventory',
+    'test_proof_pin','test_source_pin','unclassified_refusal','unexpected_failure'))
+PUBLIC_PHASES = frozenset(('controller_admission','sealed_sources','download_image',
+    'download_util','admit_util','download_ncurses','admit_ncurses','download_acl-tar','admit_acl-tar',
+    'download_test_evidence','admit_test_evidence','fetch_test_sources','base_image_admission','base_archive_config',
+    'load_base_image','inspect_base_image','audit_base_image','create_base_alias','inspect_base_alias','inspect_builder',
+    'write_build_context','build_candidate','cleanup_base_alias','inspect_candidate_image','audit_candidate_image',
+    'native_checks','focused_tests','component_probe','bind_composition_evidence','composition_complete',
+    'finalize_admission','bind_raw_reports','export_image','export_complete'))
 
 
 def require(ok, code):
@@ -98,6 +122,58 @@ def write(path,raw,mode=0o600):
 
 
 def encoded(value): return (json.dumps(value,sort_keys=True)+'\n').encode()
+
+
+def public_error(error):
+    if type(error) is RuntimeError:
+        return error.args[0] if len(error.args)==1 and type(error.args[0]) is str and error.args[0] in PUBLIC_FAILURE_CODES else 'unclassified_refusal'
+    if isinstance(error,subprocess.TimeoutExpired):return 'command_timeout'
+    if isinstance(error,FileNotFoundError):return 'input_unavailable'
+    if isinstance(error,(UnicodeError,json.JSONDecodeError)):return 'document_invalid'
+    if isinstance(error,OSError):return 'io_failure'
+    return 'unexpected_failure'
+
+
+def phase_state(root):
+    path=root/'reports/phase.json'
+    if not path.exists():return {}
+    value=json.loads(read(path,65536))
+    require(value.get('schema')=='security_os_composition_phase/1' and value.get('phase') in PUBLIC_PHASES
+        and value.get('status') in {'running','complete','failed'}
+        and value.get('first_failure_phase') in PUBLIC_PHASES|{None}
+        and value.get('first_failure_code') in PUBLIC_FAILURE_CODES|{None},'phase_state_invalid')
+    return value
+
+
+def save_phase(root,value):
+    reports=root/'reports';reports.mkdir(mode=0o700,exist_ok=True)
+    info=reports.lstat()
+    require(reports.resolve(strict=True)==reports and stat.S_ISDIR(info.st_mode) and info.st_uid==os.geteuid()
+        and stat.S_IMODE(info.st_mode)==0o700,'phase_state_invalid')
+    temporary=reports/('.phase-'+str(os.getpid())+'-'+str(time.monotonic_ns())+'.json')
+    try:
+        write(temporary,encoded(value));os.replace(temporary,reports/'phase.json')
+        descriptor=os.open(reports,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(descriptor)
+        finally:os.close(descriptor)
+    finally:temporary.unlink(missing_ok=True)
+
+
+def phase(root,name,*,complete=False):
+    require(name in PUBLIC_PHASES,'phase_invalid');previous=phase_state(root)
+    save_phase(root,{'schema':'security_os_composition_phase/1','phase':name,'status':'complete' if complete else 'running',
+        'first_failure_phase':previous.get('first_failure_phase'),'first_failure_code':previous.get('first_failure_code'),
+        'updated_at_epoch_seconds':time.time(),'security_accepted':False,'deployment_performed':False})
+
+
+def failed_phase(root,error):
+    previous=phase_state(root);name=previous.get('phase','controller_admission')
+    code=public_error(error)
+    value={'schema':'security_os_composition_phase/1','phase':name,'status':'failed',
+        'first_failure_phase':previous.get('first_failure_phase') or name,
+        'first_failure_code':previous.get('first_failure_code') or code,'last_failure_code':code,
+        'updated_at_epoch_seconds':time.time(),'security_accepted':False,'deployment_performed':False}
+    save_phase(root,value);return value
 
 
 def stream_digest(stream,size):
@@ -334,6 +410,24 @@ def dockerfile_for(alias):
                     '/usr/local/bin/python3','-I','-B','/compose-installer.py'])+'\n')
 
 
+def inspect_builder(root):
+    # buildx inspect has no --format option. Keep its bounded documented text.
+    raw=docker(root,['buildx','inspect','default'],maximum=65536,combine_stderr=True,
+               log_path=root/'reports/builder-inspect.log')
+    parse_builder(raw)
+    return raw
+
+
+def parse_builder(raw):
+    require(type(raw) is bytes and 0<len(raw)<=65536,'builder_inspect_shape')
+    lines=raw.decode('utf-8').splitlines()
+    values=lambda key:[line.split(':',1)[1].strip() for line in lines if line.startswith(key+':')]
+    names,drivers,statuses=values('Name'),values('Driver'),values('Status')
+    require(names and names[0]=='default' and drivers==['docker'] and statuses
+        and all(value=='running' for value in statuses)
+        and not any(line.lstrip().startswith('Error:') for line in lines),'local_docker_builder_required')
+
+
 def image_record(raw, expected=None):
     values=json.loads(raw);require(type(values) is list and len(values)==1,'image_inspect')
     value=values[0]
@@ -460,56 +554,67 @@ def ci_root(root):
 
 
 def compose(root):
-    ci_root(root);identity,modules=load_sealed(root)
+    ci_root(root);phase(root,'controller_admission');phase(root,'sealed_sources');identity,modules=load_sealed(root)
     admission=modules['admit_security_component_image_reuse.py']
     require((admission.IMAGE,admission.SOURCE,admission.ARTIFACT_ID)==(IMAGE,SOURCE,12552928309),'base_admission_scope')
-    for name in ('inputs','context','reports','tests','docker-config'):(root/name).mkdir(mode=0o700)
+    for name in ('inputs','context','tests','docker-config'):(root/name).mkdir(mode=0o700)
     (root/'context/capsule').mkdir(mode=0o755);(root/'context/capsule').chmod(0o755)
     floor=os.statvfs(root);require(floor.f_bavail*floor.f_frsize>=8*1024**3,'runner_space')
-    fetch_artifact(admission.ARTIFACT_ID,root/'inputs/image.zip',admission.ZIP_BYTES,admission.ZIP_SHA256)
+    phase(root,'download_image');fetch_artifact(admission.ARTIFACT_ID,root/'inputs/image.zip',admission.ZIP_BYTES,admission.ZIP_SHA256)
     packages=[];families={}
     for group,record in GROUPS.items():
         _,identifier,size,digest,*_=record;path=root/'inputs'/(group+'.zip')
-        fetch_artifact(identifier,path,size,digest);families[group]=admit_packages(path,group,root/'context/capsule')
+        phase(root,'download_'+group);fetch_artifact(identifier,path,size,digest)
+        phase(root,'admit_'+group);families[group]=admit_packages(path,group,root/'context/capsule')
         packages+=families[group]['packages']
     require(len(packages)==15 and {r['name'] for r in packages}==set(PACKAGES),'combined_package_inventory')
-    fetch_artifact(EVIDENCE[0],root/'inputs/tests.zip',EVIDENCE[1],EVIDENCE[2])
-    proof=admit_test_proof(root/'inputs/tests.zip');fetch_tests(root/'tests');(root/'tests').chmod(0o755)
+    phase(root,'download_test_evidence');fetch_artifact(EVIDENCE[0],root/'inputs/tests.zip',EVIDENCE[1],EVIDENCE[2])
+    phase(root,'admit_test_evidence');proof=admit_test_proof(root/'inputs/tests.zip')
+    phase(root,'fetch_test_sources');fetch_tests(root/'tests');(root/'tests').chmod(0o755)
     write(root/'test-sources.json',proof,0o644)
     write(root/'context/capsule/manifest.json',encoded({'schema':'security_os_composition_packages/1','packages':packages}),0o644)
-    admitted=admission.admit_image(root/'inputs/image.zip',root/'admitted')
+    phase(root,'base_image_admission');admitted=admission.admit_image(root/'inputs/image.zip',root/'admitted')
     write(root/'reports/base-admission.json',encoded(admitted))
-    original_config=archive_config(root/'admitted/candidate-image.tar',IMAGE)
+    phase(root,'base_archive_config');original_config=archive_config(root/'admitted/candidate-image.tar',IMAGE)
     # The admission helper's original component-only receipt remains immutable.
     # This separately authorized recipe proves its own composition boundaries.
+    phase(root,'load_base_image')
     with admission.pinned(root/'admitted/candidate-image.tar',admission.MAX_TAR) as (stream,size):
         require(size==admitted['docker_archive_bytes'] and admission.digest(stream,size)==admitted['docker_archive_sha256'],'base_archive_changed')
         stream.seek(0);docker(root,['image','load'],seconds=180,input_stream=stream)
-    before=image_record(docker(root,['image','inspect',IMAGE],maximum=2*1024**2),IMAGE)
+    phase(root,'inspect_base_image');before=image_record(docker(root,['image','inspect',IMAGE],maximum=2*1024**2),IMAGE)
     require(original_config['rootfs']['diff_ids']==before['RootFS']['Layers'],'base_daemon_layers_changed')
     require(before['Config'].get('User','') in ('','root','0') and not before['Config'].get('OnBuild'),'base_user_or_onbuild')
-    original=json.loads(isolated(root,IMAGE,AUDIT,'before').splitlines()[-1])
+    phase(root,'audit_base_image');original=json.loads(isolated(root,IMAGE,AUDIT,'before').splitlines()[-1])
     alias='security-os-base-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']+':ci'
-    docker(root,['image','tag',IMAGE,alias])
-    require(image_record(docker(root,['image','inspect',alias],maximum=2*1024**2),IMAGE)['Config']==before['Config'],'base_alias_changed')
-    require(docker(root,['buildx','inspect','default','--format','{{.Driver}}'],maximum=256).strip()==b'docker','local_docker_builder_required')
-    write(root/'context/Dockerfile',dockerfile_for(alias).encode(),0o644);write(root/'context/installer.py',INSTALLER.encode(),0o644)
+    phase(root,'create_base_alias');docker(root,['image','tag',IMAGE,alias])
     try:
+        phase(root,'inspect_base_alias')
+        require(image_record(docker(root,['image','inspect',alias],maximum=2*1024**2),IMAGE)['Config']==before['Config'],'base_alias_changed')
+        phase(root,'inspect_builder');inspect_builder(root)
+        phase(root,'write_build_context')
+        write(root/'context/Dockerfile',dockerfile_for(alias).encode(),0o644);write(root/'context/installer.py',INSTALLER.encode(),0o644)
+        phase(root,'build_candidate')
         docker(root,['build','--builder','default','--pull=false','--no-cache','--network=none','--iidfile',str(root/'candidate.id'),str(root/'context')],
                seconds=600,maximum=32*1024**2,combine_stderr=True,log_path=root/'reports/build.log')
+    except Exception as error:
+        try:failed_phase(root,error)
+        except Exception:pass
+        raise
     finally:
+        phase(root,'cleanup_base_alias')
         require(image_record(docker(root,['image','inspect',alias],maximum=2*1024**2),IMAGE)['Id']==IMAGE,'base_alias_cleanup_owner')
         docker(root,['image','rm',alias],seconds=20)
     image=read(root/'candidate.id',256).decode().strip();require(re.fullmatch(r'sha256:[a-f0-9]{64}',image),'candidate_identity')
-    after=image_record(docker(root,['image','inspect',image],maximum=2*1024**2),image);compare_images(before,after)
-    installed=json.loads(isolated(root,image,AUDIT,'after').splitlines()[-1]);compare_inventory(original,installed)
+    phase(root,'inspect_candidate_image');after=image_record(docker(root,['image','inspect',image],maximum=2*1024**2),image);compare_images(before,after)
+    phase(root,'audit_candidate_image');installed=json.loads(isolated(root,image,AUDIT,'after').splitlines()[-1]);compare_inventory(original,installed)
     write(root/'reports/baseline-inventory.json',encoded(original));write(root/'reports/candidate-inventory.json',encoded(installed))
-    isolated(root,image,NATIVE,'native')
-    tests=isolated(root,image,FOCUSED,'focused',mounts=((root/'tests','/app/tests'),(root/'test-sources.json','/proof/test-sources.json')))
+    phase(root,'native_checks');isolated(root,image,NATIVE,'native')
+    phase(root,'focused_tests');tests=isolated(root,image,FOCUSED,'focused',mounts=((root/'tests','/app/tests'),(root/'test-sources.json','/proof/test-sources.json')))
     result=json.loads(tests.splitlines()[-1]);require(result['image_id']==image and result['tests']==56 and result['modules']==5 and result['status']=='passed','focused_test_result')
     write(root/'reports/focused-tests.json',encoded(result))
     probe=modules['verify_image_component_presence.py'];probe_raw=read(root/'source/verify_image_component_presence.py',65536)
-    component=probe.in_container(image,SOURCE,probe_raw,PROBE_SHA);validate_component(component,image)
+    phase(root,'component_probe');component=probe.in_container(image,SOURCE,probe_raw,PROBE_SHA);validate_component(component,image)
     write(root/'reports/component-presence.json',component)
     record={'schema':'security_os_composition/1','status':'composed_tested_not_accepted','image_id':image,'parent_image_id':IMAGE,
         'original_provenance':admitted['export_provenance'],'recipe':identity,'families':families,'runtime_config':before['Config'],
@@ -519,10 +624,11 @@ def compose(root):
         'installer_resource_cgroup_caps':'NOT_ASSERTED','installer_network':'none','installer_caps_mask':'0xd9',
         'focused_tests':56,'full_runtime_matrix':'NOT_TESTED','app_recompiled':False,'security_accepted':False,
         'raw_scanner_gate_waived':False,'production_installed':False,'deployment_performed':False}
-    record['test_sources_sha256']=TEST_PROOF;record['evidence_sha256']=evidence_hashes(root)
+    phase(root,'bind_composition_evidence');record['test_sources_sha256']=TEST_PROOF;record['evidence_sha256']=evidence_hashes(root)
     write(root/'reports/composition.json',encoded(record))
     for name in ('vulnerabilities.json','sbom.cdx.json'):write(root/'reports'/name,b'')
     write(root/'empty-trivy.yaml',b'{}\n')
+    phase(root,'composition_complete',complete=True)
     with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('image_id='+image+'\n')
 
 
@@ -577,7 +683,7 @@ def export_image(root,image):
 
 
 def finalize(root):
-    ci_root(root);identity,_=load_sealed(root)
+    ci_root(root);phase(root,'finalize_admission');identity,_=load_sealed(root)
     raw=read(root/'reports/composition.json',2*1024**2);record=json.loads(raw)
     require(record['schema']=='security_os_composition/1' and record['status']=='composed_tested_not_accepted'
         and record['parent_image_id']==IMAGE and record['security_accepted'] is False and record['recipe']==identity
@@ -592,9 +698,10 @@ def finalize(root):
     require(original_config['config']==record['original_oci_config'] and baseline['Config']==record['runtime_config']
         and baseline['RootFS']['Layers']==record['baseline_layers'],'composition_baseline_changed')
     require(current['Config']==record['runtime_config'] and current['RootFS']['Layers']==record['candidate_layers'],'composition_image_changed')
+    phase(root,'bind_raw_reports')
     reports={name:read(root/'reports'/name,32*1024**2) for name in ('vulnerabilities.json','sbom.cdx.json')}
     counts=validate_reports(record,*(json.loads(reports[name]) for name in ('vulnerabilities.json','sbom.cdx.json')))
-    archive=export_image(root,image)
+    phase(root,'export_image');archive=export_image(root,image)
     proof={'schema':'security_os_composition_image_export/1','status':'exported_not_accepted','image_id':image,
         'parent_image_id':IMAGE,'original_provenance':record['original_provenance'],'composition_sha256':sha256(raw).hexdigest(),
         'runtime_config_unchanged':True,'baseline_layer_prefix_unchanged':True,'archive':archive,'raw_counts':counts,
@@ -603,12 +710,24 @@ def finalize(root):
         'app_recompiled':False,'full_runtime_matrix':'NOT_TESTED','security_accepted':False,'raw_scanner_gate_waived':False,
         'runtime_data_included':False,'secrets_disclosed':False,'deployment_performed':False}
     write(root/'image-export.json',encoded(proof))
+    phase(root,'export_complete',complete=True)
 
 
-if __name__=='__main__':
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=('compose','finalize'));parser.add_argument('--root',type=Path,required=True)
+    args=parser.parse_args(argv)
     try:
-        parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=('compose','finalize'));parser.add_argument('--root',type=Path,required=True)
-        args=parser.parse_args();(compose if args.command=='compose' else finalize)(args.root)
-    except Exception:
-        print('{"status":"failed","security_accepted":false,"deployment_performed":false}',file=sys.stderr)
-        raise SystemExit(1) from None
+        (compose if args.command=='compose' else finalize)(args.root)
+        return 0
+    except Exception as error:
+        failure={'status':'failed','code':public_error(error),'phase':None,'security_accepted':False,'deployment_performed':False}
+        try:
+            # A host refusal must never create diagnostics at a caller path.
+            ci_root(args.root);state=failed_phase(args.root,error)
+            failure.update(code=state['first_failure_code'],phase=state['first_failure_phase'])
+        except Exception:pass
+        print(json.dumps(failure,sort_keys=True),file=sys.stderr)
+        return 1
+
+
+if __name__=='__main__':raise SystemExit(main())

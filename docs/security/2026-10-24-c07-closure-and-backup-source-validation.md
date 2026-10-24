@@ -477,3 +477,41 @@ authorize additional bytes or reduce any reserve. Before transfer, the actual
 ciphertext must still fit a fresh Native measurement, and receiver streaming,
 fsync and independent verification retain their strict checks. A genuinely
 insufficient pre-work sample still refuses before work/scopes are created.
+
+## Actual HOT3 completion and independent verification
+
+Attempt03 from published commit `531196246c9b916f2101f85e93722b2e0536d79f`
+finished with Ansible exit0 at `2026-10-24T18:41:23.502643Z`. Its original
+deadline and failed01/02 evidence remain unchanged. The Web stage is
+`/root/.local/security-web-market-hot3-20261024-01-attempt03`; work artifacts
+are under `/srv/trading-bot/security-web-market-hot3-20261024-01-attempt03`.
+The actual hot dump is2334082639 bytes, SHA256
+`3566af75d9bef540620c6d1414a9b3b4d2119a7b2a54acb3a7c50949a32df7a7`.
+CREATE restore/cleanup and the separate independent restore both passed.
+
+Root independently verified the bounded public receipt chain and then ran the
+unchanged receiver's verify CLI on Native, rereading the actual ciphertext.
+It verified2334082656 bytes, SHA256
+`af301405756cc90760462d928777b2bf893e69c4883042beec70c5176dd059a8`, on the
+exact attached UUID above. No backup plaintext or private key was read by that
+independent offhost check. Receipt bindings are:
+
+| Artifact | SHA256 |
+|---|---|
+| intent.json |6426b1f7e6ecbc8690180b3ce8b7fe7928f348fc61336262d8266b28d111b477|
+| complete.json |ae5afcc96fe68756af5a607f6ad3bac71a5b0586615d0a716d27f25951723e3b|
+| result.json |d4b2e1deffc65dd5a8a458ef837a79a344cce7640519412c7598a2365d25288e|
+| cleanup.json |ae7013f4b32a777f4dd54e1359c34ed6991108cac10eefdcc43d86dcd8727d1f|
+| CREATE receipt |38af1bd0b01ac0d7748b70332923ddd9e10ba8ef0b19124d1bfa9ac89c93232e|
+| CREATE journal |040a87c3558d21bb04845597875bb487036b4b4f33fc4bbeb08d06a92de14851|
+| independent restore |8a2c43dfe77573ea3f8e2d4f890cb74ba382a12217fe2f56c5968ed7ed83bb50|
+| encryption receipt |92622ef041c6a47981ebdef57c1c52c194f8303ba8def80e963b58afc08942a2|
+| dump budget |c082592f2811360293227cbfdbfbb2f1d4d7ac8db900341d021169e6b103c25f|
+
+The completed cleanup binds both distinct owned restores and original marker,
+with no pending request adoption. Original configuration and all runtime role
+identities remain bound. No production service stop, App activation, engine
+upgrade or reboot was performed. This is verified hot database backup evidence,
+not the separate quiesced engine-store rollback archive or global security
+acceptance. `security_accepted`, `deployment_eligible` and
+`production_services_changed` remain false; refactor automation remains stopped.

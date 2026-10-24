@@ -1,5 +1,5 @@
 """Owned public fixtures only; every ambient command and network is denied."""
-from contextlib import ExitStack
+from contextlib import ExitStack,redirect_stderr
 from copy import deepcopy
 from hashlib import sha256
 import ast
@@ -47,6 +47,10 @@ class CompositionTests(unittest.TestCase):
         with patch.dict(os.environ,{'GITHUB_ACTIONS':'false'}):
             for call in (M.compose,M.finalize):
                 with self.assertRaisesRegex(RuntimeError,'github_ci_only'):call(self.root)
+            output=io.StringIO()
+            with redirect_stderr(output):self.assertEqual(M.main(['compose','--root',str(self.root)]),1)
+            self.assertEqual(json.loads(output.getvalue())['code'],'github_ci_only')
+            self.assertFalse((self.root/'reports').exists())
 
     def test_stable_read_refuses_bounds_links_and_rewrites(self):
         path=self.root/'public';path.write_bytes(b'public fixture')
@@ -118,6 +122,65 @@ class CompositionTests(unittest.TestCase):
         self.assertNotIn('COPY ',text);self.assertNotIn('USER ',text);self.assertNotIn('LABEL ',text)
         with self.assertRaisesRegex(RuntimeError,'base_alias'):M.dockerfile_for('external-repository:latest')
 
+    def test_documented_builder_output_and_actual_cli_construction(self):
+        # Official docker/buildx v0.29.1 commands/inspect.go prints this shape;
+        # inspect exposes --bootstrap but no --format flag.
+        raw=b'Name:          default\nDriver:        docker\n\nNodes:\nName:          default\nEndpoint:      unix:///var/run/docker.sock\nStatus:        running\nBuildKit version: v0.25.1\n'
+        calls=[]
+        def docker(root,args,**kwargs):
+            calls.append(args)
+            if '--format' in args:raise RuntimeError('command_failed')
+            self.assertEqual(args,['buildx','inspect','default'])
+            self.assertTrue(kwargs['combine_stderr']);self.assertEqual(kwargs['maximum'],65536)
+            self.assertEqual(kwargs['log_path'],root/'reports/builder-inspect.log')
+            return raw
+        with patch.object(M,'docker',side_effect=docker):
+            self.assertEqual(M.inspect_builder(self.root),raw)
+            with self.assertRaisesRegex(RuntimeError,'command_failed'):
+                M.docker(self.root,['buildx','inspect','default','--format','{{.Driver}}'])
+        self.assertEqual(calls[0],['buildx','inspect','default'])
+        for changed in (raw.replace(b'Driver:        docker',b'Driver:        docker-container'),
+                        raw.replace(b'Name:          default',b'Name:          different',1),
+                        raw.replace(b'Status:        running',b'Status:        stopped'),
+                        raw+b'Error: context deadline exceeded\n',raw+b'Driver: docker\n'):
+            with self.assertRaisesRegex(RuntimeError,'local_docker_builder_required'):M.parse_builder(changed)
+
+    def test_phase_failure_survives_later_cleanup_and_is_atomically_written(self):
+        M.phase(self.root,'inspect_builder')
+        M.failed_phase(self.root,RuntimeError('command_failed'))
+        M.phase(self.root,'cleanup_base_alias')
+        value=M.failed_phase(self.root,RuntimeError('base_alias_cleanup_owner'))
+        self.assertEqual(value['first_failure_phase'],'inspect_builder')
+        self.assertEqual(value['first_failure_code'],'command_failed')
+        self.assertEqual(value['last_failure_code'],'base_alias_cleanup_owner')
+        self.assertEqual(M.phase_state(self.root),value)
+        self.assertEqual(stat.S_IMODE((self.root/'reports/phase.json').stat().st_mode),0o600)
+        self.assertFalse(tuple((self.root/'reports').glob('.phase-*')))
+        with self.assertRaisesRegex(RuntimeError,'phase_invalid'):M.phase(self.root,'not-an-admitted-phase')
+
+    def test_main_reports_only_closed_codes_without_exception_text(self):
+        M.phase(self.root,'inspect_builder');output=io.StringIO()
+        text='ordinary fixture argument must not enter diagnostics'
+        with patch.object(M,'compose',side_effect=RuntimeError(text)),patch.object(M,'ci_root'),redirect_stderr(output):
+            self.assertEqual(M.main(['compose','--root',str(self.root)]),1)
+        record=json.loads(output.getvalue())
+        self.assertEqual(record['phase'],'inspect_builder');self.assertEqual(record['code'],'unclassified_refusal')
+        self.assertNotIn(text,output.getvalue());self.assertNotIn(text,(self.root/'reports/phase.json').read_text())
+        self.assertFalse(record['security_accepted']);self.assertFalse(record['deployment_performed'])
+
+    def test_public_error_catalog_covers_static_refusals_and_hides_unknown_values(self):
+        tree=ast.parse(SCRIPT.read_text());codes=set()
+        for node in ast.walk(tree):
+            if isinstance(node,ast.Call) and isinstance(node.func,ast.Name):
+                index=1 if node.func.id=='require' else 0 if node.func.id=='RuntimeError' else None
+                if index is not None and len(node.args)>index and isinstance(node.args[index],ast.Constant) and type(node.args[index].value) is str:
+                    codes.add(node.args[index].value)
+        self.assertLessEqual(codes,M.PUBLIC_FAILURE_CODES)
+        self.assertEqual(M.public_error(RuntimeError('command_failed')),'command_failed')
+        self.assertEqual(M.public_error(RuntimeError('unlisted fixture value')),'unclassified_refusal')
+        self.assertEqual(M.public_error(FileNotFoundError('fixture path')),'input_unavailable')
+        self.assertEqual(M.public_error(ValueError('fixture argument')),'unexpected_failure')
+
     def test_package_failure_prevents_any_docker_command(self):
         admission=Mock(IMAGE=M.IMAGE,SOURCE=M.SOURCE,ARTIFACT_ID=12552928309,ZIP_BYTES=1,ZIP_SHA256='a'*64)
         with patch.object(M,'ci_root'),patch.object(M,'load_sealed',return_value=({}, {'admit_security_component_image_reuse.py':admission})), \
@@ -126,6 +189,7 @@ class CompositionTests(unittest.TestCase):
                 patch.object(M,'docker',side_effect=AssertionError('docker_before_admission')) as docker:
             with self.assertRaisesRegex(RuntimeError,'known_package_refused'):M.compose(self.root)
         docker.assert_not_called();admission.admit_image.assert_not_called()
+        self.assertEqual(M.phase_state(self.root)['phase'],'admit_util')
 
     def test_missing_historical_blob_never_falls_back_to_checkout_or_build(self):
         admission=Mock(IMAGE=M.IMAGE,SOURCE=M.SOURCE,ARTIFACT_ID=12552928309,ZIP_BYTES=1,ZIP_SHA256='a'*64)
@@ -140,6 +204,7 @@ class CompositionTests(unittest.TestCase):
                 patch.object(M,'docker',side_effect=AssertionError('docker_before_sources')) as docker:
             with self.assertRaisesRegex(RuntimeError,'fixed_blob_unavailable'):M.compose(self.root)
         docker.assert_not_called();admission.admit_image.assert_not_called()
+        self.assertEqual(M.phase_state(self.root)['phase'],'fetch_test_sources')
 
     def image(self, prefix='a', layers=None):
         return {'Id':'sha256:'+prefix*64,'Os':'linux','Architecture':'amd64',

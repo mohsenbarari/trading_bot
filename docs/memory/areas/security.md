@@ -27,14 +27,16 @@
 - Watchdogs check Restarting before Running. Stale heartbeat can coexist with
   progress; missing counters are unknown. Never prune attached control storage;
   process death cannot cancel daemon requests or authorize writer auto-restart.
-- Tests deny unmocked host/network commands; use named mocks/nonroot fixtures.
+- Tests deny unmocked host/network commands; use actual control schemas and
+  verify external CLI seams. Keep named mocks/nonroot fixtures.
   Stream caps differ from artifact budgets. Backup roles bind actual artifacts,
   not geography: Native=foreign/trading_bot, Web=iran/current.
 - Managed04 source validation passed; original Env/runtime preserved. Bind
   configuration revision separately from actual image OCI provenance. Archive
   v1.4 retains Env/artifact FDs; hash/parse pinned controls from identical bounded
   buffers. Hot mode needs independent restore parity/canonical schema; legacy
-  evidence cannot pass new gates. HOT3 capacity/cleanup/offhost remains open.
+  evidence cannot pass new gates. HOT3 actual03 passed two restores, cleanup
+  and independent cipher-only offhost verification; engine rollback stays open.
   No diagnostic Env copies or relaxed image checks. CI vendor builds use a
   child-only022 mask; controller stays077. Raw findings remain unwaived.
 - Keep STOP until activated/verified security, then monitor30 accepted complete

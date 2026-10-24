@@ -5,7 +5,32 @@ This manual CI-only recipe composes the already exported image
 with exactly fifteen previously built runtime DEBs. It does not rebuild the
 App, frontend, Python dependencies or vendor packages. Product baseline remains
 `ba1f7616ade57558f51bb3a7fbb903243a33aab4`, security overlay remains
-`19d4c2da778f8f1edc567db4c9616c2d153980c9`. No execution result exists yet.
+`19d4c2da778f8f1edc567db4c9616c2d153980c9`. The first actual attempt failed
+before composition; no completed derived App image is claimed.
+
+## First actual attempt and diagnostic correction
+
+[Run40120574253](https://github.com/mohsenbarari/trading_bot/actions/runs/40120574253),
+job120951019216, used source531196246c9b916f2101f85e93722b2e0536d79f.
+Evidence artifact12571460348 is2555 bytes, SHA256
+caebd806e21663a02643906fed4ab9ef4d55879ffc0267e6aba604641a84e665.
+Its three files prove original image admission with31 layers/31 legacy metadata
+nodes, and a successful baseline audit:14173 App/Python entries,245377653 bytes,
+fingerprint1cb7dca2bf546138ffdde7a1be10851887da0e58445f7ecca2ff9ca3c202ca04,
+libc2.41-12+deb13u4 with bytes SHA256
+9792e3cbb541c8f44c7acf5f14f4022ea62998ecc787d326bed4d8b6547dfd92.
+No build log exists. The old generic failure message cannot distinguish the
+following cleanup, alias or builder boundary; it does not prove a sole cause.
+
+A deterministic source error follows that audit: [buildx inspect](https://docs.docker.com/reference/cli/docker/buildx/inspect/)
+does not support --format. The correction uses documented, bounded text output
+from inspect default, requires its default name, one docker driver, running
+status and no error field, and retains builder-inspect.log. It starts no new
+builder. Every major boundary now writes an atomic public phase.json before
+work. Closed public error codes retain the first failed phase across later
+cleanup, without reflecting exception text, command arguments or environment.
+The historical failed attempt stays unchanged. A fresh reviewed CI result is
+still required; Config, layer, inventory and scanner gates remain intact.
 
 | Packages | Run / public artifact | ZIP bytes / SHA256 | Build receipt SHA256 |
 |---|---|---|---|
