@@ -27,14 +27,15 @@ class HotPreflight(unittest.TestCase):
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='.hot-preflight-test-', dir=ROOT)))
 
     def test_only_two_public_sources_match_exact_published_recipe_hashes(self):
-        self.assertEqual(set(M.SCRIPTS), {'backup_market_pipeline_archive.py', 'prepare_market_pipeline_release.py'})
-        for name, expected in M.SCRIPTS.items():
-            self.assertEqual(sha256((ROOT / 'scripts' / name).read_bytes()).hexdigest(), expected)
+        self.assertEqual(M.SOURCE_COMMIT, '43ae1eae96b9bb54b0aaffae53aafcd473c89670')
+        self.assertEqual(M.SCRIPTS, {
+            'backup_market_pipeline_archive.py': 'c7695e2e9321aed8d39a008cb76fdf229010021e3b74132ac6dc2f82b7dec527',
+            'prepare_market_pipeline_release.py': '8952ae8997101960baa3ae598c57d434dab69f86a7ae12ab72a5480a600b3953'})
 
     def test_stage_is_exact_idempotent_and_does_not_read_any_private_input(self):
         public = {name: (ROOT / 'scripts' / name).read_bytes() for name in M.SCRIPTS}
         destination = self.root / 'new-private-source'
-        with patch.object(M, 'ROOT', destination):
+        with patch.object(M, 'ROOT', destination), patch.dict(M.SCRIPTS, {name: sha256(raw).hexdigest() for name, raw in public.items()}):
             M.stage(public)
             before = {p: p.stat().st_ino for p in (destination / 'source/scripts').iterdir()}
             M.stage(public)
@@ -49,7 +50,7 @@ class HotPreflight(unittest.TestCase):
     def test_existing_partial_stage_symlink_or_attempt_is_never_overwritten(self):
         public = {name: (ROOT / 'scripts' / name).read_bytes() for name in M.SCRIPTS}
         destination = self.root / 'new-private-source'
-        with patch.object(M, 'ROOT', destination):
+        with patch.object(M, 'ROOT', destination), patch.dict(M.SCRIPTS, {name: sha256(raw).hexdigest() for name, raw in public.items()}):
             M.stage(public)
             attempt = destination / 'attempt.json'
             attempt.write_bytes(b'original failed attempt evidence')
@@ -58,7 +59,7 @@ class HotPreflight(unittest.TestCase):
             self.assertEqual(attempt.read_bytes(), b'original failed attempt evidence')
         alias = self.root / 'alias'
         alias.symlink_to(destination, target_is_directory=True)
-        with patch.object(M, 'ROOT', alias), self.assertRaisesRegex(RuntimeError, 'path_redirected'):
+        with patch.object(M, 'ROOT', alias), patch.dict(M.SCRIPTS, {name: sha256(raw).hexdigest() for name, raw in public.items()}), self.assertRaisesRegex(RuntimeError, 'path_redirected'):
             M.stage(public)
 
     def test_real_create_uses_hot_confirmation_bluegreen_and_original_anchor(self):

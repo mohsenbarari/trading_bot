@@ -171,11 +171,11 @@ def validate_release_env(
                 "MARKET_PIPELINE_IMAGE": image_id,
             }
         )
-    elif (
-        not RELEASE_SHA.fullmatch(values.get("MARKET_PIPELINE_RELEASE_SHA", ""))
-        or not IMAGE_ID.fullmatch(values.get("MARKET_PIPELINE_IMAGE", ""))
-    ):
-        raise BackupError("backup_source_release_identity_invalid")
+    else:
+        if not RELEASE_SHA.fullmatch(values.get("MARKET_PIPELINE_RELEASE_SHA", "")):
+            raise BackupError("backup_source_release_sha_invalid")
+        if not IMAGE_ID.fullmatch(values.get("MARKET_PIPELINE_IMAGE", "")):
+            raise BackupError("backup_source_image_identity_invalid")
     if any(values.get(key) != value for key, value in expected.items()):
         raise BackupError("backup_release_env_identity_mismatch")
     project = values.get("MARKET_PIPELINE_PROJECT_NAME", "")

@@ -521,6 +521,43 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 allow_target_identity_mismatch=True,
             )
 
+    def test_bluegreen_source_identity_refusals_distinguish_release_and_image_without_relaxing_validation(self) -> None:
+        cases = [
+            ("MARKET_PIPELINE_RELEASE_SHA", "", "backup_source_release_sha_invalid"),
+            ("MARKET_PIPELINE_RELEASE_SHA", "not-a-release", "backup_source_release_sha_invalid"),
+            ("MARKET_PIPELINE_RELEASE_SHA", "e" * 39, "backup_source_release_sha_invalid"),
+            ("MARKET_PIPELINE_IMAGE", "", "backup_source_image_identity_invalid"),
+            ("MARKET_PIPELINE_IMAGE", "market_pipeline_release:synthetic-tag", "backup_source_image_identity_invalid"),
+            ("MARKET_PIPELINE_IMAGE", "sha256:" + "f" * 63, "backup_source_image_identity_invalid"),
+        ]
+        for key, invalid, expected in cases:
+            with self.subTest(field=key, reason=expected):
+                values = dict(self.values)
+                values[key] = invalid
+                _write_env(self.env_file, values)
+                with self.assertRaises(backup.BackupError) as refused:
+                    backup.validate_release_env(
+                        self.env_file,
+                        release_sha=RELEASE_SHA,
+                        image_id=IMAGE_ID,
+                        allow_target_identity_mismatch=True,
+                    )
+                self.assertEqual(str(refused.exception), expected)
+                self.assertNotIn(invalid or "never-disclose", str(refused.exception))
+                self.assertFalse(self.backup_dir.exists())
+
+        values = dict(self.values)
+        values["MARKET_PIPELINE_RELEASE_SHA"] = ""
+        values["MARKET_PIPELINE_IMAGE"] = ""
+        _write_env(self.env_file, values)
+        with self.assertRaisesRegex(backup.BackupError, "^backup_source_release_sha_invalid$"):
+            backup.validate_release_env(
+                self.env_file,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                allow_target_identity_mismatch=True,
+            )
+
     def test_receipt_and_backup_must_be_isolated_from_database_root(self) -> None:
         with self.assertRaisesRegex(backup.BackupError, "destination_invalid"):
             backup.create_backup(
@@ -876,6 +913,8 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             (OSError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
             (ValueError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
             (backup.BackupError("backup_database_runtime_identity_mismatch"), "backup_database_runtime_identity_mismatch"),
+            (backup.BackupError("backup_source_release_sha_invalid"), "backup_source_release_sha_invalid"),
+            (backup.BackupError("backup_source_image_identity_invalid"), "backup_source_image_identity_invalid"),
         ]
         for error, expected in errors:
             with self.subTest(error=type(error).__name__, expected=expected):
