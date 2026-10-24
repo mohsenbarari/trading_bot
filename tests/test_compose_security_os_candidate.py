@@ -1,5 +1,5 @@
 """Owned public fixtures only; every ambient command and network is denied."""
-from contextlib import ExitStack,redirect_stderr
+from contextlib import ExitStack,contextmanager,redirect_stderr
 from copy import deepcopy
 from hashlib import sha256
 import ast
@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import tarfile
 import tempfile
 import types
 import unittest
@@ -45,7 +46,7 @@ class CompositionTests(unittest.TestCase):
 
     def test_host_entrypoints_refuse_before_any_command(self):
         with patch.dict(os.environ,{'GITHUB_ACTIONS':'false'}):
-            for call in (M.compose,M.finalize):
+            for call in (M.compose,M.finalize,M.cleanup):
                 with self.assertRaisesRegex(RuntimeError,'github_ci_only'):call(self.root)
             output=io.StringIO()
             with redirect_stderr(output):self.assertEqual(M.main(['compose','--root',str(self.root)]),1)
@@ -223,11 +224,166 @@ class CompositionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'baseline_layer_prefix_changed'):M.compare_images(before,changed)
         self.assertEqual(M.image_record(json.dumps([before]).encode(),before['Id']),before)
 
+    def test_actual_archive_config_retains_optional_public_repo_tags(self):
+        value={'config':{'Cmd':['python3']},'rootfs':{'diff_ids':['sha256:'+'1'*64]}}
+        raw=M.encoded(value);image='sha256:'+sha256(raw).hexdigest();name=image[7:]+'.json'
+        for index,tags in enumerate((None,[],['public-owned-fixture:ci'])):
+            path=self.root/('archive-'+str(index)+'.tar');manifest={'Config':name,'Layers':[]}
+            if tags is not None:manifest['RepoTags']=tags
+            with tarfile.open(path,'w') as archive:
+                for member,data in (('manifest.json',M.encoded([manifest])),(name,raw)):
+                    info=tarfile.TarInfo(member);info.size=len(data);archive.addfile(info,io.BytesIO(data))
+            self.assertEqual(M.archive_config(path,image),value)
+            self.assertEqual(M.archive_config(path,image,include_tags=True),(value,tags))
+
     def inventories(self):
         values={name:'old-version' for name in M.PACKAGES};values.update(libc6='2.41-12+deb13u4',unchanged='1')
         old={'inventory':values,'app_and_python_sha256':'a'*64,'files':5,'bytes':100,'libc_sha256':'b'*64}
         new=deepcopy(old);new['inventory'].update({name:row[0] for name,row in M.PACKAGES.items()})
         return old,new
+
+    def composed_untagged_store(self):
+        # Named Docker boundary models documented last-tag eviction. All source,
+        # package, process and export boundaries remain explicit owned fixtures.
+        baseline=self.image();baseline['Id']=M.IMAGE;baseline['RepoTags']=[]
+        candidate=self.image('b',baseline['RootFS']['Layers']+['sha256:'+'3'*64])
+        original,installed=self.inventories();identity={'recipe_commit':'f'*40}
+        state={'baseline':True,'candidate':False,'tags':{},'events':[],'baseline_record':baseline,'candidate_record':candidate}
+        component={'schema':'security_image_component_presence/1','image_id':candidate['Id'],'source_commit':M.SOURCE,
+            'verifier_sha256':M.PROBE_SHA,'scope':'known_vendor_component_paths_and_names_plus_actual_perl_inc'}
+        for key in ('security_accepted','scanner_findings_modified','production_mounts_or_data_used',
+                    'dynamic_runtime_code_downloads_analyzed','renamed_or_obfuscated_embedded_code_analyzed','directory_symlinks_followed'):
+            component[key]=False
+        @contextmanager
+        def public_archive(path,maximum):yield io.BytesIO(b'x'),1
+        admission=Mock(IMAGE=M.IMAGE,SOURCE=M.SOURCE,ARTIFACT_ID=12552928309,ZIP_BYTES=1,ZIP_SHA256='a'*64,
+                       MAX_TAR=100,pinned=public_archive,digest=Mock(return_value='c'*64))
+        admission.admit_image.return_value={'docker_archive_bytes':1,'docker_archive_sha256':'c'*64,'export_provenance':{'source':M.SOURCE}}
+        probe=Mock(in_container=Mock(return_value=M.encoded(component)))
+        (self.root/'source').mkdir();(self.root/'source/verify_image_component_presence.py').write_bytes(b'owned public fixture')
+        def packages(path,group,target):
+            return {'packages':[{'name':name,'path':name+'.deb','version':M.PACKAGES[name][0],
+                'bytes':M.PACKAGES[name][1],'sha256':M.PACKAGES[name][2]} for name in M.GROUPS[group][5]]}
+        def docker(root,args,**kwargs):
+            state['events'].append(tuple(args))
+            if args==['image','load']:return b'loaded ordinary fixture'
+            if args[:2]==['image','tag']:
+                self.assertTrue(state['baseline']);self.assertEqual(args[2],M.IMAGE);state['tags'][args[3]]=M.IMAGE;return b''
+            if args[:2]==['image','ls']:
+                self.assertEqual(args[:4],['image','ls','--quiet','--no-trunc'])
+                value=state['tags'].get(args[4]);return (value+'\n').encode() if value else b''
+            if args[:2]==['image','rm']:
+                self.assertEqual(args[:3],['image','rm','--no-prune'])
+                self.assertEqual(state['tags'].pop(args[3]),M.IMAGE)
+                if M.IMAGE not in state['tags'].values():state['baseline']=False
+                return b'untagged and removed ordinary fixture image'
+            if args[:2]==['image','inspect']:
+                target=args[2]
+                if target==candidate['Id'] and state['candidate']:return M.encoded([candidate])
+                if (target==M.IMAGE or state['tags'].get(target)==M.IMAGE) and state['baseline']:return M.encoded([baseline])
+                raise RuntimeError('command_failed')
+            if args==['buildx','inspect','default']:
+                raw=b'Name: default\nDriver: docker\nStatus: running\n';M.write(kwargs['log_path'],raw);return raw
+            if args[0]=='build':
+                self.assertTrue(state['baseline']);state['candidate']=True
+                M.write(root/'candidate.id',(candidate['Id']+'\n').encode());M.write(kwargs['log_path'],b'ordinary public build fixture\n');return b''
+            raise AssertionError('unexpected Docker fixture command')
+        def isolated(root,image,program,purpose,**kwargs):
+            if purpose=='before':value=original
+            elif purpose=='after':value=installed
+            elif purpose=='focused':value={'image_id':candidate['Id'],'tests':56,'modules':5,'status':'passed'}
+            else:self.assertEqual(purpose,'native');value={'status':'passed'}
+            raw=M.encoded(value);M.write(root/'reports'/(purpose+'-run.log'),raw);return raw
+        def archive_config(path,image,*,include_tags=False):
+            self.assertEqual(image,M.IMAGE);value={'config':baseline['Config'],'rootfs':{'diff_ids':baseline['RootFS']['Layers']}}
+            return (value,[]) if include_tags else value
+        def export(root,image):
+            self.assertTrue(state['baseline']);self.assertEqual(image,candidate['Id']);state['events'].append(('export',image))
+            return {'name':'candidate-image.tar.gz','format':'docker-archive+gzip','size_bytes':1,'sha256':'d'*64,'uncompressed_bytes':1}
+        for name,value in {'ci_root':Mock(),'load_sealed':Mock(return_value=(identity,{'admit_security_component_image_reuse.py':admission,
+                'verify_image_component_presence.py':probe})),'fetch_artifact':Mock(),'admit_packages':packages,
+                'admit_test_proof':Mock(return_value=b'owned public proof'),'fetch_tests':Mock(),'docker':docker,
+                'isolated':isolated,'archive_config':archive_config,'export_image':export}.items():
+            self.stack.enter_context(patch.object(M,name,value))
+        self.stack.enter_context(patch.object(M.os,'statvfs',return_value=Mock(f_bavail=16*1024**3,f_frsize=1)))
+        self.stack.enter_context(patch.dict(os.environ,{'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':'f'*40,
+                                                       'GITHUB_OUTPUT':str(self.root/'github-output')}))
+        M.compose(self.root)
+        record=json.loads((self.root/'reports/composition.json').read_bytes())
+        raw={'SchemaVersion':2,'ArtifactType':'container_image','Metadata':{'ImageID':candidate['Id'],
+            'ImageConfig':{'config':baseline['Config'],'rootfs':{'diff_ids':candidate['RootFS']['Layers']}}},'Results':[{'Vulnerabilities':[{'Severity':'HIGH'}]}]}
+        sbom={'metadata':{'component':{'type':'container','name':candidate['Id'],
+                'properties':[{'name':'aquasecurity:trivy:ImageID','value':candidate['Id']}]}},
+            'components':[{'name':name,'version':row[0]} for name,row in M.PACKAGES.items()]}
+        (self.root/'reports/vulnerabilities.json').write_bytes(M.encoded(raw));(self.root/'reports/sbom.cdx.json').write_bytes(M.encoded(sbom))
+        state['composition']=record;return state
+
+    def test_untagged_baseline_survives_real_finalizer_and_export_before_alias_cleanup(self):
+        state=self.composed_untagged_store();alias=M.base_alias_plan()['name']
+        self.assertTrue(state['baseline']);self.assertEqual(state['tags'],{alias:M.IMAGE})
+        self.assertEqual(state['composition']['baseline_archive_repo_tags'],[])
+        self.assertEqual(state['composition']['baseline_repo_tags_before_alias'],[])
+        identity=json.loads((self.root/'reports/baseline-image-identity.json').read_bytes())
+        self.assertEqual(identity['archive_repo_tags'],[]);self.assertEqual(identity['daemon_repo_tags_before_alias'],[])
+        M.finalize(self.root)
+        self.assertTrue(state['baseline']);self.assertTrue((self.root/'image-export.json').exists())
+        M.cleanup(self.root)
+        self.assertFalse(state['baseline']);self.assertFalse(state['tags'])
+        self.assertLess(state['events'].index(('export',state['candidate_record']['Id'])),
+                        state['events'].index(('image','rm','--no-prune',alias)))
+        receipt=json.loads((self.root/'reports/base-alias-cleanup.json').read_bytes())
+        self.assertEqual(receipt['status'],'removed_owned_alias');self.assertFalse(receipt['cancellation_proven'])
+
+    def test_early_alias_cleanup_reproduces_missing_baseline_and_identifies_exact_lookup(self):
+        state=self.composed_untagged_store();M.cleanup(self.root)
+        self.assertFalse(state['baseline']);self.assertTrue(state['candidate'])
+        with redirect_stderr(io.StringIO()):self.assertEqual(M.main(['finalize','--root',str(self.root)]),1)
+        failure=M.phase_state(self.root)
+        self.assertEqual(failure['first_failure_phase'],'inspect_final_baseline');self.assertEqual(failure['first_failure_code'],'command_failed')
+        self.assertFalse((self.root/'image-export.json').exists());self.assertFalse(any(row[0]=='export' for row in state['events']))
+
+    def test_final_candidate_failure_has_separate_phase_and_owned_cleanup_preserves_it(self):
+        state=self.composed_untagged_store();state['candidate']=False
+        with redirect_stderr(io.StringIO()):self.assertEqual(M.main(['finalize','--root',str(self.root)]),1)
+        M.cleanup(self.root)
+        self.assertEqual(M.phase_state(self.root)['first_failure_phase'],'inspect_final_candidate')
+        self.assertFalse((self.root/'image-export.json').exists());self.assertFalse(state['baseline'])
+
+    def test_alias_cleanup_refuses_foreign_image_without_removal(self):
+        state=self.composed_untagged_store();state['tags'][M.base_alias_plan()['name']]='sha256:'+'e'*64
+        with self.assertRaisesRegex(RuntimeError,'base_alias_cleanup_owner'):M.cleanup(self.root)
+        self.assertFalse(any(row[:2]==('image','rm') for row in state['events']))
+        self.assertTrue(state['baseline'])
+
+    def test_alias_cleanup_rejects_other_run_plan_before_docker(self):
+        self.composed_untagged_store();path=self.root/'reports/base-alias-plan.json'
+        changed=json.loads(path.read_bytes());changed['owner']='456-1';path.write_bytes(M.encoded(changed))
+        with patch.object(M,'docker',side_effect=AssertionError('foreign_plan_command')), \
+                self.assertRaisesRegex(RuntimeError,'base_alias_cleanup_owner'):M.cleanup(self.root)
+
+    def test_alias_cleanup_timeout_never_becomes_known_absence_or_success(self):
+        self.composed_untagged_store();M.phase(self.root,'bind_raw_reports');M.failed_phase(self.root,RuntimeError('raw_report_identity'))
+        with patch.object(M,'docker',side_effect=RuntimeError('command_timeout')),redirect_stderr(io.StringIO()):
+            self.assertEqual(M.main(['cleanup','--root',str(self.root)]),1)
+        self.assertFalse((self.root/'reports/base-alias-cleanup.json').exists())
+        failure=M.phase_state(self.root)
+        self.assertEqual(failure['first_failure_phase'],'bind_raw_reports');self.assertEqual(failure['first_failure_code'],'raw_report_identity')
+        self.assertEqual(failure['last_failure_code'],'command_timeout')
+
+    def test_alias_cleanup_successful_empty_listing_is_only_an_observation(self):
+        state=self.composed_untagged_store();state['tags'].clear()
+        M.cleanup(self.root)
+        receipt=json.loads((self.root/'reports/base-alias-cleanup.json').read_bytes())
+        self.assertEqual(receipt['status'],'absent_at_observation');self.assertFalse(receipt['cancellation_proven'])
+        self.assertFalse(any(row[:2]==('image','rm') for row in state['events']))
+        self.assertEqual(M.phase_state(self.root)['status'],'complete')
+
+    def test_alias_cleanup_before_plan_uses_no_docker_and_missing_completed_plan_refuses(self):
+        with patch.object(M,'ci_root'),patch.object(M,'load_sealed',side_effect=AssertionError('sealed_before_plan')), \
+                patch.object(M,'docker',side_effect=AssertionError('docker_before_plan')):
+            M.cleanup(self.root)
+            (self.root/'reports').mkdir();(self.root/'reports/composition.json').write_bytes(b'ordinary fixture')
+            with self.assertRaisesRegex(RuntimeError,'base_alias_plan_missing'):M.cleanup(self.root)
 
     def test_full_inventory_rejects_extra_changes_libc_and_application_drift(self):
         before,after=self.inventories();M.compare_inventory(before,after)
@@ -434,6 +590,12 @@ class CompositionTests(unittest.TestCase):
         workflow=yaml.safe_load(WORKFLOW.read_text())
         self.assertEqual(workflow['permissions'],{'contents':'read','actions':'read'})
         steps=workflow['jobs']['composition']['steps']
+        identifiers=[s.get('id') for s in steps]
+        self.assertLess(identifiers.index('export'),identifiers.index('cleanup'))
+        cleanup=next(s for s in steps if s.get('id')=='cleanup')
+        self.assertEqual(cleanup['if'],"always() && steps.seal.outcome == 'success'")
+        upload=next(s for s in steps if s.get('name')=='Retain only complete public image exports')
+        self.assertIn("steps.export.outcome == 'success'",upload['if']);self.assertIn("steps.cleanup.outcome == 'success'",upload['if'])
         scans=[s for s in steps if s.get('uses','').startswith('aquasecurity/trivy-action@')]
         self.assertEqual(len(scans),2)
         raw=next(s for s in scans if s['with'].get('format')=='json')

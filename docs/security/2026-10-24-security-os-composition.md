@@ -6,7 +6,8 @@ with exactly fifteen previously built runtime DEBs. It does not rebuild the
 App, frontend, Python dependencies or vendor packages. Product baseline remains
 `ba1f7616ade57558f51bb3a7fbb903243a33aab4`, security overlay remains
 `19d4c2da778f8f1edc567db4c9616c2d153980c9`. The first actual attempt failed
-before composition; no completed derived App image is claimed.
+before composition. The second composed and tested a derived image but failed
+finalization; no completed image export or acceptance is claimed.
 
 ## First actual attempt and diagnostic correction
 
@@ -31,6 +32,43 @@ work. Closed public error codes retain the first failed phase across later
 cleanup, without reflecting exception text, command arguments or environment.
 The historical failed attempt stays unchanged. A fresh reviewed CI result is
 still required; Config, layer, inventory and scanner gates remain intact.
+
+## Second actual attempt and baseline alias lifetime
+
+[Run40122254053](https://github.com/mohsenbarari/trading_bot/actions/runs/40122254053),
+job120956154554, used source983758c0c0a9da8ce34febb0a5ef0cdf53bf1d81.
+Evidence artifact12570884975 is157584 bytes, SHA256
+c6ac1681effb7646b460ff6c4b73241b1f90835d8e81c91994bfc61732ada6c4.
+It records derived image
+`sha256:2d1f18d41a50cd52592dc2b2ceb11d3201dfbc2fbe59a042630910a40231944f`,
+unchanged Config/App/Python/libc, the complete31-layer baseline prefix followed
+by one new layer, native/component checks and56 tests in five modules passing.
+Raw scan and SBOM collection succeeded; raw findings include44 HIGH rows.
+Finalization then failed with command_failed at finalize_admission. No export
+receipt was produced. That phase covered both candidate and baseline lookups,
+so the retained evidence does not identify which command failed.
+
+A source lifetime error could remove the baseline before those final checks:
+[Docker image rm](https://docs.docker.com/reference/cli/docker/image/rm/)
+removes the image record when removing its only tag. The original exported
+archive and loaded baseline tag lists were not recorded in that attempt; the
+earlier scanner tag list does not prove tags survived image-save/load by ID.
+This is a verified failure path, not a claim of the sole historical cause.
+The correction retains the exact run-owned baseline alias through final
+candidate/baseline checks and export. A subsequent always step validates the
+immutable alias plan, current run/source and exact image identity before
+removing only that alias with --no-prune and no force. A successful empty
+post-removal listing is an observation, never daemon cancellation proof.
+Failure paths attempt the same bounded owned cleanup and preserve the first
+failure. Image upload requires both finalization and cleanup success.
+
+Future attempts retain the archive RepoTags and daemon RepoTags before alias
+creation in baseline-image-identity.json, bind it and the immutable alias plan
+into composition/export evidence, and record separate phases immediately
+before final candidate inspection, baseline inspection and archive reading.
+Hermetic tests model actual last-tag eviction: normal finalization/export
+passes before cleanup, while premature cleanup makes the baseline lookup fail
+at its distinct phase. Both historical failed attempts remain unchanged.
 
 | Packages | Run / public artifact | ZIP bytes / SHA256 | Build receipt SHA256 |
 |---|---|---|---|

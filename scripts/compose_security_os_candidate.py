@@ -65,11 +65,12 @@ DOCKER = ['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 EVIDENCE_REPORTS = {'base-admission.json':2*1024**2,'baseline-inventory.json':2*1024**2,
     'candidate-inventory.json':2*1024**2,'before-run.log':2*1024**2,'after-run.log':2*1024**2,
     'native-run.log':2*1024**2,'focused-run.log':2*1024**2,'focused-tests.json':65536,
-    'component-presence.json':131072,'build.log':32*1024**2,'builder-inspect.log':65536}
+    'component-presence.json':131072,'build.log':32*1024**2,'builder-inspect.log':65536,
+    'base-alias-plan.json':65536,'baseline-image-identity.json':65536}
 PUBLIC_FAILURE_CODES = frozenset((
     'acl_parent_pin','application_or_python_changed','archive_config','archive_config_bound','archive_config_digest',
     'archive_config_name','archive_manifest','artifact_digest','artifact_download_failed','artifact_size','base_admission_scope',
-    'base_alias','base_alias_changed','base_alias_cleanup_owner','base_archive_changed','base_daemon_layers_changed',
+    'base_alias','base_alias_changed','base_alias_cleanup_owner','base_alias_cleanup_incomplete','base_alias_plan_missing','base_archive_changed','base_daemon_layers_changed',
     'base_user_or_onbuild','baseline_layer_prefix_changed','builder_inspect_shape','candidate_identity','ci_identity','ci_root',
     'combined_package_inventory','command_failed','command_output_bound','command_timeout','component_receipt_bound',
     'component_receipt_identity','component_receipt_scope','composition_baseline_changed','composition_evidence_changed',
@@ -89,7 +90,8 @@ PUBLIC_PHASES = frozenset(('controller_admission','sealed_sources','download_ima
     'load_base_image','inspect_base_image','audit_base_image','create_base_alias','inspect_base_alias','inspect_builder',
     'write_build_context','build_candidate','cleanup_base_alias','inspect_candidate_image','audit_candidate_image',
     'native_checks','focused_tests','component_probe','bind_composition_evidence','composition_complete',
-    'finalize_admission','bind_raw_reports','export_image','export_complete'))
+    'finalize_admission','inspect_final_candidate','inspect_final_baseline','read_final_base_archive',
+    'bind_raw_reports','export_image','export_complete'))
 
 
 def require(ok, code):
@@ -438,7 +440,7 @@ def image_record(raw, expected=None):
     return value
 
 
-def archive_config(path,image):
+def archive_config(path,image,*,include_tags=False):
     with pinned(path,2*1024**3) as (stream,_),tarfile.open(fileobj=stream,mode='r:') as archive:
         member=archive.getmember('manifest.json');require(member.isfile() and 0<member.size<=2*1024**2,'archive_manifest')
         manifest=json.loads(archive.extractfile(member).read(member.size+1))
@@ -448,7 +450,7 @@ def archive_config(path,image):
         raw=archive.extractfile(member).read(member.size+1)
         require(len(raw)==member.size and sha256(raw).hexdigest()==image[7:],'archive_config_digest')
         value=json.loads(raw);require(type(value.get('config')) is dict,'archive_config')
-        return value
+        return (value,manifest[0].get('RepoTags')) if include_tags else value
 
 
 def compare_images(before,after):
@@ -467,6 +469,38 @@ def compare_inventory(before,after):
 
 def docker(root,arguments,**kwargs):
     return command([*DOCKER,*arguments],environment={'DOCKER_CONFIG':str(root/'docker-config')},**kwargs)
+
+
+def base_alias_plan():
+    owner=os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+    require(re.fullmatch('[0-9]+-[0-9]+',owner),'ci_identity')
+    return {'schema':'security_os_composition_base_alias/1','name':'security-os-base-'+owner+':ci',
+            'image_id':IMAGE,'owner':owner,'recipe_commit':os.environ['GITHUB_SHA']}
+
+
+def cleanup(root):
+    ci_root(root)
+    path=root/'reports/base-alias-plan.json'
+    if not path.exists():
+        require(not (root/'reports/composition.json').exists() and not (root/'image-export.json').exists(),'base_alias_plan_missing')
+        return
+    load_sealed(root);plan=json.loads(read(path,65536))
+    require(plan==base_alias_plan(),'base_alias_cleanup_owner')
+    phase(root,'cleanup_base_alias');name=plan['name']
+    observed=docker(root,['image','ls','--quiet','--no-trunc',name],maximum=256).decode().splitlines()
+    status='absent_at_observation'
+    if observed:
+        require(observed==[IMAGE],'base_alias_cleanup_owner')
+        image_record(docker(root,['image','inspect',name],maximum=2*1024**2),IMAGE)
+        # This can remove the baseline image's final tag and its image record.
+        # Every baseline consumer and the candidate export must already be done.
+        docker(root,['image','rm','--no-prune',name],seconds=20)
+        require(not docker(root,['image','ls','--quiet','--no-trunc',name],maximum=256).strip(),'base_alias_cleanup_incomplete')
+        status='removed_owned_alias'
+    write(root/'reports/base-alias-cleanup.json',encoded({'schema':'security_os_composition_base_alias_cleanup/1',
+        'name':name,'image_id':IMAGE,'owner':plan['owner'],'status':status,'cancellation_proven':False,
+        'security_accepted':False,'deployment_performed':False}))
+    phase(root,'cleanup_base_alias',complete=True)
 
 
 def cleanup_isolated(root,target,name,token,image):
@@ -575,7 +609,7 @@ def compose(root):
     write(root/'context/capsule/manifest.json',encoded({'schema':'security_os_composition_packages/1','packages':packages}),0o644)
     phase(root,'base_image_admission');admitted=admission.admit_image(root/'inputs/image.zip',root/'admitted')
     write(root/'reports/base-admission.json',encoded(admitted))
-    phase(root,'base_archive_config');original_config=archive_config(root/'admitted/candidate-image.tar',IMAGE)
+    phase(root,'base_archive_config');original_config,archive_tags=archive_config(root/'admitted/candidate-image.tar',IMAGE,include_tags=True)
     # The admission helper's original component-only receipt remains immutable.
     # This separately authorized recipe proves its own composition boundaries.
     phase(root,'load_base_image')
@@ -585,9 +619,11 @@ def compose(root):
     phase(root,'inspect_base_image');before=image_record(docker(root,['image','inspect',IMAGE],maximum=2*1024**2),IMAGE)
     require(original_config['rootfs']['diff_ids']==before['RootFS']['Layers'],'base_daemon_layers_changed')
     require(before['Config'].get('User','') in ('','root','0') and not before['Config'].get('OnBuild'),'base_user_or_onbuild')
+    write(root/'reports/baseline-image-identity.json',encoded({'schema':'security_os_composition_baseline_identity/1',
+        'image_id':IMAGE,'archive_repo_tags':archive_tags,'daemon_repo_tags_before_alias':before.get('RepoTags')}))
     phase(root,'audit_base_image');original=json.loads(isolated(root,IMAGE,AUDIT,'before').splitlines()[-1])
-    alias='security-os-base-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']+':ci'
-    phase(root,'create_base_alias');docker(root,['image','tag',IMAGE,alias])
+    plan=base_alias_plan();alias=plan['name']
+    phase(root,'create_base_alias');write(root/'reports/base-alias-plan.json',encoded(plan));docker(root,['image','tag',IMAGE,alias])
     try:
         phase(root,'inspect_base_alias')
         require(image_record(docker(root,['image','inspect',alias],maximum=2*1024**2),IMAGE)['Config']==before['Config'],'base_alias_changed')
@@ -601,10 +637,6 @@ def compose(root):
         try:failed_phase(root,error)
         except Exception:pass
         raise
-    finally:
-        phase(root,'cleanup_base_alias')
-        require(image_record(docker(root,['image','inspect',alias],maximum=2*1024**2),IMAGE)['Id']==IMAGE,'base_alias_cleanup_owner')
-        docker(root,['image','rm',alias],seconds=20)
     image=read(root/'candidate.id',256).decode().strip();require(re.fullmatch(r'sha256:[a-f0-9]{64}',image),'candidate_identity')
     phase(root,'inspect_candidate_image');after=image_record(docker(root,['image','inspect',image],maximum=2*1024**2),image);compare_images(before,after)
     phase(root,'audit_candidate_image');installed=json.loads(isolated(root,image,AUDIT,'after').splitlines()[-1]);compare_inventory(original,installed)
@@ -619,6 +651,7 @@ def compose(root):
     record={'schema':'security_os_composition/1','status':'composed_tested_not_accepted','image_id':image,'parent_image_id':IMAGE,
         'original_provenance':admitted['export_provenance'],'recipe':identity,'families':families,'runtime_config':before['Config'],
         'original_oci_config':original_config['config'],
+        'baseline_archive_repo_tags':archive_tags,'baseline_repo_tags_before_alias':before.get('RepoTags'),
         'baseline_layers':before['RootFS']['Layers'],'candidate_layers':after['RootFS']['Layers'],
         'runtime_config_unchanged':True,'app_and_python_unchanged':True,'libc_unchanged':True,
         'installer_resource_cgroup_caps':'NOT_ASSERTED','installer_network':'none','installer_caps_mask':'0xd9',
@@ -691,9 +724,12 @@ def finalize(root):
         and record['focused_tests']==56 and record['full_runtime_matrix']=='NOT_TESTED','composition_state')
     require(record['test_sources_sha256']==TEST_PROOF and record['evidence_sha256']==evidence_hashes(root),'composition_evidence_changed')
     validate_component(read(root/'reports/component-presence.json',131072),record['image_id'])
-    image=record['image_id'];current=image_record(docker(root,['image','inspect',image],maximum=2*1024**2),image)
+    image=record['image_id'];phase(root,'inspect_final_candidate')
+    current=image_record(docker(root,['image','inspect',image],maximum=2*1024**2),image)
+    phase(root,'inspect_final_baseline')
     baseline=image_record(docker(root,['image','inspect',IMAGE],maximum=2*1024**2),IMAGE)
     compare_images(baseline,current)
+    phase(root,'read_final_base_archive')
     original_config=archive_config(root/'admitted/candidate-image.tar',IMAGE)
     require(original_config['config']==record['original_oci_config'] and baseline['Config']==record['runtime_config']
         and baseline['RootFS']['Layers']==record['baseline_layers'],'composition_baseline_changed')
@@ -714,10 +750,10 @@ def finalize(root):
 
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=('compose','finalize'));parser.add_argument('--root',type=Path,required=True)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=('compose','finalize','cleanup'));parser.add_argument('--root',type=Path,required=True)
     args=parser.parse_args(argv)
     try:
-        (compose if args.command=='compose' else finalize)(args.root)
+        {'compose':compose,'finalize':finalize,'cleanup':cleanup}[args.command](args.root)
         return 0
     except Exception as error:
         failure={'status':'failed','code':public_error(error),'phase':None,'security_accepted':False,'deployment_performed':False}

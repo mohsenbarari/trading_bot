@@ -99,8 +99,15 @@ jobs:
           CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
         run: python3 -I -B "$CAPSULE_ROOT/source/compose_security_os_candidate.py" finalize --root "$CAPSULE_ROOT"
 
+      - name: Release only the owned baseline alias after its last consumer
+        id: cleanup
+        if: always() && steps.seal.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_security_os_candidate.py" cleanup --root "$CAPSULE_ROOT"
+
       - name: Retain only complete public image exports
-        if: always() && steps.export.outcome == 'success'
+        if: always() && steps.export.outcome == 'success' && steps.cleanup.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: security-os-composed-image-${{ github.run_id }}-${{ github.run_attempt }}
