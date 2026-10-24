@@ -32,7 +32,7 @@ def rows(ident=OLD,image=BASE,*,running=True):
         'com.docker.compose.config-hash':'c'*64,'com.docker.compose.image':image,
         'com.docker.compose.project.config_files':','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml')),
         'com.docker.compose.project.working_dir':str(ROOT),'com.docker.compose.project.environment_file':str(V.ROLE_ENV),
-        'com.docker.compose.version':'2.38.2'}
+        'com.docker.compose.version':'2.40.3'}
     if image == BASE and ident != OLD:
         provenance['com.docker.compose.project.config_files'] += ','+str(M.TASK_ROOT/'rollback.yml')
     labels = {'org.opencontainers.image.revision':'4'*40,**provenance}
@@ -139,16 +139,20 @@ class CaptureObservabilityTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'other_container_runtime_changed'):
             M.other_runtime(before,after,OLD,NEW,known_incidents=selected)
 
-    def test_compose_replace_label_binds_the_actual_predecessor_in_both_directions(self):
+    def test_verified_2403_replace_label_uses_the_fixed_service_replica(self):
         before = rows()[OLD]
         candidate = rows(NEW,CANDIDATE)[NEW]
-        candidate['config']['Labels']['com.docker.compose.replace'] = OLD
+        candidate['config']['Labels']['com.docker.compose.replace'] = settings().SERVICE+'-1'
         M.post_parity(settings(),before,candidate,CANDIDATE,replaced=OLD)
         restored = rows(RESTORED,BASE)[RESTORED]
-        restored['config']['Labels']['com.docker.compose.replace'] = NEW
+        restored['config']['Labels']['com.docker.compose.replace'] = settings().SERVICE+'-1'
         M.post_parity(settings(),before,restored,BASE,replaced=NEW)
+        restored['config']['Labels']['com.docker.compose.replace'] = OLD
         with self.assertRaisesRegex(RuntimeError,'capture_replace_provenance_invalid'):
             M.post_parity(settings(),before,restored,BASE,replaced=OLD)
+        candidate['config']['Labels']['com.docker.compose.version'] = '2.38.2'
+        with self.assertRaisesRegex(RuntimeError,'capture_compose_version_unverified'):
+            M.post_parity(settings(),before,candidate,CANDIDATE,replaced=OLD)
 
     def test_absent_target_create_rejects_unowned_replace_label(self):
         restored = rows(RESTORED,BASE)[RESTORED]
@@ -197,6 +201,31 @@ class CaptureObservabilityTests(unittest.TestCase):
                                   {'Destination':'/one','Source':'/public/two'}]
         with self.assertRaisesRegex(RuntimeError,'duplicate_mount_destination'):
             M.other_runtime(before,copy.deepcopy(before),OLD)
+
+    def test_safe_diagnostic_is_saved_before_a_postconfiguration_failure(self):
+        bad = rows(NEW,CANDIDATE)
+        bad[NEW]['host']['Unexpected'] = True
+        fixed = [{'status':'fail','reason_code':'runtime_dependency_failure','error_type':'PermissionError',
+                  'origin':'telethon_sqlite_session','origin_line':88}]
+        saved = []
+        with patch.object(M,'snapshot',side_effect=[rows(),rows(running=False),bad]),patch.object(M,'command',return_value=b''),patch.object(M,'legacy',return_value={}),patch.object(M,'poll_diagnostics',return_value=fixed):
+            with self.assertRaisesRegex(RuntimeError,'capture_host_configuration_changed'):
+                M.stop_and_start(None,settings(),SimpleNamespace(),rows(),CANDIDATE,
+                    diagnostic_sink=lambda ident,proof:saved.append((ident,copy.deepcopy(proof))))
+        self.assertEqual(saved,[(NEW,fixed)])
+
+    def test_current_inventory_profile_changes_only_the_typed_capture_identity(self):
+        V = settings()
+        V.AFTER_CAPTURE02_ID = NEW
+        plan = {'schema':'web_engine_transaction_plan/1','operation_id':'original',
+                'containers':[copy.deepcopy(row) for row in rows().values()], 'datastore_probes':['unchanged']}
+        original = copy.deepcopy(plan)
+        profile = M.current_incident_profile(plan,V)
+        self.assertEqual(plan,original)
+        self.assertEqual(profile['schema'],'capture2_current_inventory/1')
+        self.assertEqual(profile['original_operation_id'],'original')
+        self.assertEqual(profile['datastore_probes'],plan['datastore_probes'])
+        self.assertEqual({row['id'] for row in profile['containers']},(set(rows())-{OLD})|{NEW})
 
 if __name__ == '__main__':
     unittest.main()

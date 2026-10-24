@@ -19,15 +19,15 @@ from types import ModuleType
 PARK_SHA = '83650494adc141234c447f8020f11b0cce4a2a8e419a00ae1141b29e92c4a928'
 QA_SHA = '9703ddf97439fd1578a4137ce3ad0e38d48c2c1acf0cf891b588527494982272'
 HOT_SHA = 'cb3e03503a0bddae0d7bd7d31f615606d2645b0f6f9b10dfa7468fef108995aa'
-PARITY_SHA = '7171631854871344651fbc7d6b553bf2da6cf875cf0193f0a1ec5043bc5eed23'
+PARITY_SHA = '6a7f502d85ecd58a49f1aa4209674c40a4a21b0b4d198429e43b5f49af6605b2'
 PARK_AUDIT_SHA = 'd9ddd4d3c1c5771f20014d1d986bae720e82439ff07a1869653c1174ea465e9e'
 PUBLIC_FILES = {'compose.yml':'38a9191e4f55799f1f8193b88136993e01758c1d1dcac6e8fbff03ed731fec5b',
                 'compose.web.yml':'25a794f6f9f4303c96adb69b35eeb19af86d153fb57f0ff87307f72797937cd5'}
-OP = 'security-capture2-observability-20261024-02'
-PREVIOUS_OP = 'security-capture2-observability-20261024-01'
-PREVIOUS_AUDIT_SHA = 'c8b4ecedec166ace9740324dcca01fce96cc251f387df4287a119f2c87b8b680'
+OP = 'security-capture2-observability-20261024-03'
+PREVIOUS_OP = 'security-capture2-observability-20261024-02'
+PREVIOUS_AUDIT_SHA = 'ea4c02596b1a96eb6ee4fecfb0d8fc15686ce3056a84a31a4b95e5f321029246'
 TASK_ROOT = Path('/root/.local/' + OP + '-activation')
-CONFIRM = 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-02'
+CONFIRM = 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-03'
 SESSION = '/srv/trading-bot/market-data-staging-shadow/sessions/account2'
 TOKEN = Path('/run/trading-bot/market-capture-legacy-authority-enabled')
 COLLECTORS = ('coin-capture.service','market-channel-capture.service')
@@ -170,6 +170,16 @@ def incident_deltas(before, after, identifiers):
              'after':{k:after[ident][k] for k in sorted(STATE_FIELDS)}} for ident in sorted(identifiers)
             if any(before[ident][k] != after[ident][k] for k in STATE_FIELDS)]
 
+def current_incident_profile(plan,V):
+    selected = [row for row in plan['containers'] if row['id'] == V.CID]
+    require(len(selected) == 1 and selected[0]['name'] == '/'+V.PROJECT+'-'+V.SERVICE+'-1'
+            and selected[0]['image'] == V.BASE,'original_capture_anchor_invalid')
+    # This is a typed CURRENT inspection profile, never the historical plan.
+    # Only this capture identity changes; original document/SHA remains intact.
+    return {**plan,'schema':'capture2_current_inventory/1','operation_id':OP,
+        'original_operation_id':plan['operation_id'],
+        'containers':[{**row,'id':V.AFTER_CAPTURE02_ID} if row['id'] == V.CID else row for row in plan['containers']]}
+
 def post_parity(V,before,after,desired, *, replaced=None):
     require(after['id'] != before['id'] and after['image'] == desired,'capture_replacement_identity_invalid')
     old_cfg,new_cfg = before['config'],after['config']
@@ -185,8 +195,12 @@ def post_parity(V,before,after,desired, *, replaced=None):
     old_engine = {k:v for k,v in old_cfg['Labels'].items() if k.startswith('com.docker.compose.')}
     new_engine = {k:v for k,v in new_cfg['Labels'].items() if k.startswith('com.docker.compose.')}
     replace = 'com.docker.compose.replace'
+    require(new_engine.get('com.docker.compose.version') == '2.40.3','capture_compose_version_unverified')
+    if replace in old_engine:
+        require(old_engine.get('com.docker.compose.version') == '2.40.3'
+                and old_engine.pop(replace) == V.SERVICE+'-1','capture_prior_replace_provenance_invalid')
     if replace in new_engine:
-        require(replaced is not None and new_engine.pop(replace) == replaced,'capture_replace_provenance_invalid')
+        require(replaced is not None and new_engine.pop(replace) == V.SERVICE+'-1','capture_replace_provenance_invalid')
     changed = {'com.docker.compose.config-hash','com.docker.compose.image','com.docker.compose.project.config_files',
                'com.docker.compose.project.working_dir','com.docker.compose.project.environment_file','com.docker.compose.version'}
     require(set(new_engine) == set(old_engine) and {k:v for k,v in new_engine.items() if k not in changed} == {k:v for k,v in old_engine.items() if k not in changed},'capture_compose_identity_changed')
@@ -211,13 +225,14 @@ def post_parity(V,before,after,desired, *, replaced=None):
             dns = row.get('DNSNames')
             require(dns is None or set(dns) == set(row['Aliases'])|{ident[:12]},'capture_network_dns_changed')
 
-def stop_and_start(C,V,clock,before,desired, *, known_incidents=frozenset()):
+def stop_and_start(C,V,clock,before,desired, *, known_incidents=frozenset(),diagnostic_sink=None):
+    baseline_id = target(before,V)['id']
     current = snapshot(V,clock,allow_absent_target=desired==V.BASE)
     if len(current) == 26:
-        require(desired == V.BASE and set(current) == set(before)-{V.CID},'absent_capture_rollback_scope_invalid')
+        require(desired == V.BASE and set(current) == set(before)-{baseline_id},'absent_capture_rollback_scope_invalid')
         stopped = current
         replaced = None
-        other_runtime(before,stopped,V.CID,known_incidents=known_incidents)
+        other_runtime(before,stopped,baseline_id,known_incidents=known_incidents)
     else:
         old = target(current,V)
         replaced = old['id']
@@ -226,14 +241,17 @@ def stop_and_start(C,V,clock,before,desired, *, known_incidents=frozenset()):
         stopped_target = target(stopped,V)
         require(stopped_target['id'] == old['id'] and not stopped_target['running'] and not stopped_target['restarting']
                 and stopped_target['pid'] == 0,'old_session_owner_not_stopped')
-        other_runtime(before,stopped,V.CID,old['id'],known_incidents=known_incidents)
+        other_runtime(before,stopped,baseline_id,old['id'],known_incidents=known_incidents)
     same_session_owner(stopped,None)
     legacy(C)
     command(V,clock,compose(V,'up','--detach','--no-deps','--no-build','--pull','never','--force-recreate',rollback=desired==V.BASE),seconds=180)
     after = snapshot(V,clock)
     new = target(after,V)
-    other_runtime(before,after,V.CID,new['id'],known_incidents=known_incidents)
-    post_parity(V,before[V.CID],new,desired,replaced=replaced)
+    if desired == V.CANDIDATE and diagnostic_sink is not None:
+        require(new['image'] == V.CANDIDATE,'candidate_diagnostic_image_invalid')
+        diagnostic_sink(new['id'],poll_diagnostics(V,clock,new['id']))
+    other_runtime(before,after,baseline_id,new['id'],known_incidents=known_incidents)
+    post_parity(V,before[baseline_id],new,desired,replaced=replaced)
     same_session_owner(after,new['id'])
     require(command(V,clock,[V.DOCKER,'image','inspect','--format','{{.Id}}',V.BASE]).decode().strip() == V.BASE,'rollback_image_missing')
     return new,after
@@ -305,7 +323,7 @@ def execute(P,R,H,V,action):
         require(sha256(previous_raw).hexdigest() == PREVIOUS_AUDIT_SHA
                 and previous['schema'] == 'capture2_observability_activation/1' and previous['operation_id'] == PREVIOUS_OP
                 and previous['phase'] == 'rollback_unverified_incident_open'
-                and previous['reason_code'] == previous['rollback_reason_code'] == 'other_container_runtime_changed'
+                and previous['reason_code'] == previous['rollback_reason_code'] == 'capture_replace_provenance_invalid'
                 and previous['old_capture_id'] == V.CID and previous['base_image'] == V.BASE
                 and previous['candidate_image'] == V.CANDIDATE and previous['old_fences_retained'] is True
                 and previous['security_transition_completed'] is False,'previous_capture_attempt_changed')
@@ -313,23 +331,25 @@ def execute(P,R,H,V,action):
         previous_state = dict(line.split('=',1) for line in C.B.command(['/usr/bin/systemctl','show',previous_unit,'--property=ActiveState,MainPID,ExecMainStatus']).splitlines())
         require(previous_state == {'ActiveState':'failed','MainPID':'0','ExecMainStatus':'3'}
                 and C.scope_empty(Path('/sys/fs/cgroup/system.slice')/previous_unit),'previous_capture_owner_not_terminal')
+        require(command(V,clock,[V.DOCKER,'compose','version','--short']).decode().strip() == '2.40.3+ds1-0ubuntu1','actual_compose_version_unverified')
+        profile = current_incident_profile(plan,V)
         R.hot_finished(C,H)
-        R.no_backup_exec(C,plan,retired=True)
-        P.inventory(C,R,plan,parked=True)
-        P.web_datastores_native(C,R,plan)
+        R.no_backup_exec(C,profile,retired=True)
+        P.inventory(C,R,profile,parked=True)
+        P.web_datastores_native(C,R,profile)
         native = legacy(C)
         old_evidence = {path:C.B.read(path,maximum=65536) for path in (C.paths(plan)[0],C.ROOT/(H.OP+'.owned-restore.json'),C.ROOT/(H.OP+'.owned-intent.json'),parking_path,previous_path)}
         output = io.StringIO()
         with redirect_stdout(output):
-            checked = V.main(existing=True)
+            checked = V.main(existing=True,incident_profile='after_capture02')
         require(checked == 0 and json.loads(output.getvalue())['full_runtime_parity'] is True,'capture_complete_preflight_failed')
         before = snapshot(V,clock)
         known_incidents = frozenset(R.KNOWN_MARKET_FLAPS)
         require(len(known_incidents) == 2 and known_incidents <= set(before) and not known_incidents & (set(R.IDS)|{V.CID}),'known_incident_binding_invalid')
-        require(target(before,V)['id'] == V.CID and before[V.CID]['image'] == V.BASE,'old_capture_identity_changed')
-        require(not before[V.CID]['running'] and not before[V.CID]['restarting'] and before[V.CID]['pid'] == 0
-                and all(row['image'] != V.CANDIDATE for row in before.values()),'previous_stopped_capture_required')
-        same_session_owner(before,V.CID)
+        baseline_id = V.AFTER_CAPTURE02_ID
+        require(target(before,V)['id'] == baseline_id and before[baseline_id]['image'] == V.BASE
+                and all(row['image'] != V.CANDIDATE for row in before.values()),'current_postrollback_capture_required')
+        same_session_owner(before,baseline_id)
         if action == 'check':
             return {'status':'capture_diagnostic_checked','runtime_changed':False,'private_values_emitted':False}
         TASK_ROOT.mkdir(mode=0o700)
@@ -341,7 +361,8 @@ def execute(P,R,H,V,action):
         finally:
             os.close(fd)
         audit = {'schema':'capture2_observability_activation/1','operation_id':OP,'pid':os.getpid(),
-            'deadline_utc':clock.deadline_utc.isoformat(),'old_capture_id':V.CID,'base_image':V.BASE,'candidate_image':V.CANDIDATE,
+            'deadline_utc':clock.deadline_utc.isoformat(),'old_capture_id':baseline_id,'base_image':V.BASE,'candidate_image':V.CANDIDATE,
+            'original_c07_capture_id':V.CID,'capture_identity_delta':{'original_id':V.CID,'current_before_id':baseline_id,'reason':'owned02_base_rollback'},
             'source_sha256':V.PATCHED_SOURCE,'public_runtime_revision':V.PUBLIC_REVISION,'parking_audit_sha256':PARK_AUDIT_SHA,
             'previous_operation_id':PREVIOUS_OP,'previous_audit_sha256':PREVIOUS_AUDIT_SHA,
             'original_operation_id':H.OP,'original_plan_sha256':H.PLAN_SHA,'old_fences_retained':True,
@@ -349,16 +370,20 @@ def execute(P,R,H,V,action):
             'persistent_boot_guard_verified':native['persistent_boot_guard_verified'],'web_reboot_authorized':False,
             'cleanup_review_due_utc':(datetime.now(timezone.utc)+timedelta(days=10)).isoformat()}
         C.write_json(audit_path,audit,exclusive=True)
+        def save_diagnostic(ident,records):
+            audit.update(phase='candidate_diagnostic_collected_before_acceptance',observed_candidate_id=ident,diagnostics=records,
+                diagnostic_status='fixed_origin_captured' if records else 'diagnostic_not_yet_available',candidate_configuration_accepted=False)
+            C.write_json(audit_path,audit,exclusive=False)
         try:
-            new,after = stop_and_start(C,V,clock,before,V.CANDIDATE,known_incidents=known_incidents)
+            new,after = stop_and_start(C,V,clock,before,V.CANDIDATE,known_incidents=known_incidents,diagnostic_sink=save_diagnostic)
             require(legacy(C) == native,'legacy_guard_metadata_changed')
-            P.web_datastores_native(C,R,plan)
-            records = poll_diagnostics(V,clock,new['id'])
+            P.web_datastores_native(C,R,profile)
+            records = audit['diagnostics']
             after = snapshot(V,clock)
             final = target(after,V)
             require(final['id'] == new['id'],'capture_replaced_during_observation')
-            other_runtime(before,after,V.CID,new['id'],known_incidents=known_incidents)
-            post_parity(V,before[V.CID],final,V.CANDIDATE,replaced=V.CID)
+            other_runtime(before,after,baseline_id,new['id'],known_incidents=known_incidents)
+            post_parity(V,before[baseline_id],final,V.CANDIDATE,replaced=baseline_id)
             same_session_owner(after,new['id'])
             require(legacy(C) == native,'legacy_guard_metadata_changed')
             for path,raw in originals.items():
@@ -369,7 +394,7 @@ def execute(P,R,H,V,action):
                 diagnostic_status='fixed_origin_captured' if records else 'diagnostic_not_yet_available',
                 known_market_incident_ids=sorted(known_incidents),known_market_state_deltas=incident_deltas(before,after,known_incidents),
                 capture_role_original_anchor_intentionally_superseded=True,all_other_26_configuration_unchanged=True,
-                capture_functional_repair_accepted=False,completion_unverified=True)
+                capture_functional_repair_accepted=False,candidate_configuration_accepted=True,completion_unverified=True)
         except Exception as error:
             audit.update(phase='rollback_pending',reason_code=code(error),completion_unverified=True)
             C.write_json(audit_path,audit,exclusive=False)
