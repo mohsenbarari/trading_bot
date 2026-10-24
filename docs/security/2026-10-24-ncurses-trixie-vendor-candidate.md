@@ -1,5 +1,21 @@
 # Trixie ncurses vendor update: candidate evidence only
 
+Actual run **40112668891**, source `bfc769e9`, succeeded. Authenticated source
+resolution, the full thirteen-package family build, three old-caller ABI checks,
+ordinary Python/terminfo compatibility, four-package installation, clean audit,
+version inventory and raw scans completed. Public packages are artifact
+`12567123180`, build-receipt SHA256
+`0903c9fbcd69d5dbc6e381f2c84d2718f85899e23c375de2e1c8ec57e81483fd`;
+scanner/SBOM artifact is `12567322211`.
+
+The isolated package-test image is
+`sha256:cc3d50b29eaa499d3afa410f024271c922b401877c7b9dbab51b637929abe88d`.
+It retains46 raw HIGH/zero CRITICAL, including the four ncurses rows despite
+their actual `6.6+20260608-2~trixie+gold1` versions: the Debian advisory has no
+Trixie fixed-version entry. Raw findings remain unchanged. This is not the App
+or production, and neither source acceptance nor the successful job changes
+the final admission gate. Interactive upstream coverage remains `NOT_TESTED`.
+
 The candidate rebuilds Debian source `6.6+20260608-2` against authenticated
 Trixie binary dependencies. Its honest local version is
 `6.6+20260608-2~trixie+gold1`. Debian identifies the affected `infocmp` issue and
@@ -84,8 +100,8 @@ APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
 actionlint -shellcheck= -pyflakes= .github/workflows/trixie-ncurses-build.yml
 ```
 
-Initial source review: 31 hermetic tests passed, an independent reviewer found
-no actionable defect, and actionlint accepted the workflow. Actual source
-resolution, compilation, compatibility, installation, scan and final App
-activation still require their own run-bound evidence. Global security closure
-and automation restart remain blocked until the remaining production gates pass.
+Initial source review passed31 hermetic tests and independent review; the
+corrected source also passed executable installer/mask tests and actionlint.
+Run40112668891 supplies build/install/compatibility/scan evidence. Final App
+composition, regression, admission and production activation remain open;
+global security closure and automation restart remain blocked.

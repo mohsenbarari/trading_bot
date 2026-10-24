@@ -1,0 +1,48 @@
+---
+- name: Stage only the reviewed managed Web backup configuration
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    managed_config_argv:
+      - /usr/bin/env
+      - -i
+      - PATH=/usr/sbin:/usr/bin:/sbin:/bin
+      - LC_ALL=C.UTF-8
+      - /usr/bin/python3
+      - -I
+      - -B
+      - -c
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/web_market_managed_config.py', rstrip=false) }}"
+      - --deadline-utc
+      - '{{ managed_config_deadline_utc }}'
+      - --web-engine-preflight
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/web_engine_preflight.py', rstrip=false) }}"
+      - --backup-market-pipeline-archive
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/../../scripts/backup_market_pipeline_archive.py', rstrip=false) }}"
+      - --prepare-market-pipeline-primary-release
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/../../scripts/prepare_market_pipeline_primary_release.py', rstrip=false) }}"
+      - --prepare-market-pipeline-release
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/../../scripts/prepare_market_pipeline_release.py', rstrip=false) }}"
+  tasks:
+    - name: Require the exact Web inventory and fresh finite operation deadline
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - managed_config_deadline_utc is defined
+          - managed_config_argv[8] | hash('sha256') == '955181f3fbdef503ac9bedaee3f5560d9489d13d541b6ce6184bc546ad4870f7'
+    - name: Stage public scripts then bind and preserve runtime under the existing permanent marker
+      # Only pinned public bytes are staged before taking M. Private input and
+      # runtime checks and the fresh managed output remain inside the M lock.
+      # Refused partial directories remain evidence and are never adopted.
+      ansible.builtin.command:
+        argv: '{{ managed_config_argv }}'
+      timeout: 620
+      check_mode: false
+      register: managed_config_result
+      changed_when: (managed_config_result.stdout | from_json).managed_configuration_staged | default(false)
+    - name: Report only the configuration staging verdict
+      ansible.builtin.debug:
+        msg: '{{ managed_config_result.stdout | from_json }}'

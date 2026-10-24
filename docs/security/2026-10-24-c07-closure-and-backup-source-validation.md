@@ -287,3 +287,14 @@ needs a finite owning producer, measured capacity, daemon-side deadline/cleanup,
 managed source provenance, and durable verified offhost transport. This source
 packet has not created a production dump or independent restore. It grants no
 production stop, daemon upgrade, reboot or activation authority.
+
+The finite `web_market_managed_config.py` producer and its Ansible wrapper now
+bind the completed closure, permanent M inode and absent old fences. They check
+the public 27-container inventory, parked10/retained17 intent, heterogeneous role
+images, actual E46 source OCI identity and the separate f79/223 two-layer lineage
+before and after normal rendering. Only the four pinned public helper scripts
+and a fresh managed backup configuration are staged. Original Env metadata is
+retained; no diagnostic Env copy/hash or referenced secret/session read occurs.
+Canonical public source evidence is persisted and hashed independently of the
+private configuration. Source tests and public-module loading pass; actual
+provisioning, dump, restore and offhost acceptance are separate pending actions.

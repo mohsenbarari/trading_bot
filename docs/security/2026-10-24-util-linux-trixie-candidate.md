@@ -1,5 +1,24 @@
 # Stable Trixie util-linux candidate: build evidence only
 
+Latest actual run **40112666640**, source `bfc769e9`, completed successfully:
+the same verified nine packages were reused without compilation, installed in
+normal dependency order, audited, inventoried and scanned. Public packages are
+artifact `12567076825`; raw scanner/SBOM evidence is `12566952540`. The original
+build receipt remains SHA256
+`3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde`.
+All six old-caller ABI records pass and retain exact candidate library hashes.
+
+The disposable scan image is
+`sha256:92ec168c9d2dcd52e2af8c4ea31e99650663ee85046ade80c5f7fc32a5ab6e4c`.
+It has **46 raw HIGH and zero CRITICAL**, including all 36 util-linux rows with
+empty fixed-version fields. This is a package-test base, not the App; its other
+findings cannot be compared directly with the pip-free App's 44 HIGH rows.
+The pinned [Trivy Debian detector](https://raw.githubusercontent.com/aquasecurity/trivy/v0.76.1/pkg/detector/ospkg/debian/debian.go)
+reports empty-fixed-version advisories before any installed-version comparison.
+Thus a different honest Trixie version alone cannot resolve these rows.
+No raw finding, admission policy, real-kernel test gap or production gate has
+been waived. The earlier failed attempts below remain historical evidence.
+
 Continuation CI40087272190 actually passed full-family compilation, the six
 old-caller ABI probes, the mountfd-disabled variant and compiled old/fixed
 source negative controls. Its upstream report counted340 suite scripts and162
@@ -52,7 +71,7 @@ separate feature-regression build, not the full Debian package configuration.
 That source fix alone proved no build or security pass; later CI40087272190
 provided the actual disabled-variant execution evidence described above.
 
-Status: the complete candidate job has not passed. Compilation, six old-caller
+Historical status before run40112666640: the complete candidate job had not passed. Compilation, six old-caller
 ABI checks, the disabled variant and source regressions passed in40087272190
 and40108449213; a successful actual installation and scan remain required.
 No production package installation or activation is asserted.
