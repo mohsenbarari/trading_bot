@@ -364,3 +364,77 @@ Canonical public source evidence is persisted and hashed independently of the
 private configuration. Source tests and public-module loading passed; actual04
 provisioning also passed as recorded above. Dump, restore and offhost acceptance
 remain separate pending actions.
+
+## Finite HOT3 source preparation
+
+The new `web_market_hot3.py` producer and `web_market_hot3.yml` wrapper prepare
+one fresh hot backup operation. This paragraph records reviewed source behavior,
+not an executed backup or security acceptance. Managed04's completed receipt and
+public source proof remain stable inputs; its expired staging deadline grants no
+authority to the new operation. HOT3 requires a fresh UTC deadline of at most two
+hours, a fresh nonce, the original permanent M file description, absent old
+fences, and fresh public control/profile validation. It preserves all 27 current
+container identities and intended running/restart/mount/network settings. It
+does not claim unchanged PIDs, uptime or transient processor health.
+
+Before any dump, the independent watchdog scope is armed with the inherited M
+descriptor. The worker uses a nonce-specific PostgreSQL application name and two
+distinct owned restore container/volume bindings sequentially. The normal hot1.4
+helper performs CREATE plus its restore, then a separately pinned `verify-hot`
+performs the independent restore. Metadata, dump, restore and server processes
+have finite client bounds and absolute in-container deadlines; a killed client
+alone is never treated as daemon cancellation. Cleanup terminates only exact
+owned backend PID/start/database/application tuples and removes only exact
+nonce-labelled restore resources. Disk pressure stops only those owned tasks.
+Transient metadata/stop failures keep the watchdog retrying under M. A killed
+worker or failed supervisor durably signals cancellation before any stop RPC.
+
+Docker volume/container creation has no daemon-side request cancellation proof.
+If cancellation interrupts a creation phase before its synchronous completion,
+the watchdog retains M and retries cleanup through the full operation deadline
+plus its 120-second cleanup reserve. It then records unresolved/manual recovery,
+never claims all resources absent, and forbids automatic retry/adoption. Negative
+inventory polls cannot prove an accepted timed-out creation request will never
+materialize later. Existing partial directories, artifacts and phase journals
+are retained; a subsequent operation needs a fresh namespace and review of any
+unresolved daemon outcome.
+
+Capacity is measured in bytes on the actual Web work/Docker filesystems and the
+Native attached backup mount. The attempted dump cap is the smallest of fresh
+Native capacity minus cipher overhead, the helper's 64-GiB bound, and Web's
+available space after conservative `2 * database_size + 4 GiB` restore/WAL/temp
+space and an 8-GiB reserve. No compression ratio is assumed. A free-space guard
+continues throughout both restores. Only after both restores and owned-resource
+cleanup pass does the unchanged normal crypt tool encrypt the retained dump and
+verify the decrypted plaintext hash/size. Key metadata is bound; no key hash,
+copy or diagnostic read is introduced.
+
+The old Web-to-Native `-07` SSH authorization expired and failed authentication.
+HOT3 instead requires the fresh public transport receipt at
+`/root/.ssh/security-web-market-hot3-20261024-01/transport.json`, SHA256
+`539910168632df009a175f373693bb441d499292fd24413bdca9328141f394e0`.
+It binds the new root-only key metadata, original pinned public known-hosts file,
+fixed Web/Native endpoints and expiry `2026-10-24T20:59:13Z`; the fresh HOT3
+deadline cannot exceed that expiry. The old immutable plan remains unchanged.
+The actual new-lane capacity-only probe passed without creating receiver files;
+this is transport preflight evidence only.
+
+Two other benign actual Web prerequisites passed separately: the exact
+`systemd-run --scope` launch flags preserved an inherited descriptor containing
+only a new public literal under a 20-second scope limit, and the exact source
+PostgreSQL image's fixed absolute-deadline guard ran `/bin/true` with return code
+0 for a future deadline and 124 for an expired deadline. These probes read no
+production SQL/data, used no M descriptor and restarted no production service.
+They prove those launch/tool seams only, not dump, restore or backup completion.
+
+The receiver CLI verifies Native's exact device 2064/ext4/UUID
+`9d19fc8e-f71a-4089-b826-5dddfe83ea28` at `/srv/trading-bot/backups`, never Native
+root storage. Cipher size plus 8 GiB and 1 MiB of control allowance must fit
+fresh measured capacity. It creates a fresh namespace, accepts only exact-sized
+ciphertext, fsyncs and rereads the same descriptor, then independently reopens
+and verifies the completed receipt/cipher. No plaintext or key is sent offhost.
+The producer publishes completion only after both restore proofs, cryptographic
+reconciliation, receiver receive/separate verification, and final source/control
+checks pass. Capacity or durability refusal remains unaccepted; this operation
+has no ObjectStorage fallback, production service stop, deployment eligibility,
+engine upgrade, reboot or security acceptance.

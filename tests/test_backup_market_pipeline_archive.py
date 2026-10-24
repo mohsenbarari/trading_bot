@@ -13,6 +13,7 @@ import unittest
 import os
 import errno
 import socket
+import stat
 from unittest import mock
 
 from scripts import backup_market_pipeline_archive as backup
@@ -207,7 +208,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             backup._write_receipt(path, payload)
         return backup.file_digest(self.receipt), backup.file_digest(journal_path)
 
-    def _hot_fixture(self, *, restore_changes=None) -> dict[str, object]:
+    def _hot_fixture(self, *, restore_changes=None, create_overrides=None, restore_callback=None) -> dict[str, object]:
         pgdata = self.postgres_root / "pgdata"
         pgdata.mkdir(mode=0o700)
         (pgdata / "PG_VERSION").write_text("15\n")
@@ -230,12 +231,280 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         with mock.patch.object(backup, "inspect_source_database", side_effect=[source, source, after]), \
                 mock.patch.object(backup, "_write_dump", side_effect=dump), \
                 mock.patch.object(backup, "_dump_archive_is_valid", return_value=True), \
-                mock.patch.object(backup, "restore_smoke", return_value=restored):
+                mock.patch.object(backup, "restore_smoke", return_value=restored, side_effect=restore_callback):
             return backup.create_backup(
                 env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
                 release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
                 image_input_signature=IMAGE_SIGNATURE, allow_running_writers=True,
+                **(create_overrides or {}),
             )
+
+    def _limits(self, **overrides):
+        values = dict(metadata_timeout_seconds=3, dump_timeout_seconds=30, restore_timeout_seconds=40,
+                      dump_max_bytes=1024, minimum_free_bytes=8 * 1024**3,
+                      pg_application_name="hot3-dump-" + "a" * 32, restore_cpus=2,
+                      restore_memory_bytes=2 * 1024**3, restore_pids_limit=256,
+                      daemon_deadline_epoch_seconds=int(backup.time.time()) + 1800)
+        values.update(overrides)
+        return backup.BackupExecutionLimits(**values)
+
+    def _dump_child(self, data=b"", *, open_writer=False):
+        reader, writer = os.pipe()
+        if data:
+            os.write(writer, data)
+        if open_writer:
+            self.addCleanup(os.close, writer)
+        else:
+            os.close(writer)
+        stdout = os.fdopen(reader, "rb", buffering=0)
+        self.addCleanup(stdout.close)
+        return mock.Mock(stdout=stdout, wait=mock.Mock(return_value=0), poll=mock.Mock(return_value=None))
+
+    def test_execution_limits_reject_bad_types_and_deadlines_before_env_or_commands(self):
+        bad = {"metadata_timeout_seconds": True, "dump_timeout_seconds": 1801,
+               "restore_timeout_seconds": 0, "dump_max_bytes": -1, "minimum_free_bytes": 0,
+               "restore_cpus": float("nan"), "restore_memory_bytes": True,
+               "restore_pids_limit": "256", "pg_application_name": "private value\n",
+               "daemon_deadline_epoch_seconds": int(backup.time.time()) - 1, "checkpoint": 1}
+        for name, value in bad.items():
+            with self.subTest(field=name), self.assertRaisesRegex(backup.BackupError, "backup_execution_limits_invalid"):
+                self._limits(**{name: value})
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            for overrides in ({"execution_limits": {}}, {"allow_private_primary_source": True},
+                              {"allow_private_primary_source": 1}):
+                with self.assertRaises(backup.BackupError):
+                    backup.create_backup(env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                                         release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                                         image_input_signature=IMAGE_SIGNATURE, **overrides)
+
+    def test_bounded_dump_stream_never_writes_excess_and_reaps_client(self):
+        limits = self._limits(dump_max_bytes=4)
+        child = self._dump_child(b"abcdef")
+        original_read = os.read
+        reads = []
+        def short_read(descriptor, count):
+            reads.append(count)
+            return original_read(descriptor, min(2, count))
+        output = self.root / "bounded.pending"
+        with output.open("wb") as stream, mock.patch.object(backup.subprocess, "Popen", return_value=child), \
+                mock.patch.object(backup.os, "read", side_effect=short_read), \
+                mock.patch.object(backup.os, "fstatvfs", return_value=mock.Mock(f_bavail=64 * 1024**3, f_frsize=1)):
+            with self.assertRaisesRegex(backup.BackupError, "backup_dump_byte_bound"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+        self.assertEqual(output.read_bytes(), b"abcd")
+        self.assertEqual(reads, [5, 3, 1])
+        child.kill.assert_called_once_with()
+        self.assertEqual(child.wait.call_args.kwargs["timeout"], 3)
+        self.assertTrue(child.stdout.closed)
+
+    def test_bounded_dump_rechecks_free_floor_before_each_write(self):
+        limits = self._limits()
+        child = self._dump_child(b"ab")
+        output = self.root / "floor.pending"
+        space = [mock.Mock(f_bavail=limits.minimum_free_bytes + 1024, f_frsize=1),
+                 mock.Mock(f_bavail=limits.minimum_free_bytes + 1, f_frsize=1)]
+        with output.open("wb") as stream, mock.patch.object(backup.subprocess, "Popen", return_value=child), \
+                mock.patch.object(backup.os, "fstatvfs", side_effect=space):
+            with self.assertRaisesRegex(backup.BackupError, "backup_dump_free_floor"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+        self.assertEqual(output.read_bytes(), b"")
+        child.kill.assert_called_once_with()
+
+    def test_bounded_dump_timeout_and_checkpoint_do_not_claim_daemon_cancellation(self):
+        limits = self._limits()
+        child = self._dump_child(open_writer=True)
+        with (self.root / "timeout.pending").open("wb") as stream, \
+                mock.patch.object(backup.subprocess, "Popen", return_value=child), \
+                mock.patch.object(backup.os, "fstatvfs", return_value=mock.Mock(f_bavail=64 * 1024**3, f_frsize=1)), \
+                mock.patch.object(backup.time, "monotonic", side_effect=[0, 31]):
+            with self.assertRaisesRegex(backup.BackupError, "backup_pg_dump_timeout"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+        child.kill.assert_called_once_with()
+        guard = mock.Mock(side_effect=backup.BackupError("outer_guard_refused"))
+        with (self.root / "guard.pending").open("wb") as stream, \
+                mock.patch.object(backup.subprocess, "Popen", side_effect=AssertionError("client_started")):
+            with self.assertRaisesRegex(backup.BackupError, "outer_guard_refused"):
+                backup._bounded_dump(["owned-docker-client"], stream, self._limits(checkpoint=guard))
+        with (self.root / "late.pending").open("wb") as stream, \
+                mock.patch.object(backup.time, "time", return_value=limits.daemon_deadline_epoch_seconds + 1), \
+                mock.patch.object(backup.subprocess, "Popen", side_effect=AssertionError("late_client_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_execution_deadline"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+
+    def test_bounded_write_dump_has_public_pgappname_and_fixed_positional_daemon_guard(self):
+        limits = self._limits()
+        child = self._dump_child(b"ordinary-custom-dump")
+        child.poll.return_value = 0
+        target = self.root / "owned.dump"
+        with mock.patch.object(backup.subprocess, "Popen", return_value=child) as launch, \
+                mock.patch.object(backup.os, "fstatvfs", return_value=mock.Mock(f_bavail=64 * 1024**3, f_frsize=1)), \
+                mock.patch.object(backup, "_dump_archive_is_valid", return_value=True):
+            backup._write_dump(container_id="e" * 64, user="market_data", database="market_archive",
+                               destination=target, execution_limits=limits)
+        argv = launch.call_args.args[0]
+        self.assertEqual(argv[:5], ["docker", "exec", "-e", "PGAPPNAME=" + limits.pg_application_name, "e" * 64])
+        self.assertEqual(argv[5:9], ["/bin/sh", "-ec", backup._DAEMON_GUARD, "backup-deadline"])
+        self.assertEqual(argv[9:12], [str(limits.daemon_deadline_epoch_seconds), "30", "pg_dump"])
+        self.assertEqual(argv[12:], ["-U", "market_data", "-d", "market_archive", "-Fc", "--no-owner", "--no-privileges"])
+        self.assertIn('command -v timeout', backup._DAEMON_GUARD)
+        self.assertIn('[ "$remaining" -gt 0 ] || exit 124', backup._DAEMON_GUARD)
+        self.assertIn('exec timeout -s TERM -k 5 "$remaining" "$@"', backup._DAEMON_GUARD)
+        self.assertEqual(target.read_bytes(), b"ordinary-custom-dump")
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        self.assertFalse((self.root / ".owned.dump.pending").exists())
+
+    def test_metadata_timeout_and_cleanup_refuse_content_free_without_foreign_deletion(self):
+        limits = self._limits()
+        with mock.patch.object(backup.subprocess, "run", side_effect=subprocess.TimeoutExpired(["private-argument"], 3)) as run:
+            with self.assertRaisesRegex(backup.BackupError, "^backup_command_timeout$"):
+                backup._run_text(["owned-command"], label="owned_metadata", execution_limits=limits)
+        self.assertEqual(run.call_args.kwargs["timeout"], 3)
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="foreign-owner")), \
+                mock.patch.object(backup, "_run_text", side_effect=AssertionError("deletion_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_restore_container_owner_mismatch"):
+                backup._cleanup_owned_restore_resource("container", "owned-name", "owned-label", execution_limits=limits)
+        with mock.patch.object(backup.subprocess, "run", side_effect=subprocess.TimeoutExpired(["inspect"], 3)):
+            with self.assertRaisesRegex(backup.BackupError, "backup_command_timeout"):
+                backup._assert_restore_resource_absent("container", "owned-name", execution_limits=limits)
+
+    def test_metadata_sql_and_archive_parser_have_positional_in_container_deadline_guards(self):
+        limits = self._limits()
+        sql = "SELECT 'ordinary fixture';"
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="fixture")) as run:
+            self.assertEqual(backup._restore_query("owned-container", sql, execution_limits=limits), "fixture")
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:5], ["docker", "exec", "-e", "PGAPPNAME=" + limits.pg_application_name, "owned-container"])
+        self.assertEqual(argv[5:12], ["/bin/sh", "-ec", backup._DAEMON_GUARD, "backup-deadline",
+                                    str(limits.daemon_deadline_epoch_seconds), "3", "psql"])
+        self.assertEqual(argv[-2:], ["-c", sql])
+        self.assertNotIn(sql, backup._DAEMON_GUARD)
+        artifact = self.root / "parser.dump"
+        artifact.write_bytes(b"owned-parser-input")
+        artifact.chmod(0o600)
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+            self.assertTrue(backup._dump_archive_is_valid(container_id="owned-container", path=artifact, execution_limits=limits))
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[-2:], ["pg_restore", "--list"])
+        self.assertEqual(argv[argv.index("backup-deadline") + 1:][-4:],
+                         [str(limits.daemon_deadline_epoch_seconds), "40", "pg_restore", "--list"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 40)
+
+    def test_limited_cleanup_accepts_only_fixed_name_explicit_absence(self):
+        limits = self._limits()
+        for kind, message in (("container", "Error: No such container: owned-name"),
+                              ("container", "Error: No such object: owned-name"),
+                              ("volume", "Error response from daemon: get owned-name: no such volume")):
+            with self.subTest(kind=kind, message=message), \
+                    mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=1, stderr=message)), \
+                    mock.patch.object(backup, "_run_text", side_effect=AssertionError("deletion_started")):
+                backup._assert_restore_resource_absent(kind, "owned-name", execution_limits=limits)
+                backup._cleanup_owned_restore_resource(kind, "owned-name", "owned-label", execution_limits=limits)
+        for error in ("Cannot connect to the Docker daemon", "Error: No such container: other-name", "", "context deadline exceeded"):
+            with self.subTest(error=error), \
+                    mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=1, stderr=error)), \
+                    mock.patch.object(backup, "_run_text", side_effect=AssertionError("deletion_started")):
+                for check in (lambda: backup._assert_restore_resource_absent("container", "owned-name", execution_limits=limits),
+                              lambda: backup._cleanup_owned_restore_resource("container", "owned-name", "owned-label", execution_limits=limits)):
+                    with self.assertRaisesRegex(backup.BackupError, "^backup_restore_container_absence_unknown$"):
+                        check()
+        # Existing unbounded callers retain their original interface semantics.
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=1, stderr="old daemon error")):
+            backup._assert_restore_resource_absent("container", "owned-name")
+            backup._cleanup_owned_restore_resource("container", "owned-name", "owned-label")
+
+    def test_limited_restore_uses_resource_caps_deadline_and_finite_pg_restore_timeout(self):
+        limits = self._limits()
+        artifact = self.root / "owned-restore.dump"
+        artifact.write_bytes(b"retained-restore-bytes")
+        descriptor = os.open(artifact, os.O_RDONLY)
+        self.addCleanup(os.close, descriptor)
+        invariants = {"schema_versions": [1], "table_count": 1, "fact_count": 1, **_invariants(fact_count=1)}
+        binding = {"container": "market_pipeline_restore_0123456789abcdef",
+                   "volume": "market_pipeline_restore_0123456789abcdef_data",
+                   "label": "market-pipeline-backup-0123456789abcdef"}
+        commands = []
+        restores = []
+        def command(arguments, *, label, execution_limits):
+            self.assertIs(execution_limits, limits)
+            commands.append(arguments)
+            return binding["label"] if label.endswith("_owner") else "owned"
+        def run(arguments, **kwargs):
+            self.assertEqual(kwargs["timeout"], 40 if "pg_restore" in arguments else 3)
+            if "pg_restore" in arguments:
+                restores.append(kwargs["stdin"].read())
+            return mock.Mock(returncode=0, stdout="1", stderr=b"")
+        with mock.patch.object(backup, "_cleanup_owned_restore_resource"), \
+                mock.patch.object(backup, "_assert_restore_resource_absent"), \
+                mock.patch.object(backup, "_database_invariants", return_value=invariants), \
+                mock.patch.object(backup, "_run_text", side_effect=command), \
+                mock.patch.object(backup.subprocess, "run", side_effect=run), \
+                mock.patch.object(backup.time, "sleep"):
+            result = backup.restore_smoke(artifact, invariants, resource_binding=binding,
+                                          artifact_descriptor=descriptor, execution_limits=limits)
+        start = next(argv for argv in commands if argv[:2] == ["docker", "run"])
+        for flag, value in (("--cpus", "2"), ("--memory", str(2 * 1024**3)),
+                            ("--memory-swap", str(2 * 1024**3)), ("--pids-limit", "256")):
+            self.assertEqual(start[start.index(flag) + 1], value)
+        self.assertEqual(start[start.index("--entrypoint") + 1], "/bin/sh")
+        self.assertEqual(start[start.index(backup.POSTGRES_IMAGE) + 1:],
+                         backup._guarded_arguments(limits, ["/usr/local/bin/docker-entrypoint.sh", "postgres"], 40)[1:])
+        self.assertFalse(any(arg.startswith("--cap-") or arg == "--privileged" for arg in start))
+        self.assertEqual(restores, [b"retained-restore-bytes"])
+        self.assertEqual(result["cleanup_status"], "PASS")
+
+    def test_limited_hot_create_uses_preowned_resources_primary_permission_and_pinned_artifact(self):
+        self.values.update(MARKET_PIPELINE_FEED_MODE="PRIVATE_PRIMARY", MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY="1",
+                           MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE="PRIVATE_PRIMARY")
+        _write_env(self.env_file, self.values)
+        limits = self._limits()
+        binding = {"container": "market_pipeline_restore_0123456789abcdef",
+                   "volume": "market_pipeline_restore_0123456789abcdef_data",
+                   "label": "market-pipeline-backup-0123456789abcdef"}
+        observed = []
+        def restore(artifact, source, **kwargs):
+            self.assertIs(kwargs["execution_limits"], limits)
+            self.assertEqual(kwargs["resource_binding"], binding)
+            observed.append(os.pread(kwargs["artifact_descriptor"], 64, 0))
+            return {"status": "PASS", "cleanup_status": "PASS", **backup._invariant_view(source)}
+        payload = self._hot_fixture(create_overrides=dict(execution_limits=limits, allow_private_primary_source=True,
+                                                          restore_resource_binding=binding), restore_callback=restore)
+        self.assertEqual(observed, [b"synthetic-custom-dump"])
+        self.assertEqual(json.loads(backup._journal_path(self.backup_dir).read_text())["restore_resources"], binding)
+        with mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", return_value=payload["restore_smoke"]) as fresh:
+            result = backup.verify_hot_receipt(**self._hot_arguments(execution_limits=limits, allow_private_primary_source=True))
+        self.assertIs(fresh.call_args.kwargs["execution_limits"], limits)
+        self.assertTrue(result["fresh_restore_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
+        other = {"container": "market_pipeline_restore_fedcba9876543210",
+                 "volume": "market_pipeline_restore_fedcba9876543210_data",
+                 "label": "market-pipeline-backup-fedcba9876543210"}
+        controls = (self.receipt.read_bytes(), backup._journal_path(self.backup_dir).read_bytes())
+        with self.assertRaisesRegex(backup.BackupError, "backup_hot_source_identity_mismatch"):
+            backup.create_backup(env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                                 release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id="sha256:" + "f" * 64,
+                                 image_input_signature=IMAGE_SIGNATURE, allow_running_writers=True,
+                                 allow_target_identity_mismatch=True, allow_private_primary_source=True, execution_limits=limits)
+        with self.assertRaisesRegex(backup.BackupError, "backup_restore_resource_binding_mismatch"):
+            backup.create_backup(env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                                 release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                                 image_input_signature=IMAGE_SIGNATURE, allow_running_writers=True,
+                                 allow_private_primary_source=True, execution_limits=limits, restore_resource_binding=other)
+        self.assertEqual(controls, (self.receipt.read_bytes(), backup._journal_path(self.backup_dir).read_bytes()))
+
+    def test_limited_hot_create_detects_artifact_rewrite_before_complete_publication(self):
+        limits = self._limits()
+        def restore(artifact, source, **kwargs):
+            original = artifact.stat()
+            self.assertEqual(os.pread(kwargs["artifact_descriptor"], 64, 0), b"synthetic-custom-dump")
+            artifact.write_bytes(b"rewritten-custom-dump")
+            artifact.write_bytes(b"synthetic-custom-dump")
+            os.utime(artifact, ns=(original.st_atime_ns, original.st_mtime_ns))
+            return {"status": "PASS", "cleanup_status": "PASS", **backup._invariant_view(source)}
+        with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+            self._hot_fixture(create_overrides={"execution_limits": limits}, restore_callback=restore)
+        self.assertFalse(self.receipt.exists())
+        self.assertEqual(json.loads(backup._journal_path(self.backup_dir).read_text())["status"], "RESTORE_RUNNING")
 
     def _hot_arguments(self, **overrides):
         arguments = dict(

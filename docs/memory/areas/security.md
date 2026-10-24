@@ -22,7 +22,8 @@
   receipt. Never reinterpret that failure or reuse expired windows. See24Oct
   native-brotli-refresh runbook; global security remains incomplete.
 - Actual19d App:56 focused tests/rawHIGH44/8 advisory IDs; not accepted/activated.
-  See `docs/security/2026-10-24-security-candidate-19d.md`.
+  Exact-image CI also found homed/Archive::Tar absent in its stated scope;
+  raw rows remain unwaived. See24Oct security-candidate-19d runbook.
 - Watchdogs check Restarting before Running. Stale heartbeat can coexist with
   progress; missing counters are unknown. Never prune attached control storage;
   process death cannot cancel daemon requests or authorize writer auto-restart.

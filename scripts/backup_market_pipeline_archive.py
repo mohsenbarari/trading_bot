@@ -13,18 +13,20 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import re
 import secrets
+import selectors
 import stat
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, Mapping, Sequence
 
 if __package__:
@@ -74,6 +76,111 @@ class BackupError(RuntimeError):
     """A stable, content-free backup refusal."""
 
 
+@dataclass(frozen=True)
+class BackupExecutionLimits:
+    """Optional finite boundaries for an independently supervised HOT caller.
+
+    Client timeouts do not cancel Docker daemon work or PostgreSQL backends.
+    The owning caller must independently supervise its named resources/backend.
+    """
+
+    metadata_timeout_seconds: int
+    dump_timeout_seconds: int
+    restore_timeout_seconds: int
+    dump_max_bytes: int
+    minimum_free_bytes: int
+    pg_application_name: str
+    restore_cpus: int | float
+    restore_memory_bytes: int
+    restore_pids_limit: int
+    daemon_deadline_epoch_seconds: int
+    checkpoint: Callable[[], None] | None = None
+
+    def __post_init__(self) -> None:
+        bounds = (
+            (self.metadata_timeout_seconds, 1, 60),
+            (self.dump_timeout_seconds, 1, 1800),
+            (self.restore_timeout_seconds, 1, 1800),
+            (self.dump_max_bytes, 1, 64 * 1024**3),
+            (self.minimum_free_bytes, 1, 1024**4),
+            (self.restore_memory_bytes, 128 * 1024**2, 16 * 1024**3),
+            (self.restore_pids_limit, 16, 1024),
+        )
+        if (any(type(value) is not int or not lower <= value <= upper for value, lower, upper in bounds)
+                or type(self.restore_cpus) not in (int, float) or not 0 < self.restore_cpus <= 8
+                or type(self.pg_application_name) is not str
+                or not re.fullmatch(r"[a-z][a-z0-9_-]{0,62}", self.pg_application_name)
+                or type(self.daemon_deadline_epoch_seconds) is not int
+                or not time.time() < self.daemon_deadline_epoch_seconds <= time.time() + 7200
+                or (self.checkpoint is not None and not callable(self.checkpoint))):
+            raise BackupError("backup_execution_limits_invalid")
+
+
+def _execution_kwargs(limits: BackupExecutionLimits | None) -> dict[str, Any]:
+    return {} if limits is None else {"execution_limits": limits}
+
+
+def _checkpoint(limits: BackupExecutionLimits | None) -> None:
+    if limits is not None:
+        if time.time() >= limits.daemon_deadline_epoch_seconds:
+            raise BackupError("backup_execution_deadline")
+        if limits.checkpoint is not None:
+            limits.checkpoint()
+
+
+def _validate_execution_options(
+    limits: BackupExecutionLimits | None, permission: bool, *, hot: bool,
+) -> None:
+    if limits is not None:
+        if type(limits) is not BackupExecutionLimits:
+            raise BackupError("backup_execution_limits_invalid")
+        limits.__post_init__()
+    if type(permission) is not bool or (permission and (not hot or limits is None)):
+        raise BackupError("backup_primary_source_permission_invalid")
+
+
+def _run_process(
+    arguments: Sequence[str], *, execution_limits: BackupExecutionLimits | None = None,
+    timeout_seconds: int | float | None = None, **kwargs: Any,
+) -> subprocess.CompletedProcess[Any]:
+    _checkpoint(execution_limits)
+    if execution_limits is not None:
+        kwargs["timeout"] = (execution_limits.metadata_timeout_seconds
+                             if timeout_seconds is None else timeout_seconds)
+    try:
+        result = subprocess.run(list(arguments), **kwargs)
+    except subprocess.TimeoutExpired:
+        raise BackupError("backup_command_timeout") from None
+    _checkpoint(execution_limits)
+    return result
+
+
+def _exec_prefix(container: str, limits: BackupExecutionLimits | None, *, interactive: bool = False) -> list[str]:
+    return ["docker", "exec", *(["-i"] if interactive else []),
+            *(["-e", "PGAPPNAME=" + limits.pg_application_name] if limits is not None else []), container]
+
+
+_DAEMON_GUARD = (
+    'command -v date >/dev/null; command -v timeout >/dev/null; '
+    'deadline="$1"; stage="$2"; shift 2; now="$(date +%s)"; '
+    'remaining=$((deadline - now)); [ "$remaining" -gt 0 ] || exit 124; '
+    '[ "$remaining" -le "$stage" ] || remaining="$stage"; '
+    'exec timeout -s TERM -k 5 "$remaining" "$@"'
+)
+
+
+def _guarded_arguments(limits: BackupExecutionLimits, arguments: Sequence[str], seconds: int) -> list[str]:
+    return ["/bin/sh", "-ec", _DAEMON_GUARD, "backup-deadline",
+            str(limits.daemon_deadline_epoch_seconds), str(seconds), *arguments]
+
+
+def _exec_arguments(container: str, limits: BackupExecutionLimits | None, arguments: Sequence[str], *,
+                    interactive: bool = False, timeout_seconds: int | None = None) -> list[str]:
+    guarded = (list(arguments) if limits is None else _guarded_arguments(
+        limits, arguments, limits.metadata_timeout_seconds if timeout_seconds is None else timeout_seconds))
+    return [*_exec_prefix(container, limits, interactive=interactive), *guarded]
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -82,10 +189,15 @@ def utc_text(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def file_digest(path: Path) -> str:
+def file_digest(path: Path, *, execution_limits: BackupExecutionLimits | None = None) -> str:
     digest = sha256()
+    total = 0
     with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
+        while chunk := stream.read(1024 * 1024 if execution_limits is None else min(1024 * 1024, execution_limits.dump_max_bytes + 1 - total)):
+            _checkpoint(execution_limits)
+            total += len(chunk)
+            if execution_limits is not None and total > execution_limits.dump_max_bytes:
+                raise BackupError("backup_dump_byte_bound")
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -131,9 +243,11 @@ def _secure_regular(path: Path, *, expected_mode: int = 0o600) -> None:
         raise BackupError("backup_file_owner_mode_invalid")
 
 
-def _run_text(arguments: Sequence[str], *, label: str) -> str:
-    result = subprocess.run(
+def _run_text(arguments: Sequence[str], *, label: str,
+              execution_limits: BackupExecutionLimits | None = None) -> str:
+    result = _run_process(
         list(arguments),
+        **_execution_kwargs(execution_limits),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -364,7 +478,8 @@ def _initial_store_is_empty(path: Path) -> bool:
         raise BackupError("backup_postgres_root_unavailable") from exc
 
 
-def _container_ids(*, project: str, postgres_path: Path) -> tuple[str, str]:
+def _container_ids(*, project: str, postgres_path: Path,
+                   execution_limits: BackupExecutionLimits | None = None) -> tuple[str, str]:
     labelled = _run_text(
         [
             "docker", "ps", "-q",
@@ -372,10 +487,12 @@ def _container_ids(*, project: str, postgres_path: Path) -> tuple[str, str]:
             "--filter", "label=com.docker.compose.service=market-database",
         ],
         label="backup_database_inventory",
+        **_execution_kwargs(execution_limits),
     ).splitlines()
     mounted = _run_text(
         ["docker", "ps", "-q", "--filter", f"volume={postgres_path}"],
         label="backup_database_mount_inventory",
+        **_execution_kwargs(execution_limits),
     ).splitlines()
     labelled = [item for item in labelled if item]
     mounted = [item for item in mounted if item]
@@ -514,19 +631,20 @@ def _database_invariants(query: Any) -> dict[str, Any]:
     }
 
 
-def _running_project_services(project: str) -> list[str]:
+def _running_project_services(project: str, *, execution_limits: BackupExecutionLimits | None = None) -> list[str]:
     output = _run_text(
         [
             "docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
             "--format", '{{.Label "com.docker.compose.service"}}',
         ],
         label="backup_project_workload_inventory",
+        **_execution_kwargs(execution_limits),
     )
     return sorted({line for line in output.splitlines() if line})
 
 
-def _assert_writer_workloads_quiesced(project: str) -> None:
-    if _running_project_services(project) != ["market-database"]:
+def _assert_writer_workloads_quiesced(project: str, *, execution_limits: BackupExecutionLimits | None = None) -> None:
+    if _running_project_services(project, **_execution_kwargs(execution_limits)) != ["market-database"]:
         raise BackupError("backup_writer_workloads_not_quiesced")
 
 
@@ -534,20 +652,23 @@ def inspect_source_database(
     values: Mapping[str, str],
     *,
     require_quiesce: bool = True,
+    execution_limits: BackupExecutionLimits | None = None,
 ) -> dict[str, Any]:
     project = values["MARKET_PIPELINE_PROJECT_NAME"]
-    running = _running_project_services(project)
+    running = _running_project_services(project, **_execution_kwargs(execution_limits))
     if require_quiesce:
-        _assert_writer_workloads_quiesced(project)
+        _assert_writer_workloads_quiesced(project, **_execution_kwargs(execution_limits))
     elif "market-database" not in running:
         raise BackupError("backup_database_not_running")
     postgres_path = _postgres_path(values)
     container_id, _ = _container_ids(
-        project=values["MARKET_PIPELINE_PROJECT_NAME"], postgres_path=postgres_path
+        project=values["MARKET_PIPELINE_PROJECT_NAME"], postgres_path=postgres_path,
+        **_execution_kwargs(execution_limits),
     )
     try:
         document = json.loads(
-            _run_text(["docker", "inspect", container_id], label="backup_database_inspect")
+            _run_text(["docker", "inspect", container_id], label="backup_database_inspect",
+                      **_execution_kwargs(execution_limits))
         )[0]
     except (json.JSONDecodeError, IndexError, TypeError) as exc:
         raise BackupError("backup_database_inspect_invalid") from exc
@@ -574,12 +695,12 @@ def inspect_source_database(
 
     def query(sql: str, *, label: str) -> str:
         return _run_text(
-            [
-                "docker", "exec", container_id, "psql",
+            _exec_arguments(container_id, execution_limits, ["psql",
                 "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At",
                 "-U", user, "-d", database, "-c", sql,
-            ],
+            ]),
             label=label,
+            **_execution_kwargs(execution_limits),
         )
 
     has_migrations = query(
@@ -612,11 +733,18 @@ def inspect_source_database(
     }
 
 
-def _dump_archive_is_valid(*, container_id: str, path: Path) -> bool:
+def _dump_archive_is_valid(*, container_id: str, path: Path,
+                           execution_limits: BackupExecutionLimits | None = None,
+                           artifact_descriptor: int | None = None) -> bool:
     _secure_regular(path)
-    with path.open("rb") as stream:
-        result = subprocess.run(
-            ["docker", "exec", "-i", container_id, "pg_restore", "--list"],
+    with (path.open("rb") if artifact_descriptor is None
+          else os.fdopen(os.dup(artifact_descriptor), "rb")) as stream:
+        stream.seek(0)
+        result = _run_process(
+            _exec_arguments(container_id, execution_limits, ["pg_restore", "--list"], interactive=True,
+                            timeout_seconds=None if execution_limits is None else execution_limits.restore_timeout_seconds),
+            **_execution_kwargs(execution_limits),
+            timeout_seconds=None if execution_limits is None else execution_limits.restore_timeout_seconds,
             stdin=stream,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -625,19 +753,77 @@ def _dump_archive_is_valid(*, container_id: str, path: Path) -> bool:
     return result.returncode == 0
 
 
+def _check_dump_storage(descriptor: int, count: int, limits: BackupExecutionLimits) -> None:
+    space = os.fstatvfs(descriptor)
+    if space.f_bavail * space.f_frsize - count < limits.minimum_free_bytes:
+        raise BackupError("backup_dump_free_floor")
+
+
+def _bounded_dump(arguments: list[str], stream: Any, limits: BackupExecutionLimits) -> subprocess.CompletedProcess[Any]:
+    _checkpoint(limits)
+    _check_dump_storage(stream.fileno(), 0, limits)
+    child = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + limits.dump_timeout_seconds
+    total = 0
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                _checkpoint(limits)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise BackupError("backup_pg_dump_timeout")
+                for key, _ in selector.select(min(.25, remaining)):
+                    chunk = os.read(key.fileobj.fileno(), min(65536, limits.dump_max_bytes + 1 - total))
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    total += len(chunk)
+                    if total > limits.dump_max_bytes:
+                        raise BackupError("backup_dump_byte_bound")
+                    stream.flush()
+                    _check_dump_storage(stream.fileno(), len(chunk), limits)
+                    stream.write(chunk)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BackupError("backup_pg_dump_timeout")
+            try:
+                status = child.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                raise BackupError("backup_pg_dump_timeout") from None
+        _checkpoint(limits)
+        return subprocess.CompletedProcess(arguments, status)
+    finally:
+        # This only bounds the local Docker client. The owning independent
+        # watchdog must cancel the exact source backend and daemon resources.
+        try:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=limits.metadata_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            raise BackupError("backup_dump_client_cleanup_timeout") from None
+        finally:
+            if child.stdout is not None:
+                child.stdout.close()
+
+
 def _write_dump(
-    *, container_id: str, user: str, database: str, destination: Path
+    *, container_id: str, user: str, database: str, destination: Path,
+    execution_limits: BackupExecutionLimits | None = None,
 ) -> None:
     candidate = destination.parent / f".{destination.name}.pending"
     if candidate.exists() or candidate.is_symlink():
         _secure_regular(candidate)
+        if execution_limits is not None and candidate.stat().st_size > execution_limits.dump_max_bytes:
+            raise BackupError("backup_dump_byte_bound")
         if destination.exists() or destination.is_symlink():
             raise BackupError("backup_dump_resume_ambiguous")
         # A process can be killed while pg_dump is still writing.  Presence of
         # the deterministic candidate alone is therefore not evidence that it
         # is complete.  pg_restore's archive parser is the authoritative local
         # completeness check; only a complete archive is promoted.
-        if _dump_archive_is_valid(container_id=container_id, path=candidate):
+        if _dump_archive_is_valid(container_id=container_id, path=candidate, **_execution_kwargs(execution_limits)):
             os.replace(candidate, destination)
             directory = os.open(destination.parent, os.O_RDONLY)
             try:
@@ -655,23 +841,21 @@ def _write_dump(
     descriptor = os.open(candidate, flags, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as stream:
-            process = subprocess.run(
-                [
-                    "docker", "exec", container_id, "pg_dump",
+            dump_arguments = ["pg_dump",
                     "-U", user, "-d", database, "-Fc",
                     "--no-owner", "--no-privileges",
-                ],
-                stdout=stream,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
+                ]
+            arguments = _exec_arguments(container_id, execution_limits, dump_arguments,
+                                        timeout_seconds=None if execution_limits is None else execution_limits.dump_timeout_seconds)
+            process = (_bounded_dump(arguments, stream, execution_limits) if execution_limits is not None
+                       else subprocess.run(arguments, stdout=stream, stderr=subprocess.PIPE, check=False))
             stream.flush()
             os.fsync(stream.fileno())
         if process.returncode:
             raise BackupError(f"backup_pg_dump_failed_rc_{process.returncode}")
         if candidate.stat().st_size <= 0:
             raise BackupError("backup_pg_dump_empty")
-        if not _dump_archive_is_valid(container_id=container_id, path=candidate):
+        if not _dump_archive_is_valid(container_id=container_id, path=candidate, **_execution_kwargs(execution_limits)):
             raise BackupError("backup_pg_dump_archive_invalid")
         os.replace(candidate, destination)
         directory = os.open(destination.parent, os.O_RDONLY)
@@ -683,41 +867,60 @@ def _write_dump(
         candidate.unlink(missing_ok=True)
 
 
-def _restore_query(container: str, sql: str) -> str:
+def _restore_query(container: str, sql: str, *, execution_limits: BackupExecutionLimits | None = None) -> str:
     return _run_text(
-        [
-            "docker", "exec", container, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
+        _exec_arguments(container, execution_limits, ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
             "-At", "-U", "restore", "-d", "restore", "-c", sql,
-        ],
+        ]),
         label="backup_restore_query",
+        **_execution_kwargs(execution_limits),
     )
 
 
-def _assert_restore_resource_absent(kind: str, name: str) -> None:
-    result = subprocess.run(
+def _known_restore_absence(kind: str, name: str, result: subprocess.CompletedProcess[Any]) -> bool:
+    messages = {
+        f"Error: No such {kind}: {name}",
+        f"Error response from daemon: No such {kind}: {name}",
+    }
+    if kind == "container":
+        messages.add(f"Error: No such object: {name}")
+    elif kind == "volume":
+        messages.add(f"Error response from daemon: get {name}: no such volume")
+    return result.returncode == 1 and type(result.stderr) is str and result.stderr.strip() in messages
+
+
+def _assert_restore_resource_absent(kind: str, name: str, *, execution_limits: BackupExecutionLimits | None = None) -> None:
+    result = _run_process(
         ["docker", kind, "inspect", name],
+        **_execution_kwargs(execution_limits),
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL if execution_limits is None else subprocess.PIPE,
+        **({"text": True} if execution_limits is not None else {}),
         check=False,
     )
     if result.returncode == 0:
         raise BackupError(f"backup_restore_{kind}_cleanup_incomplete")
+    if execution_limits is not None and not _known_restore_absence(kind, name, result):
+        raise BackupError(f"backup_restore_{kind}_absence_unknown")
 
 
-def _cleanup_owned_restore_resource(kind: str, name: str, label: str) -> None:
+def _cleanup_owned_restore_resource(kind: str, name: str, label: str, *, execution_limits: BackupExecutionLimits | None = None) -> None:
     template = (
         '{{index .Config.Labels "io.gold-trade.market-backup-run"}}'
         if kind == "container"
         else '{{index .Labels "io.gold-trade.market-backup-run"}}'
     )
-    result = subprocess.run(
+    result = _run_process(
         ["docker", kind, "inspect", "-f", template, name],
+        **_execution_kwargs(execution_limits),
         text=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL if execution_limits is None else subprocess.PIPE,
         check=False,
     )
     if result.returncode != 0:
+        if execution_limits is not None and not _known_restore_absence(kind, name, result):
+            raise BackupError(f"backup_restore_{kind}_absence_unknown")
         return
     if result.stdout.strip() != label:
         raise BackupError(f"backup_restore_{kind}_owner_mismatch")
@@ -726,8 +929,8 @@ def _cleanup_owned_restore_resource(kind: str, name: str, label: str) -> None:
         if kind == "container"
         else ["docker", "volume", "rm", name]
     )
-    _run_text(command, label=f"backup_restore_{kind}_recover")
-    _assert_restore_resource_absent(kind, name)
+    _run_text(command, label=f"backup_restore_{kind}_recover", **_execution_kwargs(execution_limits))
+    _assert_restore_resource_absent(kind, name, **_execution_kwargs(execution_limits))
 
 
 def _valid_restore_resources(binding: Any) -> bool:
@@ -750,7 +953,9 @@ def restore_smoke(
     resource_binding: Mapping[str, str] | None = None,
     before_cleanup: Callable[[str], None] | None = None,
     artifact_descriptor: int | None = None,
+    execution_limits: BackupExecutionLimits | None = None,
 ) -> dict[str, Any]:
+    _validate_execution_options(execution_limits, False, hot=True)
     if resource_binding is None:
         nonce = secrets.token_hex(8)
         resource_binding = {
@@ -763,8 +968,8 @@ def restore_smoke(
     container = str(resource_binding["container"])
     volume = str(resource_binding["volume"])
     label = str(resource_binding["label"])
-    _cleanup_owned_restore_resource("container", container, label)
-    _cleanup_owned_restore_resource("volume", volume, label)
+    _cleanup_owned_restore_resource("container", container, label, **_execution_kwargs(execution_limits))
+    _cleanup_owned_restore_resource("volume", volume, label, **_execution_kwargs(execution_limits))
     created_volume = False
     created_container = False
     cleanup_error: BackupError | None = None
@@ -775,37 +980,47 @@ def restore_smoke(
                 f"io.gold-trade.market-backup-run={label}", volume,
             ],
             label="backup_restore_volume_create",
+            **_execution_kwargs(execution_limits),
         )
         created_volume = True
         _run_text(
             [
                 "docker", "run", "-d", "--name", container,
+                *(["--cpus", str(execution_limits.restore_cpus),
+                   "--memory", str(execution_limits.restore_memory_bytes),
+                   "--memory-swap", str(execution_limits.restore_memory_bytes),
+                   "--pids-limit", str(execution_limits.restore_pids_limit)] if execution_limits is not None else []),
                 "--label", f"io.gold-trade.market-backup-run={label}",
                 "--network", "none",
                 "--mount", f"type=volume,source={volume},target=/var/lib/postgresql/data",
                 "-e", "POSTGRES_USER=restore",
                 "-e", "POSTGRES_DB=restore",
                 "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
+                *(["--entrypoint", "/bin/sh"] if execution_limits is not None else []),
                 POSTGRES_IMAGE,
+                *(_guarded_arguments(execution_limits, ["/usr/local/bin/docker-entrypoint.sh", "postgres"],
+                                     execution_limits.restore_timeout_seconds)[1:] if execution_limits is not None else []),
             ],
             label="backup_restore_container_start",
+            **_execution_kwargs(execution_limits),
         )
         created_container = True
         ready = False
         consecutive = 0
         for _attempt in range(90):
-            ready_probe = subprocess.run(
-                ["docker", "exec", container, "pg_isready", "-U", "restore", "-d", "restore"],
+            ready_probe = _run_process(
+                _exec_arguments(container, execution_limits, ["pg_isready", "-U", "restore", "-d", "restore"]),
+                **_execution_kwargs(execution_limits),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            sql_probe = subprocess.run(
-                [
-                    "docker", "exec", container, "psql",
+            sql_probe = _run_process(
+                _exec_arguments(container, execution_limits, ["psql",
                     "-X", "-v", "ON_ERROR_STOP=1", "-At",
                     "-U", "restore", "-d", "restore", "-c", "SELECT 1",
-                ],
+                ]),
+                **_execution_kwargs(execution_limits),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 check=False,
@@ -828,12 +1043,14 @@ def restore_smoke(
                       else os.fdopen(os.dup(artifact_descriptor), "rb"))
             with stream:
                 stream.seek(0)
-                result = subprocess.run(
-                    [
-                        "docker", "exec", "-i", container, "pg_restore",
+                result = _run_process(
+                    _exec_arguments(container, execution_limits, ["pg_restore",
                         "-U", "restore", "-d", "restore",
                         "--exit-on-error", "--no-owner", "--no-privileges",
-                    ],
+                    ], interactive=True,
+                        timeout_seconds=None if execution_limits is None else execution_limits.restore_timeout_seconds),
+                    **_execution_kwargs(execution_limits),
+                    timeout_seconds=None if execution_limits is None else execution_limits.restore_timeout_seconds,
                     stdin=stream,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
@@ -850,7 +1067,7 @@ def restore_smoke(
             raise BackupError("backup_restore_failed")
         def restore_query(sql: str, *, label: str) -> str:
             del label
-            return _restore_query(container, sql)
+            return _restore_query(container, sql, **_execution_kwargs(execution_limits))
 
         restored = _database_invariants(restore_query)
         # pg_dump owns a transactionally consistent snapshot while the live
@@ -875,10 +1092,12 @@ def restore_smoke(
                         container,
                     ],
                     label="backup_restore_container_owner",
+                    **_execution_kwargs(execution_limits),
                 )
                 if owner != label:
                     raise BackupError("backup_restore_container_owner_mismatch")
-                _run_text(["docker", "rm", "-f", container], label="backup_restore_container_remove")
+                _run_text(["docker", "rm", "-f", container], label="backup_restore_container_remove",
+                          **_execution_kwargs(execution_limits))
             if created_volume:
                 owner = _run_text(
                     [
@@ -886,14 +1105,16 @@ def restore_smoke(
                         '{{index .Labels "io.gold-trade.market-backup-run"}}', volume,
                     ],
                     label="backup_restore_volume_owner",
+                    **_execution_kwargs(execution_limits),
                 )
                 if owner != label:
                     raise BackupError("backup_restore_volume_owner_mismatch")
-                _run_text(["docker", "volume", "rm", volume], label="backup_restore_volume_remove")
+                _run_text(["docker", "volume", "rm", volume], label="backup_restore_volume_remove",
+                          **_execution_kwargs(execution_limits))
             if created_container:
-                _assert_restore_resource_absent("container", container)
+                _assert_restore_resource_absent("container", container, **_execution_kwargs(execution_limits))
             if created_volume:
-                _assert_restore_resource_absent("volume", volume)
+                _assert_restore_resource_absent("volume", volume, **_execution_kwargs(execution_limits))
         except BackupError as exc:
             cleanup_error = exc
         if cleanup_error is not None:
@@ -1213,13 +1434,21 @@ def _create_backup_bound(
     refresh_complete: bool = False,
     allow_running_writers: bool = False,
     allow_target_identity_mismatch: bool = False,
+    allow_private_primary_source: bool = False,
+    execution_limits: BackupExecutionLimits | None = None,
+    restore_resource_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     values = _validate_release_values(
         _env_binding.values(),
         release_sha=release_sha,
         image_id=image_id,
         allow_target_identity_mismatch=allow_target_identity_mismatch,
+        allow_private_primary_source=allow_private_primary_source,
     )
+    if allow_private_primary_source and (
+        values.get("MARKET_PIPELINE_RELEASE_SHA") != release_sha or values.get("MARKET_PIPELINE_IMAGE") != image_id
+    ):
+        raise BackupError("backup_hot_source_identity_mismatch")
     require_quiesce = not allow_running_writers
     backup_mode = "hot" if allow_running_writers else "quiesced"
     root = _secure_directory(backup_dir, create=True)
@@ -1244,6 +1473,8 @@ def _create_backup_bound(
             image_input_signature=image_input_signature,
             backup_mode=backup_mode,
         )
+        if restore_resource_binding is not None and journal.get("restore_resources") != restore_resource_binding:
+            raise BackupError("backup_restore_resource_binding_mismatch")
         if allow_running_writers and _empty_prepared_journal(journal, root=root):
             _env_binding.check()
             _abandon_empty_prepared_journal(journal_path, journal, root=root)
@@ -1302,7 +1533,7 @@ def _create_backup_bound(
             journal = None
     created_at = utc_now()
     if not (postgres / "pgdata" / "PG_VERSION").is_file():
-        if _running_project_services(values["MARKET_PIPELINE_PROJECT_NAME"]):
+        if _running_project_services(values["MARKET_PIPELINE_PROJECT_NAME"], **_execution_kwargs(execution_limits)):
             raise BackupError("backup_writer_workloads_not_quiesced")
         if not _initial_store_is_empty(postgres):
             raise BackupError("backup_uninitialized_store_not_empty")
@@ -1342,7 +1573,7 @@ def _create_backup_bound(
         return payload
 
     if journal is None:
-        source = inspect_source_database(values, require_quiesce=require_quiesce)
+        source = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits))
         nonce = secrets.token_hex(8)
         stamp = created_at.strftime("%Y%m%dT%H%M%SZ")
         restore_nonce = secrets.token_hex(8)
@@ -1368,7 +1599,7 @@ def _create_backup_bound(
             "source_after": None,
             "backup": None,
             "restore_smoke": None,
-            "restore_resources": {
+            "restore_resources": dict(restore_resource_binding) if restore_resource_binding is not None else {
                 "container": f"market_pipeline_restore_{restore_nonce}",
                 "volume": f"market_pipeline_restore_{restore_nonce}_data",
                 "label": f"market-pipeline-backup-{restore_nonce}",
@@ -1378,7 +1609,7 @@ def _create_backup_bound(
         _env_binding.check()
         _write_journal(journal_path, journal)
     source = journal["source_before"]
-    current_source = inspect_source_database(values, require_quiesce=require_quiesce)
+    current_source = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits))
     _env_binding.check()
     if not _source_window_compatible(
         source, current_source, allow_running_writers=allow_running_writers
@@ -1392,58 +1623,71 @@ def _create_backup_bound(
             user=values.get("MARKET_POSTGRES_USER", "market_data"),
             database=values.get("MARKET_POSTGRES_DB", "market_archive"),
             destination=artifact,
+            **_execution_kwargs(execution_limits),
         )
     _env_binding.check()
     _secure_regular(artifact)
+    if execution_limits is not None and artifact.stat().st_size > execution_limits.dump_max_bytes:
+        raise BackupError("backup_dump_byte_bound")
     if not _dump_archive_is_valid(
-        container_id=str(source["container_id"]), path=artifact
+        container_id=str(source["container_id"]), path=artifact, **_execution_kwargs(execution_limits)
     ):
         raise BackupError("backup_artifact_archive_invalid")
     observed_backup = {
         "path": str(artifact),
-        "sha256": file_digest(artifact),
+        "sha256": file_digest(artifact, **_execution_kwargs(execution_limits)),
         "size_bytes": artifact.stat().st_size,
         "format": "postgres_custom",
     }
     if journal.get("backup") is not None and journal["backup"] != observed_backup:
         raise BackupError("backup_artifact_drifted_during_resume")
-    journal["backup"] = observed_backup
-    journal["status"] = "DUMP_READY"
-    _env_binding.check()
-    _write_journal(journal_path, journal)
-    source_after = inspect_source_database(values, require_quiesce=require_quiesce)
-    _env_binding.check()
-    if not _source_window_compatible(
-        source, source_after, allow_running_writers=allow_running_writers
-    ):
-        raise BackupError("backup_source_changed_during_dump")
-    journal["source_after"] = source_after
-    journal["status"] = "RESTORE_RUNNING"
-    _env_binding.check()
-    _write_journal(journal_path, journal)
-    _env_binding.check()
-    restore = restore_smoke(
-        artifact,
-        source,
-        resource_binding=journal["restore_resources"],
-    )
-    _env_binding.check()
-    if not _restore_window_compatible(
-        source,
-        source_after,
-        restore,
-        allow_running_writers=allow_running_writers,
-    ):
-        raise BackupError("backup_restore_reconciliation_mismatch")
-    journal["restore_smoke"] = restore
-    journal["backup_status"] = "PASS"
-    journal["status"] = "COMPLETE"
-    _env_binding.check()
-    _write_journal(journal_path, journal)
-    payload = _receipt_from_journal(journal)
-    _env_binding.check()
-    _write_receipt(receipt, payload)
-    return payload
+    pinned = (_pinned_backup_artifact(artifact, observed_backup, **_execution_kwargs(execution_limits))
+              if execution_limits is not None else nullcontext(None))
+    with pinned as descriptor:
+        identity = None if descriptor is None else _file_identity(os.fstat(descriptor))
+        def check_artifact() -> None:
+            _checkpoint(execution_limits)
+            if descriptor is not None and (
+                _file_identity(os.fstat(descriptor)) != identity or _file_identity(artifact.lstat()) != identity
+            ):
+                raise BackupError("backup_artifact_drifted")
+        journal["backup"] = observed_backup
+        journal["status"] = "DUMP_READY"
+        _env_binding.check()
+        _write_journal(journal_path, journal)
+        source_after = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits))
+        _env_binding.check()
+        if not _source_window_compatible(
+            source, source_after, allow_running_writers=allow_running_writers
+        ):
+            raise BackupError("backup_source_changed_during_dump")
+        journal["source_after"] = source_after
+        journal["status"] = "RESTORE_RUNNING"
+        _env_binding.check()
+        _write_journal(journal_path, journal)
+        _env_binding.check()
+        restore = restore_smoke(
+            artifact, source, resource_binding=journal["restore_resources"],
+            **({"artifact_descriptor": descriptor} if descriptor is not None else {}),
+            **_execution_kwargs(execution_limits),
+        )
+        _env_binding.check()
+        check_artifact()
+        if not _restore_window_compatible(
+            source, source_after, restore, allow_running_writers=allow_running_writers,
+        ):
+            raise BackupError("backup_restore_reconciliation_mismatch")
+        journal["restore_smoke"] = restore
+        journal["backup_status"] = "PASS"
+        journal["status"] = "COMPLETE"
+        _env_binding.check()
+        check_artifact()
+        _write_journal(journal_path, journal)
+        payload = _receipt_from_journal(journal)
+        _env_binding.check()
+        check_artifact()
+        _write_receipt(receipt, payload)
+        return payload
 
 
 def _refuse_legacy_receipt(path: Path) -> None:
@@ -1464,7 +1708,13 @@ def create_backup(
     release_tree: str, image_id: str, image_input_signature: str,
     refresh_complete: bool = False, allow_running_writers: bool = False,
     allow_target_identity_mismatch: bool = False,
+    allow_private_primary_source: bool = False,
+    execution_limits: BackupExecutionLimits | None = None,
+    restore_resource_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    _validate_execution_options(execution_limits, allow_private_primary_source, hot=allow_running_writers)
+    if restore_resource_binding is not None and not _valid_restore_resources(restore_resource_binding):
+        raise BackupError("backup_restore_resource_binding_invalid")
     # Refuse old transactions before any protected Env open/read.
     _refuse_legacy_receipt(receipt)
     journal_path = _journal_path(backup_dir)
@@ -1478,6 +1728,9 @@ def create_backup(
             refresh_complete=refresh_complete,
             allow_running_writers=allow_running_writers,
             allow_target_identity_mismatch=allow_target_identity_mismatch,
+            allow_private_primary_source=allow_private_primary_source,
+            **_execution_kwargs(execution_limits),
+            restore_resource_binding=restore_resource_binding,
         )
 
 
@@ -1733,9 +1986,12 @@ def _pinned_control_snapshots(
 
 
 @contextmanager
-def _pinned_backup_artifact(artifact: Path, expected: Mapping[str, Any]) -> Iterator[int]:
+def _pinned_backup_artifact(artifact: Path, expected: Mapping[str, Any], *,
+                            execution_limits: BackupExecutionLimits | None = None) -> Iterator[int]:
     if type(expected.get("size_bytes")) is not int or expected["size_bytes"] <= 0:
         raise BackupError("backup_artifact_drifted")
+    if execution_limits is not None and expected["size_bytes"] > execution_limits.dump_max_bytes:
+        raise BackupError("backup_dump_byte_bound")
     _secure_regular(artifact)
     descriptor = os.open(artifact, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     try:
@@ -1752,6 +2008,7 @@ def _pinned_backup_artifact(artifact: Path, expected: Mapping[str, Any]) -> Iter
         digest = sha256()
         total = 0
         while chunk := os.read(descriptor, min(1024 * 1024, expected["size_bytes"] + 1 - total)):
+            _checkpoint(execution_limits)
             total += len(chunk)
             if total > expected["size_bytes"]:
                 raise BackupError("backup_artifact_drifted")
@@ -1773,12 +2030,15 @@ def verify_hot_receipt(
     maximum_age_seconds: int | None, now: datetime | None = None,
     allow_target_identity_mismatch: bool = False,
     restore_resource_binding: Mapping[str, str] | None = None,
+    allow_private_primary_source: bool = False,
+    execution_limits: BackupExecutionLimits | None = None,
 ) -> dict[str, Any]:
     """Verify an explicit hot snapshot with a fresh independent isolated restore.
 
     The finite owning caller remains responsible for capacity, daemon-side
     deadline cleanup, current application image provenance and offhost proof.
     """
+    _validate_execution_options(execution_limits, allow_private_primary_source, hot=True)
     if type(maximum_age_seconds) is not int or not 60 <= maximum_age_seconds <= 86400:
         raise BackupError("backup_maximum_age_invalid")
     with _pinned_control_snapshots(receipt, receipt_sha256, journal_sha256, hot=True) as snapshots:
@@ -1809,6 +2069,7 @@ def verify_hot_receipt(
             values = _validate_release_values(
                 bound.values(), release_sha=release_sha, image_id=image_id,
                 allow_target_identity_mismatch=allow_target_identity_mismatch,
+                allow_private_primary_source=allow_private_primary_source,
             )
             # A hot backup is bound to the actual source, never an unrelated
             # deployment target accepted by the older Blue/Green interface.
@@ -1824,22 +2085,24 @@ def verify_hot_receipt(
             )
             if payload["status"] != "PASS":
                 raise BackupError("backup_hot_initialized_source_required")
-            source = inspect_source_database(values, require_quiesce=False)
+            source = inspect_source_database(values, require_quiesce=False, **_execution_kwargs(execution_limits))
             bound.check()
             if not _valid_source_metadata(source) or not _source_window_compatible(payload["source_after"], source, allow_running_writers=True):
                 raise BackupError("backup_hot_current_source_mismatch")
-            with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"]) as descriptor:
+            with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"],
+                                         **_execution_kwargs(execution_limits)) as descriptor:
                 restored = restore_smoke(
                     Path(payload["backup"]["path"]), source,
                     resource_binding=restore_resource_binding,
                     artifact_descriptor=descriptor,
+                    **_execution_kwargs(execution_limits),
                 )
                 bound.check()
                 if (restored.get("status") != "PASS" or restored.get("cleanup_status") != "PASS"
                         or not _valid_invariants(restored)
                         or not _same_env_binding(_invariant_view(restored), _invariant_view(payload["restore_smoke"]))):
                     raise BackupError("backup_hot_independent_restore_mismatch")
-                source_after = inspect_source_database(values, require_quiesce=False)
+                source_after = inspect_source_database(values, require_quiesce=False, **_execution_kwargs(execution_limits))
                 bound.check()
                 if not _valid_source_metadata(source_after) or not _source_window_compatible(source, source_after, allow_running_writers=True):
                     raise BackupError("backup_hot_current_source_mismatch")
