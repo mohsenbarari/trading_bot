@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import fcntl
 from pathlib import Path
 import tempfile
 import unittest
@@ -106,6 +107,42 @@ class NativeBrotliInstallTests(unittest.TestCase):
             M.write(alias, b'new', exclusive=False)
         self.assertEqual(original.read_bytes(), b'preserve-public-proof')
 
+    def test_existing_idle_zero_byte_source_flock_is_valid_and_unchanged(self):
+        target = self.folder / 'source.lock'
+        target.write_bytes(b'')
+        target.chmod(0o600)
+        before = M.identity(target.lstat())
+        with patch.object(M, 'LEGACY_SOURCE', target):
+            with M.legacy_source_guard() as fd:
+                self.assertEqual(M.identity(os.fstat(fd)), before)
+        self.assertEqual(M.identity(target.lstat()), before)
+        self.assertEqual(target.read_bytes(), b'')
+
+    def test_busy_existing_source_flock_is_refused_without_taking_it_over(self):
+        target = self.folder / 'source.lock'
+        target.write_bytes(b'')
+        target.chmod(0o600)
+        fd = os.open(target, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(M, 'LEGACY_SOURCE', target), self.assertRaisesRegex(RuntimeError, 'native_source_lock_busy'):
+                with M.legacy_source_guard():
+                    self.fail('busy lock admitted')
+        finally:
+            os.close(fd)
+        self.assertEqual(target.read_bytes(), b'')
+
+    def test_replaced_source_flock_inode_is_refused_and_never_deleted(self):
+        target = self.folder / 'source.lock'
+        target.write_bytes(b'')
+        target.chmod(0o600)
+        with patch.object(M, 'LEGACY_SOURCE', target), self.assertRaisesRegex(RuntimeError, 'native_source_lock_changed'):
+            with M.legacy_source_guard():
+                target.unlink()
+                target.write_bytes(b'')
+                target.chmod(0o600)
+        self.assertTrue(target.exists())
+
     def test_default_check_never_opens_marker_or_creates_workspace(self):
         with patch.object(M, 'native'), patch.object(M, 'versions', return_value={n: M.OLD for n in M.PACKAGES}), \
              patch.object(M, 'bundle', return_value={}), patch.object(M, 'runtime', return_value=[]), \
@@ -132,14 +169,16 @@ class NativeBrotliInstallTests(unittest.TestCase):
 
     def transaction_fixture(self, *, fail_first_install=False):
         folder = self.folder / 'transaction'
-        marker, policy = self.folder / 'marker', self.folder / 'policy'
+        marker, policy, source_lock = self.folder / 'marker', self.folder / 'policy', self.folder / 'source.lock'
         marker.write_bytes(b'original-production-authority')
         os.chmod(marker, 0o600)
+        source_lock.write_bytes(b'')
+        source_lock.chmod(0o600)
         old = {name: ('old-' + name).encode() for name in M.PACKAGES}
         new = {name: ('new-' + name).encode() for name in M.PACKAGES}
         states = {name: M.OLD for name in M.PACKAGES}
         calls, failures = [], [fail_first_install]
-        for name, value in [('ROOT', folder), ('MARKER', marker), ('POLICY', policy),
+        for name, value in [('ROOT', folder), ('MARKER', marker), ('POLICY', policy), ('LEGACY_SOURCE', source_lock),
                             ('BASELINE', {n: (len(b), sha256(b).hexdigest()) for n, b in old.items()}),
                             ('INPUTS', {n: (len(b), sha256(b).hexdigest()) for n, b in new.items()})]:
             self.stack.enter_context(patch.object(M, name, value))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Finite two-package Native Brotli transaction; consumer refresh is separate."""
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import argparse
@@ -20,7 +20,8 @@ import zipfile
 ROOT = Path('/srv/trading-bot/backups/security-brotli-native-install-20261024-01')
 CONTROL = Path('/root/secure-envs/trading-bot')
 MARKER = CONTROL / 'queue-cutover-artifacts/production-release.lock'
-ABSENT = (CONTROL / '.production-runtime-source.lock', CONTROL / 'release-control/private-primary-controller.lock',
+LEGACY_SOURCE = CONTROL / '.production-runtime-source.lock'
+ABSENT = (CONTROL / 'release-control/private-primary-controller.lock',
           Path('/var/lib/trading-bot/production-release/two-host-release-state.json'))
 OLD, NEW = '1.1.0-2build2', '1.1.0-2build2+security20261024.1'
 PACKAGES = ('libbrotli1', 'python3-brotli')
@@ -196,7 +197,29 @@ def package_locks_available():
             os.close(fd)
 
 
-def native(*, recovery=False):
+@contextmanager
+def legacy_source_guard():
+    # This is a permanent, empty flock file, not a durable operation record.
+    # Never create, delete, replace or write it; prove and lock the same inode.
+    safe_parent(LEGACY_SOURCE)
+    before = LEGACY_SOURCE.lstat()
+    fd = os.open(LEGACY_SOURCE, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        value = os.fstat(fd)
+        require(stat.S_ISREG(value.st_mode) and value.st_uid == 0 and value.st_nlink == 1
+                and stat.S_IMODE(value.st_mode) == 0o600 and value.st_size == 0
+                and identity(before) == identity(value) == identity(LEGACY_SOURCE.lstat()), 'native_source_lock_changed')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('native_source_lock_busy') from None
+        yield fd
+        require(identity(value) == identity(os.fstat(fd)) == identity(LEGACY_SOURCE.lstat()), 'native_source_lock_changed')
+    finally:
+        os.close(fd)
+
+
+def native(*, recovery=False, source_held=False):
     require(os.geteuid() == 0 and Path('/proc/1/exe').readlink().name == 'systemd', 'native_root_required')
     require(not any(Path(v).exists() for v in ('/.dockerenv', '/run/.containerenv', '/run/systemd/container')), 'container_refused')
     for ns in ('pid', 'mnt', 'user'):
@@ -205,6 +228,9 @@ def native(*, recovery=False):
     require(release.get('ID') == 'ubuntu' and release.get('VERSION_ID', '').strip('"') == '24.04'
             and os.uname().machine == 'x86_64', 'wrong_native_distribution')
     require(not any(os.path.lexists(path) for path in ABSENT), 'production_operation_present')
+    if not source_held:
+        with legacy_source_guard():
+            pass
     require(not os.path.lexists(POLICY), 'preexisting_service_policy_refused')
     package_locks_available()
     if not recovery:
@@ -334,11 +360,14 @@ def action(mode, source):
     safe_parent(MARKER)
     old_marker = read(MARKER, 8192)
     fd = os.open(MARKER, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    stack = ExitStack()
+    stack.callback(os.close, fd)
     try:
         marker_identity = identity(os.fstat(fd))
         require(marker_identity == identity(MARKER.lstat()), 'production_marker_changed')
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        native(recovery=mode == 'rollback')
+        stack.enter_context(legacy_source_guard())
+        native(recovery=mode == 'rollback', source_held=True)
         if mode == 'stage':
             safe_parent(ROOT)
             os.mkdir(ROOT, 0o700)
@@ -386,7 +415,7 @@ def action(mode, source):
         return {'status': receipt['phase'], 'security_transition_completed': False, 'services_restarted': False,
                 'consumer_refresh_required': list(UNITS), 'completion_unverified': True}
     finally:
-        os.close(fd)
+        stack.close()
 
 
 def main():

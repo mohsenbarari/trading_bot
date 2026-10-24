@@ -31,8 +31,12 @@ before the transaction is admitted. All paths, files and output sizes are bounde
 `install` rechecks the same boot, frozen 15-container identities, metadata and
 mount records, rollback debs, globally clean dpkg/pending-trigger state, package
 locks, baseline versions and exact two-package simulation. It holds the existing
-production marker flock throughout and preserves its payload and inode; foreign
-production/source/reservation fences block the operation. It then invokes normal
+production marker flock throughout and preserves its payload and inode. The
+permanent empty `.production-runtime-source.lock` is admitted only as the same
+root0600, single-link, zero-byte inode and locked nonblockingly alongside M;
+its existence alone is not an active-operation signal. Busy ownership or changed
+identity refuses. It is never created, written, replaced or deleted. Actual
+reservation/pending-operation state still blocks the operation. It then invokes normal
 `dpkg --install` on only the two verified local debs, matching the actual CI
 installation method. No apt install hooks, package removals, toolchain install,
 Docker operation, service restart or repository update is requested.
