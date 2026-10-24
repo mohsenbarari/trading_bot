@@ -26,6 +26,7 @@ BASELINE = 'ba1f7616ade57558f51bb3a7fbb903243a33aab4'
 EVIDENCE = (12553191740, 190111, '976a32a2c5284b27cf1f007992495d1a2353f0ca957133916f2fd27871d7d30a')
 TEST_PROOF = '39826fc608153f0ce34cd0a48cfe5e6712914e2d157c8c5475c4262445319593'
 PROBE_SHA = '36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3'
+ACL_PROBE_SHA = '001e51d270c079153cc38db1be53c723fbbc8a8bb9e981e718e7b657127bc778'
 UTIL_VERSION = '2.41.6-0+deb13u0+gold1'
 NCURSES_VERSION = '6.6+20260608-2~trixie+gold1'
 PACKAGES = {
@@ -66,8 +67,10 @@ EVIDENCE_REPORTS = {'base-admission.json':2*1024**2,'baseline-inventory.json':2*
     'candidate-inventory.json':2*1024**2,'before-run.log':2*1024**2,'after-run.log':2*1024**2,
     'native-run.log':2*1024**2,'focused-run.log':2*1024**2,'focused-tests.json':65536,
     'component-presence.json':131072,'build.log':32*1024**2,'builder-inspect.log':65536,
-    'base-alias-plan.json':65536,'baseline-image-identity.json':65536}
+    'base-alias-plan.json':65536,'baseline-image-identity.json':65536,
+    'acl-consumer-presence.json':4*1024**2,'acl-run.log':4*1024**2}
 PUBLIC_FAILURE_CODES = frozenset((
+    'acl_probe_changed','acl_receipt_bound','acl_receipt_identity','acl_receipt_scope',
     'acl_parent_pin','application_or_python_changed','archive_config','archive_config_bound','archive_config_digest',
     'archive_config_name','archive_manifest','artifact_digest','artifact_download_failed','artifact_size','base_admission_scope',
     'base_alias','base_alias_changed','base_alias_cleanup_owner','base_alias_cleanup_incomplete','base_alias_plan_missing','base_archive_changed','base_daemon_layers_changed',
@@ -89,7 +92,7 @@ PUBLIC_PHASES = frozenset(('controller_admission','sealed_sources','download_ima
     'download_test_evidence','admit_test_evidence','fetch_test_sources','base_image_admission','base_archive_config',
     'load_base_image','inspect_base_image','audit_base_image','create_base_alias','inspect_base_alias','inspect_builder',
     'write_build_context','build_candidate','cleanup_base_alias','inspect_candidate_image','audit_candidate_image',
-    'native_checks','focused_tests','component_probe','bind_composition_evidence','composition_complete',
+    'native_checks','focused_tests','component_probe','acl_consumer_probe','bind_composition_evidence','composition_complete',
     'finalize_admission','inspect_final_candidate','inspect_final_baseline','read_final_base_archive',
     'bind_raw_reports','export_image','export_complete'))
 
@@ -517,7 +520,7 @@ def cleanup_isolated(root,target,name,token,image):
     docker(root,['rm','--force',value['Id']],seconds=20)
 
 
-def isolated(root,image,program,purpose,*,mounts=()):
+def isolated(root,image,program,purpose,*,mounts=(),maximum=2*1024**2):
     token=os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
     name='security-os-'+purpose+'-'+token;cid=None
     argv=['create','--name',name,'--label','io.gold-trade.os-compose-owner='+token,
@@ -528,7 +531,7 @@ def isolated(root,image,program,purpose,*,mounts=()):
     try:
         observed=docker(root,[*argv,image,'-I','-B','-c',program,image],maximum=256).decode().strip()
         require(re.fullmatch('[a-f0-9]{64}',observed),'container_identity');cid=observed
-        output=docker(root,['start','--attach',cid],seconds=180,maximum=2*1024**2,
+        output=docker(root,['start','--attach',cid],seconds=180,maximum=maximum,
                       combine_stderr=True,log_path=root/'reports'/(purpose+'-run.log'))
         require(docker(root,['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip()==b'0','container_exit')
         return output
@@ -562,10 +565,37 @@ def evidence_hashes(root):
     return {name:sha256(read(root/'reports'/name,maximum)).hexdigest() for name,maximum in EVIDENCE_REPORTS.items()}
 
 
+def validate_acl_receipt(raw,image,commit):
+    require(0<len(raw)<=4*1024**2,'acl_receipt_bound');value=json.loads(raw)
+    require(value.get('schema')=='security_acl_consumer_presence/1' and value.get('image_id')==image
+        and value.get('source_commit')==commit and value.get('verifier_sha256')==ACL_PROBE_SHA,'acl_receipt_identity')
+    require(all(value.get(key) is False for key in ('directory_symlinks_followed','inspected_code_executed',
+        'static_or_obfuscated_embedded_code_analyzed','dlopen_or_ctypes_reachability_analyzed',
+        'acl_flags_or_callsite_safety_analyzed','production_mounts_or_data_used','scanner_findings_modified','security_accepted'))
+        and value.get('scope')=='regular_elf_dynamic_needed_and_undefined_acl_symbols_under_fixed_roots'
+        and type(value.get('inventory')) is dict and value['inventory'].get('roots')==['/usr','/app','/opt']
+        and type(value['inventory'].get('elf_files')) is list and value['inventory']['elf_files'],'acl_receipt_scope')
+    return value
+
+
+def acl_consumer_probe(root,image,commit):
+    raw=read(root/'source/verify_acl_consumer_presence.py',131072)
+    require(sha256(raw).hexdigest()==ACL_PROBE_SHA,'acl_probe_changed')
+    program=('import hashlib,json,sys;raw=bytes.fromhex('+repr(raw.hex())+');'
+        'assert hashlib.sha256(raw).hexdigest()=='+repr(ACL_PROBE_SHA)+';'
+        'scope={"__name__":"sealed_acl_inventory"};'
+        'exec(compile(raw,"<sealed-acl-inventory>","exec"),scope);'
+        'print(json.dumps(scope["probe"](sys.argv[1],'+repr(commit)+','+repr(ACL_PROBE_SHA)+'),sort_keys=True))')
+    result=isolated(root,image,program,'acl',maximum=4*1024**2)
+    validate_acl_receipt(result,image,commit)
+    write(root/'reports/acl-consumer-presence.json',result)
+
+
 def load_sealed(root):
     identity=json.loads(read(root/'source/identity.json',65536))
     require(identity['recipe_commit']==os.environ['GITHUB_SHA'] and set(identity['files'])=={
-        'compose_security_os_candidate.py','admit_security_component_image_reuse.py','verify_image_component_presence.py'},'sealed_inventory')
+        'compose_security_os_candidate.py','admit_security_component_image_reuse.py','verify_image_component_presence.py',
+        'verify_acl_consumer_presence.py'},'sealed_inventory')
     modules={}
     for name,row in identity['files'].items():
         raw=read(root/'source'/name,131072)
@@ -573,6 +603,7 @@ def load_sealed(root):
         if name=='compose_security_os_candidate.py':
             require(raw==read(Path(__file__).resolve(),131072),'controller_source_changed');continue
         if name=='verify_image_component_presence.py':require(sha256(raw).hexdigest()==PROBE_SHA,'probe_changed')
+        if name=='verify_acl_consumer_presence.py':require(sha256(raw).hexdigest()==ACL_PROBE_SHA,'acl_probe_changed')
         module=ModuleType('composition_'+name.removesuffix('.py'));exec(compile(raw,'<sealed-'+name+'>','exec'),module.__dict__);modules[name]=module
     return identity,modules
 
@@ -648,6 +679,7 @@ def compose(root):
     probe=modules['verify_image_component_presence.py'];probe_raw=read(root/'source/verify_image_component_presence.py',65536)
     phase(root,'component_probe');component=probe.in_container(image,SOURCE,probe_raw,PROBE_SHA);validate_component(component,image)
     write(root/'reports/component-presence.json',component)
+    phase(root,'acl_consumer_probe');acl_consumer_probe(root,image,identity['recipe_commit'])
     record={'schema':'security_os_composition/1','status':'composed_tested_not_accepted','image_id':image,'parent_image_id':IMAGE,
         'original_provenance':admitted['export_provenance'],'recipe':identity,'families':families,'runtime_config':before['Config'],
         'original_oci_config':original_config['config'],
@@ -724,6 +756,7 @@ def finalize(root):
         and record['focused_tests']==56 and record['full_runtime_matrix']=='NOT_TESTED','composition_state')
     require(record['test_sources_sha256']==TEST_PROOF and record['evidence_sha256']==evidence_hashes(root),'composition_evidence_changed')
     validate_component(read(root/'reports/component-presence.json',131072),record['image_id'])
+    validate_acl_receipt(read(root/'reports/acl-consumer-presence.json',4*1024**2),record['image_id'],identity['recipe_commit'])
     image=record['image_id'];phase(root,'inspect_final_candidate')
     current=image_record(docker(root,['image','inspect',image],maximum=2*1024**2),image)
     phase(root,'inspect_final_baseline')

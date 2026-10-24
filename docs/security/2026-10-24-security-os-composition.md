@@ -104,6 +104,20 @@ and export never change security_accepted or raw_scanner_gate_waived to true.
 | ncurses four |40112668891 /12567123180|1319510 /5d4f181112b2965d177c10e3923b2ba2ff4d2b0ee6716818acc9b7f784bfee08|0903c9fbcd69d5dbc6e381f2c84d2718f85899e23c375de2e1c8ec57e81483fd|
 | ACL and tar two |40115339187 /12567979094|933904 /d367fb3c1b92f069538a6e90a77ea110efec6dccd9286a8f0e1359b285bc1765|c0114c344ec6103c1d8053421f5e63dc06721b16d8e318f21cde95608d9b465c|
 
+## Additional static ACL caller inventory: source integration
+
+The existing recipe now seals a fourth published source,
+verify_acl_consumer_presence.py, SHA256
+001e51d270c079153cc38db1be53c723fbbc8a8bb9e981e718e7b657127bc778.
+After composition, the same immutable image runs those hash-checked literal
+bytes inside the existing read-only, networkless, capability-free bounded
+container. No inventoried ELF is executed or loaded. Returned image, recipe
+commit, verifier hash, scope and false safety/acceptance flags must match.
+The JSON and bounded log join the composition/export hash chain, and the final
+export rechecks the receipt. The prior thirteen-hash actual run remains unchanged;
+this integration requires its own new CI result and does not close ACL54369.
+It adds no App/vendor rebuild or alternative archive-admission framework.
+
 Package admission checks ZIP bytes/hash, bounded closed member names, pinned
 receipts and all fifteen exact archive hashes/versions. The ACL/tar receipt
 also binds the actual ACL compiler receipt. The public installation capsule

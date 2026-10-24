@@ -242,7 +242,16 @@ class CompositionTests(unittest.TestCase):
         new=deepcopy(old);new['inventory'].update({name:row[0] for name,row in M.PACKAGES.items()})
         return old,new
 
-    def composed_untagged_store(self):
+    def acl_receipt(self,image,commit):
+        value={'schema':'security_acl_consumer_presence/1','image_id':image,'source_commit':commit,
+            'verifier_sha256':M.ACL_PROBE_SHA,'scope':'regular_elf_dynamic_needed_and_undefined_acl_symbols_under_fixed_roots',
+            'inventory':{'roots':['/usr','/app','/opt'],'elf_files':[{'path':'/usr/bin/tar'}]}}
+        for key in ('directory_symlinks_followed','inspected_code_executed','static_or_obfuscated_embedded_code_analyzed',
+                'dlopen_or_ctypes_reachability_analyzed','acl_flags_or_callsite_safety_analyzed',
+                'production_mounts_or_data_used','scanner_findings_modified','security_accepted'):value[key]=False
+        return value
+
+    def composed_untagged_store(self,*,changed_acl=False):
         # Named Docker boundary models documented last-tag eviction. All source,
         # package, process and export boundaries remain explicit owned fixtures.
         baseline=self.image();baseline['Id']=M.IMAGE;baseline['RepoTags']=[]
@@ -261,6 +270,9 @@ class CompositionTests(unittest.TestCase):
         admission.admit_image.return_value={'docker_archive_bytes':1,'docker_archive_sha256':'c'*64,'export_provenance':{'source':M.SOURCE}}
         probe=Mock(in_container=Mock(return_value=M.encoded(component)))
         (self.root/'source').mkdir();(self.root/'source/verify_image_component_presence.py').write_bytes(b'owned public fixture')
+        acl_raw=b'owned public ACL source fixture'
+        self.stack.enter_context(patch.object(M,'ACL_PROBE_SHA',sha256(acl_raw).hexdigest()))
+        (self.root/'source/verify_acl_consumer_presence.py').write_bytes(acl_raw+(b' changed' if changed_acl else b''))
         def packages(path,group,target):
             return {'packages':[{'name':name,'path':name+'.deb','version':M.PACKAGES[name][0],
                 'bytes':M.PACKAGES[name][1],'sha256':M.PACKAGES[name][2]} for name in M.GROUPS[group][5]]}
@@ -292,6 +304,10 @@ class CompositionTests(unittest.TestCase):
             if purpose=='before':value=original
             elif purpose=='after':value=installed
             elif purpose=='focused':value={'image_id':candidate['Id'],'tests':56,'modules':5,'status':'passed'}
+            elif purpose=='acl':
+                self.assertEqual(kwargs['maximum'],4*1024**2)
+                self.assertIn(repr(acl_raw.hex()),program);self.assertIn(repr(M.ACL_PROBE_SHA),program)
+                state['acl_program']=program;value=self.acl_receipt(candidate['Id'],identity['recipe_commit'])
             else:self.assertEqual(purpose,'native');value={'status':'passed'}
             raw=M.encoded(value);M.write(root/'reports'/(purpose+'-run.log'),raw);return raw
         def archive_config(path,image,*,include_tags=False):
@@ -317,6 +333,25 @@ class CompositionTests(unittest.TestCase):
             'components':[{'name':name,'version':row[0]} for name,row in M.PACKAGES.items()]}
         (self.root/'reports/vulnerabilities.json').write_bytes(M.encoded(raw));(self.root/'reports/sbom.cdx.json').write_bytes(M.encoded(sbom))
         state['composition']=record;return state
+
+    def test_acl_receipt_binds_actual_image_recipe_source_and_no_safety_claims(self):
+        image='sha256:'+'a'*64;commit='b'*40;value=self.acl_receipt(image,commit)
+        self.assertEqual(M.validate_acl_receipt(M.encoded(value),image,commit),value)
+        for key,changed in (('image_id','sha256:'+'c'*64),('source_commit','d'*40),
+                ('verifier_sha256','e'*64),('security_accepted',True),('inspected_code_executed',True),
+                ('scope','all_callers_safe'),('inventory',{'roots':['/usr'],'elf_files':[]})):
+            wrong=deepcopy(value);wrong[key]=changed
+            with self.subTest(key=key),self.assertRaises(RuntimeError):M.validate_acl_receipt(M.encoded(wrong),image,commit)
+
+    def test_changed_sealed_acl_bytes_refuse_before_acl_container_execution(self):
+        with self.assertRaisesRegex(RuntimeError,'acl_probe_changed'):self.composed_untagged_store(changed_acl=True)
+        self.assertEqual(M.phase_state(self.root)['phase'],'acl_consumer_probe')
+
+    def test_acl_evidence_is_bound_to_the_same_export_recipe(self):
+        state=self.composed_untagged_store()
+        self.assertIn('acl_program',state)
+        for name in ('acl-consumer-presence.json','acl-run.log'):
+            self.assertEqual(state['composition']['evidence_sha256'][name],sha256((self.root/'reports'/name).read_bytes()).hexdigest())
 
     def test_untagged_baseline_survives_real_finalizer_and_export_before_alias_cleanup(self):
         state=self.composed_untagged_store();alias=M.base_alias_plan()['name']

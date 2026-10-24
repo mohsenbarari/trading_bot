@@ -36,13 +36,14 @@ jobs:
           (root/'source').mkdir(mode=0o700)
           commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
           records={}
-          for name in ('compose_security_os_candidate.py','admit_security_component_image_reuse.py','verify_image_component_presence.py'):
+          for name in ('compose_security_os_candidate.py','admit_security_component_image_reuse.py','verify_image_component_presence.py','verify_acl_consumer_presence.py'):
               path='scripts/'+name
               size=subprocess.run(['git','--no-optional-locks','cat-file','-s',commit+':'+path],check=True,capture_output=True,timeout=10).stdout
               assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=131072
               raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',commit+':'+path],check=True,capture_output=True,timeout=10).stdout
               assert len(raw)==int(size)
               if name=='verify_image_component_presence.py':assert sha256(raw).hexdigest()=='36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3'
+              if name=='verify_acl_consumer_presence.py':assert sha256(raw).hexdigest()=='001e51d270c079153cc38db1be53c723fbbc8a8bb9e981e718e7b657127bc778'
               fd=os.open(root/'source'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
               with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
               records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
