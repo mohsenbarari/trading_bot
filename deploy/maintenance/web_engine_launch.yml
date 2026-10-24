@@ -1,0 +1,116 @@
+---
+# One durable launch only; the unchanged C96 controller owns every operation.
+- name: Preflight or launch the exact reviewed Web engine transaction
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    web_engine_launch_action: check
+  tasks:
+    - name: Admit only the strict existing Web lane and exact final-plan digest
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - web_engine_launch_action in ['check', 'start']
+          - web_engine_launch_plan_sha256 is match('^[a-f0-9]{64}$')
+
+    - name: Authenticate all thirteen sealed sources and refuse every previous launch or operation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import hashlib,json,os,pathlib,stat,subprocess,sys
+            from datetime import datetime,timezone
+            ROOT=pathlib.Path('/root/.local/security-web-engine-20261023')
+            CONTROL=pathlib.Path('/root/secure-envs/trading-bot/release-control')
+            PENDING=pathlib.Path('/var/lib/trading-bot/production-release/two-host-release-state.json')
+            UNIT='security-web-engine-05-b4bd11449f9843cd930b3f1dfddac5c5.service'
+            SOURCES=('deploy/maintenance/web_engine_preflight.py','deploy/maintenance/web_engine_controller.py','deploy/maintenance/web_engine_offhost.py','deploy/maintenance/web_engine_transaction.yml','deploy/maintenance/web_engine_local_inventory.yml','deploy/maintenance/ansible.cfg','scripts/validate_docker_daemon_maintenance.py','scripts/crypt_market_pipeline_backup.py','scripts/backup_market_pipeline_archive.py','scripts/prepare_market_pipeline_release.py','deploy/maintenance/web_engine_prepare.py','deploy/maintenance/web_engine_prepare.yml','deploy/maintenance/web_engine_inventory.yml')
+            def native():
+                assert os.geteuid()==0 and pathlib.Path('/proc/1/exe').readlink().name=='systemd'
+                assert not any(os.path.lexists(p) for p in ('/.dockerenv','/run/.containerenv'))
+                for ns in ('pid','mnt','user'):assert os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns)
+            def read(p,maximum):
+                assert p.resolve(strict=True)==p
+                for parent in p.parents:
+                    s=parent.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid in {0,os.geteuid()} and not s.st_mode&0o022
+                fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                try:
+                    s=os.fstat(fd);assert stat.S_ISREG(s.st_mode) and s.st_uid==os.geteuid() and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600 and s.st_size<=maximum
+                    data=os.read(fd,maximum+1);assert len(data)==s.st_size
+                    identity=lambda x:(x.st_dev,x.st_ino,x.st_size,x.st_mtime_ns,x.st_ctime_ns)
+                    assert identity(s)==identity(os.fstat(fd))==identity(p.lstat())
+                    return data
+                finally:os.close(fd)
+            def verify(digest):
+                native();s=ROOT.lstat();assert stat.S_ISDIR(s.st_mode) and stat.S_IMODE(s.st_mode)==0o700
+                raw=read(ROOT/'plan.json',2097152);assert hashlib.sha256(raw).hexdigest()==digest
+                plan=json.loads(raw);assert plan['operation_id']=='security-web-engine-20261023-05' and plan['nonce']=='b4bd11449f9843cd930b3f1dfddac5c5' and plan['deadline_utc']=='2026-10-24T06:00:00Z' and plan['source_root']==str(ROOT/'source')
+                files={entry['path']:entry for entry in plan['files']};assert len(files)==len(plan['files'])
+                for name in SOURCES:
+                    p=ROOT/'source'/name;data=read(p,131072);assert hashlib.sha256(data).hexdigest()==files[str(p)]['sha256'] and len(data)==files[str(p)]['size']
+                    if name=='deploy/maintenance/web_engine_controller.py':assert hashlib.sha256(data).hexdigest()=='96bab1152eb4ce105e56717e87c27d32836a8c06a0ae01962178dd034f3df367'
+                absent=(ROOT/'controller05.log',CONTROL/'private-primary-controller.lock',CONTROL/'security-web-engine-20261023-05.journal.json',CONTROL/'security-web-engine-20261023-05.source.lock',PENDING)
+                assert not any(os.path.lexists(p) for p in absent)
+                result=subprocess.run(['/usr/bin/systemctl','show',UNIT,'-p','LoadState','--value'],capture_output=True,check=True,timeout=10)
+                assert result.stdout==b'not-found\n'
+            def admit_start(action):
+                assert action in {'check','start'}
+                if action=='start':assert datetime.now(timezone.utc)>=datetime(2026,10,24,4,30,tzinfo=timezone.utc)
+            verify(sys.argv[1])
+            admit_start(sys.argv[2])
+          - '{{ web_engine_launch_plan_sha256 }}'
+          - "{{ 'start' if web_engine_launch_action == 'start' and not ansible_check_mode else 'check' }}"
+      changed_when: false
+      check_mode: false
+      timeout: 30
+
+    - name: Run the full unchanged controller default preflight without runtime mutation
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, /root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_controller.py, run, --manifest, /root/.local/security-web-engine-20261023/plan.json, --manifest-sha256, '{{ web_engine_launch_plan_sha256 }}']
+      changed_when: false
+      check_mode: false
+      timeout: 300
+
+    - name: Default and Ansible check mode create no unit or output file
+      ansible.builtin.meta: end_play
+      when: web_engine_launch_action == 'check' or ansible_check_mode
+
+    - name: Launch exactly one durable native-namespace controller without retry
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-run
+          - --no-ask-password
+          - --expand-environment=no
+          - --unit=security-web-engine-05-b4bd11449f9843cd930b3f1dfddac5c5.service
+          - --property=Type=exec
+          - --property=Restart=no
+          - --property=RuntimeMaxSec=5400
+          - --property=TimeoutStopSec=30
+          - --property=KillMode=control-group
+          - --property=UMask=0077
+          - --property=LimitFSIZE=infinity
+          - --property=WorkingDirectory=/root/.local/security-web-engine-20261023
+          - --property=StandardOutput=append:/root/.local/security-web-engine-20261023/controller05.log
+          - --property=StandardError=append:/root/.local/security-web-engine-20261023/controller05.log
+          - /usr/bin/env
+          - -i
+          - PATH=/usr/sbin:/usr/bin:/sbin:/bin
+          - LC_ALL=C
+          - DOCKER_HOST=unix:///var/run/docker.sock
+          - /usr/bin/python3
+          - -I
+          - -B
+          - /root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_controller.py
+          - run
+          - --manifest
+          - /root/.local/security-web-engine-20261023/plan.json
+          - --manifest-sha256
+          - '{{ web_engine_launch_plan_sha256 }}'
+          - --apply
+      timeout: 30

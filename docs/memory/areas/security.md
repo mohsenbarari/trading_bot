@@ -33,9 +33,10 @@
 - Self-revoking SSH can strand Ansible housekeeping. Final revocation uses
   controller-local SSH; separately verify key/pin/authorized-entry absence and
   retain failed-transport evidence.
-- 24Oct clarification: maximum90min from ACTUAL first downtime, not04:41Z.
-  Fresh04 window is conservatively bounded05:20Z; keep old02/03 expiries intact.
-  Require restore reserve; preparation is not actual engine acceptance.
+- 24Oct: maximum90min from ACTUAL first downtime. Fresh05 start is not before
+  04:30Z, deadline06:00Z; old02/03/04 expiries stay unchanged. Keep restore
+  reserve; preparation is not acceptance. Docker-only work does not close the
+  persistent collector-inhibition gap required before Web kernel reboot.
 - Actual combined backup roles are Native=foreign/trading_bot, Web=iran/current;
   bind real host/project/artifacts, never infer geography from role names.
   Process/cgroup death does not cancel accepted Docker/PID1 requests; ambiguous

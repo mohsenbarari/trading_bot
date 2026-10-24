@@ -229,10 +229,29 @@ security gates and the separately requested clean-unit acceptance are complete.
 
 ## New 24 October window: bounded work and truthful recovery
 
-The newly authorized outer deadline is **2026-10-24 04:41:00 UTC**. Only the
-fresh `host-patch-03` reverse-SSH lane receives that expiry; previous identities
-retain their old expiry and are not extended or adopted. Native's completed
+The user clarified that the approved 90 minutes starts with actual downtime.
+The conservative new outer deadline is **2026-10-24 06:00:00 UTC**. Only the
+fresh `host-patch-05` reverse-SSH lane receives that expiry; previous identities
+retain their old expiry (`04`:05:20, `03`:04:41, `02`:01:30 UTC) and are not extended or adopted. Native's completed
 kernel transaction and its original bound guard are not modified by this work.
+The exact05 launcher additionally refuses **start before04:30 UTC**, while
+read-only checks remain possible earlier, so this fixed06:00 outer deadline
+cannot admit more than90minutes of project downtime. The unchanged controller's
+65-minute minimum start budget gives a latest first admission of04:55 UTC.
+
+Root explicitly serializes **one** preparation invocation for this fixed
+workspace; this is not a concurrency guarantee. With no final plan, reservation
+or pending operation, that invocation may refresh only the fixed authenticated
+13 public sources, empty namespace marker, metadata inputs and two metadata
+receipts, then independently checks all staged hashes before execution. A final
+plan ends the play before any copy; its source bundle is never refreshed.
+An unused finalized previous-window plan must be preserved by separately
+reviewed exact-identity retirement, not edited, adopted or overwritten.
+
+The actual Web systemd no-job tuple `(uo) 0 "/"` renders as `Job=` even with
+`show --all`. Rescue therefore requires exactly explicit `LoadState=loaded`
+plus `Job=` or `Job=0`; missing, unloaded, duplicate or nonzero job metadata
+refuses before restoration. All daemon-side ambiguity restrictions still apply.
 
 Preparation downloads and verifies all nine old/new public packages, checks the
 actual SSH/off-host capacity, freezes the real metadata and validates the source
@@ -307,3 +326,74 @@ automatic rollback tool**. If that residual risk and the measured preparation
 facts do not support recoverability before the deadline, stop at preparation;
 do not begin quiescence merely to meet a security-completion target. Neither
 these tests nor the 30-minute reserve guarantees a 90-minute recovery outcome.
+
+## Daemon-only scope proof after the04 launch was refused
+
+The attempted04 start was refused **before** commit or launch. It was not
+retried through another executor. Read-only inspection then authenticated the
+actual Web prepared controller as
+`96bab1152eb4ce105e56717e87c27d32836a8c06a0ae01962178dd034f3df367`
+and the unused04 plan as
+`5ad57c8c91d758df46a50c5cd661f2c35665e5561b671b669f12ba40f57fb373`.
+The05 operation must create a new immutable plan; it never extends or adopts04.
+
+The source call path is specifically Docker maintenance, **not kernel reboot**:
+
+- The launcher executes only this exact controller's `run --apply`. Its fixed
+  local transaction has no reboot module or reboot/shutdown/poweroff command.
+  The reachable backup/crypto/release-primitives sources were also checked;
+  reboot text appears only in explicit `reboot_performed=false` metadata and
+  descriptive non-reboot comments, not an executable reboot path.
+- `apt_argv` installs only the five SHA-pinned local CE/CLI/containerd/Compose/
+  Buildx packages and removes the four exact old Docker/containerd/runc/Compose
+  packages. It uses `--no-download --no-install-recommends`, not full upgrade.
+  `apt_scope` refuses any simulated installed/removed name outside those exact
+  sets. No kernel, initrd, bootloader, systemd or general OS package is admitted.
+- Immediately before the actual package command, `install` exclusively creates
+  its own `/usr/sbin/policy-rc.d` containing `#!/bin/sh\nexit 101\n`, fsyncs it,
+  sets `NEEDRESTART_MODE=l` and `DEBIAN_FRONTEND=noninteractive`, and afterward
+  removes only that same inode/content. Existing policy is a refusal, not an
+  overwrite. This suppresses package service auto-start; the original captured
+  engines and containers are restored by the guarded DB-first transaction.
+
+All nine retained `.deb` files were independently rehashed against the prepared
+plan, then their control archives were read in RAM with a1MiB streamed output
+cap and15-second deadline, without extracting or installing files. Exact script
+hashes below identify the actual authenticated public package scripts:
+
+| Package | Maintscript | SHA256 |
+| --- | --- | --- |
+| New `docker-ce` | postinst | `31fe64d3324bd501e2b87af9c339772e1cbdc05197140efeba4712cf38395bc8` |
+| New `docker-ce` | preinst | `795697b58c15a48888f2b64113a6f8e284acdc07c1cc9e6657c4ff96e96ba034` |
+| New `docker-ce` | prerm | `46e1a9a9f0c96c4a2e7eb7c3d380aab2919c617ecfae89d0658c3db9ceb6ee4e` |
+| New `docker-ce` | postrm | `44264f6685872e15b1ac067a1a65fc6dd1aa248164ade6576fe6aee3740c0b42` |
+| New `containerd.io` / old `containerd` | postinst | `8eb27a42216980e4718b36df9bca1ca5106f6ee6cd5e530b01317ed6b57fd837` |
+| New `containerd.io` / old `containerd` | prerm | `fb57783af42240ca75150d5befc5a7cf2c353088dbf237ca2d78401929b83332` |
+| New `containerd.io` / old `containerd` | postrm | `07708390cab040da3c2cf628f04dd1ba71299bf5fcd5ec5e039712961ced75a2` |
+| Old `docker.io` | postinst | `eb565a299e76c65bca86708766bf2d4c158b83fb7b25b7eea5098da4f522df15` |
+| Old `docker.io` | preinst | `0126ea7a95f68fd15cf0d621e1d745b49ccd7f3b0e8b4fc42f8b5e79f57af3a1` |
+| Old `docker.io` | prerm | `4e2e352933d74f3c35486e34042cf9a582dcef01efe4405e6610fec647cd9c35` |
+| Old `docker.io` | postrm | `5b2e41555d6fdd376fe96ea0ed97e06f8b0510327891c39b7a32bff343680ed7` |
+
+New CLI/Compose/Buildx and old runc/Compose have no such maintscripts. None of
+the inspected scripts contains reboot/shutdown/poweroff/halt actions. Service
+actions name only Docker/containerd and use `invoke-rc.d`, `deb-systemd-invoke`,
+`deb-systemd-helper` or `systemctl daemon-reload`; they do not remove collector
+authority drop-ins or their condition path.
+
+Both actual public runtime collector drop-ins contain exactly
+`[Unit]\nConditionPathExists=/run/trading-bot/market-capture-legacy-authority-enabled\nRefuseManualStart=yes\n`.
+Their SHA256 is
+`7c76f1096916e6d7541684abee33514e281aaa81b096098b633f0dd4c5498066`,
+at `/run/systemd/system/{coin-capture,market-channel-capture}.service.d/market-container-authority.conf`.
+The captured device/inodes are29/12386748 and29/12386747 respectively. A Docker/
+containerd restart or PID1 daemon-reload does not clear `/run`; the transaction
+also rechecks original unit fragment/drop-in hashes, disabled collector intent,
+all27 original container IDs/images/mounts and exact26-running baseline.
+
+This evidence narrows the same reviewed executor to **daemon-only**. It is not
+a claim that an unexpected host reboot is impossible, that host reboot is
+authorized by this launcher, or that the separate persistent collector boot
+inhibition gap is closed. That gap remains a blocker for the later Web kernel
+reboot. If the execution reviewer still refuses, do not bypass it; close the
+boot inhibition through reviewed source and refreeze a fresh plan first.

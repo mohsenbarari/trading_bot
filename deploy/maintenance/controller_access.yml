@@ -19,9 +19,9 @@
       def require(ok, message):
           if not ok: raise SystemExit(message)
       def setup_deadline(task_id):
-          # Fresh04 alone receives the newly approved window. Old02/03 are
+          # Fresh05 alone receives the newly approved window. Old02/03/04 are
           # never extended or adopted by a subsequent task identity.
-          hour, minute = (5, 20) if task_id == 'host-patch-04' else (4, 41) if task_id == 'host-patch-03' else (1, 30)
+          hour, minute = (6, 0) if task_id == 'host-patch-05' else (5, 20) if task_id == 'host-patch-04' else (4, 41) if task_id == 'host-patch-03' else (1, 30)
           return datetime.datetime(2026, 10, 24, hour, minute, tzinfo=datetime.timezone.utc)
       require(action in ('check', 'setup', 'cleanup'), 'invalid action')
       require(role in ('bot', 'web'), 'invalid role')
@@ -118,7 +118,7 @@
           - hostvars.controller_web.ansible_ssh_private_key_file == '/root/.ssh/id_ed25519_iran'
           - hostvars.controller_web.ansible_ssh_common_args == '-o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes'
           - controller_access_action in ['check', 'setup', 'cleanup']
-          - controller_access_action == 'check' or controller_access_confirmation == ('TEMPORARY-ROOT-SSH-20261024T052000Z' if controller_access_id == 'host-patch-04' else 'TEMPORARY-ROOT-SSH-20261024T044100Z' if controller_access_id == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T013000Z')
+          - controller_access_action == 'check' or controller_access_confirmation == ('TEMPORARY-ROOT-SSH-20261024T060000Z' if controller_access_id == 'host-patch-05' else 'TEMPORARY-ROOT-SSH-20261024T052000Z' if controller_access_id == 'host-patch-04' else 'TEMPORARY-ROOT-SSH-20261024T044100Z' if controller_access_id == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T013000Z')
 
     - name: Inspect persistent native to Web identity metadata without opening its bytes
       ansible.builtin.stat:
@@ -203,7 +203,7 @@
 
     - name: Derive exactly one options-prefixed managed public key
       ansible.builtin.set_fact:
-        controller_managed_line: "{{ ('restrict,from=\"65.109.220.59\",expiry-time=\"' + ('20261024052000Z' if controller_access_id == 'host-patch-04' else '20261024044100Z' if controller_access_id == 'host-patch-03' else '20261024013000Z') + '\" ' + (controller_web_owned.stdout | from_json).public_key) if (controller_web_owned.stdout | from_json).public_key else '' }}"
+        controller_managed_line: "{{ ('restrict,from=\"65.109.220.59\",expiry-time=\"' + ('20261024060000Z' if controller_access_id == 'host-patch-05' else '20261024052000Z' if controller_access_id == 'host-patch-04' else '20261024044100Z' if controller_access_id == 'host-patch-03' else '20261024013000Z') + '\" ' + (controller_web_owned.stdout | from_json).public_key) if (controller_web_owned.stdout | from_json).public_key else '' }}"
 
     - name: Require private key and exact public file set for setup
       ansible.builtin.assert:
