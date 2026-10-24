@@ -191,13 +191,16 @@ def main():
                 current = state.setdefault(role, {})
                 health = healths[role]
                 grace = startup_grace(role, container, health, current, now)
+                # Docker can report Running=true while its restart manager is
+                # backing off with no live process. Preserve Docker recovery;
+                # a recent starting heartbeat cannot make this LIVENESS_OK.
+                restarting = container["State"].get("Restarting") or container["State"].get("Status") == "restarting"
+                if restarting:
+                    results.append({"role": role, "status": "STARTUP_GRACE" if grace else "DEGRADED",
+                                    "reason_code": None if grace else "CRASH_LOOP"})
+                    continue
                 if not container["State"]["Running"]:
-                    restarting = container["State"].get("Restarting") or container["State"].get("Status") == "restarting"
-                    if restarting:
-                        results.append({"role": role, "status": "STARTUP_GRACE" if grace else "DEGRADED",
-                                        "reason_code": None if grace else "CRASH_LOOP"})
-                    else:
-                        results.append({"role": role, "status": "STOPPED_REQUIRES_REVIEW"})
+                    results.append({"role": role, "status": "STOPPED_REQUIRES_REVIEW"})
                     continue  # Preserve intentional stops; Docker recovers crashes.
                 started = container["State"]["StartedAt"]
                 if current.get("started_at") != started:

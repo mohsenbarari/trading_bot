@@ -143,3 +143,49 @@ class WatchdogTests(unittest.TestCase):
                     watchdog.main()
                     run.assert_not_called()
                     self.assertIn("DEPLOYMENT_IN_PROGRESS", output.getvalue())
+
+    def test_running_true_restarting_true_is_not_healthy_or_manually_restarted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ops = root / 'ops'; ops.mkdir()
+            deployment = root / 'deployment.lock'; deployment.touch()
+            containers = []
+            for role in watchdog.ROLES['web']:
+                state = root / role / role; state.mkdir(parents=True)
+                (state / 'health.json').write_text(json.dumps(health(role)))
+                containers.append({'Id': role, 'Config': {'Labels': {
+                    'com.docker.compose.project': 'test-pipeline', 'com.docker.compose.service': role}},
+                    'State': {'Running': True, 'Restarting': False, 'Status': 'running',
+                              'StartedAt': '1970-01-01T00:16:30Z'}})
+            target = next(row for row in containers if row['Id'] == 'market-capture-account2')
+            args = SimpleNamespace(host_role='web', project='test-pipeline', state_root=root,
+                                   ops_root=ops, deployment_lock=deployment, apply=True)
+            restarts = []
+            def run(argv, timeout=10):
+                if argv[1] == 'inspect':
+                    return SimpleNamespace(returncode=0, stdout=json.dumps(containers))
+                if argv[1] == 'exec':
+                    return SimpleNamespace(returncode=0, stdout='')
+                if argv[1] == 'restart':
+                    restarts.append(argv[-1])
+                    return SimpleNamespace(returncode=0, stdout='')
+                self.fail('unexpected watchdog action')
+            for running, restarting, status, expected in (
+                (True, True, 'restarting', 'CRASH_LOOP'),
+                (True, True, 'running', 'CRASH_LOOP'),
+                (True, False, 'restarting', 'CRASH_LOOP'),
+                (False, False, 'exited', None),
+            ):
+                target['State'].update(Running=running, Restarting=restarting, Status=status)
+                with self.subTest(running=running, restarting=restarting, status=status), \
+                     patch.object(watchdog.argparse.ArgumentParser, 'parse_args', return_value=args), \
+                     patch.object(watchdog.os, 'geteuid', return_value=0), \
+                     patch.object(watchdog.time, 'time', return_value=1000), \
+                     patch.object(watchdog, 'run', side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                    watchdog.main()
+                report = json.loads((ops / 'watchdog-health.json').read_bytes())
+                row = next(row for row in report['roles'] if row['role'] == 'market-capture-account2')
+                self.assertEqual(row['status'], 'DEGRADED' if expected else 'STOPPED_REQUIRES_REVIEW')
+                self.assertEqual(row.get('reason_code'), expected)
+                self.assertEqual(report['status'], 'DEGRADED')
+                self.assertFalse(restarts)
