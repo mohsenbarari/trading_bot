@@ -15,20 +15,30 @@ are not production container environment values.
 
 | Profile | Immutable public reference | Config identity | Protected server |
 | --- | --- | --- | --- |
-| PostgreSQL | `postgres@sha256:7bf293f93568d967c8dfcf6d95c2ff522289dc11c558989a9c6f926a644d6dfa` | `sha256:aad6289ca337b3ce76896f2e7e61480490152886c7828120371fb28e6b779e1d` | PostgreSQL 15.19, SHA256 `1e08a0e796ae0461ec40031e9bd7a76831d453e723812b9c3e8757bc411a38c7` |
-| Redis | `redis@sha256:8231d3786e10c470840c27963f3d19672dc7ef3e5d5adc512c01d44faada5672` | `sha256:5509c0097c6064aa8a3b1df58f1d950e67090fffa6678ae8f3f1dc2385f12deb` | Redis 7.4.11, SHA256 `67adb510c4c9db9585ad63404950694241c748ad6f34c3e1cc8fdc095268f1b6` |
+| PostgreSQL | `postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b` | `sha256:aad6289ca337b3ce76896f2e7e61480490152886c7828120371fb28e6b779e1d` | PostgreSQL 15.19, SHA256 `1e08a0e796ae0461ec40031e9bd7a76831d453e723812b9c3e8757bc411a38c7` |
+| Redis | `redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf` | `sha256:5509c0097c6064aa8a3b1df58f1d950e67090fffa6678ae8f3f1dc2385f12deb` | Redis 7.4.11, SHA256 `67adb510c4c9db9585ad63404950694241c748ad6f34c3e1cc8fdc095268f1b6` |
 
 The source contains all eleven/seven ordered baseline diffIDs and exact server and
 entrypoint hashes. Native aad/Web 7bf/Web fe0737 observations share the eleven
 diffIDs and public software bytes. That does not prove equal registry manifest
-identities. The independently observed fe0737 index selects a2c20749… then config
-aad; the recipe does not invent a fe0737→7bf graph. It hashes the public reference's
-actual raw registry index/manifest, selects exactly one Linux/amd64 child when
-needed, checks that child's raw digest and config descriptor, and preserves all
-three identity types in its receipt. Docker daemon identities may refer to the
-proved index, platform manifest or config. Every local RootFS and server byte
-check remains strict. Buildx's documented `imagetools inspect --raw` preserves
+identities. The independently observed fe0737 index selects the exact 3,054-byte
+manifest `sha256:a2c20749c564b4eb73a77bfda626f8a3cde1bbfae020fb97c616a00cdc1a2181`
+then config aad (9,091 bytes). Redis ff02 selects the exact 2,288-byte manifest
+`sha256:1db42ccef14898aa29bae778452d567534b59c107129cbc1163fb552de184d3c`
+then config 5509 (5,531 bytes). Both public indexes contain sixteen children.
+The recipe hashes the actual raw index/manifest, requires exactly one Linux/amd64
+child with that pinned digest/size, and preserves all three identity types.
+Docker daemon identities may refer to the proved index, platform manifest or
+config. Every local RootFS and server byte check remains strict. Buildx's
+documented `imagetools inspect --raw` preserves
 manifest bytes without an appended newline ([upstream implementation](https://github.com/docker/buildx/blob/v0.29.1/util/imagetools/printers.go)).
+
+These candidates preserve the **Native canonical image Config** exactly. The Web
+converted identities 7bf/823 have proved full RootFS/software equivalence only;
+their complete immutable image Config equivalence is still unproven. Before any
+Web role activation a trusted validator must compare those image Configs without
+exposing production container Env/private values. This packet grants no Web role
+eligibility and invents no Web Config hash or fe0737→7bf registry graph.
 
 The distinct running Web image 994e5b… is PostgreSQL 15.18, server SHA256
 `bb5d3bd97463136573859b6b9db854289f6872f89ddf390f4e89e444d8bb8d67`,
@@ -67,6 +77,15 @@ repository directories when `--repositories-file` is set. Its
 [context preparation](https://github.com/alpinelinux/apk-tools/blob/v3.0.8/src/context.c)
 also changes simulation database access to read-only. CI records the exact
 installed apk-tools version; no production package-manager version was inferred.
+
+The root/capability-zero signature-check container reads only an explicitly
+published public capsule: the exact repository/architecture directories are
+0755, the hash/inventory-checked APK/index files and repository list are 0644.
+Publication uses retained descriptors, refuses unexpected paths/owners/links or
+changed bytes, and explicitly sets modes under umask077. The enclosing context
+and task root remain 0700. SDK/gosu compiler inputs remain 0600 inside that private
+context; no new capability or DAC override is granted. Fixture certificates were
+already published in their separate 0755/0644 disposable public directory.
 
 PostgreSQL additionally rebuilds exactly gosu 1.19 source commit
 `6456aaa0f3c854d199d0f037f068eb97515b7513`. All five build source files have
@@ -142,3 +161,38 @@ imports. Named inert command/download models exercise the complete real
 compose/acquire/fixture/cleanup/report/finalize flow for both profiles, including a
 server-byte-drift refusal. They are not substitutes for the actual ordinary CI
 build and server fixtures.
+
+## Actual first CI refusals and narrow correction
+
+[PostgreSQL run40139191263](https://github.com/mohsenbarari/trading_bot/actions/runs/40139191263)
+and [Redis run40139205274](https://github.com/mohsenbarari/trading_bot/actions/runs/40139205274)
+at source `42c3cd898c7ccc8671da0f788cfb8fdf745ef2e1` sealed the published helpers,
+then failed at `pull_baseline` with `command_failed`. Neither reached registry
+inspection, any fixture/container creation, APK/SDK acquisition, build, scan or
+export. Their public artifacts remain unchanged:
+
+- PostgreSQL artifact12578074423: 641 bytes, SHA256
+  `c5775097c98dc23219c2b03ecb2461063897391ea641d772341da75c0f03d033`.
+- Redis artifact12577849560: 638 bytes, SHA256
+  `ef09d0a8824473fed332bf14dc2c2f26fe40d208a3a74b596ea92c2f2194325e`.
+
+The original pull stderr was not retained, so its exact historical error text
+cannot be asserted. Independent correctly scoped public registry requests then
+proved 404/`MANIFEST_UNKNOWN` for 7bf/823 and 200 for the canonical fe/ff02 indexes,
+their selected platform manifests and exact aad/5509 config blobs. Config digest,
+architecture, OS, all eleven/seven ordered diffIDs and volume declarations matched
+the approved Native baselines. No layer or running-container data was downloaded.
+The bounded public projection is
+`/root/trading-bot/trading_bot/.local/security-datastore-registry-baselines-20261024-02.json`,
+8,612 bytes, SHA256
+`47484f3eafd4c0ad7453593ec72350eb9267445992bde88acf384a390b9fe661`.
+The earlier invalid anonymous-scope probe01 is explicitly superseded and supplies
+no registry-validity conclusion.
+
+The correction selects those original canonical roots and pins their exact
+Linux/amd64 manifests, preserving every server/Config/layer/package gate. It adds
+a bounded `baseline-pull.log` including public stderr on success or refusal, with
+no automatic retry. Review also caught the still-unreached root/cap0 public-input
+permission seam; its scoped publication fix above grants no extra capability.
+The changed source is not an actual successful rebuild or activation. Fresh CI
+and its unchanged raw reports remain required.

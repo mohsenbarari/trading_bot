@@ -7,10 +7,11 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 FENCE = ExitStack()
 for target in ('subprocess.Popen', 'subprocess.run', 'os.system', 'os.kill', 'os.killpg',
@@ -43,7 +44,7 @@ class DatastoreTests(unittest.TestCase):
     def registry(self, profile='postgres'):
         p = M.PROFILES[profile]
         return {'reference': p['reference'], 'top_digest': p['reference'].split('@')[1],
-            'platform_manifest_digest': 'sha256:'+'d'*64, 'config_digest': p['config_id'], 'layer_descriptors': []}
+            'platform_manifest_digest': p['platform_manifest_digest'], 'config_digest': p['config_id'], 'layer_descriptors': []}
 
     def image(self, profile='postgres', *, candidate=False):
         p = M.PROFILES[profile]
@@ -74,7 +75,9 @@ class DatastoreTests(unittest.TestCase):
         self.assertEqual(set(M.PROFILES), {'postgres', 'redis'})
         self.assertEqual([len(M.PROFILES[p]['layers']) for p in M.PROFILES], [11, 7])
         self.assertEqual(M.PROFILES['postgres']['version'], 'postgres (PostgreSQL) 15.19')
-        self.assertNotIn('994e5b', repr(M.PROFILES)); self.assertNotIn('fe0737', repr(M.PROFILES))
+        self.assertNotIn('994e5b', repr(M.PROFILES)); self.assertNotIn('7bf293', repr(M.PROFILES)); self.assertNotIn('8231d3', repr(M.PROFILES))
+        self.assertEqual(M.PROFILES['postgres']['reference'], 'postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b')
+        self.assertEqual(M.PROFILES['redis']['reference'], 'redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf')
         for p in M.PROFILES.values():
             self.assertNotEqual(p['reference'].split('@')[1], p['config_id'])
         self.assertEqual(M.GO[1], 66936659); self.assertEqual(len(M.GOSU_FILES), 5)
@@ -134,6 +137,7 @@ class DatastoreTests(unittest.TestCase):
             'config': {'digest': p['config_id'], 'size': 9091, 'mediaType': 'application/vnd.oci.image.config.v1+json'},
             'layers': [{'digest': value, 'size': 1024, 'mediaType': 'application/vnd.oci.image.layer.v1.tar+gzip'} for value in p['layers']]}
         raw = M.encoded(manifest); selected = 'sha256:'+sha256(raw).hexdigest()
+        p['platform_manifest_digest'] = selected; p['platform_manifest_bytes'] = len(raw)
         responses = [raw]
         if index:
             descriptor = {'digest': selected, 'size': len(raw), 'platform': {'os': 'linux', 'architecture': 'amd64'}}
@@ -159,6 +163,13 @@ class DatastoreTests(unittest.TestCase):
         p, responses, _ = self.manifest_fixture()
         with patch.dict(M.PROFILES, {'postgres': p}), patch.object(M, 'docker', return_value=responses[0]+b' '):
             with self.assertRaisesRegex(RuntimeError, 'registry_digest'): M.registry_identity(self.root, 'postgres')
+
+    def test_wrong_selected_manifest_or_descriptor_size_refuses_before_child_fetch(self):
+        for field, value in [('platform_manifest_digest', 'sha256:'+'0'*64), ('platform_manifest_bytes', 99999)]:
+            p, responses, _ = self.manifest_fixture(index=True); p[field] = value
+            with patch.dict(M.PROFILES, {'postgres': p}), patch.object(M, 'docker', side_effect=responses) as call:
+                with self.assertRaisesRegex(RuntimeError, 'registry_platform_pin'): M.registry_identity(self.root, 'postgres')
+                self.assertEqual(call.call_count, 1)
 
     def test_real_audit_parser_and_minimal_delta_both_profiles(self):
         for profile in M.PROFILES:
@@ -233,15 +244,62 @@ class DatastoreTests(unittest.TestCase):
 
     def test_retained_build_inputs_refuse_hash_and_aba_drift(self):
         path = self.write(self.root/'context/repo/x86_64/fixture.apk', b'ordinary package')
-        self.write(self.root/'context/repositories', b'/capsule/repo\n'); self.write(self.root/'context/Dockerfile', b'FROM fixed\n')
+        path.chmod(0o644)
+        self.write(self.root/'context/repositories', b'/capsule/repo\n').chmod(0o644); self.write(self.root/'context/Dockerfile', b'FROM fixed\n')
         rows = {'fixture.apk': {'bytes': path.stat().st_size, 'sha256': sha256(path.read_bytes()).hexdigest()}}
         with M.retained_inputs(self.root, rows): pass
-        with self.assertRaisesRegex(RuntimeError, 'input_changed'):
+        with self.assertRaisesRegex(RuntimeError, 'sealed_changed'):
             with M.retained_inputs(self.root, rows):
-                replacement = self.write(self.root/'new', path.read_bytes()); os.replace(replacement, path)
+                replacement = self.write(self.root/'new', path.read_bytes()); replacement.chmod(0o644); os.replace(replacement, path)
         rows['fixture.apk']['sha256'] = '0'*64
         with self.assertRaisesRegex(RuntimeError, 'build_input_changed'):
             with M.retained_inputs(self.root, rows): pass
+
+    def repository(self):
+        context = self.root/'context'; repo = context/'repo/x86_64'; repo.mkdir(parents=True, mode=0o700)
+        rows = {}
+        for name in {'APKINDEX.tar.gz'} | {name+'-'+v+'.apk' for name, v in M.PROFILES['postgres']['updates'].items()}:
+            raw = ('ordinary public package '+name).encode(); self.write(repo/name, raw)
+            rows[name] = {'bytes': len(raw), 'sha256': sha256(raw).hexdigest()}
+        self.write(context/'repositories', b'/capsule/repo\n')
+        self.write(context/M.GO[0], b'ordinary private-context SDK fixture')
+        self.write(context/'gosu/main.go', b'ordinary private-context source fixture')
+        return context, rows
+
+    def test_public_repository_umask077_publication_keeps_outer_and_compiler_inputs_private(self):
+        context, rows = self.repository()
+        self.assertEqual((context/'repo/x86_64').stat().st_mode&0o777, 0o700)
+        self.assertTrue(all(p.stat().st_mode&0o777 == 0o600 for p in (context/'repo/x86_64').iterdir()))
+        before = {p.name: p.read_bytes() for p in (context/'repo/x86_64').iterdir()}
+        M.publish_public_repository(context, 'postgres', rows)
+        self.assertEqual(self.root.stat().st_mode&0o777, 0o700); self.assertEqual(context.stat().st_mode&0o777, 0o700)
+        self.assertEqual((context/'repo').stat().st_mode&0o777, 0o755)
+        self.assertEqual((context/'repo/x86_64').stat().st_mode&0o777, 0o755)
+        self.assertEqual((context/'repositories').stat().st_mode&0o777, 0o644)
+        for path in (context/'repo/x86_64').iterdir():
+            self.assertEqual(path.stat().st_mode&0o777, 0o644); self.assertEqual(path.read_bytes(), before[path.name])
+        for path in (context/M.GO[0], context/'gosu/main.go'):
+            self.assertEqual(path.stat().st_mode&0o777, 0o600)
+        self.assertEqual((context/'gosu').stat().st_mode&0o777, 0o700)
+
+    def test_public_repository_unapproved_inventory_or_wrong_bytes_never_publishes_it(self):
+        context, rows = self.repository(); extra = self.write(context/'repo/x86_64/unapproved.txt', b'ordinary extra file')
+        with self.assertRaisesRegex(RuntimeError, 'public_repository_inventory'): M.publish_public_repository(context, 'postgres', rows)
+        self.assertTrue(all(p.stat().st_mode&0o777 == 0o600 for p in (context/'repo/x86_64').iterdir()))
+        extra.unlink(); path = context/'repo/x86_64/APKINDEX.tar.gz'; path.write_bytes(b'ordinary changed index')
+        rows[path.name]['bytes'] = path.stat().st_size
+        with self.assertRaisesRegex(RuntimeError, 'public_repository_bytes'): M.publish_public_repository(context, 'postgres', rows)
+        self.assertEqual(path.stat().st_mode&0o777, 0o600)
+        self.assertEqual((context/'repo/x86_64').stat().st_mode&0o777, 0o700)
+
+    def test_public_repository_never_chmods_linked_or_symlink_target(self):
+        context, rows = self.repository(); index = context/'repo/x86_64/APKINDEX.tar.gz'
+        target = self.write(self.root/'ordinary-target', index.read_bytes()); index.unlink(); index.symlink_to(target)
+        with self.assertRaises(OSError): M.publish_public_repository(context, 'postgres', rows)
+        self.assertEqual(target.stat().st_mode&0o777, 0o600)
+        index.unlink(); os.link(target, index)
+        with self.assertRaisesRegex(RuntimeError, 'public_repository_metadata'): M.publish_public_repository(context, 'postgres', rows)
+        self.assertEqual(target.stat().st_mode&0o777, 0o600)
 
     def test_recipe_only_signed_offline_runtime_library_install_no_config_instructions(self):
         for profile in M.PROFILES:
@@ -359,7 +417,11 @@ class DatastoreTests(unittest.TestCase):
         containers = {}; events = []; next_id = iter(range(1, 20)); proof = self.registry(profile)
         def docker(root, argv, **kwargs):
             events.append((argv, kwargs))
-            if argv[0] == 'pull': return b'public pull complete\n'
+            if argv[0] == 'pull':
+                self.assertEqual(argv[2], pin['reference']); self.assertTrue(kwargs['combine_stderr'])
+                self.assertEqual(kwargs['maximum'], 4*1024**2)
+                self.assertEqual(kwargs['log_path'], root/'reports/baseline-pull.log')
+                self.write(kwargs['log_path'], b'public pull complete\n'); return b'public pull complete\n'
             if argv[:2] == ['image', 'inspect']:
                 return M.encoded([after if argv[2] == after['Id'] else before])
             if argv[0] == 'create':
@@ -368,6 +430,12 @@ class DatastoreTests(unittest.TestCase):
                 # No bind mounts may replace a software directory or expose a daemon.
                 self.assertNotIn('/var/run/docker.sock', repr(argv)); self.assertIn('--read-only', argv)
                 self.assertIn(pin['volume']+':rw,nosuid,nodev,noexec,size=768m,uid='+argv[argv.index('--user')+1].split(':')[0], repr(argv))
+                for index, item in enumerate(argv):
+                    if item != '--mount': continue
+                    source = Path(argv[index+1].split('source=', 1)[1].split(',target=', 1)[0])
+                    self.assertEqual(source.stat().st_mode&0o777, 0o755 if source.is_dir() else 0o644)
+                    if source.is_dir():
+                        self.assertTrue(all(p.stat().st_mode&0o004 for p in source.rglob('*') if p.is_file()))
                 containers[cid] = {'Id': cid, 'Name': '/'+name, 'Image': argv[image_index],
                     'Config': {'Labels': {M.LABEL: M.owner()}}, 'script': argv[image_index+3]}
                 return (cid+'\n').encode()
@@ -441,6 +509,25 @@ class DatastoreTests(unittest.TestCase):
     def test_full_redis_control_flow_build_smokes_raw_binding_export(self): self.flow('redis')
 
     def test_full_control_flow_server_drift_prevents_receipt_and_export(self): self.flow('postgres', drift=True)
+
+    def test_actual_pull_failure_retains_bounded_public_stderr_and_never_advances(self):
+        raw = b'ordinary public registry refusal: manifest unknown\n'
+        reader, writer = os.pipe(); os.write(writer, raw); os.close(writer)
+        stdout = os.fdopen(reader, 'rb', buffering=0); self.addCleanup(stdout.close)
+        child = Mock(stdout=stdout, pid=12345, wait=Mock(return_value=1), poll=Mock(return_value=1))
+        with patch.object(M, 'ci'), patch.object(M, 'load_source', return_value={}), \
+                patch.object(M.os, 'statvfs', return_value=SimpleNamespace(f_bavail=16*1024**3, f_frsize=1)), \
+                patch.object(C.subprocess, 'Popen', return_value=child) as launch, patch.object(C.os, 'killpg'), \
+                patch.object(M, 'registry_identity') as registry, redirect_stderr(io.StringIO()):
+            self.assertEqual(M.main(['compose', '--root', str(self.root), '--profile', 'postgres']), 1)
+        registry.assert_not_called(); self.assertEqual(launch.call_count, 1)
+        self.assertEqual(launch.call_args.kwargs['stderr'], subprocess.STDOUT)
+        self.assertEqual(launch.call_args.args[0][-3:], ['pull', '--platform=linux/amd64', M.PROFILES['postgres']['reference']])
+        path = self.root/'reports/baseline-pull.log'; self.assertEqual(path.read_bytes(), raw)
+        self.assertEqual(path.stat().st_mode&0o777, 0o600)
+        failure = json.loads((self.root/'reports/failure.json').read_bytes())
+        self.assertEqual((failure['phase'], failure['code']), ('pull_baseline', 'command_failed'))
+        self.assertFalse((self.root/'candidate.id').exists()); self.assertFalse((self.root/'reports/candidate.json').exists())
 
 
 if __name__ == '__main__':

@@ -18,6 +18,7 @@ import urllib.request
 from urllib.parse import urlsplit
 
 BASELINE_FACTS_SHA256 = '70889f7b6856039fa11a44eb3c208a52f9a1a13f1ea7b49b9360653e625d52f7'
+REGISTRY_FACTS_SHA256 = '47484f3eafd4c0ad7453593ec72350eb9267445992bde88acf384a390b9fe661'
 GOSU_COMMIT = '6456aaa0f3c854d199d0f037f068eb97515b7513'
 GO = ('go1.26.10.linux-amd64.tar.gz', 66936659,
       'ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5')
@@ -28,7 +29,9 @@ GOSU_FILES = {
     'setup-user.go': (1308, '87afcd1748da9efa4af5128452ac8fbec245a7ce'),
     'version.go': (37, 'a5c6e8a41c1506dff3f7232bc770b7335105551b'),
 }
-PROFILES = {'postgres': {'reference': 'postgres@sha256:7bf293f93568d967c8dfcf6d95c2ff522289dc11c558989a9c6f926a644d6dfa',
+PROFILES = {'postgres': {'reference': 'postgres@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b',
+              'platform_manifest_digest': 'sha256:a2c20749c564b4eb73a77bfda626f8a3cde1bbfae020fb97c616a00cdc1a2181',
+              'platform_manifest_bytes': 3054,
               'config_id': 'sha256:aad6289ca337b3ce76896f2e7e61480490152886c7828120371fb28e6b779e1d',
               'layers': ['sha256:34884abbe92863fce933ed7c39c0e045631af0ed86d5cc0dfbdf9fdca426ce3c',
                          'sha256:66b9f7f9f6d3928185e0c7cad648b4b841fdc2bc80eb2cb0029a9bc4bfe6a4de',
@@ -49,7 +52,9 @@ PROFILES = {'postgres': {'reference': 'postgres@sha256:7bf293f93568d967c8dfcf6d9
               'gosu_sha256': '52c8749d0142edd234e9d6bd5237dff2d81e71f43537e2f4f66f75dd4b243dd0',
               'branch': 'v3.24',
               'updates': {'libssl3': '3.5.9-r0', 'libcrypto3': '3.5.9-r0', 'libuuid': '2.42.3-r1'}},
- 'redis': {'reference': 'redis@sha256:8231d3786e10c470840c27963f3d19672dc7ef3e5d5adc512c01d44faada5672',
+ 'redis': {'reference': 'redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf',
+           'platform_manifest_digest': 'sha256:1db42ccef14898aa29bae778452d567534b59c107129cbc1163fb552de184d3c',
+           'platform_manifest_bytes': 2288,
            'config_id': 'sha256:5509c0097c6064aa8a3b1df58f1d950e67090fffa6678ae8f3f1dc2385f12deb',
            'layers': ['sha256:7211d01aba8fa2e9eb71ad34395cd313df5fc51a6b69b92d2dfad32cc37759cb',
                       'sha256:a0caa8bc04fc2a6bc37012dfcb190e6e1711e18bb1bfdf3768bafe736da6001b',
@@ -92,7 +97,8 @@ def phase(name):
 
 
 @contextmanager
-def sealed(path, maximum):
+def sealed(path, maximum, *, mode=0o600):
+    require(mode in {0o600, 0o644}, 'sealed_metadata')
     require(path.is_absolute() and path.resolve(strict=True) == path, 'sealed_path')
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
@@ -100,7 +106,7 @@ def sealed(path, maximum):
         identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mode, s.st_uid,
                                s.st_nlink, s.st_mtime_ns, s.st_ctime_ns)
         require(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid()
-                and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600
+            and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == mode
                 and 0 < before.st_size <= maximum
                 and identity(before) == identity(path.lstat()), 'sealed_metadata')
         with os.fdopen(os.dup(fd), 'rb') as source:
@@ -189,9 +195,9 @@ def download(url, path, maximum, *, size=None, digest=None, blob=None):
 
 def registry_identity(root, profile):
     pin = PROFILES[profile]; reference = pin['reference']; top = reference.split('@', 1)[1]
-    def fetch(ref, digest):
+    def fetch(ref, digest, size=None):
         raw = docker(root, ['buildx', 'imagetools', 'inspect', '--raw', ref], seconds=60, maximum=1024**2)
-        require(sha256(raw).hexdigest() == digest[7:], 'registry_digest')
+        require((size is None or len(raw) == size) and sha256(raw).hexdigest() == digest[7:], 'registry_digest')
         value = json.loads(raw); require(value.get('schemaVersion') == 2, 'registry_schema')
         return value
     value = fetch(reference, top); selected = top
@@ -204,7 +210,10 @@ def registry_identity(root, profile):
                    and row.get('platform', {}).get('variant', '') in {'', 'v1'}]
         require(len(matches) == 1 and re.fullmatch(SHA, matches[0].get('digest', '')), 'registry_platform')
         selected = matches[0]['digest']
-        value = fetch(reference.split('@')[0]+'@'+selected, selected)
+        require(selected == pin['platform_manifest_digest']
+                and type(matches[0].get('size')) is int and matches[0]['size'] == pin['platform_manifest_bytes'], 'registry_platform_pin')
+        value = fetch(reference.split('@')[0]+'@'+selected, selected, pin['platform_manifest_bytes'])
+    require(selected == pin['platform_manifest_digest'], 'registry_platform_pin')
     require(value.get('mediaType') in {'application/vnd.oci.image.manifest.v1+json',
                                      'application/vnd.docker.distribution.manifest.v2+json'}
             and value.get('config', {}).get('digest') == pin['config_id']
@@ -226,6 +235,8 @@ def baseline(profile, record, registry):
     require(profile in PROFILES and type(record) is dict, 'profile')
     pin = PROFILES[profile]
     require(registry.get('reference') == pin['reference'] and registry.get('config_digest') == pin['config_id']
+            and registry.get('top_digest') == pin['reference'].split('@')[1]
+            and registry.get('platform_manifest_digest') == pin['platform_manifest_digest']
             and record.get('Id') in {pin['config_id'], registry['top_digest'], registry['platform_manifest_digest']}
             and record.get('Os') == 'linux'
             and record.get('Architecture') == 'amd64'
@@ -459,6 +470,7 @@ def acquire(root, profile, image):
         filename = name+'-'+version+'.apk'
         records[filename] = download(url+filename, repo/filename, 16*1024**2)
     COMMON.write(context/'repositories', b'/capsule/repo\n')
+    publish_public_repository(context, profile, records)
     # Authenticity comes from apk's original baseline trust store and unmodified vendor signatures.
     script = '/sbin/apk verify '+ ' '.join('/capsule/repo/x86_64/'+name for name in records if name.endswith('.apk'))
     script += ' && /sbin/apk --no-network --no-cache --repositories-file /capsule/repositories --simulate fix --upgrade '+ ' '.join(pin['updates'])
@@ -473,16 +485,70 @@ def acquire(root, profile, image):
     return records
 
 
+def publish_public_repository(context, profile, records):
+    """Only signed PUBLIC package inputs cross the CI-UID→cap0 fixture boundary."""
+    names = {'APKINDEX.tar.gz'} | {name+'-'+version+'.apk' for name, version in PROFILES[profile]['updates'].items()}
+    repo = context/'repo'; architecture = repo/'x86_64'
+    require(set(records) == names and {p.name for p in repo.iterdir()} == {'x86_64'}
+            and {p.name for p in architecture.iterdir()} == names, 'public_repository_inventory')
+    identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mode, s.st_uid,
+                          s.st_nlink, s.st_mtime_ns, s.st_ctime_ns)
+    with ExitStack() as stack:
+        directories = []
+        for path in (repo, architecture):
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            stack.callback(os.close, fd); before = os.fstat(fd)
+            require(stat.S_ISDIR(before.st_mode) and before.st_uid == os.geteuid()
+                    and stat.S_IMODE(before.st_mode) == 0o700
+                    and identity(before) == identity(path.lstat()), 'public_repository_metadata')
+            directories.append((path, fd, before))
+        files = [(architecture/name, row['bytes'], row['sha256']) for name, row in sorted(records.items())]
+        files.append((context/'repositories', len(b'/capsule/repo\n'), sha256(b'/capsule/repo\n').hexdigest()))
+        for path, size, expected in files:
+            require(all(identity(before) == identity(os.fstat(fd)) == identity(directory.lstat())
+                        for directory, fd, before in directories), 'public_repository_changed')
+            require(type(size) is int and 0 < size <= 16*1024**2, 'public_repository_metadata')
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                before = os.fstat(fd)
+                require(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid()
+                        and before.st_nlink == 1 and before.st_size == size
+                        and stat.S_IMODE(before.st_mode) == 0o600
+                        and identity(before) == identity(path.lstat()), 'public_repository_metadata')
+                with os.fdopen(os.dup(fd), 'rb') as source:
+                    require(COMMON.stream_digest(source, size) == expected, 'public_repository_bytes')
+                require(identity(before) == identity(os.fstat(fd)) == identity(path.lstat()), 'public_repository_changed')
+                require(all(identity(state) == identity(os.fstat(handle)) == identity(directory.lstat())
+                            for directory, handle, state in directories), 'public_repository_changed')
+                os.fchmod(fd, 0o644); os.fsync(fd)
+                after = os.fstat(fd)
+                require((after.st_dev, after.st_ino, after.st_size, after.st_uid, after.st_nlink, after.st_mtime_ns)
+                        == (before.st_dev, before.st_ino, before.st_size, before.st_uid, before.st_nlink, before.st_mtime_ns)
+                        and stat.S_IMODE(after.st_mode) == 0o644
+                        and identity(after) == identity(path.lstat()), 'public_repository_changed')
+            finally:
+                os.close(fd)
+        for path, fd, before in reversed(directories):
+            require(identity(before) == identity(os.fstat(fd)) == identity(path.lstat()), 'public_repository_changed')
+            os.fchmod(fd, 0o755); os.fsync(fd); after = os.fstat(fd)
+            require((after.st_dev, after.st_ino, after.st_uid) == (before.st_dev, before.st_ino, before.st_uid)
+                    and stat.S_IMODE(after.st_mode) == 0o755 and identity(after) == identity(path.lstat()), 'public_repository_changed')
+
+
 @contextmanager
 def retained_inputs(root, records):
     with ExitStack() as stack:
         for name, row in records.items():
             path = root/'context'/(('repo/x86_64/'+name) if name.endswith(('.apk', '.tar.gz'))
                                    and name != GO[0] else name)
-            source, size = stack.enter_context(COMMON.pinned(path, 80*1024**2))
-            require(size == row['bytes'] and COMMON.stream_digest(source, size) == row['sha256'], 'build_input_changed')
-        for name in ('repositories', 'Dockerfile'):
-            stack.enter_context(COMMON.pinned(root/'context'/name, 65536))
+            if name == 'APKINDEX.tar.gz' or name.endswith('.apk'):
+                raw = stack.enter_context(sealed(path, 16*1024**2, mode=0o644))
+                require(len(raw) == row['bytes'] and sha256(raw).hexdigest() == row['sha256'], 'build_input_changed')
+            else:
+                source, size = stack.enter_context(COMMON.pinned(path, 80*1024**2))
+                require(size == row['bytes'] and COMMON.stream_digest(source, size) == row['sha256'], 'build_input_changed')
+        stack.enter_context(sealed(root/'context/repositories', 65536, mode=0o644))
+        stack.enter_context(COMMON.pinned(root/'context/Dockerfile', 65536))
         yield
 
 
@@ -502,7 +568,8 @@ def compose(root, profile):
     for name in ('reports', 'context', 'docker-config', 'fixture'):
         (root/name).mkdir(mode=0o700, exist_ok=(name == 'reports'))
     space = os.statvfs(root); require(space.f_bavail*space.f_frsize >= 8*1024**3, 'runner_space')
-    phase('pull_baseline'); docker(root, ['pull', '--platform=linux/amd64', pin['reference']], seconds=180, maximum=4*1024**2)
+    phase('pull_baseline'); docker(root, ['pull', '--platform=linux/amd64', pin['reference']], seconds=180,
+        maximum=4*1024**2, combine_stderr=True, log_path=root/'reports/baseline-pull.log')
     phase('registry_identity'); registry = registry_identity(root, profile)
     before = COMMON.image_record(docker(root, ['image', 'inspect', pin['reference']], maximum=2*1024**2))
     baseline(profile, before, registry); parent_image = before['Id']
@@ -540,6 +607,7 @@ def compose(root, profile):
     record = {'schema': 'alpine_datastore_security_candidate/1', 'status': 'built_tested_not_accepted',
         'profile': profile, 'image_id': image, 'baseline': pin, 'registry': registry,
         'parent_daemon_id': parent_image, 'baseline_public_facts_sha256': BASELINE_FACTS_SHA256,
+        'public_registry_observation_sha256': REGISTRY_FACTS_SHA256,
         'recipe': identity, 'inputs': inputs, 'runtime_config': before['Config'],
         'candidate_layers': after['RootFS']['Layers'], 'server_bytes_unchanged': True,
         'whole_runtime_config_unchanged': True, 'same_branch_signed_apk': True,
@@ -634,12 +702,13 @@ def main(argv=None):
         known = {'profile', 'sealed_path', 'sealed_metadata', 'sealed_bound', 'sealed_changed',
             'github_ci_only', 'ci_root', 'ci_identity', 'source_inventory', 'source_changed', 'controller_changed',
             'download_origin', 'download_redirect', 'download_timeout', 'download_bound', 'download_identity',
-            'registry_digest', 'registry_schema', 'registry_index', 'registry_platform', 'registry_config', 'registry_layers',
+            'registry_digest', 'registry_schema', 'registry_index', 'registry_platform', 'registry_platform_pin', 'registry_config', 'registry_layers',
             'baseline_identity', 'baseline_repository', 'audit_bound', 'audit_shape', 'audit_duplicate', 'audit_file',
             'audit_inventory', 'audit_nodes', 'software_baseline', 'gosu_version', 'gosu_baseline', 'unexpected_gosu',
             'package_baseline', 'package_delta', 'protected_runtime_changed', 'gosu_not_rebuilt', 'server_or_support_changed',
             'cleanup_unknown', 'cleanup_owner', 'fixture_capability', 'container_identity', 'fixture_failed',
             'build_input_changed', 'fixture_marker', 'gosu_fixture_marker', 'runner_space', 'candidate_identity',
+            'public_repository_inventory', 'public_repository_metadata', 'public_repository_bytes', 'public_repository_changed',
             'raw_identity', 'raw_config', 'sbom_identity', 'sbom_package', 'candidate_state', 'registry_changed',
             'candidate_changed', 'phase'}
         code = error.args[0] if type(error) is RuntimeError and len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in known else 'unexpected_failure'
