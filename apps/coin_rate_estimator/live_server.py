@@ -256,6 +256,8 @@ PUBLIC_COLLECTOR_HEALTH_NAME = "public-telegram-health.json"
 EXTERNAL_MARKET_HEALTH_NAME = "external-market-health.json"
 GROUP_PROJECTION_HEALTH_NAME = "group-event-health.json"
 MAX_MANUAL_FORM_BYTES = 16_384
+MAX_LOGIN_FORM_BYTES = 8_192
+LOGIN_BODY_TIMEOUT_SECONDS = 5.0
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
 
@@ -7593,6 +7595,40 @@ def handler_factory(
                     return False
             return present
 
+        def _read_login_body(self) -> bytes:
+            """Validate framing before reading; bound size and total read time."""
+            lengths = self.headers.get_all("Content-Length", [])
+            if self.headers.get_all("Transfer-Encoding", []) or len(lengths) > 1:
+                raise ValueError("unsupported_login_body_framing")
+            value = lengths[0].strip() if lengths else "0"
+            if not re.fullmatch(r"[0-9]+", value):
+                raise ValueError("invalid_login_content_length")
+            value = value.lstrip("0") or "0"
+            if len(value) > 4 or int(value) > MAX_LOGIN_FORM_BYTES:
+                raise OverflowError("login_body_too_large")
+            length = int(value)
+            if not length:
+                return b""
+            previous_timeout = self.connection.gettimeout()
+            deadline = time.monotonic() + LOGIN_BODY_TIMEOUT_SECONDS
+            body = bytearray()
+            try:
+                while len(body) < length:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("login_body_deadline")
+                    timeout = remaining if previous_timeout is None else min(previous_timeout, remaining)
+                    self.connection.settimeout(timeout)
+                    # BaseHTTPRequestHandler's buffered socket reader supports
+                    # read1: one bounded socket read, then recheck the deadline.
+                    chunk = self.rfile.read1(length - len(body))
+                    if not chunk:
+                        raise ValueError("incomplete_login_body")
+                    body.extend(chunk)
+                return bytes(body)
+            finally:
+                self.connection.settimeout(previous_timeout)
+
         def do_GET(self) -> None:  # noqa: N802
             path = urlsplit(self.path).path.rstrip("/") or "/"
             state = state_store.get()
@@ -7898,10 +7934,18 @@ def handler_factory(
             path = urlsplit(self.path).path.rstrip("/") or "/"
             if path == login_path:
                 try:
-                    content_length = int(self.headers.get("Content-Length", "0"))
-                except ValueError:
-                    content_length = 0
-                payload = self.rfile.read(content_length).decode("utf-8", errors="replace") if content_length > 0 else ""
+                    payload = self._read_login_body().decode("utf-8", errors="replace")
+                except (ValueError, OverflowError, OSError) as exc:
+                    status = (
+                        HTTPStatus.REQUEST_TIMEOUT if isinstance(exc, TimeoutError)
+                        else HTTPStatus.REQUEST_ENTITY_TOO_LARGE if isinstance(exc, OverflowError)
+                        else HTTPStatus.BAD_REQUEST
+                    )
+                    self.close_connection = True
+                    body = b"Invalid login request body"
+                    self._headers(status, "text/plain; charset=utf-8", len(body))
+                    self.wfile.write(body)
+                    return
                 parsed = parse_qs(payload, keep_blank_values=True)
                 u_val = parsed.get("username", [""])[-1].strip()
                 p_val = parsed.get("password", [""])[-1].strip()
