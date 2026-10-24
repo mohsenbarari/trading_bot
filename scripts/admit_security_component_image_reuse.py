@@ -124,6 +124,34 @@ def safe_member(name):
                 and all(ord(char) >= 32 for char in name))
 
 
+def closed_inventory_diagnostic(unexpected, wrong_directory_type):
+    """Bound public archive names only; admission still refuses afterward."""
+    names = {'unexpected_names': sorted(unexpected),
+             'wrong_directory_type_names': sorted(wrong_directory_type)}
+    record = {'code': 'reuse_tar_closed_inventory',
+              'unexpected_count': len(unexpected), 'unexpected_names': [],
+              'wrong_directory_type_count': len(wrong_directory_type),
+              'wrong_directory_type_names': [], 'names_or_characters_omitted': False}
+    def encode():
+        return json.dumps(record, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
+    full = False
+    for index in range(32):
+        for key, values in names.items():
+            if index >= len(values):
+                continue
+            record[key].append(values[index][:256])
+            if len(encode().encode('ascii')) + 1 > 16 * 1024:
+                record[key].pop()
+                full = True
+                break
+        if full:
+            break
+    record['names_or_characters_omitted'] = any(
+        len(record[key]) < len(values) or any(len(value) > 256 for value in values[:len(record[key])])
+        for key, values in names.items())
+    sys.stderr.write(encode() + '\n')
+
+
 def validate_docker_archive(path):
     """Check one classic Docker or OCI-backed docker-save image, without extraction."""
     with pinned(path, MAX_TAR) as (stream, size), tarfile.open(fileobj=stream, mode='r:') as bundle:
@@ -235,9 +263,12 @@ def validate_docker_archive(path):
                 require(members['repositories'].size <= MAX_JSON, 'reuse_repositories_bound')
                 allowed.add('repositories')
         directories = {str(parent) for name in allowed for parent in PurePosixPath(name).parents if str(parent) != '.'}
-        require(set(members) <= allowed | directories
-                and all(member.isdir() == (name in directories) for name, member in members.items()),
-                'reuse_tar_closed_inventory')
+        unexpected = set(members) - allowed - directories
+        wrong_directory_type = {name for name, member in members.items()
+                                if member.isdir() != (name in directories)}
+        if unexpected or wrong_directory_type:
+            closed_inventory_diagnostic(unexpected, wrong_directory_type)
+            raise RuntimeError('reuse_tar_closed_inventory')
         stream.seek(0)
         archive_sha = digest(stream, size)
         return {'image_id': IMAGE, 'layers': len(layers), 'docker_archive_sha256': archive_sha,

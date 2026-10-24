@@ -265,6 +265,48 @@ class ComponentImageReuseTests(unittest.TestCase):
         good, _ = self.image(); path.write_bytes(good + b'payload-after-zero-trailer')
         with self.assertRaisesRegex(RuntimeError, 'reuse_tar_trailing_payload'): M.validate_docker_archive(path)
 
+    def test_closed_inventory_diagnostic_is_public_escaped_bounded_and_still_refuses(self):
+        _, entries = self.image()
+        parent = entries[2][0].rsplit('/', 1)[0]
+        unexpected = [('extra-%03d-"' % index + '\U0001f642' * 300, b'public', tarfile.REGTYPE)
+                      for index in range(80)]
+        # This path belongs to the required directory closure but is a file.
+        raw = self.tar(entries + unexpected + [(parent, b'', tarfile.REGTYPE)])
+        path = self.root / 'public-closed-inventory-diagnostic.tar'
+        path.write_bytes(raw); path.chmod(0o600)
+        error = io.StringIO()
+        with patch.object(M.sys, 'stderr', error):
+            with self.assertRaisesRegex(RuntimeError, '^reuse_tar_closed_inventory$'):
+                M.validate_docker_archive(path)
+        emitted = error.getvalue()
+        self.assertLessEqual(len(emitted.encode('utf-8')), 16 * 1024)
+        self.assertEqual(len(emitted.splitlines()), 1)
+        self.assertTrue(emitted.isascii())
+        self.assertIn('\\"', emitted)
+        self.assertIn('\\ud83d\\ude42', emitted)
+        record = json.loads(emitted)
+        self.assertEqual(record['code'], 'reuse_tar_closed_inventory')
+        self.assertEqual(record['unexpected_count'], 80)
+        self.assertEqual(record['wrong_directory_type_count'], 1)
+        self.assertEqual(record['wrong_directory_type_names'], [parent])
+        self.assertTrue(record['names_or_characters_omitted'])
+        for key in ('unexpected_names', 'wrong_directory_type_names'):
+            self.assertLessEqual(len(record[key]), 32)
+            self.assertEqual(record[key], sorted(record[key]))
+            self.assertTrue(all(len(name) <= 256 for name in record[key]))
+
+    def test_closed_inventory_diagnostic_caps_names_even_when_short(self):
+        error = io.StringIO()
+        with patch.object(M.sys, 'stderr', error):
+            M.closed_inventory_diagnostic({'public-%03d' % index for index in range(100)},
+                                          {'directory-%03d' % index for index in range(50)})
+        record = json.loads(error.getvalue())
+        self.assertEqual(record['unexpected_count'], 100)
+        self.assertEqual(record['wrong_directory_type_count'], 50)
+        self.assertEqual(record['unexpected_names'], ['public-%03d' % index for index in range(32)])
+        self.assertEqual(record['wrong_directory_type_names'], ['directory-%03d' % index for index in range(32)])
+        self.assertLessEqual(len(error.getvalue().encode()), 16 * 1024)
+
     def test_config_digest_and_layer_content_are_both_required(self):
         raw, entries = self.image()
         path = self.root / 'changed.tar'
