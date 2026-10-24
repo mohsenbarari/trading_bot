@@ -48,7 +48,7 @@
             for ns in ('pid','mnt','user'): assert os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns)
             for p in ('/root','/root/.local'):
                 s=os.lstat(p); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
-            root=pathlib.Path('/root/.local/security-web-engine-20261023')
+            root=pathlib.Path('/root/.local/security-web-engine-20261024-task07')
             assert root.resolve(strict=False)==root
             assert not any(os.path.lexists(p) for p in ('/root/secure-envs/trading-bot/release-control/private-primary-controller.lock','/var/lib/trading-bot/production-release/two-host-release-state.json'))
             if os.path.lexists(root):
@@ -108,7 +108,7 @@
 
     - name: Create only the fixed private non-operational workspace directories
       ansible.builtin.file:
-        path: '/root/.local/security-web-engine-20261023/{{ item }}'
+        path: '/root/.local/security-web-engine-20261024-task07/{{ item }}'
         state: directory
         mode: '0700'
         owner: root
@@ -118,7 +118,7 @@
     - name: Refresh only the fixed unprepared public source inventory never application or private files
       ansible.builtin.copy:
         src: '{{ playbook_dir }}/../../{{ item }}'
-        dest: '/root/.local/security-web-engine-20261023/source/{{ item }}'
+        dest: '/root/.local/security-web-engine-20261024-task07/source/{{ item }}'
         mode: '0600'
         owner: root
         group: root
@@ -129,7 +129,7 @@
     - name: Generate only the empty private-bundle Python namespace marker
       ansible.builtin.copy:
         content: ''
-        dest: /root/.local/security-web-engine-20261023/source/scripts/__init__.py
+        dest: /root/.local/security-web-engine-20261024-task07/source/scripts/__init__.py
         mode: '0600'
         owner: root
         group: root
@@ -139,7 +139,7 @@
     - name: Transfer only the validated fixed metadata specification no env key or session
       ansible.builtin.copy:
         src: /root/trading-bot/trading_bot/.local/security-web-engine-20261023-inputs.json
-        dest: /root/.local/security-web-engine-20261023/inputs.json
+        dest: /root/.local/security-web-engine-20261024-task07/inputs.json
         mode: '0600'
         owner: root
         group: root
@@ -150,7 +150,7 @@
     - name: Transfer only the two verified existing backup metadata receipts never backup payloads
       ansible.builtin.copy:
         src: '{{ item.source }}'
-        dest: '/root/.local/security-web-engine-20261023/{{ item.destination }}'
+        dest: '/root/.local/security-web-engine-20261024-task07/{{ item.destination }}'
         mode: '0600'
         owner: root
         group: root
@@ -163,7 +163,7 @@
 
     - name: Hash only the staged enumerated public code before executing any transferred Python
       ansible.builtin.stat:
-        path: '/root/.local/security-web-engine-20261023/source/{{ item }}'
+        path: '/root/.local/security-web-engine-20261024-task07/source/{{ item }}'
         follow: false
         get_checksum: true
         checksum_algorithm: sha256
@@ -185,7 +185,7 @@
 
     - name: Verify the staged metadata input bytes before importing transferred Python
       ansible.builtin.stat:
-        path: /root/.local/security-web-engine-20261023/inputs.json
+        path: /root/.local/security-web-engine-20261024-task07/inputs.json
         follow: false
         get_checksum: true
         checksum_algorithm: sha256
@@ -205,7 +205,7 @@
 
     - name: Hash only the two staged backup metadata receipts before remote execution
       ansible.builtin.stat:
-        path: '/root/.local/security-web-engine-20261023/{{ item }}'
+        path: '/root/.local/security-web-engine-20261024-task07/{{ item }}'
         follow: false
         get_checksum: true
         checksum_algorithm: sha256
@@ -227,7 +227,7 @@
 
     - name: Prepare exact public packages and fresh actual private metadata plan never apply
       ansible.builtin.command:
-        argv: [/usr/bin/python3, -I, -B, /root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_prepare.py, prepare]
+        argv: [/usr/bin/python3, -I, -B, /root/.local/security-web-engine-20261024-task07/source/deploy/maintenance/web_engine_prepare.py, prepare]
       register: web_engine_prepared
       timeout: 1500
 

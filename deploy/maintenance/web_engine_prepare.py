@@ -21,7 +21,7 @@ from types import ModuleType
 import urllib.parse
 import urllib.request
 
-ROOT = Path('/root/.local/security-web-engine-20261023')
+ROOT = Path('/root/.local/security-web-engine-20261024-task07')
 SOURCE = ROOT / 'source'
 INPUTS = ROOT / 'inputs.json'
 PLAN = ROOT / 'plan.json'
@@ -42,7 +42,11 @@ PUBLIC_SOURCES = (
     'deploy/maintenance/web_engine_inventory.yml',
 )
 EMPTY_INIT = 'scripts/__init__.py'  # Generated EMPTY only in this private bundle.
-CONTROLLER_SHA = '966970743e3e96a1b7ffac3665486d8b7db589b952751f49c6568d45005eec43'
+CONTROLLER_SHA = '81b8983cb0f790c95d0e51c3f3225bd60aa5eb8ef5037dd9c20f8dbc549e64b9'
+PRIOR_ROOT = Path('/root/.local/security-web-engine-20261023')
+PRIOR_SHA = 'dc01b663f6fa3e23762804b5c6cf0f0ec7b0e45d14aeb820d6641c905e8d275a'
+PRIOR_C_SHA = '966970743e3e96a1b7ffac3665486d8b7db589b952751f49c6568d45005eec43'
+PRIOR_NONCE = '888de791edea40c3b69ef53b2ac170ad'
 OLD_URLS = {
     'docker.io': 'https://archive.ubuntu.com/ubuntu/pool/universe/d/docker.io-app/docker.io_29.1.3-0ubuntu4.1_amd64.deb',
     'containerd': 'https://security.ubuntu.com/ubuntu/pool/main/c/containerd-app/containerd_2.2.2-0ubuntu1.1_amd64.deb',
@@ -113,8 +117,8 @@ def validate_inputs(spec):
         and re.fullmatch('sha256:[0-9a-f]{64}', market['image_id']) and re.fullmatch('[0-9a-f]{64}', market['image_input_signature']), 'market_input_scope')
     remote = spec['offhost']
     require(set(remote) == {'identity_file', 'known_hosts_file', 'known_hosts_sha256'} and
-        remote['identity_file'] == '/root/.ssh/security-controller-20261023-host-patch-06/id_ed25519' and
-        remote['known_hosts_file'] == '/root/.ssh/security-controller-20261023-host-patch-06/known_hosts' and
+        remote['identity_file'] == '/root/.ssh/security-controller-20261023-host-patch-07/id_ed25519' and
+        remote['known_hosts_file'] == '/root/.ssh/security-controller-20261023-host-patch-07/known_hosts' and
         re.fullmatch('[0-9a-f]{64}', remote['known_hosts_sha256']), 'offhost_lane_scope')
     require(Path(spec['backup_key_file']).is_absolute() and isinstance(spec['datastore_probes'], list)
             and len(spec['datastore_probes']) == 8, 'private_path_or_probe_scope')
@@ -215,6 +219,32 @@ def download(C, entry):
     finally: os.close(fd); Path(temporary).unlink(missing_ok=True)
 
 
+def prior_terminal(C):
+    # Retain the terminal06 plan/journal/source. Never call its old run path,
+    # remove its evidence, adopt its reservation or claim it was unapplied.
+    raw = read(PRIOR_ROOT / 'plan.json')
+    require(sha256(raw).hexdigest() == PRIOR_SHA, 'prior_plan_changed')
+    old = document(raw)
+    require(old['schema'] == 'web_engine_transaction_plan/1'
+            and old['operation_id'] == 'security-web-engine-20261023-06'
+            and old['nonce'] == PRIOR_NONCE, 'prior_identity_changed')
+    control = Path('/root/secure-envs/trading-bot/release-control')
+    require(not any(os.path.lexists(path) for path in (C.P.RESERVATION, C.P.PENDING,
+            control / 'security-web-engine-20261023-06.source.lock')), 'prior_operation_active')
+    receipt = document(read(control / 'security-web-engine-20261023-06.journal.json'))
+    require(receipt['schema'] == 'web_engine_transaction/1'
+            and receipt['operation_id'] == old['operation_id'] and receipt['nonce'] == PRIOR_NONCE
+            and receipt['manifest_sha256'] == PRIOR_SHA and receipt['phase'] == 'aborted_restored'
+            and receipt['aborted_from'] == 'reserved' and receipt['security_transition_completed'] is False,
+            'prior_recovery_not_verified')
+    require(sha256(read(PRIOR_ROOT / 'source/deploy/maintenance/web_engine_controller.py', maximum=65536)).hexdigest()
+            == PRIOR_C_SHA, 'prior_source_changed')
+    state = dict(line.split('=', 1) for line in C.B.command(['/usr/bin/systemctl', 'show',
+        'security-web-engine-06-' + PRIOR_NONCE + '.service', '--property=ActiveState,MainPID,ExecMainStatus']).splitlines())
+    require(state == {'ActiveState': 'failed', 'MainPID': '0', 'ExecMainStatus': '1'}, 'prior_runner_not_terminal')
+    return old
+
+
 def snapshot(C, spec):
     require(Path(__file__).resolve().parents[2] == SOURCE, 'fixed_staged_project_required')
     plan = {'schema': 'web_engine_transaction_plan/1', 'operation_id': spec['operation_id'],
@@ -228,6 +258,7 @@ def snapshot(C, spec):
             '/root/secure-envs/trading-bot/market-pipeline-cutover/bot-legacy-handoff-4ef8e6dc.json'],
         'health_urls': []}
     C.native_contract(plan); C.control_parent_contract(plan)
+    previous = prior_terminal(C)
     addresses = document(C.B.command(['/usr/sbin/ip', '-j', 'address']))
     require(any(value.get('local') == '65.109.220.59' for row in addresses for value in row.get('addr_info', [])), 'web_ip_required')
     require(not any(os.path.lexists(path) for path in [C.P.RESERVATION, C.P.PENDING, *C.paths(plan), *plan['absent_control_paths']]), 'existing_operation')
@@ -249,6 +280,10 @@ def snapshot(C, spec):
         row['mounts'] = C.P.canonical_mounts(row['mounts']); row['network_names'] = sorted(row['network_names'])
         plan['containers'].append(row)
     C.P.baseline_contract(plan['containers'])
+    fields = ('id', 'name', 'image', 'running', 'restart_policy', 'mounts',
+              'network_names', 'network_mode', 'port_bindings')
+    baseline = lambda rows: {row['id']: {key: row[key] for key in fields} for row in rows}
+    require(baseline(plan['containers']) == baseline(previous['containers']), 'prior_restored_baseline_changed')
     by_name = {row['name']: row for row in plan['containers']}
     plan['datastore_probes'] = [{**{k: v for k, v in probe.items() if k != 'name'}, 'id': by_name[probe['name']]['id']} for probe in spec['datastore_probes']]
     plan['datastore_ids'] = [probe['id'] for probe in plan['datastore_probes']]

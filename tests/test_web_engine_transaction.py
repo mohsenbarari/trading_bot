@@ -106,7 +106,7 @@ class FiniteWebEngineTests(unittest.TestCase):
             def stage_child(plan, digest, argv, env, deadline, descriptors, stage):
                 return child([*argv, '--tags', stage], env, deadline, lock_fds=descriptors)
             with patch.object(guard, 'ROOT', root), patch.object(guard.P, 'MARKER', marker), patch.object(guard.P, 'RESERVATION', reservation), \
-                    patch.object(guard, 'invariant_contract'), patch.object(guard, 'runtime_contract'), patch.object(guard, 'verify_private_inputs'), \
+                    patch.object(guard, 'invariant_contract'), patch.object(guard, 'runtime_contract'), patch.object(guard, 'verify_private_inputs'), patch.object(guard, 'ansible_preflight'), \
                     patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
                     patch.object(guard.B, 'command', return_value=''), patch.object(guard, 'apt_scope'), patch.object(guard, 'offhost'), \
                     patch.object(guard.os, 'statvfs', return_value=type('Capacity', (), {'f_bavail': 100 * 1024**3, 'f_frsize': 1})()), \
@@ -178,7 +178,7 @@ class FiniteWebEngineTests(unittest.TestCase):
                 patch.object(guard.B, 'command', return_value=''), patch.object(guard, 'apt_scope'), \
                 patch.object(guard.os.path, 'lexists', return_value=False), patch.object(guard.os, 'open') as opened, \
                 patch.object(guard.os, 'statvfs', return_value=type('Capacity', (), {'f_bavail': 100 * 1024**3, 'f_frsize': 1})()), patch.object(guard, 'verify_private_inputs'), \
-                patch.object(guard, 'offhost') as remote, patch.object(guard.B, 'execute_ansible') as ansible, patch('builtins.print'):
+                patch.object(guard, 'offhost') as remote, patch.object(guard, 'ansible_preflight'), patch.object(guard.B, 'execute_ansible') as ansible, patch('builtins.print'):
             guard.run({'new_packages': [], 'backup_root': '/private/backup'}, Path('/private/manifest'), 'a' * 64, False)
             opened.assert_not_called(); ansible.assert_not_called()
             self.assertIsNone(remote.call_args.kwargs['verify'])
@@ -227,7 +227,7 @@ class FiniteWebEngineTests(unittest.TestCase):
                 patch.object(guard.B, 'command', return_value=''), patch.object(guard, 'apt_scope'), \
                 patch.object(guard.os.path, 'lexists', return_value=False), patch.object(guard.os, 'open') as opened, \
                 patch.object(guard.os, 'statvfs', return_value=type('Capacity', (), {'f_bavail': 100 * 1024**3, 'f_frsize': 1})()), \
-                patch.object(guard, 'verify_private_inputs'), patch.object(guard, 'offhost'), \
+                patch.object(guard, 'verify_private_inputs'), patch.object(guard, 'offhost'), patch.object(guard, 'ansible_preflight'), \
                 patch.object(guard.B, 'execute_ansible') as child:
             with self.assertRaisesRegex(guard.P.Refusal, 'insufficient_restore_window'):
                 guard.run(plan, Path('/private/manifest'), 'a' * 64, True)
@@ -487,6 +487,48 @@ class FiniteWebEngineTests(unittest.TestCase):
         self.assertTrue(all(task['tags'] == ['always'] for task in tasks[:3]))
         self.assertTrue(all(task['tags'] == ['pre_install'] for task in tasks[3:boundary]))
         self.assertTrue(all(task['tags'] == ['install_restore'] for task in tasks[boundary:]))
+
+
+class AnsibleLocalePreflightTests(unittest.TestCase):
+    def test_real_cli_preflight_and_stages_share_exact_utf8_environment(self):
+        plan = {'backup_root': '/private/backups/operation', 'ansible_binary': '/private/venv/bin/ansible-playbook'}
+        env = guard.ansible_environment(plan)
+        self.assertEqual(env, {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C.UTF-8',
+            'DOCKER_HOST': 'unix:///var/run/docker.sock',
+            'ANSIBLE_HOME': '/private/backups/.web-engine-ansible-home',
+            'ANSIBLE_LOCAL_TEMP': '/private/backups/.web-engine-ansible-tmp',
+            'ANSIBLE_CONFIG': str(guard.PROJECT / 'deploy/maintenance/ansible.cfg')})
+        with patch.object(guard, 'bounded', return_value='ansible-playbook [core 2.21.5]\npublic CLI version') as child:
+            guard.ansible_preflight(plan)
+        child.assert_called_once_with([plan['ansible_binary'], '--version'], timeout=30, extra_env=env)
+        tree = ast.parse((HERE / 'web_engine_controller.py').read_text())
+        run = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'run')
+        version = next(node for node in ast.walk(run) if isinstance(node, ast.Call)
+                       and isinstance(node.func, ast.Name) and node.func.id == 'ansible_preflight')
+        ownership = next(node for node in run.body if isinstance(node, ast.With))
+        self.assertLess(version.lineno, ownership.lineno)
+        assignment = next(node for node in ast.walk(run) if isinstance(node, ast.Assign)
+                          and any(isinstance(name, ast.Name) and name.id == 'env' for name in node.targets))
+        self.assertEqual(ast.unparse(assignment.value), 'ansible_environment(plan)')
+
+    def test_wrong_cli_version_fails_before_any_stage(self):
+        plan = {'backup_root': '/private/backups/operation', 'ansible_binary': '/private/ansible'}
+        for output in ('', 'ansible-playbook [core 2.20.0]', 'ansible [core 2.21.5]', 'locale encoding is None'):
+            with patch.object(guard, 'bounded', return_value=output), self.assertRaisesRegex(guard.P.Refusal, 'ansible_runtime_not_ready'):
+                guard.ansible_preflight(plan)
+
+    def test_cli_failure_occurs_before_reservation_open_or_scope(self):
+        plan = {'new_packages': [], 'backup_root': '/private/backup'}
+        with patch.object(guard, 'invariant_contract'), patch.object(guard, 'runtime_contract'), \
+             patch.object(guard, 'verify_private_inputs'), patch.object(guard.B, 'command', return_value=''), \
+             patch.object(guard, 'apt_scope'), patch.object(guard.os.path, 'lexists', return_value=False), \
+             patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
+             patch.object(guard, 'ansible_preflight', side_effect=guard.P.Refusal('synthetic_cli_failure')), \
+             patch.object(guard.os, 'open') as opened, patch.object(guard, 'execute_stage') as stage:
+            with self.assertRaisesRegex(guard.P.Refusal, 'synthetic_cli_failure'):
+                guard.run(plan, Path('/private/manifest'), 'a' * 64, True)
+        opened.assert_not_called()
+        stage.assert_not_called()
 
 
 class BoundedArtifactOutputTests(unittest.TestCase):

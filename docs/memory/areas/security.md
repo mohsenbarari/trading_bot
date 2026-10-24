@@ -33,13 +33,16 @@
 - Self-revoking SSH can strand Ansible housekeeping. Final revocation uses
   controller-local SSH; separately verify key/pin/authorized-entry absence and
   retain failed-transport evidence.
-- 24Oct: maximum90min from ACTUAL first downtime. Fresh06 start is not before
-  05:30Z, deadline07:00Z; old02/03/04/05 expiries stay unchanged. Keep restore
+- 24Oct: maximum90min from ACTUAL first downtime. Fresh07 start is not before
+  05:30Z, deadline07:00Z; old02/03/04/05/06 expiries stay unchanged. Keep restore
   reserve; preparation is not acceptance. Docker-only work does not close the
   persistent collector-inhibition gap required before Web kernel reboot.
 - Diagnostic output and payload-file limits are independent: a small inherited
   RLIMIT_FSIZE breaks pg_dump and dpkg. C966 streams diagnostics with early caps
   and finite artifact budgets; real3MiB-file/oversized-output regressions apply.
+- 06 aborted/restored from reserved before quiescence: Ansible needs UTF-8.
+  07 uses one UTF-8 environment for real CLI preflight and execution, preserving
+  all06 terminal evidence; never adopt it as unapplied or reuse its journal.
 - Actual combined backup roles are Native=foreign/trading_bot, Web=iran/current;
   bind real host/project/artifacts, never infer geography from role names.
   Process/cgroup death does not cancel accepted Docker/PID1 requests; ambiguous

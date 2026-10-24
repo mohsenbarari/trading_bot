@@ -826,6 +826,22 @@ def _abort_restore(plan, digest):
     write_json(paths(plan)[0], value, exclusive=False)
 
 
+def ansible_environment(plan):
+    return {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C.UTF-8',
+            'DOCKER_HOST': 'unix:///var/run/docker.sock',
+            'ANSIBLE_HOME': str(Path(plan['backup_root']).parent / '.web-engine-ansible-home'),
+            'ANSIBLE_LOCAL_TEMP': str(Path(plan['backup_root']).parent / '.web-engine-ansible-tmp'),
+            'ANSIBLE_CONFIG': str(PROJECT / 'deploy/maintenance/ansible.cfg')}
+
+
+def ansible_preflight(plan):
+    # Invoke the REAL CLI under precisely the stage environment before any
+    # reservation/quiescence. Trusted Ansible may create private scratch/cache.
+    version = bounded([plan['ansible_binary'], '--version'], timeout=30,
+                      extra_env=ansible_environment(plan))
+    require(re.match(r'^ansible-playbook \[core 2\.21\.5\]', version), 'ansible_runtime_not_ready')
+
+
 def run(plan, path, digest, apply):
     invariant_contract(plan, digest, owned=False)
     runtime_contract(plan, 'baseline')
@@ -833,6 +849,7 @@ def run(plan, path, digest, apply):
     verify_private_inputs(plan)
     apt_scope(B.command(apt_argv(plan, simulation=True)))
     require(not os.path.lexists('/usr/sbin/policy-rc.d'), 'existing_service_policy_requires_review')
+    ansible_preflight(plan)
     available = os.statvfs(Path(plan['backup_root']).parent)
     require(available.f_bavail * available.f_frsize >= 2 * (MAX_ARCHIVE + 4096) + FREE_FLOOR + 16 * 1024**3,
             'initial_backup_capacity_insufficient')
@@ -866,10 +883,7 @@ def run(plan, path, digest, apply):
             invariant_contract(plan, digest, owned=True)
             argv = [plan['ansible_binary'], '-i', str(HERE / 'web_engine_local_inventory.yml'),
                     str(HERE / 'web_engine_transaction.yml'), '-e', json.dumps({'web_engine_manifest': str(path), 'web_engine_manifest_sha256': digest})]
-            env = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C', 'DOCKER_HOST': 'unix:///var/run/docker.sock',
-                   'ANSIBLE_HOME': str(Path(plan['backup_root']).parent / '.web-engine-ansible-home'),
-                   'ANSIBLE_LOCAL_TEMP': str(Path(plan['backup_root']).parent / '.web-engine-ansible-tmp'),
-                   'ANSIBLE_CONFIG': str(PROJECT / 'deploy/maintenance/ansible.cfg')}
+            env = ansible_environment(plan)
             # Aggregate pre-install work cannot consume the restore reserve.
             cutoff = (deadline - timedelta(seconds=PREINSTALL_MARGIN)).isoformat().replace('+00:00', 'Z')
             require(execute_stage(plan, digest, argv, env, cutoff, descriptors, 'pre_install') == 0, 'ansible_failed_fence_retained')

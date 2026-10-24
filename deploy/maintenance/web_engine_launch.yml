@@ -1,5 +1,5 @@
 ---
-# One durable launch only; the independently reviewed C966 controller owns every operation.
+# One durable launch only; the independently reviewed UTF-8 controller owns every operation.
 - name: Preflight or launch the exact reviewed Web engine transaction
   hosts: web_engine
   gather_facts: false
@@ -26,10 +26,10 @@
           - |
             import hashlib,json,os,pathlib,stat,subprocess,sys
             from datetime import datetime,timezone
-            ROOT=pathlib.Path('/root/.local/security-web-engine-20261023')
+            ROOT=pathlib.Path('/root/.local/security-web-engine-20261024-task07')
             CONTROL=pathlib.Path('/root/secure-envs/trading-bot/release-control')
             PENDING=pathlib.Path('/var/lib/trading-bot/production-release/two-host-release-state.json')
-            UNIT='security-web-engine-06-888de791edea40c3b69ef53b2ac170ad.service'
+            UNIT='security-web-engine-07-304b2ec68d304738a43794f5a666b6c8.service'
             SOURCES=('deploy/maintenance/web_engine_preflight.py','deploy/maintenance/web_engine_controller.py','deploy/maintenance/web_engine_offhost.py','deploy/maintenance/web_engine_transaction.yml','deploy/maintenance/web_engine_local_inventory.yml','deploy/maintenance/ansible.cfg','scripts/validate_docker_daemon_maintenance.py','scripts/crypt_market_pipeline_backup.py','scripts/backup_market_pipeline_archive.py','scripts/prepare_market_pipeline_release.py','deploy/maintenance/web_engine_prepare.py','deploy/maintenance/web_engine_prepare.yml','deploy/maintenance/web_engine_inventory.yml')
             def native():
                 assert os.geteuid()==0 and pathlib.Path('/proc/1/exe').readlink().name=='systemd'
@@ -50,12 +50,12 @@
             def verify(digest):
                 native();s=ROOT.lstat();assert stat.S_ISDIR(s.st_mode) and stat.S_IMODE(s.st_mode)==0o700
                 raw=read(ROOT/'plan.json',2097152);assert hashlib.sha256(raw).hexdigest()==digest
-                plan=json.loads(raw);assert plan['operation_id']=='security-web-engine-20261023-06' and plan['nonce']=='888de791edea40c3b69ef53b2ac170ad' and plan['deadline_utc']=='2026-10-24T07:00:00Z' and plan['source_root']==str(ROOT/'source')
+                plan=json.loads(raw);assert plan['operation_id']=='security-web-engine-20261023-07' and plan['nonce']=='304b2ec68d304738a43794f5a666b6c8' and plan['deadline_utc']=='2026-10-24T07:00:00Z' and plan['source_root']==str(ROOT/'source')
                 files={entry['path']:entry for entry in plan['files']};assert len(files)==len(plan['files'])
                 for name in SOURCES:
                     p=ROOT/'source'/name;data=read(p,131072);assert hashlib.sha256(data).hexdigest()==files[str(p)]['sha256'] and len(data)==files[str(p)]['size']
-                    if name=='deploy/maintenance/web_engine_controller.py':assert hashlib.sha256(data).hexdigest()=='966970743e3e96a1b7ffac3665486d8b7db589b952751f49c6568d45005eec43'
-                absent=(ROOT/'controller06.log',CONTROL/'private-primary-controller.lock',CONTROL/'security-web-engine-20261023-06.journal.json',CONTROL/'security-web-engine-20261023-06.source.lock',PENDING)
+                    if name=='deploy/maintenance/web_engine_controller.py':assert hashlib.sha256(data).hexdigest()=='81b8983cb0f790c95d0e51c3f3225bd60aa5eb8ef5037dd9c20f8dbc549e64b9'
+                absent=(ROOT/'controller07.log',CONTROL/'private-primary-controller.lock',CONTROL/'security-web-engine-20261023-07.journal.json',CONTROL/'security-web-engine-20261023-07.source.lock',PENDING)
                 assert not any(os.path.lexists(p) for p in absent)
                 result=subprocess.run(['/usr/bin/systemctl','show',UNIT,'-p','LoadState','--value'],capture_output=True,check=True,timeout=10)
                 assert result.stdout==b'not-found\n'
@@ -72,7 +72,7 @@
 
     - name: Run the full unchanged controller default preflight without runtime mutation
       ansible.builtin.command:
-        argv: [/usr/bin/python3, -I, -B, /root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_controller.py, run, --manifest, /root/.local/security-web-engine-20261023/plan.json, --manifest-sha256, '{{ web_engine_launch_plan_sha256 }}']
+        argv: [/usr/bin/python3, -I, -B, /root/.local/security-web-engine-20261024-task07/source/deploy/maintenance/web_engine_controller.py, run, --manifest, /root/.local/security-web-engine-20261024-task07/plan.json, --manifest-sha256, '{{ web_engine_launch_plan_sha256 }}']
       changed_when: false
       check_mode: false
       timeout: 300
@@ -87,7 +87,7 @@
           - /usr/bin/systemd-run
           - --no-ask-password
           - --expand-environment=no
-          - --unit=security-web-engine-06-888de791edea40c3b69ef53b2ac170ad.service
+          - --unit=security-web-engine-07-304b2ec68d304738a43794f5a666b6c8.service
           - --property=Type=exec
           - --property=Restart=no
           - --property=RuntimeMaxSec=5400
@@ -95,9 +95,9 @@
           - --property=KillMode=control-group
           - --property=UMask=0077
           - --property=LimitFSIZE=infinity
-          - --property=WorkingDirectory=/root/.local/security-web-engine-20261023
-          - --property=StandardOutput=append:/root/.local/security-web-engine-20261023/controller06.log
-          - --property=StandardError=append:/root/.local/security-web-engine-20261023/controller06.log
+          - --property=WorkingDirectory=/root/.local/security-web-engine-20261024-task07
+          - --property=StandardOutput=append:/root/.local/security-web-engine-20261024-task07/controller07.log
+          - --property=StandardError=append:/root/.local/security-web-engine-20261024-task07/controller07.log
           - /usr/bin/env
           - -i
           - PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -106,10 +106,10 @@
           - /usr/bin/python3
           - -I
           - -B
-          - /root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_controller.py
+          - /root/.local/security-web-engine-20261024-task07/source/deploy/maintenance/web_engine_controller.py
           - run
           - --manifest
-          - /root/.local/security-web-engine-20261023/plan.json
+          - /root/.local/security-web-engine-20261024-task07/plan.json
           - --manifest-sha256
           - '{{ web_engine_launch_plan_sha256 }}'
           - --apply

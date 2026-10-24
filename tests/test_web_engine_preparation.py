@@ -53,10 +53,40 @@ class WebEnginePreparationTests(unittest.TestCase):
             'market_backup': {'env_file': '/private/metadata-only.env', 'release_sha': 'e' * 40, 'release_tree': 'f' * 40,
                 'image_id': 'sha256:' + '1' * 64, 'image_input_signature': '2' * 64},
             'backup_key_file': '/private/metadata-only.key',
-            'offhost': {'identity_file': '/root/.ssh/security-controller-20261023-host-patch-06/id_ed25519',
-                'known_hosts_file': '/root/.ssh/security-controller-20261023-host-patch-06/known_hosts', 'known_hosts_sha256': '3' * 64},
+            'offhost': {'identity_file': '/root/.ssh/security-controller-20261023-host-patch-07/id_ed25519',
+                'known_hosts_file': '/root/.ssh/security-controller-20261023-host-patch-07/known_hosts', 'known_hosts_sha256': '3' * 64},
             'datastore_probes': [{'name': '/fixture-db' + str(n), 'kind': 'postgres', 'user': 'fixture', 'database': 'fixture'} for n in range(8)]}
         self.inputs['source_sha256']['deploy/maintenance/web_engine_controller.py'] = R.CONTROLLER_SHA
+
+    def test_fresh07_requires_authentic_terminal06_without_adopting_or_deleting_it(self):
+        old = {'schema': 'web_engine_transaction_plan/1', 'operation_id': 'security-web-engine-20261023-06',
+               'nonce': R.PRIOR_NONCE, 'containers': []}
+        raw = json.dumps(old).encode()
+        digest = sha256(raw).hexdigest()
+        source = b'public old reviewed controller fixture'
+        receipt = {'schema': 'web_engine_transaction/1', 'operation_id': old['operation_id'],
+                   'nonce': R.PRIOR_NONCE, 'manifest_sha256': digest, 'phase': 'aborted_restored',
+                   'aborted_from': 'reserved', 'security_transition_completed': False}
+        state = Mock(return_value='ActiveState=failed\nMainPID=0\nExecMainStatus=1')
+        C = SimpleNamespace(P=SimpleNamespace(RESERVATION=self.temp / 'reservation', PENDING=self.temp / 'pending'),
+                            B=SimpleNamespace(command=state))
+        paths = {R.PRIOR_ROOT / 'plan.json': raw,
+                 R.PRIOR_ROOT / 'source/deploy/maintenance/web_engine_controller.py': source}
+        journal = Path('/root/secure-envs/trading-bot/release-control/security-web-engine-20261023-06.journal.json')
+        def fetch(path, **kwargs):
+            return json.dumps(receipt).encode() if path == journal else paths[path]
+        with patch.object(R, 'read', side_effect=fetch), patch.object(R, 'PRIOR_SHA', digest), \
+             patch.object(R, 'PRIOR_C_SHA', sha256(source).hexdigest()), patch.object(R.os.path, 'lexists', return_value=False):
+            self.assertEqual(R.prior_terminal(C), old)
+            for key, wrong in (('phase', 'reserved'), ('aborted_from', 'quiescing'),
+                               ('security_transition_completed', True), ('manifest_sha256', '0' * 64)):
+                original = receipt[key]; receipt[key] = wrong
+                with self.subTest(field=key), self.assertRaisesRegex(RuntimeError, 'prior_recovery_not_verified'):
+                    R.prior_terminal(C)
+                receipt[key] = original
+            state.return_value = 'ActiveState=active\nMainPID=123\nExecMainStatus=0'
+            with self.assertRaisesRegex(RuntimeError, 'prior_runner_not_terminal'):
+                R.prior_terminal(C)
 
     def tiny_controller(self, payload=b'public tiny deb fixture'):
         pins = {'docker.io': ('29.1.3-0ubuntu4.1', len(payload), sha256(payload).hexdigest())}
@@ -268,7 +298,8 @@ class WebEnginePreparationTests(unittest.TestCase):
             return original_lexists(path)
         with patch.object(R, '__file__', str(source / 'deploy/maintenance/web_engine_prepare.py')), patch.object(R, 'SOURCE', source), \
                 patch.object(R, 'binding', side_effect=bind), patch.object(R, 'private_metadata', return_value=list(range(9))) as metadata, \
-                patch.object(Path, 'lstat', new=lstat), patch.object(Path, 'read_text', new=text), patch.object(R.os.path, 'lexists', side_effect=lexists):
+                patch.object(Path, 'lstat', new=lstat), patch.object(Path, 'read_text', new=text), patch.object(R.os.path, 'lexists', side_effect=lexists), \
+                patch.object(R, 'prior_terminal', return_value={'containers': [{**row, 'network_names': sorted(row['network_names'])} for row in containers]}):
             plan = R.snapshot(C, spec)
         self.assertEqual((len(plan['containers']), len(plan['units']), len(plan['engine_intent']), len(plan['datastore_probes'])), (27, 10, 4, 8))
         self.assertEqual(sum(row['running'] for row in plan['containers']), 26)

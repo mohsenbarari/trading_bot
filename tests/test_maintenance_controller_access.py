@@ -77,7 +77,7 @@ class ControllerPlaybookContracts(unittest.TestCase):
 
     def test_explicit_fixed_window_and_native_host_guards(self):
         guards = TASKS[0]["ansible.builtin.assert"]["that"]
-        self.assertIn("controller_access_action == 'check' or controller_access_confirmation == ('TEMPORARY-ROOT-SSH-20261024T070000Z' if controller_access_id == 'host-patch-06' else 'TEMPORARY-ROOT-SSH-20261024T060000Z' if controller_access_id == 'host-patch-05' else 'TEMPORARY-ROOT-SSH-20261024T052000Z' if controller_access_id == 'host-patch-04' else 'TEMPORARY-ROOT-SSH-20261024T044100Z' if controller_access_id == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T013000Z')", guards)
+        self.assertIn("controller_access_action == 'check' or controller_access_confirmation == ('TEMPORARY-ROOT-SSH-20261024T070000Z' if controller_access_id in ['host-patch-06', 'host-patch-07'] else 'TEMPORARY-ROOT-SSH-20261024T060000Z' if controller_access_id == 'host-patch-05' else 'TEMPORARY-ROOT-SSH-20261024T052000Z' if controller_access_id == 'host-patch-04' else 'TEMPORARY-ROOT-SSH-20261024T044100Z' if controller_access_id == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T013000Z')", guards)
         for value in ("os.geteuid() == 0", "'/proc/1/exe'", "'systemd'", "'/proc/self/ns/'", "'/.dockerenv'", "'/usr/sbin/ip'", "'65.109.216.187' if role == 'bot' else '65.109.220.59'", "< setup_deadline(ident)"):
             self.assertIn(value, SOURCE)
         self.assertNotIn("402653", SOURCE)  # Namespace inode magic is not host proof.
@@ -117,7 +117,7 @@ class ControllerPlaybookContracts(unittest.TestCase):
         index = TASKS.index(task("Append or remove only the exact owned timed public key preserving other lines"))
         self.assertIn("Refuse unsafe authorized keys metadata", TASKS[index - 1]["name"])
 
-    def test_new_window_and_key_expiry_extend_only_fresh06_not_previous_or_unknown_ids(self):
+    def test_new_window_and_key_expiry_extend_only_fresh07_not_previous_or_unknown_ids(self):
         environment = Environment(undefined=StrictUndefined)
         environment.filters['from_json'] = json.loads
         expression = next(value for value in TASKS[0]['ansible.builtin.assert']['that']
@@ -125,6 +125,7 @@ class ControllerPlaybookContracts(unittest.TestCase):
         confirm = environment.compile_expression(expression)
         managed = task('Derive exactly one options-prefixed managed public key')['ansible.builtin.set_fact']['controller_managed_line']
         for ident, expiry, confirmation in (
+                ('host-patch-07', '20261024070000Z', 'TEMPORARY-ROOT-SSH-20261024T070000Z'),
                 ('host-patch-06', '20261024070000Z', 'TEMPORARY-ROOT-SSH-20261024T070000Z'),
                 ('host-patch-05', '20261024060000Z', 'TEMPORARY-ROOT-SSH-20261024T060000Z'),
                 ('host-patch-04', '20261024052000Z', 'TEMPORARY-ROOT-SSH-20261024T052000Z'),
@@ -192,13 +193,14 @@ class PublicValidatorFixtures(unittest.TestCase):
         self.owner.start()
         self.addCleanup(self.owner.stop)
 
-    def test_setup_deadline_is_closed_and_only_fresh06_has_new_window(self):
+    def test_setup_deadline_is_closed_and_only_fresh07_has_new_window(self):
         cutoff = self.functions['setup_deadline']
         now = datetime.datetime(2026, 10, 24, 3, 11, tzinfo=datetime.timezone.utc)
         self.assertEqual(cutoff('host-patch-03'), datetime.datetime(2026, 10, 24, 4, 41, tzinfo=datetime.timezone.utc))
         self.assertEqual(cutoff('host-patch-04'), datetime.datetime(2026, 10, 24, 5, 20, tzinfo=datetime.timezone.utc))
         self.assertEqual(cutoff('host-patch-05'), datetime.datetime(2026, 10, 24, 6, 0, tzinfo=datetime.timezone.utc))
         self.assertEqual(cutoff('host-patch-06'), datetime.datetime(2026, 10, 24, 7, 0, tzinfo=datetime.timezone.utc))
+        self.assertEqual(cutoff('host-patch-07'), datetime.datetime(2026, 10, 24, 7, 0, tzinfo=datetime.timezone.utc))
         self.assertLess(now, cutoff('host-patch-03'))
         self.assertLess(now, cutoff('host-patch-04'))
         after03 = datetime.datetime(2026, 10, 24, 4, 42, tzinfo=datetime.timezone.utc)
@@ -207,7 +209,7 @@ class PublicValidatorFixtures(unittest.TestCase):
         self.assertFalse(after04 < cutoff('host-patch-04')); self.assertTrue(after04 < cutoff('host-patch-05'))
         after05 = datetime.datetime(2026, 10, 24, 6, 1, tzinfo=datetime.timezone.utc)
         self.assertFalse(after05 < cutoff('host-patch-05')); self.assertTrue(after05 < cutoff('host-patch-06'))
-        for ident in ('host-patch-02', 'fixture', 'host-patch-03-extra', 'host-patch-04-extra', 'host-patch-05-extra', 'host-patch-06-extra', 'host-patch-07'):
+        for ident in ('host-patch-02', 'fixture', 'host-patch-03-extra', 'host-patch-04-extra', 'host-patch-05-extra', 'host-patch-06-extra', 'host-patch-07-extra', 'host-patch-08'):
             self.assertEqual(cutoff(ident), datetime.datetime(2026, 10, 24, 1, 30, tzinfo=datetime.timezone.utc))
             self.assertFalse(now < cutoff(ident))
 

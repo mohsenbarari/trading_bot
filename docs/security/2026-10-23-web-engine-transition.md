@@ -421,3 +421,27 @@ with tiny stdout, refused a2MiB artifact overflow, and killed/reaped an output
 flood after at most4097 captured bytes for a4096-byte cap. These establish the
 limit separation, not a successful production dump, installation or recovery.
 All backup/capacity/restore/source/authority gates remain required on real run.
+
+## Fresh07: real Ansible locale admission, terminal06 retained
+
+Actual06 stopped at `reserved`: Ansible rejected the C locale before the first
+quiescence checkpoint. Its authentic terminal receipt is `aborted_restored`,
+`aborted_from=reserved`, `security_transition_completed=false`; it is not a
+successful upgrade and is not an unused plan. The failed exited unit, original
+plan (`dc01b663f6fa3e23762804b5c6cf0f0ec7b0e45d14aeb820d6641c905e8d275a`),
+source and journal remain intact. Fresh07 preparation requires that exact
+terminal identity, no old reservation/source fences and the actual unchanged
+27-container baseline. No terminal record is deleted, reset or adopted.
+
+Fresh07 uses the separate private workspace
+`/root/.local/security-web-engine-20261024-task07`, nonce
+`304b2ec68d304738a43794f5a666b6c8`, with the SAME07:00 UTC deadline and
+05:30 not-before boundary; no earlier key expiry is extended. Its controller
+`81b8983cb0f790c95d0e51c3f3225bd60aa5eb8ef5037dd9c20f8dbc549e64b9`
+uses one shared `ansible_environment(plan)` for preflight and both real stages.
+It sets `LC_ALL=C.UTF-8`, preserving Ansible's mandatory encoding guard.
+Before any reservation or downtime, the real `ansible-playbook --version`
+must succeed under that exact environment and report core2.21.5. This is
+operationally read-only; trusted Ansible may create private scratch/cache
+files. Metadata CLI locale behavior and every artifact/diagnostic bound are
+unchanged. Actual backup, restore and installation evidence is still required.
