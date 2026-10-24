@@ -294,6 +294,23 @@ production stop, daemon upgrade, reboot or activation authority.
 
 ## Separate configuration and image identities for managed04
 
+Actual04 provisioning subsequently **passed** through Ansible from reviewed
+source `d6b06990`, with its own deadline `2026-10-24T17:17:17.122226Z`.
+The strict normal validator accepted the staged source. An independent
+read-only check matched the completed receipt, canonical public evidence,
+original file metadata and its complete parent chain. Only IMAGE changed in
+the new configuration; the original Env and all runtime intent were preserved.
+
+The managed directory is
+`/srv/trading-bot/market-pipeline-releases/security-backup-managed-20261024-04`.
+Its `web-managed-receipt.json` SHA256 is
+`305de6c1fc3a1997e53f91c689f83d038c37383d27b15d6d4571281dfb233e9c`;
+`public-source-evidence.json` SHA256 is
+`2e13ad0997eacd9ec8cf1f6cd6dc22494b3f81b0216a4ec684559f28e4520f3c`.
+These are hashes of public/metadata control evidence, never Env contents.
+This completed configuration staging only: no dump, restore, offhost copy,
+service stop, engine upgrade, reboot or security acceptance occurred.
+
 Actual03 provisioning refused cleanly with
 `primary_managed_source_release_mismatch`. Its public script staging and empty
 managed directory remain immutable failure evidence and cannot be adopted.
@@ -344,5 +361,6 @@ before and after normal rendering. Only the four pinned public helper scripts
 and a fresh managed backup configuration are staged. Original Env metadata is
 retained; no diagnostic Env copy/hash or referenced secret/session read occurs.
 Canonical public source evidence is persisted and hashed independently of the
-private configuration. Source tests and public-module loading pass; actual
-provisioning, dump, restore and offhost acceptance are separate pending actions.
+private configuration. Source tests and public-module loading passed; actual04
+provisioning also passed as recorded above. Dump, restore and offhost acceptance
+remain separate pending actions.
