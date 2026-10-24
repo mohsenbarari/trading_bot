@@ -12,7 +12,10 @@ concurrency:
 
 jobs:
   candidate:
-    if: github.ref == 'refs/heads/main'
+    # Disposable source evidence has no deploy credentials or release action.
+    # Keep the reviewed candidate branch usable without repeatedly cancelling
+    # the full production-main test matrix for each build-recipe correction.
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:

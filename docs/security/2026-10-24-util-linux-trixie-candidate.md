@@ -25,8 +25,11 @@ by the existing raw HIGH/CRITICAL gate.
 
 ## What the manual CI job actually does
 
-`trixie-util-linux-build.yml` is manual-only, published-main-only and has only
-`contents:read`. It copies exactly four published Git blobs into a private,
+`trixie-util-linux-build.yml` is manual-only, admits only published `main` or
+the reviewed `security/remediation-20261023` branch, and has only `contents:read`.
+This disposable candidate is not a release. Keeping its source iterations on
+the security branch avoids restarting the full main acceptance matrix; actual
+App release gates remain unchanged. It copies exactly four published Git blobs into a private,
 bounded context and records their hashes. No application source, runtime
 configuration, session, credential or production volume enters the job.
 
