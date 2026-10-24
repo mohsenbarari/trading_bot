@@ -79,3 +79,36 @@ the ordinary role fails. A repeat failure remains failed; do not call it fixed.
 Retain required public provenance and protected rollback references through
 review, with a cleanup review due within 10 days. No artifact in this packet is
 a production backup, secret snapshot, security remediation or activation proof.
+# Finite activation after authentic QA parking
+
+The reviewed operation is `deploy/maintenance/web_capture2_observability.py`.
+Its default `check` acquires the original maintenance/source/reservation locks
+without rewriting their payloads or the expired C07 transaction. Activation is
+an explicit separate action, bound to the completed QA-parking audit and a new
+15-minute repair clock. The first nine minutes admit work; six remain for
+rollback. It never releases the original fences or declares security closure.
+
+Use only the recovered public 4ef8 Compose context at
+`/root/.local/security-capture2-compose-parity-20261024-04` and the legitimate
+protected f3be `--env-file`. The narrow overlay retains the proven live public
+release revision and `unless-stopped` policy. Full resolved environment and
+Config/HostConfig comparisons remain in bounded RAM. Actual runtime collector
+inhibitors must remain intact; this operation does not install persistent boot
+guards or authorize reboot.
+
+The operation stops only account2 with normal Compose, proves its PID is zero
+and no other running container owns an overlapping account2 session bind, then
+uses `up --detach --no-deps --no-build --pull never --force-recreate` for that
+service. It verifies all other 26 identities/images/configurations unchanged.
+Only process-state changes of the two previously bound Market incident IDs are
+recorded as still open. Post-start output contains only the fixed bounded
+exception-type/origin schema; an absent diagnostic remains explicitly pending.
+
+Unexpected replacement/configuration failures trigger the same normal Compose
+operation with the retained immutable base image. Rollback also handles an
+absent account2 container after a failed create, provided the exact other 26
+remain and no competing session owner exists. The new audit truthfully records
+the replacement CID and the superseded capture-role anchor; the original C07
+manifest and evidence remain unchanged. Public incident artifacts have a
+10-day cleanup-review deadline; sessions, application data and images are not
+deleted by this operation.
