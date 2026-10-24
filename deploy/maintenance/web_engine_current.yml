@@ -45,7 +45,7 @@
                     return raw
                 finally:os.close(fd)
             controller=public(root/'source/deploy/maintenance/web_engine_current_controller.py',131072)
-            assert hashlib.sha256(controller).hexdigest()=='752aae16b2fd913af98dd67be41371a41dd53235ff15a3ed03723dc4ade2917b'
+            assert hashlib.sha256(controller).hexdigest()=='77ca1a9dc477d9a2057e6b33c61871bba529a986ceeb1bdd16a0da5f56a56f9e'
             raw=public(root/'plan.json',2*1024**2);assert hashlib.sha256(raw).hexdigest()==sys.argv[1]
             plan=json.loads(raw);assert plan['schema']=='web_engine_current_plan/1' and plan['operation_id']=='security-web-engine-20261024-08' and plan['nonce']==sys.argv[2]
             print('{"public_source_binding_verified":true}')

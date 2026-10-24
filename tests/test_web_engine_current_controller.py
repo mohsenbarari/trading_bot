@@ -133,6 +133,8 @@ class CurrentControllerTests(unittest.TestCase):
         self.assertIn('--simulate',simulation);self.assertIn('--no-download',simulation)
         self.assertNotIn('--no-download',install);self.assertIn('--yes',install)
         self.assertIn('Dir::Etc::sourcelist=/dev/null',install);self.assertIn('Dir::Etc::sourceparts=-',install)
+        for argv in (simulation,install):
+            self.assertEqual(argv.count('Dir::Cache::pkgcache='),1);self.assertEqual(argv.count('Dir::Cache::srcpkgcache='),1)
         self.assertEqual([a for a in install if a.endswith('.deb')],[p['path'] for p in self.rt.plan['new_packages']])
         good='\n'.join(['Inst '+v for v in self.recipe.C.P.NEW_PACKAGES]+['Remv '+v for v in self.recipe.C.P.OLD_PACKAGES])
         self.recipe.C.apt_scope(good)
@@ -142,9 +144,12 @@ class CurrentControllerTests(unittest.TestCase):
 
     def test_sanitized_failure_diagnostics_require_exact_trusted_exception_type(self):
         self.assertEqual(M.safe_reason(M.Refusal('current_closed_reason')),'current_closed_reason')
+        self.assertEqual(M.safe_reason(self.recipe.C.B.Refusal('native_command_failed_apt-get')),'native_command_failed_apt_get')
         fake=type('Refusal',(RuntimeError,),{})
         for error in (fake('private_value'),M.Refusal('/private/path=secret'),M.Refusal('a'*81),RuntimeError('secret')):
             self.assertEqual(M.safe_reason(error),'current_unexpected_failure')
+        self.assertEqual(M.safe_reason(fake('native_command_failed_apt-get')),'current_unexpected_failure')
+        self.assertEqual(M.safe_reason(M.Refusal('native_command_failed_private-secret')),'current_unexpected_failure')
         self.assertEqual(M.safe_reason(KeyError('private_value')),'current_keyerror_unknown')
 
     def test_checkpoint_retry_rechecks_without_advancing_twice(self):

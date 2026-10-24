@@ -359,6 +359,7 @@ class Runtime:
 
     def apt_argv(self,*,simulation):
         return ['/usr/bin/apt-get',*(['--simulate','--no-download'] if simulation else ['--yes']),
+            '-o','Dir::Cache::pkgcache=','-o','Dir::Cache::srcpkgcache=',
             '-o','Dir::Etc::sourcelist=/dev/null','-o','Dir::Etc::sourceparts=-',
             '-o','Dir::State::lists='+str(self.work/'apt/lists'),'-o','Dir::Cache::archives='+str(self.work/'apt/archives'),
             '--no-install-recommends','install',*[p['path'] for p in self.plan['new_packages']],*[name+'-' for name in self.C.P.OLD_PACKAGES]]
@@ -709,6 +710,7 @@ def watch(rt,descriptors,*,pause=time.sleep):
 
 def safe_reason(error):
     text=str(error)
+    if type(error) in TRUSTED_ERRORS and text=='native_command_failed_apt-get':return 'native_command_failed_apt_get'
     if type(error) in TRUSTED_ERRORS and re.fullmatch('[a-z][a-z0-9_]{0,79}',text):return text
     known={OSError:'oserror',ValueError:'valueerror',KeyError:'keyerror',TypeError:'typeerror',TimeoutError:'timeouterror',
         subprocess.TimeoutExpired:'timeoutexpired',KeyboardInterrupt:'interrupted'}

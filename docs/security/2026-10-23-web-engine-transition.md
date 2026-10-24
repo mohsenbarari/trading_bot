@@ -616,3 +616,14 @@ within 0.75 seconds. Every successful buffer is checked again against its exact
 schema, operation, nonce and manifest; stable wrong ownership, invalid typed
 phase/flags, or persistent instability still refuses and retains fences.
 Immutable source/window/history controls receive no such retry or adoption.
+
+The first real OP08 read-only prepare stopped before publishing a plan or
+creating any work directory, fence, outage or package transaction. APT's
+simulation tried to write its ordinary binary package cache under the existing
+2-MiB child file-size limit and exited on SIGXFSZ. A bounded real retry with only
+`Dir::Cache::pkgcache=` and `Dir::Cache::srcpkgcache=` added returned zero and
+passed the unchanged exact five-install/four-remove closure. Both simulation
+and installation now disable those unnecessary caches; file/output limits stay
+unchanged. Preserve the never-applied original window/source as preflight
+history when repinning the corrected source, retaining the same nonce and
+22:29:08Z deadline. This does not extend maintenance authority or attest apply.
