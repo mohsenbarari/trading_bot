@@ -1,4 +1,19 @@
-# Capture2 observability candidate — source only
+# Capture2 diagnostic provenance and functional replay recovery
+
+Current recovery packet05 uses functional image
+`sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b`.
+The isolated read-only business-state probe reproduced `SQLITE_FULL` (13)
+with the original full-sort query and 16MiB temporary filesystem. The reviewed
+account-constrained query processed 131,795 entries successfully. Public fix
+`adca507b261d3e139befc67b4a937c48c96bb949` changes only replay completion and
+its streaming canonical hasher. Target source SHA is
+`1b9c611692978edec4c37de217e77abf00f5a0e456006060c936d40c53978929`;
+undoing those two changes restores the exact historical source bytes.
+The actual image passed canonical/iterator tests and a 60,000-row synthetic
+stream with 6,213-byte traced peak allocation, without session/config mounts.
+This is a functional capture fix; it does not declare security remediation or
+production acceptance. The earlier sections retain the diagnostic admission
+history; the stopped-first procedure below is authoritative for packet05.
 
 The exact existing image is
 `sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6`.
@@ -79,7 +94,7 @@ the ordinary role fails. A repeat failure remains failed; do not call it fixed.
 Retain required public provenance and protected rollback references through
 review, with a cleanup review due within 10 days. No artifact in this packet is
 a production backup, secret snapshot, security remediation or activation proof.
-# Finite activation after authentic QA parking
+## Finite stopped-first activation after authentic QA parking
 
 The reviewed operation is `deploy/maintenance/web_capture2_observability.py`.
 Its default `check` acquires the original maintenance/source/reservation locks
@@ -96,13 +111,34 @@ Config/HostConfig comparisons remain in bounded RAM. Actual runtime collector
 inhibitors must remain intact; this operation does not install persistent boot
 guards or authorize reboot.
 
+The current inspection profile binds the exact BASE container produced by
+owned rollback04, prior04 audit and original C07 manifest. It records the
+capture-only identity delta without modifying historical manifests or evidence.
+The public functional image overlay is
+`/root/.local/security-capture2-replay-fix-20261024-01/capture2-functional-image.yml`.
+
 The operation stops only account2 with normal Compose, proves its PID is zero
 and no other running container owns an overlapping account2 session bind, then
-uses `up --detach --no-deps --no-build --pull never --force-recreate` for that
-service. It verifies all other 26 identities/images/configurations unchanged.
+uses `up --no-start --no-deps --no-build --pull never --force-recreate` for that
+service. Complete semantic configuration must pass while the new container is
+still stopped with PID0. Only then may native Docker start that exact verified
+CID; no dependency is selected or started. Rollback follows the same sequence.
+It verifies all other 26 identities/images/configurations unchanged.
 Only process-state changes of the two previously bound Market incident IDs are
 recorded as still open. Post-start output contains only the fixed bounded
 exception-type/origin schema; an absent diagnostic remains explicitly pending.
+Sanitized diagnostics are persisted before any later observation can cause
+rollback. A normal datastore healthcheck ExecID is not a capture deployment
+gate; owned HOT backup activity/resource leftovers and real DB/API failures
+still block this operation.
+
+Compare complete bind/native mount records, normalizing order only for unique,
+mutually non-nested destinations. Preserve unknown network configuration keys
+(including gateway priority) and unique alias sets. Endpoint IP/gateway/prefix
+assignments are runtime observations. Native network inspection binds declared
+network names to IDs; only a never-started PID0 candidate may have unallocated
+empty IDs. After start, actual IDs must match. Only the exact empty IPv4/IPv6
+IPAM dictionary is equivalent to no explicit IPAM configuration.
 
 Unexpected replacement/configuration failures trigger the same normal Compose
 operation with the retained immutable base image. Rollback also handles an

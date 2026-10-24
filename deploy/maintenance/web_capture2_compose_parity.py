@@ -15,8 +15,15 @@ ROOT = Path('/root/.local/security-capture2-compose-parity-20261024-04')
 ROLE_ENV = Path('/srv/trading-bot/market-pipeline-releases/f3be9ae2c4e9df0da31abaa41e91f327eb9573a2/web.release.env')
 CID = '9870311065b13646767dfad1e48214d6a231e3898e1f248bb9559edd8926966c'
 AFTER_CAPTURE02_ID = '9d427b7bf4c89f954040cad09e591bbbe01eca6c0e935abbbab87dcd9a8d5538'
+AFTER_CAPTURE04_ID = 'b29cc1b589fd5f255dd8086419cb16a155769667618f2859cca6702a05377a76'
 BASE = 'sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6'
 CANDIDATE = 'sha256:a96439e0366c40b8aca012d2a0b4c3254e2c8257880d67f6d6f0d53361ad924c'
+FUNCTIONAL_IMAGE = 'sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b'
+FUNCTIONAL_OVERLAY = Path('/root/.local/security-capture2-replay-fix-20261024-01/capture2-functional-image.yml')
+FUNCTIONAL_LABELS = {'io.gold-trade.capture.replay.baseline':'d8f15f8212b9510e3abb5301d0201b2ba1eca13224f5a01c682d1de6716cb7d5',
+    'io.gold-trade.capture.replay.fix-commit':'adca507b261d3e139befc67b4a937c48c96bb949',
+    'io.gold-trade.capture.replay.source-sha256':'1b9c611692978edec4c37de217e77abf00f5a0e456006060c936d40c53978929',
+    'io.gold-trade.capture.replay.status':'functional_fix_not_security_acceptance'}
 PUBLIC_REVISION = '4ef8e6dcb2d361b763bd8b72dc730c1f978f564a'
 PATCHED_SOURCE = 'f9d2b55921431e069b06e7de463d8b1d36ecbc01a94d5d0d98cd59f1dc9260da'
 PROJECT = 'market-private-pipeline-primary'
@@ -89,8 +96,10 @@ def duration(value):
     return int(match[1]) * {'ns': 1, 'us': 1000, 'ms': 1000000, 's': 1000000000, 'm': 60000000000, 'h': 3600000000000}[match[2]]
 
 def main(*, existing=False, incident_profile='original'):
-    require(incident_profile in {'original','after_capture02'}, 'incident_profile_invalid')
-    current_id = AFTER_CAPTURE02_ID if incident_profile == 'after_capture02' else CID
+    require(incident_profile in {'original','after_capture02','after_capture04'}, 'incident_profile_invalid')
+    current_id = {'original':CID,'after_capture02':AFTER_CAPTURE02_ID,'after_capture04':AFTER_CAPTURE04_ID}[incident_profile]
+    require(incident_profile != 'after_capture04' or existing,'functional_profile_requires_existing_public_context')
+    candidate_image = FUNCTIONAL_IMAGE if incident_profile == 'after_capture04' else CANDIDATE
     require(os.geteuid() == 0, 'native_root_required')
     safe(Path(DOCKER))
     before_env = safe(ROLE_ENV, private=True)
@@ -110,6 +119,8 @@ def main(*, existing=False, incident_profile='original'):
     expected_files['capture2-image-only.yml'] = ('services:\n  ' + SERVICE + ':\n    image: ' + CANDIDATE + '\n'
         '    restart: unless-stopped\n    environment:\n      MARKET_PIPELINE_RELEASE_SHA: ' + PUBLIC_REVISION + '\n').encode()
     require(set(expected_files) == {'compose.yml','compose.web.yml','capture2-image-only.yml'}, 'public_file_inventory_invalid')
+    if incident_profile == 'after_capture04':
+        expected_files[str(FUNCTIONAL_OVERLAY)] = ('services:\n  '+SERVICE+':\n    image: '+FUNCTIONAL_IMAGE+'\n').encode()
     for name, data in expected_files.items():
         path = ROOT / name
         if existing:
@@ -132,6 +143,9 @@ def main(*, existing=False, incident_profile='original'):
             '--env-file', str(ROLE_ENV), '-f', str(ROOT / 'compose.yml'),
             '-f', str(ROOT / 'compose.web.yml'), '-f', str(ROOT / 'capture2-image-only.yml'),
             '--profile', 'web', 'config', '--format', 'json']
+    if incident_profile == 'after_capture04':
+        at = args.index('--profile')
+        args[at:at] = ['-f',str(FUNCTIONAL_OVERLAY)]
     code, raw, error = bounded(args)
     require(safe(ROLE_ENV, private=True) == before_env, 'role_env_metadata_changed')
     if code:
@@ -170,10 +184,12 @@ def main(*, existing=False, incident_profile='original'):
     diagnostic_labels = {'io.gold-trade.observability.base-image': BASE,
                          'io.gold-trade.observability.source-sha256': PATCHED_SOURCE,
                          'io.gold-trade.observability.status': 'diagnostic_not_security_acceptance'}
+    if incident_profile == 'after_capture04':
+        diagnostic_labels.update(FUNCTIONAL_LABELS)
     old_labels = dict(base['config'].get('Labels') or {})
     old_env = environment(config.get('Env'))
     checks = {
-        'source_image_identity': image['id'] == CANDIDATE and live['image'] == base['id'] == BASE,
+        'source_image_identity': image['id'] == candidate_image and live['image'] == base['id'] == BASE,
         'complete_image_default_parity': {k:v for k,v in defaults.items() if k != 'Labels'} == {k:v for k,v in base['config'].items() if k != 'Labels'},
         'exact_diagnostic_image_labels': defaults.get('Labels') == {**old_labels, **diagnostic_labels},
         'public_release_retained': old_env.get('MARKET_PIPELINE_RELEASE_SHA') == PUBLIC_REVISION == expected_env.get('MARKET_PIPELINE_RELEASE_SHA'),
@@ -212,7 +228,7 @@ def main(*, existing=False, incident_profile='original'):
     compose_fixed = {'com.docker.compose.project': PROJECT, 'com.docker.compose.service': SERVICE,
                      'com.docker.compose.container-number': '1', 'com.docker.compose.oneoff': 'False',
                      'com.docker.compose.depends_on': ''}
-    if incident_profile == 'after_capture02':
+    if incident_profile != 'original':
         compose_fixed['com.docker.compose.replace'] = SERVICE+'-1'
     compose_provenance = {'com.docker.compose.config-hash','com.docker.compose.image',
                           'com.docker.compose.project.config_files','com.docker.compose.project.working_dir','com.docker.compose.project.environment_file',
@@ -222,16 +238,17 @@ def main(*, existing=False, incident_profile='original'):
     checks['compose_image_provenance'] = compose_labels.get('com.docker.compose.image') == BASE
     checks['compose_hash_provenance_format'] = bool(re.fullmatch(r'[0-9a-f]{64}', compose_labels.get('com.docker.compose.config-hash', '')))
     old_working = '/root/secure-envs/trading-bot/release-control/production-4ef8e6dc-cutover/.web-bluegreen.json.compose.242959.6db610ac44418756'
-    if incident_profile == 'after_capture02':
+    if incident_profile != 'original':
         old_working = str(ROOT)
-        expected_config_files = ','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml'))+',/root/.local/security-capture2-observability-20261024-02-activation/rollback.yml'
+        suffix = '04' if incident_profile == 'after_capture04' else '02'
+        expected_config_files = ','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml'))+',/root/.local/security-capture2-observability-20261024-'+suffix+'-activation/rollback.yml'
         expected_environment_file = str(ROLE_ENV)
     else:
         expected_config_files = old_working+'/compose.yml,'+old_working+'/compose.web.yml'
         expected_environment_file = old_working+'/runtime.env'
     checks['compose_old_file_provenance'] = compose_labels.get('com.docker.compose.project.working_dir') == old_working and compose_labels.get('com.docker.compose.project.config_files') == expected_config_files and compose_labels.get('com.docker.compose.project.environment_file') == expected_environment_file
     checks['compose_cli_provenance_format'] = bool(re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?', compose_labels.get('com.docker.compose.version','')))
-    if incident_profile == 'after_capture02':
+    if incident_profile != 'original':
         checks['compose_cli_provenance_format'] = compose_labels.get('com.docker.compose.version') == '2.40.3'
     checks['old_image_reference_schema'] = isinstance(config.get('Image'),str) and bool(re.fullmatch(r'[A-Za-z0-9._:/@-]{1,256}',config['Image']))
     checks['dynamic_network_configuration'] = all(not (item or {}).keys() - {'aliases'} for item in service['networks'].values()) and all(not item.get('IPAMConfig') and not item.get('DriverOpts') and not item.get('Links') for item in live['networks'].values())

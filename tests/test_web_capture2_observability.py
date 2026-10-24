@@ -21,7 +21,9 @@ def environment(items):
     return dict(item.split('=',1) for item in items)
 
 def settings():
-    return SimpleNamespace(CID=OLD,BASE=BASE,CANDIDATE=CANDIDATE,PATCHED_SOURCE='f'*64,ROOT=ROOT,
+    return SimpleNamespace(CID=OLD,BASE=BASE,CANDIDATE=CANDIDATE,FUNCTIONAL_IMAGE=CANDIDATE,
+        FUNCTIONAL_OVERLAY=ROOT/'functional.yml',FUNCTIONAL_LABELS={'io.gold-trade.capture.replay.status':'functional_fix_not_security_acceptance'},
+        PATCHED_SOURCE='f'*64,ROOT=ROOT,
         ROLE_ENV=Path('/srv/public-synthetic-release/web.release.env'),PROJECT='market-private-pipeline-primary',
         SERVICE='market-capture-account2',DOCKER='/usr/bin/docker',environment=environment)
 
@@ -30,7 +32,7 @@ def rows(ident=OLD,image=BASE,*,running=True):
     provenance = {'com.docker.compose.project':V.PROJECT,'com.docker.compose.service':V.SERVICE,
         'com.docker.compose.container-number':'1','com.docker.compose.oneoff':'False','com.docker.compose.depends_on':'',
         'com.docker.compose.config-hash':'c'*64,'com.docker.compose.image':image,
-        'com.docker.compose.project.config_files':','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml')),
+        'com.docker.compose.project.config_files':','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml'))+','+str(V.FUNCTIONAL_OVERLAY),
         'com.docker.compose.project.working_dir':str(ROOT),'com.docker.compose.project.environment_file':str(V.ROLE_ENV),
         'com.docker.compose.version':'2.40.3'}
     if image == BASE and ident != OLD:
@@ -38,7 +40,7 @@ def rows(ident=OLD,image=BASE,*,running=True):
     labels = {'org.opencontainers.image.revision':'4'*40,**provenance}
     if image == CANDIDATE:
         labels.update({'io.gold-trade.observability.base-image':BASE,'io.gold-trade.observability.source-sha256':V.PATCHED_SOURCE,
-            'io.gold-trade.observability.status':'diagnostic_not_security_acceptance'})
+            'io.gold-trade.observability.status':'diagnostic_not_security_acceptance',**V.FUNCTIONAL_LABELS})
     target = {'id':ident,'name':'/'+V.PROJECT+'-'+V.SERVICE+'-1','image':image,'running':running,'restarting':False,
         'pid':123 if running else 0,'started':'fixed','restarts':0,
         'config':{'Env':['PRIVATE=synthetic-do-not-emit'],'Image':image,'Hostname':ident[:12],'Labels':labels,
@@ -67,17 +69,19 @@ class CaptureObservabilityTests(unittest.TestCase):
         return result,commands
 
     def test_candidate_normal_stop_before_start_and_complete_private_parity(self):
-        result,commands = self.run_operation([rows(),rows(running=False),rows(NEW,CANDIDATE)],CANDIDATE)
+        result,commands = self.run_operation([rows(),rows(running=False),rows(NEW,CANDIDATE,running=False),rows(NEW,CANDIDATE)],CANDIDATE)
         self.assertEqual(result[0]['id'],NEW)
         self.assertIn('stop',commands[0])
         self.assertIn('up',commands[1])
         for flag in ('--no-deps','--no-build','--pull','never','--force-recreate'):
             self.assertIn(flag,commands[1])
+        self.assertIn('--no-start',commands[1])
+        self.assertEqual(commands[2],['/usr/bin/docker','start',NEW])
 
     def test_missing_target_after_failed_create_can_restore_exact_base(self):
         absent = rows()
         absent.pop(OLD)
-        result,commands = self.run_operation([absent,rows(RESTORED,BASE)],BASE)
+        result,commands = self.run_operation([absent,rows(RESTORED,BASE,running=False),rows(RESTORED,BASE)],BASE)
         self.assertEqual(result[0]['id'],RESTORED)
         self.assertNotIn('stop',commands[0])
         self.assertIn(str(M.TASK_ROOT/'rollback.yml'),commands[0])
@@ -86,8 +90,8 @@ class CaptureObservabilityTests(unittest.TestCase):
         bad = rows(NEW,CANDIDATE)
         bad[NEW]['config']['Env'] = ['PRIVATE=changed-secret']
         with self.assertRaisesRegex(RuntimeError,'capture_private_environment_changed'):
-            self.run_operation([rows(),rows(running=False),bad],CANDIDATE)
-        result,commands = self.run_operation([bad,rows(NEW,CANDIDATE,running=False),rows(RESTORED,BASE)],BASE)
+            self.run_operation([rows(),rows(running=False),{**bad,NEW:{**bad[NEW],'running':False,'pid':0}}],CANDIDATE)
+        result,commands = self.run_operation([bad,rows(NEW,CANDIDATE,running=False),rows(RESTORED,BASE,running=False),rows(RESTORED,BASE)],BASE)
         self.assertEqual(result[0]['image'],BASE)
         self.assertIn('stop',commands[0])
 
@@ -208,7 +212,7 @@ class CaptureObservabilityTests(unittest.TestCase):
         fixed = [{'status':'fail','reason_code':'runtime_dependency_failure','error_type':'PermissionError',
                   'origin':'telethon_sqlite_session','origin_line':88}]
         saved = []
-        with patch.object(M,'snapshot',side_effect=[rows(),rows(running=False),bad]),patch.object(M,'command',return_value=b''),patch.object(M,'legacy',return_value={}),patch.object(M,'poll_diagnostics',return_value=fixed):
+        with patch.object(M,'snapshot',side_effect=[rows(),rows(running=False),rows(NEW,CANDIDATE,running=False),bad]),patch.object(M,'command',return_value=b''),patch.object(M,'legacy',return_value={}),patch.object(M,'poll_diagnostics',return_value=fixed):
             with self.assertRaisesRegex(RuntimeError,'capture_host_configuration_changed'):
                 M.stop_and_start(None,settings(),SimpleNamespace(),rows(),CANDIDATE,
                     diagnostic_sink=lambda ident,proof:saved.append((ident,copy.deepcopy(proof))))
@@ -216,7 +220,7 @@ class CaptureObservabilityTests(unittest.TestCase):
 
     def test_current_inventory_profile_changes_only_the_typed_capture_identity(self):
         V = settings()
-        V.AFTER_CAPTURE02_ID = NEW
+        V.AFTER_CAPTURE04_ID = NEW
         plan = {'schema':'web_engine_transaction_plan/1','operation_id':'original',
                 'containers':[copy.deepcopy(row) for row in rows().values()], 'datastore_probes':['unchanged']}
         original = copy.deepcopy(plan)
@@ -244,6 +248,74 @@ class CaptureObservabilityTests(unittest.TestCase):
             M.capture_readiness(None,P,R,None,{})
         P.inventory.assert_not_called()
         P.web_datastores_native.assert_not_called()
+
+    def test_disjoint_host_mount_order_only_is_normalized_and_all_fields_retained(self):
+        host = {'ReadonlyRootfs':True,'Binds':['/one:/state:rw','/two:/capture:rw'],
+                'Mounts':[{'Target':'/run/secrets/a','Source':'/key-a','Type':'bind','Unknown':{'kept':1}},
+                          {'Target':'/run/secrets/b','Source':'/key-b','Type':'bind'}]}
+        permuted = copy.deepcopy(host)
+        permuted['Binds'].reverse();permuted['Mounts'].reverse()
+        self.assertEqual(M.canonical_host(host),M.canonical_host(permuted))
+        permuted['Mounts'][1]['Unknown']['kept'] = 2
+        self.assertNotEqual(M.canonical_host(host),M.canonical_host(permuted))
+        nested = {'Binds':['/one:/data:rw','/two:/data/nested:rw'],'Mounts':[]}
+        self.assertNotEqual(M.canonical_host(nested),M.canonical_host({**nested,'Binds':list(reversed(nested['Binds']))}))
+        with self.assertRaisesRegex(RuntimeError,'duplicate_host_mount_destination'):
+            M.canonical_host({'Binds':['/one:/data:rw'],'Mounts':[{'Target':'/data'}]})
+
+    def test_network_observations_are_dynamic_and_unknown_configuration_stays_strict(self):
+        old = {'net':{'NetworkID':'fixed','IPAMConfig':None,'DriverOpts':None,'Links':None,'Aliases':['a','b'],
+                      'Gateway':'','IPPrefixLen':0,'EndpointID':'','GwPriority':0}}
+        new = copy.deepcopy(old)
+        new['net'].update(Gateway='192.0.2.1',IPPrefixLen=24,EndpointID='new-endpoint',Aliases=['b','a'])
+        self.assertEqual(M.static_networks(old),M.static_networks(new))
+        new['net']['GwPriority']=1
+        self.assertNotEqual(M.static_networks(old),M.static_networks(new))
+        new['net']['Aliases']=['a','a']
+        with self.assertRaisesRegex(RuntimeError,'network_alias_inventory_invalid'):
+            M.static_networks(new)
+
+    def test_stopped_candidate_config_failure_never_starts_it(self):
+        bad = rows(NEW,CANDIDATE,running=False)
+        bad[NEW]['host']['UnexpectedPrivilege']=True
+        commands=[]
+        with patch.object(M,'snapshot',side_effect=[rows(),rows(running=False),bad]),patch.object(M,'command',side_effect=lambda *a,**k:commands.append(a[2]) or b''),patch.object(M,'legacy',return_value={}):
+            with self.assertRaisesRegex(RuntimeError,'capture_host_configuration_changed'):
+                M.stop_and_start(None,settings(),SimpleNamespace(),rows(),CANDIDATE)
+        self.assertFalse(any(len(argv)>1 and argv[1]=='start' for argv in commands))
+
+    def test_only_verified_stopped_candidate_can_defer_network_id_allocation(self):
+        before = rows()[OLD]
+        after = rows(NEW,CANDIDATE,running=False)[NEW]
+        ident = 'd'*64
+        declared = {'NetworkID':ident,'IPAMConfig':None,'DriverOpts':None,'Links':None,'Aliases':['service','name'],
+                    'GwPriority':0,'Gateway':'192.0.2.1','IPPrefixLen':24}
+        before['networks']={'net':declared}
+        after['networks']={'net':{**declared,'NetworkID':'','Gateway':'','IPPrefixLen':0,'Aliases':['name','service'],
+                                'IPAMConfig':{'IPv4Address':'','IPv6Address':''}}}
+        M.post_parity(settings(),before,after,CANDIDATE,network_ids={'net':ident})
+        after['networks']['net']['IPAMConfig']['Unrecognized']=''
+        with self.assertRaisesRegex(RuntimeError,'capture_explicit_ipam_unreviewed'):
+            M.post_parity(settings(),before,after,CANDIDATE,network_ids={'net':ident})
+        after['networks']['net']['IPAMConfig']={'IPv4Address':'','IPv6Address':''}
+        after['running']=True;after['pid']=123
+        with self.assertRaisesRegex(RuntimeError,'unallocated_network_after_start'):
+            M.post_parity(settings(),before,after,CANDIDATE,network_ids={'net':ident})
+        after['networks']['net']['NetworkID']=ident
+        M.post_parity(settings(),before,after,CANDIDATE,network_ids={'net':ident})
+        after['networks']['net']['NetworkID']='e'*64
+        with self.assertRaisesRegex(RuntimeError,'candidate_declared_network_identity_changed'):
+            M.post_parity(settings(),before,after,CANDIDATE,network_ids={'net':ident})
+
+    def test_declared_network_identity_comes_from_exact_native_name_resolution(self):
+        commands=[]
+        def result(V,clock,argv,seconds=30):
+            commands.append(argv)
+            return json.dumps({'name':argv[-1],'id':'d'*64}).encode()
+        with patch.object(M,'command',side_effect=result):
+            self.assertEqual(M.network_identities(settings(),None,['second','first']),{'first':'d'*64,'second':'d'*64})
+        self.assertEqual([row[-1] for row in commands],['first','second'])
+        self.assertTrue(all(row[1:3]==['network','inspect'] for row in commands))
 
 if __name__ == '__main__':
     unittest.main()

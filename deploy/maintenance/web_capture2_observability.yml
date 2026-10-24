@@ -24,8 +24,8 @@
           - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
           - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
           - capture_action in ['check', 'activate']
-          - capture_action == 'check' or capture_confirmation == 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-04'
-          - capture_argv[4] | hash('sha256') == '698490395b4981b5c6eac60e59e6eed0ff21144f6d3b124b3bc7750f85bd896c'
+          - capture_action == 'check' or capture_confirmation == 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-05'
+          - capture_argv[4] | hash('sha256') == '3bdecede8b80007a5c2a2b334833a6fc54aed97323150057ad7cd5e306e9dd3b'
     - name: Verify full configuration and single-owner conditions without mutation
       ansible.builtin.command:
         argv: "{{ capture_argv + ['check'] }}"
@@ -44,12 +44,12 @@
           - -c
           - |
             import os,subprocess
-            assert not os.path.lexists('/root/.local/security-capture2-observability-20261024-04-activation.log')
-            p=subprocess.run(['/usr/bin/systemctl','show','security-capture2-observability-20261024-04.service','-p','LoadState','--value'],capture_output=True,check=True,timeout=10)
+            assert not os.path.lexists('/root/.local/security-capture2-observability-20261024-05-activation.log')
+            p=subprocess.run(['/usr/bin/systemctl','show','security-capture2-observability-20261024-05.service','-p','LoadState','--value'],capture_output=True,check=True,timeout=10)
             assert p.stdout==b'not-found\n'
       changed_when: false
       timeout: 20
     - name: Launch only the bounded capture diagnostic owner and its rollback reserve
       ansible.builtin.command:
-        argv: "{{ ['/usr/bin/systemd-run', '--no-ask-password', '--expand-environment=no', '--unit=security-capture2-observability-20261024-04.service', '--property=Type=exec', '--property=Restart=no', '--property=RuntimeMaxSec=930', '--property=TimeoutStopSec=10', '--property=KillMode=control-group', '--property=UMask=0077', '--property=LimitCORE=0', '--property=LimitFSIZE=infinity', '--property=StandardOutput=append:/root/.local/security-capture2-observability-20261024-04-activation.log', '--property=StandardError=append:/root/.local/security-capture2-observability-20261024-04-activation.log', '/usr/bin/env', '-i', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL=C.UTF-8', 'DOCKER_HOST=unix:///var/run/docker.sock'] + capture_argv + ['activate', '--confirmation', capture_confirmation] }}"
+        argv: "{{ ['/usr/bin/systemd-run', '--no-ask-password', '--expand-environment=no', '--unit=security-capture2-observability-20261024-05.service', '--property=Type=exec', '--property=Restart=no', '--property=RuntimeMaxSec=930', '--property=TimeoutStopSec=10', '--property=KillMode=control-group', '--property=UMask=0077', '--property=LimitCORE=0', '--property=LimitFSIZE=infinity', '--property=StandardOutput=append:/root/.local/security-capture2-observability-20261024-05-activation.log', '--property=StandardError=append:/root/.local/security-capture2-observability-20261024-05-activation.log', '/usr/bin/env', '-i', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL=C.UTF-8', 'DOCKER_HOST=unix:///var/run/docker.sock'] + capture_argv + ['activate', '--confirmation', capture_confirmation] }}"
       timeout: 30
