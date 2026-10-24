@@ -265,6 +265,13 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
         with patch.object(B.os, 'geteuid', return_value=0), self.assertRaisesRegex(RuntimeError, 'nonroot_container_required'):
             B.run('sha256:' + 'a' * 64)
 
+    def test_input_preparation_refuses_host_checkout_without_network(self):
+        with patch.object(B.os, 'geteuid', return_value=0), self.assertRaisesRegex(RuntimeError, 'fetch_builder_only'):
+            B.fetch_inputs()
+        source = (RECIPE / 'build.py').read_text().split('def fetch_inputs():',1)[1].split('def unpack(',1)[0]
+        self.assertNotIn("Path('/.dockerenv').is_file()", source)
+        self.assertIn("Path('/recipe/build.py')", source)
+
     def test_report_admission_refuses_oversize_before_body_and_hardlink(self):
         block = next(value for value in blocks() if 'rows=[r for r in receipt' in value and "root/'reports'/name" in value)
         tree = ast.parse(block)

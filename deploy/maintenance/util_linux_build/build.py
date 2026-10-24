@@ -105,7 +105,11 @@ def expected_version(name, version=VERSION):
 
 
 def fetch_inputs():
-    require(os.geteuid() == 0 and Path('/.dockerenv').is_file(), 'fetch_builder_only')
+    # BuildKit RUN deliberately lacks Docker's runtime-only /.dockerenv.
+    # This preparation only downloads pinned public inputs into /inputs; bind
+    # the sealed recipe location instead of misclassifying a normal build.
+    require(os.geteuid() == 0 and Path(__file__).resolve(strict=True) == Path('/recipe/build.py'),
+            'fetch_builder_only')
     require(not tuple(Path('/inputs').iterdir()), 'inputs_not_empty')
     for name, (url, size, digest) in INPUTS.items():
         with urllib.request.urlopen(url, timeout=45) as response:

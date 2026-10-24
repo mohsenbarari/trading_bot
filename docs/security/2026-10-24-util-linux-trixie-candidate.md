@@ -1,7 +1,12 @@
 # Stable Trixie util-linux candidate: build evidence only
 
-Status: SOURCE ONLY. No local/host compilation, package installation, production
-change or CI execution is asserted by this document. The earlier
+Status: first actual CI40082608496 failed during builder preparation; no
+compilation, package installation or production change is asserted. All seven
+public input sizes/digests independently match. BuildKit does not create the
+Docker runtime-only `/.dockerenv`; preparation now binds the sealed recipe
+location instead. Compilation still requires the nonroot Docker runtime.
+Failure diagnostics retain bounded matching error lines as well as the tail,
+so Docker's long command summary cannot hide the original failure. The earlier
 [source research](2026-10-24-util-linux-trixie-remediation-research.md) remains the
 advisory source and explains the Debian/upstream discrepancy for CVE-2026-78409.
 
@@ -126,7 +131,9 @@ apply. Raw reports have separate finite limits: 32MiB vulnerability JSON, 8MiB
 SBOM and 64KiB image identity, 48MiB total. Package export is independent of report
 admission, so a scanner/report failure preserves completed package evidence.
 Both artifact groups expire after seven days. Failure diagnostics read only
-eight fixed public build logs, at most 8KiB per encoded record/64KiB total.
+the last64KiB of eight fixed public build logs, at most32KiB per encoded
+record/256KiB total, including eight matching failure lines of at most500
+characters each and a700-byte tail.
 
 Every receipt remains `candidate_built_not_accepted`, `security_accepted:false`,
 `production_installed:false`. A green build does not close any advisory. Final
