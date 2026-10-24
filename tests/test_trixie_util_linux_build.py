@@ -1,5 +1,6 @@
 """Hermetic source contracts plus an explicit local actionlint preflight."""
 import ast
+import builtins
 from contextlib import ExitStack
 from hashlib import sha256
 import importlib.util
@@ -15,7 +16,7 @@ import tempfile
 import textwrap
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / 'deploy/maintenance/util_linux_build'
@@ -465,6 +466,83 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
                          {'schema':'trixie_util_linux_install_log/1','name':'candidate-install.log','bytes':len(raw),
                           'retained_bytes':len(raw),'truncated':False,'public_inputs_only':True})
         self.assertIn('install_log=true\n',output.read_text())
+
+    def nested_installer_fixture(self, *, simulation=None, audit=b'', versions=None):
+        tree = next(ast.parse(block) for block in blocks() if 'def install_capsule(' in block)
+        program = next(ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == 'install' for target in node.targets))
+        folder = Path(self.stack.enter_context(tempfile.TemporaryDirectory(dir=self.root)))
+        packages = folder / 'packages'; packages.mkdir()
+        rows = [{'name': name, 'path': name + '.deb', 'version': B.expected_version(name)}
+                for name in sorted(B.SELECTED)]
+        (packages / 'build-receipt.json').write_text(json.dumps({
+            'selected_runtime_packages': sorted(B.SELECTED), 'all_family_packages': rows}))
+        paths = [str(packages / row['path']) for row in rows]
+        if simulation is None:
+            simulation = ''.join('Inst ' + row['name'] + ':amd64 (' + row['version'] + ')\n' for row in rows)
+        installed = versions if versions is not None else {row['name']: row['version'] for row in rows}
+        def run(arguments, **options):
+            if arguments[:5] == ['/usr/bin/apt-get', '--simulate', '--no-remove', '--no-download', 'install']:
+                options['stdout'].write(simulation.encode())
+                return types.SimpleNamespace(returncode=0)
+            if arguments[:5] == ['/usr/bin/apt-get', '--yes', '--no-remove', '--no-download', 'install']:
+                return types.SimpleNamespace(returncode=0)
+            if arguments == ['/usr/bin/dpkg', '--audit']:
+                return types.SimpleNamespace(returncode=0, stdout=audit)
+            if arguments[:3] == ['/usr/bin/dpkg-query', '-W', '-f=${Package}=${Version}\n']:
+                return types.SimpleNamespace(returncode=0, stdout=''.join(
+                    name + '=' + version + '\n' for name, version in installed.items()).encode())
+            raise AssertionError('unexpected_installer_command')
+        command = Mock(side_effect=run)
+        modules = {'pathlib': types.SimpleNamespace(Path=lambda value: packages if value == '/packages' else Path(value)),
+                   'subprocess': types.SimpleNamespace(run=command), 'json': json, 'os': os}
+        def import_module(name, *args, **kwargs):
+            if name not in modules:
+                raise AssertionError('unexpected_installer_import')
+            return modules[name]
+        def simulation_file(path, mode):
+            self.assertEqual(path, '/tmp/simulation')
+            return builtins.open(folder / 'simulation', mode)
+        def execute():
+            exec(compile(program, '<actual-disposable-installer>', 'exec'), {
+                '__builtins__': {**vars(builtins), '__import__': import_module}, 'open': simulation_file})
+        return execute, command, paths, rows
+
+    def test_actual_installer_uses_offline_apt_after_exact_nine_simulation_then_audits_versions(self):
+        execute, command, paths, rows = self.nested_installer_fixture()
+        execute()
+        self.assertEqual([call.args[0] for call in command.call_args_list], [
+            ['/usr/bin/apt-get', '--simulate', '--no-remove', '--no-download', 'install', *paths],
+            ['/usr/bin/apt-get', '--yes', '--no-remove', '--no-download', 'install', *paths],
+            ['/usr/bin/dpkg', '--audit'],
+            ['/usr/bin/dpkg-query', '-W', '-f=${Package}=${Version}\n', *sorted(B.SELECTED)]])
+        self.assertTrue(all(call.kwargs['check'] for call in command.call_args_list))
+        self.assertEqual(command.call_args_list[1].kwargs['timeout'], 120)
+        self.assertEqual(len(paths), 9)
+
+    def test_actual_installer_refuses_removal_unrelated_or_incomplete_simulation_before_install(self):
+        names = sorted(B.SELECTED)
+        normal = ['Inst ' + name + ':amd64 (candidate)\n' for name in names]
+        for simulation in (''.join(normal) + 'Remv unrelated [1]\n',
+                           ''.join(normal) + 'Inst unrelated (1)\n',
+                           ''.join(normal[:-1]) + 'Inst unrelated (1)\n', ''.join(normal[:-1])):
+            with self.subTest(simulation=simulation):
+                execute, command, _, _ = self.nested_installer_fixture(simulation=simulation)
+                with self.assertRaises(AssertionError):
+                    execute()
+                self.assertEqual(command.call_count, 1)
+
+    def test_actual_installer_refuses_dirty_audit_or_wrong_installed_version(self):
+        execute, command, _, _ = self.nested_installer_fixture(audit=b'libblkid1 is not configured\n')
+        with self.assertRaises(AssertionError):
+            execute()
+        self.assertEqual(command.call_count, 3)
+        versions = {name: B.expected_version(name) for name in B.SELECTED}
+        versions['libblkid1'] = '2.41.5-0+deb13u1'
+        execute, command, _, _ = self.nested_installer_fixture(versions=versions)
+        with self.assertRaises(AssertionError):
+            execute()
+        self.assertEqual(command.call_count, 4)
 
     def test_negative_control_that_unexpectedly_passes_is_a_failure(self):
         with patch.object(S.B, 'command'), patch.object(S.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)):

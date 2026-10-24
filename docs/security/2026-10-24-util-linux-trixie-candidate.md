@@ -22,6 +22,17 @@ unproven. The old bounded diagnostic omitted dpkg's explanatory continuation
 lines, so no package or capability fix is inferred from that failure. Public
 artifact12565781476 retains the completed build evidence and nine packages.
 
+Reuse-only CI40111852561, job120925048576, then exposed the exact installation
+cause: `mount` and `util-linux` Pre-Depend on the candidate `libblkid1`, while
+`dpkg --install` had only unpacked it and the latest configured version remained
+2.41.5. This is a dependency-order failure. The installer now uses ordinary
+`apt-get --yes --no-remove --no-download install` with the same nine checked local
+paths, after the unchanged exact-nine/no-removal simulation. APT can configure
+Pre-Dependencies before unpacking their consumers. The clean audit and exact
+installed-version checks remain required; no force option, capability or repository
+is added. Reuse the same pinned40108449213 artifact without compilation. Actual
+corrected installation and raw scans remain unproven.
+
 Actual diagnostic CI40083981841 completed the coherent Debian family, six
 old-caller ABI probes and normal distclean, then failed the isolated disabled
 variant at `configure: error: libblkid is needed to build libmount`.
@@ -86,7 +97,7 @@ buffers before the seventeen source artifacts are copied. The original receipt
 remains unchanged. Missing or changed inputs fail without falling back to a build.
 
 Reuse skips only builder preparation and compilation. Runtime preparation,
-the unchanged real installer and both scans still execute. The separate
+the real installer and both scans still execute. The separate
 `build-provenance.json` identifies `reused_from_run`, `reused_from_artifact` and
 `reused_receipt_sha256`, and states `compiled_in_this_run:false`; successful
 candidate-image evidence carries the same provenance. This is a CI source
@@ -183,7 +194,8 @@ the 78409 vendor/binary reconciliation remain mandatory before acceptance.
 
 A second disposable, network-isolated CI container simulates the exact nine
 package upgrades, rejects removals/unrelated changes, then installs those local
-files. Only file-owner/setid capabilities needed by normal dpkg metadata are
+files with offline APT in normal dependency order. Only file-owner/setid
+capabilities needed by normal dpkg metadata are
 added there; no host socket, device, network or application data is mounted.
 Policy-rc.d refuses service starts. The exact installed versions and clean dpkg
 audit are checked before committing that container to an immutable scan image.
