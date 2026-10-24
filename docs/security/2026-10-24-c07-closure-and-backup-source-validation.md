@@ -189,3 +189,64 @@ completed closure SHA
 `712af9788ef73e3934252d7b7e50bd0681bbfea13c25088da59a123efabb5dc0`.
 An operation that actually stops production services is separate and must fit
 a valid user-approved downtime window; a hot backup does not grant that window.
+
+## Additive managed Web metadata renderer (source-only)
+
+The PRIMARY preparer now offers `render-web-metadata` and
+`verify-web-metadata`. These are the managed single-Web-role successor to the
+old hash-based derive/render path. Legacy `derive-source`, pair rendering and
+pair verification stay unchanged and remain prohibited under the current
+no-Env-content-hashing instruction. No implementation here has been executed
+against the protected Env or provisioned on a host.
+
+The new commands accept the original rendered Env, a fresh managed Web Env and
+receipt path, plus public **actual source** image ID/release SHA/tree/input
+signature and a caller-verified source evidence SHA. There are no deployment
+target image/release, Bot output, research-key override or backfill override
+arguments. The normal parser reads the original only through its retained
+`BoundRoleEnv` descriptor. Topology derivation removes dynamic keys in RAM;
+normal `validate_source('web', ...)`, `_rendered` and Env encoding produce the
+managed output. No source/output Env or encoded payload is hashed.
+
+The original must already have a coherent live PRIMARY lane, a valid project
+name and the same release SHA as the caller's actual source baseline. Rendering
+must change exactly `MARKET_PIPELINE_IMAGE`; even an already-matching image
+refuses as a no-op. Every other setting, including all non-dynamic values,
+project, release, PRIMARY triple, data/publication roots, research/secret path
+references and backfill settings, remains equal in memory. No referenced secret
+or session file is opened. The original remains untouched and retained.
+
+Both destinations must be distinct from the source and each other, under one
+pre-existing owner-only managed parent. The tool creates or chmods no directory.
+Outputs are fresh-only: partial files, symlinks, hard links and foreign or
+concurrent publications cannot be adopted or overwritten. The established
+atomic writer's metadata-only path publishes by exclusive hard link after file
+fsync, removes its temporary name and fsyncs the directory. The output's full
+metadata binding and parsed settings are checked before the completed receipt
+is published. Retained source/output descriptors are checked again immediately
+before publication and successful return. If staging stops after the output is
+written, no completed receipt is produced; retry refuses the partial output.
+A caller requires successful rendering **and** successful metadata verification;
+existence of an output or receipt alone is never acceptance.
+
+Receipt `market_pipeline_primary_web_managed_metadata/1.0` binds source/output
+file metadata and the caller's public provenance identifiers. Exact JSON types
+and the full expected mapping are checked during verification; it consumes the
+receipt from a retained bounded descriptor. The receipt and CLI explicitly set
+`runtime_verified_by_tool: false`, `runtime_mutated: false` and
+`deployment_eligible: false`. They attest a staged backup configuration only.
+They do not attest the running source, prove OCI lineage, enable product
+authority, activate a container or create another capture/session owner.
+
+A future finite caller must hold the permanent marker **M**, bind current public
+source daemon evidence and the retained 17-container/Capture06 `6a16...`/`f79...`
+profile, and refuse foreign/pending ownership. The old C07 source/reservation
+fences are absent: do not recreate or adopt them merely to acquire flock locks.
+Public evidence must distinguish the shared source image/release/tree/input
+signature from the derived Capture06 f79 image and its parent-layer lineage,
+and distinguish both from a new deployment target. Only that actual source
+baseline may supply the new Env's image ID. Stage the configuration through its
+normal managed owner and then run a freshly pinned normal backup validator;
+never activate containers as part of configuration staging. A bounded operation
+deadline is required. Staging without downtime does not itself require a new
+human permission; any actual stop still requires a valid downtime window.

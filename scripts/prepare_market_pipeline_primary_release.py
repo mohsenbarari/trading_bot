@@ -14,12 +14,14 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import sys
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 if __package__:
+    from scripts.backup_market_pipeline_archive import BackupError, BoundRoleEnv, _same_env_binding
     from scripts.prepare_market_pipeline_release import (
         DYNAMIC_VALUES,
         IMAGE_ID,
@@ -33,6 +35,7 @@ if __package__:
     )
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.backup_market_pipeline_archive import BackupError, BoundRoleEnv, _same_env_binding
     from scripts.prepare_market_pipeline_release import (
         DYNAMIC_VALUES,
         IMAGE_ID,
@@ -49,6 +52,8 @@ else:
 CONFIRMATION = "render-market-pipeline-private-primary"
 SCHEMA = "market_pipeline_primary_release_pair/1.0"
 ROLE_IMAGE_SCHEMA = "market_pipeline_primary_release_pair/1.1"
+WEB_METADATA_SCHEMA = "market_pipeline_primary_web_managed_metadata/1.0"
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
 AUTHORIZED_BACKFILL_NOT_BEFORE_UTC = "2026-08-25T09:33:00Z"
 AUTHORIZED_BACKFILL_SOURCE_CODES = (
     "MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2"
@@ -85,8 +90,14 @@ def _secure_parent(path: Path) -> None:
         raise PrimaryReleaseError("primary_release_parent_owner_mode_invalid")
 
 
-def _atomic_write(path: Path, payload: bytes, *, exclusive: bool) -> None:
-    _secure_parent(path)
+def _atomic_write(
+    path: Path, payload: bytes, *, exclusive: bool, _metadata: bool = False,
+    _before_publish: Callable[[], None] | None = None,
+) -> None:
+    if _metadata:
+        _managed_parent(path.parent)
+    else:
+        _secure_parent(path)
     if path.exists() or path.is_symlink():
         if exclusive:
             raise PrimaryReleaseError("primary_release_output_exists")
@@ -109,7 +120,14 @@ def _atomic_write(path: Path, payload: bytes, *, exclusive: bool) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        if _before_publish is not None:
+            _before_publish()
+        if _metadata:
+            # Publish once without replacing a concurrent or partial output.
+            os.link(temporary, path, follow_symlinks=False)
+            temporary.unlink()
+        else:
+            os.replace(temporary, path)
         directory = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(directory)
@@ -427,6 +445,196 @@ def verify_pair(
     return document
 
 
+def _managed_parent(parent: Path) -> None:
+    """Require an existing private managed destination; never mkdir/chmod it."""
+    if not parent.is_absolute():
+        raise PrimaryReleaseError("primary_managed_parent_invalid")
+    try:
+        canonical = parent.resolve(strict=False)
+    except (OSError, RuntimeError):
+        raise PrimaryReleaseError("primary_managed_parent_invalid") from None
+    if canonical != parent:
+        raise PrimaryReleaseError("primary_managed_parent_invalid")
+    try:
+        info = parent.lstat()
+    except OSError:
+        raise PrimaryReleaseError("primary_managed_parent_invalid") from None
+    if (
+        not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise PrimaryReleaseError("primary_managed_parent_invalid")
+
+
+def _managed_paths(rendered_env: Path, web_env: Path, receipt: Path) -> None:
+    if (
+        len({rendered_env, web_env, receipt}) != 3
+        or web_env.parent != receipt.parent
+        or any(not path.is_absolute() for path in (rendered_env, web_env, receipt))
+    ):
+        raise PrimaryReleaseError("primary_managed_paths_invalid")
+    _managed_parent(web_env.parent)
+
+
+def _managed_web_values(
+    values: Mapping[str, str], *, source_image_id: str, source_release_sha: str,
+    source_release_tree: str, source_image_input_signature: str,
+    source_evidence_sha256: str,
+) -> dict[str, str]:
+    if (
+        not IMAGE_ID.fullmatch(source_image_id)
+        or not RELEASE_SHA.fullmatch(source_release_sha)
+        or not RELEASE_SHA.fullmatch(source_release_tree)
+        or not HEX64.fullmatch(source_image_input_signature)
+        or not HEX64.fullmatch(source_evidence_sha256)
+    ):
+        raise PrimaryReleaseError("primary_managed_source_identity_invalid")
+    if values.get("MARKET_PIPELINE_RELEASE_SHA") != source_release_sha:
+        raise PrimaryReleaseError("primary_managed_source_release_mismatch")
+    if (
+        values.get("MARKET_PIPELINE_MODE") != "live"
+        or values.get("MARKET_PIPELINE_FEED_MODE") != "PRIVATE_PRIMARY"
+        or values.get("MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY") != "1"
+        or values.get("MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE") != "PRIVATE_PRIMARY"
+        or not PROJECT_NAME.fullmatch(values.get("MARKET_PIPELINE_PROJECT_NAME", ""))
+    ):
+        raise PrimaryReleaseError("primary_managed_source_authority_invalid")
+    source = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
+    validate_source("web", source)
+    expected = _rendered(
+        source, release_sha=source_release_sha, image_id=source_image_id,
+        project_name=values["MARKET_PIPELINE_PROJECT_NAME"],
+    )
+    if {key for key in set(values) | set(expected) if values.get(key) != expected.get(key)} != {"MARKET_PIPELINE_IMAGE"}:
+        raise PrimaryReleaseError("primary_managed_image_only_change_required")
+    return expected
+
+
+def _managed_web_receipt(
+    source: BoundRoleEnv, output: BoundRoleEnv, *, source_image_id: str,
+    source_release_sha: str, source_release_tree: str,
+    source_image_input_signature: str, source_evidence_sha256: str,
+) -> dict[str, object]:
+    return {
+        "schema": WEB_METADATA_SCHEMA, "role": "web",
+        "stage": "managed_backup_configuration_staged",
+        "source_image": {
+            "image_id": source_image_id, "release_sha": source_release_sha,
+            "release_tree": source_release_tree,
+            "image_input_signature": source_image_input_signature,
+        },
+        "caller_source_evidence_sha256": source_evidence_sha256,
+        "source_env_binding": dict(source.binding),
+        "output_env_binding": dict(output.binding),
+        "changed_keys": ["MARKET_PIPELINE_IMAGE"],
+        "preserved_settings": True, "original_retained": True,
+        "product_authority_changed": False, "runtime_verified_by_tool": False,
+        "runtime_mutated": False, "deployment_eligible": False,
+        "secret_file_contents_read": False, "session_contents_read": False,
+        "secrets_disclosed": False,
+    }
+
+
+def render_web_metadata(
+    *, rendered_env: Path, web_env: Path, receipt: Path, source_image_id: str,
+    source_release_sha: str, source_release_tree: str,
+    source_image_input_signature: str, source_evidence_sha256: str,
+) -> dict[str, object]:
+    """Stage one managed Web backup configuration without content hashes.
+
+    Caller evidence supplies the actual source image, never a deployment target.
+    Runtime/profile/OCI lineage verification belongs to the locked caller.
+    """
+    _managed_paths(rendered_env, web_env, receipt)
+    if any(path.exists() or path.is_symlink() for path in (web_env, receipt)):
+        raise PrimaryReleaseError("primary_managed_output_exists")
+    identity = dict(
+        source_image_id=source_image_id, source_release_sha=source_release_sha,
+        source_release_tree=source_release_tree,
+        source_image_input_signature=source_image_input_signature,
+        source_evidence_sha256=source_evidence_sha256,
+    )
+    with BoundRoleEnv(rendered_env) as source:
+        expected = _managed_web_values(source.values(), **identity)
+        source.check()
+        _atomic_write(web_env, _env_bytes(expected), exclusive=True, _metadata=True)
+        with BoundRoleEnv(web_env) as output:
+            if output.values() != expected:
+                raise PrimaryReleaseError("primary_managed_output_content_mismatch")
+            source.check()
+            output.check()
+            document = _managed_web_receipt(source, output, **identity)
+            def ready_to_publish() -> None:
+                source.check()
+                output.check()
+            _atomic_write(
+                receipt, (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                exclusive=True, _metadata=True, _before_publish=ready_to_publish,
+            )
+            source.check()
+            output.check()
+            return document
+
+
+def verify_web_metadata(
+    *, rendered_env: Path, web_env: Path, receipt: Path, source_image_id: str,
+    source_release_sha: str, source_release_tree: str,
+    source_image_input_signature: str, source_evidence_sha256: str,
+) -> dict[str, object]:
+    _managed_paths(rendered_env, web_env, receipt)
+    identity = dict(
+        source_image_id=source_image_id, source_release_sha=source_release_sha,
+        source_release_tree=source_release_tree,
+        source_image_input_signature=source_image_input_signature,
+        source_evidence_sha256=source_evidence_sha256,
+    )
+    with BoundRoleEnv(rendered_env) as source, BoundRoleEnv(web_env) as output:
+        expected = _managed_web_values(source.values(), **identity)
+        if output.values() != expected:
+            raise PrimaryReleaseError("primary_managed_output_content_mismatch")
+        with BoundRoleEnv(receipt) as control:
+            try:
+                raw = os.pread(control.descriptor, 64 * 1024 + 1, 0)
+                document = json.loads(raw.decode("utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                raise PrimaryReleaseError("primary_managed_receipt_invalid") from None
+            control.check()
+            if len(raw) != control.binding["size_bytes"] or not _same_env_binding(
+                document, _managed_web_receipt(source, output, **identity)
+            ):
+                raise PrimaryReleaseError("primary_managed_receipt_identity_mismatch")
+            source.check()
+            output.check()
+            return document
+
+
+def _managed_web_main(args: argparse.Namespace) -> int:
+    try:
+        if args.confirm != CONFIRMATION:
+            raise PrimaryReleaseError("primary_release_confirmation_invalid")
+        operation = render_web_metadata if args.command == "render-web-metadata" else verify_web_metadata
+        result = operation(
+            rendered_env=args.rendered_env, web_env=args.web_env, receipt=args.receipt,
+            source_image_id=args.source_image_id,
+            source_release_sha=args.source_release_sha,
+            source_release_tree=args.source_release_tree,
+            source_image_input_signature=args.source_image_input_signature,
+            source_evidence_sha256=args.source_evidence_sha256,
+        )
+        print(json.dumps({
+            "status": "PASS", "schema": result["schema"], "role": "web",
+            "runtime_verified_by_tool": False, "runtime_mutated": False,
+            "deployment_eligible": False, "secrets_disclosed": False,
+        }, sort_keys=True))
+        return 0
+    except (OSError, ValueError, BackupError, ReleaseContractError, PrimaryReleaseError) as exc:
+        reason = str(exc)
+        if not isinstance(exc, (BackupError, ReleaseContractError, PrimaryReleaseError)) or not re.fullmatch(r"[a-z0-9_]{1,96}", reason):
+            reason = "primary_managed_input_or_io_failure"
+        print(json.dumps({"status": "FAIL", "reason_code": reason, "secrets_disclosed": False}, sort_keys=True), file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -450,12 +658,24 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--web-image-id")
         command.add_argument("--bot-image-id")
         command.add_argument("--project-name", required=True)
+    for name in ("render-web-metadata", "verify-web-metadata"):
+        command = commands.add_parser(name)
+        command.add_argument("--rendered-env", type=Path, required=True)
+        command.add_argument("--web-env", type=Path, required=True)
+        command.add_argument("--receipt", type=Path, required=True)
+        command.add_argument("--source-image-id", required=True)
+        command.add_argument("--source-release-sha", required=True)
+        command.add_argument("--source-release-tree", required=True)
+        command.add_argument("--source-image-input-signature", required=True)
+        command.add_argument("--source-evidence-sha256", required=True)
     parser.add_argument("--confirm", required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command in {"render-web-metadata", "verify-web-metadata"}:
+        return _managed_web_main(args)
     try:
         if args.confirm != CONFIRMATION:
             raise PrimaryReleaseError("primary_release_confirmation_invalid")
