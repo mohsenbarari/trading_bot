@@ -23,11 +23,11 @@ PARITY_SHA = '6a7f502d85ecd58a49f1aa4209674c40a4a21b0b4d198429e43b5f49af6605b2'
 PARK_AUDIT_SHA = 'd9ddd4d3c1c5771f20014d1d986bae720e82439ff07a1869653c1174ea465e9e'
 PUBLIC_FILES = {'compose.yml':'38a9191e4f55799f1f8193b88136993e01758c1d1dcac6e8fbff03ed731fec5b',
                 'compose.web.yml':'25a794f6f9f4303c96adb69b35eeb19af86d153fb57f0ff87307f72797937cd5'}
-OP = 'security-capture2-observability-20261024-03'
+OP = 'security-capture2-observability-20261024-04'
 PREVIOUS_OP = 'security-capture2-observability-20261024-02'
 PREVIOUS_AUDIT_SHA = 'ea4c02596b1a96eb6ee4fecfb0d8fc15686ce3056a84a31a4b95e5f321029246'
 TASK_ROOT = Path('/root/.local/' + OP + '-activation')
-CONFIRM = 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-03'
+CONFIRM = 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-04'
 SESSION = '/srv/trading-bot/market-data-staging-shadow/sessions/account2'
 TOKEN = Path('/run/trading-bot/market-capture-legacy-authority-enabled')
 COLLECTORS = ('coin-capture.service','market-channel-capture.service')
@@ -180,6 +180,13 @@ def current_incident_profile(plan,V):
         'original_operation_id':plan['operation_id'],
         'containers':[{**row,'id':V.AFTER_CAPTURE02_ID} if row['id'] == V.CID else row for row in plan['containers']]}
 
+def capture_readiness(C,P,R,H,profile):
+    # This operation never stops/changes a datastore or takes a backup. Normal
+    # healthcheck ExecIDs are permitted; owned HOT activity is still excluded.
+    R.hot_finished(C,H)
+    P.inventory(C,R,profile,parked=True)
+    P.web_datastores_native(C,R,profile)
+
 def post_parity(V,before,after,desired, *, replaced=None):
     require(after['id'] != before['id'] and after['image'] == desired,'capture_replacement_identity_invalid')
     old_cfg,new_cfg = before['config'],after['config']
@@ -331,12 +338,15 @@ def execute(P,R,H,V,action):
         previous_state = dict(line.split('=',1) for line in C.B.command(['/usr/bin/systemctl','show',previous_unit,'--property=ActiveState,MainPID,ExecMainStatus']).splitlines())
         require(previous_state == {'ActiveState':'failed','MainPID':'0','ExecMainStatus':'3'}
                 and C.scope_empty(Path('/sys/fs/cgroup/system.slice')/previous_unit),'previous_capture_owner_not_terminal')
+        refused03 = 'security-capture2-observability-20261024-03'
+        refused_state = dict(line.split('=',1) for line in C.B.command(['/usr/bin/systemctl','show',refused03+'.service','--property=ActiveState,MainPID,ExecMainStatus']).splitlines())
+        require(refused_state == {'ActiveState':'failed','MainPID':'0','ExecMainStatus':'1'}
+                and C.scope_empty(Path('/sys/fs/cgroup/system.slice')/(refused03+'.service'))
+                and not os.path.lexists(C.ROOT/(refused03+'.activation.json'))
+                and not os.path.lexists(Path('/root/.local')/(refused03+'-activation')),'refused03_not_proven_readonly')
         require(command(V,clock,[V.DOCKER,'compose','version','--short']).decode().strip() == '2.40.3+ds1-0ubuntu1','actual_compose_version_unverified')
         profile = current_incident_profile(plan,V)
-        R.hot_finished(C,H)
-        R.no_backup_exec(C,profile,retired=True)
-        P.inventory(C,R,profile,parked=True)
-        P.web_datastores_native(C,R,profile)
+        capture_readiness(C,P,R,H,profile)
         native = legacy(C)
         old_evidence = {path:C.B.read(path,maximum=65536) for path in (C.paths(plan)[0],C.ROOT/(H.OP+'.owned-restore.json'),C.ROOT/(H.OP+'.owned-intent.json'),parking_path,previous_path)}
         output = io.StringIO()
@@ -365,6 +375,7 @@ def execute(P,R,H,V,action):
             'original_c07_capture_id':V.CID,'capture_identity_delta':{'original_id':V.CID,'current_before_id':baseline_id,'reason':'owned02_base_rollback'},
             'source_sha256':V.PATCHED_SOURCE,'public_runtime_revision':V.PUBLIC_REVISION,'parking_audit_sha256':PARK_AUDIT_SHA,
             'previous_operation_id':PREVIOUS_OP,'previous_audit_sha256':PREVIOUS_AUDIT_SHA,
+            'prior03_readonly_refusal_proven':True,
             'original_operation_id':H.OP,'original_plan_sha256':H.PLAN_SHA,'old_fences_retained':True,
             'original_manifest_changed':False,'security_transition_completed':False,'phase':'admitted',
             'persistent_boot_guard_verified':native['persistent_boot_guard_verified'],'web_reboot_authorized':False,

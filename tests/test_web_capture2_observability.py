@@ -227,5 +227,23 @@ class CaptureObservabilityTests(unittest.TestCase):
         self.assertEqual(profile['datastore_probes'],plan['datastore_probes'])
         self.assertEqual({row['id'] for row in profile['containers']},(set(rows())-{OLD})|{NEW})
 
+    def test_capture_readiness_admits_datastore_healthcheck_exec_ids(self):
+        C = SimpleNamespace(ExecIDs=['ordinary-healthcheck-exec'])
+        P = SimpleNamespace(inventory=unittest.mock.Mock(),web_datastores_native=unittest.mock.Mock())
+        R = SimpleNamespace(hot_finished=unittest.mock.Mock(),no_backup_exec=unittest.mock.Mock(side_effect=AssertionError('unrelated_backup_gate')))
+        M.capture_readiness(C,P,R,None,{'schema':'capture2_current_inventory/1'})
+        R.hot_finished.assert_called_once()
+        P.inventory.assert_called_once()
+        P.web_datastores_native.assert_called_once()
+        R.no_backup_exec.assert_not_called()
+
+    def test_capture_readiness_still_blocks_owned_hot_operation(self):
+        R = SimpleNamespace(hot_finished=unittest.mock.Mock(side_effect=RuntimeError('hot_backup_still_active')))
+        P = SimpleNamespace(inventory=unittest.mock.Mock(),web_datastores_native=unittest.mock.Mock())
+        with self.assertRaisesRegex(RuntimeError,'hot_backup_still_active'):
+            M.capture_readiness(None,P,R,None,{})
+        P.inventory.assert_not_called()
+        P.web_datastores_native.assert_not_called()
+
 if __name__ == '__main__':
     unittest.main()
