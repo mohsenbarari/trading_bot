@@ -70,6 +70,7 @@ class WebBootGuards(unittest.TestCase):
                                 'Asserts': [('AssertPathIsMountPoint', False, False, M.PRIMARY, 1)]}
         self.stack.enter_context(patch.object(M, 'props', side_effect=lambda unit: rows[unit]))
         self.stack.enter_context(patch.object(M, 'property_value', side_effect=lambda bus, unit, name: properties[unit][name]))
+        self.stack.enter_context(patch.object(M, 'primary', return_value={'mounted': {'source': '/dev/sdb', 'uuid': M.UUID}}))
         return rows, properties
 
     def test_four_literal_guards_preserve_same_inhibition_and_only_real_primary_mount(self):
@@ -119,6 +120,20 @@ class WebBootGuards(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'uuid_override_not_loaded'):
             M.entries('setup', True, object())
 
+    def test_systemd_canonical_what_uses_same_primary_uuid_device_proof(self):
+        rows, _ = self.fixture_entries(installed=True)
+        rows[M.MOUNT]['What'] = '/dev/sdb'
+        self.assertEqual(len(M.entries('setup', True, object())), 4)
+        rows[M.MOUNT]['What'] = '/dev/sdc'
+        with self.assertRaisesRegex(RuntimeError, 'uuid_override_not_loaded'):
+            M.entries('setup', True, object())
+
+    def test_only_helper_owned_static_refusal_codes_are_reported(self):
+        self.assertEqual(M.safe_reason(M.BootGuardRefusal('uuid_override_not_loaded')), 'uuid_override_not_loaded')
+        for error in (RuntimeError('private_value'), OSError('private path'), M.BootGuardRefusal('/private/path'),
+                      M.BootGuardRefusal('x'*81)):
+            self.assertEqual(M.safe_reason(error), 'web_boot_guards_refused')
+
     def test_primary_uses_unescaped_dbus_mount_dropins_and_same_verified_uuid_device(self):
         mounted = {'target': M.PRIMARY, 'uuid': M.UUID, 'fstype': 'ext4', 'options': 'rw,relatime', 'source': '/dev/sdb'}
         unit = {'LoadState': 'loaded', 'UnitFileState': 'enabled', 'ActiveState': 'active',
@@ -131,6 +146,12 @@ class WebBootGuards(unittest.TestCase):
              patch.object(M, 'property_value', return_value=[dropin]), patch.object(M, 'read', return_value=public), \
              patch.object(M.Path, 'resolve', return_value=Path('/dev/sdb')):
             self.assertEqual(M.primary(object())['inode'], 2)
+            unit['What'] = '/dev/sdb'
+            self.assertEqual(M.primary(object())['mounted']['source'], '/dev/sdb')
+            unit['What'] = '/dev/sdc'
+            with self.assertRaisesRegex(RuntimeError, 'mount_what_changed'):
+                M.primary(object())
+            unit['What'] = '/dev/sdb'
             mounted['uuid'] = M.ROOT_UUID
             with self.assertRaisesRegex(RuntimeError, 'wrong_primary'):
                 M.primary(object())

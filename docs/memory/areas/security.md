@@ -1,43 +1,36 @@
 # Security remediation
 
-- Source/tests are not activation. Preserve baseline/Market behavior and single
-  capture ownership. Publish security history, not unrelated feature activation. See
-  `docs/security/2026-10-23-remediation.md`.
-- Upgrade compatible Python families together; test parser/uploads. Bound images
-  before decode/discard unsafe originals; contain Static/SPA inside trusted dist.
-  CA trust is separate from CVEs; retain TLS/pinned bootstrap.
-- Native engine/kernel verified with15 containers intact; Web engine/kernel/App
-  activation remains unfinished. C07 terminal closure released only two dead
-  fences: retain permanent marker/history and open incidents. Expired windows
-  need fresh authority; never rewrite deadlines. Reboot needs persistent
-  collector inhibitors and attached-mount gates.
-- QA:10 parked/8443 closed;17 configurations/six datastores/four volumes preserved.
-  Bind identity uses Options.device/attached UUID, not transient Docker_data inode.
-- Capture2 f79 replay fixed by account-indexed streaming with equal hashes.
-  Processor65–68s still flaps30s health. Legacy collectors stay inhibited; never
-  duplicate owners or inspect/copy/hash session/config contents.
-- Native Brotli runtime verified: both consumers patched/ready; readiness binds
-  the current boot as well as PID/unit/monotonic time. Golden-only
-  continuation preserved collector,15 containers and immutable failed-parent
-  receipt. Never reinterpret that failure or reuse expired windows. See24Oct
-  native-brotli-refresh runbook; global security remains incomplete.
-- App composition40125049596 exported:56 tests/rawHIGH44/8 IDs; not accepted/active.
-  Exact-image CI also found homed/Archive::Tar absent in its stated scope;
-  raw rows remain unwaived. See24Oct security-candidate-19d runbook.
-- Watchdogs check Restarting before Running. Stale heartbeat can coexist with
-  progress; missing counters are unknown. Never prune attached control storage;
-  process death cannot cancel daemon requests or authorize writer auto-restart.
-- Tests deny unmocked host/network commands; use actual control schemas and
-  verify external CLI seams. Keep named mocks/nonroot fixtures.
-  Stream caps differ from artifact budgets. Backup roles bind actual artifacts,
-  not geography: Native=foreign/trading_bot, Web=iran/current.
-- Managed04 source validation passed; original Env/runtime preserved. Bind
-  configuration revision separately from actual image OCI provenance. Archive
-  v1.4 retains Env/artifact FDs; hash/parse pinned controls from identical bounded
-  buffers. Hot mode needs independent restore parity/canonical schema; legacy
-  evidence cannot pass new gates. HOT3 actual03 passed two restores, cleanup
-  and independent cipher-only offhost verification; engine rollback stays open.
-  No diagnostic Env copies or relaxed image checks. CI vendor builds use a
-  child-only022 mask; controller stays077. Raw findings remain unwaived.
-- Keep STOP until activated/verified security, then monitor30 consecutive accepted
-  complete clean units. Failure restarts streak, never history; polls never count.
+- Source/tests are not activation. Preserve product/Market behavior, single
+  capture ownership and user changes. Main may publish approved security
+  history; unrelated feature activation is excluded. See
+  `docs/security/2026-10-23-remediation.md` and24Oct operation runbooks.
+- Keep refactor STOP until security is activated and verified; then monitor30
+  consecutive completed accepted clean units. Polls/tests never count. Failures
+  reset only the streak, preserving history/counters. User authorizes necessary
+  intervention without routine approval; Writer/DNS stay human-controlled.
+- Native engine/kernel/Brotli verified with15 containers preserved; Brotli
+  readiness binds current boot/PID/unit. Web OP08 completed24Oct21:30UTC:
+  Docker29.9.2/containerd2.4.2/runc1.5.2,27 IDs/16 running/six datastores,
+  QA10 parked and f79 capture repair preserved. Kernel/App activation remains
+  unfinished; two sealed Market health incidents remain OPEN, unwaived.
+- OP08 fresh quiesced PRIMARY dump/restore/parity/cleanup and cold tar compare
+  passed. Authenticated6.46GB cipher actually fsynced/reread on Final Finland.
+  Final plan/journal/watch-cleanup pins are in the Web-engine runbook. Temporary
+  fences released; permanent marker/history retained. Never rewrite expired
+  windows or infer daemon cancellation from process death/absence.
+- Persistent Web boot guards require explicit current08 final evidence, exact
+  27/16/QA10/f79, mount gates and legacy collector inhibitors. Four files were
+  installed; normal systemd What canonicalization needs final validation before
+  reboot. Old C07/Native15 evidence supplies no new boot authority.
+- Configf3 versus actual OCIa6 are separate identities. Backup v1.4 retains
+  Env/artifact FDs; no diagnostic Env/session/key read/copy/hash. Normal trusted
+  validators/backup/crypto consume protected inputs only as required.
+- App8da composed candidate passed56 focused tests/native checks but raw44HIGH
+  across8 advisory IDs remain; no activation/global acceptance. Isolated util
+  restricted-subdir contract40132051114 passed; historical OPEN/raw findings
+  remain. ACL legacy callers require exact-role/caller assessment, not blanket
+  FIXED. Runtime audits incomplete: Web9/12, Native7/8; Native inventory cause
+  unknown. Preserve failed reports; no green-by-waiver or evidence deletion.
+- Tests deny unmocked native/network commands. Stream caps differ from artifact
+  budgets. Backup roles follow artifacts: Native=foreign/trading_bot,
+  Web=iran/current. Quotas/disk limits and private controls are never bypassed.

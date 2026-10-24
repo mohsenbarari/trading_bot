@@ -60,9 +60,18 @@ INSPECT = ('{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},'
            '"health":{{with index .State "Health"}}{{json .Status}}{{else}}null{{end}}}')
 
 
+class BootGuardRefusal(RuntimeError):
+    """Only this helper's static reason codes may enter its public result."""
+
+
 def require(ok, code):
     if not ok:
-        raise RuntimeError(code)
+        raise BootGuardRefusal(code)
+
+
+def safe_reason(error):
+    value = str(error)
+    return value if type(error) is BootGuardRefusal and re.fullmatch('[a-z][a-z0-9_]{0,79}', value) else 'web_boot_guards_refused'
 
 
 def identity(value):
@@ -427,7 +436,11 @@ def entries(action, verify, bus):
                     require(any(list(row[:4]) == ['AssertPathIsMountPoint', False, False, PRIMARY]
                                 for row in property_value(bus, unit, 'Asserts')), 'mount_assertion_missing')
                 elif unit == MOUNT:
-                    require(info['What'] == '/dev/disk/by-uuid/' + UUID, 'uuid_override_not_loaded')
+                    # systemd can canonicalize the loaded UUID alias to the
+                    # actual block-device path. Reuse the full mounted UUID,
+                    # source and device-resolution proof, not string spelling.
+                    mounted = primary(bus)['mounted']
+                    require(info['What'] in {'/dev/disk/by-uuid/' + UUID, mounted['source']}, 'uuid_override_not_loaded')
         result.append({'destination': str(target), 'content': text, 'exists': exists})
     return result
 
@@ -548,6 +561,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
-        print('{"status":"refused","code":"web_boot_guards_refused"}')
+    except Exception as error:
+        print(json.dumps({'status': 'refused', 'code': safe_reason(error)}))
         raise SystemExit(1)

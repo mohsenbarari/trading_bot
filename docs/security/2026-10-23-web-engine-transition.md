@@ -627,3 +627,31 @@ and installation now disable those unnecessary caches; file/output limits stay
 unchanged. Preserve the never-applied original window/source as preflight
 history when repinning the corrected source, retaining the same nonce and
 22:29:08Z deadline. This does not extend maintenance authority or attest apply.
+
+## Actual OP08 completion,24Oct21:30 UTC
+
+The reviewed77ca1a9 controller completed the real transition. Docker29.9.2,
+containerd2.4.2 and runc1.5.2 passed its actual runtime checks. All27 container
+identities,16 prior-running/six-datastore intent, QA10 parking, source/config
+separation and the f79 capture repair were preserved. Data services passed
+readiness before application/API smoke; restart policies/native triggers were
+restored. The two sealed Market health incidents remain OPEN, unwaived.
+
+The fresh quiesced PRIMARY CREATE/restore/VERIFY/parity and owned cleanup
+passed before the engines stopped. The cold archive was created and compared;
+plaintext6461994075 bytes and authenticated ciphertext6461994096 bytes were
+reconciled. Only ciphertext went to Final Finland65.109.214.203, where actual
+receive/fsync and independent reread verified it before the offline package
+transaction. These are real operation results, not the earlier capacity plan.
+
+Final public evidence SHA256:
+
+- Plan: `7d55ccacd99a0f6fd0a4d93ee493a7193a9dde027b4e47bc73b2ef0af63e6216`.
+- Complete journal: `ab1b1e85fc017cb2188a499f69ad3806e60f2b8be27e16dccd9dbb5be1050184`.
+- Independent watcher cleanup: `b4a488bbafd472319f3c4c1dbac7bd10582a285f305b015191af5aae4bf9f511`.
+
+The finite supervisor exited successfully; exact temporary fences/resources
+were released, and the permanent marker/history remained. No reboot, Writer,
+DNS or application-image activation occurred. Global security/deployment
+acceptance remains false; kernel/App/Market remediation and the later30-unit
+refactor monitoring gate are still separate work.

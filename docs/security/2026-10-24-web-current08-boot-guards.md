@@ -58,3 +58,15 @@ last remaining inhibitor. The helper never starts a unit or container.
 This is source validation only until the completed OP08 evidence and an actual
 read-only preflight are available. Security acceptance, application rollout
 and reboot authorization are not granted by these guards.
+
+Actual OP08 engine maintenance completed and the boot read-only check passed.
+The first setup then published all four exact drop-ins and loaded them, but its
+final validation refused `uuid_override_not_loaded`: systemd reported the
+correct mounted device as `/dev/sdb` instead of retaining the textual UUID
+alias. Independent read-only inspection confirmed the exact files, loaded
+inhibitors, unchanged runtime and matching mount UUID. The source correction
+reuses the full existing primary mount UUID/source/device-resolution proof;
+it accepts that canonical spelling and continues rejecting a different device
+or UUID. Drop-in contents are unchanged. No successful corrected setup or
+reboot is claimed by this source correction. Public refusal output now exposes
+only this helper's own static reason codes, never arbitrary exception text.
