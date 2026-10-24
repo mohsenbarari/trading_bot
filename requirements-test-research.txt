@@ -1,0 +1,17 @@
+# CI-only synthetic research regression tests (Python 3.11).
+# Never include this file in production images or replace the separately
+# versioned model-training environment in apps/coin_rate_estimator/.
+# PyPI metadata verified 2026-10-23: these are the latest stable releases
+# compatible with Python 3.11, including the full dependency closure.
+# NumPy 2.5 / SciPy 1.18 require Python 3.12; do not blindly select latest.
+# https://pypi.org/project/scikit-learn/1.9.1/
+# https://pypi.org/project/joblib/1.6.0/
+# https://pypi.org/project/numpy/2.4.6/
+# https://pypi.org/project/scipy/1.17.1/
+joblib==1.6.0
+numpy==2.4.6
+scikit-learn==1.9.1
+scipy==1.17.1
+threadpoolctl==3.7.0
+narwhals==2.27.1
+cloudpickle==3.1.2

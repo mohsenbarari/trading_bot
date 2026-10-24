@@ -93,6 +93,9 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt
           python3 -m pip install -r requirements-test.txt
+          # Only this test job needs the synthetic research fixtures; never
+          # install the legacy serialized-model training requirements here.
+          python3 -m pip install --only-binary=:all: -r requirements-test-research.txt
 
       - name: Resolve diff coverage base
         id: coverage_base
@@ -130,9 +133,9 @@ jobs:
           if [[ "$command_status" -ne 0 ]]; then
             status=$command_status
           fi
-          # Pytest-style PRIVATE_PRIMARY builder/controller/outbox/promotion
-          # files are not collected by unittest discovery. This explicit run
-          # is a required official gate, not optional coverage.
+          # Pytest-style PRIVATE_PRIMARY and synthetic research functions
+          # are not executed by unittest discovery. This explicit run is a
+          # required official gate, not merely an import or optional coverage.
           APP_ENV_FILE=config/unit-test.env.example PYTHONWARNINGS=error \
           python3 -m coverage run --branch --parallel-mode -m pytest -q \
             tests/test_build_production_private_primary_choreography_plan.py \
@@ -140,6 +143,9 @@ jobs:
             tests/test_promote_production_private_primary_product.py \
             tests/test_reconcile_estimator_snapshot_publication_outbox.py \
             tests/test_verify_production_private_primary_promotion.py \
+            tests/test_coin_intelligence_offer_condition_training.py \
+            tests/test_coin_offer_condition_calibration.py \
+            tests/test_coin_offer_condition_owner_review.py \
             2>&1 | tee -a tmp/backend-coverage.log
           pytest_status=${PIPESTATUS[0]}
           if [[ "$pytest_status" -ne 0 ]]; then
