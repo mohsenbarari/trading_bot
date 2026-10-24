@@ -10,6 +10,15 @@ on:
         description: Optional git ref to validate as a release candidate
         required: false
         type: string
+      security_payload:
+        description: Build and scan ONLY the sealed baseline plus reviewed security overlay (never deploy)
+        required: false
+        default: false
+        type: boolean
+      security_payload_manifest_sha256:
+        description: Exact independently prepared public payload.json SHA-256; required for security_payload
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -317,3 +326,312 @@ jobs:
       - name: Tear down backend stack
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  security-consumer-payload:
+    name: security-consumer-payload
+    if: github.event_name == 'workflow_dispatch' && inputs.security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      PAYLOAD_SOURCE_COMMIT: ${{ github.sha }}
+      PAYLOAD_EXPECTED_MANIFEST: ${{ inputs.security_payload_manifest_sha256 }}
+      TRIVY_CONFIG: /dev/null
+      TRIVY_IGNOREFILE: /dev/null
+      TRIVY_IGNORE_UNFIXED: 'false'
+    steps:
+      - name: Checkout published main recipe with deployed baseline history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Seal exact Git-only security payload before any build
+        id: payload_seal
+        run: |
+          python3 -I -B scripts/prepare_security_consumer_payload.py \
+            --source-commit "$PAYLOAD_SOURCE_COMMIT" --output "$PWD/.local/security-payload"
+          python3 -I -B - <<'PY'
+          from hashlib import sha1,sha256
+          from pathlib import Path
+          import json,os,re,types
+          def seal_test_sources(root,out,commit,helper):
+              assert re.fullmatch('[a-f0-9]{40}',commit)
+              specifications=[('test_chat_upload_image_security.py',commit),('test_jwt_codec_security.py',commit),
+                  ('test_frontend_static_security.py',commit),('test_coin_intelligence_market_store.py',helper.BASELINE),
+                  ('test_coin_intelligence_coin_rate_engine.py',helper.BASELINE),('unit-test.env.example',commit)]
+              target=out/'tests';target.mkdir(mode=0o700)
+              rows=[]
+              for name,revision in specifications:
+                  path='config/unit-test.env.example' if name=='unit-test.env.example' else 'tests/'+name
+                  entries=helper.entries(helper.git(root,'ls-tree','-r','-z',revision,'--',path))
+                  assert set(entries)=={path} and entries[path][0] in {'100644','100755'}
+                  blob=entries[path][1];raw=helper.git(root,'cat-file','blob',blob,maximum=1048576)
+                  assert 0<len(raw)<=1048576 and sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==blob
+                  helper.write_file(target/name,raw)
+                  rows.append({'name':name,'path':path,'source_commit':revision,'git_blob':blob,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
+              proof={'schema':'security_consumer_test_sources/1','source_commit':commit,'baseline_commit':helper.BASELINE,
+                  'files':rows,'runtime_data_included':False}
+              raw=(json.dumps(proof,sort_keys=True)+'\n').encode()
+              helper.write_file(out/'test-sources.json',raw)
+              return sha256(raw).hexdigest()
+          expected=os.environ['PAYLOAD_EXPECTED_MANIFEST']
+          assert re.fullmatch('[a-f0-9]{64}',expected)
+          assert sha256(Path('.local/security-payload/payload.json').read_bytes()).hexdigest()==expected
+          with Path('scripts/prepare_security_consumer_payload.py').open('rb') as source:
+              helper=source.read(131073)
+          assert 0<len(helper)<=131072
+          module=types.ModuleType('pre_npm_payload_recipe');module.__file__=str(Path('scripts/prepare_security_consumer_payload.py').resolve())
+          exec(compile(helper,module.__file__,'exec'),module.__dict__)
+          test_sources=seal_test_sources(Path.cwd(),Path('.local/security-payload'),os.environ['PAYLOAD_SOURCE_COMMIT'],module)
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write('helper_sha256='+sha256(helper).hexdigest()+'\n')
+              output.write('test_sources_sha256='+test_sources+'\n')
+          PY
+
+      - name: Setup security-pinned frontend build runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+
+      - name: Build only the sealed security frontend source
+        working-directory: .local/security-payload/context/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build candidate with the existing App Dockerfile and truthful mixed-payload labels
+        id: payload-build
+        env:
+          PAYLOAD_EXPECTED_HELPER: ${{ steps.payload_seal.outputs.helper_sha256 }}
+          PAYLOAD_EXPECTED_MANIFEST: ${{ inputs.security_payload_manifest_sha256 }}
+          PAYLOAD_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,stat,subprocess,types
+          def load_reviewed_helper(root,expected):
+              assert re.fullmatch('[a-f0-9]{64}',expected)
+              path=root/'scripts/prepare_security_consumer_payload.py'
+              assert path.resolve(strict=True)==path
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd)
+                  assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=131072
+                  raw=os.read(fd,131073)
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                  assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              finally:os.close(fd)
+              assert sha256(raw).hexdigest()==expected
+              helper=types.ModuleType('reviewed_payload_recipe');helper.__file__=str(path)
+              exec(compile(raw,str(path),'exec'),helper.__dict__)
+              return helper
+          root=pathlib.Path.cwd();out=root/'.local/security-payload'
+          helper=load_reviewed_helper(root,os.environ['PAYLOAD_EXPECTED_HELPER'])
+          raw=helper.read_regular(out/'payload.json',2097152);assert sha256(raw).hexdigest()==os.environ['PAYLOAD_EXPECTED_MANIFEST']
+          record=json.loads(raw);dist_sha=helper.verify_context(out/'context',record)
+          argv=['docker','--host=unix:///var/run/docker.sock','build','--iidfile',str(out/'candidate-image.id'),'-t','security-consumer-candidate:ci']
+          for name,value in helper.image_labels(record,sha256(raw).hexdigest()).items():argv+=['--label',name+'='+value]
+          subprocess.run([*argv,str(out/'context')],check=True,timeout=2400)
+          image=(out/'candidate-image.id').read_text().strip();assert image.startswith('sha256:') and len(image)==71
+          built=(json.dumps({'image_id':image,'baseline_commit':record['baseline_commit'],
+              'source_commit':record['source_commit'],'source_tree':record['source_tree'],'payload_tree':record['payload_tree'],
+              'payload_manifest_sha256':sha256(raw).hexdigest(),'frontend_dist_sha256':dist_sha,
+              'deployment_performed':False},sort_keys=True)+'\n').encode()
+          helper.write_file(out/'image-build.json',built)
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write('image_id='+image+'\nimage_build_sha256='+sha256(built).hexdigest()+'\n')
+          PY
+
+      - name: Exercise exact candidate security and baseline Market behavior without live data
+        env:
+          PAYLOAD_IMAGE: ${{ steps.payload-build.outputs.image_id }}
+          PAYLOAD_TEST_SOURCES_SHA256: ${{ steps.payload_seal.outputs.test_sources_sha256 }}
+          PAYLOAD_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 -I -B - <<'PY'
+          import os,pathlib,re,subprocess
+          image=os.environ['PAYLOAD_IMAGE'];proof=os.environ['PAYLOAD_TEST_SOURCES_SHA256'];commit=os.environ['PAYLOAD_SOURCE_COMMIT']
+          assert re.fullmatch('sha256:[a-f0-9]{64}',image) and re.fullmatch('[a-f0-9]{64}',proof) and re.fullmatch('[a-f0-9]{40}',commit)
+          root=pathlib.Path.cwd();out=root/'.local/security-payload'
+          runner=r'''
+          import json,os,pathlib,re,stat,sys,tempfile,types,unittest
+          from hashlib import sha1,sha256
+          from contextlib import ExitStack
+          from unittest.mock import patch
+          def bounded_read(path,maximum):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd)
+                  assert stat.S_ISREG(before.st_mode) and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=maximum
+                  raw=os.read(fd,maximum+1)
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                  assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+                  return raw
+              finally:os.close(fd)
+          expected,commit,image=sys.argv[1:]
+          raw=bounded_read(pathlib.Path('/proof/test-sources.json'),1048576)
+          assert sha256(raw).hexdigest()==expected
+          proof=json.loads(raw);baseline='ba1f7616ade57558f51bb3a7fbb903243a33aab4'
+          assert proof['schema']=='security_consumer_test_sources/1' and proof['source_commit']==commit and proof['baseline_commit']==baseline and proof['runtime_data_included'] is False
+          origins={name:commit for name in ('test_chat_upload_image_security.py','test_jwt_codec_security.py','test_frontend_static_security.py','unit-test.env.example')}
+          origins.update({name:baseline for name in ('test_coin_intelligence_market_store.py','test_coin_intelligence_coin_rate_engine.py')})
+          rows={row['name']:row for row in proof['files']};assert len(rows)==len(proof['files']) and set(rows)==set(origins)
+          folder=pathlib.Path('/app/tests');assert {p.name for p in folder.iterdir()}==set(origins)
+          sources={}
+          for name,revision in origins.items():
+              row=rows[name];raw=bounded_read(folder/name,1048576)
+              assert row['source_commit']==revision and len(raw)==row['bytes'] and sha256(raw).hexdigest()==row['sha256']
+              assert sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==row['git_blob']
+              if name.endswith('.py'):sources[name]=raw
+              else:configuration=raw
+          # Only the trusted native loader bootstrap may run ldconfig. All
+          # application/test imports below retain the absolute host/network fence.
+          import magic
+          private_config=tempfile.TemporaryDirectory(prefix='security-public-test-env-')
+          config_path=pathlib.Path(private_config.name)/'unit-test.env.example'
+          fd=os.open(config_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'wb') as stream:stream.write(configuration)
+          os.environ['APP_ENV_FILE']=str(config_path)
+          sys.path[:0]=['/app','/app/tests']
+          denied=lambda *a,**k: (_ for _ in ()).throw(AssertionError('network/host command forbidden'))
+          with ExitStack() as fence:
+              fence.callback(private_config.cleanup)
+              for target in ('socket.socket.connect','socket.create_connection','socket.getaddrinfo','subprocess.run','subprocess.Popen','urllib.request.urlopen','urllib.request.OpenerDirector.open'):
+                  fence.enter_context(patch(target,side_effect=denied))
+              suite=unittest.TestSuite()
+              for name,raw in sources.items():
+                  module=types.ModuleType(name[:-3]);module.__file__=str(folder/name);sys.modules[module.__name__]=module
+                  exec(compile(raw,module.__file__,'exec'),module.__dict__)
+                  tests=unittest.defaultTestLoader.loadTestsFromModule(module);assert tests.countTestCases()>0
+                  suite.addTests(tests)
+              result=unittest.TextTestRunner(verbosity=2,stream=sys.stderr).run(suite)
+          ok=result.wasSuccessful() and not result.skipped and result.testsRun>0
+          print(json.dumps({'schema':'security_consumer_candidate_tests/1','image_id':image,'test_sources_sha256':expected,'modules':len(sources),'tests':result.testsRun,'status':'passed' if ok else 'failed','runtime_data_used':False},sort_keys=True))
+          raise SystemExit(0 if ok else 1)
+          '''
+          argv=['docker','--host=unix:///var/run/docker.sock','run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges',
+              '--memory','1g','--cpus','2','--pids-limit','128','--tmpfs','/tmp:rw,nosuid,noexec,size=128m',
+              '--mount','type=bind,source='+str(out/'tests')+',target=/app/tests,readonly',
+              '--mount','type=bind,source='+str(out/'test-sources.json')+',target=/proof/test-sources.json,readonly',
+              '--env','APP_ENV_FILE=/app/tests/unit-test.env.example',image,'python','-I','-B','-c',runner,proof,commit,image]
+          with (out/'candidate-tests.json').open('xb') as output:
+              subprocess.run(argv,check=True,timeout=180,stdout=output)
+          PY
+
+      - name: Scan the actual candidate including unfixed HIGH and CRITICAL findings
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.payload-build.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: .local/security-payload/vulnerabilities.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          timeout: 15m
+
+      - name: Preserve actual candidate SBOM even when vulnerability findings block acceptance
+        if: always() && steps.payload-build.outcome == 'success'
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.payload-build.outputs.image_id }}
+          format: cyclonedx
+          output: .local/security-payload/sbom.cdx.json
+          timeout: 15m
+
+      - name: Export only the exact built image without rebuilding or accepting it
+        id: payload_export
+        if: always() && steps.payload-build.outcome == 'success'
+        env:
+          PAYLOAD_IMAGE: ${{ steps.payload-build.outputs.image_id }}
+          PAYLOAD_IMAGE_BUILD_SHA256: ${{ steps.payload-build.outputs.image_build_sha256 }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import gzip,json,os,pathlib,re,signal,stat,subprocess,time
+          root=pathlib.Path.cwd()/'.local/security-payload';image=os.environ['PAYLOAD_IMAGE']
+          assert re.fullmatch('sha256:[a-f0-9]{64}',image)
+          path=root/'image-build.json';fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=2097152
+              raw=os.read(fd,2097153)
+              identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+              assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          assert sha256(raw).hexdigest()==os.environ['PAYLOAD_IMAGE_BUILD_SHA256']
+          provenance=json.loads(raw);assert provenance['image_id']==image and provenance['deployment_performed'] is False
+          target=root/'candidate-image.tar.gz';maximum=2*1024**3
+          child=subprocess.Popen(['docker','--host=unix:///var/run/docker.sock','image','save',image],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+          def expired(*_):raise TimeoutError('candidate_image_export_timeout')
+          signal.signal(signal.SIGALRM,expired);signal.alarm(300)
+          total=0;started=time.monotonic()
+          try:
+              fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as output:
+                  with gzip.GzipFile(filename='',mode='wb',fileobj=output,mtime=0,compresslevel=6) as archive:
+                      while chunk:=child.stdout.read(65536):
+                          total+=len(chunk);assert total<=maximum
+                          archive.write(chunk);assert output.tell()<=maximum+16*1024**2
+                  output.flush();os.fsync(output.fileno())
+              assert child.wait(timeout=10)==0 and 0<total<=maximum
+          finally:
+              signal.alarm(0)
+              try:os.killpg(child.pid,signal.SIGKILL)
+              except ProcessLookupError:pass
+              child.wait(timeout=10);child.stdout.close()
+          remaining=int(300-(time.monotonic()-started));assert remaining>0
+          signal.alarm(remaining)
+          digest=sha256()
+          fd=os.open(target,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and 0<before.st_size<=maximum+16*1024**2
+              hashed=0
+              while chunk:=os.read(fd,min(1048576,before.st_size+1-hashed)):
+                  hashed+=len(chunk);assert hashed<=before.st_size;digest.update(chunk)
+              assert hashed==before.st_size and identity(before)==identity(os.fstat(fd))==identity(target.lstat())
+          finally:os.close(fd)
+          receipt={'schema':'security_consumer_image_export/1','status':'exported_not_accepted','image_id':image,
+              'provenance':provenance,'archive':{'name':target.name,'format':'docker-archive+gzip','size_bytes':before.st_size,'sha256':digest.hexdigest(),'uncompressed_bytes':total},
+              'elapsed_seconds':round(time.monotonic()-started,3),'runtime_data_included':False,'secrets_disclosed':False,'deployment_performed':False}
+          fd=os.open(root/'image-export.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'w') as stream:json.dump(receipt,stream,sort_keys=True);stream.write('\n');stream.flush();os.fsync(stream.fileno())
+          signal.alarm(0)
+          PY
+
+      - name: Retain exact public image archive only after complete export proof
+        if: always() && steps.payload_export.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-consumer-image-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            .local/security-payload/candidate-image.tar.gz
+            .local/security-payload/image-export.json
+
+      - name: Upload only public bound source and actual image evidence, never runtime config
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-consumer-payload-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            .local/security-payload/payload.json
+            .local/security-payload/candidate-image.id
+            .local/security-payload/image-build.json
+            .local/security-payload/test-sources.json
+            .local/security-payload/candidate-tests.json
+            .local/security-payload/vulnerabilities.json
+            .local/security-payload/sbom.cdx.json

@@ -1,0 +1,17 @@
+all:
+  hosts:
+    security_web:
+      ansible_host: 65.109.220.59
+      ansible_port: 37067
+      ansible_user: root
+      ansible_ssh_private_key_file: /root/.ssh/id_ed25519_iran
+      security_site: web
+      security_workspace: /root/.local/security-consumers-20261023-task01
+      ansible_ssh_common_args: -o IdentitiesOnly=yes
+    security_bot:
+      ansible_connection: local
+      ansible_host: 65.109.216.187
+      ansible_port: 22
+      ansible_user: root
+      security_site: bot
+      security_workspace: /root/trading-bot/trading_bot/.local/security-consumers-20261023-task01

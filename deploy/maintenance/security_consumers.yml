@@ -1,0 +1,145 @@
+---
+# Exact two hosts, serial Web then native Bot. No migration or dependency target.
+- name: Stage or run only the five explicitly approved security consumers
+  hosts: security_web:security_bot
+  order: inventory
+  serial: 1
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require the native fenced coordinator and immutable narrow scope
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['security_bot', 'security_web']
+          - security_coordinator_nonce is match('^[a-f0-9-]{36}$')
+          - security_acceptance_sha256 is match('^[a-f0-9]{64}$')
+          - security_action in ['stage', 'check', 'snapshot', 'apply', 'verify', 'rollback']
+          - (inventory_hostname == 'security_web' and ansible_host == '65.109.220.59' and ansible_port | int == 37067 and security_site == 'web' and security_workspace == '/root/.local/security-consumers-20261023-task01') or (inventory_hostname == 'security_bot' and ansible_host == '65.109.216.187' and ansible_port | int == 22 and security_site == 'bot' and security_workspace == '/root/trading-bot/trading_bot/.local/security-consumers-20261023-task01')
+          - ansible_user == 'root'
+      no_log: true
+
+    - name: Check the task directory without following links
+      ansible.builtin.stat:
+        path: '{{ security_workspace }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      register: task_directory
+
+    - name: Verify canonical non-writable directory ancestry before staging or execution
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os, pathlib, stat, sys
+            path = pathlib.Path(sys.argv[1])
+            assert path.is_absolute() and path.resolve(strict=False) == path
+            for parent in path.parents:
+                value = parent.lstat()
+                assert stat.S_ISDIR(value.st_mode) and value.st_uid == 0 and not value.st_mode & 0o022
+            if path.exists():
+                value = path.lstat()
+                assert stat.S_ISDIR(value.st_mode) and value.st_uid == 0 and stat.S_IMODE(value.st_mode) == 0o700
+                child = path / 'evidence'
+                if os.path.lexists(child):
+                    value = child.lstat()
+                    assert stat.S_ISDIR(value.st_mode) and value.st_uid == 0 and stat.S_IMODE(value.st_mode) == 0o700
+          - '{{ security_workspace }}'
+      changed_when: false
+      no_log: true
+
+    - name: Refuse unsafe or missing unstaged workspaces
+      ansible.builtin.assert:
+        that:
+          - not task_directory.stat.exists or (task_directory.stat.isdir and not task_directory.stat.islnk and task_directory.stat.uid == 0 and task_directory.stat.mode == '0700')
+          - security_action == 'stage' or task_directory.stat.exists
+
+    - name: Prepare only the new owned code workspace when explicitly staging
+      when: security_action == 'stage'
+      block:
+        - name: Create the private workspace without touching application data
+          ansible.builtin.file:
+            path: '{{ security_workspace }}'
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Create the public-evidence copy directory
+          ansible.builtin.file:
+            path: '{{ security_workspace }}/evidence'
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Stage public-only verified source and final acceptance bytes
+          ansible.builtin.copy:
+            src: '{{ item.source }}'
+            dest: '{{ security_workspace }}/{{ item.name }}'
+            owner: root
+            group: root
+            mode: '0600'
+            force: false
+          loop: '{{ security_public_assets }}'
+          no_log: true
+
+        - name: Stage exact actual public reports never runtime config or keys
+          ansible.builtin.copy:
+            src: '{{ item.source }}'
+            dest: '{{ security_workspace }}/evidence/{{ item.name }}.json'
+            owner: root
+            group: root
+            mode: '0600'
+            force: false
+          loop: '{{ security_public_evidence }}'
+          no_log: true
+
+    - name: Authenticate every public executable before Python can import it
+      ansible.builtin.stat:
+        path: '{{ security_workspace }}/{{ item.name }}'
+        follow: false
+        checksum_algorithm: sha256
+        get_checksum: true
+        get_mime: false
+      loop: '{{ security_public_assets }}'
+      register: staged_assets
+      no_log: true
+
+    - name: Refuse missing changed or redirected executable and acceptance bytes
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists and item.stat.isreg and not item.stat.islnk
+          - item.stat.uid == 0 and item.stat.nlink == 1 and item.stat.mode == '0600'
+          - item.stat.size > 0 and item.stat.size <= 2097152
+          - item.stat.checksum == item.item.sha256
+      loop: '{{ staged_assets.results }}'
+      no_log: true
+
+    - name: Run the bounded worker with public identifiers only
+      when: security_action != 'stage'
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - '{{ security_workspace }}/security_consumer_site.py'
+          - '{{ security_action }}'
+          - --site
+          - '{{ security_site }}'
+          - --directory
+          - '{{ security_workspace }}'
+          - --evidence
+          - '{{ security_workspace }}/acceptance.json'
+          - --evidence-sha256
+          - '{{ security_acceptance_sha256 }}'
+          - --primitives
+          - '{{ security_workspace }}/validate_docker_daemon_maintenance.py'
+          - --apply
+          - SECURITY-CONSUMERS-ONLY-20261023
+      changed_when: security_action in ['snapshot', 'apply', 'rollback']
+      timeout: 420
+      no_log: true
