@@ -23,9 +23,11 @@ PARITY_SHA = '7171631854871344651fbc7d6b553bf2da6cf875cf0193f0a1ec5043bc5eed23'
 PARK_AUDIT_SHA = 'd9ddd4d3c1c5771f20014d1d986bae720e82439ff07a1869653c1174ea465e9e'
 PUBLIC_FILES = {'compose.yml':'38a9191e4f55799f1f8193b88136993e01758c1d1dcac6e8fbff03ed731fec5b',
                 'compose.web.yml':'25a794f6f9f4303c96adb69b35eeb19af86d153fb57f0ff87307f72797937cd5'}
-OP = 'security-capture2-observability-20261024-01'
+OP = 'security-capture2-observability-20261024-02'
+PREVIOUS_OP = 'security-capture2-observability-20261024-01'
+PREVIOUS_AUDIT_SHA = 'c8b4ecedec166ace9740324dcca01fce96cc251f387df4287a119f2c87b8b680'
 TASK_ROOT = Path('/root/.local/' + OP + '-activation')
-CONFIRM = 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024'
+CONFIRM = 'ACTIVATE-ONLY-CAPTURE2-SAFE-ORIGIN-DIAGNOSTIC-20261024-02'
 SESSION = '/srv/trading-bot/market-data-staging-shadow/sessions/account2'
 TOKEN = Path('/run/trading-bot/market-capture-legacy-authority-enabled')
 COLLECTORS = ('coin-capture.service','market-channel-capture.service')
@@ -145,11 +147,19 @@ def target(rows, V):
 
 STATE_FIELDS = frozenset({'pid','started','restarts','running','restarting'})
 
+def canonical_mount_records(records):
+    require(isinstance(records,list) and all(isinstance(row,dict) and isinstance(row.get('Destination'),str)
+            and row['Destination'].startswith('/') for row in records),'mount_records_invalid')
+    require(len({row['Destination'] for row in records}) == len(records),'duplicate_mount_destination')
+    # Docker serializes its MountPoints map into this list in arbitrary order.
+    # Retain every field/value of every full record; normalize only list order.
+    return sorted(records,key=lambda row:row['Destination'])
+
 def other_runtime(before, after, original, replacement=None, *, known_incidents=frozenset()):
     expected = set(before)-{original}
     require(set(after)-({replacement} if replacement else {original}) == expected,'other_container_inventory_changed')
     for ident in expected:
-        old,new = before[ident],after[ident]
+        old,new = ({**row,'mounts':canonical_mount_records(row['mounts'])} for row in (before[ident],after[ident]))
         if ident in known_incidents:
             require({k:v for k,v in old.items() if k not in STATE_FIELDS} == {k:v for k,v in new.items() if k not in STATE_FIELDS},'other_container_runtime_changed')
         else:
@@ -190,7 +200,7 @@ def post_parity(V,before,after,desired, *, replaced=None):
             and re.fullmatch(r'[0-9a-f]{64}',new_engine['com.docker.compose.config-hash'])
             and re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?',new_engine['com.docker.compose.version']),'capture_new_provenance_invalid')
     require(before['host'] == after['host'],'capture_host_configuration_changed')
-    require(sorted(before['mounts'],key=lambda x:x['Destination']) == sorted(after['mounts'],key=lambda x:x['Destination']),'capture_mounts_changed')
+    require(canonical_mount_records(before['mounts']) == canonical_mount_records(after['mounts']),'capture_mounts_changed')
     require(set(before['networks']) == set(after['networks']),'capture_network_membership_changed')
     for name,old in before['networks'].items():
         new = after['networks'][name]
@@ -289,12 +299,26 @@ def execute(P,R,H,V,action):
             fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
             fds[path],originals[path] = fd,raw
         P.owner_proof(C,H,plan,fds)
+        previous_path = C.ROOT/(PREVIOUS_OP+'.activation.json')
+        previous_raw = C.B.read(previous_path,maximum=65536)
+        previous = json.loads(previous_raw)
+        require(sha256(previous_raw).hexdigest() == PREVIOUS_AUDIT_SHA
+                and previous['schema'] == 'capture2_observability_activation/1' and previous['operation_id'] == PREVIOUS_OP
+                and previous['phase'] == 'rollback_unverified_incident_open'
+                and previous['reason_code'] == previous['rollback_reason_code'] == 'other_container_runtime_changed'
+                and previous['old_capture_id'] == V.CID and previous['base_image'] == V.BASE
+                and previous['candidate_image'] == V.CANDIDATE and previous['old_fences_retained'] is True
+                and previous['security_transition_completed'] is False,'previous_capture_attempt_changed')
+        previous_unit = PREVIOUS_OP+'.service'
+        previous_state = dict(line.split('=',1) for line in C.B.command(['/usr/bin/systemctl','show',previous_unit,'--property=ActiveState,MainPID,ExecMainStatus']).splitlines())
+        require(previous_state == {'ActiveState':'failed','MainPID':'0','ExecMainStatus':'3'}
+                and C.scope_empty(Path('/sys/fs/cgroup/system.slice')/previous_unit),'previous_capture_owner_not_terminal')
         R.hot_finished(C,H)
         R.no_backup_exec(C,plan,retired=True)
         P.inventory(C,R,plan,parked=True)
         P.web_datastores_native(C,R,plan)
         native = legacy(C)
-        old_evidence = {path:C.B.read(path,maximum=65536) for path in (C.paths(plan)[0],C.ROOT/(H.OP+'.owned-restore.json'),C.ROOT/(H.OP+'.owned-intent.json'),parking_path)}
+        old_evidence = {path:C.B.read(path,maximum=65536) for path in (C.paths(plan)[0],C.ROOT/(H.OP+'.owned-restore.json'),C.ROOT/(H.OP+'.owned-intent.json'),parking_path,previous_path)}
         output = io.StringIO()
         with redirect_stdout(output):
             checked = V.main(existing=True)
@@ -303,6 +327,8 @@ def execute(P,R,H,V,action):
         known_incidents = frozenset(R.KNOWN_MARKET_FLAPS)
         require(len(known_incidents) == 2 and known_incidents <= set(before) and not known_incidents & (set(R.IDS)|{V.CID}),'known_incident_binding_invalid')
         require(target(before,V)['id'] == V.CID and before[V.CID]['image'] == V.BASE,'old_capture_identity_changed')
+        require(not before[V.CID]['running'] and not before[V.CID]['restarting'] and before[V.CID]['pid'] == 0
+                and all(row['image'] != V.CANDIDATE for row in before.values()),'previous_stopped_capture_required')
         same_session_owner(before,V.CID)
         if action == 'check':
             return {'status':'capture_diagnostic_checked','runtime_changed':False,'private_values_emitted':False}
@@ -317,6 +343,7 @@ def execute(P,R,H,V,action):
         audit = {'schema':'capture2_observability_activation/1','operation_id':OP,'pid':os.getpid(),
             'deadline_utc':clock.deadline_utc.isoformat(),'old_capture_id':V.CID,'base_image':V.BASE,'candidate_image':V.CANDIDATE,
             'source_sha256':V.PATCHED_SOURCE,'public_runtime_revision':V.PUBLIC_REVISION,'parking_audit_sha256':PARK_AUDIT_SHA,
+            'previous_operation_id':PREVIOUS_OP,'previous_audit_sha256':PREVIOUS_AUDIT_SHA,
             'original_operation_id':H.OP,'original_plan_sha256':H.PLAN_SHA,'old_fences_retained':True,
             'original_manifest_changed':False,'security_transition_completed':False,'phase':'admitted',
             'persistent_boot_guard_verified':native['persistent_boot_guard_verified'],'web_reboot_authorized':False,

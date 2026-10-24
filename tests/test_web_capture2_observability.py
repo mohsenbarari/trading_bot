@@ -173,5 +173,30 @@ class CaptureObservabilityTests(unittest.TestCase):
         self.assertEqual(M.code(ValueError('secret-value')),'capture_diagnostic_operation_failed')
         self.assertEqual(M.code(RuntimeError('/private/path secret-value')),'capture_diagnostic_operation_failed')
 
+    def test_full_mount_record_permutation_is_semantically_equal(self):
+        before = rows()
+        ident = f'{0:064x}'
+        before[ident]['mounts'] = [
+            {'Destination':'/one','Source':'/public/one','RW':False,'Type':'bind','UnrecognizedField':{'kept':True}},
+            {'Destination':'/two','Source':'/public/two','RW':True,'Type':'bind'}]
+        after = copy.deepcopy(before)
+        after[ident]['mounts'].reverse()
+        M.other_runtime(before,after,OLD)
+        after[ident]['mounts'][1]['UnrecognizedField']['kept'] = False
+        with self.assertRaisesRegex(RuntimeError,'other_container_runtime_changed'):
+            M.other_runtime(before,after,OLD)
+        after = copy.deepcopy(before)
+        after[ident]['mounts'][0]['Source'] = '/changed/source'
+        with self.assertRaisesRegex(RuntimeError,'other_container_runtime_changed'):
+            M.other_runtime(before,after,OLD)
+
+    def test_duplicate_mount_destination_is_rejected_even_when_records_match(self):
+        before = rows()
+        ident = f'{0:064x}'
+        before[ident]['mounts'] = [{'Destination':'/one','Source':'/public/one'},
+                                  {'Destination':'/one','Source':'/public/two'}]
+        with self.assertRaisesRegex(RuntimeError,'duplicate_mount_destination'):
+            M.other_runtime(before,copy.deepcopy(before),OLD)
+
 if __name__ == '__main__':
     unittest.main()
