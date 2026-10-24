@@ -31,3 +31,10 @@
       check_mode: false
       register: backup_env_probe
       changed_when: (backup_env_probe.stdout | from_json).public_scripts_staged | default(false)
+    - name: Report the validation verdict separately from command completion
+      ansible.builtin.debug:
+        msg:
+          validation_passed: '{{ (backup_env_probe.stdout | from_json).validation_passed }}'
+          reason_code: '{{ (backup_env_probe.stdout | from_json).reason_code }}'
+          backup_created: '{{ (backup_env_probe.stdout | from_json).backup_created }}'
+          runtime_changed: '{{ (backup_env_probe.stdout | from_json).runtime_changed }}'

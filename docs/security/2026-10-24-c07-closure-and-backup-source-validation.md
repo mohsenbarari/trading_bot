@@ -79,3 +79,29 @@ the original incident evidence; review only disposable public staging/logs for
 cleanup after ten days. A subsequent HOT3 operation must bind the actual
 completed closure receipt SHA and the current runtime; it cannot reuse the
 obsolete CREATE02's ownership assumptions.
+
+## Actual continuation result
+
+The reviewed packet was committed as `7c9143c6` and the real finite closure
+finished with systemd exit0 on24Oct. Its new receipt has phase
+`aborted_before_install_fences_released`, owned-fence release true, global
+security completion false and known Market cadence incidents open. Receipt
+SHA-256 is `712af9788ef73e3934252d7b7e50bd0681bbfea13c25088da59a123efabb5dc0`.
+This is the anchor for a newly reviewed HOT operation, not approval to reboot
+or to reuse CREATE02. No service restart or old evidence/deadline rewrite was
+part of closure. The first connection attempt failed before remote execution;
+the verified explicit Web SSH identity was then used successfully.
+
+The subsequent serialized normal validator completed without mutation and
+explicitly returned `validation_passed: false`, reason
+`backup_source_image_identity_invalid`. The earlier generic refusal is not
+evidence of this exact cause; the new verdict is. No Env values were exposed,
+copied or hashed by this probe, and no HOT backup was attempted.
+
+An additional source-review blocker precedes any new real HOT action: the
+ordinary archive implementation still calls `file_digest(env_file)` for its
+`role_env_sha256` journal/receipt binding. The current no-Env-content-hashing
+instruction forbids using that path unchanged. Prepare a reviewed non-content
+identity binding and appropriate contract tests before actual CREATE/VERIFY;
+do not silently weaken immutable image validation, rewrite the original plan,
+or make a diagnostic copy of the protected Env to work around either blocker.

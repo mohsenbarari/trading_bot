@@ -1,43 +1,36 @@
 # Security remediation
 
-- Source/tests are not activation. Preserve product baseline, Market behavior
-  and single capture ownership. Publishing security history is authorized,
-  unrelated feature activation is not.
-  See `docs/security/2026-10-23-remediation.md`.
-- Upgrade compatible Python families together; test parser/upload behavior.
-  Bound images before decode; discard unsafe originals. Static/SPA stays inside
-  trusted dist. CA trust differs from CVE scans; retain TLS/pinned bootstrap.
-- Native Docker/containerd29.9.2/2.4.2/kernel147 verified with15 IDs/Golden intact.
-  Web Docker/kernel/App activation remain unfinished.
-- C07 failed before installation. Original policies/four timers restored, but
-  health/security incomplete; retain fences/journal.24Oct downtime05:48:39Z;
-  90min expired07:18:39Z. Never extend manifests. Before reboot, prove persistent
+- Source/tests are not activation. Preserve baseline/Market behavior and single
+  capture ownership. Publish security history, not unrelated feature activation. See
+  `docs/security/2026-10-23-remediation.md`.
+- Upgrade compatible Python families together; test parser/uploads. Bound images
+  before decode/discard unsafe originals; contain Static/SPA inside trusted dist.
+  CA trust is separate from CVEs; retain TLS/pinned bootstrap.
+- Native engine/kernel verified with15 containers intact; Web engine/kernel/App
+  activation remains unfinished. C07 terminal closure released only two dead
+  fences: retain permanent marker/history and open incidents. Expired windows
+  need fresh authority; never rewrite deadlines. Reboot needs persistent
   collector inhibitors and attached-mount gates.
-- User confirmed old three-site QA unused:24Oct parking stopped exact10,
-  closed8443, verified17 retained configurations/Web/6DB. Four volumes/images/data
-  remain. Bind preservation uses Options.device/attached UUID, not transient
-  Docker_data inode. Parking keeps incidents/fences open.
-- Capture2 functional f79 overlay activated24Oct: actual replay131,795
-  complete/quarantine0; three samples show both groups advancing/restarts0.
-  SQLite sort exceeded16MiB tmp; account-indexed streaming preserves hashes.
-  Processor65–68s cycles still cause30s health flaps. Legacy collectors inhibited;
-  never duplicate owners or inspect/copy/hash private session/config contents.
-- Native Brotli two patched packages installed; original collector/Golden PIDs
-  unchanged and still map old decoder. Consumer refresh/window remains separate;
-  package receipt explicitly security-incomplete.
-- Actual19d App candidate:56 focused tests passed, rawHIGH48→44 after pip
-  removal;8 OS advisory IDs remain. No acceptance/activation/waiver. See
-  `docs/security/2026-10-24-security-candidate-19d.md`.
-- Both watchdogs check Restarting before Running. Stale heartbeat can coexist
-  with progress; missing counters are unknown. Consult24Oct runtime-observation
-  and native-postboot evidence.
-- Never prune active attached control storage or delete markers. Recovery needs
-  crash-safe evidence; process death cannot cancel Docker/systemd requests.
-  Ambiguous stops never auto-restart writers.
-- Synthetic tests deny unmocked host/network commands; use named mocks and
-  nonroot fixtures. Stream caps differ from artifact budgets; tiny file limits
-  break pg_dump/dpkg. Backup roles Native=foreign/trading_bot, Web=iran/current;
-  bind real artifacts, never geography.
-- Keep STOP until security remediation is activated/verified, then monitor30
-  genuinely accepted complete clean units. Health polls never count; preserve
-  failures without counter reset or waiver.
+- QA:10 parked/8443 closed;17 configurations/six datastores/four volumes preserved.
+  Bind identity uses Options.device/attached UUID, not transient Docker_data inode.
+- Capture2 f79 replay fixed by account-indexed streaming with equal hashes.
+  Processor65–68s still flaps30s health. Legacy collectors stay inhibited; never
+  duplicate owners or inspect/copy/hash session/config contents.
+- Native Brotli first refresh timed out; preserve partial receipt. Collector
+  later proved patched/ready without retry; Golden remains old. Golden-only
+  continuation needs fresh window/parent binding, never collector restart or
+  rewriting the failed attempt. See24Oct native-brotli-refresh runbook.
+- Actual19d App:56 focused tests/rawHIGH44/8 advisory IDs; not accepted/activated.
+  See `docs/security/2026-10-24-security-candidate-19d.md`.
+- Watchdogs check Restarting before Running. Stale heartbeat can coexist with
+  progress; missing counters are unknown. Never prune attached control storage;
+  process death cannot cancel daemon requests or authorize writer auto-restart.
+- Tests deny unmocked host/network commands; use named mocks/nonroot fixtures.
+  Stream caps differ from artifact budgets. Backup roles bind actual artifacts,
+  not geography: Native=foreign/trading_bot, Web=iran/current.
+- Backup probe rejects source image identity. Archive code still hashes Env:
+  no CREATE/VERIFY until reviewed non-content binding; no diagnostic Env copies
+  or relaxed image gate. util-linux compile/ABI/variants/source tests passed;
+  installer DAC capsule fix still needs actual install/scan. Reuse bound artifacts.
+- Keep STOP until activated/verified security, then monitor30 accepted complete
+  clean units. Health polls never count; preserve failures/counters without waiver.
