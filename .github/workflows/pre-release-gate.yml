@@ -408,9 +408,14 @@ jobs:
           module=types.ModuleType('pre_npm_payload_recipe');module.__file__=str(Path('scripts/prepare_security_consumer_payload.py').resolve())
           exec(compile(helper,module.__file__,'exec'),module.__dict__)
           test_sources=seal_test_sources(Path.cwd(),Path('.local/security-payload'),os.environ['PAYLOAD_SOURCE_COMMIT'],module)
+          probe=module.git(Path.cwd(),'show',os.environ['PAYLOAD_SOURCE_COMMIT']+':scripts/verify_image_component_presence.py',maximum=32768)
+          assert 0<len(probe)<=32768
+          module.write_file(Path('.local/security-payload/component-probe.py'),probe)
+          Path('.local/security-payload/component-probe.py').chmod(0o644)
           with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
               output.write('helper_sha256='+sha256(helper).hexdigest()+'\n')
               output.write('test_sources_sha256='+test_sources+'\n')
+              output.write('component_probe_sha256='+sha256(probe).hexdigest()+'\n')
           PY
 
       - name: Setup security-pinned frontend build runtime
@@ -543,6 +548,38 @@ jobs:
               subprocess.run(argv,check=True,timeout=180,stdout=output)
           PY
 
+      - name: Record actual immutable-image component presence without filtering findings
+        if: always() && steps.payload-build.outcome == 'success'
+        env:
+          PAYLOAD_IMAGE: ${{ steps.payload-build.outputs.image_id }}
+          PAYLOAD_SOURCE_COMMIT: ${{ github.sha }}
+          PAYLOAD_COMPONENT_PROBE_SHA256: ${{ steps.payload_seal.outputs.component_probe_sha256 }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,re,stat,types
+          path=pathlib.Path('.local/security-payload/component-probe.py')
+          expected=os.environ['PAYLOAD_COMPONENT_PROBE_SHA256'];assert re.fullmatch('[a-f0-9]{64}',expected)
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=32768
+              raw=os.read(fd,32769)
+              identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mode,s.st_mtime_ns,s.st_ctime_ns)
+              assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          assert sha256(raw).hexdigest()==expected
+          module=types.ModuleType('sealed_component_probe');exec(compile(raw,str(path),'exec'),module.__dict__)
+          receipt=module.in_container(os.environ['PAYLOAD_IMAGE'],os.environ['PAYLOAD_SOURCE_COMMIT'],raw,expected)
+          target=path.parent/'component-presence.json';fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          try:
+              view=memoryview(receipt)
+              while view:
+                  count=os.write(fd,view);assert count>0;view=view[count:]
+              os.fsync(fd)
+          finally:os.close(fd)
+          PY
+
       - name: Scan the actual candidate including unfixed HIGH and CRITICAL findings
         if: always() && steps.payload-build.outcome == 'success'
         env:
@@ -658,4 +695,5 @@ jobs:
             .local/security-payload/test-sources.json
             .local/security-payload/candidate-tests.json
             .local/security-payload/vulnerabilities.json
+            .local/security-payload/component-presence.json
             .local/security-payload/sbom.cdx.json
