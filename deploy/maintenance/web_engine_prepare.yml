@@ -1,5 +1,7 @@
 ---
 # PREPARATION ONLY. No service/package/install/apply tasks exist in this play.
+# One explicitly serialized root controller invokes this workspace at a time.
+# Pre-plan refresh is authenticated, NOT a concurrent-preparation guarantee.
 - name: Stage the finite public Web CE preparation bundle and real metadata plan
   hosts: web_engine
   gather_facts: false
@@ -113,7 +115,7 @@
         group: root
       loop: ['', source, source/deploy, source/deploy/maintenance, source/scripts, packages]
 
-    - name: Transfer only the fixed public source inventory never application or private files
+    - name: Refresh only the fixed unprepared public source inventory never application or private files
       ansible.builtin.copy:
         src: '{{ playbook_dir }}/../../{{ item }}'
         dest: '/root/.local/security-web-engine-20261023/source/{{ item }}'
@@ -121,7 +123,7 @@
         owner: root
         group: root
         follow: false
-        force: false
+        force: true
       loop: '{{ web_engine_source_files }}'
 
     - name: Generate only the empty private-bundle Python namespace marker
@@ -132,7 +134,7 @@
         owner: root
         group: root
         follow: false
-        force: false
+        force: true
 
     - name: Transfer only the validated fixed metadata specification no env key or session
       ansible.builtin.copy:
@@ -142,7 +144,7 @@
         owner: root
         group: root
         follow: false
-        force: false
+        force: true
       no_log: true
 
     - name: Transfer only the two verified existing backup metadata receipts never backup payloads
@@ -153,7 +155,7 @@
         owner: root
         group: root
         follow: false
-        force: false
+        force: true
       loop:
         - {source: /root/secure-envs/trading-bot/production-backups/evidence/security-host-maintenance-20261023.json, destination: app-backup-receipt.json}
         - {source: /root/trading-bot/trading_bot/.local/security-web-engine-20261024-app-offhost.json, destination: app-offhost-receipt.json}

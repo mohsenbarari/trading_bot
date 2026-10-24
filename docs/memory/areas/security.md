@@ -1,54 +1,41 @@
 # Security remediation
 
-- 2026-10-23 | Security is separate from topology acceptance; preserve Web/Bot
-  behavior. Source/test completion is not production remediation. Evidence and
-  activation blockers: `docs/security/2026-10-23-remediation.md` and linked reports.
+- Security is not topology acceptance. Preserve behavior; source/tests are not
+  activation proof. Evidence: `docs/security/2026-10-23-remediation.md` and links.
 - Upgrade FastAPI/Starlette/Pydantic and aiogram/aiohttp as compatible families;
   require parser/upload tests. Bound image bytes/pixels before EXIF/decode;
   never persist the original after a safety failure. All frontend responses,
   including SPA fallback, must remain inside immutable trusted dist.
-- Patch image OS and certifi separately. The CA build gate is not a full CVE
-  scan; never disable TLS verification. Verify exact vendor Node releases, not
-  bundled Brotli strings. Enforce one Node policy before cache lookup; bootstrap
-  stays pinned/SHA-verified, bounded, checkout-local and scoped-PATH, not global.
+- Patch OS/certifi separately; CA checks are not CVE scans. Keep TLS verification.
+  Verify vendor Node fixes, not Brotli strings; enforce policy before cache lookup.
+  Bootstrap stays pinned, bounded, checkout-local with scoped PATH, never global.
 - Publishing existing main history plus reviewed security commits is authorized,
   not unrelated Market activation. Preserve LEGACY, capture owners and mounts.
-- Publisher/chat/message fixtures must be complete; retain missing-owner negative
-  assertions. Require PostgreSQL and real multiworker Redis. Each CI subprocess
-  needs public unit config before imports and explicit scratch targets. Browser
-  CI prepares every bind under disposable paths; keep snapshots empty/read-only
-  and production create-host-path guards; check the contract before fan-out.
-- Host maintenance needs quiescence, restore and smoke proofs; never infer patch
-  activation from CLI or installed kernel. Bot Docker/containerd now run29.9.2/2.4.2
-  with same15containerIDs/images and both projects restored. Actual kernel147
-  reboot completed2026-10-23T21:19:23Z; fresh2026-10-24T03:14:22Z checks passed
-  all15/DB/API/Golden/mounts/unchangedM/J. Web vendor fixes and application
-  activation remain open. See dated security report.
-- Private control storage is an ACTIVE attached-volume bind despite its historical
-  source name: never prune it. Identity recovery requires authentic evidence and
-  crash safety, never persistent-marker deletion or weaker normal guards.
-- Live inventory differs from the old quiesced handoff: the group unit projects
-  facts; private-gold/public still collect Telegram. Preserve ingestion until
-  ownership is reconciled. Identity-only recovery must refuse; stopping units
-  solely to pass is not reconciliation.
-- 2026-10-23 | Root-run fixture context drift accidentally reached systemctl;
-  exact baseline collectors/timers were restored and real runtime/DB/API plus
-  fresh oneshots passed. Synthetic maintenance suites must unconditionally deny
-  unmocked host commands; keep named contexts, never shift positional mock tuples.
+- Keep complete publisher/chat fixtures and owner negatives; require PostgreSQL
+  and real multiworker Redis. CI subprocesses need public config before imports,
+  explicit scratch targets and disposable binds. Snapshots stay empty/read-only;
+  preserve production path-creation guards and check contracts before fan-out.
+- Native Docker/containerd29.9.2/2.4.2, kernel147 verified:
+  15IDs/DB/API/Golden/mounts/unchangedM/J. Web/App remain open;
+  see `docs/security/2026-10-24-native-postboot.md`.
+- Private control storage is an active attached bind: never prune it. Recovery
+  needs authentic crash-safe evidence, never marker deletion or weaker guards.
+- Old handoff is stale: group projects facts; private-gold/public still collect.
+  Reconcile ownership; never stop ingestion just to match an old receipt.
+- A root fixture accidentally reached systemctl; exact collectors/timers and
+  runtime/DB/API/oneshots were restored. Synthetic suites must deny all unmocked
+  host commands; use named contexts, never shifted positional mocks.
 - Resume refactor only after identified security findings are remediated and
   activated/verified. Then monitor30 genuinely accepted completed units, not
   health polls; failures must be repaired, never waived or counted as success.
-- Inactive oneshots can disappear between systemctl and D-Bus GetUnit. Hold
-  non-starting RefUnit references on one persistent private bus while checking;
-  never remove mount/ownership checks to recover. Exact owned continuation
-  preserved the original guard/HEAD/manifest and requested one actual reboot.
-- A final SSH credential revocation may succeed before Ansible's subsequent
-  remote housekeeping reconnect fails. Verify authorized-entry/key/pin absence
-  separately; use a final raw SSH child on the controller, not another remote
-  module that needs the credential after removing it. Retain failure evidence.
-- User renewed maintenance2026-10-24: immediate maximum90min downtime; current
-  bounded outer limit04:41Z(08:11Tehran). Do not extend it silently. Admission
-  needs a restore reserve; prep/source tests are not actual engine acceptance.
+- Inactive oneshots can disappear before GetUnit: retain non-starting RefUnit on
+  one bus. Preserve guards/mounts/ownership/HEAD/manifest during owned recovery.
+- Self-revoking SSH can strand Ansible housekeeping. Final revocation uses
+  controller-local SSH; separately verify key/pin/authorized-entry absence and
+  retain failed-transport evidence.
+- 24Oct clarification: maximum90min from ACTUAL first downtime, not04:41Z.
+  Fresh04 window is conservatively bounded05:20Z; keep old02/03 expiries intact.
+  Require restore reserve; preparation is not actual engine acceptance.
 - Actual combined backup roles are Native=foreign/trading_bot, Web=iran/current;
   bind real host/project/artifacts, never infer geography from role names.
   Process/cgroup death does not cancel accepted Docker/PID1 requests; ambiguous

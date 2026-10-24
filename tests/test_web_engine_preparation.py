@@ -46,15 +46,15 @@ class WebEnginePreparationTests(unittest.TestCase):
             self.stack.enter_context(patch(target, side_effect=AssertionError('no real network or host command')))
         self.open_network = self.stack.enter_context(patch.object(R.urllib.request, 'build_opener', side_effect=AssertionError('no network opener')))
         self.inputs = {'schema': 'web_engine_prepare_inputs/1', 'operation_id': 'security-web-engine-20261023-01',
-            'nonce': 'a' * 32, 'deadline_utc': '2026-10-24T04:41:00Z',
+            'nonce': 'a' * 32, 'deadline_utc': '2026-10-24T05:20:00Z',
             'source_sha256': {name: 'b' * 64 for name in R.PUBLIC_SOURCES},
             'app_backup_receipt': {'source_path': R.RECEIPTS['app_backup_receipt'][0], 'path': str(R.RECEIPTS['app_backup_receipt'][1]), 'sha256': 'c' * 64},
             'app_offhost_receipt': {'source_path': R.RECEIPTS['app_offhost_receipt'][0], 'path': str(R.RECEIPTS['app_offhost_receipt'][1]), 'sha256': 'd' * 64},
             'market_backup': {'env_file': '/private/metadata-only.env', 'release_sha': 'e' * 40, 'release_tree': 'f' * 40,
                 'image_id': 'sha256:' + '1' * 64, 'image_input_signature': '2' * 64},
             'backup_key_file': '/private/metadata-only.key',
-            'offhost': {'identity_file': '/root/.ssh/security-controller-20261023-host-patch-03/id_ed25519',
-                'known_hosts_file': '/root/.ssh/security-controller-20261023-host-patch-03/known_hosts', 'known_hosts_sha256': '3' * 64},
+            'offhost': {'identity_file': '/root/.ssh/security-controller-20261023-host-patch-04/id_ed25519',
+                'known_hosts_file': '/root/.ssh/security-controller-20261023-host-patch-04/known_hosts', 'known_hosts_sha256': '3' * 64},
             'datastore_probes': [{'name': '/fixture-db' + str(n), 'kind': 'postgres', 'user': 'fixture', 'database': 'fixture'} for n in range(8)]}
         self.inputs['source_sha256']['deploy/maintenance/web_engine_controller.py'] = R.CONTROLLER_SHA
 
@@ -84,7 +84,9 @@ class WebEnginePreparationTests(unittest.TestCase):
         for mutation in (lambda x: x.update(password='forbidden'),
                          lambda x: x['source_sha256'].pop('deploy/maintenance/ansible.cfg'),
                          lambda x: x['offhost'].update(identity_file='/root/.ssh/security-controller-20261023-host-patch-02/id_ed25519'),
-                         lambda x: x.update(deadline_utc='2026-10-24T04:41:01Z'),
+                         lambda x: x['offhost'].update(identity_file='/root/.ssh/security-controller-20261023-host-patch-03/id_ed25519'),
+                         lambda x: x['offhost'].update(known_hosts_file='/root/.ssh/security-controller-20261023-host-patch-03/known_hosts'),
+                         lambda x: x.update(deadline_utc='2026-10-24T05:20:01Z'),
                          lambda x: x.update(deadline_utc='2026-10-24T01:30:00Z')):
             value = json.loads(json.dumps(self.inputs)); mutation(value)
             with self.subTest(mutation=mutation), self.assertRaises(RuntimeError): R.validate_inputs(value)
@@ -296,7 +298,17 @@ class WebEnginePreparationTests(unittest.TestCase):
             self.assertNotIn('ansible.builtin.reboot', task)
         copies = [t['ansible.builtin.copy'] for t in tasks if 'ansible.builtin.copy' in t]
         self.assertFalse(any('lookup(' in json.dumps(copy) for copy in copies))
-        self.assertTrue(all(copy['force'] is False for copy in copies))
+        self.assertTrue(all(copy['force'] is True for copy in copies))
+        # Root explicitly serializes preparation. Refresh is allowed only
+        # before the immutable plan boundary, never an already prepared plan.
+        self.assertIn('not any(os.path.lexists(p)', tasks[boundary - 1]['ansible.builtin.command']['argv'][-2])
+        env = Environment(undefined=StrictUndefined); env.filters['from_json'] = json.loads
+        stopped = env.compile_expression(tasks[boundary]['when'])
+        for action, check_mode, plan_exists, expected in (
+                ('check', False, False, True), ('prepare', True, False, True),
+                ('prepare', False, True, True), ('prepare', False, False, False)):
+            self.assertEqual(stopped(web_engine_prepare_action=action, ansible_check_mode=check_mode,
+                web_engine_preparation_metadata={'stdout': json.dumps({'plan_exists': plan_exists})}), expected)
         self.assertEqual(copies[1]['content'], '')
 
     def test_ansible_native_pinned_code_input_and_receipt_gates_precede_remote_execution(self):

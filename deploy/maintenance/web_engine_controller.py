@@ -742,7 +742,12 @@ def _abort_restore(plan, digest):
     require(package_versions(P.OLD_PACKAGES) == {n: p[0] for n, p in P.OLD_PACKAGES.items()}, 'old_package_versions_changed')
     remaining_contract(plan, 60)
     for name in sorted(UNITS | set(ENGINES)):
-        require(B.command(['/usr/bin/systemctl', 'show', name, '-p', 'Job', '--value']) == '0', 'abort_native_job_pending')
+        # systemd renders Unit.Job=(uo) 0 "/" as Job= on this Web host.
+        # Empty command output or a missing unit must never count as idle.
+        raw = B.command(['/usr/bin/systemctl', 'show', name, '-p', 'LoadState', '-p', 'Job'])
+        lines = raw.splitlines()
+        require(len(lines) == 2 and set(lines) in (
+            {'LoadState=loaded', 'Job='}, {'LoadState=loaded', 'Job=0'}), 'abort_native_job_pending')
         if value['phase'] != 'reserved':
             require(B.command(['/usr/bin/systemctl', 'show', name, '-p', 'ActiveState', '--value'])
                     in {'inactive', 'failed'}, 'abort_target_not_quiescent')

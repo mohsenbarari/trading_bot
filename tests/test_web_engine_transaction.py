@@ -512,7 +512,7 @@ class PreinstallAbortTests(unittest.TestCase):
             calls.append(argv)
             if argv[0] == '/usr/bin/systemctl':
                 if argv[1] == 'start': active.add(argv[-1]); return ''
-                if 'Job' in argv: return '0'
+                if 'Job' in argv: return 'LoadState=loaded\nJob='
                 return 'enabled' if 'UnitFileState' in argv else 'active' if argv[2] in active else 'inactive'
             if argv[1:3] == ['image', 'inspect']:
                 return json.dumps({'revision': 'a' * 40, 'tree': 'b' * 40, 'input_signature': 'c' * 64})
@@ -598,10 +598,34 @@ class PreinstallAbortTests(unittest.TestCase):
         plan, current, calls, command = self.fixture()
         with patch.object(guard, 'invariant_contract'), patch.object(guard, 'journal', return_value={'phase': 'backing_up'}), \
                 patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
-                patch.object(guard.B, 'command', return_value='123') as native, patch.object(guard, 'write_json') as write:
+                patch.object(guard.B, 'command', return_value='LoadState=loaded\nJob=123') as native, patch.object(guard, 'write_json') as write:
             with self.assertRaisesRegex(guard.P.Refusal, 'abort_native_job_pending'):
                 guard.abort_restore(plan, 'b' * 64)
         self.assertEqual(native.call_count, 1); self.assertIn('Job', native.call_args.args[0]); write.assert_not_called()
+
+    def test_native_idle_job_requires_explicit_loaded_unit_and_exact_zero_rendering(self):
+        for raw in ('LoadState=loaded\nJob=', 'Job=0\nLoadState=loaded'):
+            plan, current, calls, command = self.fixture()
+            def actual(argv):
+                return raw if argv[0] == '/usr/bin/systemctl' and 'Job' in argv else command(argv)
+            with self.subTest(valid=raw), patch.object(guard, 'invariant_contract'), \
+                    patch.object(guard, 'journal', return_value={'phase': 'backup_ready'}), \
+                    patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
+                    patch.object(guard.B, 'command', side_effect=actual), patch.object(guard, 'containerd_contract'), \
+                    patch.object(guard, 'write_json'):
+                guard.abort_restore(plan, 'b' * 64)
+                self.assertEqual(sum(row['running'] for row in current.values()), 26)
+        for raw in ('', '0', 'Job=', 'LoadState=not-found\nJob=', 'LoadState=error\nJob=0',
+                    'LoadState=loaded\nJob=17', 'LoadState=loaded\nJob=0\nJob=',
+                    'LoadState=loaded\nJob=0 /org/freedesktop/systemd1/job/17'):
+            plan, _, _, _ = self.fixture()
+            with self.subTest(invalid=raw), patch.object(guard, 'invariant_contract'), \
+                    patch.object(guard, 'journal', return_value={'phase': 'backup_ready'}), \
+                    patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
+                    patch.object(guard.B, 'command', return_value=raw) as native, patch.object(guard, 'write_json') as write:
+                with self.assertRaisesRegex(guard.P.Refusal, 'abort_native_job_pending'):
+                    guard.abort_restore(plan, 'b' * 64)
+                self.assertEqual(native.call_count, 1); write.assert_not_called()
 
     def test_failed_smoke_does_not_restore_policies_timers_or_publish_success(self):
         plan, current, calls, command = self.fixture(smoke_failure=True)

@@ -42,7 +42,7 @@ PUBLIC_SOURCES = (
     'deploy/maintenance/web_engine_inventory.yml',
 )
 EMPTY_INIT = 'scripts/__init__.py'  # Generated EMPTY only in this private bundle.
-CONTROLLER_SHA = '41a09538af34528213a7b93ec883934521381c676b654bea38c700ccba451a14'
+CONTROLLER_SHA = '96bab1152eb4ce105e56717e87c27d32836a8c06a0ae01962178dd034f3df367'
 OLD_URLS = {
     'docker.io': 'https://archive.ubuntu.com/ubuntu/pool/universe/d/docker.io-app/docker.io_29.1.3-0ubuntu4.1_amd64.deb',
     'containerd': 'https://security.ubuntu.com/ubuntu/pool/main/c/containerd-app/containerd_2.2.2-0ubuntu1.1_amd64.deb',
@@ -99,7 +99,7 @@ def validate_inputs(spec):
         re.fullmatch('[0-9a-f]{32}', spec['nonce']), 'operation_scope')
     require(spec['deadline_utc'].endswith('Z'), 'deadline_scope')
     deadline = datetime.fromisoformat(spec['deadline_utc'].replace('Z', '+00:00'))
-    require(datetime.now(timezone.utc) < deadline <= datetime(2026, 10, 24, 4, 41, tzinfo=timezone.utc), 'window_expired_or_expanded')
+    require(datetime.now(timezone.utc) < deadline <= datetime(2026, 10, 24, 5, 20, tzinfo=timezone.utc), 'window_expired_or_expanded')
     require(set(spec['source_sha256']) == set(PUBLIC_SOURCES) and all(
         re.fullmatch('[0-9a-f]{64}', value) for value in spec['source_sha256'].values()), 'source_inventory')
     require(spec['source_sha256']['deploy/maintenance/web_engine_controller.py'] == CONTROLLER_SHA, 'unreviewed_controller')
@@ -113,8 +113,8 @@ def validate_inputs(spec):
         and re.fullmatch('sha256:[0-9a-f]{64}', market['image_id']) and re.fullmatch('[0-9a-f]{64}', market['image_input_signature']), 'market_input_scope')
     remote = spec['offhost']
     require(set(remote) == {'identity_file', 'known_hosts_file', 'known_hosts_sha256'} and
-        remote['identity_file'] == '/root/.ssh/security-controller-20261023-host-patch-03/id_ed25519' and
-        remote['known_hosts_file'] == '/root/.ssh/security-controller-20261023-host-patch-03/known_hosts' and
+        remote['identity_file'] == '/root/.ssh/security-controller-20261023-host-patch-04/id_ed25519' and
+        remote['known_hosts_file'] == '/root/.ssh/security-controller-20261023-host-patch-04/known_hosts' and
         re.fullmatch('[0-9a-f]{64}', remote['known_hosts_sha256']), 'offhost_lane_scope')
     require(Path(spec['backup_key_file']).is_absolute() and isinstance(spec['datastore_probes'], list)
             and len(spec['datastore_probes']) == 8, 'private_path_or_probe_scope')
