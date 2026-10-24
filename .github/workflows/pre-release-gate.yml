@@ -736,7 +736,7 @@ jobs:
           root=pathlib.Path(tempfile.mkdtemp(prefix='security-market-e46-',dir=parent))
           for name in ('source','reports','docker-config'):(root/name).mkdir(mode=0o700)
           commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
-          pins={'prepare_market_security_payload.py':'07be3227edd7a4fbc69c98618dfccbe5b927368d1b9febcbf3281bbf7023c130',
+          pins={'prepare_market_security_payload.py':'9131fe760b94d54f2f3fcc577b8cb4d36f0170a0f28a2f0d8adfb750c2b78c84',
                 'compose_security_os_candidate.py':'10ccbe216fef04e5f7a7ce2ad31ac30eca7eeae090dfaaf8074fa3cc5c789d44'}
           identity={}
           for name,pin in pins.items():

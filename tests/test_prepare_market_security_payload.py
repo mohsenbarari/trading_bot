@@ -221,7 +221,7 @@ class MarketSecurityPayloadTests(unittest.TestCase):
         files,_=self.fixture();files.update({name:('100644',b'# public security overlay\n') for name in M.OVERLAY})
         rows=[]
         for name,(mode,raw) in files.items():
-            path=root/'context'/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw);path.chmod(0o644)
+            path=M.public_destination(root/'context',name);path.write_bytes(raw);path.chmod(0o644)
             rows.append({'path':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest(),
                 'git_blob':sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest(),'mode':mode})
         return root,{'schema':'market_security_payload/1','profile':'e46','baseline_commit':M.BASELINE,
@@ -237,6 +237,55 @@ class MarketSecurityPayloadTests(unittest.TestCase):
         extra.unlink();extra.symlink_to(path)
         with self.assertRaisesRegex(M.PayloadError,'context_metadata'):M.verify_context(root,record)
 
+    def public_product(self):
+        outer=Path(self.stack.enter_context(tempfile.TemporaryDirectory()));app=outer/'app';app.mkdir(mode=0o755);app.chmod(0o755)
+        files,_=self.fixture();rows=[]
+        for name,(mode,raw) in files.items():
+            target=M.public_destination(app,name);M.write(target,raw,0o644)
+            rows.append({'path':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest(),'mode':mode})
+        return outer,app,rows
+
+    def test_real_umask077_keeps_outer_private_but_all_public_copy_directories_readable(self):
+        previous=os.umask(0o077)
+        try:
+            outer,app,rows=self.public_product()
+            self.assertEqual(outer.stat().st_mode&0o777,0o700)
+            self.assertTrue(M.verify_product_files(app,rows,M.read,expected_uid=os.geteuid()))
+            expected_dirs={str(parent) for row in rows for parent in Path(row['path']).parents if str(parent)!='.'}
+            observed={path.relative_to(app).as_posix() for path in app.rglob('*') if path.is_dir()}
+            self.assertEqual(observed,expected_dirs)
+            self.assertTrue(all((app/name).stat().st_mode&0o777==0o755 for name in expected_dirs))
+            self.assertTrue(all((app/row['path']).stat().st_mode&0o777==0o644 for row in rows))
+            # The enclosing build capsule itself is never widened.
+            context=outer/'context';context.mkdir(mode=0o700)
+            target=M.public_destination(context,'core/market_intelligence/public.py');M.write(target,b'# public\n',0o644)
+            self.assertEqual(context.stat().st_mode&0o777,0o700)
+            self.assertEqual(target.parent.stat().st_mode&0o777,0o755)
+        finally:os.umask(previous)
+
+    def test_real_product_inventory_rejects_old0700_copy_mode_before_any_public_file_read(self):
+        outer,app,rows=self.public_product();folder=app/'core/market_intelligence';folder.chmod(0o700)
+        with patch.object(M,'read',side_effect=AssertionError('read_before_directory_guard')) as read:
+            with self.assertRaisesRegex(AssertionError,'candidate_public_directory_metadata'):
+                M.verify_product_files(app,rows,read,expected_uid=os.geteuid())
+        read.assert_not_called();self.assertEqual(folder.stat().st_mode&0o777,0o700)
+
+    def test_public_inventory_never_hides_inaccessible_or_extra_empty_subdirectories(self):
+        outer,app,rows=self.public_product()
+        with patch.object(M.os,'scandir',side_effect=PermissionError('ordinary_fixture_denial')):
+            with self.assertRaises(PermissionError):M.verify_product_files(app,rows,M.read,expected_uid=os.geteuid())
+        extra=app/'core/market_intelligence/unexpected_empty';extra.mkdir(mode=0o755);extra.chmod(0o755)
+        with self.assertRaisesRegex(AssertionError,'candidate_public_inventory'):
+            M.verify_product_files(app,rows,M.read,expected_uid=os.geteuid())
+
+    def test_public_directory_writer_refuses_preexisting_private_directory_or_symlink_without_chmod(self):
+        root=Path(self.stack.enter_context(tempfile.TemporaryDirectory()));private=root/'private';private.mkdir(mode=0o700)
+        with self.assertRaisesRegex(M.PayloadError,'public_output_directory'):M.public_destination(root,'private/public.py')
+        self.assertEqual(private.stat().st_mode&0o777,0o700)
+        (root/'linked').symlink_to(private,target_is_directory=True)
+        with self.assertRaises((OSError,M.PayloadError)):M.public_destination(root,'linked/public.py')
+        self.assertFalse((private/'public.py').exists());self.assertEqual(root.stat().st_mode&0o777,0o700)
+
     def test_command_helper_is_pinned_before_any_compilation(self):
         with patch.object(M,'read',return_value=b'changed public helper'),patch.object(M,'ModuleType') as module:
             with self.assertRaisesRegex(M.PayloadError,'command_helper_pin'):M.primitives()
@@ -247,7 +296,9 @@ class MarketSecurityPayloadTests(unittest.TestCase):
         ast.parse(program)
         self.assertLess(program.index("apply_test_fence(fence)"),program.index("exec(compile(sources[name]"))
         self.assertIn('suite.countTestCases()==85',program);self.assertIn('not result.skipped',program)
-        self.assertIn('actual==set(expected)',program);self.assertNotIn('test_capture_public_replay_idempotence',program)
+        self.assertIn('actual==set(expected) and actual_dirs==expected_dirs',program)
+        self.assertIn('stat.S_IMODE(info.st_mode)==0o755',program)
+        self.assertNotIn('test_capture_public_replay_idempotence',program)
 
     def test_actual_fence_allows_only_owned_asyncio_selfpipe_without_any_network_operation(self):
         # A named fixture supplies the stdlib native socket base while the
@@ -297,6 +348,7 @@ class MarketSecurityPayloadTests(unittest.TestCase):
         record={'test_ids':ids,'test_sources_sha256':'a'*64}
         shared={'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':'a'*64,
             'status':'passed','skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False,
+            'public_source_directory_mode':'0755',
             'suite_execution_thread':'owned_nonmain_test_thread'}
         normal={**shared,'tests':84,'selected_test_ids':[name for name in ids if name!=M.ROOT_FIXTURE_TEST_ID],
                 'execution_uid':10001,'execution_gid':10001,'scope':'nonroot_product_tests'}
@@ -384,6 +436,7 @@ class MarketSecurityPayloadTests(unittest.TestCase):
                'test_sources_sha256':'a'*64,'native_sha256':sha256(b'{}').hexdigest(),'focused_sha256':sha256(b'{}').hexdigest(),
                'focused_nonroot_sha256':sha256(b'{}').hexdigest(),'focused_root_fixture_sha256':sha256(b'{}').hexdigest(),
                'product_files_equal_baseline':True,'buildkit_resource_cgroup_asserted':False,'vendor_debs_reused':False,
+               'public_source_directory_mode':'0755',
                'full_runtime_matrix_completed':False,'security_accepted':False,'deployment_eligible':False}
         raw={'SchemaVersion':2,'ArtifactType':'container_image','Metadata':{'ImageID':image,
             'ImageConfig':{'rootfs':{'diff_ids':build['rootfs_layers']}}},'Results':[{'Class':'os-pkgs','Type':'debian',
@@ -460,12 +513,14 @@ class MarketSecurityPayloadTests(unittest.TestCase):
                 'runtime_data_used':False,'security_accepted':False}
             else:value={'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':'a'*64,
                 'status':'passed','tests':84,'skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False,
+                'public_source_directory_mode':'0755',
                 'suite_execution_thread':'owned_nonmain_test_thread',
                 'selected_test_ids':[name for name in record['test_ids'] if name!=M.ROOT_FIXTURE_TEST_ID],
                 'execution_uid':10001,'execution_gid':10001,'scope':'nonroot_product_tests'}
             return M.encoded(value)
         fixture={'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':'a'*64,
             'status':'passed','tests':1,'skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False,
+            'public_source_directory_mode':'0755',
             'suite_execution_thread':'owned_nonmain_test_thread',
             'selected_test_ids':[M.ROOT_FIXTURE_TEST_ID],'execution_uid':0,'execution_gid':0,'scope':'root_owned_metadata_fixture'}
         with patch.object(M,'ci_admit'),patch.object(M,'verify_context'),patch.object(M,'primitives',return_value=SimpleNamespace(docker=docker,isolated=isolated)),\

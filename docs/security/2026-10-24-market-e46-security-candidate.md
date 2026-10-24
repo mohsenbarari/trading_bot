@@ -101,3 +101,36 @@ all other isolation limits, public read-only test mount and exact owned cleanup
 remain identical. Its test body and root/GID permission constants are unchanged.
 Both 84-test and one-test receipts, real execution UIDs and distinct ID sets are
 independently bound into the aggregate proof and exported evidence hashes.
+
+Actual rerun [40139103589](https://github.com/mohsenbarari/trading_bot/actions/runs/40139103589)
+at source `4f837a85` built the image, passed native checks and all 84 UID10001
+cases with zero skips. Its root fixture stopped before its one test at the
+public-source inventory assertion. The preparer had created nested public COPY
+directories as 0700; Docker preserved those modes while assigning UID10001.
+UID0 with no DAC capability cannot traverse them, and pathlib.rglob suppressed
+the permission errors. The ten-file evidence ZIP12578187734 is 35043 bytes,
+SHA256 `a4eaa62a7fc26682ee6aa2955b266e6619254ecd1ee178a61e8f492c0bf73db8`.
+This failed boundary remains unchanged historical evidence.
+
+The permanent correction explicitly sets only newly created, verified public
+context/test directories to 0755, independent of umask 077. The enclosing host
+payload/context stays 0700, and public files retain their exact Git bytes and
+0644/0755 modes. Existing private directories or symlinks are refused rather
+than widened or adopted. No DAC capability, extra mount, test-body change or
+runtime-user change is introduced. Both candidate test profiles verify every
+expected public directory's exact 0755 mode and UID/GID10001, enumerate every
+directory in the three recursive COPY scopes with scandir, and require exact
+file and directory inventories. Permission failures propagate; unexpected
+empty directories and unreadable trees cannot disappear from the proof.
+The directory contract joins both test receipts and build/export bindings.
+
+Before another CI run, the exact a6 root-test body and metadata-validator buffer
+were reconciled with the actual rerun's sealed source hashes and executed on
+real fresh temporary files. This local process was UID0/GID0 with effective,
+permitted and bounding capabilities all zero and NoNewPrivs1. The unchanged
+test passed with zero skips, including its0440 positive,0444 negative and final
+shared-GID constant restoration. Only the exact test method, validator and
+original constants were compiled; no application modules or production data
+were imported/read. Its required directory/file ownership is created naturally
+by UID0; chmod/lstat/write need no chown or DAC capability. This metadata-only
+proof does not substitute for the complete next candidate CI run.

@@ -72,6 +72,44 @@ def apply_test_fence(stack):
 # Define this ordinary trusted fixture function from the identical public bytes
 # embedded below; neither definition calls a host/network operation.
 exec(compile(TEST_GUARD_SOURCE,'<market-test-fence>','exec'))
+PRODUCT_CHECK_SOURCE = r'''
+def verify_product_files(app, expected_product, read_public, *, expected_uid=10001):
+    import os,stat
+    from pathlib import Path,PurePosixPath
+    from hashlib import sha256
+    app=Path(app);expected={row['path']:row for row in expected_product}
+    assert expected and len(expected)==len(expected_product),'candidate_public_inventory'
+    trees=('core/market_intelligence','contracts/market_data','deploy/market-data/migrations')
+    expected_dirs={str(parent) for name in expected for parent in PurePosixPath(name).parents if str(parent)!='.'}
+    def directory(path):
+        info=path.lstat()
+        assert stat.S_ISDIR(info.st_mode) and info.st_uid==info.st_gid==expected_uid and stat.S_IMODE(info.st_mode)==0o755,'candidate_public_directory_metadata'
+    directory(app)
+    for name in expected_dirs:directory(app/name)
+    actual={'core/__init__.py','config/market_data_sources.v1.json'}
+    actual_dirs={name for name in expected_dirs if not any(name==tree or name.startswith(tree+'/') for tree in trees)}
+    count=0
+    def walk(path):
+        nonlocal count
+        directory(path);actual_dirs.add(path.relative_to(app).as_posix())
+        # scandir propagates permission errors; pathlib.rglob can suppress them.
+        with os.scandir(path) as entries:
+            for entry in entries:
+                count+=1;assert count<=10000,'candidate_public_inventory_bound'
+                assert not entry.is_symlink(),'candidate_public_symlink'
+                if entry.is_dir(follow_symlinks=False):walk(Path(entry.path))
+                else:
+                    assert entry.is_file(follow_symlinks=False),'candidate_public_file_type'
+                    actual.add(Path(entry.path).relative_to(app).as_posix())
+    for tree in trees:walk(app/tree)
+    assert actual==set(expected) and actual_dirs==expected_dirs,'candidate_public_inventory'
+    for name,row in expected.items():
+        path=app/name;raw=read_public(path,4194304);info=path.lstat()
+        assert len(raw)==row['bytes'] and sha256(raw).hexdigest()==row['sha256'] and info.st_uid==info.st_gid==expected_uid,'candidate_public_file_identity'
+        assert stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode)==(0o755 if row['mode']=='100755' else 0o644),'candidate_public_file_metadata'
+    return True
+'''
+exec(compile(PRODUCT_CHECK_SOURCE,'<market-product-files>','exec'))
 
 
 class PayloadError(RuntimeError):
@@ -322,6 +360,25 @@ def write(path, raw, mode=0o600):
         output.write(raw);output.flush();os.fchmod(output.fileno(),mode);os.fsync(output.fileno())
 
 
+def public_destination(root,name):
+    """Public COPY/test directories stay readable under a private outer root."""
+    require(public_path(name) and root.is_absolute() and root.resolve(strict=True)==root,'public_output_path')
+    descriptors=[os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)]
+    try:
+        for part in name.split('/')[:-1]:
+            parent=descriptors[-1];created=False
+            try:os.mkdir(part,0o755,dir_fd=parent);created=True
+            except FileExistsError:pass
+            fd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent);descriptors.append(fd)
+            info=os.fstat(fd)
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid==os.geteuid() and not info.st_mode&0o022,'public_output_directory')
+            if created:os.fchmod(fd,0o755)
+            require(stat.S_IMODE(os.fstat(fd).st_mode)==0o755,'public_output_directory')
+        return root/name
+    finally:
+        for fd in reversed(descriptors):os.close(fd)
+
+
 def read(path, maximum=2*1024**2):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     try:
@@ -420,14 +477,15 @@ def prepare(repo, commit, output, *, profile='e46'):
         info=parent.lstat();require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0,os.geteuid()) and not info.st_mode&0o022,'output_parent')
     os.mkdir(output,0o700)
     for name in ('context','tests','reports','docker-config'):(output/name).mkdir(mode=0o755 if name=='tests' else 0o700)
+    (output/'tests').chmod(0o755)
     files=[]
     for name,(mode,raw) in inputs.items():
-        target=output/'context'/name;target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        target=public_destination(output/'context',name)
         write(target,raw,0o755 if mode=='100755' else 0o644)
         files.append({'path':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest(),'git_blob':mixed[name][1],'mode':mode})
     tests=[]
     for name,(mode,original,effective,origin,oid) in sorted(selected.items()):
-        target=output/'tests'/name;target.parent.mkdir(mode=0o755,parents=True,exist_ok=True)
+        target=public_destination(output/'tests',name)
         write(target,effective,0o755 if mode=='100755' else 0o644)
         tests.append({'path':name,'bytes':len(effective),'sha256':sha256(effective).hexdigest(),'original_sha256':sha256(original).hexdigest(),
                       'git_blob':oid,'source_commit':origin,'transformation':'security_base_assertion_only' if original!=effective else 'none'})
@@ -460,6 +518,7 @@ def verify_context(output, record):
             require(count<=10000 and not stat.S_ISLNK(info.st_mode) and info.st_uid==os.geteuid()
                     and not info.st_mode&0o022 and (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)),
                     'context_metadata')
+            if stat.S_ISDIR(info.st_mode):require(stat.S_IMODE(info.st_mode)==0o755,'context_directory_mode')
         for name in files:
             path=Path(parent)/name;relative=path.relative_to(output/'context').as_posix()
             require(relative in expected,'context_inventory');row=expected[relative]
@@ -479,6 +538,7 @@ def ci_admit(root):
     require(root.is_absolute() and root.resolve(strict=True)==root and root.parent==parent
             and root.name.startswith('security-market-e46-') and root.stat().st_uid==1001
             and stat.S_IMODE(root.stat().st_mode)==0o700,'ci_root')
+    os.umask(0o077)
 
 
 def primitives():
@@ -586,18 +646,8 @@ for name,row in rows.items():
     assert row['source_commit']==(expected_commit if name=='deploy/market-data/Dockerfile' else proof['baseline_commit'])
     if name.endswith('.py'):sources[name]=raw
 assert sha256(read(evidence/'public-baseline.json',2097152)).hexdigest()==proof['public_baseline_sha256']
-expected={row['path']:row for row in expected_product};actual=set()
-for fixed in ('core/__init__.py','config/market_data_sources.v1.json'):
-    actual.add(fixed)
-for tree in ('core/market_intelligence','contracts/market_data','deploy/market-data/migrations'):
-    for path in (pathlib.Path('/app')/tree).rglob('*'):
-        assert not path.is_symlink()
-        if path.is_file():actual.add(path.relative_to('/app').as_posix())
-assert actual==set(expected)
-for name,row in expected.items():
-    path=pathlib.Path('/app')/name;raw=read(path,4194304);info=path.stat()
-    assert len(raw)==row['bytes'] and sha256(raw).hexdigest()==row['sha256'] and info.st_uid==info.st_gid==10001
-    assert info.st_mode&0o777==(0o755 if row['mode']=='100755' else 0o644)
+__PRODUCT_CHECK__
+assert verify_product_files(pathlib.Path('/app'),expected_product,read)
 sys.path[:0]=['/app','/opt/market-python','/evidence']
 __TEST_GUARD__
 with ExitStack() as fence:
@@ -631,9 +681,9 @@ with ExitStack() as fence:
     assert not worker.is_alive() and len(results)==1
     result=results[0]
 ok=result.wasSuccessful() and not result.skipped and result.testsRun==(1 if root_fixture else 84)
-print(json.dumps({'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':expected_proof,'status':'passed' if ok else 'failed','tests':result.testsRun,'skips':len(result.skipped),'selected_test_ids':selected_ids,'scope':'root_owned_metadata_fixture' if root_fixture else 'nonroot_product_tests','execution_uid':os.getuid(),'execution_gid':os.getgid(),'suite_execution_thread':'owned_nonmain_test_thread','product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False},sort_keys=True))
+print(json.dumps({'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':expected_proof,'status':'passed' if ok else 'failed','tests':result.testsRun,'skips':len(result.skipped),'selected_test_ids':selected_ids,'scope':'root_owned_metadata_fixture' if root_fixture else 'nonroot_product_tests','execution_uid':os.getuid(),'execution_gid':os.getgid(),'suite_execution_thread':'owned_nonmain_test_thread','public_source_directory_mode':'0755','product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False},sort_keys=True))
 raise SystemExit(0 if ok else 1)
-'''.replace('TEST_NEW',repr(TEST_NEW)).replace('TEST_OLD',repr(TEST_OLD)).replace('__TEST_GUARD__',TEST_GUARD_SOURCE)
+'''.replace('TEST_NEW',repr(TEST_NEW)).replace('TEST_OLD',repr(TEST_OLD)).replace('__TEST_GUARD__',TEST_GUARD_SOURCE).replace('__PRODUCT_CHECK__',PRODUCT_CHECK_SOURCE)
 
 
 def root_fixture_container(helpers,root,image,program):
@@ -675,6 +725,7 @@ def validate_test_receipts(record,image,normal,fixture):
                 and value.get('image_id')==image and value.get('test_sources_sha256')==record['test_sources_sha256']
                 and value.get('status')=='passed' and type(value.get('tests')) is int and value['tests']==count
                 and value.get('suite_execution_thread')=='owned_nonmain_test_thread'
+                and value.get('public_source_directory_mode')=='0755'
                 and type(value.get('skips')) is int and value['skips']==0 and value.get('scope')==scope
                 and type(value.get('execution_uid')) is int and value['execution_uid']==uid
                 and type(value.get('execution_gid')) is int and value['execution_gid']==uid
@@ -691,6 +742,7 @@ def validate_test_receipts(record,image,normal,fixture):
             'execution_profiles':{'nonroot':{'uid':10001,'gid':10001,'tests':84},
                                   'root_owned_metadata_fixture':{'uid':0,'gid':0,'tests':1,'test_id':ROOT_FIXTURE_TEST_ID}},
             'test_selections_disjoint':True,'historical_test_bodies_unchanged_except_security_base_assertion':True,
+            'public_source_directory_mode':'0755',
             'runtime_data_used':False,'security_accepted':False}
 
 
@@ -735,6 +787,7 @@ def build_candidate(root, record):
     proof={'schema':'market_security_candidate_build/1',**facts,'payload_sha256':sha256(encoded(record)).hexdigest(),
            'test_sources_sha256':record['test_sources_sha256'],'native_sha256':sha256(encoded(native)).hexdigest(),
            'focused_sha256':sha256(encoded(focused)).hexdigest(),'product_files_equal_baseline':True,
+           'public_source_directory_mode':'0755',
            'focused_nonroot_sha256':sha256(encoded(normal)).hexdigest(),'focused_root_fixture_sha256':sha256(encoded(fixture)).hexdigest(),
            'buildkit_resource_cgroup_asserted':False,'vendor_debs_reused':False,
            'full_runtime_matrix_completed':False,'security_accepted':False,'deployment_eligible':False}
@@ -770,6 +823,7 @@ def bind_reports(root,record,build,vulnerabilities,sbom):
             and build['payload_sha256']==sha256(encoded(record)).hexdigest()
             and build['test_sources_sha256']==record['test_sources_sha256']
             and build['product_files_equal_baseline'] is True
+            and build['public_source_directory_mode']=='0755'
             and all(build[field] is False for field in ('buildkit_resource_cgroup_asserted','vendor_debs_reused',
                 'full_runtime_matrix_completed','security_accepted','deployment_eligible')),'build_receipt')
     for name,field in (('native.json','native_sha256'),('focused.json','focused_sha256'),
@@ -818,6 +872,7 @@ def finalize(root,record):
            'focused_nonroot_sha256':build['focused_nonroot_sha256'],'focused_root_fixture_sha256':build['focused_root_fixture_sha256'],
            'raw_counts':counts,'reports_sha256':{name:sha256(raw).hexdigest() for name,raw in reports.items()},
            'archive':archive,'product_files_equal_baseline':True,'vendor_debs_reused':False,
+           'public_source_directory_mode':'0755',
            'full_runtime_matrix_completed':False,'security_accepted':False,'findings_waived':False,
            'runtime_data_used':False,'deployment_eligible':False,'deployment_performed':False}
     write(root/'image-export.json',encoded(proof));phase(root,'complete')
