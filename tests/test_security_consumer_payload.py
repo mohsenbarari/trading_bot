@@ -47,6 +47,80 @@ class SecurityPayload(unittest.TestCase):
         self.overlay = {name: ('100644', blob(raw)) for name, raw in self.overlay_raw.items()}
         self.stack.enter_context(patch.object(M, 'BASELINE_TREE', M.tree_digest(self.base)))
 
+    def ci_parent_initializer(self):
+        tree, _ = self.ci_program('Prepare the exact private capsule parent without adopting unsafe directories')
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'prepare_output_parent')
+        namespace = {'os': os, 'pathlib': pathlib, 'stat': stat}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), '<finite-ci-parent-initializer>', 'exec'), namespace)
+        return namespace['prepare_output_parent']
+
+    def test_fresh_ci_missing_parent_is_created_before_actual_preparer_admission(self):
+        parent = self.temp / '.local'; output = parent / 'capsule'
+        self.assertFalse(parent.exists())
+        with self.assertRaises(FileNotFoundError):
+            self.prepare(output)  # Real filesystem admission, mocked public Git bytes only.
+        self.assertFalse(parent.exists())
+        self.assertEqual(self.ci_parent_initializer()(self.temp), parent)
+        self.assertEqual(parent.stat().st_mode & 0o777, 0o700)
+        self.prepare(output)
+        self.assertTrue((output / 'payload.json').is_file())
+        _, job = self.ci_program('payload_seal')
+        steps = job['steps']
+        before = next(i for i, step in enumerate(steps) if step['name'].startswith('Prepare the exact private capsule parent'))
+        seal = next(i for i, step in enumerate(steps) if step.get('id') == 'payload_seal')
+        self.assertLess(before, seal)
+
+    def test_ci_private_parent_revalidates_existing_owned_0700_without_chmod(self):
+        parent = self.temp / '.local'; parent.mkdir(mode=0o700)
+        marker = parent / 'preserve'; marker.write_bytes(b'existing public fixture')
+        identity = (parent.stat().st_dev, parent.stat().st_ino)
+        self.assertEqual(self.ci_parent_initializer()(self.temp), parent)
+        self.assertEqual((parent.stat().st_dev, parent.stat().st_ino), identity)
+        self.assertEqual(marker.read_bytes(), b'existing public fixture')
+
+    def test_ci_parent_refuses_unsafe_modes_links_files_and_ancestors_without_adoption(self):
+        initialize = self.ci_parent_initializer()
+        for kind in ('mode', 'symlink', 'file', 'ancestor'):
+            root = self.temp / kind; root.mkdir(mode=0o700); parent = root / '.local'
+            if kind == 'mode': parent.mkdir(mode=0o755)
+            elif kind == 'symlink': parent.symlink_to(self.temp, target_is_directory=True)
+            elif kind == 'file': parent.write_bytes(b'preserve original file')
+            else: root.chmod(0o777)
+            with self.subTest(kind=kind), self.assertRaises(RuntimeError): initialize(root)
+            if kind == 'mode': self.assertEqual(parent.stat().st_mode & 0o777, 0o755)
+            elif kind == 'symlink': self.assertTrue(parent.is_symlink())
+            elif kind == 'file': self.assertEqual(parent.read_bytes(), b'preserve original file')
+            else:
+                self.assertFalse(parent.exists()); root.chmod(0o700)
+
+    def test_cli_refusals_emit_only_bounded_static_codes_without_exception_text(self):
+        class Hostile(RuntimeError):
+            def __str__(self): raise AssertionError('arbitrary exception text must not be inspected')
+        for error, expected in ((RuntimeError('unsafe_output_parent'), 'unsafe_output_parent'),
+                                (RuntimeError('public_git_read_failed'), 'public_git_read_failed'),
+                                (RuntimeError('/private-like-path/do-not-print'), 'unexpected_failure'),
+                                (RuntimeError('x' * 100000), 'unexpected_failure'),
+                                (FileNotFoundError('do-not-print'), 'unexpected_failure'),
+                                (Hostile('do-not-print'), 'unexpected_failure')):
+            with self.subTest(error=type(error), expected=expected), patch.object(M, 'main', side_effect=error), \
+                    patch.object(M.sys, 'stderr', io.StringIO()) as stream:
+                self.assertEqual(M.run_cli(), 1)
+                self.assertEqual(json.loads(stream.getvalue()), {'status': 'refused', 'code': expected})
+                self.assertLess(len(stream.getvalue()), 128)
+        with patch.object(M, 'main'), patch.object(M.sys, 'stderr', io.StringIO()) as stream:
+            self.assertEqual(M.run_cli(), 0)
+            self.assertEqual(stream.getvalue(), '')
+
+    def test_all_existing_refusal_literals_have_explicit_public_diagnostic_codes(self):
+        tree = ast.parse((REPO / 'scripts/prepare_security_consumer_payload.py').read_text())
+        codes = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name): continue
+            index = 1 if node.func.id == 'require' else 0 if node.func.id == 'RuntimeError' else None
+            if index is not None and len(node.args) > index and isinstance(node.args[index], ast.Constant):
+                codes.add(node.args[index].value)
+        self.assertEqual(codes, M.PUBLIC_FAILURE_CODES)
+
     def test_git_tree_hash_empty_and_known_raw_tree_order(self):
         self.assertEqual((REPO / 'scripts/prepare_security_consumer_payload.py').read_text().count(
             "['/usr/bin/git', '--no-optional-locks', '-C'"), 2)

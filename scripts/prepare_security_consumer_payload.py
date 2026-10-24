@@ -13,6 +13,7 @@ import re
 import resource
 import stat
 import subprocess
+import sys
 import tempfile
 
 BASELINE = 'ba1f7616ade57558f51bb3a7fbb903243a33aab4'
@@ -37,6 +38,22 @@ DIRECT = {'.dockerignore', 'Dockerfile', 'Dockerfile.iran', 'requirements.txt',
           'deploy/production/pip-bootstrap-requirements.txt'}
 ROOTS = {'api', 'bot', 'core', 'src', 'migrations', 'models', 'templates', 'fonts', 'scripts', 'frontend'}
 MAXIMUM = 128 * 1024 * 1024
+PUBLIC_FAILURE_CODES = frozenset({
+    'baseline_identity_changed', 'baseline_product_drift', 'baseline_tree_mismatch',
+    'blob_inventory_incomplete', 'blob_metadata_invalid', 'blob_stream_bound',
+    'blob_stream_changed', 'blob_stream_file_bound', 'blob_stream_header',
+    'build_context_size_bound', 'clean_published_main_required', 'closed_security_overlay_required',
+    'context_entry_count_bound', 'context_entry_metadata', 'context_file_bound',
+    'context_file_changed', 'context_file_metadata', 'context_link_refused',
+    'duplicate_context_binding', 'existing_output_refused', 'frontend_dist_bound',
+    'git_entry_count_bound', 'git_object_format', 'git_output_bound', 'git_path_prefix_collision',
+    'incomplete_build_context', 'invalid_git_entry', 'invalid_recipe_tree', 'invalid_source_commit',
+    'market_overlay_forbidden', 'non_source_context_entry', 'overlay_link_refused',
+    'payload_label_identity', 'public_git_read_failed', 'published_main_changed',
+    'real_github_origin_required', 'sealed_context_source_changed', 'short_artifact_write',
+    'source_publication_changed', 'unexpected_blob_stream_tail', 'unlisted_context_file',
+    'unsafe_git_path', 'unsafe_output_parent', 'unsafe_output_path', 'wrong_source_repository',
+})
 
 
 def require(ok, code):
@@ -286,8 +303,22 @@ def main():
     print(json.dumps({key: value[key] for key in ('schema', 'baseline_commit', 'source_commit', 'source_tree', 'payload_tree')}))
 
 
-if __name__ == '__main__':
+def public_failure_code(error):
+    if type(error) is RuntimeError and len(error.args) == 1:
+        value = error.args[0]
+        if type(value) is str and len(value) <= 64 and value in PUBLIC_FAILURE_CODES:
+            return value
+    return 'unexpected_failure'
+
+
+def run_cli():
     try:
         main()
-    except Exception:
-        raise SystemExit('security_payload_refused') from None
+        return 0
+    except Exception as error:
+        print(json.dumps({'status': 'refused', 'code': public_failure_code(error)}), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(run_cli())

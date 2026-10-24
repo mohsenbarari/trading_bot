@@ -347,6 +347,27 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Prepare the exact private capsule parent without adopting unsafe directories
+        run: |
+          python3 -I -B - <<'PY'
+          import json,os,pathlib,stat,sys
+          def prepare_output_parent(root):
+              if not root.is_absolute() or root.resolve(strict=True)!=root:raise RuntimeError('unsafe_ci_output_parent')
+              for path in (root,*root.parents):
+                  value=path.lstat()
+                  if not stat.S_ISDIR(value.st_mode) or value.st_uid not in {0,os.geteuid()} or value.st_mode&0o022:raise RuntimeError('unsafe_ci_output_parent')
+              target=root/'.local'
+              try:os.mkdir(target,0o700)
+              except FileExistsError:pass
+              value=target.lstat()
+              if not stat.S_ISDIR(value.st_mode) or stat.S_ISLNK(value.st_mode) or value.st_uid!=os.geteuid() or stat.S_IMODE(value.st_mode)!=0o700 or target.resolve(strict=True)!=target:raise RuntimeError('unsafe_ci_output_parent')
+              return target
+          try:prepare_output_parent(pathlib.Path.cwd())
+          except Exception:
+              print(json.dumps({'status':'refused','code':'unsafe_ci_output_parent'}),file=sys.stderr)
+              raise SystemExit(1) from None
+          PY
+
       - name: Seal exact Git-only security payload before any build
         id: payload_seal
         run: |

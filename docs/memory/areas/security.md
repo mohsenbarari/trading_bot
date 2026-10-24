@@ -47,3 +47,10 @@
   bind real host/project/artifacts, never infer geography from role names.
   Process/cgroup death does not cancel accepted Docker/PID1 requests; ambiguous
   interrupted stop phases must not automatically restart writers.
+- C07 failed before install; original policies/four timers are restored, but
+  health is incomplete and fences/STOP remain. See the 24Oct runtime-observation
+  note: real processor progress can coexist with stale completion-only heartbeat;
+  blobs restart-loop timing is unknown. Missing counters are unknown, never zero.
+- Prove real HOT create/restore before future downtime; emit only static backup
+  refusal codes. CI must create its private output parent explicitly. Test the
+  actual dashboard handler AST alone; unrelated Python3.12 syntax breaks3.11 CI.

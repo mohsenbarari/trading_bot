@@ -56,6 +56,14 @@ does not replace complete API/Bot compatibility, import-boundary or browser
 proofs. The current CI job builds the App recipe, not the Iran offline-cache
 variant; an Iran-specific candidate still needs its own build/linkage proof.
 
+The optional job first creates the absent checkout-local `.local` parent with
+mode 0700. If it already exists, it must be a canonical real directory owned by
+the CI user with exactly that mode, below non-writable canonical ancestors.
+It never changes permissions or adopts an unsafe existing path. A refusal emits
+only a bounded JSON status and static reason code. The preparer likewise exposes
+only its explicit allowlisted refusal codes; unexpected exceptions return
+`unexpected_failure` without paths, exception text or tracebacks.
+
 Before npm executes, the sealing step records the preparer's SHA-256 in its
 completed CI step output, after published-source and caller-manifest checks.
 The later build step receives that previously stored digest, reads the helper
