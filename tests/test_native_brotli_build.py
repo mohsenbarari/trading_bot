@@ -3,8 +3,12 @@ import ast
 from contextlib import ExitStack
 from hashlib import sha256
 import importlib.util
+import json
 import os
 from pathlib import Path
+import pathlib
+import re
+import stat
 import tempfile
 from io import StringIO
 import unittest
@@ -191,6 +195,194 @@ class NativeBrotliBuildTests(unittest.TestCase):
         for task in PLAY['tasks']:
             argv = task.get('ansible.builtin.command', {}).get('argv', [])
             if '-c' in argv: compile(argv[argv.index('-c') + 1], '<ansible-source>', 'exec')
+
+    def ci_job(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/noble-brotli-build.yml').read_text())
+        return workflow, workflow['jobs']['noble-brotli']
+
+    def ci_functions(self, title, names):
+        _, job = self.ci_job()
+        script = next(step['run'] for step in job['steps'] if step['name'].startswith(title))
+        body = script.split("<<'PY'", 1)[1].split('\nPY', 1)[0].lstrip('\n')
+        tree = ast.parse(body)
+        nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names or
+                 isinstance(node, ast.Assign) and any(isinstance(name, ast.Name) and name.id in {'RECIPE', 'RECIPE_COMMIT'} for name in node.targets)]
+        namespace = {'os': os, 'pathlib': pathlib, 'stat': stat, 'sha256': sha256, 'json': json,
+                     're': re, 'tempfile': tempfile}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), '<finite-brotli-ci-functions>', 'exec'), namespace)
+        return namespace
+
+    def test_hosted_workflow_is_manual_one_job_without_production_authority(self):
+        workflow, job = self.ci_job()
+        self.assertEqual(workflow.get('on', workflow.get(True)), {'workflow_dispatch': None})
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        self.assertEqual(set(workflow['jobs']), {'noble-brotli'})
+        self.assertEqual(job['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(job['runs-on'], 'ubuntu-24.04')
+        self.assertFalse(workflow['concurrency']['cancel-in-progress'])
+        self.assertEqual(job['timeout-minutes'], 80)
+        checkout = job['steps'][0]
+        self.assertFalse(checkout['with']['persist-credentials'])
+        self.assertEqual(checkout['with']['ref'], '${{ github.sha }}')
+        scripts = json.dumps(job['steps'])
+        for forbidden in ('secrets.', 'ansible-playbook', 'ssh ', '--privileged', '--cap-add', 'docker.sock,', 'production_deploy'):
+            self.assertNotIn(forbidden, scripts)
+        compile_step = next(step for step in job['steps'] if step.get('id') == 'candidate')
+        code = compile_step['run']
+        for required in ('--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+                         '--cpus=2', '--memory=2g', '--memory-swap=2g', '--pids-limit=256', 'size=128m',
+                         "image,image],'compile-and-tests',1600", "owned.st_uid==0", 'RLIMIT_FSIZE'):
+            self.assertIn(required, code)
+        self.assertEqual(code.count('type=bind'), 2)
+        self.assertIn("'--entrypoint','/usr/bin/dpkg',image,'--install'", code)
+        for step in job['steps']:
+            script = step.get('run', '')
+            if "<<'PY'" in script:
+                compile(script.split("<<'PY'", 1)[1].split('\nPY', 1)[0].lstrip('\n'), '<hosted-ci-program>', 'exec')
+
+    def test_ci_stages_only_exact_recipe_bytes_and_refuses_drift_before_build(self):
+        namespace = self.ci_functions('Stage exactly', {'stage_recipe'})
+        self.assertEqual(namespace['RECIPE_COMMIT'], '9b38f2e1970204bde863d7ad60023e4ec8d48768')
+        self.assertEqual(set(namespace['RECIPE']), {'Dockerfile', 'build.py', 'verify.py', 'CVE-2026-111497.patch'})
+        disk = type('Space', (), {'f_bavail': 8 * 1024**3, 'f_frsize': 1})()
+        with patch.object(os, 'statvfs', return_value=disk), patch.dict(os.environ, {'GITHUB_SHA': 'a' * 40}):
+            root, digest = namespace['stage_recipe'](RECIPE, self.temp)
+            self.assertEqual({path.name for path in (root / 'context').iterdir()}, set(namespace['RECIPE']))
+            self.assertEqual(sha256((root / 'recipe-identity.json').read_bytes()).hexdigest(), digest)
+            for path in (root / 'context').iterdir():
+                self.assertEqual(path.read_bytes(), (RECIPE / path.name).read_bytes())
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            wrong = self.temp / 'wrong'; wrong.mkdir(mode=0o700)
+            for path in RECIPE.iterdir():
+                if path.name in namespace['RECIPE']: (wrong / path.name).write_bytes(path.read_bytes())
+            (wrong / 'build.py').write_bytes(b'changed public recipe')
+            with self.assertRaises(AssertionError): namespace['stage_recipe'](wrong, self.temp)
+
+    def ci_export_fixture(self):
+        root = self.temp / ('export-' + str(len(list(self.temp.iterdir())))); root.mkdir(mode=0o700)
+        for name in ('public', 'output', 'output/artifacts'): (root / name).mkdir(mode=0o700)
+        constants = self.ci_functions('Stage exactly', set())
+        identity = {'recipe_commit': constants['RECIPE_COMMIT'], 'recipe_sha256': constants['RECIPE'], 'workflow_commit': 'a' * 40}
+        identity_raw = (json.dumps(identity, sort_keys=True) + '\n').encode(); (root / 'recipe-identity.json').write_bytes(identity_raw)
+        tests = {'status': 'passed', 'python_embedded_decoder_rebuilt': True,
+                 'abi': {name: {'exports_retained': True} for name in ('common', 'dec', 'enc')},
+                 'c_api': dict.fromkeys(('roundtrip', 'streaming', 'security_error_minus17'), True),
+                 'python_api': dict.fromkeys(('roundtrip', 'streaming', 'bounded_malformed', 'candidate_module_path', 'no_shared_decoder_interposition'), True)}
+        image = 'sha256:' + 'b' * 64; rows = []
+        for name in BUILD.PACKAGES:
+            path = name + '_' + BUILD.VERSION + '_amd64.deb'; raw = ('synthetic-not-a-real-deb:' + name).encode()
+            (root / 'output/artifacts' / path).write_bytes(raw)
+            rows.append({'name': name, 'path': path, 'bytes': len(raw), 'sha256': sha256(raw).hexdigest()})
+        receipt = {'schema': 'noble_brotli_source_build/1', 'status': 'passed', 'version': BUILD.VERSION, 'builder_image_id': image,
+                   'host_installed': False, 'services_changed': False, 'maintainer_dsc_signature_verified': False,
+                   'recipe_sha256': identity['recipe_sha256'], 'patch_sha256': BUILD.PATCH_SHA,
+                   'source_sha256': {name: value[1] for name, value in BUILD.SOURCE.items()}, 'packages': rows, 'tests': tests}
+        for name, raw in {'candidate-tests.json': json.dumps(tests).encode(), 'build-receipt.json': json.dumps(receipt).encode(),
+                          'brotli.buildinfo': b'public synthetic build info', 'brotli.changes': b'public synthetic changes'}.items():
+            (root / 'output/artifacts' / name).write_bytes(raw)
+        return root, image, sha256(identity_raw).hexdigest()
+
+    def test_ci_filtered_export_binds_all_eight_public_files_without_touching_private_work(self):
+        namespace = self.ci_functions('Export only verified', {'read_public', 'export_public'})
+        root, image, digest = self.ci_export_fixture()
+        marker = root / 'output/private-build-marker'; marker.write_bytes(b'not an artifact')
+        result = namespace['export_public'](root, image, digest, os.geteuid(), os.geteuid(), os.getegid())
+        self.assertEqual(result['status'], 'candidate_built_not_installed')
+        self.assertFalse(result['production_installed']); self.assertFalse(result['scanner_certifies_custom_backport'])
+        self.assertEqual(len(result['files']), 8)
+        self.assertEqual(len(list((root / 'public').iterdir())), 9)
+        self.assertEqual(marker.read_bytes(), b'not an artifact')
+        self.assertFalse((root / 'public/private-build-marker').exists())
+        for row in result['files']:
+            copied = root / 'public' / row['name']
+            self.assertEqual(sha256(copied.read_bytes()).hexdigest(), row['sha256'])
+            self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
+
+    def test_ci_export_refuses_tamper_unlisted_files_links_and_stale_identity_without_proof(self):
+        namespace = self.ci_functions('Export only verified', {'read_public', 'export_public'})
+        for fault in ('package', 'extra', 'link', 'identity'):
+            with self.subTest(fault=fault):
+                root, image, digest = self.ci_export_fixture(); source = root / 'output/artifacts'
+                package = next(source.glob('*.deb'))
+                if fault == 'package': package.write_bytes(b'changed')
+                elif fault == 'extra': (source / 'unlisted-private-fixture').write_bytes(b'do not export')
+                elif fault == 'link':
+                    package.unlink(); package.symlink_to(root / 'recipe-identity.json')
+                else: digest = 'c' * 64
+                with self.assertRaises((AssertionError, OSError)):
+                    namespace['export_public'](root, image, digest, os.geteuid(), os.geteuid(), os.getegid())
+                self.assertFalse((root / 'public/ci-export.json').exists())
+
+    def test_ci_scanner_inventory_requires_all_four_actual_versions_and_raw_findings_are_truthful(self):
+        namespace = self.ci_functions('Require the actual scanner inventory', {'verify_inventory'})
+        path = self.temp / 'sbom.json'
+        value = {'components': [{'name': name, 'version': BUILD.VERSION} for name in BUILD.PACKAGES]}
+        path.write_text(json.dumps(value)); namespace['verify_inventory'](path)
+        value['components'][0]['version'] = '1.1.0-2build2'; path.write_text(json.dumps(value))
+        with self.assertRaises(AssertionError): namespace['verify_inventory'](path)
+        path.write_text('{"components":[]}')
+        with self.assertRaises(AssertionError): namespace['verify_inventory'](path)
+        _, job = self.ci_job()
+        scans = [step for step in job['steps'] if step.get('uses', '').startswith('aquasecurity/trivy-action@')]
+        self.assertEqual(len(scans), 2)
+        self.assertTrue(all(step['with']['image-ref'] == '${{ steps.candidate.outputs.scan_image_id }}' for step in scans))
+        self.assertEqual(scans[0]['with']['severity'], 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL')
+        self.assertEqual(scans[0]['with']['ignore-unfixed'], 'false')
+        self.assertEqual(scans[0]['with']['exit-code'], '0')
+        self.assertEqual(job['env']['TRIVY_IGNOREFILE'], '/dev/null')
+        uploads = [step for step in job['steps'] if step.get('uses', '').startswith('actions/upload-artifact@')]
+        self.assertTrue(all(step['with']['retention-days'] == 7 for step in uploads))
+        self.assertIn("steps.package_export.outcome == 'success'", uploads[0]['if'])
+        self.assertIn("steps.scan_reports.outcome == 'success'", uploads[1]['if'])
+
+    def test_ci_scanner_export_refuses_unlisted_or_linked_reports(self):
+        namespace = self.ci_functions('Require the actual scanner inventory', {'bound_reports'})
+        folder = self.temp / 'reports'; folder.mkdir(mode=0o700)
+        for name in ('candidate-image.json', 'vulnerabilities.json', 'sbom.cdx.json'): (folder / name).write_text('{}')
+        namespace['bound_reports'](folder)
+        extra = folder / 'private-marker'; extra.write_bytes(b'never upload')
+        with self.assertRaises(AssertionError): namespace['bound_reports'](folder)
+        extra.unlink(); (folder / 'vulnerabilities.json').unlink()
+        (folder / 'vulnerabilities.json').symlink_to(folder / 'candidate-image.json')
+        with self.assertRaises(OSError): namespace['bound_reports'](folder)
+
+    def test_ci_failed_build_tails_only_fixed_public_logs_with_per_file_and_total_caps(self):
+        namespace = self.ci_functions('Print only bounded fixed', {'failure_diagnostics'})
+        root = self.temp / 'diagnostics'; root.mkdir(mode=0o700); (root / 'output').mkdir(mode=0o700)
+        names = ('image-build.log', 'compile-and-tests.log', 'output/build.log', 'output/unpack.log',
+                 'output/patch-check.log', 'output/quilt.log', 'output/candidate-tests.json', 'scan-container-install.log')
+        for name in names: (root / name).write_bytes(b'old-public-output\n' * 1024 + b'LAST_PUBLIC_ERROR\n::error::must-remain-text\n')
+        private = root / 'unlisted-private-marker'; private.write_bytes(b'NEVER_PRINT_THIS')
+        records = namespace['failure_diagnostics'](root, os.geteuid())
+        self.assertEqual(len(records), 8)
+        self.assertLessEqual(sum(map(len, records)), 64 * 1024)
+        self.assertTrue(all(len(line) <= 8192 for line in records))
+        self.assertEqual({json.loads(line)['log'] for line in records}, set(names))
+        self.assertTrue(all('LAST_PUBLIC_ERROR' in json.loads(line)['tail'] for line in records))
+        self.assertNotIn(b'NEVER_PRINT_THIS', b''.join(records))
+        self.assertTrue(all(line.startswith(b'{') and line.count(b'\n') == 1 for line in records))
+        _, job = self.ci_job()
+        step = next(step for step in job['steps'] if step['name'].startswith('Print only bounded fixed'))
+        self.assertEqual(step['if'], "failure() && steps.recipe.outcome == 'success'")
+        self.assertNotIn('continue-on-error', step)
+
+    def test_ci_failure_diagnostics_refuse_links_hardlinks_fifo_and_writable_log(self):
+        namespace = self.ci_functions('Print only bounded fixed', {'failure_diagnostics'})
+        for kind in ('symlink', 'parent-link', 'hardlink', 'fifo', 'writable'):
+            with self.subTest(kind=kind):
+                root = self.temp / kind; root.mkdir(mode=0o700)
+                marker = root / 'not-a-log'; marker.write_bytes(b'NEVER_PRINT_THIS')
+                log = root / 'image-build.log'
+                if kind == 'symlink': log.symlink_to(marker)
+                elif kind == 'parent-link':
+                    (root / 'output').symlink_to(self.temp, target_is_directory=True)
+                elif kind == 'hardlink': os.link(marker, log)
+                elif kind == 'fifo': os.mkfifo(log, mode=0o600)
+                else: log.write_bytes(b'NEVER_PRINT_THIS'); log.chmod(0o666)
+                records = namespace['failure_diagnostics'](root, os.geteuid())
+                self.assertTrue(records)
+                self.assertTrue(all(json.loads(line)['status'] == 'refused' for line in records))
+                self.assertNotIn(b'NEVER_PRINT_THIS', b''.join(records))
 
 
 if __name__ == '__main__': unittest.main()

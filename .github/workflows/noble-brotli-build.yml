@@ -1,0 +1,327 @@
+name: Noble Brotli build-only evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noble-brotli-build-only
+  cancel-in-progress: false
+
+jobs:
+  noble-brotli:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    env:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      TRIVY_CONFIG: /dev/null
+      TRIVY_IGNOREFILE: /dev/null
+      TRIVY_IGNORE_UNFIXED: 'false'
+      TRIVY_SKIP_VERSION_CHECK: 'true'
+    steps:
+      - name: Checkout only the published control commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Stage exactly the four previously reviewed public recipe files
+        id: recipe
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,stat,tempfile
+          RECIPE_COMMIT='9b38f2e1970204bde863d7ad60023e4ec8d48768'
+          RECIPE={
+              'Dockerfile':'444f7ecfcc9fa41504efbdb54fbcb0b11ef7f56efa93dde06a0f8ebbdd80aed1',
+              'build.py':'05f820d6edf12894d463fe18b7c8bd3cb7ca537d001a8c644a9a98fcbbe576ea',
+              'verify.py':'8dcbcb65d3f12cfca4d1ec1ec36dec4a1f6b22d23cbcb0ebe473bd535c70ba38',
+              'CVE-2026-111497.patch':'3c1e4587947e4c61dd9c7c4619b1ae12d6bedbfd3c33c23981bf31269e18d52c'}
+          def stage_recipe(source,parent):
+              assert source.resolve(strict=True)==source and parent.resolve(strict=True)==parent
+              assert os.statvfs(parent).f_bavail*os.statvfs(parent).f_frsize>=6*1024**3
+              root=pathlib.Path(tempfile.mkdtemp(prefix='noble-brotli-',dir=parent))
+              context=root/'context';context.mkdir(mode=0o700)
+              for name,digest in RECIPE.items():
+                  fd=os.open(source/name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                  try:
+                      before=os.fstat(fd)
+                      assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=65536
+                      raw=os.read(fd,65537)
+                      identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                      assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity((source/name).lstat())
+                  finally:os.close(fd)
+                  assert sha256(raw).hexdigest()==digest
+                  output=os.open(context/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                  with os.fdopen(output,'wb') as stream:stream.write(raw)
+              for name in ('docker-config','reports','public'): (root/name).mkdir(mode=0o700)
+              identity={'recipe_commit':RECIPE_COMMIT,'recipe_sha256':RECIPE,'workflow_commit':os.environ['GITHUB_SHA']}
+              raw=(json.dumps(identity,sort_keys=True)+'\n').encode()
+              (root/'recipe-identity.json').write_bytes(raw)
+              return root,sha256(raw).hexdigest()
+          root,digest=stage_recipe(pathlib.Path.cwd()/'deploy/maintenance/brotli_build',pathlib.Path(os.environ['RUNNER_TEMP']))
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write('root='+str(root)+'\nidentity_sha256='+digest+'\n')
+          PY
+
+      - name: Build and test the exact source offline then prepare a disposable scanner image
+        id: candidate
+        env:
+          BROTLI_ROOT: ${{ steps.recipe.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          import json,os,pathlib,re,resource,subprocess
+          root=pathlib.Path(os.environ['BROTLI_ROOT']);assert root.resolve(strict=True)==root and root.stat().st_uid==os.geteuid() and root.stat().st_mode&0o777==0o700
+          docker=['docker','--host=unix:///var/run/docker.sock']
+          environment={**os.environ,'DOCKER_CONFIG':str(root/'docker-config')}
+          def command(argv,name,timeout):
+              def bounds():
+                  resource.setrlimit(resource.RLIMIT_FSIZE,(8*1024**2,)*2)
+                  resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+              with (root/(name+'.log')).open('xb') as log:
+                  subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,timeout=timeout,check=True,preexec_fn=bounds,env=environment)
+          def small(path):
+              with path.open('rb') as stream:raw=stream.read(257)
+              assert len(raw)<=256
+              return raw.decode().strip()
+          def image_id(value):
+              assert re.fullmatch('sha256:[a-f0-9]{64}',value)
+              return value
+          store=pathlib.Path('/var/lib/docker').resolve(strict=True)
+          available=os.statvfs(store);assert available.f_bavail*available.f_frsize>=6*1024**3
+          command([*docker,'build','--pull=false','--iidfile',str(root/'builder.id'),str(root/'context')],'image-build',900)
+          image=image_id(small(root/'builder.id'))
+          command(['/usr/bin/sudo','--','/usr/bin/python3','-I','-B','-c',"import os,sys;os.mkdir(sys.argv[1],0o700)",str(root/'output')],'prepare-owned-output',15)
+          owned=(root/'output').stat();assert owned.st_uid==0 and owned.st_mode&0o777==0o700
+          # The daemon resolves private host ancestors; only this root-owned bind
+          # enters the cap-drop-ALL builder, where root still obeys ordinary DAC.
+          token=os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'];assert re.fullmatch('[0-9]+-[0-9]+',token)
+          compiler='noble-brotli-compile-'+token
+          try:
+              command([*docker,'run','--rm','--name',compiler,'--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
+                  '--cpus=2','--memory=2g','--memory-swap=2g','--pids-limit=256','--tmpfs','/tmp:rw,nosuid,nodev,size=128m',
+                  '--mount','type=bind,source='+str(root/'output')+',target=/work',image,image],'compile-and-tests',1600)
+          finally:
+              subprocess.run([*docker,'rm','--force',compiler],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=20,check=False,env=environment)
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write('builder_id='+image+'\n')
+          # A separate disposable writable overlay is allowed to install ONLY
+          # these four local candidates. No host package path or socket is mounted.
+          packages=['brotli','libbrotli1','libbrotli-dev','python3-brotli']
+          paths=['/packages/'+name+'_1.1.0-2build2+security20261024.1_amd64.deb' for name in packages]
+          scanner='noble-brotli-scan-'+token
+          try:
+              command([*docker,'create','--name',scanner,'--network=none','--cap-drop=ALL','--security-opt=no-new-privileges',
+                  '--cpus=2','--memory=2g','--memory-swap=2g','--pids-limit=256','--tmpfs','/tmp:rw,nosuid,nodev,size=128m',
+                  '--mount','type=bind,source='+str(root/'output/artifacts')+',target=/packages,readonly',
+                  '--entrypoint','/usr/bin/dpkg',image,'--install',*paths],'scan-container-create',20)
+              container=small(root/'scan-container-create.log');assert re.fullmatch('[a-f0-9]{64}',container)
+              command([*docker,'start','--attach',container],'scan-container-install',90)
+              command([*docker,'inspect','--format','{{.State.ExitCode}}',container],'scan-container-exit',15)
+              assert small(root/'scan-container-exit.log')=='0'
+              command([*docker,'commit','--pause=false',container],'scan-image',60)
+              candidate=image_id(small(root/'scan-image.log'))
+          finally:
+              subprocess.run([*docker,'rm','--force',scanner],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=20,check=False,env=environment)
+          (root/'reports/candidate-image.json').write_text(json.dumps({'schema':'noble_brotli_scan_image/1','image_id':candidate,'builder_image_id':image,'production_installed':False,'services_changed':False},sort_keys=True)+'\n')
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('scan_image_id='+candidate+'\n')
+          PY
+
+      - name: Preserve raw findings for the actual disposable installed candidate
+        if: always() && steps.candidate.outcome == 'success'
+        env:
+          DOCKER_CONFIG: ${{ steps.recipe.outputs.root }}/docker-config
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.candidate.outputs.scan_image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.recipe.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0' # Raw evidence only: custom backport/host activation still need review.
+          timeout: 15m
+
+      - name: Preserve actual candidate inventory for all four rebuilt packages
+        if: always() && steps.candidate.outcome == 'success'
+        env:
+          DOCKER_CONFIG: ${{ steps.recipe.outputs.root }}/docker-config
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.candidate.outputs.scan_image_id }}
+          format: cyclonedx
+          output: ${{ steps.recipe.outputs.root }}/reports/sbom.cdx.json
+          timeout: 15m
+
+      - name: Require the actual scanner inventory to contain every candidate version
+        id: scan_reports
+        if: always() && steps.candidate.outcome == 'success'
+        env:
+          BROTLI_ROOT: ${{ steps.recipe.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          import json,os,pathlib,stat
+          def bound_reports(folder):
+              names={'candidate-image.json','vulnerabilities.json','sbom.cdx.json'}
+              assert {path.name for path in folder.iterdir()}==names
+              for name in names:
+                  fd=os.open(folder/name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                  try:
+                      before=os.fstat(fd)
+                      assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=8*1024**2
+                      raw=bytearray()
+                      while chunk:=os.read(fd,min(65536,8*1024**2+1-len(raw))):
+                          raw.extend(chunk);assert len(raw)<=8*1024**2
+                      identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                      assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity((folder/name).lstat())
+                      json.loads(raw)
+                  finally:os.close(fd)
+          def verify_inventory(path):
+              with path.open('rb') as stream:raw=stream.read(8*1024**2+1)
+              assert 0<len(raw)<=8*1024**2
+              value=json.loads(raw)
+              names={'brotli','libbrotli1','libbrotli-dev','python3-brotli'}
+              found={name:{row.get('version') for row in value.get('components',[]) if row.get('name')==name} for name in names}
+              assert all(versions=={'1.1.0-2build2+security20261024.1'} for versions in found.values())
+              return found
+          folder=pathlib.Path(os.environ['BROTLI_ROOT'])/'reports'
+          bound_reports(folder);verify_inventory(folder/'sbom.cdx.json')
+          PY
+
+      - name: Export only verified bounded public package evidence
+        id: package_export
+        if: always() && steps.candidate.outputs.builder_id != ''
+        env:
+          BROTLI_ROOT: ${{ steps.recipe.outputs.root }}
+          BROTLI_BUILDER: ${{ steps.candidate.outputs.builder_id }}
+          BROTLI_IDENTITY: ${{ steps.recipe.outputs.identity_sha256 }}
+        run: |
+          # The filtered copier alone reads root-owned build outputs. Upload sees
+          # only caller-owned public copies, never the source/work directory.
+          sudo -- /usr/bin/python3 -I -B - "$BROTLI_ROOT" "$BROTLI_BUILDER" "$BROTLI_IDENTITY" <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,signal,stat,sys
+          def read_public(path,maximum,owner):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd)
+                  assert stat.S_ISREG(before.st_mode) and before.st_uid==owner and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=maximum
+                  raw=bytearray()
+                  while chunk:=os.read(fd,min(65536,maximum+1-len(raw))):
+                      raw.extend(chunk);assert len(raw)<=maximum
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_uid,s.st_mode,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                  assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+                  return bytes(raw)
+              finally:os.close(fd)
+          def export_public(root,image,identity_sha,producer,consumer,gid):
+              assert root.resolve(strict=True)==root and re.fullmatch('sha256:[a-f0-9]{64}',image) and re.fullmatch('[a-f0-9]{64}',identity_sha)
+              for directory,owner in ((root,consumer),(root/'public',consumer),(root/'output',producer),(root/'output/artifacts',producer)):
+                  value=directory.lstat();assert stat.S_ISDIR(value.st_mode) and value.st_uid==owner and stat.S_IMODE(value.st_mode)==0o700
+              raw=read_public(root/'recipe-identity.json',1048576,consumer);assert sha256(raw).hexdigest()==identity_sha
+              identity=json.loads(raw);source=root/'output/artifacts'
+              receipt_raw=read_public(source/'build-receipt.json',1048576,producer);receipt=json.loads(receipt_raw)
+              version='1.1.0-2build2+security20261024.1';names={'brotli','libbrotli1','libbrotli-dev','python3-brotli'}
+              assert receipt['schema']=='noble_brotli_source_build/1' and receipt['status']=='passed' and receipt['version']==version and receipt['builder_image_id']==image
+              assert receipt['host_installed'] is False and receipt['services_changed'] is False and receipt['maintainer_dsc_signature_verified'] is False
+              assert receipt['recipe_sha256']==identity['recipe_sha256'] and receipt['patch_sha256']==identity['recipe_sha256']['CVE-2026-111497.patch']
+              assert receipt['source_sha256']=={
+                  'brotli_1.1.0.orig.tar.gz':'10973f4b4199eafa1d5735ef661ddb2ec2f97319ee9fd1824d4aabe08cff5265',
+                  'brotli_1.1.0-2build2.debian.tar.xz':'96603222d7b6edb3253a846852972b6bde5b86814907d5540249e6950980a943',
+                  'brotli_1.1.0-2build2.dsc':'c58421959677a80d942924685007e8d5b5d1160fd7f61a1f0a9062bf08835856'}
+              rows={row['name']:row for row in receipt['packages']};assert len(rows)==len(receipt['packages'])==4 and set(rows)==names
+              expected={name+'_'+version+'_amd64.deb' for name in names}
+              for name,row in rows.items():assert row['path']==name+'_'+version+'_amd64.deb' and re.fullmatch('[a-f0-9]{64}',row['sha256']) and 0<row['bytes']<=16*1024**2
+              for pattern in ('*.buildinfo','*.changes'):
+                  found=list(source.glob(pattern));assert len(found)==1;expected.add(found[0].name)
+              expected|={'candidate-tests.json','build-receipt.json'}
+              assert {path.name for path in source.iterdir()}==expected and len(expected)==8
+              test_raw=read_public(source/'candidate-tests.json',1048576,producer);tests=json.loads(test_raw)
+              assert tests==receipt['tests'] and tests['status']=='passed' and tests['python_embedded_decoder_rebuilt'] is True
+              assert set(tests['abi'])=={'common','dec','enc'} and all(value['exports_retained'] is True for value in tests['abi'].values())
+              assert all(tests['c_api'][key] is True for key in ('roundtrip','streaming','security_error_minus17'))
+              assert all(tests['python_api'][key] is True for key in ('roundtrip','streaming','bounded_malformed','candidate_module_path','no_shared_decoder_interposition'))
+              exported=[];total=0
+              for name in sorted(expected):
+                  raw=receipt_raw if name=='build-receipt.json' else test_raw if name=='candidate-tests.json' else read_public(source/name,16*1024**2 if name.endswith('.deb') else 1048576,producer)
+                  total+=len(raw);assert total<=96*1024**2
+                  if name.endswith('.deb'):
+                      row=next(row for row in rows.values() if row['path']==name)
+                      assert len(raw)==row['bytes'] and sha256(raw).hexdigest()==row['sha256']
+                  fd=os.open(root/'public'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                  with os.fdopen(fd,'wb') as output:output.write(raw);output.flush();os.fsync(output.fileno());os.fchown(output.fileno(),consumer,gid)
+                  exported.append({'name':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
+              proof={'schema':'noble_brotli_ci_export/1','status':'candidate_built_not_installed','identity':identity,'builder_image_id':image,
+                  'bytes':total,'files':exported,'production_installed':False,'services_changed':False,'scanner_certifies_custom_backport':False}
+              fd=os.open(root/'public/ci-export.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'w') as output:json.dump(proof,output,sort_keys=True);output.write('\n');output.flush();os.fsync(output.fileno());os.fchown(output.fileno(),consumer,gid)
+              return proof
+          signal.signal(signal.SIGALRM,lambda *_:(_ for _ in ()).throw(TimeoutError('public_export_deadline')));signal.alarm(60)
+          export_public(pathlib.Path(sys.argv[1]),sys.argv[2],sys.argv[3],0,int(os.environ['SUDO_UID']),int(os.environ['SUDO_GID']))
+          signal.alarm(0)
+          PY
+
+      - name: Upload exact public packages and source-bound proof without claiming remediation
+        if: always() && steps.package_export.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: noble-brotli-packages-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.recipe.outputs.root }}/public/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload raw candidate image scanner evidence
+        if: always() && steps.scan_reports.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: noble-brotli-scan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.recipe.outputs.root }}/reports/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Print only bounded fixed public build diagnostics after a failure
+        if: failure() && steps.recipe.outcome == 'success'
+        env:
+          BROTLI_ROOT: ${{ steps.recipe.outputs.root }}
+        run: |
+          sudo -- /usr/bin/python3 -I -B - "$BROTLI_ROOT" <<'PY'
+          import json,os,pathlib,stat,sys
+          def failure_diagnostics(root,consumer):
+              assert root.resolve(strict=True)==root
+              control=root.lstat();assert stat.S_ISDIR(control.st_mode) and control.st_uid==consumer and stat.S_IMODE(control.st_mode)==0o700
+              names=('image-build.log','compile-and-tests.log','output/build.log','output/unpack.log',
+                  'output/patch-check.log','output/quilt.log','output/candidate-tests.json','scan-container-install.log')
+              records=[];remaining=64*1024
+              for name in names:
+                  path=root/name
+                  try:
+                      assert path.parent.resolve(strict=True)==path.parent
+                      directory=path.parent.lstat();assert stat.S_ISDIR(directory.st_mode) and directory.st_uid in {0,consumer} and not directory.st_mode&0o022
+                      fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                      try:
+                          before=os.fstat(fd)
+                          assert stat.S_ISREG(before.st_mode) and before.st_uid in {0,consumer} and before.st_nlink==1 and not before.st_mode&0o022
+                          os.lseek(fd,max(0,before.st_size-8192),os.SEEK_SET);raw=os.read(fd,8193);assert len(raw)<=8192
+                          identity=lambda s:(s.st_dev,s.st_ino,s.st_uid,s.st_mode,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                          assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+                      finally:os.close(fd)
+                      record={'log':name,'tail':raw.decode('utf-8','replace')}
+                  except (FileNotFoundError,NotADirectoryError):continue
+                  except (OSError,AssertionError):record={'log':name,'status':'refused'}
+                  # JSON escapes control characters and embedded workflow commands;
+                  # both framing and escaped bytes count toward the output budget.
+                  limit=min(8192,remaining)
+                  line=(json.dumps(record,ensure_ascii=True)+'\n').encode('ascii')
+                  while len(line)>limit and record.get('tail'):
+                      record['tail']=record['tail'][len(record['tail'])//2+1:]
+                      line=(json.dumps(record,ensure_ascii=True)+'\n').encode('ascii')
+                  if len(line)>limit:break
+                  records.append(line);remaining-=len(line)
+              return records
+          for line in failure_diagnostics(pathlib.Path(sys.argv[1]),int(os.environ['SUDO_UID'])):sys.stdout.buffer.write(line)
+          PY

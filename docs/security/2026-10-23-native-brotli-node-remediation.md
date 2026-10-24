@@ -317,3 +317,75 @@ owned workspace for diagnosis; no broad Docker/image/volume prune is part of
 this playbook. After acceptance/rejection retain only required provenance and
 rollback artifacts; schedule removal of redundant build workspace/cache within
 10 days under the existing retention policy, never indefinite backups.
+
+## Hosted build-only packet — source ready, not an executed build
+
+The manual **Noble Brotli build-only evidence** workflow provides an ephemeral
+GitHub-hosted runner when the native disks cannot preserve their admission
+floors. It does not weaken or retarget the native Ansible playbook. It runs one
+job, only on published `main`, with read-only repository permission and no SSH,
+production configuration, registry credentials, deployment or service action.
+Concurrent dispatches queue instead of cancelling a build already running.
+The finite outer job budget is 80 minutes so the unchanged individual build,
+compile and scanner deadlines can complete without an artificial early retry.
+
+The four recipe files remain byte-for-byte those reviewed in
+`9b38f2e1970204bde863d7ad60023e4ec8d48768`; the workflow verifies their four
+independent SHA-256 values before copying only those files into a fresh private
+context. The official Noble base digest, authenticated exact Ubuntu source,
+two-file Google patch/preimages/postimages, complete distro package build/tests
+and actual C/Python/ABI regression checks are unchanged. No `nocheck`, refreshed
+patch, alternative source or relaxed ABI check is introduced.
+
+The ephemeral runner needs 6 GiB free on its scratch and Docker-store filesystems.
+Public toolchain acquisition retains the existing 600-second Dockerfile and
+900-second client bounds; actual compilation/tests retain the offline,
+read-only-root, two-CPU/2-GiB/PID256 container and 1500-second helper deadline.
+The output bind alone is created root-owned 0700: UID 0 without DAC capabilities
+cannot enter a foreign-owned 0700 bind. No extra capability repairs that problem.
+Only the recorded compile/scanner containers may be removed by this workflow.
+
+A second disposable, network-isolated container installs all four newly built
+local `.deb` files into its own writable image overlay, never into the runner or
+project hosts. Its actual zero exit status is required before committing that
+stopped container as an immutable scanner image. This preserves a genuine dpkg
+database for Trivy; scanning a folder of `.deb` files with no detected OS
+packages would not be proof. The resulting SBOM must contain all four exact
+candidate versions. Raw findings include every severity and unfixed issues with
+no ignore file. The scanner's exit code for vulnerability findings is zero
+because this job collects evidence, not release acceptance; scanner execution,
+missing inventory or artifact-validation errors still fail the job. Existing
+release security gates are unchanged.
+
+Trivy's Ubuntu advisories cannot certify a custom source backport. Its report
+must be assessed together with the exact compiled patch, package hashes and
+actual ABI/C/Python proof, rather than treating an empty report or a version
+string as remediation. The native CVE remains open until separately admitted
+host installation, affected-consumer restart/health/mapping checks and actual
+post-install security review complete. No host install is authorized by a
+successful hosted build or artifact download.
+
+A finite privileged copier reads only the four exact candidate packages,
+one `.buildinfo`, one `.changes`, actual candidate-test JSON and build receipt.
+It checks ownership, ordinary-file/no-link metadata, source/recipe/builder
+identity, lengths, hashes and successful nonempty proof. Packages are at most
+16 MiB each, metadata at most 1 MiB each and the aggregate at most 96 MiB; the
+copier has a 60-second deadline. Only caller-owned 0600 copies and a ninth
+`ci-export.json` enter the public package artifact. The three separately
+allowlisted scanner reports are at most 8 MiB each. No source tree, cache,
+private build workspace or unrelated file is uploaded. Both artifacts expire
+after seven days. Status is always `candidate_built_not_installed`, never
+`READY`, host-fixed or permission to activate.
+
+After a failure, CI prints only the tails of eight literal public build-log
+paths, including the actual root-owned package build log. Stable regular-file,
+no-link, allowed-owner and safe-parent checks apply; rejected paths reveal no
+file contents. Each JSON-escaped record is at most 8 KiB and all records together
+at most 64 KiB, including framing. The copier reads tails with seek/bounded reads,
+never whole logs or arbitrary host files. This diagnostic step preserves the
+failed result and introduces no acceptance exception.
+
+Source tests use synthetic package bytes and mocked external commands only.
+They are not an actual `.deb` build, container-install, ABI, scanner or native
+remediation result. Final review and a real manual workflow dispatch are still
+required.
