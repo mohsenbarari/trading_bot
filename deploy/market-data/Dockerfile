@@ -6,12 +6,19 @@ FROM ${PYTHON_BASE_IMAGE} AS patched-base
 RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/debian-security#g' /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true upgrade -y --no-install-recommends \
-    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends ca-certificates \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends ca-certificates libpq5 \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py
+COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py
+COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
+RUN python -m pip install --no-cache-dir -r /tmp/pip-bootstrap-requirements.txt \
+    && rm /tmp/pip-bootstrap-requirements.txt
 RUN python -I -B /usr/local/libexec/verify_image_trust.py
 
 FROM patched-base AS assembly
+RUN apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends "libpq-dev=$(dpkg-query -W -f='${Version}' libpq5)" build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG SOURCE_DATE_EPOCH
 
@@ -23,8 +30,9 @@ WORKDIR /build
 COPY deploy/market-data/requirements.lock ./requirements.lock
 RUN python -m pip install \
         --no-compile \
+        --no-build-isolation \
         --only-binary=:all: \
-        --no-binary=pyaes \
+        --no-binary=pyaes,psycopg2-binary \
         --require-hashes \
         --target=/rootfs/opt/market-python \
         --requirement requirements.lock
@@ -61,6 +69,7 @@ ENV LANG=C.UTF-8 \
 
 COPY --from=assembly /rootfs/ /
 WORKDIR /app
+RUN python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python
 
 USER 10001:10001
 ENTRYPOINT ["python", "-m", "core.market_intelligence.private_pipeline_foundation"]

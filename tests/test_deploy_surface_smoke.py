@@ -666,7 +666,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             'foreign_image_signature',
             'Foreign Docker image inputs unchanged. Skipping docker build.',
             'python3 -m pip download -r "$PIP_BOOTSTRAP_REQUIREMENTS"',
-            'python3 -m pip download -r "$PROJECT_DIR/requirements.txt"',
+            'python3 -m pip download -r "$PROJECT_DIR/pip_packages/.requirements-without-psycopg2.txt"',
+            'scripts/prepare_psycopg2_source.py',
         ):
             self.assertIn(expected, deploy_script)
 

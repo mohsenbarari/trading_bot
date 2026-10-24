@@ -674,16 +674,18 @@ prepare_pip_packages() {
     CURRENT_HASH="$(
         {
             md5sum "$PROJECT_DIR/requirements.txt"
+            md5sum "$PROJECT_DIR/scripts/prepare_psycopg2_source.py"
             if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
                 md5sum "$PIP_BOOTSTRAP_REQUIREMENTS"
             fi
         } | md5sum | cut -d' ' -f1
     )-$LOCAL_ARCH"
     
-    if [ "$DEPLOY_FORCE_REBUILD" = "1" ] || [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
+    if [ "$DEPLOY_FORCE_REBUILD" = "1" ] || [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ] || ! python3 -I -B "$PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$PROJECT_DIR/pip_packages" --requirements "$PROJECT_DIR/requirements.txt"; then
         echo "🔄 requirements.txt changed or packages missing. Downloading..."
         mkdir -p "$PROJECT_DIR/pip_packages"
         rm -f "$PROJECT_DIR"/pip_packages/*.whl "$PROJECT_DIR"/pip_packages/*.tar.gz "$PROJECT_DIR"/pip_packages/*.zip "$PROJECT_DIR/pip_packages/.requirements_hash" 2>/dev/null || true
+        python3 -I -B "$PROJECT_DIR/scripts/prepare_psycopg2_source.py" prepare --cache-dir "$PROJECT_DIR/pip_packages" --requirements "$PROJECT_DIR/requirements.txt"
         mapfile -t PIP_PLATFORM_ARGS < <(append_pip_platform_args "$LOCAL_ARCH")
 
         if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
@@ -703,7 +705,7 @@ prepare_pip_packages() {
             -w "$PROJECT_DIR/pip_packages/"
         
         # Download for Python 3.11 (Docker image version)
-        python3 -m pip download -r "$PROJECT_DIR/requirements.txt" \
+        python3 -m pip download -r "$PROJECT_DIR/pip_packages/.requirements-without-psycopg2.txt" \
             -d "$PROJECT_DIR/pip_packages/" \
             --find-links "$PROJECT_DIR/pip_packages/" \
             --python-version 311 \

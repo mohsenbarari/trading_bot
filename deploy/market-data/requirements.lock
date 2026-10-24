@@ -8,8 +8,8 @@ pyaes==1.6.1 \
     --hash=sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312cc129c536d8f
 pyasn1==0.6.4 \
     --hash=sha256:deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b
-psycopg2-binary==2.9.9 \
-    --hash=sha256:977646e05232579d2e7b9c59e21dbe5261f403a88417f6a6512e70d3f8a046be
+psycopg2-binary @ https://files.pythonhosted.org/packages/ed/76/7b4383014be0fcc6c1c0e24292845a14e1672cf17fca62ca0a2bd5f4563d/psycopg2_binary-2.9.13.tar.gz \
+    --hash=sha256:e324ecf60f952d21dd11413b8bbed0951bbd99579a06fd06f28bfc37737cd373
 rsa==4.9.1 \
     --hash=sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762
 telethon==1.44.0 \

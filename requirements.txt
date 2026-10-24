@@ -12,7 +12,9 @@ sqlalchemy==2.0.31
 greenlet==3.4.0
 # psycopg==3.1.18  
 asyncpg==0.29.0  
-psycopg2-binary==2.9.9
+# Distribution name/API retained; production images compile its pinned sdist
+# against patched system libpq/libssl, never reuse its vendored binary wheel.
+psycopg2-binary==2.9.13
 alembic==1.13.2
 pydantic-settings==2.3.4
 aiogram==3.31.0

@@ -12,15 +12,24 @@ RUN pip install --no-cache-dir --upgrade 'pip>=26.2.2' 'setuptools>=78.1.1' 'whe
 # Both stages share the exact patched Python/OS base and target architecture.
 FROM patched-base AS wheel-builder
 RUN apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
-    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends libpq-dev build-essential \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends "libpq-dev=$(dpkg-query -W -f='${Version}' libpq5)" build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 # Copy pre-downloaded packages (downloaded on fast German server)
 COPY pip_packages/ /tmp/pip_packages/
+COPY scripts/prepare_psycopg2_source.py /tmp/prepare_psycopg2_source.py
 COPY requirements.txt .
 RUN if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
-            pip wheel --no-cache-dir --no-index --find-links=/tmp/pip_packages/ --wheel-dir=/wheelhouse -r requirements.txt; \
+            python -I -B /tmp/prepare_psycopg2_source.py check --cache-dir /tmp/pip_packages --requirements /app/requirements.txt; \
         else \
-            pip wheel --no-cache-dir --wheel-dir=/wheelhouse -r requirements.txt; \
+            python -I -B /tmp/prepare_psycopg2_source.py prepare --cache-dir /tmp/pip_packages --requirements /app/requirements.txt; \
+        fi \
+        && python -m pip wheel --no-cache-dir --no-index --no-deps --no-build-isolation \
+            --wheel-dir=/wheelhouse /tmp/pip_packages/psycopg2_binary-2.9.13.tar.gz \
+        && if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
+            python -m pip wheel --no-cache-dir --no-index --find-links=/tmp/pip_packages/ --find-links=/wheelhouse \
+                --wheel-dir=/wheelhouse -r /tmp/pip_packages/.requirements-without-psycopg2.txt; \
+        else \
+            python -m pip wheel --no-cache-dir --wheel-dir=/wheelhouse -r /tmp/pip_packages/.requirements-without-psycopg2.txt; \
         fi \
         && rm -rf /tmp/pip_packages/
 
@@ -48,5 +57,6 @@ COPY seed_fake_data.py .
 COPY trading_settings.json .
 COPY scripts/ ./scripts/
 RUN python -I -B scripts/verify_image_trust.py --require-certifi
+RUN python -I -B scripts/verify_psycopg2_runtime.py
 
 COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/

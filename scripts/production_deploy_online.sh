@@ -4981,6 +4981,7 @@ prepare_pip_packages() {
     hash_material="$(
         {
             md5sum "$LOCAL_PROJECT_DIR/requirements.txt"
+            md5sum "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py"
             md5sum "$bootstrap_requirements"
         } | md5sum | cut -d' ' -f1
     )-$target_arch"
@@ -4990,11 +4991,14 @@ prepare_pip_packages() {
     if [[ "$IRAN_FORCE_RELEASE_REFRESH" == "1" || ! -f "$hash_file" || "$(cat "$hash_file")" != "$current_hash" ]]; then
         needs_refresh=1
     fi
+    if ! python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt"; then
+        needs_refresh=1
+    fi
     if [[ "$needs_refresh" == "0" && "$target_arch" == "$LOCAL_HOST_ARCH" ]]; then
         if ! docker run --rm \
             -v "$output_dir:/tmp/pip_packages:ro" \
             -v "$bootstrap_requirements:/tmp/pip-bootstrap-requirements.txt:ro" \
-            -v "$LOCAL_PROJECT_DIR/requirements.txt:/tmp/requirements.txt:ro" \
+            -v "$output_dir/.requirements-without-psycopg2.txt:/tmp/requirements.txt:ro" \
             "python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
             log "Existing wheel cache failed validation; rebuilding it."
             needs_refresh=1
@@ -5002,6 +5006,7 @@ prepare_pip_packages() {
     fi
     if [[ "$needs_refresh" == "1" ]]; then
         rm -f "$output_dir"/*.whl "$output_dir"/*.tar.gz "$output_dir"/*.zip "$output_dir"/.requirements_hash 2>/dev/null || true
+        python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" prepare --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt"
         mapfile -t pip_platform_args < <(append_pip_platform_args "$target_arch")
         python3 -m pip download -r "$bootstrap_requirements" \
             -d "$output_dir/" \
@@ -5015,7 +5020,7 @@ prepare_pip_packages() {
         # resolve pywebpush without using the pip-conflicting --no-binary flag.
         python3 -m pip wheel --no-deps "http-ece==1.2.1" \
             -w "$output_dir/"
-        python3 -m pip download -r "$LOCAL_PROJECT_DIR/requirements.txt" \
+        python3 -m pip download -r "$output_dir/.requirements-without-psycopg2.txt" \
             -d "$output_dir/" \
             --find-links "$output_dir/" \
             --python-version 311 \
@@ -5095,6 +5100,8 @@ market_pipeline_image_input_signature() {
             deploy/market-data/Dockerfile \
             deploy/market-data/requirements.lock \
             deploy/market-data/migrations \
+            deploy/production/pip-bootstrap-requirements.txt \
+            scripts/verify_psycopg2_runtime.py \
             scripts/verify_image_trust.py
     } | sha256sum | awk '{print $1}'
 }
@@ -5244,6 +5251,8 @@ prepare_market_pipeline_control_payload() {
         deploy/market-data/compose.yml \
         deploy/market-data/compose.web.yml \
         deploy/market-data/compose.bot.yml \
+        deploy/production/pip-bootstrap-requirements.txt \
+        scripts/verify_psycopg2_runtime.py \
         scripts/verify_image_trust.py \
         scripts/prepare_market_pipeline_release.py \
         scripts/prepare_market_pipeline_primary_release.py \
@@ -6935,6 +6944,7 @@ expected_wheel_cache_signature() {
     local bootstrap_requirements="$LOCAL_PROJECT_DIR/deploy/production/pip-bootstrap-requirements.txt"
     {
         md5sum "$LOCAL_PROJECT_DIR/requirements.txt"
+        md5sum "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py"
         md5sum "$bootstrap_requirements"
     } | md5sum | cut -d' ' -f1 | awk -v arch="$target_arch" '{print $1 "-" arch}'
 }
@@ -6947,6 +6957,8 @@ verify_prepared_wheel_cache() {
     actual="$(cat "$output_dir/.requirements_hash")"
     [[ "$actual" == "$expected" ]] \
         || die "Prepared wheel cache does not match release requirements for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt" \
+        || die "Prepared wheel cache failed exact psycopg2 source admission for architecture $target_arch."
     find "$output_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -print -quit | grep -q . \
         || die "Prepared wheel cache is empty for architecture $target_arch."
 }
