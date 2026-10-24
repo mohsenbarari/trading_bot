@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +28,104 @@ SAMPLE_DIFF = """diff --git a/frontend/src/sample.ts b/frontend/src/sample.ts
 
 
 class Stage9DiffCoverageTests(unittest.TestCase):
+    def test_frontend_function_declaration_uses_function_map_not_entire_body(self):
+        data = {"statementMap": {}, "s": {}, "branchMap": {}, "b": {},
+                "fnMap": {"f": {"decl": {"start": {"line": 2}, "end": {"line": 2}},
+                                  "loc": {"start": {"line": 2}, "end": {"line": 8}}}},
+                "f": {"f": 1}}
+        coverage = {"/repo/frontend/src/sample.ts": data}
+        self.assertTrue(check_frontend({"frontend/src/sample.ts": {2}}, coverage)["passed"])
+        body = check_frontend({"frontend/src/sample.ts": {5}}, coverage)
+        self.assertFalse(body["passed"])
+        self.assertIn("coverage_map_missing:frontend/src/sample.ts:5", body["failures"])
+        data["f"]["f"] = 0
+        declaration = check_frontend({"frontend/src/sample.ts": {2}}, coverage)
+        self.assertIn("uncovered_functions:frontend/src/sample.ts:f", declaration["failures"])
+
+    def test_vue_omits_only_parser_proved_nonexecutables_and_keeps_explicit_exclusions(self):
+        path = "frontend/src/sample.vue"
+        data = {"statementMap": {"s": {"start": {"line": 2}, "end": {"line": 2}}}, "s": {"s": 1},
+                "branchMap": {}, "b": {}, "fnMap": {}, "f": {}}
+        with patch.object(diff_checker, "_vue_non_executable_lines", return_value={3, 6, 7}) as parser:
+            report = check_frontend({path: {2, 3, 6, 7}}, {path: data}, {path: {6: "existing static CSS"}})
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["files"][path]["non_executable"], [3, 6, 7])
+        self.assertEqual(report["files"][path]["excluded"], [{"line": 6, "reason": "existing static CSS"}])
+        parser.assert_called_once_with(diff_checker.REPO_ROOT / path)
+        with patch.object(diff_checker, "_vue_non_executable_lines", return_value={3, 6, 7}):
+            missing_js = check_frontend({path: {4}}, {path: data})
+        self.assertIn(f"coverage_map_missing:{path}:4", missing_js["failures"])
+
+    def test_vue_classification_errors_refuse_without_ignoring_changed_lines(self):
+        path = "frontend/src/sample.vue"
+        data = {"statementMap": {}, "s": {}, "branchMap": {}, "b": {}, "fnMap": {}, "f": {}}
+        for error in (FileNotFoundError("node unavailable"), ValueError("invalid parser result")):
+            with self.subTest(error=type(error)), patch.object(diff_checker, "_vue_non_executable_lines", side_effect=error):
+                report = check_frontend({path: {5}}, {path: data})
+            self.assertIn(f"coverage_source_classification_failed:{path}", report["failures"])
+            self.assertIn(f"coverage_map_missing:{path}:5", report["failures"])
+
+    def test_vue_parser_process_is_bounded_and_does_not_inherit_node_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / "frontend/src/sample.vue"
+            source.parent.mkdir(parents=True); source.write_text('<style>div{color:red}</style>')
+            def classify(argv, **kwargs):
+                self.assertEqual(argv[:2], ["node", "-e"])
+                self.assertEqual(argv[-1], str(source))
+                self.assertEqual(kwargs["timeout"], 10)
+                self.assertEqual(kwargs["cwd"], root / "frontend")
+                self.assertNotIn("NODE_OPTIONS", kwargs["env"])
+                with patch.object(diff_checker.resource, "setrlimit") as limit:
+                    kwargs["preexec_fn"]()
+                limit.assert_any_call(diff_checker.resource.RLIMIT_FSIZE, (512 * 1024,) * 2)
+                kwargs["stdout"].write(b'{"schema":1,"line_count":8,"non_executable":[2,7]}')
+            with patch.object(diff_checker, "REPO_ROOT", root), patch.dict(os.environ, {"NODE_OPTIONS": "--untrusted"}), \
+                    patch.object(diff_checker.subprocess, "run", side_effect=classify):
+                self.assertEqual(diff_checker._vue_non_executable_lines(source), {2, 7})
+
+    def test_vue_parser_rejects_malformed_duplicate_or_out_of_range_line_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / "frontend/src/sample.vue"
+            source.parent.mkdir(parents=True); source.write_text('<style>div{color:red}</style>')
+            invalid = [[], {"schema": 2, "line_count": 8, "non_executable": [2]},
+                       {"schema": 1, "line_count": False, "non_executable": [2]},
+                       {"schema": 1, "line_count": 0, "non_executable": []},
+                       {"schema": 1, "line_count": 50001, "non_executable": []},
+                       {"schema": 1, "line_count": 8, "non_executable": "not a list"},
+                       {"schema": 1, "line_count": 8, "non_executable": [2, 2]},
+                       {"schema": 1, "line_count": 8, "non_executable": [9]},
+                       {"schema": 1, "line_count": 8, "non_executable": [True]},
+                       {"schema": 1, "line_count": 8, "non_executable": [{}]}]
+            for value in invalid:
+                def classify(_argv, **kwargs): kwargs["stdout"].write(json.dumps(value).encode())
+                with self.subTest(value=value), patch.object(diff_checker, "REPO_ROOT", root), \
+                        patch.object(diff_checker.subprocess, "run", side_effect=classify), self.assertRaises(ValueError):
+                    diff_checker._vue_non_executable_lines(source)
+
+    def test_vue_parser_refuses_redirected_sources_and_oversized_output_before_decoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); folder = root / "frontend/src"; folder.mkdir(parents=True)
+            outside = root / "outside.vue"; outside.write_text('<style>div{color:red}</style>')
+            alias = folder / "alias.vue"; alias.symlink_to(outside)
+            with patch.object(diff_checker, "REPO_ROOT", root), patch.object(diff_checker.subprocess, "run") as run:
+                for path in (outside, alias):
+                    with self.subTest(path=path.name), self.assertRaises(ValueError):
+                        diff_checker._vue_non_executable_lines(path)
+                run.assert_not_called()
+            source = folder / "sample.vue"; source.write_text('<style>div{color:red}</style>')
+            def oversized(_argv, **kwargs): kwargs["stdout"].write(b'x' * (512 * 1024))
+            with patch.object(diff_checker, "REPO_ROOT", root), \
+                    patch.object(diff_checker.subprocess, "run", side_effect=oversized), \
+                    self.assertRaisesRegex(ValueError, 'output_bound'):
+                diff_checker._vue_non_executable_lines(source)
+
+    def test_mapped_vue_lines_do_not_need_a_second_source_parser(self):
+        path = "frontend/src/sample.vue"
+        data = {"statementMap": {"s": {"start": {"line": 2}, "end": {"line": 2}}}, "s": {"s": 1},
+                "branchMap": {}, "b": {}, "fnMap": {}, "f": {}}
+        with patch.object(diff_checker, "_vue_non_executable_lines", side_effect=AssertionError("unnecessary parse")):
+            self.assertTrue(check_frontend({path: {2}}, {path: data})["passed"])
+
     def test_python_executable_lines_match_coverage_statement_semantics(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "sample.py"

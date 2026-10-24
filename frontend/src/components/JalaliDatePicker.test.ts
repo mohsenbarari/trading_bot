@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -40,7 +43,97 @@ function findDay(wrapper: ReturnType<typeof mount>, label: string) {
   return day!
 }
 
+function classifySfc(source: string): number[] {
+  const checker = readFileSync(resolve(process.cwd(), '../scripts/check_stage9_diff_coverage.py'), 'utf8')
+  const program = checker.match(/VUE_NON_EXECUTABLE_PROGRAM = r"""([\s\S]*?)"""/)?.[1]
+  if (!program) throw new Error('missing exact SFC classifier program')
+  const directory = mkdtempSync(join(tmpdir(), 'stage9-sfc-fixture-'))
+  try {
+    const filename = join(directory, 'Fixture.vue')
+    writeFileSync(filename, source, { mode: 0o600, flag: 'wx' })
+    const output = execFileSync(process.execPath, ['-e', program, filename], {
+      cwd: process.cwd(), timeout: 10000, maxBuffer: 512 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { PATH: process.env.PATH ?? '', LC_ALL: 'C.UTF-8' },
+    })
+    return JSON.parse(output.toString()).non_executable as number[]
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
+
 describe('JalaliDatePicker.vue', () => {
+  it('keeps executable SFC blocks even when static CSS shares their physical line', () => {
+    expect(classifySfc('<script setup>const value=mustRemainExecutable()</script><template>{{value}}</template><style>.x{color:red}</style>')).not.toContain(1)
+    expect(classifySfc('<script>/* no statement */</script><script setup>mustRemainExecutable()</script><template>{{value}}</template>')).not.toContain(1)
+  })
+
+  it('classifies only static CSS and structural tokens, not template or string contents', () => {
+    const lines = classifySfc('<script setup lang="ts">\nconst value = `\n// not a JS comment\n}\n`\nfunction choose() {\n  return value\n}\n</script>\n<template>{{ value }}</template>\n<style scoped>\n.x { color: red; }\n</style>\n')
+    for (const line of [3, 4, 6, 7, 10]) expect(lines).not.toContain(line)
+    for (const line of [8, 11, 12, 13]) expect(lines).toContain(line)
+    const dynamic = classifySfc('<script setup>const color="red"</script>\n<template>{{color}}</template>\n<style>.x{color:v-bind(color)}</style>\n')
+    expect(dynamic).not.toContain(2)
+    expect(dynamic).not.toContain(3)
+  })
+
+  it.each([
+    '<script setup>const value = </script>',
+    '<script lang="coffee">value = yes</script><template><div /></template>',
+    '<script src="./external.js"></script><template><div /></template>',
+  ])('refuses unparsed or external script source instead of waiving coverage: %s', (source) => {
+    expect(() => classifySfc(source)).toThrow()
+  })
+
+  it.each([false, true])('does not measure an inline or closed calendar on resize (inline=%s)', (inline) => {
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali', inline } })
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      window.dispatchEvent(new Event('resize'))
+      expect(measure).not.toHaveBeenCalled()
+      expect(wrapper.find('.jalali-calendar-panel').exists()).toBe(inline)
+    } finally {
+      wrapper.unmount()
+      measure.mockRestore()
+    }
+  })
+
+  it('ignores resize when an open panel has been removed from its anchor', async () => {
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali' } })
+    await wrapper.get('.jalali-date-trigger').trigger('click')
+    await nextTick()
+    wrapper.get('.jalali-calendar-panel').element.remove()
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      window.dispatchEvent(new Event('resize'))
+      expect(measure).not.toHaveBeenCalled()
+      expect(wrapper.find('.jalali-calendar-panel').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+      measure.mockRestore()
+    }
+  })
+
+  it('safely ignores an already queued resize callback after the root ref unmounts', async () => {
+    const registered = vi.spyOn(window, 'addEventListener')
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali' } })
+    await wrapper.get('.jalali-date-trigger').trigger('click')
+    await nextTick()
+    const resize = registered.mock.calls.find(([event]) => event === 'resize')?.[1]
+    wrapper.unmount()
+    await nextTick()
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      expect(typeof resize).toBe('function')
+      if (typeof resize !== 'function') throw new Error('missing actual resize listener')
+      resize.call(window, new Event('resize'))
+      expect(measure).not.toHaveBeenCalled()
+    } finally {
+      registered.mockRestore()
+      measure.mockRestore()
+    }
+  })
+
   it('budgets seven 40px popover targets independently of a narrow trigger', () => {
     const popover = '.jalali-calendar-panel.is-popover'
     expect(calendarDeclaration(popover, 'width')).toBe('min(360px, calc(100vw - 16px))')
