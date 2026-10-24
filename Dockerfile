@@ -60,5 +60,7 @@ COPY scripts/ ./scripts/
 RUN python -I -B scripts/verify_image_trust.py --require-certifi
 RUN python -I -B scripts/verify_psycopg2_runtime.py
 RUN python -I -B scripts/verify_sqlite_runtime.py --require-libmagic
+RUN python -I -B scripts/remove_runtime_pip.py --image-build \
+    && python -I -B scripts/verify_psycopg2_runtime.py --final-runtime
 
 COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/

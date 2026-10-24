@@ -132,8 +132,9 @@ class SecurityPayload(unittest.TestCase):
         self.assertEqual(M.tree_digest(files), sha1(b'tree ' + str(len(raw)).encode() + b'\0' + raw).hexdigest())
 
     def test_closed_overlay_preserves_all_market_calendar_and_incident_absence(self):
-        self.assertEqual(len(M.OVERLAY), 24)
+        self.assertEqual(len(M.OVERLAY), 25)
         self.assertIn('scripts/verify_sqlite_runtime.py', M.OVERLAY)
+        self.assertIn('scripts/remove_runtime_pip.py', M.OVERLAY)
         value = M.compose(self.base, self.overlay)
         for name in self.base_raw:
             if name not in M.OVERLAY: self.assertEqual(value[name], self.base[name])

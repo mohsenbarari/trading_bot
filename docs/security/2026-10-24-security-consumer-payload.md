@@ -10,7 +10,7 @@ Both current App images identify baseline
 `ba1f7616ade57558f51bb3a7fbb903243a33aab4`, tree
 `5d2ff35831696a3886372e4388f2a769a3594a8a`. Publishing newer main history did
 not authorize activation of its unrelated Market code. The preparer therefore
-uses that entire Git tree and replaces only the 24 literal security paths in
+uses that entire Git tree and replaces only the 25 literal security paths in
 `scripts/prepare_security_consumer_payload.py:OVERLAY`. Those are the compatible
 dependency/Docker recipes, upload/static/JWT fixes, credential-safe identity and
 WebSocket frontend code, and their security build helpers, including the mandatory
@@ -145,3 +145,31 @@ This is artifact preparation, not a new deployment route. Normal main release
 and its existing gates are unchanged. No Market producer, legacy collector,
 Queue, Writer, DNS, schema migration or runtime configuration is changed.
 Old expired acceptance/operation identities are not extended by this recipe.
+
+## Final runtime installer removal — source only until rebuilt and scanned
+
+App, Iran and Market keep the patched installer throughout dependency assembly,
+`pip check` and the existing trust/SQLite/psycopg2 ABI checks. Only their final
+serving stages then run the finite `remove_runtime_pip.py --image-build` helper:
+it genuinely uninstalls pip through its own uninstall command, not by hiding a
+version or removing only metadata. Installed healthy setuptools, wheel and all
+application dependencies remain. Build/assembly stages retain their tooling.
+
+[CPython 3.11.17's bootstrap source](https://github.com/python/cpython/blob/v3.11.17/Lib/ensurepip/__init__.py)
+also carries an alternate pip 24.0 wheel and a setuptools 79.0.1 wheel. The helper
+removes only those two admitted archives in that interpreter's private
+`ensurepip/_bundled` directory; unrelated stdlib and installed setuptools remain.
+Unexpected archive names, links, unsafe ownership or a configured external
+`WHEEL_PKG_DIR` refuse the build before removal. The helper has a fixed
+`/usr/local` Python 3.11.17 image layout and explicit isolated-build opt-in;
+there is no host-maintenance or arbitrary-prefix deletion interface.
+
+The explicit `verify_psycopg2_runtime.py --final-runtime` mode then requires no
+pip module, distribution, console command, uninstall stash, bootstrap archive
+or active dependency requiring pip. It reruns the same dynamic libpq/OpenSSL and
+psycopg2 checks. Default verification still requires the patched pip floor while
+tools are in use. The new helper is the 25th closed security overlay path and is
+bound into Market's transferred source and input signature; the Iran signature
+already covers all scripts. A source test is not a successful image build:
+actual candidate tests, complete SBOM and unfiltered vulnerability scanning must
+confirm the final filesystem, followed by the existing activation evidence gates.

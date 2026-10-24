@@ -11,6 +11,7 @@ RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/
 COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py
 COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py
 COPY scripts/verify_sqlite_runtime.py /usr/local/libexec/verify_sqlite_runtime.py
+COPY scripts/remove_runtime_pip.py /usr/local/libexec/remove_runtime_pip.py
 COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/pip-bootstrap-requirements.txt \
     && rm /tmp/pip-bootstrap-requirements.txt
@@ -72,6 +73,8 @@ COPY --from=assembly /rootfs/ /
 WORKDIR /app
 RUN python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python
 RUN python -I -B /usr/local/libexec/verify_sqlite_runtime.py
+RUN python -I -B /usr/local/libexec/remove_runtime_pip.py --image-build \
+    && python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python --final-runtime
 
 USER 10001:10001
 ENTRYPOINT ["python", "-m", "core.market_intelligence.private_pipeline_foundation"]

@@ -30,7 +30,7 @@ OVERLAY = (
     'frontend/scripts/check-node-security-baseline.mjs',
     'frontend/src/composables/useWebSocket.ts', 'frontend/src/utils/currentUser.ts',
     'scripts/prepare_psycopg2_source.py', 'scripts/verify_image_trust.py',
-    'scripts/verify_psycopg2_runtime.py', 'scripts/verify_sqlite_runtime.py',
+    'scripts/verify_psycopg2_runtime.py', 'scripts/verify_sqlite_runtime.py', 'scripts/remove_runtime_pip.py',
 )
 DIRECT = {'.dockerignore', 'Dockerfile', 'Dockerfile.iran', 'requirements.txt',
           'alembic.ini', 'main.py', 'manage.py', 'run_bot.py', 'schemas.py',

@@ -5103,6 +5103,7 @@ market_pipeline_image_input_signature() {
             deploy/production/pip-bootstrap-requirements.txt \
             scripts/verify_psycopg2_runtime.py \
             scripts/verify_sqlite_runtime.py \
+            scripts/remove_runtime_pip.py \
             scripts/verify_image_trust.py
     } | sha256sum | awk '{print $1}'
 }
@@ -5255,6 +5256,7 @@ prepare_market_pipeline_control_payload() {
         deploy/production/pip-bootstrap-requirements.txt \
         scripts/verify_psycopg2_runtime.py \
         scripts/verify_sqlite_runtime.py \
+        scripts/remove_runtime_pip.py \
         scripts/verify_image_trust.py \
         scripts/prepare_market_pipeline_release.py \
         scripts/prepare_market_pipeline_primary_release.py \
