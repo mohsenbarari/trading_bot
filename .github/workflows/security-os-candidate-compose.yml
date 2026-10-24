@@ -3,6 +3,10 @@ name: Existing App OS package composition evidence only
 on:
   workflow_dispatch:
     inputs:
+      market_e46_os:
+        description: Compose only the fixed tested E46 export with fifteen vendor DEBs
+        type: boolean
+        default: false
       datastore_profile:
         description: Optional exact public Alpine datastore security profile
         type: choice
@@ -22,7 +26,7 @@ concurrency:
 
 jobs:
   composition:
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023') && (inputs.datastore_profile == 'none' || inputs.datastore_profile == '')
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023') && !inputs.market_e46_os && (inputs.datastore_profile == 'none' || inputs.datastore_profile == '')
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -140,7 +144,7 @@ jobs:
             ${{ steps.seal.outputs.root }}/reports/*.log
 
   datastore:
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023') && (inputs.datastore_profile == 'postgres' || inputs.datastore_profile == 'redis')
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023') && !inputs.market_e46_os && (inputs.datastore_profile == 'postgres' || inputs.datastore_profile == 'redis')
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
@@ -250,3 +254,142 @@ jobs:
             ${{ steps.seal.outputs.root }}/image-export.json
             ${{ steps.seal.outputs.root }}/reports/*.json
             ${{ steps.seal.outputs.root }}/reports/*.log
+
+  market-e46:
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023') && inputs.market_e46_os
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Seal the published fixed E46 composition recipe and scoped helpers
+        id: seal
+        env:
+          DATASTORE_PROFILE: ${{ inputs.datastore_profile }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,stat,subprocess,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          assert os.environ['DATASTORE_PROFILE'] in ('','none')
+          os.umask(0o077)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          root=pathlib.Path(tempfile.mkdtemp(prefix='security-market-os-',dir=parent))
+          (root/'source').mkdir(mode=0o700)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          pins={'compose_market_security_os_candidate.py':'5cb9afd1d33db53e8906f9222572636580a4dbc7c33c7d027fba9e09344034c7',
+                'compose_security_os_candidate.py':'10ccbe216fef04e5f7a7ce2ad31ac30eca7eeae090dfaaf8074fa3cc5c789d44',
+                'prepare_market_security_payload.py':'9131fe760b94d54f2f3fcc577b8cb4d36f0170a0f28a2f0d8adfb750c2b78c84',
+                'verify_image_component_presence.py':'36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3',
+                'verify_acl_consumer_presence.py':'001e51d270c079153cc38db1be53c723fbbc8a8bb9e981e718e7b657127bc778'}
+          records={}
+          for name,pin in pins.items():
+              path=pathlib.Path('scripts')/name;operand=commit+':'+path.as_posix()
+              size=subprocess.run(['git','--no-optional-locks','cat-file','-s',operand],check=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=10).stdout
+              assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=131072
+              raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',operand],check=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=10).stdout
+              assert len(raw)==int(size) and sha256(raw).hexdigest()==pin
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd);actual=os.read(fd,131073)
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                  assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and not before.st_mode&0o022
+                  assert actual==raw and len(actual)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              finally:os.close(fd)
+              fd=os.open(root/'source'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+              records[name]={'bytes':len(raw),'sha256':pin}
+          with (root/'source/identity.json').open('x') as out:json.dump({'recipe_commit':commit,'files':records},out,sort_keys=True)
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:out.write('root='+str(root)+'\n')
+          PY
+
+      - name: Admit the exact historical E46 export and compose only fifteen DEBs
+        id: compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_market_security_os_candidate.py" compose --root "$CAPSULE_ROOT" --repo "$GITHUB_WORKSPACE"
+
+      - name: Preserve every raw Market finding including unfixed and UNKNOWN rows
+        id: vulnerabilities
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.seal.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Preserve the same composed Market image SBOM
+        id: sbom
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          format: cyclonedx
+          output: ${{ steps.seal.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Bind all Market proofs and export the same unaccepted immutable image
+        id: export
+        if: always() && steps.compose.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_market_security_os_candidate.py" finalize --root "$CAPSULE_ROOT"
+
+      - name: Release only this run's baseline alias after its last consumer
+        id: cleanup
+        if: always() && steps.seal.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_market_security_os_candidate.py" cleanup --root "$CAPSULE_ROOT"
+
+      - name: Retain only complete public Market composition exports
+        if: always() && steps.export.outcome == 'success' && steps.cleanup.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-e46-os-composed-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.seal.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.seal.outputs.root }}/image-export.json
+
+      - name: Retain bounded public Market evidence and failed attempts
+        if: always() && steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-e46-os-composition-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.seal.outputs.root }}/source/identity.json
+            ${{ steps.seal.outputs.root }}/image-export.json
+            ${{ steps.seal.outputs.root }}/reports/*.json
+            ${{ steps.seal.outputs.root }}/reports/*.log
+
+      - name: Preserve the unwaived raw HIGH and CRITICAL gate
+        if: always() && steps.export.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_market_security_os_candidate.py" gate --root "$CAPSULE_ROOT"

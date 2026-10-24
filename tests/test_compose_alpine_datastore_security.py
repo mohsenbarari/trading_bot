@@ -456,7 +456,14 @@ class DatastoreTests(unittest.TestCase):
         workflow = yaml.safe_load((ROOT/'.github/workflows/security-os-candidate-compose.yml').read_bytes())
         dispatch = workflow.get('on', workflow.get(True))['workflow_dispatch']['inputs']['datastore_profile']
         self.assertEqual(dispatch['default'], 'none'); self.assertEqual(dispatch['options'], ['none', 'postgres', 'redis'])
-        self.assertEqual(set(workflow['jobs']), {'composition', 'datastore'})
+        self.assertEqual(set(workflow['jobs']), {'composition', 'datastore', 'market-e46'})
+        market = workflow.get('on', workflow.get(True))['workflow_dispatch']['inputs']['market_e46_os']
+        self.assertEqual(market['type'], 'boolean'); self.assertIs(market['default'], False)
+        for name in ('composition', 'datastore'):
+            self.assertIn('!inputs.market_e46_os', workflow['jobs'][name]['if'])
+        self.assertIn('inputs.market_e46_os', workflow['jobs']['market-e46']['if'])
+        seal = next(row for row in workflow['jobs']['market-e46']['steps'] if row.get('id') == 'seal')
+        self.assertIn("os.environ['DATASTORE_PROFILE'] in ('','none')", seal['run'])
         steps = workflow['jobs']['datastore']['steps']
         scan = next(row for row in steps if row.get('id') == 'vulnerabilities')['with']
         self.assertEqual(scan['severity'], 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'); self.assertEqual(scan['ignore-unfixed'], 'false')
