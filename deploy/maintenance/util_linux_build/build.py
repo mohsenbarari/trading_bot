@@ -169,7 +169,13 @@ def command(argv, directory, log, timeout=120, extra=None):
                     else:
                         total += len(block); require(total <= LOG_LIMIT, 'command_log_bound')
                         output.write(block)
-            require(child.wait(timeout=max(0.1, deadline - time.monotonic())) == 0, 'command_failed')
+            status = child.wait(timeout=max(0.1, deadline - time.monotonic()))
+            if status:
+                name = Path(log).name
+                require(re.fullmatch(r'[a-zA-Z0-9._-]{1,100}', name), 'command_failed')
+                print(json.dumps({'schema': 'trixie_util_linux_failed_command/1',
+                                  'public_log': name, 'exit_code': status}), flush=True)
+            require(status == 0, 'command_failed')
         finally:
             selector.close()
             if child.poll() is None:

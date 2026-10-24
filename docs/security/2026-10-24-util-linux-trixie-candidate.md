@@ -5,8 +5,12 @@ compilation, package installation or production change is asserted. All seven
 public input sizes/digests independently match. BuildKit does not create the
 Docker runtime-only `/.dockerenv`; preparation now binds the sealed recipe
 location instead. Compilation still requires the nonroot Docker runtime.
-Failure diagnostics retain bounded matching error lines as well as the tail,
-so Docker's long command summary cannot hide the original failure. The earlier
+Actual second CI40083356266 completed the full package build and all six
+old-caller ABI checks, then failed a later command before source-regression
+completion. No final build receipt or acceptance exists. Command failures now
+name their bounded public log, and diagnostics cover post-ABI configure/build
+stages as well as the original build. Error lines and tails remain bounded.
+The earlier
 [source research](2026-10-24-util-linux-trixie-remediation-research.md) remains the
 advisory source and explains the Debian/upstream discrepancy for CVE-2026-78409.
 
@@ -28,7 +32,7 @@ by the existing raw HIGH/CRITICAL gate.
 `trixie-util-linux-build.yml` is manual-only, admits only published `main` or
 the reviewed `security/remediation-20261023` branch, and has only `contents:read`.
 This disposable candidate is not a release. Keeping its source iterations on
-the security branch avoids restarting the full main acceptance matrix; actual
+the security branch avoids additional full main acceptance runs; actual
 App release gates remain unchanged. It copies exactly four published Git blobs into a private,
 bounded context and records their hashes. No application source, runtime
 configuration, session, credential or production volume enters the job.
@@ -134,8 +138,8 @@ apply. Raw reports have separate finite limits: 32MiB vulnerability JSON, 8MiB
 SBOM and 64KiB image identity, 48MiB total. Package export is independent of report
 admission, so a scanner/report failure preserves completed package evidence.
 Both artifact groups expire after seven days. Failure diagnostics read only
-the last64KiB of eight fixed public build logs, at most32KiB per encoded
-record/256KiB total, including eight matching failure lines of at most500
+the last64KiB of sixteen fixed public build logs, at most32KiB per encoded
+record/512KiB total, including eight matching failure lines of at most500
 characters each and a700-byte tail.
 
 Every receipt remains `candidate_built_not_accepted`, `security_accepted:false`,

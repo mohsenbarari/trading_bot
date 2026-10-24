@@ -13,8 +13,7 @@ concurrency:
 jobs:
   candidate:
     # Disposable source evidence has no deploy credentials or release action.
-    # Keep the reviewed candidate branch usable without repeatedly cancelling
-    # the full production-main test matrix for each build-recipe correction.
+    # Keep recipe iterations from repeatedly triggering the full main matrix.
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
@@ -278,7 +277,13 @@ jobs:
           import json,os,pathlib,re,stat
           root=pathlib.Path(os.environ['CANDIDATE_ROOT']);total=0
           names=('runtime-prepare.log','builder-prepare.log','compile-tests.log','candidate-install.log',
-                 'output/build.log','output/quilt.log','output/abi-tests.json','output/source-tests.json')
+                 'output/build.log','output/quilt.log','output/abi-tests.json','output/source-tests.json',
+                 'output/primary-distclean.log','output/disabled-configure.log','output/disabled-build.log',
+                 'output/source-regressions/old-failed-mount-compile.log',
+                 'output/source-regressions/candidate-failed-mount-compile.log',
+                 'output/source-regressions/old-descriptor-lifetime-compile.log',
+                 'output/source-regressions/candidate-descriptor-lifetime-compile.log',
+                 'output/source-regressions/disabled-loader.log')
           for name in names:
               path=root/name
               try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -293,6 +298,6 @@ jobs:
                   assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
                   line=json.dumps({'schema':'trixie_util_linux_public_tail/1','name':name,'bytes':before.st_size,
                       'tail':tail.decode(errors='replace'),'failure_lines':errors},ensure_ascii=True)
-                  assert len(line.encode())<=32768;total+=len(line.encode());assert total<=262144;print(line)
+                  assert len(line.encode())<=32768;total+=len(line.encode());assert total<=524288;print(line)
               finally:os.close(fd)
           PY
