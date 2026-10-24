@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from copy import deepcopy
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -860,6 +861,37 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
     def test_production_backup_directory_rejects_tmp(self) -> None:
         with self.assertRaisesRegex(backup.BackupError, "tmp_forbidden"):
             REAL_SECURE_DIRECTORY(self.backup_dir, create=False)
+
+    def test_real_create_cli_reports_source_refusal_without_traceback_or_private_text(self) -> None:
+        args = [
+            "create", "--env-file", str(self.env_file), "--receipt", str(self.receipt),
+            "--release-sha", RELEASE_SHA, "--release-tree", RELEASE_TREE,
+            "--image-id", IMAGE_ID, "--image-input-signature", IMAGE_SIGNATURE,
+            "--bluegreen-source-env", "--backup-dir", str(self.backup_dir),
+            "--allow-running-writers", "--confirm", backup.HOT_CREATE_CONFIRMATION,
+        ]
+        errors = [
+            (backup.ReleaseContractError("source_env_required_keys_missing"), "source_env_required_keys_missing"),
+            (backup.ReleaseContractError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
+            (OSError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
+            (ValueError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
+            (backup.BackupError("backup_database_runtime_identity_mismatch"), "backup_database_runtime_identity_mismatch"),
+        ]
+        for error, expected in errors:
+            with self.subTest(error=type(error).__name__, expected=expected):
+                output, diagnostics = io.StringIO(), io.StringIO()
+                with mock.patch.object(backup, "create_backup", side_effect=error) as create, \
+                        mock.patch.object(backup.sys, "stdout", output), \
+                        mock.patch.object(backup.sys, "stderr", diagnostics), \
+                        mock.patch.object(backup.subprocess, "run", side_effect=AssertionError("no host commands")):
+                    self.assertEqual(backup.main(args), 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertEqual(json.loads(diagnostics.getvalue()), {
+                    "status": "fail", "reason_code": expected, "secrets_disclosed": False,
+                })
+                self.assertTrue(create.call_args.kwargs["allow_running_writers"])
+                self.assertTrue(create.call_args.kwargs["allow_target_identity_mismatch"])
+                self.assertFalse(self.backup_dir.exists())
 
 
 if __name__ == "__main__":

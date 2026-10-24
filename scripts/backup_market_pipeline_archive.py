@@ -31,6 +31,7 @@ if __package__:
         DYNAMIC_VALUES,
         IMAGE_ID,
         RELEASE_SHA,
+        ReleaseContractError,
         parse_env,
         validate_source,
     )
@@ -40,6 +41,7 @@ else:
         DYNAMIC_VALUES,
         IMAGE_ID,
         RELEASE_SHA,
+        ReleaseContractError,
         parse_env,
         validate_source,
     )
@@ -1415,10 +1417,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0
-    except (OSError, ValueError, BackupError) as exc:
+    except (OSError, ValueError, BackupError, ReleaseContractError) as exc:
+        # Source validation is part of the real backup operation. Keep its
+        # refusal visible without rendering paths, private values or tracebacks.
+        reason = str(exc)
+        if not isinstance(exc, (BackupError, ReleaseContractError)) or not re.fullmatch(
+            r"[a-z0-9_]{1,96}", reason
+        ):
+            reason = "backup_cli_input_or_io_failure"
         print(
             json.dumps(
-                {"status": "fail", "reason_code": str(exc), "secrets_disclosed": False},
+                {"status": "fail", "reason_code": reason, "secrets_disclosed": False},
                 sort_keys=True,
             ),
             file=sys.stderr,
