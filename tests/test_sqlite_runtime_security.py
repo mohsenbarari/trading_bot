@@ -3,6 +3,7 @@ from contextlib import ExitStack, redirect_stdout
 from io import StringIO
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -48,6 +49,17 @@ class SQLiteRuntimeSecurityTests(unittest.TestCase):
         release = self.temp / 'os-release'
         release.write_text('ID=debian\nVERSION_ID="13"\nVERSION_CODENAME=trixie\n')
         release.chmod(0o600)
+        # The synthetic file belongs to the runner, which need not be root.
+        # Substitute only its owner metadata; real production files still
+        # require uid0 and all other metadata remains real.
+        actual_fstat = os.fstat
+        def fixture_fstat(fd):
+            info = actual_fstat(fd)
+            expected = release.stat()
+            self.assertEqual((info.st_dev, info.st_ino), (expected.st_dev, expected.st_ino))
+            values = list(info); values[4] = 0
+            return os.stat_result(values)
+        self.stack.enter_context(patch.object(G.os, 'fstat', side_effect=fixture_fstat))
         real = Path.resolve
         def resolve(path, **kwargs):
             return release if str(path) == '/etc/os-release' else real(path, **kwargs)
@@ -70,6 +82,17 @@ class SQLiteRuntimeSecurityTests(unittest.TestCase):
              self.assertRaisesRegex(ValueError, 'trixie_required'):
             G.platform_package()
         command.assert_not_called()
+
+    def test_os_metadata_still_rejects_nonroot_owner_and_writable_files(self):
+        for owner, mode in ((1001, 0o100600), (0, 0o100666)):
+            with self.subTest(owner=owner, mode=mode), \
+                 patch.object(G.os, 'open', return_value=43210), \
+                 patch.object(G.os, 'close'), \
+                 patch.object(G.os, 'fstat', return_value=SimpleNamespace(st_uid=owner, st_mode=mode, st_size=10)), \
+                 patch.object(G.os, 'read') as read, patch.object(G, 'command') as command, \
+                 self.assertRaisesRegex(ValueError, 'os_metadata'):
+                G.platform_package()
+            read.assert_not_called(); command.assert_not_called()
 
     def test_system_mapping_gate_rejects_vendored_deleted_missing_and_ambiguous_libraries(self):
         def maps(paths):
