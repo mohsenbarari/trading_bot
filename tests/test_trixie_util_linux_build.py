@@ -572,7 +572,7 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
 
     def test_every_workflow_python_program_and_nested_installer_parses(self):
         values = blocks()
-        self.assertEqual(len(values), 5)
+        self.assertEqual(len(values), 6)
         for value in values:
             tree = ast.parse(value)
             for node in tree.body:
@@ -640,7 +640,109 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
         self.assertIn('8*1024**2', text)
         self.assertIn("steps.export.outcome == 'success'", text)
         self.assertIn("steps.reports.outcome == 'success'", text)
-        self.assertEqual(text.count('retention-days: 7'), 3)
+        self.assertEqual(text.count('retention-days: 7'), 4)
+
+    def subdir_workflow_functions(self):
+        tree=ast.parse(next(value for value in blocks() if 'def seal_contract(' in value))
+        nodes=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in
+               {'seal_contract','fetch_input','read_result','export_contract','admit_contract'}]
+        pin=next(ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign)
+                 and any(isinstance(target,ast.Name) and target.id=='pin' for target in node.targets))
+        namespace={'pin':pin,'os':os,'pathlib':__import__('pathlib'),'sha256':sha256,'stat':__import__('stat'),
+                   'subprocess':subprocess,'re':re,'time':__import__('time'),'json':json,'urllib':__import__('urllib.request')}
+        exec(compile(ast.Module(body=nodes,type_ignores=[]),'<actual-subdir-workflow-functions>','exec'),namespace)
+        return namespace
+
+    def test_opt_in_contract_requires_reuse_before_any_recipe_or_install_work(self):
+        import yaml
+        workflow=yaml.safe_load(WORKFLOW.read_text());inputs=workflow.get('on',workflow.get(True))['workflow_dispatch']['inputs']
+        self.assertEqual(inputs['verify_restricted_subdir']['type'],'boolean');self.assertIs(inputs['verify_restricted_subdir']['default'],False)
+        steps=workflow['jobs']['candidate']['steps'];guard=next(step for step in steps if step.get('run')=='exit 1')
+        self.assertEqual(guard['if'],'inputs.verify_restricted_subdir && !inputs.reuse_verified_packages')
+        self.assertLess(steps.index(guard),next(index for index,step in enumerate(steps) if step.get('id')=='recipe'))
+        contract=next(step for step in steps if step.get('id')=='restricted_subdir')
+        self.assertEqual(contract['if'],"inputs.verify_restricted_subdir && inputs.reuse_verified_packages && steps.build.outcome == 'success'")
+        self.assertEqual(contract['timeout-minutes'],5)
+        self.assertGreater(steps.index(contract),next(index for index,step in enumerate(steps) if step.get('id')=='build'))
+        upload=next(step for step in steps if 'restricted-subdir-contract-${{' in step.get('with',{}).get('name',''))
+        self.assertIn("steps.restricted_subdir.outputs.artifact_root != ''",upload['if'])
+        self.assertIn('always()',upload['if']);self.assertNotIn("steps.restricted_subdir.outcome == 'success'",upload['if'])
+
+    def test_contract_wiring_preserves_the_exact_four_vendor_recipe_bytes(self):
+        expected={'Dockerfile':'a368ebab2583fc98f7ddefc44ef47ea21d5e55f3ec0b8c45834db6da7d476090',
+            'build.py':'300126114d0a4641acbc861176ffa14db3ffc296949ba5197f6396e345bf6246',
+            'verify.py':'247e28bbef656d102a2afc8fe5f4618b34a4ee504a950b8828568ae717361a2b',
+            'source_regressions.py':'19dd9dee3ef474e64f202c5756ba08c50b21c159a4f1551a6f6c72902a015f1c'}
+        self.assertEqual({name:sha256((RECIPE/name).read_bytes()).hexdigest() for name in expected},expected)
+        block=next(value for value in blocks() if 'def seal_contract(' in value)
+        self.assertIn("work/'tools/restricted_subdir_contract.py'",block)
+        self.assertNotIn("root/'context'",block);self.assertNotIn("root/'output/artifacts'",block.split('subprocess.run([sys.executable',1)[0])
+
+    def test_seal_uses_published_git_blob_and_same_current_tree_fd_before_downloads(self):
+        namespace=self.subdir_workflow_functions();raw=(RECIPE/'restricted_subdir_contract.py').read_bytes()
+        tree=self.root/'tree';path=tree/'deploy/maintenance/util_linux_build/restricted_subdir_contract.py'
+        path.parent.mkdir(parents=True);path.write_bytes(raw)
+        replies=[types.SimpleNamespace(stdout=(str(len(raw))+'\n').encode()),types.SimpleNamespace(stdout=raw)]
+        with patch.object(subprocess,'run',side_effect=replies) as git:
+            self.assertEqual(namespace['seal_contract']('f'*40,tree),raw)
+        self.assertEqual(git.call_args.args[0],['git','--no-optional-locks','cat-file','blob','f'*40+':deploy/maintenance/util_linux_build/restricted_subdir_contract.py'])
+        path.write_bytes(raw+b'\n# ordinary source drift\n')
+        with patch.object(subprocess,'run',side_effect=replies),self.assertRaises(AssertionError):namespace['seal_contract']('f'*40,tree)
+        self.assertFalse((self.root/'inputs').exists())
+
+    def test_fetch_input_enforces_size_plus_one_sha_deadline_and_https_redirect(self):
+        namespace=self.subdir_workflow_functions();urllib=namespace['urllib'];raw=b'ordinary public source input';url='https://www.kernel.org/ordinary'
+        class Response(io.BytesIO):
+            def geturl(self):return url
+        for content,pin,should_pass in ((raw,sha256(raw).hexdigest(),True),(raw+b'X',sha256(raw).hexdigest(),False),(raw,'0'*64,False)):
+            response=Response(content);opener=Mock();opener.open.return_value=response
+            with self.subTest(content=content,pin=pin),patch.object(urllib.request,'build_opener',return_value=opener),patch.object(namespace['time'],'monotonic',return_value=10):
+                if should_pass:self.assertEqual(namespace['fetch_input'](url,len(raw),pin,20),raw)
+                else:
+                    with self.assertRaises(AssertionError):namespace['fetch_input'](url,len(raw),pin,20)
+        with patch.object(urllib.request,'build_opener') as opener,patch.object(namespace['time'],'monotonic',return_value=20):
+            with self.assertRaises(AssertionError):namespace['fetch_input'](url,len(raw),sha256(raw).hexdigest(),20)
+        opener.assert_not_called()
+        response=Response(raw);response.geturl=lambda:'http://www.kernel.org/ordinary';response.read=Mock(wraps=response.read)
+        opener=Mock();opener.open.return_value=response
+        with patch.object(urllib.request,'build_opener',return_value=opener),patch.object(namespace['time'],'monotonic',return_value=10):
+            with self.assertRaises(AssertionError):namespace['fetch_input'](url,len(raw),sha256(raw).hexdigest(),20)
+        response.read.assert_not_called()
+
+    def contract_proof(self):
+        value={'schema':'util_linux_restricted_subdir_contract/1','status':'source_contract_passed_not_accepted',
+            'source_commit':'f'*40,'verifier_sha256':'61a9d508b092fcfd6174c12d0ea398b5a2cf7f03f0aed137b9b195c933081bde',
+            'historical_build_receipt_sha256':'3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde',
+            'libmount_package':{'sha256':'111baa6313bd1e72002d99725bf2f82e07d8dafd282269e005d5600aa616aaca'},
+            'restricted_refusal_before_stub_side_effects':True,'compiled_contracts':{}}
+        for key in ('maintainer_signatures_authenticated','privileged_or_kernel_mount_operations_executed','historical_receipts_modified',
+                'vendor_database_reconciliation_completed','scanner_findings_modified','production_installed','security_accepted'):value[key]=False
+        for mode in ('enabled','disabled'):
+            for variant in ('original','missing-guard'):
+                value['compiled_contracts']['mountfd-'+mode+'-'+variant]={'compile':{'exit_code':0},'run':{'exit_code':10 if variant=='missing-guard' else 0}}
+        return value
+
+    def test_contract_admission_requires_real_compile_and_exact_negative_exit_and_lineage(self):
+        from copy import deepcopy
+        admit=self.subdir_workflow_functions()['admit_contract'];value=self.contract_proof();admit(json.dumps(value).encode(),'f'*40)
+        for change in (lambda v:v.update(security_accepted=True),lambda v:v.update(source_commit='e'*40),
+                lambda v:v.update(historical_build_receipt_sha256='0'*64),lambda v:v['libmount_package'].update(sha256='0'*64),
+                lambda v:v['compiled_contracts']['mountfd-enabled-original']['compile'].update(exit_code=False),
+                lambda v:v['compiled_contracts']['mountfd-enabled-missing-guard']['run'].update(exit_code=0)):
+            wrong=deepcopy(value);change(wrong)
+            with self.assertRaises(AssertionError):admit(json.dumps(wrong).encode(),'f'*40)
+
+    def test_contract_export_retains_only_bounded_source_json_logs_and_no_package_binary(self):
+        export=self.subdir_workflow_functions()['export_contract'];result=self.root/'result';result.mkdir();public=self.root/'public';public.mkdir()
+        expected={'mountfd-enabled-original.c':b'ordinary source','mountfd-enabled-original-compile.log':b'',
+                  'proof.json':json.dumps(self.contract_proof()).encode()}
+        for name,raw in expected.items():(result/name).write_bytes(raw)
+        (result/'mountfd-enabled-original').write_bytes(b'inert binary output not uploaded')
+        self.assertEqual(export(result,public),sum(map(len,expected.values())))
+        self.assertEqual({p.name:p.read_bytes() for p in public.iterdir()},expected)
+        (result/'unexpected.log').write_bytes(b'public but outside fixed inventory')
+        other=self.root/'other-public';other.mkdir()
+        with self.assertRaises(AssertionError):export(result,other)
 
     def test_reuse_is_explicit_default_off_and_downloads_only_the_fixed_public_artifact(self):
         text=WORKFLOW.read_text()

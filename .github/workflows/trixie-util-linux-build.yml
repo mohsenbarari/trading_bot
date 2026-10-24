@@ -7,6 +7,10 @@ on:
         description: Reuse the fixed reviewed package artifact; still perform real installation and scans
         type: boolean
         default: false
+      verify_restricted_subdir:
+        description: Run the separate benign source contract using only the fixed reused packages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,6 +38,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Reject source-contract verification without verified package reuse
+        if: inputs.verify_restricted_subdir && !inputs.reuse_verified_packages
+        run: exit 1
 
       - name: Seal exactly four published public recipe blobs
         id: recipe
@@ -252,6 +260,124 @@ jobs:
               'build_provenance':provenance,'security_accepted':False},out,sort_keys=True)
           with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('image_id='+candidate+'\n')
           PY
+
+      - name: Verify the separate restricted-subdirectory source contract
+        id: restricted_subdir
+        if: inputs.verify_restricted_subdir && inputs.reuse_verified_packages && steps.build.outcome == 'success'
+        timeout-minutes: 5
+        env:
+          CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,resource,stat,subprocess,sys,tempfile,time,types,urllib.parse,urllib.request
+          pin='61a9d508b092fcfd6174c12d0ea398b5a2cf7f03f0aed137b9b195c933081bde'
+          def seal_contract(commit,tree):
+              assert re.fullmatch('[a-f0-9]{40}',commit)
+              gitpath='deploy/maintenance/util_linux_build/restricted_subdir_contract.py'
+              size=subprocess.run(['git','--no-optional-locks','cat-file','-s',commit+':'+gitpath],check=True,capture_output=True,timeout=10).stdout
+              assert re.fullmatch(rb'[1-9][0-9]{0,4}\n',size) and int(size)<=65536
+              raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',commit+':'+gitpath],check=True,capture_output=True,timeout=10).stdout
+              assert len(raw)==int(size) and sha256(raw).hexdigest()==pin
+              path=tree/gitpath;assert path.resolve(strict=True)==path
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and before.st_size==len(raw)
+                  assert os.read(fd,len(raw)+1)==raw
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_size,s.st_nlink,s.st_mtime_ns,s.st_ctime_ns)
+                  assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              finally:os.close(fd)
+              return raw
+          def fetch_input(url,size,digest,end):
+              assert url.startswith('https://') and 0<size<=12*1024**2
+              remaining=end-time.monotonic();assert remaining>0
+              opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+              with opener.open(url,timeout=min(30,remaining)) as response:
+                  final=urllib.parse.urlsplit(response.geturl())
+                  assert final.scheme=='https' and final.hostname in {'www.kernel.org','mirrors.edge.kernel.org','cdn.kernel.org','deb.debian.org','github.com','patch-diff.githubusercontent.com'}
+                  raw=bytearray()
+                  while True:
+                      assert time.monotonic()<end
+                      block=response.read(min(65536,size+1-len(raw)))
+                      if not block:break
+                      assert len(raw)+len(block)<=size;raw.extend(block)
+              assert len(raw)==size and sha256(raw).hexdigest()==digest
+              return bytes(raw)
+          def read_result(path,maximum):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<=before.st_size<=maximum
+                  raw=os.read(fd,before.st_size+1)
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_size,s.st_nlink,s.st_mtime_ns,s.st_ctime_ns)
+                  assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat());return raw
+              finally:os.close(fd)
+          def export_contract(result,public):
+              allowed={mode+suffix for mode in ('mountfd-enabled-original','mountfd-enabled-missing-guard','mountfd-disabled-original','mountfd-disabled-missing-guard') for suffix in ('.c','-compile.log','-run.log')}|{'proof.json'}
+              total=0
+              if result.exists():
+                  assert result.resolve(strict=True)==result and result.is_dir()
+                  for path in sorted(result.iterdir()):
+                      if path.suffix not in {'.json','.c','.log'}:continue
+                      assert path.name in allowed
+                      raw=read_result(path,65536 if path.name=='proof.json' else 262144);total+=len(raw);assert total<=4*1024**2
+                      fd=os.open(public/path.name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                      with os.fdopen(fd,'wb') as out:out.write(raw)
+              return total
+          def admit_contract(raw,commit):
+              value=json.loads(raw)
+              assert value['schema']=='util_linux_restricted_subdir_contract/1' and value['status']=='source_contract_passed_not_accepted'
+              assert value['source_commit']==commit and value['verifier_sha256']==pin
+              assert value['historical_build_receipt_sha256']=='3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde'
+              assert value['libmount_package']['sha256']=='111baa6313bd1e72002d99725bf2f82e07d8dafd282269e005d5600aa616aaca'
+              assert value['restricted_refusal_before_stub_side_effects'] is True
+              assert all(value[key] is False for key in ('maintainer_signatures_authenticated','privileged_or_kernel_mount_operations_executed','historical_receipts_modified','vendor_database_reconciliation_completed','scanner_findings_modified','production_installed','security_accepted'))
+              records=value['compiled_contracts'];assert set(records)=={'mountfd-'+mode+'-'+variant for mode in ('enabled','disabled') for variant in ('original','missing-guard')}
+              for name,row in records.items():assert type(row['compile']['exit_code']) is int and type(row['run']['exit_code']) is int and row['compile']['exit_code']==0 and row['run']['exit_code']==(10 if name.endswith('missing-guard') else 0)
+          assert os.geteuid()==1001 and os.environ['GITHUB_ACTIONS']=='true' and os.environ['RUNNER_ENVIRONMENT']=='github-hosted' and os.environ['GITHUB_REPOSITORY']=='mohsenbarari/trading_bot'
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True);root=pathlib.Path(os.environ['CANDIDATE_ROOT'])
+          assert root.resolve(strict=True)==root and root.parent==parent and root.stat().st_uid==1001 and stat.S_IMODE(root.stat().st_mode)==0o700
+          commit=os.environ['GITHUB_SHA'];raw=seal_contract(commit,pathlib.Path.cwd())
+          os.umask(0o077);work=pathlib.Path(tempfile.mkdtemp(prefix='util-linux-subdir-contract-',dir=parent))
+          for name in ('tools','inputs','public','home'):(work/name).mkdir(mode=0o700)
+          helper=work/'tools/restricted_subdir_contract.py'
+          fd=os.open(helper,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+          module=types.ModuleType('sealed_subdir_contract');module.__file__=str(helper);exec(compile(raw,'<sealed-subdir-contract>','exec'),module.__dict__)
+          assert len(module.INPUTS)==5
+          end=time.monotonic()+120
+          for name,(size,digest) in module.INPUTS.items():
+              url=('https://www.kernel.org/pub/linux/utils/util-linux/v2.41/' if name==module.ARCHIVE else 'https://deb.debian.org/debian/pool/main/u/util-linux/' if name==module.PACKAGING else 'https://github.com/util-linux/util-linux/commit/')+name
+              value=fetch_input(url,size,digest,end)
+              fd=os.open(work/'inputs'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(value)
+          result=work/'result';public=work/'public';log=work/'helper.log'
+          environment={'PATH':'/usr/bin:/bin','LC_ALL':'C.UTF-8','HOME':str(work/'home'),'GITHUB_ACTIONS':'true','RUNNER_OS':'Linux','RUNNER_TEMP':str(parent)}
+          def limits():resource.setrlimit(resource.RLIMIT_FSIZE,(262144,262144));resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+          try:
+              with log.open('xb') as out:
+                  subprocess.run([sys.executable,'-I','-B',str(helper),'--inputs',str(work/'inputs'),
+                      '--receipt',str(root/'output/artifacts/build-receipt.json'),'--package',str(root/'output/artifacts'/module.PACKAGE),
+                      '--output',str(result),'--source-commit',commit,'--verifier-sha256',pin],
+                      stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,check=True,timeout=130,preexec_fn=limits,env=environment)
+              admit_contract(read_result(result/'proof.json',65536),commit)
+          finally:
+              total=export_contract(result,public)
+              value=read_result(log,262144);assert total+len(value)<=4*1024**2
+              fd=os.open(public/'helper.log',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(value)
+              identity={'source_commit':commit,'verifier_sha256':pin,'scope':'benign_source_contract_only','security_accepted':False,'historical_receipts_modified':False}
+              (public/'source-identity.json').write_text(json.dumps(identity,sort_keys=True)+'\n')
+              with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:out.write('artifact_root='+str(public)+'\n')
+          PY
+
+      - name: Retain separate bounded source-contract proof and diagnostics
+        if: always() && inputs.verify_restricted_subdir && inputs.reuse_verified_packages && steps.restricted_subdir.outputs.artifact_root != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: trixie-util-linux-restricted-subdir-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.restricted_subdir.outputs.artifact_root }}/*
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Preserve ALL raw candidate findings without a custom-backport waiver
         if: always() && steps.build.outputs.image_id != ''
