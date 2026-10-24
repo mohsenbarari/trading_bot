@@ -124,6 +124,95 @@ def safe_member(name):
                 and all(ord(char) >= 32 for char in name))
 
 
+def moby_go_json(value):
+    """Go encoding/json escaping; callers supply the required struct order."""
+    raw = json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+    for character, escaped in (('&', '\\u0026'), ('<', '\\u003c'), ('>', '\\u003e'),
+                               ('\u2028', '\\u2028'), ('\u2029', '\\u2029')):
+        raw = raw.replace(character, escaped)
+    return raw.encode('utf-8')
+
+
+def moby_container_config(value=None):
+    # Moby v28 container.Config declaration order, with its omitempty fields
+    # omitted at zero. Struct-valued container_config itself is not omitted.
+    # https://github.com/moby/moby/blob/v28.5.1/api/types/container/config.go
+    result = {'Hostname': '', 'Domainname': '', 'User': '', 'AttachStdin': False,
+              'AttachStdout': False, 'AttachStderr': False, 'Tty': False,
+              'OpenStdin': False, 'StdinOnce': False, 'Env': None, 'Cmd': None,
+              'Image': '', 'Volumes': None, 'WorkingDir': '', 'Entrypoint': None,
+              'OnBuild': None, 'Labels': None}
+    if value is None:
+        return result
+    # This packet admits one already-pinned image, whose nonzero config has
+    # precisely these four fields. Unsupported projections remain refused.
+    require(type(value) is dict and set(value) == {'Cmd', 'Env', 'Labels', 'WorkingDir'},
+            'reuse_legacy_config_projection')
+    require(type(value['Cmd']) is list and all(type(item) is str for item in value['Cmd'])
+            and type(value['Env']) is list and all(type(item) is str for item in value['Env'])
+            and type(value['WorkingDir']) is str and type(value['Labels']) is dict
+            and all(type(key) is str and type(item) is str for key, item in value['Labels'].items()),
+            'reuse_legacy_config_projection')
+    result.update(value)
+    result['Labels'] = dict(sorted(value['Labels'].items()))
+    return result
+
+
+def moby_legacy_configs(config):
+    """Reconstruct the complete v28 tarexport compatibility chain, not a waiver.
+
+    Official saveImage/saveConfig and image/v1.CreateID generate one legacy
+    config per ordered DiffID. The RawMessage ID map sorts only top-level
+    keys; nested container.Config values retain their Go struct field order.
+    https://github.com/moby/moby/blob/v28.5.1/image/tarexport/save.go
+    https://github.com/moby/moby/blob/v28.5.1/image/v1/imagev1.go
+    """
+    require(type(config) is dict and set(config) == {'architecture', 'created', 'history', 'os', 'rootfs', 'config'}
+            and config['architecture'] == 'amd64' and config['os'] == 'linux'
+            and type(config['history']) is list, 'reuse_legacy_image_projection')
+    created = config['created']
+    require(type(created) is str and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z', created),
+            'reuse_legacy_image_timestamp')
+    # time.Time MarshalJSON uses RFC3339Nano, retaining nanoseconds while
+    # removing fractional trailing zeros. Do not round through datetime.
+    if '.' in created:
+        prefix, fraction = created[:-1].split('.')
+        created = prefix + ('.' + fraction.rstrip('0') if fraction.rstrip('0') else '') + 'Z'
+    rootfs = config['rootfs']
+    require(type(rootfs) is dict and set(rootfs) == {'type', 'diff_ids'} and rootfs.get('type') == 'layers'
+            and type(rootfs.get('diff_ids')) is list and 0 < len(rootfs['diff_ids']) <= 128,
+            'reuse_legacy_rootfs')
+    require(type(config['config']) is dict, 'reuse_legacy_config_projection')
+    final_config = moby_container_config(config['config'])
+    expected, chain, parent = {}, None, None
+    for index, diff_id in enumerate(rootfs['diff_ids']):
+        require(type(diff_id) is str and re.fullmatch(r'sha256:[a-f0-9]{64}', diff_id), 'reuse_legacy_rootfs')
+        chain = diff_id if chain is None else 'sha256:' + sha256((chain + ' ' + diff_id).encode()).hexdigest()
+        value = {'created': '1970-01-01T00:00:00Z', 'container_config': moby_container_config()}
+        if index == len(rootfs['diff_ids']) - 1:
+            value = {'created': created, 'container_config': moby_container_config(),
+                     'config': final_config, 'architecture': config['architecture'], 'os': config['os']}
+        identifier_map = {**value, 'layer_id': chain}
+        if parent is not None:
+            identifier_map['parent'] = 'sha256:' + parent
+        raw_map = b'{' + b','.join(moby_go_json(key) + b':' + moby_go_json(identifier_map[key])
+                                  for key in sorted(identifier_map)) + b'}'
+        identifier = sha256(raw_map).hexdigest()
+        saved = {'id': identifier}
+        if parent is not None:
+            saved['parent'] = parent
+        saved.update(value)
+        # Intermediate OS is assigned only AFTER CreateID. The final source
+        # V1Image already carried OS before CreateID. Parent wire forms differ.
+        saved['os'] = config['os']
+        raw = moby_go_json(saved)
+        require(len(raw) <= 64 * 1024, 'reuse_legacy_config_bound')
+        expected['blobs/sha256/' + sha256(raw).hexdigest()] = raw
+        parent = identifier
+    require(len(expected) == len(rootfs['diff_ids']), 'reuse_legacy_chain_collision')
+    return expected
+
+
 def unexpected_blob_metadata(bundle, members, unexpected):
     """Read small public exporter metadata only; never emit config values."""
     records = []
@@ -317,6 +406,27 @@ def validate_docker_archive(path):
                 allowed.add('repositories')
         directories = {str(parent) for name in allowed for parent in PurePosixPath(name).parents if str(parent) != '.'}
         unexpected = set(members) - allowed - directories
+        legacy_count = 0
+        if unexpected and 'index.json' in members and all(re.fullmatch(r'blobs/sha256/[a-f0-9]{64}', name) for name in unexpected):
+            try:
+                legacy = moby_legacy_configs(config)
+            except (RuntimeError, ValueError, TypeError):
+                legacy = {}
+            matches = set(legacy) == unexpected
+            if matches:
+                for name, raw in legacy.items():
+                    member = members[name]
+                    if not member.isfile() or member.size != len(raw):
+                        matches = False
+                        break
+                    with bundle.extractfile(member) as source:
+                        if source.read(len(raw) + 1) != raw:
+                            matches = False
+                            break
+            if matches:
+                allowed.update(legacy)
+                legacy_count = len(legacy)
+                unexpected = set()
         wrong_directory_type = {name for name, member in members.items()
                                 if member.isdir() != (name in directories)}
         if unexpected or wrong_directory_type:
@@ -326,7 +436,8 @@ def validate_docker_archive(path):
         stream.seek(0)
         archive_sha = digest(stream, size)
         return {'image_id': IMAGE, 'layers': len(layers), 'docker_archive_sha256': archive_sha,
-                'docker_archive_bytes': size, 'layout': 'oci-docker' if 'index.json' in members else 'docker'}
+                'docker_archive_bytes': size, 'layout': 'oci-docker' if 'index.json' in members else 'docker',
+                'legacy_compatibility_configs': legacy_count}
 
 
 def admit_image(zip_path, output):

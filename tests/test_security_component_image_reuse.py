@@ -26,6 +26,48 @@ SPEC = importlib.util.spec_from_file_location('image_reuse_fixture', ROOT / 'scr
 M = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(M)
 
+# Literal Go v28 zero-value container.Config JSON, including the non-omitempty
+# OnBuild field. Keep this fixture independent of the admission implementation.
+ZERO_CONTAINER = (b'{"Hostname":"","Domainname":"","User":"","AttachStdin":false,'
+    b'"AttachStdout":false,"AttachStderr":false,"Tty":false,"OpenStdin":false,'
+    b'"StdinOnce":false,"Env":null,"Cmd":null,"Image":"","Volumes":null,'
+    b'"WorkingDir":"","Entrypoint":null,"OnBuild":null,"Labels":null}')
+
+
+def legacy_fixture(config, *, os_before_id=False, wrong_chain_order=False):
+    """Synthetic ASCII saveImage fixture; no admission helper generates it."""
+    dumps = lambda value: json.dumps(value, separators=(',', ':')).encode('ascii')
+    zero = json.loads(ZERO_CONTAINER)
+    final = dict(zero)
+    final.update(config['config'])
+    final['Labels'] = dict(sorted(final['Labels'].items()))
+    previous_id = None
+    chain = None
+    entries = []
+    diffs = config['rootfs']['diff_ids']
+    for number, diff in enumerate(diffs):
+        next_diff = diffs[-1-number] if wrong_chain_order else diff
+        chain = next_diff if chain is None else 'sha256:' + sha256((chain+' '+next_diff).encode()).hexdigest()
+        fields = {'created': '1970-01-01T00:00:00Z', 'container_config': zero}
+        if number == len(diffs)-1:
+            fields.update(created=config['created'], config=final, architecture='amd64', os='linux')
+        elif os_before_id:
+            fields['os'] = 'linux'
+        hashed = dict(fields, layer_id=chain)
+        if previous_id:
+            hashed['parent'] = 'sha256:' + previous_id
+        # RawMessage maps sort their keys; nested struct JSON retains order.
+        identifier = sha256(dumps(dict(sorted(hashed.items())))).hexdigest()
+        saved = {'id': identifier}
+        if previous_id:
+            saved['parent'] = previous_id
+        saved.update(fields)
+        saved['os'] = 'linux'
+        raw = dumps(saved)
+        entries.append(('blobs/sha256/'+sha256(raw).hexdigest(), raw, tarfile.REGTYPE))
+        previous_id = identifier
+    return entries
+
 
 def blocks():
     return [textwrap.dedent(value) for value in re.findall(
@@ -73,7 +115,8 @@ class ComponentImageReuseTests(unittest.TestCase):
                 bundle.addfile(member, io.BytesIO(data) if member.isfile() else None)
         return output.getvalue()
 
-    def image(self, *, oci=False, layer_gzip=False, config_changes=None, extra=None, repeated_empty=False):
+    def image(self, *, oci=False, layer_gzip=False, config_changes=None, extra=None, repeated_empty=False,
+              legacy=False):
         layer = b'public synthetic image-layer bytes'
         empty = b'\0' * 1024
         layers = [layer, empty, b'public second layer', empty, empty] if repeated_empty else [layer]
@@ -83,6 +126,9 @@ class ComponentImageReuseTests(unittest.TestCase):
                   'io.gold-trade.security.payload.sha256': M.MANIFEST_SHA256}
         config = {'os': 'linux', 'architecture': 'amd64', 'config': {'Labels': labels},
                   'rootfs': {'type': 'layers', 'diff_ids': ['sha256:' + sha256(value).hexdigest() for value in layers]}}
+        if legacy:
+            config.update(created='2026-10-24T07:49:39.591986633Z', history=[])
+            config['config'].update(Cmd=['/public-command'], Env=['PUBLIC_FIXTURE=1'], WorkingDir='/public')
         config.update(config_changes or {})
         raw = json.dumps(config, sort_keys=True).encode()
         image = 'sha256:' + sha256(raw).hexdigest()
@@ -103,6 +149,8 @@ class ComponentImageReuseTests(unittest.TestCase):
             entries += [('blobs/sha256/' + sha256(image_manifest).hexdigest(), image_manifest, tarfile.REGTYPE),
                         ('index.json', json.dumps({'schemaVersion': 2, 'manifests': [descriptor(image_manifest, 'application/vnd.oci.image.manifest.v1+json')]}).encode(), tarfile.REGTYPE),
                         ('oci-layout', b'{"imageLayoutVersion":"1.0.0"}', tarfile.REGTYPE)]
+        if legacy:
+            entries += legacy_fixture(config)
         self.stack.enter_context(patch.object(M, 'IMAGE', image))
         return self.tar(entries + (extra or [])), entries
 
@@ -193,6 +241,120 @@ class ComponentImageReuseTests(unittest.TestCase):
                 path.write_bytes(self.tar(entries + [extra])); path.chmod(0o600)
                 with self.subTest(oci=oci, reason=reason), self.assertRaisesRegex(RuntimeError, reason):
                     M.validate_docker_archive(path)
+
+    def test_moby_v28_legacy_ids_match_independent_actual_public_vectors(self):
+        # CI40117617410 public metadata and the original image's public DiffIDs.
+        # A fourth layer keeps all three known vectors intermediate, independent
+        # of the original final config's values.
+        diffs = ['a70f6272827f64e1427d048ced77491aab5d64ab95725e56920802ff391197d7',
+                 '535a5d38abecfac4fa49da33fa942b53c53c463bd0d39a860967e46eb03faafe',
+                 '6972161a9a77e7c1afb997daac15abc54f5b70c7b40b814601f53e038d8c398c', 'f'*64]
+        config = {'architecture': 'amd64', 'os': 'linux', 'created': '2026-10-24T07:49:39.591986633Z',
+                  'history': [], 'rootfs': {'type': 'layers', 'diff_ids': ['sha256:'+item for item in diffs]},
+                  'config': {'Cmd': ['/public'], 'Env': [], 'Labels': {}, 'WorkingDir': '/'}}
+        expected = [
+            ('5f8d3200190edddbf5cd381cf2c0fd3499122fb6801ec16e341d65f1aed02e80',
+             '90dd2996262ff4fe6242a91a91ddff653fb306f80142897b14bd0e441e3f2738', None, 401),
+            ('a58a5e6856bc2d06f9cd3feb5c88867de173d42f0d80a25e5f94ea213190ed8f',
+             '50a8212d1810941b7b5f89aa49afe3d7cba9615e554e85f54926f733f7d8af0c',
+             '90dd2996262ff4fe6242a91a91ddff653fb306f80142897b14bd0e441e3f2738', 477),
+            ('11bee0262d6c99d2270befe57d3c9df1c4d12b486aec69445c5912179ceae315',
+             '7af4b97e4e656685e9a0b0e4f89b5b747ea41087825aeef9a76b3d88f9f924b8',
+             '50a8212d1810941b7b5f89aa49afe3d7cba9615e554e85f54926f733f7d8af0c', 477)]
+        generated = list(M.moby_legacy_configs(config).items())
+        for (name, raw), (blob, identifier, parent, size) in zip(generated, expected):
+            self.assertEqual(name, 'blobs/sha256/'+blob)
+            self.assertEqual(len(raw), size)
+            value = json.loads(raw)
+            self.assertEqual(value['id'], identifier)
+            self.assertEqual(value.get('parent'), parent)
+            self.assertEqual(value['container_config'], json.loads(ZERO_CONTAINER))
+            self.assertEqual(value['os'], 'linux')
+            self.assertEqual(value['created'], '1970-01-01T00:00:00Z')
+        reference = legacy_fixture(config)
+        self.assertEqual(list(M.moby_legacy_configs(config).items()), [(name, raw) for name, raw, _ in reference])
+
+    def test_oci_moby_compatibility_chain_is_checked_with_repeated_ordered_layers(self):
+        for repeated in (False, True):
+            raw, entries = self.image(oci=True, legacy=True, repeated_empty=repeated)
+            path = self.root/'moby-compatibility.tar'
+            path.write_bytes(raw); path.chmod(0o600)
+            result = M.validate_docker_archive(path)
+            expected_count = 5 if repeated else 1
+            self.assertEqual(result['layers'], expected_count)
+            self.assertEqual(result['legacy_compatibility_configs'], expected_count)
+            self.assertEqual(result['docker_archive_sha256'], sha256(raw).hexdigest())
+            configs = [json.loads(data) for name, data, _ in entries
+                       if name.startswith('blobs/') and data.startswith(b'{"id":')]
+            self.assertEqual(len(configs), expected_count)
+            self.assertEqual(configs[-1]['created'], '2026-10-24T07:49:39.591986633Z')
+            self.assertEqual(configs[-1]['config']['Env'], ['PUBLIC_FIXTURE=1'])
+
+    def test_legacy_chain_requires_exact_all_nodes_and_refuses_other_extras(self):
+        _, entries = self.image(oci=True, legacy=True, repeated_empty=True)
+        configs = [entry for entry in entries if entry[1].startswith(b'{"id":')]
+        ordinary = [entry for entry in entries if entry not in configs]
+        path = self.root/'wrong-compatibility-closure.tar'
+        invalid = [configs[:-1], configs[1:], configs+[configs[0]],
+                   configs+[('blobs/sha256/'+'e'*64, b'{}', tarfile.REGTYPE)]]
+        for index, altered in enumerate(invalid):
+            path.write_bytes(self.tar(ordinary+altered)); path.chmod(0o600)
+            reason = 'reuse_tar_member_invalid' if index == 2 else 'reuse_tar_closed_inventory'
+            with self.subTest(index=index), patch.object(M.sys, 'stderr', io.StringIO()), \
+                    self.assertRaisesRegex(RuntimeError, reason):
+                M.validate_docker_archive(path)
+
+    def test_legacy_chain_rejects_noncanonical_zero_final_parent_os_and_blob_bytes(self):
+        _, entries = self.image(oci=True, legacy=True, repeated_empty=True)
+        configs = [entry for entry in entries if entry[1].startswith(b'{"id":')]
+        ordinary = [entry for entry in entries if entry not in configs]
+        config = json.loads(entries[1][1])
+        path = self.root/'wrong-compatibility-content.tar'
+        wrong = [legacy_fixture(config, os_before_id=True),
+                 legacy_fixture(config, wrong_chain_order=True)]
+        for index, change in ((0, lambda value: value['container_config'].update(Env=[])),
+                              (1, lambda value: value.update(parent='sha256:'+value['parent'])),
+                              (4, lambda value: value['config'].update(WorkingDir='/altered')),
+                              (4, lambda value: value.update(created='2026-10-24T07:49:39Z')),
+                              (4, lambda value: value.update(architecture='arm64'))):
+            altered = list(configs)
+            name, data, kind = altered[index]
+            value = json.loads(data); change(value)
+            raw = json.dumps(value, separators=(',', ':')).encode()
+            altered[index] = ('blobs/sha256/'+sha256(raw).hexdigest(), raw, kind)
+            wrong.append(altered)
+        # Content-addressed names alone are insufficient: even a wrong byte
+        # with the original expected path must be refused by exact content.
+        altered = list(configs)
+        name, data, kind = altered[0]
+        changed = data.replace(b'"os":"linux"', b'"os":"other"')
+        self.assertNotEqual(changed, data); self.assertEqual(len(changed), len(data))
+        altered[0] = (name, changed, kind)
+        wrong.append(altered)
+        for index, altered in enumerate(wrong):
+            path.write_bytes(self.tar(ordinary+altered)); path.chmod(0o600)
+            with self.subTest(index=index), patch.object(M.sys, 'stderr', io.StringIO()), \
+                    self.assertRaisesRegex(RuntimeError, '^reuse_tar_closed_inventory$'):
+                M.validate_docker_archive(path)
+
+    def test_legacy_projection_refuses_unrepresented_source_config_fields(self):
+        _, entries = self.image(oci=True, legacy=True)
+        config = json.loads(entries[1][1])
+        for key, value in (('config', dict(config['config'], User='extra')), ('config', None),
+                           ('author', 'unrepresented'), ('created', 'not-a-timestamp')):
+            bad = dict(config); bad[key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, '^reuse_legacy_'):
+                M.moby_legacy_configs(bad)
+
+    def test_go_json_escape_and_map_projection_keep_struct_order(self):
+        self.assertEqual(M.moby_go_json({'value': '<>&\u2028\u2029\n"\\'}),
+                         b'{"value":"\\u003c\\u003e\\u0026\\u2028\\u2029\\n\\"\\\\"}')
+        value = M.moby_container_config({'Cmd': ['public'], 'Env': [],
+                                        'Labels': {'z': 'last', 'a': 'first'}, 'WorkingDir': '/'})
+        raw = M.moby_go_json(value)
+        self.assertLess(raw.index(b'"Env"'), raw.index(b'"Cmd"'))
+        self.assertIn(b'"Labels":{"a":"first","z":"last"}', raw)
+        self.assertIn(b'"OnBuild":null', raw)
 
     def test_wrong_zip_digest_or_size_refuses_before_output_creation(self):
         self.package()
