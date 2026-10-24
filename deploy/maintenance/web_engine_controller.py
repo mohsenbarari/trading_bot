@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import resource
+import selectors
 import shlex
 import signal
 import stat
@@ -412,8 +413,10 @@ def market_backup(plan, digest):
             '--release-sha', options['release_sha'], '--release-tree', options['release_tree'],
             '--image-id', options['image_id'], '--image-input-signature', options['image_input_signature'], '--bluegreen-source-env']
     bounded(common + ['create', *args, '--backup-dir', str(root / 'market'),
-                      '--confirm', 'create-production-market-pipeline-archive-backup'], timeout=1800, maximum=2 * 1024 * 1024)
-    bounded(common + ['verify', *args, '--maximum-age-seconds', '3600'], timeout=900)
+                      '--confirm', 'create-production-market-pipeline-archive-backup'], timeout=1800,
+            artifact_maximum=16 * 1024**3)
+    bounded(common + ['verify', *args, '--maximum-age-seconds', '3600'], timeout=900,
+            artifact_maximum=16 * 1024**3)
     receipt = root / 'market/market-pipeline-backup-receipt.json'
     observed = B.document(receipt)
     artifact = observed['backup']
@@ -438,31 +441,48 @@ def engine_stopped():
         require(B.command(['/usr/bin/systemctl', 'show', unit, '-p', 'ActiveState', '--value']) in {'inactive', 'failed'}, 'engine_not_quiescent')
 
 
-def bounded(argv, *, timeout, stdout=None, stdin=None, maximum=2 * 1024 * 1024, extra_env=None):
+def bounded(argv, *, timeout, stdout=None, stdin=None, maximum=2 * 1024 * 1024,
+            artifact_maximum=None, extra_env=None):
+    # RLIMIT_FSIZE applies to EVERY regular file written by descendants, not
+    # only their stdout. pg_dump/crypto/dpkg need their own finite artifact cap.
+    # Independently enforce the small diagnostic cap WHILE reading the pipe.
+    file_limit = maximum if artifact_maximum is None else artifact_maximum
+    require(isinstance(file_limit, int) and 0 < file_limit <= 16 * 1024**3
+            and isinstance(maximum, int) and maximum > 0
+            and (stdout is not None or maximum <= 2 * 1024 * 1024), 'bounded_limits_invalid')
     def limits():
-        resource.setrlimit(resource.RLIMIT_FSIZE, (maximum, maximum))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    with tempfile.TemporaryFile() as output:
-        process = subprocess.Popen(argv, stdin=stdin if stdin is not None else subprocess.DEVNULL,
-                                   stdout=stdout if stdout is not None else output, stderr=subprocess.DEVNULL,
-                                   start_new_session=True, preexec_fn=limits, umask=0o077,
-                                   env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C',
-                                        'DOCKER_HOST': 'unix:///var/run/docker.sock', **(extra_env or {})})
-        try:
-            try: code = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                raise P.Refusal('bounded_native_timeout') from None
-            require(code == 0, 'bounded_native_failure')
-            if stdout is None:
-                require(output.tell() <= maximum, 'bounded_native_output')
-                output.seek(0)
-                return output.read(maximum).decode().strip()
-            return ''
-        finally:
-            # This exact dedicated process group only, including compression/SSH children.
-            try: os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError: pass
-            process.wait(timeout=10)
+    process = subprocess.Popen(argv, stdin=stdin if stdin is not None else subprocess.DEVNULL,
+                               stdout=stdout if stdout is not None else subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               start_new_session=True, preexec_fn=limits, umask=0o077,
+                               env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C',
+                                    'DOCKER_HOST': 'unix:///var/run/docker.sock', **(extra_env or {})})
+    selector = selectors.DefaultSelector()
+    output = bytearray(); deadline = time.monotonic() + timeout
+    try:
+        if stdout is None:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                require(remaining > 0, 'bounded_native_timeout')
+                for key, _ in selector.select(min(remaining, 1)):
+                    chunk = os.read(key.fd, min(65536, maximum + 1 - len(output)))
+                    if not chunk: selector.unregister(key.fileobj)
+                    else:
+                        output.extend(chunk)
+                        require(len(output) <= maximum, 'bounded_native_output')
+        try: code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired: raise P.Refusal('bounded_native_timeout') from None
+        require(code == 0, 'bounded_native_failure')
+        return output.decode().strip() if stdout is None else ''
+    finally:
+        selector.close()
+        # This exact dedicated process group only, including compression/SSH children.
+        try: os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        process.wait(timeout=10)
+        if process.stdout is not None: process.stdout.close()
 
 
 def offhost(plan, digest, encrypted, *, verify):
@@ -522,7 +542,7 @@ def engine_backup(plan, digest):
     bounded(['/usr/bin/tar', '--acls', '--xattrs', '--numeric-owner', '--gzip', '--compare', '--file=' + str(plain), '--directory=/'], timeout=900)
     bounded(['/usr/bin/python3', '-I', '-B', str(PROJECT / 'scripts/crypt_market_pipeline_backup.py'), 'encrypt',
              '--source', str(plain), '--destination', str(cipher), '--key-file', plan['backup_key_file'],
-             '--receipt', str(crypt_receipt), '--confirm', 'encrypt-production-market-pipeline-offhost-backup'], timeout=900, maximum=MAX_ARCHIVE + 4096)
+             '--receipt', str(crypt_receipt), '--confirm', 'encrypt-production-market-pipeline-offhost-backup'], timeout=900, artifact_maximum=MAX_ARCHIVE + 4096)
     encrypted = B.document(crypt_receipt)
     require(encrypted['schema'] == 'market_pipeline_backup_encryption/1.1'
             and encrypted['ciphertext_size_bytes'] <= MAX_ARCHIVE + 4096
@@ -599,7 +619,7 @@ def install(plan, digest):
     try: os.fsync(directory)
     finally: os.close(directory)
     try:
-        bounded(apt_argv(plan, simulation=False), timeout=240,
+        bounded(apt_argv(plan, simulation=False), timeout=240, artifact_maximum=512 * 1024**2,
                 extra_env={'NEEDRESTART_MODE': 'l', 'DEBIAN_FRONTEND': 'noninteractive'})
     finally:
         current = policy.lstat()

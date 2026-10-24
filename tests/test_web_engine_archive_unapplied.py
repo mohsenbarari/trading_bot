@@ -1,4 +1,4 @@
-"""Source-only contract for exact unused04 retirement; no host commands."""
+"""Source-only contract for exact unused05 retirement; no host commands."""
 import ast
 from pathlib import Path
 import unittest
@@ -15,22 +15,22 @@ TREE = ast.parse(CODE)
 
 
 class UnappliedWebPlanRetirementContracts(unittest.TestCase):
-    def test_exact_original04_identity_and_separate_non_destructive_archive(self):
+    def test_exact_original05_identity_and_separate_non_destructive_archive(self):
         values = {}
         for node in TREE.body:
             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 value = node.value.args[0] if isinstance(node.value, ast.Call) else node.value
                 if isinstance(value, ast.Constant): values[node.targets[0].id] = value.value
-        self.assertEqual(values['expected'], '5ad57c8c91d758df46a50c5cd661f2c35665e5561b671b669f12ba40f57fb373')
+        self.assertEqual(values['expected'], 'c1c295242fe7ab8ce3355b25af1fbfe2dec88829e3f56bd591d453ab302a7f63')
         self.assertEqual(values['root'], '/root/.local/security-web-engine-20261023')
-        self.assertEqual(values['archive'], '/root/.local/security-web-engine-20261023-unapplied-04-5ad57c8c')
+        self.assertEqual(values['archive'], '/root/.local/security-web-engine-20261023-unapplied-05-c1c29524')
         checks = {}
         for node in ast.walk(TREE):
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Subscript) and isinstance(node.left.value, ast.Name) and node.left.value.id == 'plan' and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq):
                 if isinstance(node.left.slice, ast.Constant) and isinstance(node.comparators[0], ast.Constant):
                     checks[node.left.slice.value] = node.comparators[0].value
-        self.assertEqual(checks, {'operation_id': 'security-web-engine-20261023-04',
-            'nonce': 'ff0dc99a002840a5b4b2e44312e09960', 'deadline_utc': '2026-10-24T05:20:00Z'})
+        self.assertEqual(checks, {'operation_id': 'security-web-engine-20261023-05',
+            'nonce': 'b4bd11449f9843cd930b3f1dfddac5c5', 'deadline_utc': '2026-10-24T06:00:00Z'})
 
     def test_original_full_guards_under_marker_lock_precede_exclusive_directory_rename(self):
         for literal in ('fcntl.LOCK_EX|fcntl.LOCK_NB', "controller.invariant_contract(plan,expected,owned=False)",

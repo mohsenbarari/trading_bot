@@ -46,15 +46,15 @@ class WebEnginePreparationTests(unittest.TestCase):
             self.stack.enter_context(patch(target, side_effect=AssertionError('no real network or host command')))
         self.open_network = self.stack.enter_context(patch.object(R.urllib.request, 'build_opener', side_effect=AssertionError('no network opener')))
         self.inputs = {'schema': 'web_engine_prepare_inputs/1', 'operation_id': 'security-web-engine-20261023-01',
-            'nonce': 'a' * 32, 'deadline_utc': '2026-10-24T06:00:00Z',
+            'nonce': 'a' * 32, 'deadline_utc': '2026-10-24T07:00:00Z',
             'source_sha256': {name: 'b' * 64 for name in R.PUBLIC_SOURCES},
             'app_backup_receipt': {'source_path': R.RECEIPTS['app_backup_receipt'][0], 'path': str(R.RECEIPTS['app_backup_receipt'][1]), 'sha256': 'c' * 64},
             'app_offhost_receipt': {'source_path': R.RECEIPTS['app_offhost_receipt'][0], 'path': str(R.RECEIPTS['app_offhost_receipt'][1]), 'sha256': 'd' * 64},
             'market_backup': {'env_file': '/private/metadata-only.env', 'release_sha': 'e' * 40, 'release_tree': 'f' * 40,
                 'image_id': 'sha256:' + '1' * 64, 'image_input_signature': '2' * 64},
             'backup_key_file': '/private/metadata-only.key',
-            'offhost': {'identity_file': '/root/.ssh/security-controller-20261023-host-patch-05/id_ed25519',
-                'known_hosts_file': '/root/.ssh/security-controller-20261023-host-patch-05/known_hosts', 'known_hosts_sha256': '3' * 64},
+            'offhost': {'identity_file': '/root/.ssh/security-controller-20261023-host-patch-06/id_ed25519',
+                'known_hosts_file': '/root/.ssh/security-controller-20261023-host-patch-06/known_hosts', 'known_hosts_sha256': '3' * 64},
             'datastore_probes': [{'name': '/fixture-db' + str(n), 'kind': 'postgres', 'user': 'fixture', 'database': 'fixture'} for n in range(8)]}
         self.inputs['source_sha256']['deploy/maintenance/web_engine_controller.py'] = R.CONTROLLER_SHA
 
@@ -86,9 +86,11 @@ class WebEnginePreparationTests(unittest.TestCase):
                          lambda x: x['offhost'].update(identity_file='/root/.ssh/security-controller-20261023-host-patch-02/id_ed25519'),
                          lambda x: x['offhost'].update(identity_file='/root/.ssh/security-controller-20261023-host-patch-03/id_ed25519'),
                          lambda x: x['offhost'].update(identity_file='/root/.ssh/security-controller-20261023-host-patch-04/id_ed25519'),
+                         lambda x: x['offhost'].update(identity_file='/root/.ssh/security-controller-20261023-host-patch-05/id_ed25519'),
                          lambda x: x['offhost'].update(known_hosts_file='/root/.ssh/security-controller-20261023-host-patch-03/known_hosts'),
                          lambda x: x['offhost'].update(known_hosts_file='/root/.ssh/security-controller-20261023-host-patch-04/known_hosts'),
-                         lambda x: x.update(deadline_utc='2026-10-24T06:00:01Z'),
+                         lambda x: x['offhost'].update(known_hosts_file='/root/.ssh/security-controller-20261023-host-patch-05/known_hosts'),
+                         lambda x: x.update(deadline_utc='2026-10-24T07:00:01Z'),
                          lambda x: x.update(deadline_utc='2026-10-24T01:30:00Z')):
             value = json.loads(json.dumps(self.inputs)); mutation(value)
             with self.subTest(mutation=mutation), self.assertRaises(RuntimeError): R.validate_inputs(value)

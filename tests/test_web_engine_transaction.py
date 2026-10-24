@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -486,6 +487,91 @@ class FiniteWebEngineTests(unittest.TestCase):
         self.assertTrue(all(task['tags'] == ['always'] for task in tasks[:3]))
         self.assertTrue(all(task['tags'] == ['pre_install'] for task in tasks[3:boundary]))
         self.assertTrue(all(task['tags'] == ['install_restore'] for task in tasks[boundary:]))
+
+
+class BoundedArtifactOutputTests(unittest.TestCase):
+    ARTIFACT = ('import os,sys\n'
+                'fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)\n'
+                'try:\n'
+                ' for _ in range(48):os.write(fd,b"x"*65536)\n'
+                ' os.fsync(fd)\n'
+                'finally:os.close(fd)\n'
+                'print("artifact-ok")\n')
+    FLOOD = 'import os,time\nfor _ in range(1024):os.write(1,b"x"*65536)\ntime.sleep(30)'
+    DIRECT = 'import os\nfor _ in range(48):os.write(1,b"x"*65536)'
+
+    def setUp(self):
+        self.stack = __import__('contextlib').ExitStack(); self.addCleanup(self.stack.close)
+        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='.web-bounded-fixture-', dir=REPO)))
+        self.allowed = set(); self.children = []
+        original = subprocess.Popen
+        def own_only(argv, *args, **kwargs):
+            if tuple(argv) not in self.allowed: raise AssertionError('unmocked host process')
+            child = original(argv, *args, **kwargs); self.children.append(child); return child
+        self.stack.enter_context(patch.object(subprocess, 'Popen', side_effect=own_only))
+        self.stack.enter_context(patch.object(guard.B, 'command', side_effect=AssertionError('no native command')))
+        for target in ('socket.socket.connect', 'socket.create_connection', 'socket.getaddrinfo'):
+            self.stack.enter_context(patch(target, side_effect=AssertionError('no network')))
+
+    def argv(self, code, *args):
+        value = [sys.executable, '-I', '-B', '-c', code, *map(str, args)]
+        self.allowed.add(tuple(value)); return value
+
+    def test_real_three_mib_artifact_and_small_output_have_independent_finite_limits(self):
+        artifact = self.root / 'artifact'
+        result = guard.bounded(self.argv(self.ARTIFACT, artifact), timeout=5, maximum=128,
+                               artifact_maximum=4 * 1024**2)
+        self.assertEqual(result, 'artifact-ok')
+        self.assertEqual(artifact.stat().st_size, 3 * 1024**2)
+        self.assertEqual(artifact.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(all(child.poll() == 0 for child in self.children))
+
+    def test_artifact_cap_is_not_unlimited_or_silently_ignored(self):
+        artifact = self.root / 'artifact'
+        with self.assertRaisesRegex(guard.P.Refusal, 'bounded_native_failure'):
+            guard.bounded(self.argv(self.ARTIFACT, artifact), timeout=5, maximum=128,
+                          artifact_maximum=2 * 1024**2)
+        self.assertLessEqual(artifact.stat().st_size, 2 * 1024**2)
+        self.assertTrue(all(child.poll() is not None for child in self.children))
+
+    def test_oversized_diagnostic_pipe_is_refused_while_reading_and_child_is_reaped(self):
+        received = []; original = os.read; started = time.monotonic()
+        def counted(fd, size):
+            value = original(fd, size); received.append(len(value)); return value
+        with patch.object(guard.os, 'read', side_effect=counted), self.assertRaisesRegex(guard.P.Refusal, 'bounded_native_output'):
+            guard.bounded(self.argv(self.FLOOD), timeout=5, maximum=4096, artifact_maximum=4 * 1024**2)
+        self.assertLessEqual(sum(received), 4097)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertTrue(all(child.poll() is not None for child in self.children))
+
+    def test_direct_payload_fd_retains_existing_finite_file_cap_without_collecting_body(self):
+        artifact = self.root / 'direct'
+        fd = os.open(artifact, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            self.assertEqual(guard.bounded(self.argv(self.DIRECT), timeout=5, stdout=fd,
+                                          maximum=4 * 1024**2), '')
+        finally: os.close(fd)
+        self.assertEqual(artifact.stat().st_size, 3 * 1024**2)
+
+    def test_infinite_or_oversized_capture_limits_refuse_before_spawn(self):
+        for limits in ({'artifact_maximum': -1}, {'artifact_maximum': float('inf')},
+                       {'artifact_maximum': 16 * 1024**3 + 1}, {'maximum': 2 * 1024**2 + 1}):
+            with self.subTest(limits=limits), self.assertRaisesRegex(guard.P.Refusal, 'bounded_limits_invalid'):
+                guard.bounded(['/never-executed'], timeout=1, **limits)
+        self.assertEqual(self.children, [])
+
+    def test_every_large_implicit_file_writer_has_explicit_artifact_not_capture_budget(self):
+        source = ast.parse((HERE / 'web_engine_controller.py').read_text())
+        calls = [node for node in ast.walk(source) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.func.id == 'bounded']
+        artifacts = [node for node in calls if any(keyword.arg == 'artifact_maximum' for keyword in node.keywords)]
+        self.assertEqual(len(artifacts), 4)  # Market create+verify, crypto, dpkg.
+        for node in artifacts:
+            self.assertFalse(any(keyword.arg == 'maximum' for keyword in node.keywords))
+        code = (HERE / 'web_engine_controller.py').read_text()
+        self.assertIn('artifact_maximum=16 * 1024**3', code)
+        self.assertIn('artifact_maximum=MAX_ARCHIVE + 4096', code)
+        self.assertIn('artifact_maximum=512 * 1024**2', code)
 
 
 class PreinstallAbortTests(unittest.TestCase):

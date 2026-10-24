@@ -230,14 +230,17 @@ security gates and the separately requested clean-unit acceptance are complete.
 ## New 24 October window: bounded work and truthful recovery
 
 The user clarified that the approved 90 minutes starts with actual downtime.
-The conservative new outer deadline is **2026-10-24 06:00:00 UTC**. Only the
-fresh `host-patch-05` reverse-SSH lane receives that expiry; previous identities
-retain their old expiry (`04`:05:20, `03`:04:41, `02`:01:30 UTC) and are not extended or adopted. Native's completed
+The conservative fresh06 outer deadline is **2026-10-24 07:00:00 UTC**. Only the
+fresh `host-patch-06` reverse-SSH lane receives that expiry; previous identities
+retain their old expiry (`05`:06:00, `04`:05:20, `03`:04:41, `02`:01:30 UTC) and are not extended or adopted. Native's completed
 kernel transaction and its original bound guard are not modified by this work.
-The exact05 launcher additionally refuses **start before04:30 UTC**, while
-read-only checks remain possible earlier, so this fixed06:00 outer deadline
-cannot admit more than90minutes of project downtime. The unchanged controller's
-65-minute minimum start budget gives a latest first admission of04:55 UTC.
+The exact06 launcher additionally refuses **start before05:30 UTC**, while
+read-only checks remain possible earlier, so this fixed07:00 outer deadline
+cannot admit more than90minutes of project downtime. The controller's unchanged
+65-minute minimum start budget gives a latest first admission of05:55 UTC.
+The unused05 plan (`c1c295242fe7ab8ce3355b25af1fbfe2dec88829e3f56bd591d453ab302a7f63`)
+must be proved unapplied and preserved whole before fresh06 preparation; its
+sealed source and old06:00 expiry are never overwritten, extended or adopted.
 
 Root explicitly serializes **one** preparation invocation for this fixed
 workspace; this is not a concurrency guarantee. With no final plan, reservation
@@ -397,3 +400,24 @@ authorized by this launcher, or that the separate persistent collector boot
 inhibition gap is closed. That gap remains a blocker for the later Web kernel
 reboot. If the execution reviewer still refuses, do not bypass it; close the
 boot inhibition through reviewed source and refreeze a fresh plan first.
+
+## Fresh06: independent artifact and diagnostic bounds
+
+Before05 activation, review found that the former `bounded` helper applied its
+2MiB diagnostic `RLIMIT_FSIZE` to every descendant file, including a real
+`pg_dump` or unpacked Docker executable. No downtime or package write occurred.
+The corrected independently reviewed controller is
+`966970743e3e96a1b7ffac3665486d8b7db589b952751f49c6568d45005eec43`.
+Fresh06 alone binds it. Captured diagnostic stdout is now read incrementally
+from a pipe and refused at maximum+1 bytes, before full collection; it retains
+its 2MiB maximum, total monotonic deadline and exact-child process-group cleanup.
+Separate finite per-file limits admit the actual intended writers: Market
+create/verify16GiB, encrypted engine archive10GiB, exact offline APT512MiB.
+Direct tar/vendor-payload FDs retain their earlier finite payload limits.
+Neither an unlimited file allowance nor a larger diagnostic capture is used.
+
+Owned synthetic subprocess regressions actually wrote a3MiB private artifact
+with tiny stdout, refused a2MiB artifact overflow, and killed/reaped an output
+flood after at most4097 captured bytes for a4096-byte cap. These establish the
+limit separation, not a successful production dump, installation or recovery.
+All backup/capacity/restore/source/authority gates remain required on real run.

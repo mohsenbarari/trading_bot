@@ -1,5 +1,5 @@
 ---
-# Preserve the exact unused04 plan and its entire workspace; never adopt it.
+# Preserve the exact unused05 plan and its entire workspace; never adopt it.
 - name: Archive only the proved unapplied Web preparation under the marker lock
   hosts: web_engine
   gather_facts: false
@@ -24,8 +24,8 @@
             import ctypes,fcntl,hashlib,json,os,pathlib,stat,sys,types
             P=pathlib.Path
             root=P('/root/.local/security-web-engine-20261023')
-            archive=P('/root/.local/security-web-engine-20261023-unapplied-04-5ad57c8c')
-            expected='5ad57c8c91d758df46a50c5cd661f2c35665e5561b671b669f12ba40f57fb373'
+            archive=P('/root/.local/security-web-engine-20261023-unapplied-05-c1c29524')
+            expected='c1c295242fe7ab8ce3355b25af1fbfe2dec88829e3f56bd591d453ab302a7f63'
             def require(ok):
                 if not ok: raise RuntimeError('unused_plan_archive_refused')
             def read(path,maximum):
@@ -49,7 +49,7 @@
                 info=root.lstat();require(stat.S_ISDIR(info.st_mode) and info.st_uid==0 and stat.S_IMODE(info.st_mode)==0o700)
                 raw=read(root/'plan.json',2097152);require(hashlib.sha256(raw).hexdigest()==expected)
                 plan=json.loads(raw)
-                require(plan['operation_id']=='security-web-engine-20261023-04' and plan['nonce']=='ff0dc99a002840a5b4b2e44312e09960' and plan['deadline_utc']=='2026-10-24T05:20:00Z')
+                require(plan['operation_id']=='security-web-engine-20261023-05' and plan['nonce']=='b4bd11449f9843cd930b3f1dfddac5c5' and plan['deadline_utc']=='2026-10-24T06:00:00Z')
                 helper=root/'source/deploy/maintenance/web_engine_prepare.py'
                 bindings=[r for r in plan['files'] if r['path']==str(helper)]
                 require(len(bindings)==1)

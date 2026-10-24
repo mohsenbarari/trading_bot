@@ -41,8 +41,8 @@ class DurableWebEngineLaunchTests(unittest.TestCase):
             data = (REPO / name).read_bytes() if name.endswith('web_engine_controller.py') else b'bounded public fixture\n'
             path.write_bytes(data); path.chmod(0o600)
             files.append({'path': str(path), 'sha256': sha256(data).hexdigest(), 'size': len(data)})
-        self.plan = {'operation_id': 'security-web-engine-20261023-05', 'nonce': 'b4bd11449f9843cd930b3f1dfddac5c5',
-                     'deadline_utc': '2026-10-24T06:00:00Z', 'source_root': str(self.root / 'source'), 'files': files}
+        self.plan = {'operation_id': 'security-web-engine-20261023-06', 'nonce': '888de791edea40c3b69ef53b2ac170ad',
+                     'deadline_utc': '2026-10-24T07:00:00Z', 'source_root': str(self.root / 'source'), 'files': files}
 
     def verify(self, plan=None):
         raw = json.dumps(self.plan if plan is None else plan).encode()
@@ -53,7 +53,7 @@ class DurableWebEngineLaunchTests(unittest.TestCase):
         self.verify()
         self.assertEqual(len(self.code['SOURCES']), 13)
         self.assertEqual(self.process.call_args.args[0], ['/usr/bin/systemctl', 'show',
-            'security-web-engine-05-b4bd11449f9843cd930b3f1dfddac5c5.service', '-p', 'LoadState', '--value'])
+            'security-web-engine-06-888de791edea40c3b69ef53b2ac170ad.service', '-p', 'LoadState', '--value'])
         self.assertEqual(self.process.call_args.kwargs['timeout'], 10)
 
     def test_changed_plan_sha_or_any_sealed_source_refuses_before_unit_query(self):
@@ -67,14 +67,14 @@ class DurableWebEngineLaunchTests(unittest.TestCase):
 
     def test_wrong_operation_nonce_window_source_or_duplicate_binding_refuses(self):
         for key, wrong in (('operation_id', 'security-web-engine-20261023-04'), ('nonce', '0' * 32),
-                           ('deadline_utc', '2026-10-24T06:00:01Z'), ('source_root', '/wrong')):
+                           ('deadline_utc', '2026-10-24T07:00:01Z'), ('source_root', '/wrong')):
             plan = deepcopy(self.plan); plan[key] = wrong
             with self.subTest(field=key), self.assertRaises(AssertionError): self.verify(plan)
         plan = deepcopy(self.plan); plan['files'].append(plan['files'][0])
         with self.assertRaises(AssertionError): self.verify(plan)
         self.process.assert_not_called()
 
-    def test_resigned_changed_controller_cannot_pass_independent_c96_pin(self):
+    def test_resigned_changed_controller_cannot_pass_independent_c966_pin(self):
         plan = deepcopy(self.plan)
         entry = next(item for item in plan['files'] if item['path'].endswith('web_engine_controller.py'))
         data = b'changed controller\n'; Path(entry['path']).write_bytes(data)
@@ -83,9 +83,9 @@ class DurableWebEngineLaunchTests(unittest.TestCase):
         self.process.assert_not_called()
 
     def test_existing_log_reservation_source_lock_journal_or_unit_refuses(self):
-        for path in (self.root / 'controller05.log', self.control / 'private-primary-controller.lock',
-                     self.control / 'security-web-engine-20261023-05.source.lock',
-                     self.control / 'security-web-engine-20261023-05.journal.json', self.control / 'pending.json'):
+        for path in (self.root / 'controller06.log', self.control / 'private-primary-controller.lock',
+                     self.control / 'security-web-engine-20261023-06.source.lock',
+                     self.control / 'security-web-engine-20261023-06.journal.json', self.control / 'pending.json'):
             path.write_bytes(b'preserve existing')
             with self.subTest(existing=path.name), self.assertRaises(AssertionError): self.verify()
             path.unlink(); self.process.assert_not_called()
@@ -124,15 +124,15 @@ class DurableWebEngineLaunchTests(unittest.TestCase):
         self.assertIn('/root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_controller.py', argv)
         self.assertEqual(TASKS[-1]['timeout'], 30)
 
-    def test_start_only_not_before_0430_enforces_ninety_minute_outer_window(self):
+    def test_start_only_not_before_0530_enforces_ninety_minute_outer_window(self):
         class Clock(datetime):
-            current = datetime(2026, 10, 24, 4, 29, 59, tzinfo=timezone.utc)
+            current = datetime(2026, 10, 24, 5, 29, 59, tzinfo=timezone.utc)
             @classmethod
             def now(cls, tz=None): return cls.current
         self.code['datetime'] = Clock
         self.code['admit_start']('check')
         with self.assertRaises(AssertionError): self.code['admit_start']('start')
-        for value in ((4, 30, 0), (4, 55, 0)):
+        for value in ((5, 30, 0), (5, 55, 0)):
             Clock.current = datetime(2026, 10, 24, *value, tzinfo=timezone.utc)
             self.code['admit_start']('start')
         env = Environment(undefined=StrictUndefined)
