@@ -1,5 +1,26 @@
 # Immutable-image component evidence
 
+The manual `security-component-presence-reuse.yml` now offers a CI-only way to
+inspect the already-built19d App without rebuilding or downloading its image
+onto a production host. It admits only run40075556242/artifact12552928309 and
+the exact ZIP180449870 bytes/SHA256
+`a737731a99ddf2d8cb43bcfaeb0e8490c56cdb7ac751c4ea5fbdf1cde327959b`.
+One authenticated download is bounded on disk; its redirect URL/token is never
+logged. Exact export provenance, closed archive members, configuration digest,
+RootFS layer identities and complete Docker/OCI inventory are verified before
+loading. The same retained, rehashed tar descriptor feeds Docker. Even an
+all-zero growing trailer cannot outlive its advertised file bound.
+
+Only exact image
+`sha256:3b4f58b071f3a7c51778e1f6a1ae66d03beaa401fdefee6f8fd2af69999512cf`
+may be probed. The current Git-sealed probe is unchanged; its isolated container
+has no network or production mounts. Admission/execution/component receipts
+retain scope limitations, original source identity, `image_rebuilt:false` and
+`security_accepted:false`. No scanner finding or policy is changed. The job has
+repository/actions read access only and retains small public receipts for30days.
+Source review and44 focused hermetic tests passed, including independent review
+and real actionlint validation; actual CI image/probe execution remains pending.
+
 This probe supplies evidence for two source-package-wide scanner reports. It
 does not modify the raw scan, dismiss a vulnerability, or accept a release.
 
