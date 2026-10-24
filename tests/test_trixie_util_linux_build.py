@@ -485,7 +485,7 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
             if arguments[:5] == ['/usr/bin/apt-get', '--simulate', '--no-remove', '--no-download', 'install']:
                 options['stdout'].write(simulation.encode())
                 return types.SimpleNamespace(returncode=0)
-            if arguments[:5] == ['/usr/bin/apt-get', '--yes', '--no-remove', '--no-download', 'install']:
+            if arguments[:4] == ['/usr/bin/apt-get', '--yes', '--no-remove', 'install']:
                 return types.SimpleNamespace(returncode=0)
             if arguments == ['/usr/bin/dpkg', '--audit']:
                 return types.SimpleNamespace(returncode=0, stdout=audit)
@@ -513,12 +513,25 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
         execute()
         self.assertEqual([call.args[0] for call in command.call_args_list], [
             ['/usr/bin/apt-get', '--simulate', '--no-remove', '--no-download', 'install', *paths],
-            ['/usr/bin/apt-get', '--yes', '--no-remove', '--no-download', 'install', *paths],
+            ['/usr/bin/apt-get', '--yes', '--no-remove', 'install', *paths],
             ['/usr/bin/dpkg', '--audit'],
             ['/usr/bin/dpkg-query', '-W', '-f=${Package}=${Version}\n', *sorted(B.SELECTED)]])
         self.assertTrue(all(call.kwargs['check'] for call in command.call_args_list))
         self.assertEqual(command.call_args_list[1].kwargs['timeout'], 120)
         self.assertEqual(len(paths), 9)
+
+    def test_actual_installer_container_has_no_network_and_only_existing_metadata_capabilities(self):
+        tree = next(ast.parse(block) for block in blocks() if 'def install_capsule(' in block)
+        create = next(call for call in ast.walk(tree) if isinstance(call, ast.Call)
+                      and isinstance(call.func, ast.Name) and call.func.id == 'command'
+                      and len(call.args) > 1 and isinstance(call.args[1], ast.Constant)
+                      and call.args[1].value == 'candidate-create')
+        flags = [node.value for node in create.args[0].elts if isinstance(node, ast.Constant)]
+        self.assertIn('--network=none', flags)
+        self.assertIn('--cap-drop=ALL', flags)
+        self.assertEqual([flag for flag in flags if flag.startswith('--cap-add=')],
+                         ['--cap-add=CHOWN', '--cap-add=FOWNER', '--cap-add=FSETID',
+                          '--cap-add=SETUID', '--cap-add=SETGID'])
 
     def test_actual_installer_refuses_removal_unrelated_or_incomplete_simulation_before_install(self):
         names = sorted(B.SELECTED)

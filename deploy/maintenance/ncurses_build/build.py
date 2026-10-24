@@ -61,7 +61,11 @@ def environment():
 def command(argv, cwd, log, timeout=120, extra=None):
     """Bound ordinary public tool output before persisting it."""
     child = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, env={**environment(), **(extra or {})}, start_new_session=True)
+                             stderr=subprocess.STDOUT, env={**environment(), **(extra or {})}, start_new_session=True,
+                             # Debian's ordinary symbolic chmod commands assume a
+                             # normal public packaging mask. Keep the controller,
+                             # its private logs and every other child at 0077.
+                             umask=0o022 if argv and argv[0] == '/usr/bin/dpkg-buildpackage' else -1)
     deadline = time.monotonic() + timeout
     complete = False
     try:

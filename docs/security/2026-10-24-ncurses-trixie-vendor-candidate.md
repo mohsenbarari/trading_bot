@@ -44,6 +44,29 @@ rejects removals or unrelated changes. Normal offline APT orders local packages
 and their Pre-Depends; no forced installation is permitted. Clean dpkg audit and
 all four exact installed versions are required before making the scan image.
 
+The real install uses `apt-get --yes --no-remove install` with exactly those four
+absolute local paths; simulation alone retains `--no-download`. Actual util-linux
+CI40112121261 demonstrated that `--no-download` on the real command bypassed
+local-file acquisition and produced an internal pathname error. The candidate's
+mandatory `--network=none`, empty runtime APT lists, exact-four simulation and
+archive hash checks preserve network isolation while normal APT acquires the
+local files. No force option, ignore-missing, repository or capability is added.
+This source correction applies to subsequent installation attempts. Ncurses
+CI40112074921 and its evidence remain bound to their originally dispatched source;
+that run failed during the vendor package build and produced no accepted package
+artifact. A fresh build is required; its outputs must not be relabeled as evidence
+for this installation correction.
+
+That first run authenticated the exact vendor archives and installed Trixie
+build dependencies successfully. Normal Debian packaging then failed at
+`chmod -x .../README.gz`: the inherited 0077 mask excluded group/other execute
+bits from a symbolic mode with no explicit owner class. Only the exact
+`/usr/bin/dpkg-buildpackage` child now receives its normal public-build mask
+0022 through `Popen(umask=...)`. The controller, logs and other children retain
+0077. Source/build data are public and remain below the private runner parent;
+no production permissions or vendor rules are changed. The mask regression
+checks child scope, unchanged controller mask and 0600 log files.
+
 The raw scanner report retains all severities and unfixed findings. Its schema
 and image ID, the SBOM versions, source receipt, recipe identities and exported
 package hashes must match the actual candidate. Scanner exit zero here means
@@ -56,7 +79,8 @@ Before dispatch, run the focused hermetic tests and the actual Actions parser:
 
 ```sh
 APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
-  python3 -m pytest -q -p no:cacheprovider tests/test_native_ncurses_build.py
+  python3 -m pytest -q -p no:cacheprovider \
+  tests/test_native_ncurses_build.py tests/test_ncurses_packaging_umask.py
 actionlint -shellcheck= -pyflakes= .github/workflows/trixie-ncurses-build.yml
 ```
 

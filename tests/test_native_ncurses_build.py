@@ -1,5 +1,6 @@
 """Hermetic ncurses packaging boundaries; no compiler/install/daemon/network use."""
 import ast
+import builtins
 from contextlib import ExitStack, redirect_stdout
 from hashlib import sha256
 import importlib.util
@@ -203,8 +204,8 @@ class NativeNcursesPackagingTests(unittest.TestCase):
             self.assertNotIn(value,source)
         self.assertIn('signal.alarm(4800)',(RECIPE/'build.py').read_text())
 
-    def artifact_fixture(self):
-        root=self.root/'ci';root.mkdir();(root/'output').mkdir();source=root/'output/artifacts';source.mkdir()
+    def artifact_fixture(self, *, folder=None):
+        root=folder if folder is not None else self.root/'ci';root.mkdir();(root/'output').mkdir();source=root/'output/artifacts';source.mkdir()
         (root/'public').mkdir();(root/'reports').mkdir()
         def write(path,data):path.write_bytes(data);path.chmod(0o600);return data
         packages=[]
@@ -259,19 +260,85 @@ class NativeNcursesPackagingTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(item.stat().st_mode),0o644)
             self.assertEqual(item.read_bytes(),(source/item.name).read_bytes())
 
-    def test_capsule_validation_precedes_creation_and_installer_uses_apt_dependency_order(self):
+    def test_capsule_validation_precedes_creation(self):
         root,source,receipt=self.artifact_fixture()
         block=next(value for value in blocks() if 'def install_capsule(' in value)
         capsule=function(block,'install_capsule',{'os':os,'pathlib':__import__('pathlib'),'stat':stat,'json':json,'sha256':sha256})
         (source/'libncursesw6.deb').write_bytes(b'changed public package')
         with self.assertRaises(AssertionError):capsule(root,receipt)
         self.assertFalse((root/'install-public').exists())
+
+    def nested_installer_fixture(self, *, simulation=None):
+        folder = Path(self.stack.enter_context(tempfile.TemporaryDirectory(dir=self.root))) / 'ci'
+        root, source, receipt = self.artifact_fixture(folder=folder)
+        block = next(value for value in blocks() if 'def install_capsule(' in value)
         tree=ast.parse(block)
         install=next(ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign)
                      and any(isinstance(target,ast.Name) and target.id=='install' for target in node.targets))
-        self.assertIn("'/usr/bin/apt-get','--yes','--no-remove','--no-download','install',*paths",install)
-        self.assertNotIn("'/usr/bin/dpkg','--install'",install)
-        self.assertNotIn('--force',install)
+        rows = [row for row in receipt['all_family_packages'] if row['name'] in B.SELECTED]
+        paths = [str(source / row['path']) for row in rows]
+        if simulation is None:
+            simulation = ''.join('Inst ' + row['name'] + ':amd64 (' + row['version'] + ')\n' for row in rows)
+        def run(arguments, **options):
+            if arguments[:5] == ['/usr/bin/apt-get', '--simulate', '--no-remove', '--no-download', 'install']:
+                options['stdout'].write(simulation.encode())
+                return SimpleNamespace(returncode=0)
+            if arguments[:4] == ['/usr/bin/apt-get', '--yes', '--no-remove', 'install']:
+                return SimpleNamespace(returncode=0)
+            if arguments == ['/usr/bin/dpkg', '--audit']:
+                return SimpleNamespace(returncode=0, stdout=b'')
+            if arguments[:3] == ['/usr/bin/dpkg-query', '-W', '-f=${Package}=${Version}\n']:
+                return SimpleNamespace(returncode=0, stdout=''.join(
+                    row['name'] + '=' + row['version'] + '\n' for row in rows).encode())
+            raise AssertionError('unexpected_installer_command')
+        command = Mock(side_effect=run)
+        modules = {'pathlib': SimpleNamespace(Path=lambda value: source if value == '/packages' else Path(value)),
+                   'subprocess': SimpleNamespace(run=command), 'json': json, 'os': os,
+                   'stat': stat, 'hashlib': SimpleNamespace(sha256=sha256)}
+        def import_module(name, *args, **kwargs):
+            if name not in modules:
+                raise AssertionError('unexpected_installer_import')
+            return modules[name]
+        def simulation_file(path, mode):
+            self.assertEqual(path, '/tmp/simulation')
+            return builtins.open(root / 'simulation', mode)
+        def execute():
+            exec(compile(install, '<actual-disposable-ncurses-installer>', 'exec'), {
+                '__builtins__': {**vars(builtins), '__import__': import_module}, 'open': simulation_file})
+        return execute, command, paths
+
+    def test_actual_installer_acquires_exact_local_files_then_audits_all_four_versions(self):
+        execute, command, paths = self.nested_installer_fixture()
+        execute()
+        self.assertEqual([call.args[0] for call in command.call_args_list], [
+            ['/usr/bin/apt-get', '--simulate', '--no-remove', '--no-download', 'install', *paths],
+            ['/usr/bin/apt-get', '--yes', '--no-remove', 'install', *paths],
+            ['/usr/bin/dpkg', '--audit'],
+            ['/usr/bin/dpkg-query', '-W', '-f=${Package}=${Version}\n', *sorted(B.SELECTED)]])
+        self.assertTrue(all(call.kwargs['check'] for call in command.call_args_list))
+        self.assertEqual(command.call_args_list[1].kwargs['timeout'], 120)
+
+    def test_actual_installer_refuses_removal_or_unrelated_plan_before_local_acquisition(self):
+        normal = ''.join('Inst ' + name + ':amd64 (candidate)\n' for name in sorted(B.SELECTED))
+        for suffix in ('Remv unrelated [1]\n', 'Inst unrelated (1)\n'):
+            with self.subTest(suffix=suffix):
+                execute, command, _ = self.nested_installer_fixture(simulation=normal + suffix)
+                with self.assertRaises(AssertionError):
+                    execute()
+                self.assertEqual(command.call_count, 1)
+
+    def test_actual_installer_container_keeps_network_disabled_and_existing_capabilities(self):
+        tree = next(ast.parse(block) for block in blocks() if 'def install_capsule(' in block)
+        create = next(call for call in ast.walk(tree) if isinstance(call, ast.Call)
+                      and isinstance(call.func, ast.Name) and call.func.id == 'command'
+                      and len(call.args) > 1 and isinstance(call.args[1], ast.Constant)
+                      and call.args[1].value == 'candidate-create')
+        flags = [node.value for node in create.args[0].elts if isinstance(node, ast.Constant)]
+        self.assertIn('--network=none', flags)
+        self.assertIn('--cap-drop=ALL', flags)
+        self.assertEqual([flag for flag in flags if flag.startswith('--cap-add=')],
+                         ['--cap-add=CHOWN', '--cap-add=FOWNER', '--cap-add=FSETID',
+                          '--cap-add=SETUID', '--cap-add=SETGID'])
 
     def test_export_refuses_incomplete_family_or_false_acceptance_before_copy(self):
         root,source,receipt=self.artifact_fixture()

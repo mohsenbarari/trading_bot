@@ -227,7 +227,7 @@ jobs:
           assert len(simulation)<=65536 and not any(line.startswith('Remv ') for line in simulation.splitlines())
           plans=[line.split()[1].removesuffix(':amd64') for line in simulation.splitlines() if line.startswith('Inst ')]
           assert len(plans)==9 and set(plans)==names
-          subprocess.run(['/usr/bin/apt-get','--yes','--no-remove','--no-download','install',*paths],check=True,timeout=120)
+          subprocess.run(['/usr/bin/apt-get','--yes','--no-remove','install',*paths],check=True,timeout=120)
           audit=subprocess.run(['/usr/bin/dpkg','--audit'],check=True,capture_output=True,timeout=15);assert not audit.stdout.strip()
           values=subprocess.run(['/usr/bin/dpkg-query','-W','-f=${Package}=${Version}\n',*sorted(names)],check=True,capture_output=True,timeout=15)
           assert dict(line.split('=',1) for line in values.stdout.decode().splitlines())=={row['name']:row['version'] for row in rows}

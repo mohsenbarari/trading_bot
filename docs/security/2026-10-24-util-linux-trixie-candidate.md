@@ -25,13 +25,22 @@ artifact12565781476 retains the completed build evidence and nine packages.
 Reuse-only CI40111852561, job120925048576, then exposed the exact installation
 cause: `mount` and `util-linux` Pre-Depend on the candidate `libblkid1`, while
 `dpkg --install` had only unpacked it and the latest configured version remained
-2.41.5. This is a dependency-order failure. The installer now uses ordinary
-`apt-get --yes --no-remove --no-download install` with the same nine checked local
-paths, after the unchanged exact-nine/no-removal simulation. APT can configure
-Pre-Dependencies before unpacking their consumers. The clean audit and exact
-installed-version checks remain required; no force option, capability or repository
-is added. Reuse the same pinned40108449213 artifact without compilation. Actual
-corrected installation and raw scans remain unproven.
+2.41.5. This is a dependency-order failure. The first correction replaced direct
+dpkg installation with normal APT ordering of the same nine checked local paths.
+
+Reuse-only CI40112121261 then failed with APT's internal pathname error for
+`bsdutils_1%3a2.41.6-0+deb13u0+gold1_amd64.deb`. The real install's `--no-download`
+skipped acquisition of the local package files. Per the
+[Trixie APT manual](https://manpages.debian.org/trixie/apt/apt-get.8.en.html), that
+option requires already downloaded archives. The real command now uses
+`apt-get --yes --no-remove install` with the same nine absolute local paths;
+the exact-nine/no-removal simulation retains `--no-download`. The candidate
+container still has `--network=none`, the runtime image has no APT package lists,
+and every local archive passes its existing hash checks. This permits local-file
+acquisition while keeping installation isolated from the network. No force,
+ignore-missing, capability or repository change is added. Clean audit and exact
+installed versions remain required. Reuse the same pinned40108449213 artifact
+without compilation; corrected installation and raw scans remain unproven.
 
 Actual diagnostic CI40083981841 completed the coherent Debian family, six
 old-caller ABI probes and normal distclean, then failed the isolated disabled
