@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError
 
 from api.routers.offers import InternalOfferExpireRequest, cancel_all_active_offers, expire_offer, expire_offer_internal
+from core.services.offer_expiry_gate import try_acquire_offer_expiry_gate
 from core.services.offer_cancel_all_service import (
     OfferCancelAllItemResult,
     OfferCancelAllItemStatus,
@@ -35,6 +36,25 @@ def make_context(owner_user=None, actor_user=None):
     owner = owner_user or SimpleNamespace(id=5)
     actor = actor_user or owner
     return SimpleNamespace(owner_user=owner, actor_user=actor, relation=None, is_accountant_context=getattr(owner, "id", None) != getattr(actor, "id", None))
+
+
+class FakeExpiryRedis:
+    """Per-case storage; exercise the real single-flight lease without live Redis."""
+
+    def __init__(self):
+        self.values = {}
+
+    async def set(self, key, value, *, nx=False, px=None):
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    async def eval(self, _script, _number_of_keys, key, token):
+        if self.values.get(key) != token:
+            return 0
+        self.values.pop(key)
+        return 1
 
 
 class FakeDB:
@@ -72,6 +92,25 @@ class FakeDB:
 
 class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        # Router tests must not contend on a CI Redis key or share an async
+        # connection across IsolatedAsyncioTestCase event loops. Keep the real
+        # gate/ownership/release implementation, with fresh synthetic storage.
+        self.expiry_redis = FakeExpiryRedis()
+        gate_patcher = patch(
+            "core.services.offer_expiry_gate._get_gate_client",
+            return_value=(self.expiry_redis, False),
+        )
+        gate_patcher.start()
+        self.addCleanup(gate_patcher.stop)
+        # The shared expiry service reads only the normal lifetime before the
+        # already-stubbed overtime invalidation. Do not load a separate DB-backed
+        # settings cache in these FakeDB router cases.
+        settings_patcher = patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=0)),
+        )
+        settings_patcher.start()
+        self.addCleanup(settings_patcher.stop)
         # Stage 6 expiry invalidates nonterminal overtime rows; FakeDB fixtures
         # do not mock that select, so stub the call for router-focused tests.
         overtime_patcher = patch(
@@ -80,6 +119,29 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         )
         overtime_patcher.start()
         self.addCleanup(overtime_patcher.stop)
+
+    async def test_expire_offer_rejects_busy_singleflight_before_database_or_rate(self):
+        for target in ("core.services.offer_expiry_gate.get_redis_client",
+                       "core.services.offer_expiry_gate.redis.Redis"):
+            blocker = patch(target, side_effect=AssertionError("router fixture cannot use live Redis"))
+            blocker.start()
+            self.addCleanup(blocker.stop)
+        lease = await try_acquire_offer_expiry_gate(offer_id=1)
+        self.assertTrue(lease.acquired)
+        db = FakeDB()
+        settings = SimpleNamespace(offer_expire_rate_per_minute=2, offer_expire_daily_limit_after_threshold=3)
+        try:
+            with patch("api.routers.offers.get_trading_settings", return_value=settings), patch.object(
+                db, "get", new=AsyncMock(side_effect=AssertionError("busy gate must precede database lookup")),
+            ), patch("bot.utils.redis_helpers.track_expire_rate", new=AsyncMock()) as rate:
+                with self.assertRaises(HTTPException) as caught:
+                    await expire_offer(offer_id=1, db=db, context=make_context())
+            self.assertEqual(caught.exception.status_code, 409)
+            self.assertEqual(caught.exception.detail, "این لفظ در حال غیرفعال شدن است.")
+            rate.assert_not_awaited()
+        finally:
+            await lease.release()
+        self.assertNotIn(lease.key, self.expiry_redis.values)
 
     async def test_expire_offer_rejects_rate_limited_or_daily_limit_requests(self):
         current_user = SimpleNamespace(id=5)
