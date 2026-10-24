@@ -466,14 +466,32 @@ bytes without opening file contents. The existing 24-GiB raw scope bound remains
 the archive preserves ACLs/xattrs/numeric ownership/sparse data and does not cross
 other-device mounts beneath an operand. This is not a whole-host root backup.
 
-The HOT3 dump and cold engine archive are **two separately required artifacts**.
-The proposal avoids embedding another copy of the already independently verified
-HOT3 dump inside the cold archive. Its existing encrypted Native copy stays
-retained. This does not replace a fresh quiesced engine-store archive: before any
-package write, that archive must still be created under owned quiescence, compared
-against its sources, encrypted/reconciled by the normal tool, and independently
+Historical HOT3 data and its encrypted Native copy stay retained; neither its old
+deadline nor its aging snapshot becomes new engine-window authority. The current
+successor requires a **fresh quiesced database backup/restore/verify proof** and a
+**separate cold engine-store archive proof**. The fresh managed04 PRIMARY backup
+uses the configuration/image identities separately, while all writers are stopped
+and only the six intended datastores run. Its receipt and journal remain normal
+v1.4-quiesced/v1.2 evidence; no hot receipt is relabelled.
+
+After that normal strict verification, an explicit typed fresh-dump operand may
+be included with the cold engine roots in one encrypted offhost archive. Its
+OP08/nonce, release/tree/image identity, restore/cleanup status, receipt/journal
+SHA256, actual path/size/hash and allocated bytes are bound. Only the normal dump
+basename under this fresh operation's own `market` directory is allowed; arbitrary
+paths and the old HOT3 artifact refuse. Its measured allocation counts toward the
+same 24-GiB raw scope. Free space must be sampled again after creating the dump.
+The plan records `hot_dump_embedded_in_cold_archive:false` and
+`fresh_quiesced_dump_required:true`; an initial proposal without the fresh operand
+cannot satisfy the later package-write gate.
+
+This retains the earlier controller's legitimate shape of embedding a newly
+verified logical dump alongside the quiescent stores, without duplicating old
+HOT3 data or creating another receiver/key protocol. Before any package write,
+the combined cold archive must still be created under owned quiescence, compared
+against its sources, encrypted/reconciled by the normal tool and independently
 verified durable offhost. External Market data remains preserved in place;
-database backup age/schema admission and data-first recovery are explicit gates.
+fresh backup age/schema admission and data-first recovery are explicit gates.
 
 The proposed cold destination is a new cipher-only namespace on the existing
 Finland host `65.109.214.203`, not an application deployment or target stack.
@@ -495,3 +513,97 @@ and enforce stream/disk bounds, actual cipher fit and durability. A new approved
 window, fresh transport, live runtime/storage checks and restore reserve are
 required before mutation. Persistent boot guards and any Web kernel reboot
 remain separately admitted work; this source packet authorizes neither.
+
+## Fresh OP08 executable adapter (source reviewed before any window)
+
+`web_engine_current_controller.py` and `web_engine_current_transaction.yml`
+provide a separate executable path. They consume the reviewed current profile;
+they do not run or patch C07's old invariant, entrypoint, receipts or deadline.
+Only the stable low-level package checks, App backup gate, native Ansible scope
+executor and selected owned-backup resource helpers are reused. The new plan,
+journal, source fence, supervisor and private backup workspace have OP08 names.
+The permanent production marker is opened without creation and remains intact.
+
+The caller stages a **fresh**, root-only task08 directory with the public source
+tree at `source/`, the fixed fourteen controls at `evidence/<logical-key>.json`,
+the destination receipt, fresh public transport receipt, fresh App receipts and
+`window.json`. Every staged file is root-owned `0600`; directories are `0700`.
+Existing workspaces, partial plans, fences or backup work directories are never
+retried or adopted. The source inventory is exactly the controller's `PINS` plus
+its two `OWN_SOURCES`, all SHA256-bound by the new window. The window schema is
+`web_engine_current_window/1`: exact OP08/nonce, not-before/deadline at most
+90 minutes apart, engine-package permission true, and reboot, kernel packages,
+recreation, DNS, capture ownership and automatic downgrade permissions false.
+At actual start at least 65 minutes must remain. No old window is authority.
+
+Fresh normal App backup evidence was independently produced at
+`2026-10-24T20:18:21.418579Z`: both `foreign` and `iran/current`, four artifacts
+each, and both restore/cleanup checks passed. Its source receipt is
+`/root/secure-envs/trading-bot/production-backups/evidence/security-web-engine-20261024-08.json`,
+SHA256 `873f1ca88b7ad1e3aa491017e1bde8bc5512316030405625906cbceec60bd5b6`.
+The separate Native offhost receipt
+`.local/security-web-engine-20261024-app-offhost-08.json` has SHA256
+`47e444b61879f431c556bec26923a6618308fdd61ae0b553c444d6baf384ceb9`;
+all four Web artifact hashes/lengths/inodes and actual fsync were verified.
+Stage those public controls as `evidence/app-backup.json` and `app-offhost.json`.
+The adapter retains the normal strict SSH/fsync/four-hash and 24-hour age gate.
+
+The actual Final Finland destination control SHA256 is
+`258870a2ff17e4fa0ad4309969d4a307edb6eb2c7a05e85962c773e700efcdb1`.
+The public receiver is already staged and its capacity-only check passed; that
+check created no ciphertext or backup receipt. A separate finite OP08 forced
+SSH grant is still required. Its `web_engine_cold_transport/1` receipt must bind
+the new operation/nonce, Web source IP, Final Finland destination, receiver and
+guard SHA256, destination-control SHA256, known-hosts bytes, expiry, and only the
+private key's nine metadata fields. The fixed Web identity directory is
+`/root/.ssh/security-web-engine-cold-20261024-08`; no private key contents are
+diagnostic inputs. The grant must cover the new deadline and remain within the
+receiver's two-hour limit. Native's retained HOT3 cipher remains untouched.
+
+Run `prepare` with the four public transport/destination/App receipt SHA256
+arguments. It performs read-only runtime, provenance, package, App, managed04,
+APT-closure and measured cold-scope/capacity checks before exclusively publishing
+`plan.json`; it creates no fence or backup. `web_engine_current.yml` defaults to
+the same read-only `check`. Its explicit `start` launches one durable native
+supervisor; failure or an unknown launch is inspected, never retried. Trusted
+Ansible's exact version/UTF-8 environment is checked in the new private work
+directory before any fence publication or writer action.
+
+The actual apply path holds the existing marker plus two fresh flocks and arms
+an independent finite watchdog before quiescing. It stops native triggers first,
+sets restart=no for the exact27, stops only the ten running non-datastores, and
+keeps the six intended databases running for the strict fresh PRIMARY quiesced
+CREATE and VERIFY APIs. CREATE performs one owned restore; VERIFY retains that
+restore proof and rechecks fresh current source parity without a second restore.
+The dump/control hashes, exact config-versus-OCI identity and nonce are bound.
+Only after owned backup cleanup passes are the six stores and engines stopped.
+
+Cold creation then includes that exact fresh dump and the approved cold roots.
+Retained dump/plaintext/cipher FDs guard the normal tar create/compare, normal
+authenticated encryption/decryption reconciliation, cipher-only send and fresh
+remote reread/fsync verification. Capacity samples remain measurements rather
+than reservations; attempted caps and the full 8-GiB reserves are not waived.
+Only a verified cold archive permits the exact simulated offline package closure.
+The normal local-file APT install disables source lists and refuses any simulated
+additional install/removal; it uses no force, downgrade or repository addition.
+The last 35 minutes are reserved for installation/restoration; databases start
+and pass readiness before the other ten containers, exact policies return, and
+only previously active native targets and timers restart, timers last. QA10 and
+the migration remain stopped; the functional f79 image and open incidents remain.
+
+The watchdog survives parent/client death, retains the inherited marker FD and
+cancels only its exact stage scopes, nonce-owned PG backends and labelled restore
+resources. Unknown daemon creation completion is sticky even after an absence
+sample: it retains fences through the finite cleanup boundary and requires
+manual recovery. A failed second fence publication or journal write before any
+worker action removes only already-created exact FD/inode/owner-payload fences;
+a foreign reservation and all history remain intact. Automatic pre-install
+restoration is limited to acknowledged, unambiguous stopped phases with the exact
+old packages, empty owned scopes and no pending native jobs. Package-write or
+descendant uncertainty retains fences; no automatic package/store downgrade runs.
+
+This source packet is not an actual engine transition, cold backup or fresh
+maintenance-window receipt. Completion still leaves security/deployment acceptance
+false, preserves known health incidents, and performs no reboot. The older boot
+guard accepts only completed C07, so a separately reviewed OP08 completion binding
+is still required before persistent boot-guard work or any later kernel reboot.

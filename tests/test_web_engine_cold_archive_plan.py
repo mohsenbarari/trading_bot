@@ -42,7 +42,8 @@ class ColdArchivePlanTests(unittest.TestCase):
         self.assertEqual(result['cold_archive_inputs'],sorted(M.COLD_INPUTS))
         self.assertNotIn(self.profile['hot_backup_data']['artifact']['path'],result['cold_archive_inputs'])
         self.assertFalse(result['hot_dump_embedded_in_cold_archive'])
-        self.assertTrue(result['database_and_cold_archive_are_separate_required_artifacts'])
+        self.assertTrue(result['fresh_quiesced_dump_required']);self.assertFalse(result['fresh_quiesced_dump_included'])
+        self.assertTrue(result['database_restore_and_cold_store_are_separate_required_proofs'])
         for key in ('current_runtime_rechecked','cold_engine_archive_exists','maintenance_authorized',
                 'security_accepted','deployment_eligible','reboot_authorized'):self.assertIs(result[key],False)
         self.assertNotIn('deadline_utc',result)
@@ -106,6 +107,43 @@ class ColdArchivePlanTests(unittest.TestCase):
         result=self.build();result['offhost_identity']['mount']['uuid']='changed'
         result['hot_backup_data']['artifact']['path']='/changed'
         self.assertEqual((self.profile,self.target,self.sizes),before)
+
+    def fresh(self):
+        nonce='a'*32
+        return {'schema':'web_engine_fresh_quiesced_operand/1','operation_id':M.OPERATION,'nonce':nonce,'backup_mode':'quiesced',
+            'release_sha':self.profile['configuration_source']['release_sha'],'release_tree':self.profile['configuration_source']['release_tree'],
+            'image_id':self.profile['source_image']['image_id'],'image_input_signature':self.profile['source_image']['image_input_signature'],
+            'path':'/srv/trading-bot/'+M.OPERATION+'-'+nonce+'/market/market-archive-before-f3be9ae2c4e9-20261024T200000Z-12345678.dump',
+            'size_bytes':1234,'sha256':'c'*64,'receipt_sha256':'d'*64,'journal_sha256':'e'*64,'restore_status':'PASS','cleanup_status':'PASS'}
+
+    def test_fresh_quiesced_dump_is_an_explicit_additional_raw_scope_operand(self):
+        fresh=self.fresh();self.sizes[fresh['path']]=4096
+        plan=self.build(fresh_quiesced_backup=fresh)
+        self.assertIn(fresh['path'],plan['cold_archive_inputs'])
+        self.assertEqual(plan['raw_scope_bytes'],4*1024**3+4096)
+        self.assertEqual(plan['fresh_quiesced_dump_operand'],fresh)
+        self.assertTrue(plan['fresh_quiesced_dump_included']);self.assertFalse(plan['hot_dump_embedded_in_cold_archive'])
+        self.assertFalse(plan['cold_engine_archive_exists']);self.assertFalse(plan['capacity']['actual_cold_cipher_fit_verified'])
+
+    def test_fresh_dump_metadata_cannot_point_at_hot03_or_arbitrary_source(self):
+        for path in (self.profile['hot_backup_data']['artifact']['path'],'/etc/passwd',
+                '/srv/trading-bot/'+M.OPERATION+'-'+'b'*32+'/market/'+Path(self.fresh()['path']).name):
+            fresh=self.fresh();fresh['path']=path
+            with self.subTest(path=path),self.assertRaisesRegex(M.ColdPlanError,'fresh_operand_path'):self.build(fresh_quiesced_backup=fresh)
+
+    def test_fresh_dump_requires_quiesced_mode_strict_provenance_and_cleanup(self):
+        for key,value in (('backup_mode','hot'),('restore_status','FAIL'),('cleanup_status',True),
+                ('release_sha',self.profile['source_image']['release_sha']),('size_bytes',True),('receipt_sha256','unbound')):
+            fresh=self.fresh();fresh[key]=value
+            with self.subTest(key=key),self.assertRaises(M.ColdPlanError):self.build(fresh_quiesced_backup=fresh)
+
+    def test_fresh_dump_must_be_measured_and_count_toward_raw_limit(self):
+        fresh=self.fresh()
+        with self.assertRaisesRegex(M.ColdPlanError,'input_scope'):self.build(fresh_quiesced_backup=fresh)
+        self.sizes[fresh['path']]=1000
+        with self.assertRaisesRegex(M.ColdPlanError,'operand_allocation'):self.build(fresh_quiesced_backup=fresh)
+        self.sizes[fresh['path']]=24*1024**3
+        with self.assertRaisesRegex(M.ColdPlanError,'raw_scope_bound'):self.build(fresh_quiesced_backup=fresh)
 
 
 if __name__=='__main__':unittest.main()

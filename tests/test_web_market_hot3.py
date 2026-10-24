@@ -572,10 +572,28 @@ class Hot3Tests(unittest.TestCase):
         with self.assertRaisesRegex(M.Refusal,'offhost_durability_unproven'):M.worker(rt,70)
         self.assertIn('offhost-verify',events);self.assertFalse((self.stage/'result.json').exists())
 
-    def test_recipe_loads_only_real_pinned_public_buffers_without_host_access(self):
-        sources={name:(ROOT/('scripts' if name in {'prepare_market_pipeline_release.py',
-            'prepare_market_pipeline_primary_release.py','backup_market_pipeline_archive.py','crypt_market_pipeline_backup.py'}
-            else 'deploy/maintenance')/name).read_bytes() for name in M.PINS}
+    def historical_sources(self):
+        import base64
+        import zlib
+        path=ROOT/'tests/fixtures/security_hot3_20261024_public_sources.json'
+        self.assertLess(path.stat().st_size,131072)
+        value=json.loads(path.read_bytes())
+        self.assertEqual(value['schema'],'security_hot3_public_source_fixture/1')
+        self.assertEqual(value['source_commit'],'531196246c9b916f2101f85e93722b2e0536d79f')
+        self.assertEqual(set(value['sources']),set(M.PINS))
+        sources={}
+        for name,row in value['sources'].items():
+            self.assertIs(type(row['bytes']),int);self.assertTrue(0<row['bytes']<=131072)
+            encoded=base64.b64decode(row['zlib_base64'],validate=True);decoder=zlib.decompressobj()
+            raw=decoder.decompress(encoded,row['bytes']+1)
+            self.assertTrue(decoder.eof);self.assertFalse(decoder.unconsumed_tail or decoder.unused_data)
+            self.assertEqual(len(raw),row['bytes']);self.assertEqual(row['sha256'],M.PINS[name])
+            self.assertEqual(sha256(raw).hexdigest(),M.PINS[name]);sources[name]=raw
+        return sources
+
+    def test_recipe_loads_only_real_historical_pinned_buffers_without_host_access(self):
+        # Historical operation evidence is immutable while the shared APIs evolve.
+        sources=self.historical_sources()
         with patch.dict(M.sys.modules):
             for name in list(M.sys.modules):
                 if name=='scripts' or name.startswith('scripts.'):del M.sys.modules[name]
@@ -583,7 +601,7 @@ class Hot3Tests(unittest.TestCase):
             self.assertEqual(modules['backup_market_pipeline_archive.py'].RECEIPT_SCHEMA,'market_pipeline_backup_restore/1.4')
             self.assertEqual(modules['web_market_hot3_offhost.py'].UUID,'9d19fc8e-f71a-4089-b826-5dddfe83ea28')
 
-    def test_wrapper_source_and_every_helper_are_exact_pinned_bounded_arguments(self):
+    def test_historical_wrapper_retains_exact_pins_and_refuses_current_dependency_drift(self):
         import re
         import yaml
         folder=ROOT/'deploy/maintenance'
@@ -592,16 +610,28 @@ class Hot3Tests(unittest.TestCase):
         self.assertEqual(argv[argv.index('--own-sha256')+1],sha256(source).hexdigest())
         self.assertEqual(argv[8],argv[argv.index('--own-source')+1])
         self.assertLess(len(source.hex()),131072)
+        frozen=self.historical_sources();current={}
         for name,digest in M.PINS.items():
             flag='--'+name.removesuffix('.py').replace('_','-')
             expression=argv[argv.index(flag)+1]
             relative=re.fullmatch(r'\{\{ lookup\(\x27ansible.builtin.file\x27, playbook_dir \+ \x27([^\x27]+)\x27, rstrip=false\) \}\}',expression).group(1)
             raw=(folder/relative.lstrip('/')).resolve().read_bytes()
-            self.assertEqual(sha256(raw).hexdigest(),digest)
+            self.assertEqual(sha256(frozen[name]).hexdigest(),digest)
             self.assertLess(len(raw),131072)
+            current[name]=raw
+        if any(sha256(current[name]).hexdigest()!=digest for name,digest in M.PINS.items()):
+            with patch.object(M,'ModuleType',side_effect=AssertionError('changed_source_must_not_compile')):
+                with self.assertRaisesRegex(M.Refusal,'recipe_changed'):M.load_modules(current)
         task=next(task for task in play['tasks'] if 'ansible.builtin.command' in task)
         self.assertEqual(task['ansible.builtin.command']['argv'],'{{ hot3_argv }}')
         self.assertEqual(task['timeout'],7350)
+
+    def test_each_changed_historical_helper_refuses_before_compilation(self):
+        frozen=self.historical_sources()
+        for name in frozen:
+            sources={**frozen,name:frozen[name]+b'\n'}
+            with self.subTest(name=name),patch.object(M,'ModuleType',side_effect=AssertionError('changed_source_must_not_compile')):
+                with self.assertRaisesRegex(M.Refusal,'recipe_changed'):M.load_modules(sources)
 
 
 if __name__=='__main__':unittest.main()

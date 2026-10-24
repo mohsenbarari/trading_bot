@@ -78,7 +78,7 @@ class BackupError(RuntimeError):
 
 @dataclass(frozen=True)
 class BackupExecutionLimits:
-    """Optional finite boundaries for an independently supervised HOT caller.
+    """Finite boundaries for an independently supervised backup caller.
 
     Client timeouts do not cancel Docker daemon work or PostgreSQL backends.
     The owning caller must independently supervise its named resources/backend.
@@ -1734,6 +1734,79 @@ def create_backup(
         )
 
 
+def _quiesced_primary_options(
+    execution_limits: BackupExecutionLimits, *, release_sha: str,
+    release_tree: str, image_id: str, image_input_signature: str,
+) -> None:
+    if type(execution_limits) is not BackupExecutionLimits:
+        raise BackupError("backup_execution_limits_invalid")
+    _validate_execution_options(execution_limits, False, hot=False)
+    if (type(release_sha) is not str or not RELEASE_SHA.fullmatch(release_sha)
+            or type(release_tree) is not str or not RELEASE_SHA.fullmatch(release_tree)
+            or type(image_id) is not str or not IMAGE_ID.fullmatch(image_id)
+            or type(image_input_signature) is not str or not HEX64.fullmatch(image_input_signature)):
+        raise BackupError("backup_quiesced_primary_identity_invalid")
+    _checkpoint(execution_limits)
+
+
+def _quiesced_primary_values(bound: BoundRoleEnv, *, release_sha: str, image_id: str) -> dict[str, str]:
+    values = _validate_release_values(
+        bound.values(), release_sha=release_sha, image_id=image_id,
+        allow_target_identity_mismatch=False, allow_private_primary_source=True,
+    )
+    if (values.get("MARKET_PIPELINE_FEED_MODE"), values.get("MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY"),
+            values.get("MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE")) != ("PRIVATE_PRIMARY", "1", "PRIVATE_PRIMARY"):
+        raise BackupError("backup_quiesced_primary_lane_invalid")
+    return values
+
+
+def create_quiesced_primary_backup(
+    *, env_file: Path, backup_dir: Path, receipt: Path, release_sha: str,
+    release_tree: str, image_id: str, image_input_signature: str,
+    execution_limits: BackupExecutionLimits, restore_resource_binding: Mapping[str, str],
+) -> dict[str, Any]:
+    """Fresh bounded PRIMARY backup, with strict writer and restore parity.
+
+    RELEASE is the configuration identity; immutable image/OCI provenance is
+    separately established by the owning producer. No identity relaxation,
+    hot mode, receipt adoption, or operation authority is supplied by this API.
+    """
+    _quiesced_primary_options(execution_limits, release_sha=release_sha, release_tree=release_tree,
+                             image_id=image_id, image_input_signature=image_input_signature)
+    if not _valid_restore_resources(restore_resource_binding):
+        raise BackupError("backup_restore_resource_binding_invalid")
+    _refuse_legacy_receipt(receipt)
+    journal = _journal_path(backup_dir)
+    if receipt.exists() or receipt.is_symlink() or journal.exists() or journal.is_symlink():
+        raise BackupError("backup_quiesced_primary_fresh_required")
+    if backup_dir.exists() or backup_dir.is_symlink():
+        _secure_directory(backup_dir, create=False)
+        if any(backup_dir.iterdir()):
+            raise BackupError("backup_quiesced_primary_fresh_required")
+    with BoundRoleEnv(env_file) as bound:
+        values = _quiesced_primary_values(bound, release_sha=release_sha, image_id=image_id)
+        _assert_writer_workloads_quiesced(values["MARKET_PIPELINE_PROJECT_NAME"],
+                                         execution_limits=execution_limits)
+        bound.check()
+        payload = _create_backup_bound(
+            env_file=env_file, _env_binding=bound, backup_dir=backup_dir, receipt=receipt,
+            release_sha=release_sha, release_tree=release_tree, image_id=image_id,
+            image_input_signature=image_input_signature, allow_running_writers=False,
+            allow_target_identity_mismatch=False, allow_private_primary_source=True,
+            execution_limits=execution_limits, restore_resource_binding=restore_resource_binding,
+        )
+        if payload.get("status") != "PASS" or payload.get("backup_mode") != "quiesced":
+            raise BackupError("backup_quiesced_primary_initialized_source_required")
+        with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"],
+                                     execution_limits=execution_limits):
+            current = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits)
+            bound.check()
+            if (not _valid_source_metadata(current)
+                    or not _source_window_compatible(payload["source_after"], current, allow_running_writers=False)):
+                raise BackupError("backup_quiesced_primary_current_source_mismatch")
+        return payload
+
+
 def _verify_receipt_evidence(
     *, receipt: Path, role_env_binding: Mapping[str, Any],
     release_sha: str, release_tree: str, image_id: str,
@@ -1911,10 +1984,10 @@ def verify_receipt(
 @contextmanager
 def _pinned_control_snapshots(
     receipt: Path, receipt_sha256: str, journal_sha256: str,
-    *, hot: bool = False,
+    *, hot: bool = False, quiesced_primary: bool = False,
 ) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
     """Hash and parse the same bounded bytes; retain both identities to return."""
-    prefix = "backup_hot" if hot else "backup_historical"
+    prefix = "backup_quiesced_primary" if quiesced_primary else "backup_hot" if hot else "backup_historical"
     if not HEX64.fullmatch(receipt_sha256) or not HEX64.fullmatch(journal_sha256):
         raise BackupError(prefix + "_evidence_identity_mismatch")
     _secure_directory(receipt.parent, create=False)
@@ -2022,6 +2095,61 @@ def _pinned_backup_artifact(artifact: Path, expected: Mapping[str, Any], *,
         raise BackupError("backup_artifact_drifted") from None
     finally:
         os.close(descriptor)
+
+
+def verify_quiesced_primary_receipt(
+    *, env_file: Path, receipt: Path, receipt_sha256: str, journal_sha256: str,
+    release_sha: str, release_tree: str, image_id: str, image_input_signature: str,
+    maximum_age_seconds: int, execution_limits: BackupExecutionLimits,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Strict current PRIMARY verification; CREATE's owned restore is retained.
+
+    This performs no second restore. It rechecks actual writer quiescence and
+    exact source inventories around the retained, hash-pinned artifact FD.
+    The caller still owns locks, finite cleanup, capacity and offhost proof.
+    """
+    _quiesced_primary_options(execution_limits, release_sha=release_sha, release_tree=release_tree,
+                             image_id=image_id, image_input_signature=image_input_signature)
+    if type(maximum_age_seconds) is not int or not 60 <= maximum_age_seconds <= 86400:
+        raise BackupError("backup_maximum_age_invalid")
+    if (type(receipt_sha256) is not str or not HEX64.fullmatch(receipt_sha256)
+            or type(journal_sha256) is not str or not HEX64.fullmatch(journal_sha256)):
+        raise BackupError("backup_quiesced_primary_evidence_identity_mismatch")
+    with _pinned_control_snapshots(receipt, receipt_sha256, journal_sha256,
+                                   quiesced_primary=True) as snapshots:
+        payload, journal = snapshots
+        if type(payload.get("schema")) is not str or type(journal.get("schema")) is not str:
+            raise BackupError("backup_quiesced_primary_evidence_invalid")
+        if (payload.get("schema") in {LEGACY_RECEIPT_SCHEMA, METADATA_LEGACY_RECEIPT_SCHEMA}
+                or journal.get("schema") in {LEGACY_JOURNAL_SCHEMA, METADATA_LEGACY_JOURNAL_SCHEMA}):
+            raise BackupError("backup_mode_migration_required")
+        if payload.get("backup_mode") != "quiesced" or journal.get("backup_mode") != "quiesced":
+            raise BackupError("backup_mode_mismatch")
+        with BoundRoleEnv(env_file) as bound:
+            values = _quiesced_primary_values(bound, release_sha=release_sha, image_id=image_id)
+            payload = _verify_receipt_evidence(
+                receipt=receipt, role_env_binding={"role_env_binding": bound.binding},
+                release_sha=release_sha, release_tree=release_tree, image_id=image_id,
+                image_input_signature=image_input_signature,
+                maximum_age_seconds=maximum_age_seconds, now=now,
+                _snapshots=snapshots, backup_mode="quiesced", _artifact_verified=True,
+            )
+            if payload["status"] != "PASS":
+                raise BackupError("backup_quiesced_primary_initialized_source_required")
+            current = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits)
+            bound.check()
+            if (not _valid_source_metadata(current)
+                    or not _source_window_compatible(payload["source_after"], current, allow_running_writers=False)):
+                raise BackupError("backup_quiesced_primary_current_source_mismatch")
+            with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"],
+                                         execution_limits=execution_limits):
+                after = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits)
+                bound.check()
+                if (not _valid_source_metadata(after)
+                        or not _source_window_compatible(current, after, allow_running_writers=False)):
+                    raise BackupError("backup_quiesced_primary_current_source_mismatch")
+            return payload
 
 
 def verify_hot_receipt(
