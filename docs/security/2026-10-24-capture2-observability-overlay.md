@@ -1,5 +1,19 @@
 # Capture2 diagnostic provenance and functional replay recovery
 
+Actual packet06 accepted and started candidate container
+`6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752`.
+The audit is `diagnostic_image_active_incident_open`; intentional helper exit3
+keeps security/maintenance incomplete. All other26 configurations were retained.
+Read-only samples at09:35:48,09:36:34 and09:37:20 UTC verified healthy/live-ready
+capture, restart count0 and empty outbox. Both replay backfills completed with
+27,142+104,653 accepted entries and quarantine0. During those samples, sequence
+advanced277790→277806, G1 creations+2 and G2 creations+13, with one edit.
+Sender ACKs6301→6324 and PRIMARY snapshot version991467→991482 also advanced;
+transport queues/rejections remained0. This proves actual input and downstream
+progress, not only process liveness. Processor cycles65.7–68.5s still cause
+30s healthcheck flaps despite caught-up/pending0; that separate incident remains
+open. No claim of full security closure or automation restart is made.
+
 Current recovery packet06 uses functional image
 `sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b`.
 The isolated read-only business-state probe reproduced `SQLITE_FULL` (13)

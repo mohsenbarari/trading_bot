@@ -17,9 +17,14 @@
   closed8443, verified17 retained configurations/Web/6DB. Four volumes/images/data
   remain. Bind preservation uses Options.device/attached UUID, not transient
   Docker_data inode. Parking keeps incidents/fences open.
-- Capture2 crash-loops; diagnostic image/parity passed, not activated/repaired.
-  Never duplicate session owners or read/copy/hash private session/config contents.
-  Legacy collectors remain inhibited.
+- Capture2 functional f79 overlay activated24Oct: actual replay131,795
+  complete/quarantine0; three samples show both groups advancing/restarts0.
+  SQLite sort exceeded16MiB tmp; account-indexed streaming preserves hashes.
+  Processor65–68s cycles still cause30s health flaps. Legacy collectors inhibited;
+  never duplicate owners or inspect/copy/hash private session/config contents.
+- Native Brotli two patched packages installed; original collector/Golden PIDs
+  unchanged and still map old decoder. Consumer refresh/window remains separate;
+  package receipt explicitly security-incomplete.
 - Actual19d App candidate:56 focused tests passed, rawHIGH48→44 after pip
   removal;8 OS advisory IDs remain. No acceptance/activation/waiver. See
   `docs/security/2026-10-24-security-candidate-19d.md`.

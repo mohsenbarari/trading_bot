@@ -1,6 +1,11 @@
 # Native Brotli: stage, two-package install, and deferred consumer refresh
 
-SOURCE ONLY. This packet has not installed packages or restarted anything.
+Actual stage02 and install01 completed on 24 October 2026 at about09:34 UTC.
+Both selected packages are now `1.1.0-2build2+security20261024.1` on disk.
+The helper verified the package files, API, unchanged15 containers and both
+original consumer processes. No service/container restart occurred. The owned
+receipt is `on_disk_patched_consumers_pending`, security incomplete. The two
+old mapped decoders still require the separate controlled refresh below.
 
 Actual read-only host proof on 2026-10-24 found Ubuntu 24.04 with systemd PID1,
 15 retained containers, and only `libbrotli1` / `python3-brotli` installed at
