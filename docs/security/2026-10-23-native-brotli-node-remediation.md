@@ -389,3 +389,29 @@ Source tests use synthetic package bytes and mocked external commands only.
 They are not an actual `.deb` build, container-install, ABI, scanner or native
 remediation result. Final review and a real manual workflow dispatch are still
 required.
+
+### First hosted run: packages passed, report admission remained incomplete
+
+Run `40073262326`, job `120811086785`, successfully built all four patched
+packages, passed offline package/ABI/C/Python tests, installed them only in the
+disposable scanner image and ran both Trivy reports. The package artifact
+`12551834335` is 1,098,270 bytes; its existence is build evidence, not host
+remediation. The later scanner-report metadata assertion failed and therefore
+the raw-report artifact was withheld. This was not a package-build failure.
+The old log did not record the individual owner/mode/link/size fields, so that
+particular failed predicate cannot be recovered honestly from its evidence.
+
+The wrapper now creates only the two known scanner output files exclusively
+with mode 0600 before scanning, inside its private 0700 report directory.
+[Trivy v0.76.1's actual output writer](https://github.com/aquasecurity/trivy/blob/v0.76.1/pkg/flag/options.go)
+uses `os.Create`, which truncates an existing file while preserving its mode;
+the workflow never repairs or adopts an unsafe report after production. The
+candidate-image record is also created exclusively as 0600.
+
+Report admission logs only each fixed report name, numeric UID/GID, octal mode,
+link count, byte size, expected UID and static failed-check names, at most 1 KiB
+per record. It never dumps report content or arbitrary file paths. Regular-file,
+same-owner, no-follow, single-link, stable-file and 8 MiB per-report checks are
+unchanged. A real subsequent run must confirm these fields, all four SBOM
+versions and final admission; this source amendment is not a passing run or an
+exception to the gate.

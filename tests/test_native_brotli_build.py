@@ -252,6 +252,12 @@ class NativeBrotliBuildTests(unittest.TestCase):
             for path in (root / 'context').iterdir():
                 self.assertEqual(path.read_bytes(), (RECIPE / path.name).read_bytes())
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual({path.name for path in (root / 'reports').iterdir()}, {'vulnerabilities.json', 'sbom.cdx.json'})
+            for path in (root / 'reports').iterdir():
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.stat().st_uid, os.geteuid())
+                self.assertEqual(path.stat().st_nlink, 1)
+                self.assertEqual(path.stat().st_size, 0)
             wrong = self.temp / 'wrong'; wrong.mkdir(mode=0o700)
             for path in RECIPE.iterdir():
                 if path.name in namespace['RECIPE']: (wrong / path.name).write_bytes(path.read_bytes())
@@ -339,12 +345,54 @@ class NativeBrotliBuildTests(unittest.TestCase):
         namespace = self.ci_functions('Require the actual scanner inventory', {'bound_reports'})
         folder = self.temp / 'reports'; folder.mkdir(mode=0o700)
         for name in ('candidate-image.json', 'vulnerabilities.json', 'sbom.cdx.json'): (folder / name).write_text('{}')
-        namespace['bound_reports'](folder)
+        with patch('builtins.print'): namespace['bound_reports'](folder)
         extra = folder / 'private-marker'; extra.write_bytes(b'never upload')
         with self.assertRaises(AssertionError): namespace['bound_reports'](folder)
         extra.unlink(); (folder / 'vulnerabilities.json').unlink()
         (folder / 'vulnerabilities.json').symlink_to(folder / 'candidate-image.json')
         with self.assertRaises(OSError): namespace['bound_reports'](folder)
+
+    def test_ci_report_metadata_diagnoses_each_failed_field_without_content_or_path_disclosure(self):
+        namespace = self.ci_functions('Require the actual scanner inventory', {'bound_reports'})
+        for fault in ('owner', 'safe_mode', 'single_link', 'size_bound'):
+            with self.subTest(fault=fault), ExitStack() as changes:
+                folder = self.temp / fault; folder.mkdir(mode=0o700)
+                for name in ('candidate-image.json', 'vulnerabilities.json', 'sbom.cdx.json'):
+                    path = folder / name; path.write_text('{"public_marker":"DO_NOT_DUMP_REPORT_CONTENT"}'); path.chmod(0o600)
+                target = folder / 'candidate-image.json'
+                if fault == 'owner': changes.enter_context(patch.object(os, 'geteuid', return_value=os.geteuid() + 1))
+                elif fault == 'safe_mode': target.chmod(0o666)
+                elif fault == 'single_link': os.link(target, self.temp / 'outside-report-link')
+                else:
+                    with target.open('r+b') as stream: stream.truncate(8 * 1024**2 + 1)
+                with patch('builtins.print') as output, self.assertRaises(AssertionError): namespace['bound_reports'](folder)
+                self.assertEqual(output.call_count, 1)
+                line = output.call_args.args[0]; value = json.loads(line)
+                self.assertLessEqual(len(line), 1024)
+                self.assertEqual(value['name'], 'candidate-image.json')
+                self.assertEqual(value['refused_checks'], [fault])
+                self.assertEqual(set(value), {'schema', 'name', 'uid', 'gid', 'mode', 'links', 'bytes', 'expected_uid', 'refused_checks'})
+                self.assertNotIn('DO_NOT_DUMP_REPORT_CONTENT', line); self.assertNotIn(str(folder), line)
+                if fault == 'size_bound': self.assertEqual(value['bytes'], 8 * 1024**2 + 1)
+
+    def test_ci_precreated_scanner_outputs_keep_private_mode_under_group_writable_umask(self):
+        namespace = self.ci_functions('Stage exactly', {'stage_recipe'})
+        disk = type('Space', (), {'f_bavail': 8 * 1024**3, 'f_frsize': 1})()
+        previous = os.umask(0o002)
+        try:
+            with patch.object(os, 'statvfs', return_value=disk), patch.dict(os.environ, {'GITHUB_SHA': 'a' * 40}):
+                root, _ = namespace['stage_recipe'](RECIPE, self.temp)
+            for path in (root / 'reports').iterdir():
+                identity = path.stat().st_dev, path.stat().st_ino
+                # The actual Trivy v0.76.1 OutputWriter uses Go os.Create:
+                # O_RDWR|O_CREAT|O_TRUNC, preserving an existing file's mode.
+                fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o666)
+                with os.fdopen(fd, 'wb') as output: output.write(b'{}')
+                self.assertEqual((path.stat().st_dev, path.stat().st_ino), identity)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.stat().st_uid, os.geteuid())
+        finally:
+            os.umask(previous)
 
     def test_ci_failed_build_tails_only_fixed_public_logs_with_per_file_and_total_caps(self):
         namespace = self.ci_functions('Print only bounded fixed', {'failure_diagnostics'})
