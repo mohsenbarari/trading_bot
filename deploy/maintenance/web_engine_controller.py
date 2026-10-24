@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import fcntl
 from hashlib import sha256
 import json
@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import types
 
 HERE = Path(__file__).resolve().parent
@@ -70,6 +71,13 @@ BACKUP_INPUTS = ['/var/lib/docker', '/var/lib/containerd',
 OPTIONAL_INPUTS = ['/etc/docker', '/etc/containerd', '/etc/default/docker', '/etc/default/containerd']
 PHASES = ['reserved', 'quiescing', 'writers_quiesced', 'market_backed_up', 'quiesced', 'backing_up', 'backup_ready', 'installing',
           'installed', 'engines_verified', 'datastores', 'healthy', 'complete']
+RESTORE_RESERVE = 30 * 60
+PREINSTALL_MARGIN = 35 * 60
+MINIMUM_START = 65 * 60
+
+
+class StageLivenessError(P.Refusal):
+    """Retain all fences: no automatic restore without descendant quiescence."""
 
 
 def paths(plan):
@@ -187,9 +195,36 @@ def market_contract(plan, receipt, artifact_identity):
 
 def market_document(plan, digest):
     proof = journal(plan, digest)['market_backup']
-    receipt = P.document(Path(plan['backup_root']) / 'market' / 'receipt.json', proof['receipt_sha256'])
+    receipt = P.document(Path(plan['backup_root']) / 'market' / 'market-pipeline-backup-receipt.json', proof['receipt_sha256'])
     market_contract(plan, receipt, proof['artifact_identity'])
     return receipt
+
+
+def market_anchor_contract(plan, *, verified=None):
+    """Real active Market image correlation, not the processor's missing label."""
+    options = plan['market_backup']
+    require(options['image_id'] in {row['image'] for row in plan['containers']
+            if row['project'] == 'market-private-pipeline-primary' and row['running']}, 'market_anchor_not_active_baseline_image')
+    expected = {'image_id': options['image_id'], 'revision': options['release_sha'],
+                'tree': options['release_tree'], 'input_signature': options['image_input_signature']}
+    if verified is not None:
+        require(verified == expected, 'market_anchor_recorded_provenance_changed')
+        return expected
+    template = ('{"revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}},'
+                '"tree":{{json (index .Config.Labels "io.gold-trade.release.tree")}},'
+                '"input_signature":{{json (index .Config.Labels "io.gold-trade.release.input-signature")}}}')
+    actual = json.loads(B.command(['/usr/bin/docker', 'image', 'inspect', '--format', template, options['image_id']]))
+    require(actual == {'revision': options['release_sha'], 'tree': options['release_tree'],
+                       'input_signature': options['image_input_signature']}, 'market_anchor_provenance_changed')
+    return expected
+
+
+def market_anchor_invariant(plan, digest, *, owned):
+    anchor = None
+    if owned and journal(plan, digest)['phase'] in {'quiesced', 'backing_up', 'backup_ready', 'installing', 'installed'}:
+        anchor = journal(plan, digest).get('market_anchor_provenance')
+        require(isinstance(anchor, dict), 'market_anchor_quiescent_proof_missing')
+    return market_anchor_contract(plan, verified=anchor)
 
 
 def store_root_contract(entry):
@@ -268,6 +303,7 @@ def invariant_contract(plan, digest, *, owned):
         require(re.fullmatch('[0-9a-f]{40}', options[key]), 'market_release_binding_invalid')
     require(re.fullmatch('sha256:[0-9a-f]{64}', options['image_id'])
             and re.fullmatch('[0-9a-f]{64}', options['image_input_signature']), 'market_image_binding_invalid')
+    market_anchor_invariant(plan, digest, owned=owned)
     for path in (options['env_file'], plan['backup_key_file']):
         value = Path(path).lstat()
         B.private_parent(Path(path))
@@ -371,13 +407,13 @@ def market_backup(plan, digest):
             and list(B.identity(info)) == options['env_file_identity'], 'market_role_metadata_changed')
     B.private_parent(env_path)  # no environment contents are read by this controller
     common = ['/usr/bin/python3', '-I', '-B', str(PROJECT / 'scripts/backup_market_pipeline_archive.py')]
-    args = ['--env-file', str(env_path), '--receipt', str(root / 'market/receipt.json'),
+    args = ['--env-file', str(env_path), '--receipt', str(root / 'market/market-pipeline-backup-receipt.json'),
             '--release-sha', options['release_sha'], '--release-tree', options['release_tree'],
             '--image-id', options['image_id'], '--image-input-signature', options['image_input_signature'], '--bluegreen-source-env']
     bounded(common + ['create', *args, '--backup-dir', str(root / 'market'),
                       '--confirm', 'create-production-market-pipeline-archive-backup'], timeout=1800, maximum=2 * 1024 * 1024)
     bounded(common + ['verify', *args, '--maximum-age-seconds', '3600'], timeout=900)
-    receipt = root / 'market/receipt.json'
+    receipt = root / 'market/market-pipeline-backup-receipt.json'
     observed = B.document(receipt)
     artifact = observed['backup']
     artifact_identity = list(B.identity(Path(artifact['path']).lstat()))
@@ -549,6 +585,7 @@ def install(plan, digest):
     apt_scope(B.command(apt_argv(plan, simulation=True)))
     require(not os.path.lexists('/usr/sbin/policy-rc.d'), 'existing_service_policy_requires_review')
     configs = vendor_configs(plan)
+    remaining_contract(plan, RESTORE_RESERVE)  # Last check BEFORE any package write.
     advance(plan, digest, 'installing', vendor_configs=configs)
     policy = Path('/usr/sbin/policy-rc.d')
     fd = os.open(policy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o755)
@@ -588,7 +625,8 @@ def checkpoint(plan, digest, phase):
     else:
         runtime_contract(plan, phase)
     if journal(plan, digest)['phase'] != phase:
-        advance(plan, digest, phase)
+        evidence = {'market_anchor_provenance': market_anchor_contract(plan)} if phase == 'quiesced' else {}
+        advance(plan, digest, phase, **evidence)
 
 
 def verify_private_inputs(plan):
@@ -612,6 +650,160 @@ def verify_private_inputs(plan):
     require(re.fullmatch('sha256:[0-9a-f]{64}', B.command(['/usr/bin/docker', 'image', 'inspect', '--format', '{{.Id}}', restore_image])), 'market_restore_image_not_cached')
 
 
+def remaining_contract(plan, minimum):
+    deadline = datetime.fromisoformat(plan['deadline_utc'].replace('Z', '+00:00'))
+    require((deadline - datetime.now(timezone.utc)).total_seconds() >= minimum, 'insufficient_restore_window')
+    return deadline
+
+
+def scope_empty(path):
+    if not os.path.lexists(path): return True
+    B.private_parent(path / 'cgroup.events')
+    value = path.lstat()
+    require(stat.S_ISDIR(value.st_mode) and value.st_uid == 0 and not value.st_mode & 0o022, 'stage_cgroup_unsafe')
+    events = dict(line.split() for line in B.read(path / 'cgroup.events', maximum=4096, private=False).decode('ascii').splitlines())
+    return events.get('populated') == '0'
+
+
+def execute_stage(plan, digest, argv, env, deadline, descriptors, stage):
+    """A scope preserves inherited FDs and contains even setsid descendants.
+
+    Unlike a new service, systemd-run --scope execs the caller's child directly.
+    Group/session death is never treated as proof that all stage work stopped.
+    """
+    require(stage in {'pre_install', 'install_restore'}, 'stage_invalid')
+    unit = 'security-web-engine-' + plan['nonce'] + '-' + stage + '.scope'
+    relative = '/system.slice/' + unit
+    cgroup = Path('/sys/fs/cgroup' + relative)
+    description = ':'.join(('web-engine', plan['operation_id'], plan['nonce'], digest, stage))
+    def load_state():
+        return B.command(['/usr/bin/systemctl', 'show', unit, '-p', 'LoadState', '--value'])
+    if load_state() != 'not-found' or os.path.lexists(cgroup):
+        raise StageLivenessError('prior_stage_scope_present')
+    seconds = int((datetime.fromisoformat(deadline.replace('Z', '+00:00')) - datetime.now(timezone.utc)).total_seconds())
+    require(seconds > 0, 'stage_window_expired')
+    command = ['/usr/bin/systemd-run', '--scope', '--system', '--quiet', '--no-ask-password',
+        '--expand-environment=no', '--slice=system.slice', '--unit=' + unit, '--description=' + description,
+        '--property=KillMode=control-group', '--property=SendSIGKILL=yes', '--property=TimeoutStopSec=10s',
+        '--property=RuntimeMaxSec=' + str(seconds), '--', *argv, '--tags', stage]
+    try:
+        return B.execute_ansible(command, env, deadline, lock_fds=descriptors)
+    finally:
+        try:
+            state = load_state()
+            if state != 'not-found':
+                fields = dict(line.split('=', 1) for line in B.command(['/usr/bin/systemctl', 'show', unit,
+                    '--property=Description,ControlGroup,Transient,ActiveState,KillMode,Slice']).splitlines())
+                require(fields.get('Description') == description and fields.get('Transient') == 'yes'
+                        and fields.get('KillMode') == 'control-group' and fields.get('Slice') == 'system.slice'
+                        and fields.get('ControlGroup') in {'', relative}, 'foreign_stage_scope')
+                if fields.get('ControlGroup') or fields.get('ActiveState') not in {'inactive', 'failed'}:
+                    try: B.command(['/usr/bin/systemctl', 'stop', unit])
+                    except B.Refusal:
+                        require(load_state() == 'not-found' and scope_empty(cgroup), 'stage_stop_failed')
+            require(scope_empty(cgroup), 'stage_descendants_still_populated')
+        except BaseException:
+            raise StageLivenessError('stage_descendant_quiescence_unproven') from None
+
+
+def release_owned_fences(owned):
+    for target, device, inode in reversed(owned):
+        require((target.lstat().st_dev, target.lstat().st_ino) == (device, inode), 'owned_fence_changed')
+        target.unlink()
+        directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try: os.fsync(directory)
+        finally: os.close(directory)
+
+
+def old_datastores_and_api_ready(plan):
+    for probe in plan['datastore_probes']:
+        args = ['redis-cli', 'ping'] if probe['kind'] == 'redis' else ['pg_isready', '-U', probe['user'], '-d', probe['database']]
+        result = B.command(['/usr/bin/docker', 'exec', probe['id'], *args])
+        require(probe['kind'] != 'redis' or result == 'PONG', 'old_datastore_not_ready')
+    for probe in plan.get('health_probes', []):
+        require(B.command(['/usr/bin/docker', 'exec', probe['id'], '/usr/local/bin/python', '-I', '-B', '-c', B.CONTAINER_HTTP_PROBE, probe['url']]) == '200', 'old_api_smoke_failed')
+    if plan.get('health_probes'):
+        for row in plan['containers']:
+            current = json.loads(B.command(['/usr/bin/docker', 'inspect', '--format', INSPECT, row['id']]))
+            require(current['running'] == row['running'] and (not row['running'] or current['health'] in {None, 'healthy'}), 'old_container_not_healthy')
+
+
+def abort_restore(plan, digest):
+    """Only this still-fenced pre-install owner may restore the unchanged runtime.
+
+    Not a package rollback or crash adoption. A changed identity/old package set,
+    unknown resources, expired window or failed smoke retains all durable fences.
+    """
+    deadline = remaining_contract(plan, 60)
+    seconds = min(RESTORE_RESERVE, int((deadline - datetime.now(timezone.utc)).total_seconds()) - 5)
+    def expired(*_): raise P.Refusal('abort_restore_deadline')
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.alarm(seconds)
+    try: _abort_restore(plan, digest)
+    finally: signal.alarm(0); signal.signal(signal.SIGALRM, previous)
+
+
+def _abort_restore(plan, digest):
+    invariant_contract(plan, digest, owned=True)
+    value = journal(plan, digest)
+    require(value['phase'] in PHASES[:PHASES.index('installing')], 'package_boundary_requires_review')
+    require(package_versions(P.OLD_PACKAGES) == {n: p[0] for n, p in P.OLD_PACKAGES.items()}, 'old_package_versions_changed')
+    remaining_contract(plan, 60)
+    for unit in plan['units']:
+        if unit['kind'] != 'oneshot' and not unit['active']:
+            require(B.command(['/usr/bin/systemctl', 'show', unit['name'], '-p', 'ActiveState', '--value'])
+                    in {'inactive', 'failed'}, 'abort_unexpected_native_writer')
+    for unit in ('containerd.service', 'docker.socket', 'docker.service'):
+        before = next(e for e in plan['engine_intent'] if e['name'] == unit)
+        require(B.command(['/usr/bin/systemctl', 'show', unit, '-p', 'UnitFileState', '--value']) == before['enabled'], 'engine_enablement_changed')
+        if before['active']: B.command(['/usr/bin/systemctl', 'start', unit])
+    market_anchor_contract(plan)  # Re-read actual OCI metadata after old engines return.
+    expected = {row['id']: row for row in plan['containers']}
+    require(set(B.command(['/usr/bin/docker', 'ps', '-aq', '--no-trunc']).splitlines()) == set(expected), 'abort_container_set_changed')
+    observed = {}
+    for ident, before in expected.items():
+        current = json.loads(B.command(['/usr/bin/docker', 'inspect', '--format', INSPECT, ident]))
+        require(all(current[k] == before[k] for k in ('id', 'name', 'image', 'project', 'network_mode', 'port_bindings'))
+                and P.canonical_mounts(current['mounts']) == P.canonical_mounts(before['mounts'])
+                and sorted(current['network_names']) == sorted(before['network_names']), 'abort_container_identity_changed')
+        require(not current['running'] or before['running'], 'abort_unexpected_writer')
+        require(current['restart_policy'] in [before['restart_policy'], {'Name': 'no', 'MaximumRetryCount': 0}], 'abort_container_policy_changed')
+        observed[ident] = current
+    P.store_contract(json.loads(B.command(['/usr/bin/docker', 'info', '--format', '{"root":{{json .DockerRootDir}},"driver":{{json .Driver}},"driver_status":{{json .DriverStatus}},"live_restore":{{json .LiveRestoreEnabled}}}'])))
+    require(json.loads(B.command(['/usr/bin/docker', 'info', '--format', '{"driver":{{json .CgroupDriver}},"version":{{json .CgroupVersion}}}']))
+            == {'driver': 'systemd', 'version': '2'}, 'cgroup_runtime_changed')
+    containerd_contract({**plan, 'containers': list(observed.values())}, 'baseline')
+    for ident in plan['datastore_ids']:
+        if not observed[ident]['running']: B.command(['/usr/bin/docker', 'start', ident])
+    # PostgreSQL/Redis readiness must succeed BEFORE applications are restarted.
+    probes = {**plan, 'health_probes': []}
+    for attempt in range(30):
+        try: old_datastores_and_api_ready(probes); break
+        except (P.Refusal, B.Refusal):
+            if attempt == 29: raise
+            remaining_contract(plan, 30); time.sleep(2)
+    for ident, before in expected.items():
+        if before['running'] and ident not in plan['datastore_ids'] and not observed[ident]['running']:
+            B.command(['/usr/bin/docker', 'start', ident])
+    for attempt in range(30):
+        try: old_datastores_and_api_ready(plan); break
+        except (P.Refusal, B.Refusal):
+            if attempt == 29: raise
+            remaining_contract(plan, 30); time.sleep(2)
+    for row in plan['containers']:
+        policy = row['restart_policy']
+        label = policy['Name'] + (':' + str(policy['MaximumRetryCount']) if policy['Name'] == 'on-failure' and policy['MaximumRetryCount'] > 0 else '')
+        B.command(['/usr/bin/docker', 'update', '--restart=' + label, row['id']])
+    for timer in (False, True):
+        for unit in plan['units']:
+            if unit['active'] and unit['kind'] != 'oneshot' and (unit['kind'] == 'timer') == timer:
+                B.command(['/usr/bin/systemctl', 'start', unit['name']])
+    invariant_contract(plan, digest, owned=True); runtime_contract(plan, 'baseline')
+    old_datastores_and_api_ready(plan)
+    value.update(phase='aborted_restored', aborted_from=value['phase'], security_transition_completed=False)
+    write_json(paths(plan)[0], value, exclusive=False)
+
+
 def run(plan, path, digest, apply):
     invariant_contract(plan, digest, owned=False)
     runtime_contract(plan, 'baseline')
@@ -625,7 +817,8 @@ def run(plan, path, digest, apply):
     offhost(plan, digest, {'ciphertext_size_bytes': MAX_ARCHIVE + 4096, 'ciphertext_sha256': '0' * 64}, verify=None)
     if not apply:
         print('{"status":"preflight_passed","runtime_changed":false}')
-        return
+        return True
+    deadline = remaining_contract(plan, MINIMUM_START)
     with ExitStack() as stack:
         descriptors, owned = [], []
         fd = os.open(P.MARKER, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -655,18 +848,26 @@ def run(plan, path, digest, apply):
                    'ANSIBLE_HOME': str(Path(plan['backup_root']).parent / '.web-engine-ansible-home'),
                    'ANSIBLE_LOCAL_TEMP': str(Path(plan['backup_root']).parent / '.web-engine-ansible-tmp'),
                    'ANSIBLE_CONFIG': str(PROJECT / 'deploy/maintenance/ansible.cfg')}
-            require(B.execute_ansible(argv, env, plan['deadline_utc'], lock_fds=descriptors) == 0, 'ansible_failed_fence_retained')
+            # Aggregate pre-install work cannot consume the restore reserve.
+            cutoff = (deadline - timedelta(seconds=PREINSTALL_MARGIN)).isoformat().replace('+00:00', 'Z')
+            require(execute_stage(plan, digest, argv, env, cutoff, descriptors, 'pre_install') == 0, 'ansible_failed_fence_retained')
+            require(journal(plan, digest)['phase'] == 'backup_ready', 'preinstall_evidence_incomplete')
+            remaining_contract(plan, PREINSTALL_MARGIN)
+            require(execute_stage(plan, digest, argv, env, plan['deadline_utc'], descriptors, 'install_restore') == 0, 'ansible_failed_fence_retained')
             invariant_contract(plan, digest, owned=True); runtime_contract(plan, 'complete')
             require(journal(plan, digest)['phase'] == 'complete', 'completion_evidence_missing')
-            for target, device, inode in reversed(owned):
-                require((target.lstat().st_dev, target.lstat().st_ino) == (device, inode), 'owned_fence_changed')
-                target.unlink()
-                directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                try: os.fsync(directory)
-                finally: os.close(directory)
+            release_owned_fences(owned)
             print('{"status":"completed","authority_changed":false,"reboot_performed":false}')
-        except BaseException:
-            # No blind resume/adoption/retry/downgrade; retain durable identity.
+            return True
+        except BaseException as failure:
+            if isinstance(failure, StageLivenessError): raise
+            try:
+                abort_restore(plan, digest)
+                release_owned_fences(owned)
+                print('{"status":"aborted_restored","security_transition_completed":false,"authority_changed":false}')
+                return False
+            except BaseException:
+                pass  # Not an admissible pre-install restore; retain identity.
             raise
 
 
@@ -680,7 +881,7 @@ def main():
     args = parser.parse_args()
     try:
         plan = P.document(args.manifest, args.manifest_sha256)
-        if args.mode == 'run': run(plan, args.manifest, args.manifest_sha256, args.apply)
+        if args.mode == 'run': return 0 if run(plan, args.manifest, args.manifest_sha256, args.apply) else 1
         elif args.mode == 'inspect':
             invariant_contract(plan, args.manifest_sha256, owned=True)
             print(json.dumps({k: plan[k] for k in ('units', 'containers', 'datastore_ids')}))

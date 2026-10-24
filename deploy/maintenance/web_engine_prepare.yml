@@ -1,0 +1,234 @@
+---
+# PREPARATION ONLY. No service/package/install/apply tasks exist in this play.
+- name: Stage the finite public Web CE preparation bundle and real metadata plan
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    web_engine_prepare_action: check
+    web_engine_source_files:
+      - deploy/maintenance/web_engine_preflight.py
+      - deploy/maintenance/web_engine_controller.py
+      - deploy/maintenance/web_engine_offhost.py
+      - deploy/maintenance/web_engine_transaction.yml
+      - deploy/maintenance/web_engine_local_inventory.yml
+      - deploy/maintenance/ansible.cfg
+      - scripts/validate_docker_daemon_maintenance.py
+      - scripts/crypt_market_pipeline_backup.py
+      - scripts/backup_market_pipeline_archive.py
+      - scripts/prepare_market_pipeline_release.py
+      - deploy/maintenance/web_engine_prepare.py
+      - deploy/maintenance/web_engine_prepare.yml
+      - deploy/maintenance/web_engine_inventory.yml
+  tasks:
+    - name: Admit only the existing strict Web lane and explicit preparation
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59'
+          - ansible_port | int == 37067
+          - ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - web_engine_prepare_action in ['check', 'prepare']
+          - web_engine_source_files == ['deploy/maintenance/web_engine_preflight.py', 'deploy/maintenance/web_engine_controller.py', 'deploy/maintenance/web_engine_offhost.py', 'deploy/maintenance/web_engine_transaction.yml', 'deploy/maintenance/web_engine_local_inventory.yml', 'deploy/maintenance/ansible.cfg', 'scripts/validate_docker_daemon_maintenance.py', 'scripts/crypt_market_pipeline_backup.py', 'scripts/backup_market_pipeline_archive.py', 'scripts/prepare_market_pipeline_release.py', 'deploy/maintenance/web_engine_prepare.py', 'deploy/maintenance/web_engine_prepare.yml', 'deploy/maintenance/web_engine_inventory.yml']
+
+    - name: Check native Web identity safe parents absent maintenance and immutable plan boundary
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import json,os,pathlib,stat
+            assert os.geteuid()==0 and pathlib.Path('/proc/1/exe').readlink().name=='systemd'
+            assert not any(pathlib.Path(p).exists() for p in ('/.dockerenv','/run/.containerenv'))
+            for ns in ('pid','mnt','user'): assert os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns)
+            for p in ('/root','/root/.local'):
+                s=os.lstat(p); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+            root=pathlib.Path('/root/.local/security-web-engine-20261023')
+            assert root.resolve(strict=False)==root
+            assert not any(os.path.lexists(p) for p in ('/root/secure-envs/trading-bot/release-control/private-primary-controller.lock','/var/lib/trading-bot/production-release/two-host-release-state.json'))
+            if os.path.lexists(root):
+                s=root.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700
+                allowed=set(json.loads(__import__('sys').argv[1]))|{'scripts/__init__.py'}
+                for name in ('source','packages'):
+                    p=root/name
+                    if os.path.lexists(p):
+                        s=p.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700
+                p=root/'source'
+                if p.exists():
+                    for directory,dirs,files in os.walk(p,followlinks=False):
+                        for name in dirs+files:
+                            q=pathlib.Path(directory)/name; s=q.lstat()
+                            assert s.st_uid==0 and not s.st_mode&0o022
+                            assert stat.S_ISDIR(s.st_mode) or (stat.S_ISREG(s.st_mode) and s.st_nlink==1 and str(q.relative_to(p)) in allowed and s.st_size<=131072)
+                for name in ('inputs.json','plan.json','app-backup-receipt.json','app-offhost-receipt.json'):
+                    p=root/name
+                    if os.path.lexists(p):
+                        s=p.lstat(); assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600 and s.st_size<=2097152
+            print(json.dumps({'plan_exists':os.path.lexists(root/'plan.json')}))
+          - '{{ web_engine_source_files | to_json }}'
+      changed_when: false
+      check_mode: false
+      register: web_engine_preparation_metadata
+
+    - name: Default check never stages or downloads and prepared sources are immutable
+      ansible.builtin.meta: end_play
+      when: web_engine_prepare_action == 'check' or ansible_check_mode or (web_engine_preparation_metadata.stdout | from_json).plan_exists
+
+    - name: Validate only the fixed private public-metadata input and all source pins natively
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ playbook_dir }}/web_engine_prepare.py', validate-inputs]
+      delegate_to: localhost
+      changed_when: false
+      register: web_engine_native_validation
+
+    - name: Inspect only the thirteen enumerated public source files before transfer
+      ansible.builtin.stat:
+        path: '{{ playbook_dir }}/../../{{ item }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      loop: '{{ web_engine_source_files }}'
+      delegate_to: localhost
+      register: web_engine_public_source_metadata
+
+    - name: Require bounded root-owned regular single-link public sources
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.size <= 131072
+      loop: '{{ web_engine_public_source_metadata.results }}'
+
+    - name: Create only the fixed private non-operational workspace directories
+      ansible.builtin.file:
+        path: '/root/.local/security-web-engine-20261023/{{ item }}'
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+      loop: ['', source, source/deploy, source/deploy/maintenance, source/scripts, packages]
+
+    - name: Transfer only the fixed public source inventory never application or private files
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../{{ item }}'
+        dest: '/root/.local/security-web-engine-20261023/source/{{ item }}'
+        mode: '0600'
+        owner: root
+        group: root
+        follow: false
+        force: false
+      loop: '{{ web_engine_source_files }}'
+
+    - name: Generate only the empty private-bundle Python namespace marker
+      ansible.builtin.copy:
+        content: ''
+        dest: /root/.local/security-web-engine-20261023/source/scripts/__init__.py
+        mode: '0600'
+        owner: root
+        group: root
+        follow: false
+        force: false
+
+    - name: Transfer only the validated fixed metadata specification no env key or session
+      ansible.builtin.copy:
+        src: /root/trading-bot/trading_bot/.local/security-web-engine-20261023-inputs.json
+        dest: /root/.local/security-web-engine-20261023/inputs.json
+        mode: '0600'
+        owner: root
+        group: root
+        follow: false
+        force: false
+      no_log: true
+
+    - name: Transfer only the two verified existing backup metadata receipts never backup payloads
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '/root/.local/security-web-engine-20261023/{{ item.destination }}'
+        mode: '0600'
+        owner: root
+        group: root
+        follow: false
+        force: false
+      loop:
+        - {source: /root/secure-envs/trading-bot/production-backups/evidence/security-host-maintenance-20261023.json, destination: app-backup-receipt.json}
+        - {source: /root/trading-bot/trading_bot/.local/security-maintenance-20261023-offhost.json, destination: app-offhost-receipt.json}
+      no_log: true
+
+    - name: Hash only the staged enumerated public code before executing any transferred Python
+      ansible.builtin.stat:
+        path: '/root/.local/security-web-engine-20261023/source/{{ item }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop: "{{ web_engine_source_files + ['scripts/__init__.py'] }}"
+      register: web_engine_staged_code
+
+    - name: Require native-verified source bytes and exact empty namespace before remote execution
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.mode == '0600'
+          - item.stat.size <= 131072
+          - item.stat.checksum == ('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' if item.item == 'scripts/__init__.py' else (web_engine_native_validation.stdout | from_json).source_sha256[item.item])
+      loop: '{{ web_engine_staged_code.results }}'
+
+    - name: Verify the staged metadata input bytes before importing transferred Python
+      ansible.builtin.stat:
+        path: /root/.local/security-web-engine-20261023/inputs.json
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      register: web_engine_staged_inputs
+
+    - name: Require the exact private native-validated metadata input
+      ansible.builtin.assert:
+        that:
+          - web_engine_staged_inputs.stat.isreg
+          - not web_engine_staged_inputs.stat.islnk
+          - web_engine_staged_inputs.stat.uid == 0
+          - web_engine_staged_inputs.stat.nlink == 1
+          - web_engine_staged_inputs.stat.mode == '0600'
+          - web_engine_staged_inputs.stat.size <= 65536
+          - web_engine_staged_inputs.stat.checksum == (web_engine_native_validation.stdout | from_json).inputs_sha256
+
+    - name: Hash only the two staged backup metadata receipts before remote execution
+      ansible.builtin.stat:
+        path: '/root/.local/security-web-engine-20261023/{{ item }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop: [app-backup-receipt.json, app-offhost-receipt.json]
+      register: web_engine_staged_receipts
+
+    - name: Require immutable native-verified private metadata receipt bytes
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.mode == '0600'
+          - item.stat.size <= 2097152
+          - item.stat.checksum == (web_engine_native_validation.stdout | from_json).receipt_sha256[item.item]
+      loop: '{{ web_engine_staged_receipts.results }}'
+
+    - name: Prepare exact public packages and fresh actual private metadata plan never apply
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, /root/.local/security-web-engine-20261023/source/deploy/maintenance/web_engine_prepare.py, prepare]
+      register: web_engine_prepared
+      timeout: 1500
+
+    - name: Report only bounded plan integrity and preparation status
+      ansible.builtin.debug:
+        msg: '{{ web_engine_prepared.stdout | from_json }}'

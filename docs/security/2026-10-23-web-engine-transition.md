@@ -88,6 +88,21 @@ enablement intents, 8 datastores/probes, immutable public source files and exact
 old/new offline debs. It refers to the actual existing application backup and
 off-host-copy receipts. No placeholder Market/off-host `PASS` receipt is used.
 
+The backup tool's explicit `--bluegreen-source-env` tuple correlates the backup
+journal with a real immutable Market image for **host-maintenance correlation**;
+it is not a claim about a future activation target, that the current processor
+uses this build signature, or that all seven Market components use one version.
+The current processor lacks its input-signature label,
+so no value is invented for it. An actual active capture image with all three
+authentic revision/tree/input-signature labels is selected instead. Admission
+requires that exact image in the frozen active Market baseline and re-reads only
+those three public OCI labels. The last active-daemon quiesced checkpoint durably
+records that exact proof. Only the same owned stopped-engine phases may rely on
+it while Docker is intentionally unavailable; active-daemon phases and abort
+restoration re-read the actual labels. The unchanged 27-row baseline records the actual
+mixed images independently. The receipt basename remains the existing backup
+tool's mandatory `market-pipeline-backup-receipt.json`.
+
 Admission proves containerd namespaces exactly `moby` and `moby_history`, only
 the expected running Docker task IDs in `moby`, no tasks in `moby_history`,
 healthy overlayfs snapshotter, systemd cgroups v2, and the existing image store.
@@ -189,8 +204,80 @@ security gates and the separately requested clean-unit acceptance are complete.
 - Native default full guard must pass before explicit apply. Observe and retain
   actual journal, backup, remote verification, active daemon/runc/containerd,
   exact restored identities/intents and API health evidence afterward.
-- On failure the durable reservation and phase remain. No generic automatic
-  adoption/retry/downgrade exists; a separately reviewed bounded recovery is
-  required. A completed operation's last restorable encrypted backup must stay
+- After the package boundary, ambiguous failures retain the durable reservation
+  and phase. No generic automatic adoption/retry/downgrade exists; a separately
+  reviewed bounded recovery is required. A completed operation's last restorable encrypted backup must stay
   until superseded by another verified backup; remove superseded artifacts by
   the project's bounded retention policy, never retain every attempt forever.
+
+## New 24 October window: bounded work and truthful recovery
+
+The newly authorized outer deadline is **2026-10-24 04:41:00 UTC**. Only the
+fresh `host-patch-03` reverse-SSH lane receives that expiry; previous identities
+retain their old expiry and are not extended or adopted. Native's completed
+kernel transaction and its original bound guard are not modified by this work.
+
+Preparation downloads and verifies all nine old/new public packages, checks the
+actual SSH/off-host capacity, freezes the real metadata and validates the source
+before the first downtime action. The remote **12 GiB** free-space admission
+floor remains unchanged; a shortfall blocks admission, not a reason to weaken it.
+
+The apply controller requires at least **65 minutes remaining** before creating
+its reservation. Its first Ansible child runs only `pre_install`: quiescence,
+strict Market dump/restore, quiescent store backup, encryption and verified
+off-host retention. That entire child is cut off at deadline minus **35 minutes**,
+inside a uniquely named transient systemd **scope**, retaining the three lock
+descriptors through direct exec. Each stage has finite RuntimeMax/stop limits,
+whole-control-group termination and no service restart mechanism. Before any
+automatic restore, the parent verifies exact nonce/digest ownership metadata,
+stops only that scope and proves its cgroup absent or recursively unpopulated;
+a leader/PGID exit alone is never accepted. A foreign or still-populated scope
+retains the durable fences without attempting restore. The same parent keeps
+all three kernel flocks. The second `install_restore` child
+starts only when that 35-minute margin remains. Immediately before recording
+`installing`, after package/backup verification, a fresh check requires at least
+**30 minutes**. These are conservative admission bounds, not a measured promise
+that a 12 GB backup or vendor migration will finish in the window.
+
+If the first child fails or time is insufficient **before** `installing`, only
+the original still-fenced parent may attempt the narrow abort/restore path. It
+requires the exact old four package versions, unchanged source/marker/control
+proof, unchanged 27 IDs/images/mounts/networks and compatible original/no restart
+policies. It restarts the old engine, proves the original containerd store and
+task inventory, starts the eight original datastores, checks PostgreSQL/Redis,
+then starts only the 26 prior-running containers. Real container-loopback API
+smoke must pass before exact restart policies and native daemon/timer intent are
+restored. The stopped Iran migration stays stopped; enablement is never changed.
+The whole rescue has a 30-minute maximum within the remaining outer deadline.
+Only full baseline/health proof permits `aborted_restored` and deletion of its
+own two nonce/inode-bound fences. That outcome is **not security remediation**;
+the command returns failure. Failed or ambiguous rescue keeps all evidence and
+fences. SIGKILL/controller loss is not claimed to be automatically recoverable.
+
+Once `installing` is recorded, automatic old-runtime rescue is forbidden even
+if apt failed before reporting success. The separately reviewed recovery decision
+must distinguish two cases:
+
+1. **No application/native writer has restarted:** verify original control and
+   ownership, stop any engine/socket, preserve the failed stores and package
+   diagnostics privately, reverify both retained ciphertext copies, decrypt to
+   an owned bounded staging location, and verify the authenticated archive. A
+   proposed offline old-four/new-five package reversal must be simulated and
+   constrained before execution, with service auto-start suppressed. Restore
+   **both** original quiescent engine stores and original configuration together;
+   never run containerd 2.2 against a potentially modified 2.4 store. Restore
+   sessions/configuration only to the exact originally bound paths. Then prove
+   old daemon/store/27 identities before the same DB-first/health/policy/trigger
+   sequence. No recreation, role change or blind data-directory overwrite.
+2. **Any writer has restarted or that fact is unknown:** the old store snapshot
+   is not a safe live-database rollback. Preserve current stores and bind data;
+   choose a reviewed forward repair or a coordinated application/Market restore
+   with explicit data-loss/consistency analysis. The old debs and existence of an
+   archive alone do not authorize a downgrade or prove that this can fit the
+   remaining window.
+
+The second recovery is a concrete operator review boundary, **not an implemented
+automatic rollback tool**. If that residual risk and the measured preparation
+facts do not support recoverability before the deadline, stop at preparation;
+do not begin quiescence merely to meet a security-completion target. Neither
+these tests nor the 30-minute reserve guarantees a 90-minute recovery outcome.
