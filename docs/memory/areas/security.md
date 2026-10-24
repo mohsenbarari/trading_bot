@@ -21,6 +21,15 @@
   cancellation from death/absence or adopt old C07/Native15 controls. Configf3 and
   OCIa6 are distinct. Normal backup/crypto may consume protected inputs; no
   diagnostic Env/session/key read/copy/hash, quota bypass or hostdata fixtures.
-- App 8da historical candidate retains 44 HIGH/eight IDs. Preserve raw findings and
-  failed/incomplete audits; no green by waiver/deletion. ACL legacy callers need
-  exact-role assessment, not blanket FIXED. Tests deny ambient host/network calls.
+- Runtime audits completed Native 8/8 and Web05 12/12. Mixed-archive normalization
+  passed actual F79/994 scans; preserve earlier failed evidence.
+- App 8da retains raw 44 HIGH/eight IDs; its serving-role dossier records 43
+  source/component/version assessments and conditional ACL, never blanket FIXED.
+  Actual candidate binding/role checks remain required. PG49a8/Redis98c4 passed
+  revised vendor builds/scans; PostgreSQL retains Windows-only UNKNOWN with Linux
+  code-absence evidence. These are candidates, not activated releases.
+- No green by waiver/deletion. Tests deny ambient host/network calls. Disable
+  new App runtime bytecode writes through one explicit security Env override;
+  do not adopt working-layer cache/code changes or expose private Env values.
+- Do not inherit Python collector address-space caps into Go CLI children;
+  retain finite CPU/wall and output limits enforced before accumulation.
