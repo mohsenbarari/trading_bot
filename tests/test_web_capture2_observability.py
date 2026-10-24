@@ -2,7 +2,12 @@ import copy
 from contextlib import ExitStack
 import importlib.util
 import json
+import fcntl
+import os
 from pathlib import Path
+import tempfile
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -220,7 +225,7 @@ class CaptureObservabilityTests(unittest.TestCase):
 
     def test_current_inventory_profile_changes_only_the_typed_capture_identity(self):
         V = settings()
-        V.AFTER_CAPTURE04_ID = NEW
+        V.AFTER_CAPTURE05_ID = NEW
         plan = {'schema':'web_engine_transaction_plan/1','operation_id':'original',
                 'containers':[copy.deepcopy(row) for row in rows().values()], 'datastore_probes':['unchanged']}
         original = copy.deepcopy(plan)
@@ -316,6 +321,51 @@ class CaptureObservabilityTests(unittest.TestCase):
             self.assertEqual(M.network_identities(settings(),None,['second','first']),{'first':'d'*64,'second':'d'*64})
         self.assertEqual([row[-1] for row in commands],['first','second'])
         self.assertTrue(all(row[1:3]==['network','inspect'] for row in commands))
+
+    def test_only_oom_enabled_pointer_defaults_are_semantically_equal(self):
+        before={'OomKillDisable':None,'Memory':402653184,'Binds':[],'Mounts':[]}
+        created={**before,'OomKillDisable':False}
+        self.assertEqual(M.canonical_host(before),M.canonical_host(created))
+        self.assertNotEqual(M.canonical_host(before),M.canonical_host({**before,'OomKillDisable':True}))
+        self.assertNotEqual(M.canonical_host(before),M.canonical_host({**created,'Memory':1}))
+
+    def test_closed_never_started_baseline_resolves_only_its_deferred_network_ids(self):
+        V=settings();V.AFTER_CAPTURE05_ID=OLD
+        before=rows(running=False)[OLD];after=rows(NEW,CANDIDATE,running=False)[NEW]
+        net={'NetworkID':'','IPAMConfig':{'IPv4Address':'','IPv6Address':''},'DriverOpts':None,'Links':None,'Aliases':['service','name'],'GwPriority':0}
+        before['networks']={'net':copy.deepcopy(net)};after['networks']={'net':copy.deepcopy(net)}
+        M.post_parity(V,before,after,CANDIDATE,network_ids={'net':'d'*64})
+        V.AFTER_CAPTURE05_ID='e'*64
+        with self.assertRaisesRegex(RuntimeError,'prior_declared_network_identity_changed'):
+            M.post_parity(V,before,after,CANDIDATE,network_ids={'net':'d'*64})
+
+    def test_marker_wait_acquires_after_short_real_owner_unlock_without_mutation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'marker';path.write_bytes(b'public-owned-marker')
+            before=path.stat();owner=os.open(path,os.O_RDWR);waiter=os.open(path,os.O_RDWR)
+            fcntl.flock(owner,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            thread=threading.Thread(target=lambda:(time.sleep(.12),fcntl.flock(owner,fcntl.LOCK_UN)))
+            thread.start()
+            try:
+                M.acquire_marker(waiter,SimpleNamespace(seconds=lambda maximum:.8))
+                self.assertEqual((path.stat().st_dev,path.stat().st_ino),(before.st_dev,before.st_ino))
+                self.assertEqual(path.read_bytes(),b'public-owned-marker')
+            finally:
+                thread.join();os.close(owner);os.close(waiter)
+
+    def test_marker_busy_times_out_statically_without_ownership_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'marker';path.write_bytes(b'public-owned-marker')
+            owner=os.open(path,os.O_RDWR);waiter=os.open(path,os.O_RDWR)
+            fcntl.flock(owner,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            try:
+                with self.assertRaisesRegex(RuntimeError,'capture_marker_busy'):
+                    M.acquire_marker(waiter,SimpleNamespace(seconds=lambda maximum:.12))
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(waiter,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                self.assertEqual(path.read_bytes(),b'public-owned-marker')
+            finally:
+                os.close(owner);os.close(waiter)
 
 if __name__ == '__main__':
     unittest.main()

@@ -16,6 +16,7 @@ ROLE_ENV = Path('/srv/trading-bot/market-pipeline-releases/f3be9ae2c4e9df0da31ab
 CID = '9870311065b13646767dfad1e48214d6a231e3898e1f248bb9559edd8926966c'
 AFTER_CAPTURE02_ID = '9d427b7bf4c89f954040cad09e591bbbe01eca6c0e935abbbab87dcd9a8d5538'
 AFTER_CAPTURE04_ID = 'b29cc1b589fd5f255dd8086419cb16a155769667618f2859cca6702a05377a76'
+AFTER_CAPTURE05_ID = '6e6460ecf8902cbb5f89f4478247914a6aece3ed183944232181383f8cf9acb3'
 BASE = 'sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6'
 CANDIDATE = 'sha256:a96439e0366c40b8aca012d2a0b4c3254e2c8257880d67f6d6f0d53361ad924c'
 FUNCTIONAL_IMAGE = 'sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b'
@@ -96,10 +97,11 @@ def duration(value):
     return int(match[1]) * {'ns': 1, 'us': 1000, 'ms': 1000000, 's': 1000000000, 'm': 60000000000, 'h': 3600000000000}[match[2]]
 
 def main(*, existing=False, incident_profile='original'):
-    require(incident_profile in {'original','after_capture02','after_capture04'}, 'incident_profile_invalid')
-    current_id = {'original':CID,'after_capture02':AFTER_CAPTURE02_ID,'after_capture04':AFTER_CAPTURE04_ID}[incident_profile]
-    require(incident_profile != 'after_capture04' or existing,'functional_profile_requires_existing_public_context')
-    candidate_image = FUNCTIONAL_IMAGE if incident_profile == 'after_capture04' else CANDIDATE
+    require(incident_profile in {'original','after_capture02','after_capture04','after_capture05'}, 'incident_profile_invalid')
+    current_id = {'original':CID,'after_capture02':AFTER_CAPTURE02_ID,'after_capture04':AFTER_CAPTURE04_ID,'after_capture05':AFTER_CAPTURE05_ID}[incident_profile]
+    functional = incident_profile in {'after_capture04','after_capture05'}
+    require(not functional or existing,'functional_profile_requires_existing_public_context')
+    candidate_image = FUNCTIONAL_IMAGE if functional else CANDIDATE
     require(os.geteuid() == 0, 'native_root_required')
     safe(Path(DOCKER))
     before_env = safe(ROLE_ENV, private=True)
@@ -119,7 +121,7 @@ def main(*, existing=False, incident_profile='original'):
     expected_files['capture2-image-only.yml'] = ('services:\n  ' + SERVICE + ':\n    image: ' + CANDIDATE + '\n'
         '    restart: unless-stopped\n    environment:\n      MARKET_PIPELINE_RELEASE_SHA: ' + PUBLIC_REVISION + '\n').encode()
     require(set(expected_files) == {'compose.yml','compose.web.yml','capture2-image-only.yml'}, 'public_file_inventory_invalid')
-    if incident_profile == 'after_capture04':
+    if functional:
         expected_files[str(FUNCTIONAL_OVERLAY)] = ('services:\n  '+SERVICE+':\n    image: '+FUNCTIONAL_IMAGE+'\n').encode()
     for name, data in expected_files.items():
         path = ROOT / name
@@ -143,7 +145,7 @@ def main(*, existing=False, incident_profile='original'):
             '--env-file', str(ROLE_ENV), '-f', str(ROOT / 'compose.yml'),
             '-f', str(ROOT / 'compose.web.yml'), '-f', str(ROOT / 'capture2-image-only.yml'),
             '--profile', 'web', 'config', '--format', 'json']
-    if incident_profile == 'after_capture04':
+    if functional:
         at = args.index('--profile')
         args[at:at] = ['-f',str(FUNCTIONAL_OVERLAY)]
     code, raw, error = bounded(args)
@@ -157,10 +159,12 @@ def main(*, existing=False, incident_profile='original'):
     rendered = json.loads(raw)
     service = rendered['services'][SERVICE]
     live = query([DOCKER, 'inspect', '--format',
-        '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"config":{{json .Config}},"host":{{json .HostConfig}},"mounts":{{json .Mounts}},"networks":{{json .NetworkSettings.Networks}}}', current_id])
+        '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"config":{{json .Config}},"host":{{json .HostConfig}},"mounts":{{json .Mounts}},"networks":{{json .NetworkSettings.Networks}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"pid":{{json .State.Pid}}}', current_id])
     image = query([DOCKER, 'image', 'inspect', '--format', '{"id":{{json .Id}},"config":{{json .Config}}}', service['image']])
     base = query([DOCKER, 'image', 'inspect', '--format', '{"id":{{json .Id}},"config":{{json .Config}}}', BASE])
     require(live['id'] == current_id and live['name'] == '/' + PROJECT + '-' + SERVICE + '-1', 'target_identity_changed')
+    if incident_profile == 'after_capture05':
+        require(live['running'] is False and live['restarting'] is False and live['pid'] == 0,'current_created_capture_required')
     config, host, defaults = live['config'], live['host'], image['config']
     expected_env = environment(defaults.get('Env'))
     expected_env.update(service.get('environment', {}))
@@ -184,7 +188,7 @@ def main(*, existing=False, incident_profile='original'):
     diagnostic_labels = {'io.gold-trade.observability.base-image': BASE,
                          'io.gold-trade.observability.source-sha256': PATCHED_SOURCE,
                          'io.gold-trade.observability.status': 'diagnostic_not_security_acceptance'}
-    if incident_profile == 'after_capture04':
+    if functional:
         diagnostic_labels.update(FUNCTIONAL_LABELS)
     old_labels = dict(base['config'].get('Labels') or {})
     old_env = environment(config.get('Env'))
@@ -240,8 +244,11 @@ def main(*, existing=False, incident_profile='original'):
     old_working = '/root/secure-envs/trading-bot/release-control/production-4ef8e6dc-cutover/.web-bluegreen.json.compose.242959.6db610ac44418756'
     if incident_profile != 'original':
         old_working = str(ROOT)
-        suffix = '04' if incident_profile == 'after_capture04' else '02'
-        expected_config_files = ','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml'))+',/root/.local/security-capture2-observability-20261024-'+suffix+'-activation/rollback.yml'
+        suffix = {'after_capture02':'02','after_capture04':'04','after_capture05':'05'}[incident_profile]
+        expected_config_files = ','.join(str(ROOT/name) for name in ('compose.yml','compose.web.yml','capture2-image-only.yml'))
+        if incident_profile == 'after_capture05':
+            expected_config_files += ','+str(FUNCTIONAL_OVERLAY)
+        expected_config_files += ',/root/.local/security-capture2-observability-20261024-'+suffix+'-activation/rollback.yml'
         expected_environment_file = str(ROLE_ENV)
     else:
         expected_config_files = old_working+'/compose.yml,'+old_working+'/compose.web.yml'
@@ -251,7 +258,7 @@ def main(*, existing=False, incident_profile='original'):
     if incident_profile != 'original':
         checks['compose_cli_provenance_format'] = compose_labels.get('com.docker.compose.version') == '2.40.3'
     checks['old_image_reference_schema'] = isinstance(config.get('Image'),str) and bool(re.fullmatch(r'[A-Za-z0-9._:/@-]{1,256}',config['Image']))
-    checks['dynamic_network_configuration'] = all(not (item or {}).keys() - {'aliases'} for item in service['networks'].values()) and all(not item.get('IPAMConfig') and not item.get('DriverOpts') and not item.get('Links') for item in live['networks'].values())
+    checks['dynamic_network_configuration'] = all(not (item or {}).keys() - {'aliases'} for item in service['networks'].values()) and all(item.get('IPAMConfig') in (None,{'IPv4Address':'','IPv6Address':''}) and not item.get('DriverOpts') and not item.get('Links') for item in live['networks'].values())
     # Every HostConfig field is handled, including inactive defaults. Empty
     # collection vs null is the only normalization for documented empty lists.
     empty_fields = {'BlkioDeviceReadBps','BlkioDeviceReadIOps','BlkioDeviceWriteBps','BlkioDeviceWriteIOps',
@@ -276,7 +283,7 @@ def main(*, existing=False, incident_profile='original'):
     checks['full_host_empty_defaults'] = all(host.get(k) is None or host.get(k) == [] for k in empty_fields - {'PortBindings'}) and host.get('PortBindings') in (None,{})
     checks['full_host_zero_defaults'] = all(type(host.get(k)) is int and host[k] == 0 for k in zero_fields)
     checks['full_host_text_defaults'] = all(host.get(k) == '' for k in text_fields)
-    checks['full_host_fixed_defaults'] = all(host.get(k) == v for k,v in host_fixed.items())
+    checks['full_host_fixed_defaults'] = all((host.get(k) is None or host.get(k) is False) if k == 'OomKillDisable' else host.get(k) == v for k,v in host_fixed.items())
     checks['kernel_masked_paths'] = set(host.get('MaskedPaths') or []) == masked
     checks['kernel_readonly_paths'] = set(host.get('ReadonlyPaths') or []) == readonly
     expected_binds = sorted(item['source'] + ':' + item['target'] + (':ro' if item.get('read_only') else ':rw') for item in service.get('volumes',[]))

@@ -1,6 +1,6 @@
 # Capture2 diagnostic provenance and functional replay recovery
 
-Current recovery packet05 uses functional image
+Current recovery packet06 uses functional image
 `sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b`.
 The isolated read-only business-state probe reproduced `SQLITE_FULL` (13)
 with the original full-sort query and 16MiB temporary filesystem. The reviewed
@@ -13,7 +13,7 @@ The actual image passed canonical/iterator tests and a 60,000-row synthetic
 stream with 6,213-byte traced peak allocation, without session/config mounts.
 This is a functional capture fix; it does not declare security remediation or
 production acceptance. The earlier sections retain the diagnostic admission
-history; the stopped-first procedure below is authoritative for packet05.
+history; the stopped-first procedure below is authoritative for packet06.
 
 The exact existing image is
 `sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6`.
@@ -112,7 +112,7 @@ inhibitors must remain intact; this operation does not install persistent boot
 guards or authorize reboot.
 
 The current inspection profile binds the exact BASE container produced by
-owned rollback04, prior04 audit and original C07 manifest. It records the
+owned stopped rollback05, prior05 audit and original C07 manifest. It records the
 capture-only identity delta without modifying historical manifests or evidence.
 The public functional image overlay is
 `/root/.local/security-capture2-replay-fix-20261024-01/capture2-functional-image.yml`.
@@ -139,6 +139,13 @@ assignments are runtime observations. Native network inspection binds declared
 network names to IDs; only a never-started PID0 candidate may have unallocated
 empty IDs. After start, actual IDs must match. Only the exact empty IPv4/IPv6
 IPAM dictionary is equivalent to no explicit IPAM configuration.
+The actual daemon serializes `OomKillDisable=false` before start and `null`
+after start; both keep the OOM killer enabled. Only that proven pointer default
+is equivalent; `true` and changes to other resource controls remain rejected.
+The exact never-started reference may defer its network IDs under the same
+native name-to-ID proof. The maintenance marker waits at most five seconds for
+an ordinary monitoring holder, then rechecks its original inode and payload;
+source/reservation locks remain nonblocking and no ownership is rewritten.
 
 Unexpected replacement/configuration failures trigger the same normal Compose
 operation with the retained immutable base image. Rollback also handles an
