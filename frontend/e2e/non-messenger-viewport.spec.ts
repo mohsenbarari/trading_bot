@@ -112,6 +112,10 @@ async function gotoRouteWithNavigationRetry(page: Page, path: string) {
 }
 
 async function waitForStableRouteLayout(page: Page) {
+  // Route content can render before the first-route boot overlay finishes its
+  // 250ms fade. Audit only after it is actually hidden, not merely mounted.
+  await page.locator('html[data-app-mounted="1"]').waitFor({ state: 'attached', timeout: 10_000 })
+  await page.locator('#boot-loader').waitFor({ state: 'hidden', timeout: 10_000 })
   await page.evaluate(async () => {
     await document.fonts?.ready
     const sleep = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration))

@@ -17,6 +17,33 @@ if (!evaluateCall || !ts.isCallExpression(evaluateCall) || evaluateCall.expressi
 const callback = ts.transpileModule(`(${evaluateCall.arguments[0].getText(syntax)})`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
 }).outputText
+const layoutWait = syntax.statements.find(node => (
+  ts.isFunctionDeclaration(node) && node.name?.text === 'waitForStableRouteLayout'
+))
+if (!layoutWait) throw new Error('viewport readiness regression must execute the actual layout wait')
+const waitForLayout = window.eval(ts.transpileModule(`(${layoutWait.getText(syntax)})`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+}).outputText)
+
+function deferred() {
+  let resolve
+  const promise = new Promise(done => { resolve = done })
+  return { promise, resolve }
+}
+
+function readinessPage({ mounted = Promise.resolve(), hidden = Promise.resolve() } = {}) {
+  const mountedWait = vi.fn(() => mounted)
+  const hiddenWait = vi.fn(() => hidden)
+  const page = {
+    locator: vi.fn(selector => {
+      if (selector === 'html[data-app-mounted="1"]') return { waitFor: mountedWait }
+      if (selector === '#boot-loader') return { waitFor: hiddenWait }
+      throw new Error('unexpected readiness selector')
+    }),
+    evaluate: vi.fn(async () => {}),
+  }
+  return { page, mountedWait, hiddenWait }
+}
 
 // Execute the browser audit itself, not a copied approximation of its rules.
 function geometry({ lastTop = 700, navControlTop = 830 } = {}) {
@@ -67,5 +94,43 @@ describe('actual non-messenger viewport geometry callback', () => {
 
   it('preserves the production viewport test minimum clearance assertion', () => {
     expect(source).toContain(').toBeGreaterThanOrEqual(12)')
+  })
+})
+
+describe('actual non-messenger route readiness', () => {
+  it('does not sample layout until both app mount and boot-overlay hiding finish', async () => {
+    const mounted = deferred()
+    const hidden = deferred()
+    const { page, mountedWait, hiddenWait } = readinessPage({ mounted: mounted.promise, hidden: hidden.promise })
+    const waiting = waitForLayout(page)
+    expect(mountedWait).toHaveBeenCalledWith({ state: 'attached', timeout: 10_000 })
+    expect(hiddenWait).not.toHaveBeenCalled()
+    expect(page.evaluate).not.toHaveBeenCalled()
+
+    mounted.resolve()
+    await Promise.resolve()
+    expect(hiddenWait).toHaveBeenCalledWith({ state: 'hidden', timeout: 10_000 })
+    expect(page.evaluate).not.toHaveBeenCalled()
+
+    hidden.resolve()
+    await waiting
+    expect(page.evaluate).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails instead of auditing through a stuck visible boot overlay', async () => {
+    const failure = new Error('boot overlay stayed visible')
+    const { page, hiddenWait } = readinessPage()
+    hiddenWait.mockRejectedValue(failure)
+    await expect(waitForLayout(page)).rejects.toBe(failure)
+    expect(page.evaluate).not.toHaveBeenCalled()
+  })
+
+  it('fails before layout sampling or loader handling when the app never mounts', async () => {
+    const failure = new Error('app did not mount')
+    const { page, mountedWait, hiddenWait } = readinessPage()
+    mountedWait.mockRejectedValue(failure)
+    await expect(waitForLayout(page)).rejects.toBe(failure)
+    expect(hiddenWait).not.toHaveBeenCalled()
+    expect(page.evaluate).not.toHaveBeenCalled()
   })
 })
