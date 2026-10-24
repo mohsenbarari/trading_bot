@@ -4999,7 +4999,7 @@ prepare_pip_packages() {
             -v "$output_dir:/tmp/pip_packages:ro" \
             -v "$bootstrap_requirements:/tmp/pip-bootstrap-requirements.txt:ro" \
             -v "$output_dir/.requirements-without-psycopg2.txt:/tmp/requirements.txt:ro" \
-            "python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
+            "python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
             log "Existing wheel cache failed validation; rebuilding it."
             needs_refresh=1
         fi
@@ -5054,7 +5054,7 @@ build_image_bundle_signature() {
         printf 'signature_scope=%s\n' "iran-immutable-runtime-image-v3"
         printf 'iran_image_platform=%s\n' "$IRAN_IMAGE_PLATFORM"
         printf 'iran_host_arch=%s\n' "$IRAN_HOST_ARCH"
-        printf 'python_base_image=%s\n' "python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf"
+        printf 'python_base_image=%s\n' "python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3"
         printf 'postgres_image=%s\n' "postgres:15-alpine"
         printf 'redis_image=%s\n' "redis:7-alpine"
         # Production containers execute only the receipt-bound image payload.
@@ -5102,6 +5102,7 @@ market_pipeline_image_input_signature() {
             deploy/market-data/migrations \
             deploy/production/pip-bootstrap-requirements.txt \
             scripts/verify_psycopg2_runtime.py \
+            scripts/verify_sqlite_runtime.py \
             scripts/verify_image_trust.py
     } | sha256sum | awk '{print $1}'
 }
@@ -5253,6 +5254,7 @@ prepare_market_pipeline_control_payload() {
         deploy/market-data/compose.bot.yml \
         deploy/production/pip-bootstrap-requirements.txt \
         scripts/verify_psycopg2_runtime.py \
+        scripts/verify_sqlite_runtime.py \
         scripts/verify_image_trust.py \
         scripts/prepare_market_pipeline_release.py \
         scripts/prepare_market_pipeline_primary_release.py \

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
-ARG PYTHON_BASE_IMAGE=python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf
+ARG PYTHON_BASE_IMAGE=python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3
 ARG SOURCE_DATE_EPOCH=0
 
 FROM ${PYTHON_BASE_IMAGE} AS patched-base
@@ -10,6 +10,7 @@ RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py
 COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py
+COPY scripts/verify_sqlite_runtime.py /usr/local/libexec/verify_sqlite_runtime.py
 COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/pip-bootstrap-requirements.txt \
     && rm /tmp/pip-bootstrap-requirements.txt
@@ -70,6 +71,7 @@ ENV LANG=C.UTF-8 \
 COPY --from=assembly /rootfs/ /
 WORKDIR /app
 RUN python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python
+RUN python -I -B /usr/local/libexec/verify_sqlite_runtime.py
 
 USER 10001:10001
 ENTRYPOINT ["python", "-m", "core.market_intelligence.private_pipeline_foundation"]

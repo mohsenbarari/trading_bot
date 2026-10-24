@@ -74,11 +74,11 @@ class ImageTrustSecurityTests(unittest.TestCase):
         self.assertIn('"status": "FAIL"', output.getvalue())
 
     def test_image_sources_refresh_os_packages_and_apply_effective_trust_gate(self):
-        digest = "sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf"
+        digest = "sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3"
         for relative in ("Dockerfile", "Dockerfile.iran", "deploy/market-data/Dockerfile"):
             with self.subTest(relative=relative):
                 source = (ROOT / relative).read_text()
-                self.assertIn("3.11.17-slim-bookworm@" + digest, source)
+                self.assertIn("3.11.17-slim-trixie@" + digest, source)
                 self.assertNotIn("bullseye", source)
                 self.assertIn("upgrade -y --no-install-recommends", source)
                 self.assertIn("ca-certificates", source)

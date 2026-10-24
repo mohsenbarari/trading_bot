@@ -5,7 +5,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = 'python:3.11.17-slim-bookworm@sha256:f06d01d4ba3f8ad5af45a3ec87df19c1d317d8e8961edc0fabda61811af6f7cf'
+BASE = 'python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3'
 
 
 def stages(source):
@@ -35,7 +35,7 @@ def assert_runtime_isolation(source):
     base = '\n'.join(recipe['patched-base']['instructions'])
     runtime = '\n'.join(recipe['runtime']['instructions'])
     install = re.search(r'apt-get[^\n]+ install -y --no-install-recommends (.+?)\s*&&', base).group(1)
-    assert set(install.split()) == {'ca-certificates', 'libpq5', 'libmagic1', 'libstdc++6'}
+    assert set(install.split()) == {'ca-certificates', 'libpq5', 'libmagic1t64', 'libstdc++6'}
     assert not re.search(r'\b(build-essential|libpq-dev|gcc|g\+\+|make|binutils|perl|libc6-dev)\b', base + '\n' + runtime)
     copies = [line for line in recipe['runtime']['instructions'] if line.startswith('COPY --from=')]
     assert copies == ['COPY --from=wheel-builder /wheelhouse/ /tmp/wheelhouse/']
@@ -51,9 +51,10 @@ class CoreImageBuildSecurityTests(unittest.TestCase):
         for old, new in (
             ('FROM patched-base AS runtime', 'FROM wheel-builder AS runtime'),
             ('COPY --from=wheel-builder /wheelhouse/ /tmp/wheelhouse/', 'COPY --from=wheel-builder /usr/ /usr/'),
-            ('ca-certificates libpq5 libmagic1 libstdc++6', 'ca-certificates libpq5 libmagic1 libstdc++6 build-essential'),
-            ('ca-certificates libpq5 libmagic1 libstdc++6', 'ca-certificates libpq5 libmagic1'),
+            ('ca-certificates libpq5 libmagic1t64 libstdc++6', 'ca-certificates libpq5 libmagic1t64 libstdc++6 build-essential'),
+            ('ca-certificates libpq5 libmagic1t64 libstdc++6', 'ca-certificates libpq5 libmagic1t64'),
         ):
+            self.assertIn(old, self.source, 'negative fixture must actually modify the current recipe')
             with self.subTest(mutation=new), self.assertRaises(AssertionError):
                 assert_runtime_isolation(self.source.replace(old, new))
 
