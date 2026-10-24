@@ -445,3 +445,53 @@ must succeed under that exact environment and report core2.21.5. This is
 operationally read-only; trusted Ansible may create private scratch/cache
 files. Metadata CLI locale behavior and every artifact/diagnostic bound are
 unchanged. Actual backup, restore and installation evidence is still required.
+
+## Current-profile successor: cold archive planning only
+
+The original C07 source, plan, expired deadline and aborted journal remain
+historical evidence. They cannot be made runnable by replacing a deadline or
+pretending the QA/Capture changes never occurred. The new pure current-profile
+helper derives the accepted 27-container intent: parked10, retained17/16 running,
+six running datastores and the functional Capture06 image. It binds managed04's
+configuration identity separately from the source image's OCI provenance and
+validates the actual HOT3 control chain as backup data. It grants no new window,
+current runtime attestation, package-write authority or cold-archive proof.
+
+The first successor packet, `web_engine_cold_archive_plan.py`, is also pure and
+has no CLI/apply, host, SSH, package or reboot action. It validates that profile
+and proposes the exact cold scope: both engine roots, Market sessions and secure
+Market configuration, plus only explicitly present Docker/containerd optional
+configuration paths. `du -sx --block-size=1` over those operands supplies allocated
+bytes without opening file contents. The existing 24-GiB raw scope bound remains;
+the archive preserves ACLs/xattrs/numeric ownership/sparse data and does not cross
+other-device mounts beneath an operand. This is not a whole-host root backup.
+
+The HOT3 dump and cold engine archive are **two separately required artifacts**.
+The proposal avoids embedding another copy of the already independently verified
+HOT3 dump inside the cold archive. Its existing encrypted Native copy stays
+retained. This does not replace a fresh quiesced engine-store archive: before any
+package write, that archive must still be created under owned quiescence, compared
+against its sources, encrypted/reconciled by the normal tool, and independently
+verified durable offhost. External Market data remains preserved in place;
+database backup age/schema admission and data-first recovery are explicit gates.
+
+The proposed cold destination is a new cipher-only namespace on the existing
+Finland host `65.109.214.203`, not an application deployment or target stack.
+Its caller-SHA-bound public receipt uses `web_engine_cold_destination/1` with
+host/port/user/root, full directory binding, four-field mount identity and host
+fingerprint. The source plan checks the reviewed root ext4 mount UUID
+`ce366399-3430-441e-8a6f-6f5621f0c7a2`, device2049, approved ED25519 fingerprint
+and root-only `0700` directory. It does not reuse Native's attached-backup UUID
+or claim that this proposed directory, fresh transport or receipt already exists.
+Actual destination staging and the dedicated finite SSH lane remain separate.
+
+Free-space samples are caller-reviewed metadata, never reservations. The finite
+attempted compressed-archive cap is the smallest of the existing 10-GiB bound,
+the destination's available bytes after an 8-GiB reserve, 1-MiB control allowance
+and cipher overhead, and Web's capacity for simultaneous compressed plaintext
+and ciphertext with the same reserve. No compression ratio or actual cipher fit
+is inferred from allocated input size. A fresh finite controller must remeasure
+and enforce stream/disk bounds, actual cipher fit and durability. A new approved
+window, fresh transport, live runtime/storage checks and restore reserve are
+required before mutation. Persistent boot guards and any Web kernel reboot
+remain separately admitted work; this source packet authorizes neither.

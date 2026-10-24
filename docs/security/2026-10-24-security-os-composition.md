@@ -7,7 +7,7 @@ App, frontend, Python dependencies or vendor packages. Product baseline remains
 `ba1f7616ade57558f51bb3a7fbb903243a33aab4`, security overlay remains
 `19d4c2da778f8f1edc567db4c9616c2d153980c9`. The first actual attempt failed
 before composition. The second composed and tested a derived image but failed
-finalization; no completed image export or acceptance is claimed.
+finalization. The third exported successfully; security acceptance remains false.
 
 ## First actual attempt and diagnostic correction
 
@@ -69,6 +69,34 @@ before final candidate inspection, baseline inspection and archive reading.
 Hermetic tests model actual last-tag eviction: normal finalization/export
 passes before cleanup, while premature cleanup makes the baseline lookup fail
 at its distinct phase. Both historical failed attempts remain unchanged.
+
+## Third actual attempt: export and owned cleanup completed
+
+[Run40125049596](https://github.com/mohsenbarari/trading_bot/actions/runs/40125049596),
+job120964572785, used source03bb7e0a06e8d785e5be52548c5616148ac9b69c
+and completed successfully. Its image is
+`sha256:0e4f132a9696569af9c138204fea381d3a7b02e43a7f845dc613eba107ef377c`.
+Public evidence artifact12573185101 has158889 bytes, ZIP SHA256
+`f527eec0fbaf472a65d04e8fc98c95f0580436e8bd21540e690476a42e2f4acb`.
+Root independently checked all13 composition evidence hashes, the56 focused
+tests, unchanged App/Python/libc and runtime configuration, and final owned
+alias cleanup. The final phase is complete with no first failure. Actual
+archive RepoTags are null and the daemon baseline RepoTags before aliasing are
+empty; keeping that alias until the last consumer addresses a demonstrated
+real input condition. This does not retrospectively identify the sole cause
+of the second attempt's broad finalization failure.
+
+Image artifact12573205069 has183817639 bytes, ZIP SHA256
+`c6dec94877c954e41434bc04206a054eb7b51e9836073842a6e550b0e106626b`.
+It was retained by CI only after both export and owned cleanup succeeded; the
+large image was not downloaded onto Native's constrained root disk. Public
+artifact metadata and small evidence were checked, not a local independent
+admission of the large image archive. The raw report SHA256 is
+`bd4bb593a87a9c28d1251b924a466296d39219749232785c652bdf88bb2e4ff0`.
+It retains44 HIGH,68 MEDIUM,82 LOW and one UNKNOWN row, with no CRITICAL row.
+The same eight HIGH advisory IDs, caller-level ACL work, full runtime matrix,
+final artifact admission and live activation remain open. Successful collection
+and export never change security_accepted or raw_scanner_gate_waived to true.
 
 | Packages | Run / public artifact | ZIP bytes / SHA256 | Build receipt SHA256 |
 |---|---|---|---|

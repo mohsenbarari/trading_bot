@@ -1,0 +1,135 @@
+---
+- name: Stage only public cold-engine receiver on final Finland backup filesystem
+  hosts: cold_backup
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    receiver_stage: /root/.local/security-web-engine-cold-receiver-20261024-01
+    receiver_root: /srv/trading-bot/security-backups
+    receiver_sha256: 9ecf85e2b321cab1de2dba06e121dd452825d8abdb479aa318b5b01a7237e9de
+  tasks:
+    - name: Reject inventory or path overrides before any host mutation
+      ansible.builtin.assert:
+        that:
+          - ansible_host == '65.109.214.203'
+          - ansible_user == 'root'
+          - ansible_port | int == 22
+          - receiver_stage == '/root/.local/security-web-engine-cold-receiver-20261024-01'
+          - receiver_root == '/srv/trading-bot/security-backups'
+          - receiver_sha256 == '9ecf85e2b321cab1de2dba06e121dd452825d8abdb479aa318b5b01a7237e9de'
+
+    - name: Check reviewed host and existing safe parent paths before staging
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import json,os,stat,subprocess
+            from pathlib import Path
+            assert os.geteuid()==0
+            for name in ('/','/srv','/root','/root/.local'):
+                p=Path(name)
+                if not p.exists():
+                    assert name=='/root/.local'
+                    continue
+                s=p.lstat()
+                assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022 and p.resolve()==p
+            p=Path('/srv/trading-bot')
+            if p.exists():
+                s=p.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022 and p.resolve()==p
+            assert not os.path.lexists('/srv/trading-bot/security-backups')
+            assert not os.path.lexists('/root/.local/security-web-engine-cold-receiver-20261024-01')
+            out=subprocess.run(['/usr/bin/findmnt','--json','--target','/srv','--output','TARGET,SOURCE,FSTYPE,UUID'],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5,check=True).stdout
+            assert len(out)<16384
+            assert json.loads(out)=={'filesystems':[{'target':'/','source':'/dev/sda1','fstype':'ext4','uuid':'ce366399-3430-441e-8a6f-6f5621f0c7a2'}]}
+            assert Path('/srv').stat().st_dev==2049
+            print('{"safe_fresh_destination":true,"production_changed":false}')
+      changed_when: false
+
+    - name: Exclusively create new directories without chmod or adopting existing paths
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,stat
+            from pathlib import Path
+            os.umask(0o077)
+            for name,mode in (('/srv/trading-bot',0o755),('/root/.local',0o700)):
+                p=Path(name)
+                if not os.path.lexists(p):os.mkdir(p,mode)
+                s=p.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022 and p.resolve()==p
+            for name in ('/srv/trading-bot/security-backups','/root/.local/security-web-engine-cold-receiver-20261024-01'):
+                os.mkdir(name,0o700)
+                fd=os.open(Path(name).parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+                try:os.fsync(fd)
+                finally:os.close(fd)
+            print('{"fresh_directories_created":true,"production_changed":false}')
+      changed_when: true
+
+    - name: Stage reviewed public receiver only
+      ansible.builtin.copy:
+        src: web_engine_cold_offhost.py
+        dest: '{{ receiver_stage }}/receiver.py'
+        owner: root
+        group: root
+        mode: '0700'
+        force: false
+
+    - name: Validate exact source and emit bounded public destination receipt
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import hashlib,json,os,stat,subprocess
+            from pathlib import Path
+            source=Path('/root/.local/security-web-engine-cold-receiver-20261024-01/receiver.py')
+            fd=os.open(source,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            try:
+                s=os.fstat(fd);assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o700 and 0<s.st_size<65536
+                identity=lambda v:(v.st_dev,v.st_ino,v.st_mode,v.st_uid,v.st_gid,v.st_nlink,v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+                raw=os.read(fd,s.st_size+1)
+                assert len(raw)==s.st_size and identity(s)==identity(os.fstat(fd))==identity(source.lstat())
+                assert hashlib.sha256(raw).hexdigest()=='9ecf85e2b321cab1de2dba06e121dd452825d8abdb479aa318b5b01a7237e9de'
+            finally:os.close(fd)
+            p=Path('/srv/trading-bot/security-backups');s=p.lstat()
+            assert p.resolve()==p and stat.S_ISDIR(s.st_mode) and s.st_uid==s.st_gid==0 and stat.S_IMODE(s.st_mode)==0o700 and s.st_dev==2049
+            assert list(p.iterdir())==[]
+            out=subprocess.run(['/usr/bin/findmnt','--json','--target',str(p),'--output','TARGET,SOURCE,FSTYPE,UUID'],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5,check=True).stdout
+            assert len(out)<16384
+            mount=json.loads(out)['filesystems'];assert mount==[{'target':'/','source':'/dev/sda1','fstype':'ext4','uuid':'ce366399-3430-441e-8a6f-6f5621f0c7a2'}]
+            receipt={'schema':'web_engine_cold_destination/1','host':'65.109.214.203','port':22,'user':'root','root':str(p),
+                'directory_binding':{'device':s.st_dev,'inode':s.st_ino,'uid':s.st_uid,'gid':s.st_gid,'mode':s.st_mode},
+                'mount':mount[0],'host_key_fingerprint':'SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs'}
+            print(json.dumps(receipt,sort_keys=True,separators=(',',':')))
+      changed_when: false
+      register: destination_public
+
+    - name: Retain exact public destination identity beside the receiver
+      ansible.builtin.copy:
+        content: |
+          {{ destination_public.stdout }}
+        dest: '{{ receiver_stage }}/destination.json'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+
+    - name: Report staging boundary without maintenance or security acceptance
+      ansible.builtin.debug:
+        msg:
+          receiver_source_verified: true
+          ciphertext_received: false
+          production_changed: false
+          maintenance_authorized: false
+          security_accepted: false
+          private_key_generated_or_read: false

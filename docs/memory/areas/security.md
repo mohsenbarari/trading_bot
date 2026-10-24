@@ -21,7 +21,7 @@
   continuation preserved collector,15 containers and immutable failed-parent
   receipt. Never reinterpret that failure or reuse expired windows. See24Oct
   native-brotli-refresh runbook; global security remains incomplete.
-- Actual19d App:56 focused tests/rawHIGH44/8 advisory IDs; not accepted/activated.
+- App composition40125049596 exported:56 tests/rawHIGH44/8 IDs; not accepted/active.
   Exact-image CI also found homed/Archive::Tar absent in its stated scope;
   raw rows remain unwaived. See24Oct security-candidate-19d runbook.
 - Watchdogs check Restarting before Running. Stale heartbeat can coexist with
@@ -39,5 +39,5 @@
   and independent cipher-only offhost verification; engine rollback stays open.
   No diagnostic Env copies or relaxed image checks. CI vendor builds use a
   child-only022 mask; controller stays077. Raw findings remain unwaived.
-- Keep STOP until activated/verified security, then monitor30 accepted complete
-  clean units. Health polls never count; preserve failures/counters without waiver.
+- Keep STOP until activated/verified security, then monitor30 consecutive accepted
+  complete clean units. Failure restarts streak, never history; polls never count.

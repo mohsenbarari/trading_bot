@@ -1,5 +1,10 @@
 # Infrastructure
 
+- 2026-10-24 | Final Finland SSH uses existing `id_ed25519_finland_primary` explicitly;
+  default identities omit it. Strict pinned-host access passed; root free303.6GB.
+  Security maintenance may stage only scoped ciphertext backups there; no App,
+  Writer/DNS or production-stack migration is implied.
+
 - 2026-09-03 | Initial provisioning and later infrastructure maintenance use version-controlled, idempotent Ansible against verified inventory; no operator shell execution is required. This neither automates Writer/DNS transfer nor authorizes server work before the refactor plan enters its explicitly approved execution phase.
 
 - 2026-09-02 | Architecture Full Matrix uses the final Finland host, existing Iran
