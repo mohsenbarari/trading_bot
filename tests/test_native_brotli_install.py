@@ -7,6 +7,8 @@ import os
 import fcntl
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -143,6 +145,47 @@ class NativeBrotliInstallTests(unittest.TestCase):
                 target.chmod(0o600)
         self.assertTrue(target.exists())
 
+    def test_marker_wait_admits_a_real_brief_holder_without_rewriting_file(self):
+        path = self.folder / 'marker'
+        path.write_bytes(b'original-authority')
+        path.chmod(0o600)
+        before = M.identity(path.lstat())
+        owner, contender = os.open(path, os.O_RDWR), os.open(path, os.O_RDWR)
+        timer = None
+        try:
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            timer = threading.Timer(0.15, lambda: fcntl.flock(owner, fcntl.LOCK_UN))
+            timer.start()
+            started = time.monotonic()
+            M.acquire_marker(contender)
+            self.assertGreaterEqual(time.monotonic() - started, 0.1)
+            self.assertLess(time.monotonic() - started, 2)
+            self.assertEqual(M.identity(path.lstat()), before)
+        finally:
+            if timer is not None:
+                timer.join()
+            os.close(contender)
+            os.close(owner)
+        self.assertEqual(path.read_bytes(), b'original-authority')
+
+    def test_marker_wait_times_out_without_taking_over_a_real_owner(self):
+        path = self.folder / 'marker'
+        path.write_bytes(b'original-authority')
+        path.chmod(0o600)
+        owner, contender = os.open(path, os.O_RDWR), os.open(path, os.O_RDWR)
+        try:
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            started = time.monotonic()
+            with patch.object(M, 'MARKER_WAIT_SECONDS', 0.15), self.assertRaisesRegex(RuntimeError, 'native_marker_busy'):
+                M.acquire_marker(contender)
+            self.assertLess(time.monotonic() - started, 1)
+            self.assertEqual(path.read_bytes(), b'original-authority')
+            with self.assertRaises(BlockingIOError):
+                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(contender)
+            os.close(owner)
+
     def test_default_check_never_opens_marker_or_creates_workspace(self):
         with patch.object(M, 'native'), patch.object(M, 'versions', return_value={n: M.OLD for n in M.PACKAGES}), \
              patch.object(M, 'bundle', return_value={}), patch.object(M, 'runtime', return_value=[]), \
@@ -245,6 +288,15 @@ class NativeBrotliInstallTests(unittest.TestCase):
         for call in [row for row in calls if row[:2] == ['/usr/bin/dpkg', '--install']]:
             self.assertEqual(len(call), 4)
         self.assertEqual(marker.read_bytes(), b'original-production-authority')
+
+    def test_runtime_change_while_waiting_is_refused_before_any_stage_write(self):
+        folder, marker, policy, states, calls = self.transaction_fixture()
+        with patch.object(M, 'runtime', side_effect=[[{'id': 'before'}], [{'id': 'after'}]]):
+            with self.assertRaisesRegex(RuntimeError, 'native_baseline_changed_while_waiting'):
+                M.action('stage', self.folder / 'public.zip')
+        self.assertFalse(folder.exists())
+        self.assertFalse(policy.exists())
+        self.assertFalse(any(row[0] in {'/usr/bin/dpkg', '/usr/bin/apt-get'} for row in calls))
 
 
 if __name__ == '__main__':

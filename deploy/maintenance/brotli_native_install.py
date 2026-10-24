@@ -42,6 +42,7 @@ ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C.UTF-8',
 POLICY = Path('/usr/sbin/policy-rc.d')
 POLICY_BODY = b'#!/bin/sh\n# Owned two-package Brotli transaction 20261024-01\nexit 101\n'
 DEADLINE = None
+MARKER_WAIT_SECONDS = 5.0
 MODULE = Path('/usr/lib/python3/dist-packages/_brotli.cpython-312-x86_64-linux-gnu.so')
 INSPECT = ('{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},'
            '"policy":{{json .HostConfig.RestartPolicy}},"mounts":{{json .Mounts}}}')
@@ -195,6 +196,22 @@ def package_locks_available():
     finally:
         for fd in reversed(opened):
             os.close(fd)
+
+
+def acquire_marker(fd):
+    # The normal watchdog briefly holds M. Wait only on this existing inode;
+    # never change its owner/payload or turn an unbounded wait into admission.
+    deadline = time.monotonic() + MARKER_WAIT_SECONDS
+    if DEADLINE is not None:
+        deadline = min(deadline, DEADLINE)
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, 'native_marker_busy')
+            time.sleep(min(0.1, remaining))
 
 
 @contextmanager
@@ -365,9 +382,13 @@ def action(mode, source):
     try:
         marker_identity = identity(os.fstat(fd))
         require(marker_identity == identity(MARKER.lstat()), 'production_marker_changed')
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquire_marker(fd)
+        require(read(MARKER, 8192) == old_marker
+                and identity(os.fstat(fd)) == identity(MARKER.lstat()) == marker_identity, 'production_marker_changed')
         stack.enter_context(legacy_source_guard())
         native(recovery=mode == 'rollback', source_held=True)
+        require(versions() == initial, 'package_baseline_changed_while_waiting')
+        require(runtime() == original_runtime and units() == original_units, 'native_baseline_changed_while_waiting')
         if mode == 'stage':
             safe_parent(ROOT)
             os.mkdir(ROOT, 0o700)

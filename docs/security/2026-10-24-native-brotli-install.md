@@ -32,7 +32,13 @@ before the transaction is admitted. All paths, files and output sizes are bounde
 mount records, rollback debs, globally clean dpkg/pending-trigger state, package
 locks, baseline versions and exact two-package simulation. It holds the existing
 production marker flock throughout and preserves its payload and inode. The
-permanent empty `.production-runtime-source.lock` is admitted only as the same
+watchdog may briefly hold M, so acquisition waits at most five seconds within
+the helper's total deadline. A prolonged owner returns `native_marker_busy`;
+it is never displaced. Once acquired, the same marker bytes/inode, selected
+package versions and complete pre-lock container/consumer baseline are checked
+again **before any staging or package write**. A completed real deployment while
+waiting therefore refuses before mutation. The permanent empty
+`.production-runtime-source.lock` is admitted only as the same
 root0600, single-link, zero-byte inode and locked nonblockingly alongside M;
 its existence alone is not an active-operation signal. Busy ownership or changed
 identity refuses. It is never created, written, replaced or deleted. Actual
