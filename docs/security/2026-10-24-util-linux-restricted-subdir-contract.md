@@ -1,7 +1,8 @@
 # Independent restricted-subdirectory source contract
 
-This source packet has not compiled or executed a program locally or in CI.
-Its hermetic tests use inert source/archive data and named CI-command mocks.
+The source packet passed a real, isolated CI compile/run on24Oct; see the
+separate actual receipt below. Its local hermetic tests use inert
+source/archive data and named CI-command mocks.
 The existing `source-tests.json` reconciliation remains OPEN and unchanged.
 The proposed result is a separate source-contract receipt, not a waiver, raw
 scanner change, production action, or claim about all libmount vulnerabilities.
@@ -54,7 +55,7 @@ procfs escape, credential change, or package binary execution occurs.
 The existing `trixie-util-linux-build.yml` now has the boolean input
 `verify_restricted_subdir`, default false. It is permitted only with
 `reuse_verified_packages: true`; an invalid combination fails before recipe
-sealing, downloads or Docker work. No workflow has been dispatched with it yet.
+sealing, downloads or Docker work. The first actual opt-in run is recorded below.
 The four sealed vendor-recipe files and old package/receipt artifact stay
 unchanged. The added step follows successful reuse and real installation; it
 does not rebuild util-linux or substitute a source-contract result for those
@@ -106,3 +107,20 @@ false. Record it separately alongside the original OPEN receipt. Its legitimate
 use is evidence for an independently reviewed, source-specific disposition of
 CVE-2026-78409 on these exact package bytes. It cannot clear the Trixie database
 row, prove privileged kernel behavior, or establish general image acceptance.
+
+## Actual isolated CI result,24Oct
+
+[Run40132051114](https://github.com/mohsenbarari/trading_bot/actions/runs/40132051114)
+succeeded on published source `be2fdee604b2ae6631d748418ae3487896f290ee`.
+Its separate contract artifact12575127371 is8496 bytes, ZIP SHA256
+`d5d733c68d290536f43dfdc68d43360352a956d794924975d7a89478e158d3ac`.
+The downloaded immutable artifact, helper identity and four actual integer
+compile/run results were checked again by the controller. Both original
+macro variants compiled and exited0; both variants missing the refusal guard
+compiled successfully and exited exactly10. This is a real benign source
+contract result, independent of the unchanged historical build receipt.
+
+No privileged/kernel mount operation, package execution on production, or
+security activation occurred. Maintainer signatures and general vendor-database
+reconciliation remain unasserted. All raw findings and the original OPEN receipt
+remain intact; this result supplies the narrowly stated2.41.6/78409 evidence.
