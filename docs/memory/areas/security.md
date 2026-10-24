@@ -20,8 +20,10 @@
   and production create-host-path guards; check the contract before fan-out.
 - Host maintenance needs quiescence, restore and smoke proofs; never infer patch
   activation from CLI or installed kernel. Bot Docker/containerd now run29.9.2/2.4.2
-  with same15containerIDs/images and both projects restored; kernel138, Web vendor
-  fixes and application activation remain open. See dated security report.
+  with same15containerIDs/images and both projects restored. Actual kernel147
+  reboot completed2026-10-23T21:19:23Z; fresh2026-10-24T03:14:22Z checks passed
+  all15/DB/API/Golden/mounts/unchangedM/J. Web vendor fixes and application
+  activation remain open. See dated security report.
 - Private control storage is an ACTIVE attached-volume bind despite its historical
   source name: never prune it. Identity recovery requires authentic evidence and
   crash safety, never persistent-marker deletion or weaker normal guards.
@@ -36,3 +38,14 @@
 - Resume refactor only after identified security findings are remediated and
   activated/verified. Then monitor30 genuinely accepted completed units, not
   health polls; failures must be repaired, never waived or counted as success.
+- Inactive oneshots can disappear between systemctl and D-Bus GetUnit. Hold
+  non-starting RefUnit references on one persistent private bus while checking;
+  never remove mount/ownership checks to recover. Exact owned continuation
+  preserved the original guard/HEAD/manifest and requested one actual reboot.
+- A final SSH credential revocation may succeed before Ansible's subsequent
+  remote housekeeping reconnect fails. Verify authorized-entry/key/pin absence
+  separately; use a final raw SSH child on the controller, not another remote
+  module that needs the credential after removing it. Retain failure evidence.
+- User renewed maintenance2026-10-24: immediate maximum90min downtime; current
+  bounded outer limit04:41Z(08:11Tehran). Do not extend it silently. Admission
+  needs a restore reserve; prep/source tests are not actual engine acceptance.

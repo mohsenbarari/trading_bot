@@ -87,6 +87,11 @@ class HistoricalExportScanTests(unittest.TestCase):
         self.market.commit()
         for limit in (1, 2, 7, 20, 63, 1000):
             with self.subTest(limit=limit):
+                # Each limit is an independent discovery run. The fair-batch
+                # path intentionally retains a bounded cyclic cursor; neither
+                # setup nor a preceding subtest may consume this run's window.
+                # Only discovery state is reset, never an export/semantic ACK.
+                self.market.execute("DELETE FROM market_fact_export_discovery_cursor")
                 expected = [tuple(row) for row in self.reference(limit)]
                 actual = [tuple(row) for row in _pending_export_rows(self.market, max_rows=limit)]
                 self.assertEqual(actual, expected)
@@ -94,7 +99,9 @@ class HistoricalExportScanTests(unittest.TestCase):
     def test_historical_queries_use_non_xau_index_and_bucket_key_lookup(self):
         queries = []
         self.market.set_trace_callback(queries.append)
-        _pending_export_rows(self.market, max_rows=1000)
+        # Exercise the narrow-batch exact historical selector. Fair batches
+        # use the distinct bounded-discovery path tested below and in stage8.
+        _pending_export_rows(self.market, max_rows=7)
         self.market.set_trace_callback(None)
         historical = [sql for sql in queries if "SELECT o.id" in sql and "ORDER BY o.id" in sql]
         self.assertEqual(len(historical), 2)
@@ -106,7 +113,32 @@ class HistoricalExportScanTests(unittest.TestCase):
             for name in ("market_fact_export_ledger_state_idx", "market_fact_export_semantics_state_idx"):
                 self.assertTrue(any("USING COVERING INDEX " + name in item for item in plan))
         self.assertFalse(any(item == "SCAN o" or item.startswith("SCAN o ") for item in plans[1]))
-        self.assertTrue(any("SEARCH o USING INDEX" in item for item in plans[1]))
+        self.assertTrue(any("SEARCH o USING COVERING INDEX idx_market_observations_export_xau_state" in item
+                            for item in plans[1]))
+        self.assertEqual(self.market.execute("SELECT count(*) FROM market_observations").fetchone()[0], 300)
+
+    def test_fair_history_uses_bounded_partition_windows_and_indexed_payload_lookup(self):
+        self.market.execute("DELETE FROM market_fact_export_discovery_cursor")
+        queries = []
+        self.market.set_trace_callback(queries.append)
+        actual = _pending_export_rows(self.market, max_rows=1000)
+        self.market.set_trace_callback(None)
+        self.assertEqual([tuple(row) for row in actual], [tuple(row) for row in self.reference(1000)])
+        windows = [sql for sql in queries if " AS order_key" in sql]
+        self.assertEqual(len(windows), 2)
+        self.assertTrue(all(" LIMIT " in sql for sql in windows))
+        window_plans = [row[3] for sql in windows
+                        for row in self.market.execute("EXPLAIN QUERY PLAN " + sql)]
+        self.assertTrue(any("idx_market_observations_export_non_xau_state" in item
+                            for item in window_plans))
+        candidates = [sql for sql in queries if "SELECT o.id,o.event_key" in sql]
+        self.assertEqual(len(candidates), 2)
+        for sql in candidates:
+            self.assertIn("WHERE o.id IN (", sql)
+            plan = [row[3] for row in self.market.execute("EXPLAIN QUERY PLAN " + sql)]
+            self.assertTrue(any("SEARCH o USING INTEGER PRIMARY KEY" in item for item in plan))
+            for name in ("market_fact_export_ledger_state_idx", "market_fact_export_semantics_state_idx"):
+                self.assertTrue(any("USING COVERING INDEX " + name in item for item in plan))
         self.assertEqual(self.market.execute("SELECT count(*) FROM market_observations").fetchone()[0], 300)
 
 

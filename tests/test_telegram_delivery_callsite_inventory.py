@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from scripts.audit_telegram_delivery_calls import (
     EXPECTED_RUNTIME_INVENTORY_COUNTS,
     EXPECTED_RUNTIME_INVENTORY_SHA256,
+    PRE_CHANNEL_POST_PRESERVATION_RUNTIME_INVENTORY_SHA256,
     MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
     OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
     PRE_COMMODITY_RUNTIME_ORIGIN_ROUTING_INVENTORY_SHA256,
@@ -66,6 +67,7 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             REVIEWED_RUNTIME_INVENTORY_SHA256,
             {
                 EXPECTED_RUNTIME_INVENTORY_SHA256,
+                PRE_CHANNEL_POST_PRESERVATION_RUNTIME_INVENTORY_SHA256,
                 PRE_PANEL_RESPONSE_HARDENING_RUNTIME_INVENTORY_SHA256,
                 PRE_COMMODITY_RUNTIME_ORIGIN_ROUTING_INVENTORY_SHA256,
                 PRE_PANEL_CALLBACK_HARDENING_RUNTIME_INVENTORY_SHA256,
@@ -95,6 +97,42 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             inventory_fingerprint(self.inventory),
             EXPECTED_RUNTIME_INVENTORY_SHA256,
         )
+
+    def test_preserved_channel_posts_keep_the_same_four_guarded_delivery_boundaries(self):
+        expected = [
+            (
+                "core/offer_expiry.py",
+                "remove_channel_buttons",
+                "core.telegram_gateway.edit_message_reply_markup",
+            ),
+            *[
+                (
+                    "core/services/telegram_offer_channel_service.py",
+                    "apply_offer_channel_state_with_result",
+                    "core.telegram_gateway." + method,
+                )
+                for method in (
+                    "edit_message_text",
+                    "edit_message_text",
+                    "edit_message_reply_markup",
+                )
+            ],
+        ]
+        selected = [
+            item for item in self.inventory
+            if (item.path, item.scope, item.callee) in expected
+        ]
+        self.assertCountEqual(
+            [(item.path, item.scope, item.callee) for item in selected], expected,
+        )
+        self.assertTrue(all(
+            item.kind == "gateway" and item.disposition == "legacy_mode_guarded"
+            for item in selected
+        ))
+        self.assertTrue(all(
+            item.evidence.startswith("queue branch exits at line ")
+            for item in selected
+        ))
 
     def test_final_legacy_publication_boundary_is_owner_guarded(self):
         matches = [

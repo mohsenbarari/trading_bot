@@ -50,6 +50,34 @@
         validate_checksum: true
 
     - name: Revoke only the now-completed original temporary controller credential
+      # The remote command revokes its own key. Run SSH from Web locally so
+      # Ansible's module/temp cleanup does not need a second revoked connection.
+      delegate_to: localhost
       ansible.builtin.command:
-        argv: [/usr/bin/python3, -I, -B, '{{ owned_guard }}', cleanup, --apply, RESUME-OWNED-KERNEL-20261023-02]
+        argv:
+          - /usr/bin/ssh
+          - -F
+          - /dev/null
+          - -i
+          - /root/.ssh/security-controller-20261023-host-patch-02/id_ed25519
+          - -p
+          - '22'
+          - -o
+          - BatchMode=yes
+          - -o
+          - IdentitiesOnly=yes
+          - -o
+          - ForwardAgent=no
+          - -o
+          - StrictHostKeyChecking=yes
+          - -o
+          - GlobalKnownHostsFile=/dev/null
+          - -o
+          - UserKnownHostsFile=/root/.ssh/security-controller-20261023-host-patch-02/known_hosts
+          - -o
+          - HostKeyAlgorithms=ssh-ed25519
+          - -o
+          - ConnectTimeout=10
+          - root@65.109.216.187
+          - '/usr/bin/python3 -I -B {{ owned_guard }} cleanup --apply RESUME-OWNED-KERNEL-20261023-02'
       no_log: true
