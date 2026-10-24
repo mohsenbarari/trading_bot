@@ -37,12 +37,35 @@ def ordinary_layer(name, body):
     return stream.getvalue()
 
 
-def fixture(*, identity='manifest', repeated=False, docker_media=False, compressed=False, stored_layer=None):
+# Public format facts from the bounded ordinary F79 save; layer payloads in the
+# corresponding regression are synthetic, and contain no image Config values.
+ACTUAL_F79_FORMAT = {
+    'image_id': 'sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b',
+    'config_id': 'sha256:1004633961dc344bf7720831835fd27e3a7c9899f3214ac6d67e2734bc77a2e4',
+    'manifest_media_type': 'application/vnd.oci.image.manifest.v1+json',
+    'archive_member_count': 15,
+    'layer_media_types': ['application/vnd.oci.image.layer.v1.tar'] * 6 +
+                         ['application/vnd.docker.image.rootfs.diff.tar.gzip'] * 2,
+}
+
+
+def fixture(*, identity='manifest', repeated=False, docker_media=False, compressed=False, stored_layer=None,
+            layer_media_types=None):
+    media = M.DOCKER_MANIFEST if docker_media else M.OCI_MANIFEST
+    config_media, layer_media = M.MEDIA[media]
+    media_types = list(layer_media_types) if layer_media_types is not None else [
+        layer_media + ('+gzip' if media == M.OCI_MANIFEST else '.gzip') if compressed else layer_media, layer_media]
     payloads = [ordinary_layer('ordinary-one', b'public file one'),
                 ordinary_layer('ordinary-two', b'public file two')]
+    if layer_media_types is not None:
+        payloads = [ordinary_layer('ordinary-'+str(index), ('public file '+str(index)).encode())
+                    for index in range(len(media_types))]
     layer_ids = ['sha256:' + sha256(value).hexdigest() for value in payloads]
     first = payloads[0] if stored_layer is None else stored_layer
-    contents = [gzip.compress(first,mtime=0) if compressed else first,payloads[1]]
+    payloads[0] = first
+    contents = [gzip.compress(raw,mtime=0) if kind in (
+        'application/vnd.oci.image.layer.v1.tar+gzip', 'application/vnd.docker.image.rootfs.diff.tar.gzip') else raw
+        for raw,kind in zip(payloads,media_types)]
     blob_ids = ['sha256:' + sha256(value).hexdigest() for value in contents]
     if repeated:
         layer_ids.append(layer_ids[0])
@@ -52,10 +75,7 @@ def fixture(*, identity='manifest', repeated=False, docker_media=False, compress
               'config': {'Env': ['PUBLIC_TEST_DEFAULT=not-for-output']}}
     config_raw = encode(config)
     config_id = 'sha256:' + sha256(config_raw).hexdigest()
-    media = M.DOCKER_MANIFEST if docker_media else M.OCI_MANIFEST
-    config_media, layer_media = M.MEDIA[media]
     data = dict(zip(blob_ids, contents))
-    media_types = [layer_media + ('+gzip' if media == M.OCI_MANIFEST else '.gzip') if compressed else layer_media,layer_media]
     if repeated:media_types.append(media_types[0])
     manifest = {'schemaVersion': 2, 'mediaType': media,
         'config': {'mediaType': config_media, 'digest': config_id, 'size': len(config_raw)},
@@ -70,7 +90,7 @@ def fixture(*, identity='manifest', repeated=False, docker_media=False, compress
                blob(config_id): config_raw, blob(manifest_id): manifest_raw,
                **{blob(value): raw for value, raw in data.items()}}
     image = manifest_id if identity == 'manifest' else config_id
-    observation = {'image_id': image, 'rootfs_layers': layer_ids}
+    observation = {'image_id': image, 'os': 'linux', 'architecture': 'amd64', 'rootfs_layers': layer_ids}
     return entries, observation, config_id
 
 
@@ -87,6 +107,76 @@ def archive_bytes(entries, *, extra=None, directory_entries=True):
             item.size = len(raw)
             archive.addfile(item, io.BytesIO(raw))
     return stream.getvalue()
+
+
+def indexed_fixture(*, foreign=False, missing_selected=False):
+    """Synthetic payloads, with actual994(25 members) / fe(16 child) shapes."""
+    count = 11 if foreign else 14
+    types = ['application/vnd.oci.image.layer.v1.tar'] * (count-3) + ['application/vnd.oci.image.layer.v1.tar+gzip'] * 3
+    entries, observation, config_id = fixture(layer_media_types=types)
+    runtime_id = observation['image_id']; runtime_raw = entries[blob(runtime_id)]
+    children = [{'mediaType': M.OCI_MANIFEST, 'digest': runtime_id, 'size': len(runtime_raw),
+                 'platform': {'os': 'linux', 'architecture': 'amd64'},
+                 'annotations': {'org.opencontainers.image.source': 'public-fixture'}}]
+    config = encode({'architecture': 'unknown', 'os': 'unknown', 'rootfs': {'type': 'layers', 'diff_ids': []}})
+    auxiliary_config = 'sha256:' + sha256(config).hexdigest(); entries[blob(auxiliary_config)] = config
+    statements = []
+    for index in range(2 if foreign else 1):
+        raw = encode({'_type': 'https://in-toto.io/Statement/v0.1', 'predicateType': 'https://slsa.dev/provenance/v0.2',
+                      'subject': [{'name': 'public-fixture', 'digest': {'sha256': runtime_id[7:]}}],
+                      'predicate': {'public_fixture_index': index}})
+        digest = 'sha256:' + sha256(raw).hexdigest(); entries[blob(digest)] = raw
+        statements.append({'mediaType': M.ATTESTATION, 'digest': digest, 'size': len(raw)})
+    attestation = encode({'schemaVersion': 2, 'mediaType': M.OCI_MANIFEST,
+        'config': {'mediaType': M.MEDIA[M.OCI_MANIFEST][0], 'digest': auxiliary_config, 'size': len(config)},
+        'layers': statements})
+    attestation_id = 'sha256:' + sha256(attestation).hexdigest(); entries[blob(attestation_id)] = attestation
+    children.append({'mediaType': M.OCI_MANIFEST, 'digest': attestation_id, 'size': len(attestation),
+                     'platform': {'os': 'unknown', 'architecture': 'unknown'},
+                     'annotations': {'vnd.docker.reference.type': 'attestation-manifest',
+                                     'vnd.docker.reference.digest': runtime_id}})
+    if foreign:
+        for architecture,variant in sorted(M.FOREIGN_PLATFORMS):
+            platform = {'os': 'linux', 'architecture': architecture}
+            if variant is not None:platform['variant'] = variant
+            digest = 'sha256:' + sha256(encode(platform)).hexdigest()
+            children.append({'mediaType': M.OCI_MANIFEST, 'digest': digest, 'size': 123, 'platform': platform})
+            children.append({'mediaType': M.OCI_MANIFEST, 'digest': 'sha256:' + sha256(digest.encode()).hexdigest(), 'size': 124,
+                             'platform': {'os': 'unknown', 'architecture': 'unknown'},
+                             'annotations': {'vnd.docker.reference.type': 'attestation-manifest', 'vnd.docker.reference.digest': digest}})
+    raw = encode({'schemaVersion': 2, 'mediaType': M.OCI_INDEX, 'manifests': children})
+    root_id = 'sha256:' + sha256(raw).hexdigest(); entries[blob(root_id)] = raw
+    entries['index.json'] = encode({'schemaVersion': 2, 'manifests': [
+        {'mediaType': M.OCI_INDEX, 'digest': root_id, 'size': len(raw)}]})
+    observation['image_id'] = root_id
+    if missing_selected:
+        del entries[blob(config_id)]
+        for descriptor in json.loads(runtime_raw)['layers']:entries.pop(blob(descriptor['digest']), None)
+    return entries, observation, config_id
+
+
+def rewrite_index(entries, observation, change):
+    """Reseal changed public metadata, so negatives reach semantic admission."""
+    entries = dict(entries); observation = dict(observation)
+    value = json.loads(entries.pop(blob(observation['image_id'])))
+    change(value)
+    raw = encode(value); digest = 'sha256:' + sha256(raw).hexdigest()
+    entries[blob(digest)] = raw
+    entries['index.json'] = encode({'schemaVersion': 2, 'manifests': [
+        {'mediaType': M.OCI_INDEX, 'digest': digest, 'size': len(raw)}]})
+    observation['image_id'] = digest
+    return entries, observation
+
+
+def rewrite_auxiliary(entries, observation, body, *, media=None):
+    entries=dict(entries);root=json.loads(entries[blob(observation['image_id'])])
+    old=root['manifests'][1];attestation=json.loads(entries.pop(blob(old['digest'])))
+    statement=attestation['layers'][0];entries.pop(blob(statement['digest']))
+    digest='sha256:'+sha256(body).hexdigest();entries[blob(digest)]=body
+    statement.update(digest=digest,size=len(body))
+    if media is not None:statement['mediaType']=media
+    raw=encode(attestation);digest='sha256:'+sha256(raw).hexdigest();entries[blob(digest)]=raw
+    return rewrite_index(entries,observation,lambda v:v['manifests'][1].update(digest=digest,size=len(raw)))
 
 
 class ArchiveTransportTests(unittest.TestCase):
@@ -107,10 +197,13 @@ class ArchiveTransportTests(unittest.TestCase):
 
     def test_observation_requires_exact_public_projection_and_strict_json_types(self):
         _, observation, _ = fixture()
-        value = {'id': observation['image_id'], 'rootfs': {'Type': 'layers', 'Layers': observation['rootfs_layers']}}
+        value = {'id': observation['image_id'], 'os': 'linux', 'architecture': 'amd64',
+                 'rootfs': {'Type': 'layers', 'Layers': observation['rootfs_layers']}}
         self.assertEqual(M.observe_image(encode(value), observation['image_id']), observation)
         for change in (lambda v: v.update(Config={'Env': ['excluded']}),
                        lambda v: v.update(id='sha256:' + '0' * 64),
+                       lambda v: v.pop('os'), lambda v: v.update(architecture='arm64'),
+                       lambda v: v.update(os='unknown'),
                        lambda v: v['rootfs'].update(Layers='not-a-list'),
                        lambda v: v['rootfs'].update(Type=True)):
             wrong = deepcopy(value)
@@ -153,6 +246,162 @@ class ArchiveTransportTests(unittest.TestCase):
             self.assertNotEqual(proof['rootfs_layers'][0],proof['layer_blob_digests'][0])
             self.assertEqual(proof['rootfs_layers'][1],proof['layer_blob_digests'][1])
             self.assertEqual(proof['expanded_layer_bytes'],3*10240)
+
+    def test_layer_media_family_is_independent_of_top_manifest_family(self):
+        for docker_media,types in ((False, ('application/vnd.docker.image.rootfs.diff.tar',
+                                           'application/vnd.docker.image.rootfs.diff.tar.gzip')),
+                                  (True, ('application/vnd.oci.image.layer.v1.tar',
+                                          'application/vnd.oci.image.layer.v1.tar+gzip'))):
+            with self.subTest(docker_manifest=docker_media):
+                entries,observation,config_id=fixture(docker_media=docker_media,layer_media_types=types)
+                _,proof=self.validate(entries,observation)
+                self.assertEqual(proof['docker_image_id'],observation['image_id'])
+                self.assertEqual(proof['scanner_config_id'],config_id)
+                self.assertEqual(proof['rootfs_layers'],observation['rootfs_layers'])
+                self.assertEqual(proof['expanded_layer_bytes'],2*10240)
+                self.assertEqual(proof['layer_blob_digests'][0],proof['rootfs_layers'][0])
+                self.assertNotEqual(proof['layer_blob_digests'][1],proof['rootfs_layers'][1])
+                with self.assertRaisesRegex(M.TransportError,'archive_identity'):
+                    self.validate(entries,{**observation,'image_id':'sha256:'+'0'*64})
+
+    def test_actual_f79_fifteen_member_eight_layer_format_preserves_all_bindings(self):
+        entries,observation,config_id=fixture(layer_media_types=ACTUAL_F79_FORMAT['layer_media_types'])
+        raw,proof=self.validate(entries,observation)
+        reader=M.ArchiveReader(io.BytesIO(raw),len(raw),time.monotonic()+10)
+        members,_=M.inventory(reader)
+        self.assertEqual(len(members),ACTUAL_F79_FORMAT['archive_member_count'])
+        self.assertEqual(len(proof['rootfs_layers']),8)
+        self.assertEqual(proof['manifest_media_type'],ACTUAL_F79_FORMAT['manifest_media_type'])
+        self.assertEqual(proof['rootfs_layers'],observation['rootfs_layers'])
+        self.assertEqual(proof['scanner_config_id'],config_id)
+        self.assertEqual(proof['expanded_layer_bytes'],8*10240)
+        self.assertEqual(proof['layer_blob_digests'][:6],proof['rootfs_layers'][:6])
+        self.assertTrue(all(a!=b for a,b in zip(proof['layer_blob_digests'][6:],proof['rootfs_layers'][6:])))
+        self.assertNotIn('not-for-output',json.dumps(proof))
+        with patch.object(M,'EXPANDED_BYTES',8*10240-1),self.assertRaisesRegex(M.TransportError,'archive_bound'):
+            self.validate(entries,observation)
+        wrong={**observation,'rootfs_layers':list(reversed(observation['rootfs_layers']))}
+        with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(entries,wrong)
+
+    def test_unreviewed_layer_media_never_uses_a_suffix_or_content_decoder_guess(self):
+        for kind in ('application/vnd.oci.image.layer.v1.tar+zstd',
+                     'application/vnd.docker.image.rootfs.diff.tar.zstd',
+                     'application/x-unreviewed.tar.gzip','',False,['application/vnd.oci.image.layer.v1.tar']):
+            entries,observation,_=fixture(layer_media_types=(kind,'application/vnd.oci.image.layer.v1.tar'))
+            with self.subTest(media=kind),self.assertRaisesRegex(M.TransportError,'archive_identity'):
+                self.validate(entries,observation)
+
+    def test_actual994_one_level_index_shape_authenticates_selected_runtime_and_auxiliary_closure(self):
+        entries,observation,config_id=indexed_fixture()
+        raw,proof=self.validate(entries,observation)
+        members,_=M.inventory(M.ArchiveReader(io.BytesIO(raw),len(raw),time.monotonic()+10))
+        self.assertEqual(len(members),25)
+        self.assertEqual(proof['kind'],'OCI_index_to_manifest_to_config')
+        self.assertEqual(proof['docker_image_id'],observation['image_id'])
+        self.assertNotEqual(proof['docker_image_id'],proof['scanner_config_id'])
+        self.assertEqual(proof['scanner_config_id'],config_id)
+        self.assertEqual(len(proof['rootfs_layers']),14)
+        binding=proof['index_binding']
+        self.assertEqual(binding['root_index_sha256'],observation['image_id'][7:])
+        self.assertEqual(binding['selected_manifest_sha256'],proof['manifest_sha256'])
+        self.assertEqual(len(binding['descriptors']),2);self.assertEqual(len(binding['auxiliary_blobs']),3)
+        self.assertTrue(all(binding[k] is False for k in ('statement_semantics_validated','signatures_verified','provenance_trusted')))
+        self.assertNotIn('not-for-output',json.dumps(proof))
+
+    def test_actual_fe_sixteen_child_shape_allows_only_declared_foreign_absence(self):
+        entries,observation,_=indexed_fixture(foreign=True)
+        _,proof=self.validate(entries,observation)
+        rows=proof['index_binding']['descriptors']
+        self.assertEqual(len(rows),16);self.assertEqual(sum(not r['present'] for r in rows),14)
+        self.assertTrue(all(r['present'] for r in rows if r['kind']=='runtime'))
+        missing,observation,_=indexed_fixture(foreign=True,missing_selected=True)
+        raw=archive_bytes(missing)
+        members,_=M.inventory(M.ArchiveReader(io.BytesIO(raw),len(raw),time.monotonic()+10))
+        self.assertEqual(len(members),11)
+        with self.assertRaises(M.TransportError):self.validate(missing,observation)
+
+    def test_index_does_not_substitute_observation_platform_config_or_rootfs(self):
+        entries,observation,_=indexed_fixture()
+        for field,value in (('os','windows'),('architecture','arm64'),('image_id','sha256:'+'0'*64),
+                            ('rootfs_layers',list(reversed(observation['rootfs_layers'])))):
+            with self.subTest(field=field),self.assertRaises(M.TransportError):
+                self.validate(entries,{**observation,field:value})
+
+    def test_index_ambiguous_variant_unknown_platform_nested_media_and_duplicate_child_refuse(self):
+        entries,observation,_=indexed_fixture()
+        changes=(lambda v:v['manifests'][0]['platform'].update(variant='v1'),
+                 lambda v:v['manifests'][0]['platform'].update(architecture='unreviewed'),
+                 lambda v:v['manifests'][0].update(mediaType=M.OCI_INDEX),
+                 lambda v:v['manifests'].append(deepcopy(v['manifests'][0])),
+                 lambda v:v['manifests'][1]['annotations'].update({'vnd.docker.reference.digest':'sha256:'+'0'*64}))
+        for change in changes:
+            wrong,seen=rewrite_index(entries,observation,change)
+            with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(wrong,seen)
+
+    def test_selected_attestation_is_required_and_unknown_missing_references_cannot_be_foreign(self):
+        entries,observation,_=indexed_fixture(foreign=True)
+        root=json.loads(entries[blob(observation['image_id'])]);selected_attestation=root['manifests'][1]['digest']
+        wrong=dict(entries);del wrong[blob(selected_attestation)]
+        with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(wrong,observation)
+        wrong,seen=rewrite_index(entries,observation,lambda v:v['manifests'].pop(2))
+        with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(wrong,seen)
+
+    def test_opaque_nine_subjects_unknown_future_schema_and_non_json_never_select_runtime_or_grant_trust(self):
+        entries,observation,config_id=indexed_fixture();_,baseline=self.validate(entries,observation)
+        runtime=baseline['manifest_sha256']
+        bodies=(encode({'_type':'https://in-toto.io/Statement/v0.1','predicateType':'https://spdx.dev/Document',
+                        'subject':[{'digest':{'sha256':runtime}} for _ in range(9)]}),
+                encode({'_type':'future-public-schema','predicateType':'unrecognized-future-predicate',
+                        'subject':[{'digest':{'sha256':'0'*64}}]}),
+                b'raise AssertionError("opaque bytes must never execute")\n')
+        actual_parse=M.parse
+        for body in bodies:
+            changed,seen=rewrite_auxiliary(entries,observation,body)
+            def parse(raw,*args,**kwargs):
+                self.assertNotEqual(raw,body,'opaque auxiliary body must not be interpreted')
+                return actual_parse(raw,*args,**kwargs)
+            with patch.object(M,'parse',side_effect=parse):_,proof=self.validate(changed,seen)
+            self.assertEqual(proof['manifest_sha256'],runtime)
+            self.assertEqual(proof['scanner_config_id'],config_id)
+            self.assertEqual(proof['rootfs_layers'],baseline['rootfs_layers'])
+            self.assertTrue(all(proof['index_binding'][k] is False for k in
+                                ('statement_semantics_validated','signatures_verified','provenance_trusted')))
+            with self.assertRaises(M.TransportError):self.validate(changed,{**seen,'rootfs_layers':list(reversed(seen['rootfs_layers']))})
+
+    def test_opaque_auxiliary_does_not_waive_its_mime_size_or_hash_envelope(self):
+        entries,observation,_=indexed_fixture()
+        for media in ('application/octet-stream','application/vnd.oci.image.layer.v1.tar','application/vnd.in-toto+unknown'):
+            changed,seen=rewrite_auxiliary(entries,observation,b'public opaque bytes',media=media)
+            with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(changed,seen)
+        changed,seen=rewrite_auxiliary(entries,observation,b'X'*(M.CONTROL_BYTES+1))
+        with self.assertRaises(M.TransportError):self.validate(changed,seen)
+
+    def test_present_auxiliary_bytes_and_unreferenced_members_are_never_ignored(self):
+        entries,observation,_=indexed_fixture();_,proof=self.validate(entries,observation)
+        name=blob(proof['index_binding']['auxiliary_blobs'][-1]['digest'])
+        wrong=dict(entries);wrong[name]=wrong[name]+b' '
+        with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(wrong,observation)
+        with self.assertRaisesRegex(M.TransportError,'archive_shape'):
+            self.validate(entries,observation,extra=[('blobs/sha256/'+'0'*64,b'public unreferenced metadata')])
+
+    def test_index_report_binding_requires_exact_root_manifest_platform_and_false_flags(self):
+        entries,observation,config_id=indexed_fixture();_,proof=self.validate(entries,observation)
+        raw=encode({'SchemaVersion':2,'ArtifactType':'container_image','Metadata':{'ImageID':config_id,
+            'ImageConfig':{'rootfs':{'type':'layers','diff_ids':observation['rootfs_layers']}}},'Results':[]})
+        result=M.validate_report(raw,proof)
+        self.assertEqual(result['image_id'],observation['image_id']);self.assertEqual(result['scanner_image_id'],config_id)
+        self.assertEqual(result['identity_binding'],proof)
+        changes=(lambda p:p['index_binding'].update(root_index_sha256='0'*64),
+                 lambda p:p['index_binding'].update(selected_manifest_sha256='0'*64),
+                 lambda p:p['index_binding'].update(statement_semantics_validated=0),
+                 lambda p:p['index_binding'].update(signatures_verified=0),
+                 lambda p:p['index_binding'].update(provenance_trusted=0),
+                 lambda p:p['index_binding']['descriptors'][0].update(present=1),
+                 lambda p:p['index_binding']['descriptors'][0]['platform'].update(variant='v1'),
+                 lambda p:p.update(kind='OCI_manifest_to_config'))
+        for change in changes:
+            wrong=deepcopy(proof);change(wrong)
+            with self.assertRaisesRegex(M.TransportError,'report_identity'):M.validate_report(raw,wrong)
 
     def test_gzip_expansion_and_decoder_calls_are_bounded_by_bytes_and_deadline(self):
         entries,observation,_=fixture(compressed=True)

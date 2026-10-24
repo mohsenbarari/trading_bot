@@ -21,11 +21,19 @@ MAX_LAYERS = 128
 DIGEST = re.compile(r'sha256:[a-f0-9]{64}\Z')
 BLOB = re.compile(r'blobs/sha256/[a-f0-9]{64}\Z')
 OCI_MANIFEST = 'application/vnd.oci.image.manifest.v1+json'
+OCI_INDEX = 'application/vnd.oci.image.index.v1+json'
+ATTESTATION = 'application/vnd.in-toto+json'
 DOCKER_MANIFEST = 'application/vnd.docker.distribution.manifest.v2+json'
 MEDIA = {OCI_MANIFEST: ('application/vnd.oci.image.config.v1+json',
                         'application/vnd.oci.image.layer.v1.tar'),
          DOCKER_MANIFEST: ('application/vnd.docker.container.image.v1+json',
                            'application/vnd.docker.image.rootfs.diff.tar')}
+LAYER_MEDIA = {'application/vnd.oci.image.layer.v1.tar': False,
+               'application/vnd.oci.image.layer.v1.tar+gzip': True,
+               'application/vnd.docker.image.rootfs.diff.tar': False,
+               'application/vnd.docker.image.rootfs.diff.tar.gzip': True}
+FOREIGN_PLATFORMS = frozenset((('arm', 'v6'), ('arm', 'v7'), ('arm64', 'v8'),
+                              ('386', None), ('ppc64le', None), ('riscv64', None), ('s390x', None)))
 CODES = frozenset(('archive_shape', 'archive_bound', 'archive_identity',
                    'command_timeout', 'observation_shape', 'report_identity'))
 
@@ -64,12 +72,86 @@ def observe_image(raw, image_id):
     """Consume only inspect's fixed public Id/RootFS projection, never Config."""
     require(type(image_id) is str and DIGEST.fullmatch(image_id), 'observation_shape')
     value = parse(raw, 65536, 'observation_shape')
-    require(type(value) is dict and set(value) == {'id', 'rootfs'}
+    require(type(value) is dict and set(value) == {'id', 'os', 'architecture', 'rootfs'}
             and value['id'] == image_id and type(value['rootfs']) is dict
+            and value['os'] == 'linux' and value['architecture'] == 'amd64'
             and set(value['rootfs']) == {'Type', 'Layers'}
             and value['rootfs']['Type'] == 'layers', 'observation_shape')
-    return {'image_id': image_id,
+    return {'image_id': image_id, 'os': 'linux', 'architecture': 'amd64',
             'rootfs_layers': layers(value['rootfs']['Layers'], 'observation_shape')}
+
+
+def index_descriptors(values, code):
+    """Classify only the observed one-level Linux platform/attestation layout."""
+    require(type(values) is list and 1 <= len(values) <= 32, code)
+    records, digests, platforms, references = [], set(), set(), set()
+    for value in values:
+        require(type(value) is dict and set(value) <= {'digest', 'size', 'mediaType', 'platform', 'annotations'}
+                and value.get('mediaType') == OCI_MANIFEST
+                and type(value.get('digest')) is str and DIGEST.fullmatch(value['digest'])
+                and value['digest'] not in digests and type(value.get('size')) is int
+                and 0 < value['size'] <= CONTROL_BYTES, code)
+        digests.add(value['digest'])
+        platform, annotation = value.get('platform'), value.get('annotations', {})
+        require(type(platform) is dict and type(annotation) is dict and len(annotation) <= 32
+                and all(type(k) is str and type(v) is str and len(k) <= 256 and len(v) <= 2048
+                        for k, v in annotation.items()), code)
+        reference = annotation.get('vnd.docker.reference.digest')
+        if platform == {'os': 'unknown', 'architecture': 'unknown'}:
+            require(annotation.get('vnd.docker.reference.type') == 'attestation-manifest'
+                    and type(reference) is str and DIGEST.fullmatch(reference) and reference not in references, code)
+            references.add(reference); kind = 'attestation'
+        else:
+            require(not any(k.startswith('vnd.docker.reference.') for k in annotation)
+                    and set(platform) in ({'os', 'architecture'}, {'os', 'architecture', 'variant'})
+                    and platform.get('os') == 'linux', code)
+            architecture, variant = platform.get('architecture'), platform.get('variant')
+            require(type(architecture) is str and ('variant' not in platform or type(variant) is str), code)
+            target = platform == {'os': 'linux', 'architecture': 'amd64'}
+            require(target or (architecture, variant) in FOREIGN_PLATFORMS, code)
+            require((architecture, variant) not in platforms, code); platforms.add((architecture, variant))
+            kind = 'runtime' if target else 'foreign_runtime'
+        records.append({'digest': value['digest'], 'media_type': OCI_MANIFEST, 'size': value['size'],
+                        'platform': dict(platform), 'kind': kind, 'reference': reference})
+    runtime = {r['digest']: r for r in records if r['kind'] != 'attestation'}
+    selected = [r for r in runtime.values() if r['kind'] == 'runtime']
+    require(len(selected) == 1 and all(r['reference'] in runtime for r in records if r['kind'] == 'attestation'), code)
+    require(sum(r['kind'] == 'attestation' and r['reference'] == selected[0]['digest'] for r in records) == 1, code)
+    return records, selected[0]
+
+
+def validate_index_binding(value, image, manifest, code):
+    fields = {'root_index_sha256', 'selected_manifest_sha256', 'descriptors', 'auxiliary_blobs',
+              'statement_semantics_validated', 'signatures_verified', 'provenance_trusted'}
+    require(type(value) is dict and set(value) == fields and value['root_index_sha256'] == image[7:]
+            and value['selected_manifest_sha256'] == manifest
+            and all(value[k] is False for k in ('statement_semantics_validated', 'signatures_verified', 'provenance_trusted')), code)
+    rows = value['descriptors']; require(type(rows) is list and 1 <= len(rows) <= 32, code)
+    inputs = []
+    for row in rows:
+        require(type(row) is dict and set(row) == {'digest', 'media_type', 'size', 'platform', 'kind', 'reference', 'present'}
+                and type(row['present']) is bool, code)
+        item = {'digest': row['digest'], 'mediaType': row['media_type'], 'size': row['size'], 'platform': row['platform']}
+        if row['reference'] is not None:
+            item['annotations'] = {'vnd.docker.reference.type': 'attestation-manifest', 'vnd.docker.reference.digest': row['reference']}
+        inputs.append(item)
+    canonical, selected = index_descriptors(inputs, code)
+    require(selected['digest'] == 'sha256:' + manifest, code)
+    for row, expected in zip(rows, canonical):
+        require({k: row[k] for k in expected} == expected
+                and (row['kind'] != 'runtime' or row['present'])
+                and (row['kind'] != 'foreign_runtime' or not row['present'])
+                and (row['kind'] != 'attestation' or row['reference'] != selected['digest'] or row['present']), code)
+    blobs = value['auxiliary_blobs']; require(type(blobs) is list and len(blobs) <= 32 * 6, code)
+    seen = set()
+    for row in blobs:
+        require(type(row) is dict and set(row) == {'digest', 'media_type', 'size'}
+                and type(row['digest']) is str and DIGEST.fullmatch(row['digest']) and row['digest'] not in seen
+                and type(row['media_type']) is str and row['media_type'] in {OCI_MANIFEST, MEDIA[OCI_MANIFEST][0], ATTESTATION}
+                and type(row['size']) is int and 0 < row['size'] <= CONTROL_BYTES, code)
+        seen.add(row['digest'])
+    require(all({'digest': row['digest'], 'media_type': OCI_MANIFEST, 'size': row['size']} in blobs
+                for row in rows if row['kind'] == 'attestation' and row['present']), code)
 
 
 def may_fallback(failure_code, already_attempted):
@@ -210,23 +292,25 @@ def validate_archive(stream, size, end, observation):
     """Verify same-image config/manifest identity and every ordered raw layer.
 
     Supported export is the normal OCI layout with Docker manifest.json. This
-    generalizes image identities, not arbitrary archive formats: classic legacy
-    compatibility metadata and unknown layer compression refuse pending review.
+    supports the observed single-manifest and one-level OCI-index exports.
+    Unknown platform layouts, nested indexes, legacy metadata and compression
+    outside the explicit raw/gzip set refuse pending review.
     """
-    require(type(observation) is dict and set(observation) == {'image_id', 'rootfs_layers'},
+    require(type(observation) is dict and set(observation) == {'image_id', 'os', 'architecture', 'rootfs_layers'}
+            and observation['os'] == 'linux' and observation['architecture'] == 'amd64',
             'observation_shape')
     image = observation['image_id']
     require(type(image) is str and DIGEST.fullmatch(image), 'observation_shape')
     expected_layers = layers(observation['rootfs_layers'], 'observation_shape')
     reader = ArchiveReader(stream, size, end)
     members, tail = inventory(reader)
-    def control(name):
+    def control(name, *, interpret=True):
         require(name in members, 'archive_shape')
         offset, length = members[name]
         require(length <= CONTROL_BYTES, 'archive_bound')
         reader.seek(offset)
         raw = reader.read(length)
-        return raw, parse(raw, CONTROL_BYTES, 'archive_shape')
+        return raw, parse(raw, CONTROL_BYTES, 'archive_shape') if interpret else None
     def blob(value):
         require(type(value) is str and DIGEST.fullmatch(value), 'archive_identity')
         return 'blobs/sha256/' + value[7:]
@@ -236,7 +320,60 @@ def validate_archive(stream, size, end, observation):
             and len(index['manifests']) == 1, 'archive_identity')
     entry = index['manifests'][0]
     require(type(entry) is dict and type(entry.get('mediaType')) is str
-            and entry['mediaType'] in MEDIA, 'archive_identity')
+            and entry['mediaType'] in {*MEDIA, OCI_INDEX}, 'archive_identity')
+    index_binding, additional_files = None, set()
+    if entry['mediaType'] == OCI_INDEX:
+        root_id = entry.get('digest')
+        root_raw, root_index = control(blob(root_id))
+        require(root_id == image and sha256(root_raw).hexdigest() == root_id[7:]
+                and type(entry.get('size')) is int and entry['size'] == len(root_raw)
+                and type(root_index) is dict and type(root_index.get('schemaVersion')) is int
+                and root_index['schemaVersion'] == 2 and root_index.get('mediaType') == OCI_INDEX,
+                'archive_identity')
+        records, selected = index_descriptors(root_index.get('manifests'), 'archive_identity')
+        auxiliary = []
+        additional_files.add(blob(root_id))
+        def auxiliary_control(descriptor, media, *, interpret=True):
+            require(type(descriptor) is dict and descriptor.get('mediaType') == media
+                    and type(descriptor.get('size')) is int and 0 < descriptor['size'] <= CONTROL_BYTES,
+                    'archive_identity')
+            name = blob(descriptor.get('digest'))
+            raw, value = control(name, interpret=interpret)
+            require(len(raw) == descriptor['size'] and sha256(raw).hexdigest() == descriptor['digest'][7:], 'archive_identity')
+            additional_files.add(name)
+            row = {'digest': descriptor['digest'], 'media_type': media, 'size': len(raw)}
+            require(row not in auxiliary, 'archive_identity'); auxiliary.append(row)
+            return value
+        for record in records:
+            record['present'] = blob(record['digest']) in members
+            # Other platform bytes were absent in both observed exports. Do
+            # not silently extend the runtime proof to new present platforms.
+            require(record['kind'] != 'foreign_runtime' or not record['present'], 'archive_identity')
+            if record['kind'] != 'attestation':
+                require(record['kind'] != 'runtime' or record['present'], 'archive_identity')
+                continue
+            if not record['present']:
+                require(record['reference'] != selected['digest'], 'archive_identity')
+                continue  # Only an explicitly declared foreign reference.
+            descriptor = {'digest': record['digest'], 'size': record['size'], 'mediaType': OCI_MANIFEST}
+            attestation = auxiliary_control(descriptor, OCI_MANIFEST)
+            require(type(attestation) is dict and type(attestation.get('schemaVersion')) is int
+                    and attestation['schemaVersion'] == 2 and attestation.get('mediaType') == OCI_MANIFEST,
+                    'archive_identity')
+            config = auxiliary_control(attestation.get('config'), MEDIA[OCI_MANIFEST][0])
+            require(type(config) is dict, 'archive_identity')
+            statements = attestation.get('layers')
+            require(type(statements) is list and 1 <= len(statements) <= 4, 'archive_identity')
+            for descriptor in statements:
+                # Filesystem auditing authenticates the auxiliary bytes and
+                # index reference, not statement schemas, subjects or trust.
+                # Never interpret this content as runtime layers or code.
+                auxiliary_control(descriptor, ATTESTATION, interpret=False)
+        index_binding = {'root_index_sha256': root_id[7:], 'selected_manifest_sha256': selected['digest'][7:],
+                         'descriptors': records, 'auxiliary_blobs': auxiliary,
+                         'statement_semantics_validated': False, 'signatures_verified': False, 'provenance_trusted': False}
+        validate_index_binding(index_binding, image, selected['digest'][7:], 'archive_identity')
+        entry = {'digest': selected['digest'], 'size': selected['size'], 'mediaType': OCI_MANIFEST}
     manifest_id = entry.get('digest')
     manifest_raw, manifest = control(blob(manifest_id))
     require(sha256(manifest_raw).hexdigest() == manifest_id[7:]
@@ -245,19 +382,19 @@ def validate_archive(stream, size, end, observation):
             and manifest['schemaVersion'] == 2 and manifest.get('mediaType') == entry['mediaType'],
             'archive_identity')
     descriptor = manifest.get('config')
-    config_media, layer_media = MEDIA[entry['mediaType']]
+    config_media, _ = MEDIA[entry['mediaType']]
     require(type(descriptor) is dict and descriptor.get('mediaType') == config_media, 'archive_identity')
     config_id = descriptor.get('digest')
     config_raw, config = control(blob(config_id))
     require(sha256(config_raw).hexdigest() == config_id[7:]
             and type(descriptor.get('size')) is int and descriptor['size'] == len(config_raw)
-            and type(config) is dict and config.get('rootfs') == {'type': 'layers', 'diff_ids': expected_layers},
+            and type(config) is dict and config.get('rootfs') == {'type': 'layers', 'diff_ids': expected_layers}
+            and config.get('os') == observation['os'] and config.get('architecture') == observation['architecture'],
             'archive_identity')
-    require(image in (config_id, manifest_id), 'archive_identity')
+    require(image in (config_id, manifest_id) or index_binding is not None, 'archive_identity')
     descriptors = manifest.get('layers')
     require(type(descriptors) is list and len(descriptors) == len(expected_layers), 'archive_identity')
     checked, layer_names, blob_ids, expanded = {}, [], [], 0
-    gzip_media = layer_media + ('+gzip' if entry['mediaType'] == OCI_MANIFEST else '.gzip')
     for value, descriptor in zip(expected_layers, descriptors):
         require(type(descriptor) is dict, 'archive_identity')
         stored_id = descriptor.get('digest'); name = blob(stored_id)
@@ -265,12 +402,12 @@ def validate_archive(stream, size, end, observation):
         offset, length = members[name]
         media = descriptor.get('mediaType')
         require(type(descriptor.get('size')) is int and descriptor['size'] == length
-                and media in (layer_media, gzip_media),
+                and type(media) is str and media in LAYER_MEDIA,
                 'archive_identity')
         key = (name, media)
         if key not in checked:
             reader.seek(offset)
-            stored_hash, raw_hash, raw_size = layer_digest(reader, length, media == gzip_media, EXPANDED_BYTES - expanded)
+            stored_hash, raw_hash, raw_size = layer_digest(reader, length, LAYER_MEDIA[media], EXPANDED_BYTES - expanded)
             require(stored_hash == stored_id[7:], 'archive_identity')
             checked[key] = (raw_hash, raw_size)
         raw_hash, raw_size = checked[key]
@@ -283,13 +420,15 @@ def validate_archive(stream, size, end, observation):
             'archive_identity')
     _, layout = control('oci-layout')
     require(layout == {'imageLayoutVersion': '1.0.0'}, 'archive_shape')
-    files = {'manifest.json', 'index.json', 'oci-layout', blob(manifest_id), blob(config_id), *layer_names}
+    files = {'manifest.json', 'index.json', 'oci-layout', blob(manifest_id), blob(config_id), *layer_names, *additional_files}
     require(set(members) - {'blobs', 'blobs/sha256'} == files, 'archive_shape')
     _tail(stream, tail, size, end)
     reader.seek(0)
     archive_hash = digest(reader, size)
     kind = ('OCI_manifest_to_config' if entry['mediaType'] == OCI_MANIFEST else 'Docker_manifest_to_config') if image == manifest_id else 'Docker_config_identity'
-    return {'schema': 'runtime_image_archive_binding/1', 'kind': kind,
+    if index_binding is not None:
+        kind = 'OCI_index_to_manifest_to_config'
+    proof = {'schema': 'runtime_image_archive_binding/1', 'kind': kind,
             'manifest_media_type': entry['mediaType'],
             'docker_image_id': image, 'scanner_config_id': config_id,
             'rootfs_layers': expected_layers, 'layer_blob_digests': blob_ids,
@@ -298,6 +437,9 @@ def validate_archive(stream, size, end, observation):
             'docker_manifest_sha256': sha256(docker_raw).hexdigest(),
             'index_sha256': sha256(index_raw).hexdigest(),
             'security_accepted': False, 'findings_waived': False}
+    if index_binding is not None:
+        proof['index_binding'] = index_binding
+    return proof
 
 
 def validate_report(raw, proof):
@@ -306,7 +448,11 @@ def validate_report(raw, proof):
             'layer_blob_digests', 'expanded_layer_bytes',
             'archive_bytes', 'archive_sha256', 'manifest_sha256', 'config_sha256',
             'docker_manifest_sha256', 'index_sha256', 'security_accepted', 'findings_waived'}
-    require(type(proof) is dict and set(proof) == keys
+    require(type(proof) is dict, 'report_identity')
+    indexed = proof.get('kind') == 'OCI_index_to_manifest_to_config'
+    if indexed:
+        keys.add('index_binding')
+    require(set(proof) == keys
             and proof['schema'] == 'runtime_image_archive_binding/1'
             and proof['security_accepted'] is False and proof['findings_waived'] is False,
             'report_identity')
@@ -316,6 +462,9 @@ def validate_report(raw, proof):
             and 0 < proof['expanded_layer_bytes'] <= EXPANDED_BYTES, 'report_identity')
     for key in ('archive_sha256', 'manifest_sha256', 'config_sha256', 'docker_manifest_sha256', 'index_sha256'):
         require(type(proof[key]) is str and re.fullmatch('[a-f0-9]{64}', proof[key]), 'report_identity')
+    require(type(proof['docker_image_id']) is str and DIGEST.fullmatch(proof['docker_image_id']), 'report_identity')
+    if indexed:
+        validate_index_binding(proof['index_binding'], proof['docker_image_id'], proof['manifest_sha256'], 'report_identity')
     require(type(proof['archive_bytes']) is int and 0 < proof['archive_bytes'] <= ARCHIVE_BYTES
             and proof['archive_bytes'] % 512 == 0
             and proof['scanner_config_id'] == 'sha256:' + proof['config_sha256']
@@ -323,7 +472,8 @@ def validate_report(raw, proof):
             and ((proof['kind'] in ('OCI_manifest_to_config', 'Docker_manifest_to_config')
                   and proof['kind'] == ('OCI_manifest_to_config' if proof['manifest_media_type'] == OCI_MANIFEST else 'Docker_manifest_to_config')
                   and proof['docker_image_id'] == 'sha256:' + proof['manifest_sha256'])
-                 or (proof['kind'] == 'Docker_config_identity' and proof['docker_image_id'] == proof['scanner_config_id'])),
+                 or (proof['kind'] == 'Docker_config_identity' and proof['docker_image_id'] == proof['scanner_config_id'])
+                 or (indexed and proof['manifest_media_type'] == OCI_MANIFEST)),
             'report_identity')
     value = parse(raw, REPORT_BYTES, 'report_identity')
     require(type(value) is dict and type(value.get('SchemaVersion')) is int
@@ -335,5 +485,5 @@ def validate_report(raw, proof):
             and metadata['ImageConfig'].get('rootfs') == {'type': 'layers', 'diff_ids': expected}, 'report_identity')
     return {'image_id': proof['docker_image_id'], 'docker_image_id': proof['docker_image_id'],
             'scanner_image_id': proof['scanner_config_id'], 'transport': 'docker_save_archive',
-            'identity_binding': {key: list(proof[key]) if key in ('rootfs_layers','layer_blob_digests') else proof[key] for key in keys},
+            'identity_binding': json.loads(json.dumps(proof)),
             'security_accepted': False, 'findings_waived': False}
