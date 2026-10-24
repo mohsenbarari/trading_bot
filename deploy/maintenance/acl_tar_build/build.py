@@ -309,7 +309,9 @@ def ci_build(root):
               '--memory-swap='+('4g' if compiler else '1g'),'--pids-limit='+('512' if compiler else '128'),'--ulimit','core=0']
         if compiler:
             work=root/(purpose+'-work');work.mkdir(mode=0o700)
-            args+=['--entrypoint','/usr/local/bin/python3','--user=1001:1001','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m,uid=1001,gid=1001',
+            # Stock ACL tests load their temporary libtestlookup.so. Docker
+            # prepends noexec to tmpfs options, so an explicit exec is required.
+            args+=['--entrypoint','/usr/local/bin/python3','--user=1001:1001','--read-only','--tmpfs','/tmp:rw,exec,nosuid,nodev,size=256m,uid=1001,gid=1001',
                    '--mount','type=bind,source='+str(work)+',target=/work']
             # docker commit retains the installer entrypoint and command.
             # Explicitly select the sealed helper in both compiler phases.

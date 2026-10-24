@@ -18,8 +18,27 @@ has no network or production mounts. Admission/execution/component receipts
 retain scope limitations, original source identity, `image_rebuilt:false` and
 `security_accepted:false`. No scanner finding or policy is changed. The job has
 repository/actions read access only and retains small public receipts for30days.
-Source review and44 focused hermetic tests passed, including independent review
-and real actionlint validation; actual CI image/probe execution remains pending.
+Earlier source review and44 focused hermetic tests passed, including independent
+review and real actionlint validation. Actual CI has since reached archive
+admission and failed; it has not produced an actual component receipt.
+
+Run40114614567, job120933219871, source167 failed at `reuse_layer_inventory`
+after the Git seals and exact authenticated artifact download succeeded. The
+actual job logs establish execution; an empty or stale connector steps listing
+does not establish a pre-execution infrastructure failure. The retained public
+19d scanner image metadata has31 ordered DiffIDs but29 unique values: empty-layer
+`sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef`
+appears three times. Docker and OCI can legitimately reference that one stored
+blob at multiple ordered positions.
+
+The source correction removes only the layer-reference uniqueness requirement.
+It retains manifest/config/OCI counts and order, hashes every referenced
+position, and still rejects duplicate TAR entries and unreferenced blobs.
+Classic and OCI repeated-empty-layer fixtures cover admission, changed ordered
+DiffIDs, duplicate physical entries and extra blobs. The bounded growing-trailer
+check remains intact. This is a source correction only; the same immutable
+image still needs a separately reviewed CI rerun. No actual probe success,
+security acceptance or scanner-policy change is claimed.
 
 This probe supplies evidence for two source-package-wide scanner reports. It
 does not modify the raw scan, dismiss a vulnerability, or accept a release.

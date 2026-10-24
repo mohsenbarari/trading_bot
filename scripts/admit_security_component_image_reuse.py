@@ -172,8 +172,7 @@ def validate_docker_archive(path):
         require(type(config_name) is str and safe_member(config_name)
                 and config_name in {IMAGE[7:] + '.json', 'blobs/sha256/' + IMAGE[7:]}, 'reuse_config_identity')
         require(type(layers) is list and 0 < len(layers) <= 128
-                and all(type(name) is str and safe_member(name) for name in layers)
-                and len(set(layers)) == len(layers), 'reuse_layer_inventory')
+                and all(type(name) is str and safe_member(name) for name in layers), 'reuse_layer_inventory')
         tags = item.get('RepoTags')
         require(tags is None or type(tags) is list and len(tags) <= 8
                 and all(type(tag) is str and re.fullmatch(r'[A-Za-z0-9_./:@-]{1,256}', tag) for tag in tags),

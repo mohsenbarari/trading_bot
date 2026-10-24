@@ -73,27 +73,33 @@ class ComponentImageReuseTests(unittest.TestCase):
                 bundle.addfile(member, io.BytesIO(data) if member.isfile() else None)
         return output.getvalue()
 
-    def image(self, *, oci=False, layer_gzip=False, config_changes=None, extra=None):
+    def image(self, *, oci=False, layer_gzip=False, config_changes=None, extra=None, repeated_empty=False):
         layer = b'public synthetic image-layer bytes'
-        packed_layer = gzip.compress(layer, mtime=0) if layer_gzip else layer
+        empty = b'\0' * 1024
+        layers = [layer, empty, b'public second layer', empty, empty] if repeated_empty else [layer]
+        packed = [gzip.compress(value, mtime=0) if layer_gzip else value for value in layers]
         labels = {'org.opencontainers.image.revision': M.BASELINE, 'io.gold-trade.release.tree': M.PAYLOAD_TREE,
                   'io.gold-trade.security.overlay.revision': M.SOURCE, 'io.gold-trade.security.overlay.tree': M.SOURCE_TREE,
                   'io.gold-trade.security.payload.sha256': M.MANIFEST_SHA256}
         config = {'os': 'linux', 'architecture': 'amd64', 'config': {'Labels': labels},
-                  'rootfs': {'type': 'layers', 'diff_ids': ['sha256:' + sha256(layer).hexdigest()]}}
+                  'rootfs': {'type': 'layers', 'diff_ids': ['sha256:' + sha256(value).hexdigest() for value in layers]}}
         config.update(config_changes or {})
         raw = json.dumps(config, sort_keys=True).encode()
         image = 'sha256:' + sha256(raw).hexdigest()
         config_name = ('blobs/sha256/' if oci else '') + image[7:] + ('' if oci else '.json')
-        layer_name = 'blobs/sha256/' + sha256(packed_layer).hexdigest() if oci else 'a' * 64 + '/layer.tar'
-        manifest = [{'Config': config_name, 'Layers': [layer_name], 'RepoTags': None}]
+        layer_names = [('blobs/sha256/' + sha256(value).hexdigest()) if oci else
+                       (sha256(value).hexdigest() if repeated_empty else 'a' * 64) + '/layer.tar'
+                       for value in packed]
+        manifest = [{'Config': config_name, 'Layers': layer_names, 'RepoTags': None}]
         entries = [('manifest.json', json.dumps(manifest).encode(), tarfile.REGTYPE),
-                   (config_name, raw, tarfile.REGTYPE), (layer_name, packed_layer, tarfile.REGTYPE)]
+                   (config_name, raw, tarfile.REGTYPE)]
+        # Ordered references may repeat; the TAR stores each addressed blob once.
+        entries += [(name, data, tarfile.REGTYPE) for name, data in dict(zip(layer_names, packed)).items()]
         if oci:
             descriptor = lambda data, media: {'mediaType': media, 'size': len(data), 'digest': 'sha256:' + sha256(data).hexdigest()}
             image_manifest = json.dumps({'schemaVersion': 2,
                 'config': descriptor(raw, 'application/vnd.oci.image.config.v1+json'),
-                'layers': [descriptor(packed_layer, 'application/vnd.oci.image.layer.v1.tar+gzip' if layer_gzip else 'application/vnd.oci.image.layer.v1.tar')]}).encode()
+                'layers': [descriptor(value, 'application/vnd.oci.image.layer.v1.tar+gzip' if layer_gzip else 'application/vnd.oci.image.layer.v1.tar') for value in packed]}).encode()
             entries += [('blobs/sha256/' + sha256(image_manifest).hexdigest(), image_manifest, tarfile.REGTYPE),
                         ('index.json', json.dumps({'schemaVersion': 2, 'manifests': [descriptor(image_manifest, 'application/vnd.oci.image.manifest.v1+json')]}).encode(), tarfile.REGTYPE),
                         ('oci-layout', b'{"imageLayoutVersion":"1.0.0"}', tarfile.REGTYPE)]
@@ -142,6 +148,51 @@ class ComponentImageReuseTests(unittest.TestCase):
         tar, _ = self.image(oci=True, layer_gzip=True)
         self.package(tar)
         self.assertEqual(self.admit()['layout'], 'oci-docker')
+
+    def test_classic_and_oci_repeated_empty_layer_references_preserve_order(self):
+        self.assertEqual(sha256(b'\0' * 1024).hexdigest(),
+                         '5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef')
+        for oci in (False, True):
+            raw, entries = self.image(oci=oci, layer_gzip=oci, repeated_empty=True)
+            path = self.root / ('repeated-oci.tar' if oci else 'repeated-classic.tar')
+            path.write_bytes(raw); path.chmod(0o600)
+            references = json.loads(entries[0][1])[0]['Layers']
+            self.assertEqual(len(references), 5)
+            self.assertEqual(len(set(references)), 3)
+            self.assertEqual(references[1], references[3])
+            self.assertEqual(references[3], references[4])
+            self.assertEqual(sum(name == references[1] for name, _, _ in entries), 1)
+            with self.subTest(oci=oci):
+                result = M.validate_docker_archive(path)
+                self.assertEqual(result['layers'], 5)
+                self.assertEqual(result['layout'], 'oci-docker' if oci else 'docker')
+
+    def test_repeated_empty_layers_still_check_every_ordered_rootfs_position(self):
+        for oci in (False, True):
+            _, valid = self.image(oci=oci, repeated_empty=True)
+            expected = json.loads(valid[1][1])['rootfs']['diff_ids']
+            swapped = list(expected); swapped[0], swapped[1] = swapped[1], swapped[0]
+            wrong_repetition = list(expected); wrong_repetition[4] = 'sha256:' + '0' * 64
+            for diff_ids in (swapped, wrong_repetition):
+                raw, _ = self.image(oci=oci, repeated_empty=True,
+                    config_changes={'rootfs': {'type': 'layers', 'diff_ids': diff_ids}})
+                path = self.root / 'wrong-ordered-rootfs.tar'
+                path.write_bytes(raw); path.chmod(0o600)
+                with self.subTest(oci=oci, diff_ids=diff_ids), self.assertRaisesRegex(RuntimeError, 'reuse_layer_diff_id'):
+                    M.validate_docker_archive(path)
+
+    def test_repeated_references_do_not_allow_duplicate_tar_entries_or_extra_blobs(self):
+        for oci in (False, True):
+            _, entries = self.image(oci=oci, repeated_empty=True)
+            references = json.loads(entries[0][1])[0]['Layers']
+            repeated_blob = next(entry for entry in entries if entry[0] == references[1])
+            for extra, reason in ((repeated_blob, 'reuse_tar_member_invalid'),
+                                  (('blobs/sha256/' + 'f' * 64, b'unreferenced', tarfile.REGTYPE),
+                                   'reuse_tar_closed_inventory')):
+                path = self.root / 'wrong-repeated-inventory.tar'
+                path.write_bytes(self.tar(entries + [extra])); path.chmod(0o600)
+                with self.subTest(oci=oci, reason=reason), self.assertRaisesRegex(RuntimeError, reason):
+                    M.validate_docker_archive(path)
 
     def test_wrong_zip_digest_or_size_refuses_before_output_creation(self):
         self.package()

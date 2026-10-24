@@ -76,6 +76,21 @@ remain enabled; `noudeb` excludes installer udebs. No `nocheck`, ignored test
 failure or source patch is introduced. Privileged/interactive coverage stays
 `NOT_TESTED` rather than being inferred from successful default tests.
 
+The first actual [CI attempt 40114616816](https://github.com/mohsenbarari/trading_bot/actions/runs/40114616816),
+job120933227323, authenticated the source and dependency inputs,
+then failed the ordinary ACL default tests: their temporary
+`libtestlookup.so` could not map a segment through `LD_PRELOAD`. Docker's
+[tmpfs implementation](https://github.com/moby/moby/blob/v28.5.1/daemon/oci_linux.go#L491)
+prepends `noexec`; merely omitting that option from the caller did not make
+`/tmp` executable. Both compiler phases now request
+`/tmp:rw,exec,nosuid,nodev,size=256m,uid=1001,gid=1001`, using Docker's documented
+[`exec` tmpfs option](https://docs.docker.com/engine/storage/tmpfs/#options-for---tmpfs).
+The executable temporary directory permits normal vendor-built test libraries
+and programs. Compiler identity, capability removal, network isolation,
+read-only root and `nosuid,nodev` remain required. Installer temporary mounts
+retain their existing options. No vendor test is skipped; a fresh actual build
+must establish its result before any family-build or runtime evidence is claimed.
+
 ## Ordinary compatibility and final installation
 
 One caller is compiled against the old Trixie ACL headers and actual old ELF

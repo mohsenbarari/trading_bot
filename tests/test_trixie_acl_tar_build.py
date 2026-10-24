@@ -250,7 +250,7 @@ class AclTarVendorTests(unittest.TestCase):
         self.assertIn("('CHOWN','FOWNER','FSETID','SETUID','SETGID')",text);self.assertNotIn('DAC_OVERRIDE',text);self.assertNotIn('SYS_ADMIN',text)
         self.assertIn("container(coherent,'tar'",text);self.assertIn("--network=none",text);self.assertIn("--read-only",text)
 
-    def test_actual_controller_resets_compiler_entrypoints_after_installer_commit(self):
+    def test_actual_controller_sets_compiler_entrypoints_and_vendor_test_tmpfs(self):
         root=self.root/'ci';root.mkdir()
         for name in ('context','public','reports','docker-config'):(root/name).mkdir()
         hashes={}
@@ -296,6 +296,13 @@ class AclTarVendorTests(unittest.TestCase):
             self.assertEqual(args[args.index('--entrypoint')+1],'/usr/local/bin/python3')
             self.assertEqual(args[-6:],[image,'-I','-B','/recipe/build.py',image,phase])
             self.assertIn('--read-only',args);self.assertIn('--user=1001:1001',args)
+            self.assertEqual(args[args.index('--tmpfs')+1],'/tmp:rw,exec,nosuid,nodev,size=256m,uid=1001,gid=1001')
+            self.assertIn('--network=none',args);self.assertIn('--cap-drop=ALL',args)
+            self.assertIn('--security-opt=no-new-privileges',args)
+            self.assertFalse(any(arg.startswith('--cap-add') or arg.startswith('--privileged') for arg in args))
+        for phase in ('toolchain','runtime'):
+            args=creates[phase]
+            self.assertEqual(args[args.index('--tmpfs')+1],'/tmp:rw,nosuid,nodev,size=128m')
         self.assertLess(next(i for i,args in enumerate(commands) if args[0]=='commit' and args[-1]==ids['toolchain']),
                         next(i for i,args in enumerate(commands) if args==creates['tar']))
         self.assertIn('image_id='+candidate,output.read_text())
