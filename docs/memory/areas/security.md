@@ -16,10 +16,10 @@
 - Capture2 f79 replay fixed by account-indexed streaming with equal hashes.
   Processor65–68s still flaps30s health. Legacy collectors stay inhibited; never
   duplicate owners or inspect/copy/hash session/config contents.
-- Native Brotli first refresh timed out; preserve partial receipt. Collector
-  later proved patched/ready without retry; Golden remains old. Golden-only
-  continuation needs fresh window/parent binding, never collector restart or
-  rewriting the failed attempt. See24Oct native-brotli-refresh runbook.
+- Native Brotli runtime verified: both consumers patched/ready. Golden-only
+  continuation preserved collector,15 containers and immutable failed-parent
+  receipt. Never reinterpret that failure or reuse expired windows. See24Oct
+  native-brotli-refresh runbook; global security remains incomplete.
 - Actual19d App:56 focused tests/rawHIGH44/8 advisory IDs; not accepted/activated.
   See `docs/security/2026-10-24-security-candidate-19d.md`.
 - Watchdogs check Restarting before Running. Stale heartbeat can coexist with

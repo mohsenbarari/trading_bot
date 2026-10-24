@@ -133,3 +133,25 @@ collector restart; out-of-scope writes and repeat attempts refuse. Parent
 evidence stays unchanged. No earlier deadline is extended and no Web/container
 action is authorized. The new receipt may verify both consumers only after
 real post-request readiness, while global security completion stays false.
+
+## Actual Golden-only completion
+
+The user approved a separate24Oct13:22:47–13:32:47 UTC window, without
+extending the historical collector attempt. Exactly one Golden restart was
+requested at13:23:59 UTC. Old PID524800 ended; new PID973595 demonstrated
+fresh application readiness, a patched module mapping and ten seconds of
+stable identity. The final process scan found zero old target mappings and
+no unknown old Native consumers. Collector PID829565 stayed unchanged with a
+fresh HEALTHY/connected heartbeat. All15 container IDs, images, mounts, running
+states and restart policies matched the installation receipt. No Web/container/
+collector restart was requested.
+
+The separate receipt is
+`/srv/trading-bot/backups/security-brotli-native-golden-resume-20261024-02/receipt.json`,
+SHA-256 `cb985a4cd62566c7e97e34475375d4fa95926d6b189abeec8303ae9b4f4e3e18`.
+It records `native_brotli_consumers_verified`, component runtime verification
+true and completion-unverified false. The failed parent receipt still has its
+original `5955...41c7` digest; neither it nor the original installation receipt
+was rewritten. Global security completion remains false because other image,
+backup and Web-host gates are still open. No business transactions were used
+as test data and refactor automation remains stopped.
