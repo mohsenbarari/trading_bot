@@ -1,0 +1,88 @@
+---
+# Preserve the exact unused03 plan and its entire workspace; never adopt it.
+- name: Archive only the proved unapplied Web preparation under the marker lock
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Admit only the existing strict Web lane
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59'
+          - ansible_port | int == 37067
+          - ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+    - name: Prove the exact unused plan source baseline and absent operational fences
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import ctypes,fcntl,hashlib,json,os,pathlib,stat,sys,types
+            P=pathlib.Path
+            root=P('/root/.local/security-web-engine-20261023')
+            archive=P('/root/.local/security-web-engine-20261023-unapplied-03-04fd1e7a')
+            expected='04fd1e7a04064c8e47ac05d84dba3a9eb32e30d820831ee935e20b8fb4b06106'
+            def require(ok):
+                if not ok: raise RuntimeError('unused_plan_archive_refused')
+            def read(path,maximum):
+                require(path.resolve(strict=True)==path)
+                fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                try:
+                    before=os.fstat(fd)
+                    require(stat.S_ISREG(before.st_mode) and before.st_uid==0 and before.st_nlink==1 and not before.st_mode&0o022 and before.st_size<=maximum)
+                    raw=bytearray()
+                    while chunk:=os.read(fd,min(65536,maximum+1-len(raw))):
+                        raw.extend(chunk);require(len(raw)<=maximum)
+                    def identity(s):return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                    require(identity(before)==identity(os.fstat(fd))==identity(path.lstat()))
+                    return bytes(raw)
+                finally:os.close(fd)
+            def main():
+                require(os.geteuid()==0 and P('/proc/1/exe').readlink().name=='systemd' and not P('/.dockerenv').exists())
+                require(sys.argv[1] in {'check','archive'})
+                for ns in ('pid','mnt','user'):require(os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns))
+                require(not os.path.lexists(archive))
+                info=root.lstat();require(stat.S_ISDIR(info.st_mode) and info.st_uid==0 and stat.S_IMODE(info.st_mode)==0o700)
+                raw=read(root/'plan.json',2097152);require(hashlib.sha256(raw).hexdigest()==expected)
+                plan=json.loads(raw)
+                require(plan['operation_id']=='security-web-engine-20261023-03' and plan['nonce']=='16200f6f533c4af19431a41b69e26721' and plan['deadline_utc']=='2026-10-24T04:41:00Z')
+                helper=root/'source/deploy/maintenance/web_engine_prepare.py'
+                bindings=[r for r in plan['files'] if r['path']==str(helper)]
+                require(len(bindings)==1)
+                source=read(helper,131072);require(hashlib.sha256(source).hexdigest()==bindings[0]['sha256'])
+                module=types.ModuleType('_sealed_unused_preparation');module.__file__=str(helper)
+                exec(compile(source,str(helper),'exec'),module.__dict__)
+                spec=module.document(module.read(root/'inputs.json',maximum=65536));module.validate_inputs(spec)
+                controller=module.controller(spec,root/'source')
+                marker=controller.P.MARKER
+                fd=os.open(marker,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                try:
+                    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    require(controller.B.identity(os.fstat(fd))==controller.B.identity(marker.lstat()))
+                    controller.invariant_contract(plan,expected,owned=False)
+                    controller.runtime_contract(plan,'baseline')
+                    require(hashlib.sha256(read(root/'plan.json',2097152)).hexdigest()==expected)
+                    require((root.lstat().st_dev,root.lstat().st_ino)==(info.st_dev,info.st_ino))
+                    if sys.argv[1]=='archive':
+                        rename=ctypes.CDLL(None,use_errno=True).renameat2
+                        rename.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint];rename.restype=ctypes.c_int
+                        if rename(-100,os.fsencode(root),-100,os.fsencode(archive),1):raise OSError(ctypes.get_errno(),'exclusive archive refused')
+                        parent=os.open(root.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+                        try:os.fsync(parent)
+                        finally:os.close(parent)
+                finally:os.close(fd)
+                print(json.dumps({'status':'unapplied_plan_archived' if sys.argv[1]=='archive' else 'unapplied_plan_verified','plan_sha256':expected,'runtime_changed':False,'history_deleted':False}))
+            try:main()
+            except Exception:print('{"status":"refused","code":"unused_plan_archive_refused"}',file=sys.stderr);raise SystemExit(1)
+          - "{{ 'archive' if (web_engine_archive_apply | default(false) | bool) and not ansible_check_mode else 'check' }}"
+      changed_when: web_engine_archive_apply | default(false) | bool and not ansible_check_mode
+      check_mode: false
+      timeout: 180
+      register: unused_web_plan
+    - name: Report only the preserved unused-plan integrity result
+      ansible.builtin.debug:
+        var: unused_web_plan.stdout
