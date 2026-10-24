@@ -25,8 +25,8 @@ MARKER_SHA = '0fcd5b5165f31e77665fb56a140ed0a1ad61f0098b359730b26f89ec81a074f5'
 SOURCE = CONTROL / 'security-web-engine-20261023-07.source.lock'
 RESERVATION = CONTROL / 'private-primary-controller.lock'
 ENV = Path('/srv/trading-bot/market-pipeline-releases/f3be9ae2c4e9df0da31abaa41e91f327eb9573a2/web.release.env')
-MANAGED = ENV.parent.parent / 'security-backup-managed-20261024-03'
-STAGE = Path('/root/.local/security-web-market-managed-config-20261024-03')
+MANAGED = ENV.parent.parent / 'security-backup-managed-20261024-04'
+STAGE = Path('/root/.local/security-web-market-managed-config-20261024-04')
 CONTROLS = {
     PLAN: PLAN_SHA,
     CONTROL / 'security-web-c07-terminal-closure-20261024-01.json': '712af9788ef73e3934252d7b7e50bd0681bbfea13c25088da59a123efabb5dc0',
@@ -35,8 +35,8 @@ CONTROLS = {
 }
 PINS = {
     'web_engine_preflight.py': 'cbadbc1085dd5e351510ed719a9e6c779523c4d644f53198d4f9c0c1d7750679',
-    'backup_market_pipeline_archive.py': 'e2083dcedef0c149f0ffd1f21a7855dd4db5ccaba9ea3fe136b8400661678a6c',
-    'prepare_market_pipeline_primary_release.py': '9e9179f5276ff33a5e7da8b378f917c2f0525e314c0311ca02b0a2d5ef45591b',
+    'backup_market_pipeline_archive.py': '6e91542521d5421a676768f26f32e1bd96e9f55aca5feb827fff5c2a67aa37d6',
+    'prepare_market_pipeline_primary_release.py': '898f4c824b2587bdc4ba039f4c78a9d69c901245ddca11a466bdfec60938c3d6',
     'prepare_market_pipeline_release.py': '6355aafa369b3abd652ff251a19fa9e329a8104bf9781ba197b1dc5e113677d5',
 }
 OLD_CAPTURE = '9870311065b13646767dfad1e48214d6a231e3898e1f248bb9559edd8926966c'
@@ -47,6 +47,10 @@ ANCHOR = 'sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033c
 PROVENANCE = {'image_id': ANCHOR, 'release_sha': 'a6dcd636a1525a3a3d47e2a6083ca887b16080db',
               'release_tree': '259c9c4964864b7acfd92f94c9856e664130d082',
               'image_input_signature': '669ee2267889d54bb36ef4cd8184d7a02c10fadeb4f39609e60ddce9f6f62a69'}
+CONFIGURATION = {'release_sha': 'f3be9ae2c4e9df0da31abaa41e91f327eb9573a2',
+                 'release_tree': 'd87bb5a0f7d9f96edfdad177c66f7afd120e02f7',
+                 'provenance_kind': 'root_verified_public_git_commit_tree',
+                 'historical_entire_env_contents_verified': False}
 FUNCTIONAL_LABELS = {
     'io.gold-trade.capture.replay.baseline': 'd8f15f8212b9510e3abb5301d0201b2ba1eca13224f5a01c682d1de6716cb7d5',
     'io.gold-trade.capture.replay.fix-commit': 'adca507b261d3e139befc67b4a937c48c96bb949',
@@ -142,7 +146,8 @@ def public_profile(P, clock, plan, parking):
     require(isinstance(layers, list) and layers and isinstance(derived, list)
             and len(derived) == len(layers) + 2 and derived[:len(layers)] == layers
             and images[FUNCTIONAL]['functional'] == FUNCTIONAL_LABELS, 'managed_capture_lineage_changed')
-    return {'containers': result, 'source': PROVENANCE, 'capture_lineage': images}
+    return {'containers': result, 'configuration_source': CONFIGURATION,
+            'source_image': PROVENANCE, 'capture_lineage': images}
 
 
 def controls(P):
@@ -210,8 +215,9 @@ def provision(P, backup, primary, clock):
             before = public_profile(P, clock, plan, parking)
             public_bytes = json.dumps(before, sort_keys=True, separators=(',', ':')).encode()
             evidence = sha256(public_bytes).hexdigest()
-            options = dict(source_image_id=ANCHOR, source_release_sha=PROVENANCE['release_sha'],
-                           source_release_tree=PROVENANCE['release_tree'],
+            options = dict(config_release_sha=CONFIGURATION['release_sha'], config_release_tree=CONFIGURATION['release_tree'],
+                           source_image_id=ANCHOR, source_image_release_sha=PROVENANCE['release_sha'],
+                           source_image_release_tree=PROVENANCE['release_tree'],
                            source_image_input_signature=PROVENANCE['image_input_signature'], source_evidence_sha256=evidence)
             P.safe_parent(MANAGED)
             require(not os.path.lexists(MANAGED), 'managed_destination_exists')
@@ -222,8 +228,9 @@ def provision(P, backup, primary, clock):
             evidence_path = MANAGED/'public-source-evidence.json'
             primary._atomic_write(evidence_path, public_bytes, exclusive=True, _metadata=True)
             primary.verify_web_metadata(**arguments)
-            values = backup.validate_release_env(arguments['web_env'], release_sha=PROVENANCE['release_sha'],
-                                                 image_id=ANCHOR, allow_target_identity_mismatch=True)
+            values = backup.validate_release_env(arguments['web_env'], release_sha=CONFIGURATION['release_sha'],
+                                                 image_id=ANCHOR, allow_target_identity_mismatch=False,
+                                                 allow_private_primary_source=True)
             del values
             require(public_profile(P, clock, plan, parking) == before, 'managed_public_source_changed')
             boundaries(P, clock, plan, identities, marker, marker_identity); original.check()

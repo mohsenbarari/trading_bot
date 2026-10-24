@@ -1388,6 +1388,44 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 image_id=IMAGE_ID,
             )
 
+    def test_explicit_private_primary_source_keeps_exact_configuration_and_image_checks(self):
+        values = {**self.values, 'MARKET_PIPELINE_FEED_MODE': 'PRIVATE_PRIMARY',
+                  'MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY': '1',
+                  'MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE': 'PRIVATE_PRIMARY'}
+        _write_env(self.env_file, values)
+        with self.assertRaisesRegex(backup.BackupError, 'identity_mismatch'):
+            backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID)
+        observed = backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID,
+            allow_target_identity_mismatch=False, allow_private_primary_source=True)
+        self.assertEqual(observed, values)
+        for release, image in (('e' * 40, IMAGE_ID), (RELEASE_SHA, 'sha256:' + 'f' * 64)):
+            with self.subTest(release=release, image=image), self.assertRaisesRegex(backup.BackupError, 'identity_mismatch'):
+                backup.validate_release_env(self.env_file, release_sha=release, image_id=image,
+                    allow_target_identity_mismatch=False, allow_private_primary_source=True)
+        values['MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY'] = '0'
+        _write_env(self.env_file, values)
+        with self.assertRaisesRegex(backup.BackupError, 'identity_mismatch'):
+            backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID,
+                allow_private_primary_source=True)
+
+    def test_explicit_private_primary_source_permission_requires_boolean(self):
+        for value in (1, 0, 'true', [], None):
+            with self.subTest(permission=value), self.assertRaisesRegex(backup.BackupError, 'primary_source_permission_invalid'):
+                backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID,
+                    allow_private_primary_source=value)
+
+    def test_explicit_private_primary_source_requires_immutable_identity_even_if_arguments_match(self):
+        for key, value, reason in (('MARKET_PIPELINE_IMAGE', 'source:legacy-tag', 'source_image_identity_invalid'),
+                                   ('MARKET_PIPELINE_RELEASE_SHA', 'legacy-release', 'source_release_sha_invalid')):
+            values = {**self.values, 'MARKET_PIPELINE_FEED_MODE': 'PRIVATE_PRIMARY',
+                      'MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY': '1', 'MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE': 'PRIVATE_PRIMARY',
+                      key: value}
+            _write_env(self.env_file, values)
+            with self.subTest(key=key), self.assertRaisesRegex(backup.BackupError, reason):
+                backup.validate_release_env(self.env_file, release_sha=values['MARKET_PIPELINE_RELEASE_SHA'],
+                    image_id=values['MARKET_PIPELINE_IMAGE'], allow_target_identity_mismatch=False,
+                    allow_private_primary_source=True)
+
     def test_bluegreen_source_env_rejects_incoherent_primary_lane(self) -> None:
         values = dict(self.values)
         values.update(

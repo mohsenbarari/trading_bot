@@ -47,7 +47,7 @@ class ManagedConfigurationTests(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(M, 'MARKER_INODE', info.st_ino))
         self.stack.enter_context(mock.patch.object(M, 'MARKER_SHA', sha256(b'public-marker').hexdigest()))
         values = R._rendered({**_web_values(), 'CUSTOM_RETAINED': 'retained'},
-                             release_sha=M.PROVENANCE['release_sha'], image_id='source:legacy-tag',
+                             release_sha=M.CONFIGURATION['release_sha'], image_id='source:legacy-tag',
                              project_name='market-private-pipeline-primary')
         self.env.write_text(''.join(key+'='+value+'\n' for key, value in sorted(values.items())))
         self.env.chmod(0o600); self.original_values = values
@@ -130,20 +130,25 @@ class ManagedConfigurationTests(unittest.TestCase):
         self.assertTrue(result['validation_passed']); self.assertFalse(result['runtime_changed'])
         self.assertFalse(result['backup_created']); self.assertFalse(result['deployment_eligible'])
         self.assertEqual(self.env.read_bytes(), original); self.assertEqual(P.identity(self.env.stat()), before)
-        self.assertEqual(B.validate_release_env(self.managed/'web.release.env', release_sha=M.PROVENANCE['release_sha'],
-            image_id=M.ANCHOR, allow_target_identity_mismatch=True), {**self.original_values, 'MARKET_PIPELINE_IMAGE': M.ANCHOR})
+        self.assertEqual(B.validate_release_env(self.managed/'web.release.env', release_sha=M.CONFIGURATION['release_sha'],
+            image_id=M.ANCHOR, allow_target_identity_mismatch=False, allow_private_primary_source=True),
+            {**self.original_values, 'MARKET_PIPELINE_IMAGE': M.ANCHOR})
         self.assertEqual({path.name for path in self.managed.iterdir()},
                          {'web.release.env', 'web-managed-receipt.json', 'public-source-evidence.json'})
         receipt = json.loads((self.managed/'web-managed-receipt.json').read_text())
         raw = (self.managed/'public-source-evidence.json').read_bytes()
         self.assertEqual(sha256(raw).hexdigest(), receipt['caller_source_evidence_sha256'])
+        self.assertEqual(receipt['configuration_source']['release_sha'], M.CONFIGURATION['release_sha'])
+        self.assertEqual(receipt['source_image']['oci_revision'], M.PROVENANCE['release_sha'])
+        self.assertNotEqual(receipt['configuration_source']['release_sha'], receipt['source_image']['oci_revision'])
+        self.assertEqual(json.loads(raw)['configuration_source'], M.CONFIGURATION)
         self.assertEqual(raw, json.dumps(json.loads(raw), sort_keys=True, separators=(',', ':')).encode())
         self.assertNotIn('/srv/trading-bot/secure/market', raw.decode())
         self.assertNotIn('.Config.Env', M.INSPECT + M.IMAGE)
         self.assertTrue(all(call.args[0][1] in {'ps', 'inspect', 'image'} for call in self.command.call_args_list))
 
     def test_original_release_mismatch_refuses_without_env_or_receipt_outputs(self):
-        self.env.write_text(self.env.read_text().replace(M.PROVENANCE['release_sha'], '0'*40))
+        self.env.write_text(self.env.read_text().replace(M.CONFIGURATION['release_sha'], '0'*40))
         self.plan['market_backup']['env_file_identity'] = list(P.identity(self.env.stat()))
         self.write_json(self.plan_path, self.plan)
         M.CONTROLS[self.plan_path] = sha256(self.plan_path.read_bytes()).hexdigest()

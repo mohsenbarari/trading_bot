@@ -192,6 +192,10 @@ a valid user-approved downtime window; a hot backup does not grant that window.
 
 ## Additive managed Web metadata renderer (source-only)
 
+The following 1.0 description is historical. The actual03 attempt refused before
+creating an Env or receipt; the distinct-identity 1.1 contract below supersedes
+its assumption that configuration release and image OCI revision coincide.
+
 The PRIMARY preparer now offers `render-web-metadata` and
 `verify-web-metadata`. These are the managed single-Web-role successor to the
 old hash-based derive/render path. Legacy `derive-source`, pair rendering and
@@ -287,6 +291,50 @@ needs a finite owning producer, measured capacity, daemon-side deadline/cleanup,
 managed source provenance, and durable verified offhost transport. This source
 packet has not created a production dump or independent restore. It grants no
 production stop, daemon upgrade, reboot or activation authority.
+
+## Separate configuration and image identities for managed04
+
+Actual03 provisioning refused cleanly with
+`primary_managed_source_release_mismatch`. Its public script staging and empty
+managed directory remain immutable failure evidence and cannot be adopted.
+No Env, renderer receipt, dump or runtime change was produced. The failure does
+not reveal the original RELEASE value. A later candidate must use fresh04
+destinations and validate that field through the normal parser.
+
+Managed receipt `market_pipeline_primary_web_managed_metadata/1.1` now separates
+`configuration_source.release_sha/release_tree` from
+`source_image.image_id/oci_revision/oci_tree/image_input_signature`. Its required
+API arguments name both origins explicitly. The proposed configuration identity
+is public Git commit `f3be9ae2c4e9df0da31abaa41e91f327eb9573a2`, tree
+`d87bb5a0f7d9f96edfdad177c66f7afd120e02f7`, independently resolved from public Git
+metadata. This is a candidate assertion: the normal renderer must still require
+the original parsed `MARKET_PIPELINE_RELEASE_SHA` to equal that exact argument.
+It never infers the value from the directory or rewrites a mismatch.
+
+The actual E46 anchor retains its separate OCI revision `a6dcd636a1525a3a3d47e2a6083ca887b16080db`,
+tree `259c9c4964864b7acfd92f94c9856e664130d082` and existing input signature. The
+producer preserves all seven heterogeneous runtime role images and verifies
+the separate Capture06 f79/223 layer and functional-label lineage. Only the new
+backup configuration's IMAGE key changes; RELEASE, project, PRIMARY lane,
+backfill, roots and every other setting stay equal to the bound original.
+
+The original directory has no historical renderer receipt. The public proof
+therefore records the verified public Git commit/tree and the image's separately
+verified OCI provenance, and explicitly denies historical whole-Env content
+verification. No configuration input signature is invented. Legacy Env digest
+fields are never recomputed or used to authenticate the current Env. Receipt
+1.0 cannot be silently reinterpreted as 1.1; exact fields and JSON types remain
+required, alongside retained source/output metadata and canonical public proof.
+
+Normal backup source validation now has an explicit
+`allow_private_primary_source=True` permission independent of
+`allow_target_identity_mismatch`. Managed04 uses identity mismatch **false**,
+the proposed configuration SHA and the actual immutable E46 image, so both
+identities must match exactly. Ordinary callers remain Shadow-only by default;
+existing create/verify and HOT1.4 interfaces keep their contracts. Future HOT3
+uses the configuration SHA/tree in its backup receipt and binds the managed1.1
+receipt/public envelope separately for actual image OCI provenance. This source
+change grants no dump, deployment, activation or production acceptance.
 
 The finite `web_market_managed_config.py` producer and its Ansible wrapper now
 bind the completed closure, permanent M inode and absent old fences. They check

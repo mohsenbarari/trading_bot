@@ -288,18 +288,23 @@ def validate_release_env(
     release_sha: str,
     image_id: str,
     allow_target_identity_mismatch: bool = False,
+    allow_private_primary_source: bool = False,
 ) -> dict[str, str]:
     with BoundRoleEnv(env_file) as bound:
         return _validate_release_values(
             bound.values(), release_sha=release_sha, image_id=image_id,
             allow_target_identity_mismatch=allow_target_identity_mismatch,
+            allow_private_primary_source=allow_private_primary_source,
         )
 
 
 def _validate_release_values(
     values: dict[str, str], *, release_sha: str, image_id: str,
     allow_target_identity_mismatch: bool = False,
+    allow_private_primary_source: bool = False,
 ) -> dict[str, str]:
+    if type(allow_private_primary_source) is not bool:
+        raise BackupError("backup_primary_source_permission_invalid")
     source_values = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
     validate_source("web", source_values)
     expected = {"MARKET_PIPELINE_MODE": "live"}
@@ -311,14 +316,19 @@ def _validate_release_values(
     allowed_source_lanes = {
         ("PRIVATE_SHADOW", "0", "PRIVATE_SHADOW"),
     }
-    if allow_target_identity_mismatch:
-        # A release-to-release Blue/Green upgrade may use the already-live
-        # PRIVATE_PRIMARY database as its immutable backup source.  The
-        # ordinary backup surface remains Shadow-only; only this explicitly
-        # bound source mode accepts either coherent lane triple.
+    if allow_target_identity_mismatch or allow_private_primary_source:
+        # PRIMARY lane permission and identity relaxation are independent.
+        # The explicit source permission retains exact release/image checks;
+        # the existing Blue/Green mode keeps its original contract. Ordinary
+        # callers remain Shadow-only. Neither permission activates a runtime.
         allowed_source_lanes.add(("PRIVATE_PRIMARY", "1", "PRIVATE_PRIMARY"))
     if source_lane not in allowed_source_lanes:
         raise BackupError("backup_release_env_identity_mismatch")
+    if allow_private_primary_source:
+        if not RELEASE_SHA.fullmatch(values.get("MARKET_PIPELINE_RELEASE_SHA", "")):
+            raise BackupError("backup_source_release_sha_invalid")
+        if not IMAGE_ID.fullmatch(values.get("MARKET_PIPELINE_IMAGE", "")):
+            raise BackupError("backup_source_image_identity_invalid")
     if not allow_target_identity_mismatch:
         expected.update(
             {

@@ -32,7 +32,7 @@
           - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
           - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
           - managed_config_deadline_utc is defined
-          - managed_config_argv[8] | hash('sha256') == '955181f3fbdef503ac9bedaee3f5560d9489d13d541b6ce6184bc546ad4870f7'
+          - managed_config_argv[8] | hash('sha256') == 'b9bedbe70b449e1d21e3c6472c414cd69f8c8c11c5cafafc46b0b887fc886fba'
     - name: Stage public scripts then bind and preserve runtime under the existing permanent marker
       # Only pinned public bytes are staged before taking M. Private input and
       # runtime checks and the fresh managed output remain inside the M lock.

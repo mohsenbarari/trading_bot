@@ -292,8 +292,9 @@ class ManagedWebMetadataTests(unittest.TestCase):
     def arguments(self):
         return dict(
             rendered_env=self.original, web_env=self.output, receipt=self.receipt,
-            source_image_id=WEB_IMAGE_ID, source_release_sha=RELEASE_SHA,
-            source_release_tree=RELEASE_TREE, source_image_input_signature="d" * 64,
+            config_release_sha=RELEASE_SHA, config_release_tree=RELEASE_TREE,
+            source_image_id=WEB_IMAGE_ID, source_image_release_sha="e" * 40,
+            source_image_release_tree="f" * 40, source_image_input_signature="d" * 64,
             source_evidence_sha256="9" * 64,
         )
 
@@ -324,6 +325,11 @@ class ManagedWebMetadataTests(unittest.TestCase):
         self.assertFalse(document["deployment_eligible"])
         self.assertFalse(document["product_authority_changed"])
         self.assertEqual(document["caller_source_evidence_sha256"], "9" * 64)
+        self.assertEqual(document['configuration_source'], {'release_sha': RELEASE_SHA, 'release_tree': RELEASE_TREE,
+            'release_field_verified': True, 'historical_entire_env_contents_verified': False})
+        self.assertEqual(document['source_image'], {'image_id': WEB_IMAGE_ID, 'oci_revision': 'e' * 40,
+            'oci_tree': 'f' * 40, 'image_input_signature': 'd' * 64})
+        self.assertNotEqual(document['configuration_source']['release_sha'], document['source_image']['oci_revision'])
         self.assertNotIn("/srv/trading-bot/secure/market", self.receipt.read_text())
         self.assertEqual(set(self.managed.iterdir()), {self.output, self.receipt})
 
@@ -339,9 +345,13 @@ class ManagedWebMetadataTests(unittest.TestCase):
 
     def test_source_baseline_mismatch_or_bad_public_identity_refuses_before_outputs(self):
         for override in (
-            {"source_release_sha": "1" * 40}, {"source_image_id": "candidate:target-tag"},
-            {"source_release_tree": "bad"}, {"source_image_input_signature": "bad"},
+            {"config_release_sha": "1" * 40}, {"source_image_id": "candidate:target-tag"},
+            {"config_release_tree": "bad"}, {"source_image_release_sha": "bad"},
+            {"source_image_release_tree": "bad"}, {"source_image_input_signature": "bad"},
             {"source_evidence_sha256": "bad"},
+            {"config_release_sha": "e" * 40, "source_image_release_sha": RELEASE_SHA},
+            {"config_release_sha": True}, {"config_release_tree": []},
+            {"source_image_release_sha": False}, {"source_image_release_tree": {}},
         ):
             with self.subTest(override=override):
                 with self.assertRaises(primary.PrimaryReleaseError):
@@ -435,11 +445,25 @@ class ManagedWebMetadataTests(unittest.TestCase):
     def test_verify_receipt_requires_exact_json_types_and_no_extra_fields(self):
         primary.render_web_metadata(**self.arguments())
         original = json.loads(self.receipt.read_text())
-        for tampered in ({**original, "runtime_mutated": 0}, {**original, "extra": True}):
+        reflected = json.loads(json.dumps(original))
+        reflected['source_image']['oci_revision'] = RELEASE_SHA
+        wrong_config = json.loads(json.dumps(original))
+        wrong_config['configuration_source']['release_field_verified'] = 1
+        for tampered in ({**original, "runtime_mutated": 0}, {**original, "extra": True},
+                         {**original, 'schema': 'market_pipeline_primary_web_managed_metadata/1.0'},
+                         reflected, wrong_config):
             with self.subTest(tampered=tampered.keys()):
                 self.receipt.write_text(json.dumps(tampered))
                 with self.assertRaisesRegex(primary.PrimaryReleaseError, "receipt_identity_mismatch"):
                     primary.verify_web_metadata(**self.arguments())
+
+    def test_verify_stale_configuration_identity_cannot_be_reinterpreted_as_image_revision(self):
+        primary.render_web_metadata(**self.arguments())
+        with self.assertRaisesRegex(primary.PrimaryReleaseError, 'source_release_mismatch'):
+            primary.verify_web_metadata(**{**self.arguments(), 'config_release_sha': 'e' * 40,
+                                           'source_image_release_sha': RELEASE_SHA})
+        with self.assertRaisesRegex(primary.PrimaryReleaseError, 'receipt_identity_mismatch'):
+            primary.verify_web_metadata(**{**self.arguments(), 'config_release_tree': '1' * 40})
 
     def test_source_symlink_or_hardlink_and_unsafe_destination_refuse(self):
         linked = self.root / "linked-source.env"

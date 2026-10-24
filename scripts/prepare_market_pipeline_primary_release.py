@@ -52,7 +52,7 @@ else:
 CONFIRMATION = "render-market-pipeline-private-primary"
 SCHEMA = "market_pipeline_primary_release_pair/1.0"
 ROLE_IMAGE_SCHEMA = "market_pipeline_primary_release_pair/1.1"
-WEB_METADATA_SCHEMA = "market_pipeline_primary_web_managed_metadata/1.0"
+WEB_METADATA_SCHEMA = "market_pipeline_primary_web_managed_metadata/1.1"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 AUTHORIZED_BACKFILL_NOT_BEFORE_UTC = "2026-08-25T09:33:00Z"
 AUTHORIZED_BACKFILL_SOURCE_CODES = (
@@ -477,19 +477,26 @@ def _managed_paths(rendered_env: Path, web_env: Path, receipt: Path) -> None:
 
 
 def _managed_web_values(
-    values: Mapping[str, str], *, source_image_id: str, source_release_sha: str,
-    source_release_tree: str, source_image_input_signature: str,
+    values: Mapping[str, str], *, config_release_sha: str, config_release_tree: str,
+    source_image_id: str, source_image_release_sha: str,
+    source_image_release_tree: str, source_image_input_signature: str,
     source_evidence_sha256: str,
 ) -> dict[str, str]:
-    if (
+    if any(type(value) is not str for value in (
+        config_release_sha, config_release_tree, source_image_id,
+        source_image_release_sha, source_image_release_tree,
+        source_image_input_signature, source_evidence_sha256,
+    )) or (
         not IMAGE_ID.fullmatch(source_image_id)
-        or not RELEASE_SHA.fullmatch(source_release_sha)
-        or not RELEASE_SHA.fullmatch(source_release_tree)
+        or not RELEASE_SHA.fullmatch(config_release_sha)
+        or not RELEASE_SHA.fullmatch(config_release_tree)
+        or not RELEASE_SHA.fullmatch(source_image_release_sha)
+        or not RELEASE_SHA.fullmatch(source_image_release_tree)
         or not HEX64.fullmatch(source_image_input_signature)
         or not HEX64.fullmatch(source_evidence_sha256)
     ):
         raise PrimaryReleaseError("primary_managed_source_identity_invalid")
-    if values.get("MARKET_PIPELINE_RELEASE_SHA") != source_release_sha:
+    if values.get("MARKET_PIPELINE_RELEASE_SHA") != config_release_sha:
         raise PrimaryReleaseError("primary_managed_source_release_mismatch")
     if (
         values.get("MARKET_PIPELINE_MODE") != "live"
@@ -502,7 +509,7 @@ def _managed_web_values(
     source = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
     validate_source("web", source)
     expected = _rendered(
-        source, release_sha=source_release_sha, image_id=source_image_id,
+        source, release_sha=config_release_sha, image_id=source_image_id,
         project_name=values["MARKET_PIPELINE_PROJECT_NAME"],
     )
     if {key for key in set(values) | set(expected) if values.get(key) != expected.get(key)} != {"MARKET_PIPELINE_IMAGE"}:
@@ -511,16 +518,21 @@ def _managed_web_values(
 
 
 def _managed_web_receipt(
-    source: BoundRoleEnv, output: BoundRoleEnv, *, source_image_id: str,
-    source_release_sha: str, source_release_tree: str,
+    source: BoundRoleEnv, output: BoundRoleEnv, *, config_release_sha: str,
+    config_release_tree: str, source_image_id: str,
+    source_image_release_sha: str, source_image_release_tree: str,
     source_image_input_signature: str, source_evidence_sha256: str,
 ) -> dict[str, object]:
     return {
         "schema": WEB_METADATA_SCHEMA, "role": "web",
         "stage": "managed_backup_configuration_staged",
+        "configuration_source": {
+            "release_sha": config_release_sha, "release_tree": config_release_tree,
+            "release_field_verified": True, "historical_entire_env_contents_verified": False,
+        },
         "source_image": {
-            "image_id": source_image_id, "release_sha": source_release_sha,
-            "release_tree": source_release_tree,
+            "image_id": source_image_id, "oci_revision": source_image_release_sha,
+            "oci_tree": source_image_release_tree,
             "image_input_signature": source_image_input_signature,
         },
         "caller_source_evidence_sha256": source_evidence_sha256,
@@ -536,12 +548,15 @@ def _managed_web_receipt(
 
 
 def render_web_metadata(
-    *, rendered_env: Path, web_env: Path, receipt: Path, source_image_id: str,
-    source_release_sha: str, source_release_tree: str,
+    *, rendered_env: Path, web_env: Path, receipt: Path, config_release_sha: str,
+    config_release_tree: str, source_image_id: str,
+    source_image_release_sha: str, source_image_release_tree: str,
     source_image_input_signature: str, source_evidence_sha256: str,
 ) -> dict[str, object]:
     """Stage one managed Web backup configuration without content hashes.
 
+    Configuration revision and actual image OCI provenance are independent.
+    The original RELEASE must match the explicit configuration revision.
     Caller evidence supplies the actual source image, never a deployment target.
     Runtime/profile/OCI lineage verification belongs to the locked caller.
     """
@@ -549,8 +564,9 @@ def render_web_metadata(
     if any(path.exists() or path.is_symlink() for path in (web_env, receipt)):
         raise PrimaryReleaseError("primary_managed_output_exists")
     identity = dict(
-        source_image_id=source_image_id, source_release_sha=source_release_sha,
-        source_release_tree=source_release_tree,
+        config_release_sha=config_release_sha, config_release_tree=config_release_tree,
+        source_image_id=source_image_id, source_image_release_sha=source_image_release_sha,
+        source_image_release_tree=source_image_release_tree,
         source_image_input_signature=source_image_input_signature,
         source_evidence_sha256=source_evidence_sha256,
     )
@@ -577,14 +593,16 @@ def render_web_metadata(
 
 
 def verify_web_metadata(
-    *, rendered_env: Path, web_env: Path, receipt: Path, source_image_id: str,
-    source_release_sha: str, source_release_tree: str,
+    *, rendered_env: Path, web_env: Path, receipt: Path, config_release_sha: str,
+    config_release_tree: str, source_image_id: str,
+    source_image_release_sha: str, source_image_release_tree: str,
     source_image_input_signature: str, source_evidence_sha256: str,
 ) -> dict[str, object]:
     _managed_paths(rendered_env, web_env, receipt)
     identity = dict(
-        source_image_id=source_image_id, source_release_sha=source_release_sha,
-        source_release_tree=source_release_tree,
+        config_release_sha=config_release_sha, config_release_tree=config_release_tree,
+        source_image_id=source_image_id, source_image_release_sha=source_image_release_sha,
+        source_image_release_tree=source_image_release_tree,
         source_image_input_signature=source_image_input_signature,
         source_evidence_sha256=source_evidence_sha256,
     )
@@ -615,9 +633,10 @@ def _managed_web_main(args: argparse.Namespace) -> int:
         operation = render_web_metadata if args.command == "render-web-metadata" else verify_web_metadata
         result = operation(
             rendered_env=args.rendered_env, web_env=args.web_env, receipt=args.receipt,
+            config_release_sha=args.config_release_sha, config_release_tree=args.config_release_tree,
             source_image_id=args.source_image_id,
-            source_release_sha=args.source_release_sha,
-            source_release_tree=args.source_release_tree,
+            source_image_release_sha=args.source_image_release_sha,
+            source_image_release_tree=args.source_image_release_tree,
             source_image_input_signature=args.source_image_input_signature,
             source_evidence_sha256=args.source_evidence_sha256,
         )
@@ -663,9 +682,11 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--rendered-env", type=Path, required=True)
         command.add_argument("--web-env", type=Path, required=True)
         command.add_argument("--receipt", type=Path, required=True)
+        command.add_argument("--config-release-sha", required=True)
+        command.add_argument("--config-release-tree", required=True)
         command.add_argument("--source-image-id", required=True)
-        command.add_argument("--source-release-sha", required=True)
-        command.add_argument("--source-release-tree", required=True)
+        command.add_argument("--source-image-release-sha", required=True)
+        command.add_argument("--source-image-release-tree", required=True)
         command.add_argument("--source-image-input-signature", required=True)
         command.add_argument("--source-evidence-sha256", required=True)
     parser.add_argument("--confirm", required=True)
