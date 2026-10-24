@@ -92,6 +92,19 @@ the unchanged real installer and both scans still execute. The separate
 candidate-image evidence carries the same provenance. This is a CI source
 change, not evidence that the next installation or scan has passed.
 
+Dispatch of source `f2213042` was rejected with HTTP422 before a job was created:
+`failure()` is unavailable in a step's `env` mapping. The diagnostic flag now
+uses `${{ job.status == 'failure' }}`; the step still runs under `always()` and
+retains its fixed public install log while printing tails only after failure.
+Before redispatch, run the explicit offline semantic preflight with the
+checksum-verified official actionlint1.7.12 executable:
+`python3 tests/test_trixie_util_linux_build.py --actionlint /path/to/actionlint`.
+It must accept the complete corrected workflow and reject the old `failure()`
+Env mutation specifically as an expression-context error. Shellcheck/pyflakes
+integrations are disabled; no workflow step executes. Default unit tests keep
+this tool boundary mocked, so their pass does not replace this required check.
+This parser correction does not establish installation or scan acceptance.
+
 The runtime base is the reviewed exact amd64 Python3.11.17/Trixie image. Debian
 repositories are authenticated, timestamped official Trixie snapshots; disabling
 archival Valid-Until checks does not disable index signatures. Input preparation

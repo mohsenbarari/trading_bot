@@ -1,4 +1,4 @@
-"""Hermetic source contracts; never compile/install/build or contact a network."""
+"""Hermetic source contracts plus an explicit local actionlint preflight."""
 import ast
 from contextlib import ExitStack
 from hashlib import sha256
@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 import tarfile
 import tempfile
 import textwrap
@@ -36,6 +38,38 @@ def blocks():
     text = WORKFLOW.read_text()
     return [textwrap.dedent(value) for value in re.findall(
         r"(?ms)^          python3 -I -B - <<'PY'\n(.*?)^          PY$", text)]
+
+
+def validate_actionlint_step_environment(executable):
+    """Lint the real workflow and its rejected predecessor without running steps."""
+    workflow = WORKFLOW.read_text()
+    invalid, count = re.subn(
+        r'(?m)^(\s*PRINT_FAILURE_TAILS:) .+$',
+        r'\1 ${{ failure() }}', workflow,
+    )
+    if count != 1:
+        raise AssertionError('expected_one_failure_tail_environment_binding')
+    line = next(index for index, value in enumerate(invalid.splitlines(), 1)
+                if 'PRINT_FAILURE_TAILS:' in value)
+    with tempfile.TemporaryDirectory(prefix='util-linux-actionlint-') as directory:
+        config = Path(directory) / 'actionlint.yaml'
+        config.write_text('{}\n')
+        arguments = [str(executable), '-no-color', '-shellcheck=', '-pyflakes=',
+                     '-config-file', str(config), '-format', '{{json .}}',
+                     '-stdin-filename', WORKFLOW.name, '-']
+        valid = subprocess.run(arguments, input=workflow, text=True, capture_output=True,
+                               check=False, timeout=15)
+        if valid.returncode != 0 or valid.stderr or json.loads(valid.stdout) != []:
+            raise AssertionError('corrected_workflow_actionlint_failed')
+        rejected = subprocess.run(arguments, input=invalid, text=True, capture_output=True,
+                                  check=False, timeout=15)
+        errors = json.loads(rejected.stdout)
+        if (rejected.returncode != 1 or rejected.stderr or len(errors) != 1
+                or errors[0].get('kind') != 'expression' or errors[0].get('line') != line
+                or 'calling function "failure" is not allowed here' not in errors[0].get('message', '')):
+            raise AssertionError('old_step_environment_was_not_semantically_rejected')
+    return {'status': 'passed', 'corrected_workflow_valid': True,
+            'old_failure_function_environment_rejected': True}
 
 
 class TrixieUtilLinuxBuildTests(unittest.TestCase):
@@ -454,6 +488,44 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
                 if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'install' for t in node.targets):
                     ast.parse(ast.literal_eval(node.value))
 
+    def actionlint_result(self, *, returncode=0, errors=None):
+        return types.SimpleNamespace(returncode=returncode, stdout=json.dumps(errors or []), stderr='')
+
+    def actionlint_context_error(self):
+        line = next(index for index, value in enumerate(WORKFLOW.read_text().splitlines(), 1)
+                    if 'PRINT_FAILURE_TAILS:' in value)
+        return {'kind': 'expression', 'line': line,
+                'message': 'calling function "failure" is not allowed here'}
+
+    def test_explicit_actionlint_preflight_checks_real_workflow_and_old_invalid_environment(self):
+        with patch.object(subprocess, 'run', side_effect=[self.actionlint_result(),
+                self.actionlint_result(returncode=1, errors=[self.actionlint_context_error()])]) as run:
+            result = validate_actionlint_step_environment('/explicit/local/actionlint')
+        self.assertEqual(result, {'status': 'passed', 'corrected_workflow_valid': True,
+                                 'old_failure_function_environment_rejected': True})
+        self.assertEqual(run.call_count, 2)
+        valid, invalid = run.call_args_list
+        self.assertEqual(valid.kwargs['input'], WORKFLOW.read_text())
+        self.assertNotEqual(valid.kwargs['input'], invalid.kwargs['input'])
+        self.assertEqual(valid.args[0][0], '/explicit/local/actionlint')
+        self.assertIn('-shellcheck=', valid.args[0]); self.assertIn('-pyflakes=', valid.args[0])
+        self.assertEqual(valid.args[0][-1], '-')
+
+    def test_actionlint_preflight_cannot_pass_missing_tool_or_false_negative_control(self):
+        with patch.object(subprocess, 'run', side_effect=FileNotFoundError('actionlint')):
+            with self.assertRaises(FileNotFoundError):
+                validate_actionlint_step_environment('/missing/actionlint')
+        for rejected in (self.actionlint_result(), self.actionlint_result(returncode=2),
+                         self.actionlint_result(returncode=1, errors=[{'kind': 'syntax-check',
+                             'line': 1, 'message': 'unrelated YAML failure'}])):
+            with self.subTest(rejected=rejected.stdout), patch.object(subprocess, 'run',
+                    side_effect=[self.actionlint_result(), rejected]):
+                with self.assertRaisesRegex(AssertionError, 'not_semantically_rejected'):
+                    validate_actionlint_step_environment('/explicit/local/actionlint')
+        with patch.object(subprocess, 'run', return_value=self.actionlint_result(returncode=1)):
+            with self.assertRaisesRegex(AssertionError, 'corrected_workflow_actionlint_failed'):
+                validate_actionlint_step_environment('/explicit/local/actionlint')
+
     def test_workflow_compilation_is_offline_nonroot_and_not_privileged(self):
         text = WORKFLOW.read_text()
         self.assertIn('workflow_dispatch:', text)
@@ -560,4 +632,9 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    if sys.argv[1:2] == ['--actionlint']:
+        if len(sys.argv) != 3:
+            raise SystemExit('usage: test_trixie_util_linux_build.py --actionlint /path/to/actionlint')
+        print(json.dumps(validate_actionlint_step_environment(sys.argv[2]), sort_keys=True))
+    else:
+        unittest.main()

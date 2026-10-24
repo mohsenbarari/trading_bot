@@ -384,7 +384,7 @@ jobs:
         if: always() && steps.recipe.outputs.root != ''
         env:
           CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
-          PRINT_FAILURE_TAILS: ${{ failure() }}
+          PRINT_FAILURE_TAILS: ${{ job.status == 'failure' }}
         run: |
           python3 -I -B - <<'PY'
           import json,os,pathlib,re,stat
