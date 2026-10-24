@@ -81,7 +81,7 @@ Native durable runner with an outer deadline matching this window; running the
 controller on Web would lose the controller during its own reboot.
 
 Postboot checks require the same machine, a different boot ID and exactly
-`7.0.0-38-generic`, Docker29.9.2/containerd2.4.2/runc1.5.2, unchanged source and
+`7.0.0-38-generic`, Docker 29.9.2/containerd 2.4.2/runc 1.5.2, unchanged source and
 completion evidence, and the full27-container/sixteen-running/ten-parked
 profile including f79 Capture2, networks, mounts, restart policies and native
 intent. The default boot helper's no-maintenance gate is unchanged: postboot
@@ -99,3 +99,47 @@ absence is not cleanup proof. The kernel packet does not rehash backup archive
 contents or refresh the offhost transport: the separate completed OP08 backup
 proof remains its recovery prerequisite. It never reads private Env, session
 or key contents. Security acceptance and application rollout remain false.
+
+## Actual separate reboot completed, 24 October 2026, 21:51 UTC
+
+The real operation completed after the successful OP08 transition and separately
+validated persistent guards. It used controller SHA256
+`d771da36489f085607f23dba4caef0222fd9ff642aa6837168ddf9b71f9b0f7c`,
+playbook `3c34c35ae61af7583c59bf02b227379638071490bf8029228d9c8952307eb847`
+and boot helper
+`08963b564e4925ab415359b20e75a73d8302c543706e5d8477c1602ebd506c50`.
+Its final window SHA256 was
+`c12ea7dee9a4a6991f16575373f0312585c1dda27bdbd616b1eef2440ebae321`,
+nonce `cb6162207c65a131df604041a6771f3e`, with its separate 21:42:22Z not-before
+and unchanged 22:29:08Z deadline. Never-applied earlier source/window revisions
+remain history; they are not the final request or reusable authority.
+
+Native public evidence under `.local/security-web-kernel-controller-20261024-01/`:
+
+- `completed-postboot-result.json`: SHA256
+  `caf747e2ac9418b52154583a7bf9af6a70cd75ccddc94ec1703c567216376bdd`.
+- `completed-complete.json`: SHA256
+  `42331354b02d5922fec5ee25ca5c56fe6a0b1ee084e1062da4925f8a030ef41b`.
+
+The complete receipt binds the exact postboot-result hash, operation, nonce and
+window. Boot ID changed from `71dcaadb-7b92-473a-92ec-cda4ddfe5403` to
+`0a16f404-c832-4e26-816e-302a015374d0`; the active kernel is exactly
+`7.0.0-38-generic`. Readiness records 27 containers, 16 intended running, 10 parked
+QA, six verified datastores and one successful internal API probe. The source's
+full Docker 29.9.2/containerd 2.4.2/runc 1.5.2, f79, mount, policy, inhibitor and
+native-intent gates passed. Known health incidents remain OPEN with acceptance
+unwaived; one was observed unhealthy in this sample.
+
+Ansible's retained log reports `ok=5 changed=2 unreachable=0 failed=0`, with three
+readiness retries after the single reboot request. Those were observations,
+not additional reboot requests. The completion receipt records owned temporary
+fences released and the original permanent marker retained. The postboot result
+explicitly records no package changes, application-image change, automatic reboot
+retry, Writer/DNS change or capture-owner change. `operation-current.json` is the
+earlier staging record and its `reboot_requested=false` does not supersede these
+final completion records.
+
+Global security/deployment acceptance remains false; App, Market and datastore
+security-image activation is still pending. Autopilot/refactor remains STOP,
+clean streak 0. These completed records do not extend either window or authorize
+another maintenance operation.

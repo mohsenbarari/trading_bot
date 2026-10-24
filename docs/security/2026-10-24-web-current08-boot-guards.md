@@ -68,5 +68,35 @@ inhibitors, unchanged runtime and matching mount UUID. The source correction
 reuses the full existing primary mount UUID/source/device-resolution proof;
 it accepts that canonical spelling and continues rejecting a different device
 or UUID. Drop-in contents are unchanged. No successful corrected setup or
-reboot is claimed by this source correction. Public refusal output now exposes
+reboot is claimed by that source correction alone. Public refusal output exposes
 only this helper's own static reason codes, never arbitrary exception text.
+
+## Actual validated setup, 24 October 2026
+
+The corrected helper SHA256
+`08963b564e4925ab415359b20e75a73d8302c543706e5d8477c1602ebd506c50`
+passed the actual setup gate: Ansible reported two successful tasks, zero changed.
+All four previously published files already had exact content, root ownership,
+0644 mode and one link; loaded conditions and `NeedDaemonReload=no` were verified.
+The canonical `/dev/sdb` source was accepted only through the complete attached
+UUID/device proof. No service restart or reboot occurred during this setup.
+
+The completed engine inputs are actual plan SHA256
+`7d55ccacd99a0f6fd0a4d93ee493a7193a9dde027b4e47bc73b2ef0af63e6216`,
+final journal `ab1b1e85fc017cb2188a499f69ad3806e60f2b8be27e16dccd9dbb5be1050184`
+and watcher cleanup
+`b4a488bbafd472319f3c4c1dbac7bd10582a285f305b015191af5aae4bf9f511`.
+The local public `completion.json` SHA256 is
+`bf805d5de6c8705b4ba1b02593b8c9827c8448d80c47273e4c2d82a541b6cf21`.
+Direct reconciliation confirms the completed operation/nonce, successful worker,
+owned-resource cleanup, retained permanent marker, fresh quiesced dump restore
+and cleanup PASS, cold compare, and verified offhost fsync of the same ciphertext.
+The dump was 2,341,073,498 bytes; the combined authenticated ciphertext was
+6,461,994,096 bytes. These public metadata checks do not reread database/archive
+contents or refresh backup age/capacity authority.
+
+The [separately admitted kernel operation](2026-10-24-web-kernel-reboot.md)
+subsequently completed. It rechecked these persistent conditions before and after
+reboot; this setup did not supply its reboot authority. Global security/deployment
+acceptance remains false, App/Market/datastore activation pending, and
+autopilot/refactor STOP with clean streak 0.

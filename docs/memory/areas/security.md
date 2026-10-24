@@ -1,36 +1,26 @@
 # Security remediation
 
-- Source/tests are not activation. Preserve product/Market behavior, single
-  capture ownership and user changes. Main may publish approved security
-  history; unrelated feature activation is excluded. See
-  `docs/security/2026-10-23-remediation.md` and24Oct operation runbooks.
-- Keep refactor STOP until security is activated and verified; then monitor30
-  consecutive completed accepted clean units. Polls/tests never count. Failures
-  reset only the streak, preserving history/counters. User authorizes necessary
-  intervention without routine approval; Writer/DNS stay human-controlled.
-- Native engine/kernel/Brotli verified with15 containers preserved; Brotli
-  readiness binds current boot/PID/unit. Web OP08 completed24Oct21:30UTC:
-  Docker29.9.2/containerd2.4.2/runc1.5.2,27 IDs/16 running/six datastores,
-  QA10 parked and f79 capture repair preserved. Kernel/App activation remains
-  unfinished; two sealed Market health incidents remain OPEN, unwaived.
-- OP08 fresh quiesced PRIMARY dump/restore/parity/cleanup and cold tar compare
-  passed. Authenticated6.46GB cipher actually fsynced/reread on Final Finland.
-  Final plan/journal/watch-cleanup pins are in the Web-engine runbook. Temporary
-  fences released; permanent marker/history retained. Never rewrite expired
-  windows or infer daemon cancellation from process death/absence.
-- Persistent Web boot guards require explicit current08 final evidence, exact
-  27/16/QA10/f79, mount gates and legacy collector inhibitors. Four files were
-  installed; normal systemd What canonicalization needs final validation before
-  reboot. Old C07/Native15 evidence supplies no new boot authority.
-- Configf3 versus actual OCIa6 are separate identities. Backup v1.4 retains
-  Env/artifact FDs; no diagnostic Env/session/key read/copy/hash. Normal trusted
-  validators/backup/crypto consume protected inputs only as required.
-- App8da composed candidate passed56 focused tests/native checks but raw44HIGH
-  across8 advisory IDs remain; no activation/global acceptance. Isolated util
-  restricted-subdir contract40132051114 passed; historical OPEN/raw findings
-  remain. ACL legacy callers require exact-role/caller assessment, not blanket
-  FIXED. Runtime audits incomplete: Web9/12, Native7/8; Native inventory cause
-  unknown. Preserve failed reports; no green-by-waiver or evidence deletion.
-- Tests deny unmocked native/network commands. Stream caps differ from artifact
-  budgets. Backup roles follow artifacts: Native=foreign/trading_bot,
-  Web=iran/current. Quotas/disk limits and private controls are never bypassed.
+- Global security/deployment acceptance is false. App, Market and datastore image
+  activation remains pending. Autopilot/refactor STOP; clean streak 0. Only after
+  activated, verified security count 30 completed accepted clean units; polls/tests
+  do not count. Failures reset the streak, preserving history/counters.
+- Preserve product/Market behavior, single capture ownership and user changes.
+  Necessary authorized maintenance needs no routine approval; Writer/DNS stay
+  human-controlled. Source/tests/publication are not activation or a waiver.
+- Native engine/kernel/Brotli completed with 15 containers preserved; Brotli binds
+  current boot/PID/unit. Web OP08 completed 24 Oct 21:30 UTC: Docker 29.9.2,
+  containerd 2.4.2/runc 1.5.2, exact 27/16/six datastores, QA10 parked and f79 repair
+  preserved. Fresh quiesced PRIMARY restore/parity/cleanup and cold compare passed;
+  Final Finland fsynced/reread the authenticated 6,461,994,096-byte cipher.
+- Four persistent current08 boot guards were separately validated. Separate Web
+  kernel reboot completed 21:51 UTC at 7.0.0-38-generic with changed boot ID and full
+  inventory/datastore/API readiness. Owned temporary fences released, permanent
+  marker/history retained. See current08 boot/kernel runbooks for full SHA chains.
+  Known Market incidents remain OPEN, unwaived; no image activation occurred.
+- Completed evidence/expired windows grant no future authority. Never infer daemon
+  cancellation from death/absence or adopt old C07/Native15 controls. Configf3 and
+  OCIa6 are distinct. Normal backup/crypto may consume protected inputs; no
+  diagnostic Env/session/key read/copy/hash, quota bypass or hostdata fixtures.
+- App 8da historical candidate retains 44 HIGH/eight IDs. Preserve raw findings and
+  failed/incomplete audits; no green by waiver/deletion. ACL legacy callers need
+  exact-role assessment, not blanket FIXED. Tests deny ambient host/network calls.
