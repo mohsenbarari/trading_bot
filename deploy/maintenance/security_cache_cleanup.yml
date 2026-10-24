@@ -1,9 +1,13 @@
 ---
-# Delete only unused BuildKit cache older than ten days. Never images/volumes.
+# Delete only unused BuildKit cache. Default ten days; explicit one-hour trial
+# cleanup is allowed after the obsolete validation image has been removed.
+# Never remove images/volumes/application data.
 - name: Recover native backup headroom without touching runtime or data
   hosts: boot_mount_bot
   gather_facts: false
   any_errors_fatal: true
+  vars:
+    security_cache_cleanup_filter: until=240h
   tasks:
     - name: Require the exact existing native local host
       ansible.builtin.assert:
@@ -12,10 +16,11 @@
           - ansible_connection == 'local'
           - ansible_host == '65.109.216.187'
           - ansible_user == 'root'
+          - security_cache_cleanup_filter in ['until=240h', 'until=1h']
 
     - name: Capture only the fifteen running immutable container IDs
       ansible.builtin.command:
-        argv: [/usr/bin/docker, ps, --quiet, --no-trunc]
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', ps, --quiet, --no-trunc]
       changed_when: false
       register: cache_runtime_before
 
@@ -27,15 +32,15 @@
       ansible.builtin.meta: end_play
       when: not (security_cache_cleanup_apply | default(false) | bool) or ansible_check_mode
 
-    - name: Remove only unlocked unused build cache older than ten days
+    - name: Remove only unlocked unused build cache older than the admitted age
       ansible.builtin.command:
-        argv: [/usr/bin/docker, buildx, prune, --force, --filter, 'until=240h', --timeout, 20s]
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', buildx, prune, --builder, default, --force, --filter, '{{ security_cache_cleanup_filter }}', --timeout, 20s]
       timeout: 90
       register: cache_cleanup_result
 
     - name: Require identical fifteen running containers afterward
       ansible.builtin.command:
-        argv: [/usr/bin/docker, ps, --quiet, --no-trunc]
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', ps, --quiet, --no-trunc]
       changed_when: false
       register: cache_runtime_after
       failed_when: cache_runtime_after.stdout_lines | sort != cache_runtime_before.stdout_lines | sort
