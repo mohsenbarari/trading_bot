@@ -3,13 +3,17 @@ from contextlib import ExitStack
 from copy import deepcopy
 from hashlib import sha1,sha256
 import ast
+import asyncio
 import importlib.util
 import io
 import json
 import os
+import socket
+import signal
 from pathlib import Path
 import struct
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -239,11 +243,120 @@ class MarketSecurityPayloadTests(unittest.TestCase):
         module.assert_not_called()
 
     def test_candidate_program_parses_and_places_host_network_fence_before_all_test_imports(self):
-        program=M.candidate_test_program({'files':[],'test_sources_sha256':'a'*64,'source_commit':'b'*40})
+        program=M.candidate_test_program({'files':[],'test_sources_sha256':'a'*64,'source_commit':'b'*40,'test_ids':[]})
         ast.parse(program)
-        self.assertLess(program.index("fence.enter_context"),program.index("exec(compile(sources[name]"))
+        self.assertLess(program.index("apply_test_fence(fence)"),program.index("exec(compile(sources[name]"))
         self.assertIn('suite.countTestCases()==85',program);self.assertIn('not result.skipped',program)
         self.assertIn('actual==set(expected)',program);self.assertNotIn('test_capture_public_replay_idempotence',program)
+
+    def test_actual_fence_allows_only_owned_asyncio_selfpipe_without_any_network_operation(self):
+        # A named fixture supplies the stdlib native socket base while the
+        # outer global guard continues denying all ambient socket constructors.
+        class FixtureSocket(socket.SocketType):
+            def accept(self):raise AssertionError('fixture_accept_unfenced')
+        with patch.object(socket,'socket',FixtureSocket),ExitStack() as fence:
+            M.apply_test_fence(fence)
+            async def ordinary():
+                loop=asyncio.get_running_loop()
+                self.assertEqual(loop._ssock.family,socket.AF_UNIX)
+                self.assertGreaterEqual(loop._ssock.fileno(),0);self.assertGreaterEqual(loop._csock.fileno(),0)
+                await asyncio.sleep(0);return 'owned_selfpipe_completed'
+            results=[];errors=[]
+            def run():
+                try:results.append(asyncio.run(ordinary()))
+                except BaseException as error:errors.append(error)
+            worker=threading.Thread(target=run,daemon=True);worker.start();worker.join(5)
+            self.assertFalse(worker.is_alive());self.assertFalse(errors);self.assertEqual(results,['owned_selfpipe_completed'])
+            left,right=socket.socketpair()
+            try:
+                self.assertEqual(left.family,socket.AF_UNIX);self.assertEqual(right.family,socket.AF_UNIX)
+            finally:left.close();right.close()
+            with self.assertRaisesRegex(AssertionError,'ambient_host_network_denied'):
+                signal.signal(signal.SIGINT,signal.default_int_handler)
+
+    def test_actual_fence_denies_ipv4_ipv6_and_unix_connection_operations_before_syscalls(self):
+        class FixtureSocket(socket.SocketType):
+            def accept(self):raise AssertionError('fixture_accept_unfenced')
+        with patch.object(socket,'socket',FixtureSocket),ExitStack() as fence:
+            M.apply_test_fence(fence)
+            for family,address in ((socket.AF_INET,('127.0.0.1',1)),(socket.AF_INET6,('::1',1)),(socket.AF_UNIX,'/tmp/nonexistent-market-fixture-socket')):
+                # Only owned local descriptors are created; the operation is
+                # denied before address/family validation or any syscall.
+                owned=FixtureSocket(socket.AF_UNIX,socket.SOCK_STREAM)
+                try:
+                    for operation,args in (('connect',(address,)),('connect_ex',(address,)),('bind',(address,)),
+                        ('listen',(1,)),('accept',()),('sendto',(b'x',address)),('sendmsg',([b'x'],[],0,address))):
+                        with self.subTest(family=family,operation=operation),self.assertRaisesRegex(AssertionError,'ambient_host_network_denied'):
+                            getattr(owned,operation)(*args)
+                finally:owned.close()
+            for call,args in ((socket.create_connection,(('127.0.0.1',1),)),(socket.getaddrinfo,('localhost',1))):
+                with self.assertRaisesRegex(AssertionError,'ambient_host_network_denied'):call(*args)
+
+    def test_split_receipts_require_exact_disjoint84plus1_ids_and_actual_execution_uid(self):
+        image='sha256:'+'9'*64;ids=sorted([M.ROOT_FIXTURE_TEST_ID]+['ordinary.test_'+str(n).zfill(2) for n in range(84)])
+        record={'test_ids':ids,'test_sources_sha256':'a'*64}
+        shared={'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':'a'*64,
+            'status':'passed','skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False,
+            'suite_execution_thread':'owned_nonmain_test_thread'}
+        normal={**shared,'tests':84,'selected_test_ids':[name for name in ids if name!=M.ROOT_FIXTURE_TEST_ID],
+                'execution_uid':10001,'execution_gid':10001,'scope':'nonroot_product_tests'}
+        fixture={**shared,'tests':1,'selected_test_ids':[M.ROOT_FIXTURE_TEST_ID],
+                 'execution_uid':0,'execution_gid':0,'scope':'root_owned_metadata_fixture'}
+        result=M.validate_test_receipts(record,image,normal,fixture)
+        self.assertEqual(result['tests'],85);self.assertTrue(result['test_selections_disjoint'])
+        for field,value in (('execution_uid',10001),('execution_gid',False),('tests',True),
+                            ('selected_test_ids',[]),('selected_test_ids',[normal['selected_test_ids'][0]])):
+            wrong=deepcopy(fixture);wrong[field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(M.PayloadError):M.validate_test_receipts(record,image,normal,wrong)
+        for field,value in (('execution_uid',0),('selected_test_ids',normal['selected_test_ids'][:-1]),
+                            ('selected_test_ids',normal['selected_test_ids'][:-1]+[M.ROOT_FIXTURE_TEST_ID]),
+                            ('selected_test_ids',normal['selected_test_ids'][:-1]+[normal['selected_test_ids'][0]])):
+            wrong=deepcopy(normal);wrong[field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(M.PayloadError):M.validate_test_receipts(record,image,wrong,fixture)
+
+    def test_program_refuses_wrong_uid_before_any_capsule_or_product_read(self):
+        record={'files':[],'test_sources_sha256':'a'*64,'source_commit':'b'*40,'test_ids':[]}
+        for root_fixture,expected in ((False,10001),(True,0)):
+            tree=ast.parse(M.candidate_test_program(record,root_fixture=root_fixture))
+            boundary=next(i for i,node in enumerate(tree.body) if isinstance(node,ast.Assert))
+            prefix=compile(ast.Module(body=tree.body[:boundary+1],type_ignores=[]),'<uid-fixture>','exec')
+            for actual in (expected,12345):
+                with patch.object(M.os,'getuid',return_value=actual),patch.object(M.os,'getgid',return_value=actual),\
+                     patch.object(M.sys,'argv',['fixture','sha256:'+'9'*64]):
+                    if actual==expected:exec(prefix,{})
+                    else:
+                        with self.assertRaises(AssertionError):exec(prefix,{})
+
+    def test_root_fixture_command_retains_all_isolation_and_exact_owned_cleanup(self):
+        directory=self.stack.enter_context(tempfile.TemporaryDirectory());root=Path(directory);(root/'reports').mkdir()
+        image='sha256:'+'9'*64;cid='a'*64;calls=[];cleanup=[]
+        def docker(parent,argv,**options):
+            calls.append((argv,options))
+            if argv[0]=='create':return cid.encode()
+            if argv[0]=='start':return b'public root-owned fixture result'
+            return b'0\n'
+        helpers=SimpleNamespace(docker=docker,cleanup_isolated=lambda *args:cleanup.append(args))
+        with patch.dict(M.os.environ,{'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'2'}):
+            self.assertEqual(M.root_fixture_container(helpers,root,image,'public fixture'),b'public root-owned fixture result')
+        argv=calls[0][0]
+        for flag in ('--user=0:0','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
+                     '--memory=1g','--memory-swap=1g','--cpus=2','--pids-limit=128'):
+            self.assertIn(flag,argv)
+        self.assertIn('/tmp:rw,nosuid,nodev,noexec,size=128m',argv)
+        self.assertIn('type=bind,source='+str(root/'payload/tests')+',target=/evidence,readonly',argv)
+        self.assertEqual(argv[-7:],['/usr/local/bin/python3',image,'-I','-B','-c','public fixture',image])
+        self.assertEqual(calls[1][1]['seconds'],180)
+        self.assertEqual(cleanup,[(root,cid,'security-market-root-fixture-123-2','123-2',image)])
+
+    def test_root_fixture_unknown_create_never_becomes_success_and_only_owned_name_is_considered(self):
+        directory=self.stack.enter_context(tempfile.TemporaryDirectory());root=Path(directory);(root/'reports').mkdir();cleanup=[]
+        image='sha256:'+'9'*64
+        helpers=SimpleNamespace(docker=lambda *a,**k:b'not-a-container-id',cleanup_isolated=lambda *args:cleanup.append(args))
+        with patch.dict(M.os.environ,{'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'2'}),self.assertRaisesRegex(M.PayloadError,'fixture_container_identity'):
+            M.root_fixture_container(helpers,root,image,'public fixture')
+        self.assertEqual(cleanup,[(root,'security-market-root-fixture-123-2','security-market-root-fixture-123-2','123-2',image)])
+        proof=json.loads((root/'reports/root-fixture-daemon-outcome.json').read_bytes())
+        self.assertEqual(proof['daemon_outcome'],'UNKNOWN');self.assertFalse(proof['cancellation_proven'])
 
     def test_host_refusal_creates_no_files_and_emits_only_closed_diagnostics(self):
         directory=self.stack.enter_context(tempfile.TemporaryDirectory());root=Path(directory)/'unused'
@@ -264,11 +377,12 @@ class MarketSecurityPayloadTests(unittest.TestCase):
 
     def reports(self):
         directory=self.stack.enter_context(tempfile.TemporaryDirectory());root=Path(directory);(root/'reports').mkdir()
-        for name in ('native.json','focused.json'):(root/'reports'/name).write_bytes(b'{}')
+        for name in ('native.json','focused.json','focused-nonroot.json','focused-root-fixture.json'):(root/'reports'/name).write_bytes(b'{}')
         image='sha256:'+'9'*64;record={'test_sources_sha256':'a'*64}
         build={'schema':'market_security_candidate_build/1','image_id':image,
                'rootfs_layers':['sha256:'+'b'*64],'payload_sha256':sha256(M.encoded(record)).hexdigest(),
                'test_sources_sha256':'a'*64,'native_sha256':sha256(b'{}').hexdigest(),'focused_sha256':sha256(b'{}').hexdigest(),
+               'focused_nonroot_sha256':sha256(b'{}').hexdigest(),'focused_root_fixture_sha256':sha256(b'{}').hexdigest(),
                'product_files_equal_baseline':True,'buildkit_resource_cgroup_asserted':False,'vendor_debs_reused':False,
                'full_runtime_matrix_completed':False,'security_accepted':False,'deployment_eligible':False}
         raw={'SchemaVersion':2,'ArtifactType':'container_image','Metadata':{'ImageID':image,
@@ -335,19 +449,30 @@ class MarketSecurityPayloadTests(unittest.TestCase):
         directory=self.stack.enter_context(tempfile.TemporaryDirectory());root=Path(directory);(root/'reports').mkdir()
         image='sha256:'+'9'*64;calls=[]
         record={'payload_tree':'c'*40,'source_commit':'d'*40,'source_tree':'e'*40,
-            'image_input_signature':'f'*64,'test_sources_sha256':'a'*64,'files':[]}
+            'image_input_signature':'f'*64,'test_sources_sha256':'a'*64,'files':[],
+            'test_ids':sorted([M.ROOT_FIXTURE_TEST_ID]+['ordinary.test_'+str(n).zfill(2) for n in range(84)])}
         def docker(parent,argv,**options):
             calls.append(('docker',argv,options));M.write(root/'candidate-image.id',(image+'\n').encode());return b''
         def isolated(parent,actual,program,purpose,**options):
             calls.append((purpose,actual,options));self.assertEqual(actual,image);ast.parse(program)
             if purpose=='market-native':value={'schema':'market_security_native_checks/1','image_id':image,
-                'status':'passed','pydantic':'2.8.2','psycopg2':'2.9.13','runtime_data_used':False,'security_accepted':False}
+                'status':'passed','pydantic':'2.8.2','psycopg2':'2.9.13','execution_uid':10001,'execution_gid':10001,
+                'runtime_data_used':False,'security_accepted':False}
             else:value={'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':'a'*64,
-                'status':'passed','tests':85,'skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False}
+                'status':'passed','tests':84,'skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False,
+                'suite_execution_thread':'owned_nonmain_test_thread',
+                'selected_test_ids':[name for name in record['test_ids'] if name!=M.ROOT_FIXTURE_TEST_ID],
+                'execution_uid':10001,'execution_gid':10001,'scope':'nonroot_product_tests'}
             return M.encoded(value)
+        fixture={'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':'a'*64,
+            'status':'passed','tests':1,'skips':0,'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False,
+            'suite_execution_thread':'owned_nonmain_test_thread',
+            'selected_test_ids':[M.ROOT_FIXTURE_TEST_ID],'execution_uid':0,'execution_gid':0,'scope':'root_owned_metadata_fixture'}
         with patch.object(M,'ci_admit'),patch.object(M,'verify_context'),patch.object(M,'primitives',return_value=SimpleNamespace(docker=docker,isolated=isolated)),\
-             patch.object(M,'image_metadata',return_value={'image_id':image}),patch.object(M.os,'statvfs',return_value=SimpleNamespace(f_bavail=20*1024**3,f_frsize=1)):
+             patch.object(M,'image_metadata',return_value={'image_id':image}),patch.object(M,'root_fixture_container',return_value=M.encoded(fixture)) as root_fixture,\
+             patch.object(M.os,'statvfs',return_value=SimpleNamespace(f_bavail=20*1024**3,f_frsize=1)):
             self.assertEqual(M.build_candidate(root,record),image)
+        root_fixture.assert_called_once();self.assertIn('root_fixture=True',root_fixture.call_args.args[3])
         argv=calls[0][1];self.assertIn('SOURCE_SHA='+M.BASELINE,argv);self.assertNotIn('SOURCE_SHA='+record['source_commit'],argv)
         self.assertIn('SOURCE_TREE='+record['payload_tree'],argv);self.assertIn('IMAGE_INPUT_SIGNATURE='+record['image_input_signature'],argv)
         self.assertEqual(argv[-1],str(root/'payload/context'));self.assertEqual(calls[0][2]['seconds'],2400)

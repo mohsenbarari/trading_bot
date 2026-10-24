@@ -1,8 +1,10 @@
 # E46 historical Market security candidate
 
-This is a source-only, default-off `market_security_payload` lane in the existing
-pre-release workflow. No candidate has been built, scanned, activated or deployed
-by this packet. Other Market profiles, including Capture2/F79, refuse admission.
+This is a default-off `market_security_payload` lane in the existing pre-release
+workflow. The first actual CI build passed native checks but failed its test
+fixture contexts as recorded below. The corrected source has not rerun; no
+candidate has been scanned, activated or deployed. Other Market profiles,
+including Capture2/F79, refuse admission.
 The App candidate and its 44 HIGH findings have separate evidence and disposition.
 
 The product source is exactly commit
@@ -47,7 +49,11 @@ compatibility remain contingent on the real build and scan.
 
 The test-only capsule contains the exact a6 scripts, fixtures and five historical
 test modules, outside the runtime product image. All 85 historical tests must run
-with zero skips in the candidate. The sole controlled test edit replaces the
+with zero skips against the same candidate: 84 under UID/GID 10001 and exactly
+one unchanged host-metadata fixture under UID/GID 0 in its separate container.
+Exact test IDs must cover all 85 historical IDs with no overlap, missing or
+duplicate case. The image Config and native probe remain UID/GID 10001. The sole
+controlled test edit replaces the
 old Bookworm Dockerfile assertion with the reviewed Trixie digest and explicit
 security-helper/hash checks; original/effective test hashes and Git blobs are
 recorded, and the inverse edit must reproduce the original bytes. No missing
@@ -70,3 +76,28 @@ The exported image remains unaccepted and ineligible for deployment. A separate
 unchanged raw HIGH/CRITICAL gate fails when either count is nonzero; export and
 report retention never waive that gate. Full runtime/rehearsal/Telegram/database
 integration, other role profiles and activation remain NOT_TESTED.
+
+Actual run [40137914375](https://github.com/mohsenbarari/trading_bot/actions/runs/40137914375)
+at source `2332b0f6` built image
+`sha256:7f54a75e9790bbbf853312ee3a26722694038533fc1f36687a3d47a8fb6fa279`.
+All 93 product-file checks and native trust/SQLite/system-libpq/Pydantic checks
+passed. All 85 tests ran with zero skips; 14 failed because the blanket socket
+constructor fence blocked asyncio's owned local self-pipe. One unchanged
+host-maintenance test expected its synthetic files and directory to be root
+owned while the test process correctly ran as UID 10001. The eight-file failure ZIP
+12577627587 is 28398 bytes with SHA256
+`8e203ae9c6e7002d31dbd379e9a2104f8554d68c8541b6f857530232ad4e33bc`.
+Its original logs and failed outcome remain immutable.
+
+The correction preserves the actual socket class and owned AF_UNIX socket pairs,
+denies connect/connect_ex/bind/listen/accept/sendto/sendmsg and resolver helpers,
+and retains network-none and every process/native/resource/signal fence. The
+sequential suite runs in one owned non-main Python thread with a 150-second join
+bound, so asyncio need not install main-thread SIGINT handlers. An actual
+asyncio.run/self-pipe test passes under that fence; attempted SIGINT installation
+and IPv4/IPv6/Unix connection operations are refused before syscalls. The single
+root-owned metadata fixture receives only a separate explicit user override;
+all other isolation limits, public read-only test mount and exact owned cleanup
+remain identical. Its test body and root/GID permission constants are unchanged.
+Both 84-test and one-test receipts, real execution UIDs and distinct ID sets are
+independently bound into the aggregate proof and exported evidence hashes.

@@ -7,6 +7,7 @@ the actual runtime file inventory. No deployment or live environment access.
 from hashlib import sha1, sha256
 import _imp
 import argparse
+import ast
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -40,6 +41,8 @@ OVERLAY = ('deploy/market-data/Dockerfile', 'deploy/market-data/requirements.loc
 TEST_MODULES = ('test_market_pipeline_stage3_foundation', 'test_market_pipeline_stage4_capture',
                 'test_market_pipeline_stage5_coin_processor', 'test_market_pipeline_stage6_channel_processor',
                 'test_market_private_pipeline_contracts')
+ROOT_FIXTURE_TEST_ID = ('tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.'
+                        'test_secret_contract_requires_root_only_parent_and_shared_runtime_group')
 TEST_PATHS = tuple('tests/'+name+'.py' for name in TEST_MODULES) + (
     'tests/__init__.py', 'scripts/manage_market_pipeline_stage3.py',
     'scripts/audit_production_market_catchup.py', 'scripts/export_market_private_pipeline_schemas.py',
@@ -55,6 +58,20 @@ TEST_NEW = b'''        self.assertIn("python:3.11.17-slim-trixie@sha256:b95327ce
         self.assertIn("--require-hashes", dockerfile)
 '''
 COMMAND_HELPERS_SHA256 = '10ccbe216fef04e5f7a7ce2ad31ac30eca7eeae090dfaaf8074fa3cc5c789d44'
+TEST_GUARD_SOURCE = r'''
+def apply_test_fence(stack):
+    from unittest.mock import patch
+    denied=lambda *a,**k:(_ for _ in ()).throw(AssertionError('ambient_host_network_denied'))
+    for target in ('socket.socket.connect','socket.socket.connect_ex','socket.socket.bind',
+                   'socket.socket.listen','socket.socket.accept','socket.socket.sendto','socket.socket.sendmsg',
+                   'socket.create_connection','socket.getaddrinfo','subprocess.run','subprocess.Popen',
+                   'os.system','os.kill','os.killpg','urllib.request.urlopen','urllib.request.OpenerDirector.open',
+                   'ctypes.CDLL','ctypes.PyDLL','resource.setrlimit','signal.signal','signal.alarm'):
+        stack.enter_context(patch(target,side_effect=denied))
+'''
+# Define this ordinary trusted fixture function from the identical public bytes
+# embedded below; neither definition calls a host/network operation.
+exec(compile(TEST_GUARD_SOURCE,'<market-test-fence>','exec'))
 
 
 class PayloadError(RuntimeError):
@@ -351,6 +368,19 @@ def test_transform(path, raw):
     return result
 
 
+def historical_test_ids(selected):
+    result=[]
+    for name in TEST_MODULES:
+        tree=ast.parse(selected['tests/'+name+'.py'][2])
+        for node in tree.body:
+            if isinstance(node,ast.ClassDef):
+                for child in node.body:
+                    if isinstance(child,(ast.FunctionDef,ast.AsyncFunctionDef)) and child.name.startswith('test_'):
+                        result.append('tests.'+name+'.'+node.name+'.'+child.name)
+    require(len(result)==len(set(result))==85 and ROOT_FIXTURE_TEST_ID in result,'historical_test_inventory')
+    return sorted(result)
+
+
 def prepare(repo, commit, output, *, profile='e46'):
     require(profile=='e46','unreviewed_market_profile')
     require(type(E46_PUBLIC_FINGERPRINT_SHA256) is str and re.fullmatch('[a-f0-9]{64}',E46_PUBLIC_FINGERPRINT_SHA256),
@@ -384,6 +414,7 @@ def prepare(repo, commit, output, *, profile='e46'):
     for name in TEST_PATHS:
         require(name in base,'baseline_test_missing');raw=blob(repo,base[name]);selected[name]=(base[name][0],raw,test_transform(name,raw),BASELINE,base[name][1])
     name='deploy/market-data/Dockerfile';mode,raw=inputs[name];selected[name]=(mode,raw,raw,commit,overlay[name][1])
+    test_ids=historical_test_ids(selected)
     require(output.is_absolute() and output.parent.resolve(strict=True)==output.parent and not os.path.lexists(output),'output_scope')
     for parent in output.parents:
         info=parent.lstat();require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0,os.geteuid()) and not info.st_mode&0o022,'output_parent')
@@ -402,14 +433,14 @@ def prepare(repo, commit, output, *, profile='e46'):
                       'git_blob':oid,'source_commit':origin,'transformation':'security_base_assertion_only' if original!=effective else 'none'})
     write(output/'tests/public-baseline.json',public_proof,0o644)
     test_proof={'schema':'market_security_candidate_test_sources/1','baseline_commit':BASELINE,'source_commit':commit,
-                'modules':list(TEST_MODULES),'expected_tests':85,'files':tests,'public_baseline_sha256':E46_PUBLIC_FINGERPRINT_SHA256,
+                'modules':list(TEST_MODULES),'expected_tests':85,'test_ids':test_ids,'files':tests,'public_baseline_sha256':E46_PUBLIC_FINGERPRINT_SHA256,
                 'runtime_data_used':False,'historical_test_change':'only_Bookworm_assertion_replaced_with_explicit_reviewed_security_base_checks'}
     write(output/'tests/test-sources.json',encoded(test_proof),0o644)
     signature=sha256(encoded({'scope':'market-pipeline-security-runtime-v1','platform':'linux/amd64','files':files})).hexdigest()
     record={'schema':'market_security_payload/1','profile':'e46','baseline_commit':BASELINE,'baseline_tree':BASELINE_TREE,
             'baseline_image_id':BASELINE_IMAGE,'source_commit':commit,'source_tree':source_tree,'payload_tree':tree_digest(mixed),
             'image_input_signature':signature,'public_source_binding':binding,'dependency_delta':delta,'files':files,
-            'test_sources_sha256':sha256(encoded(test_proof)).hexdigest(),'security_accepted':False,'deployment_eligible':False,
+            'test_sources_sha256':sha256(encoded(test_proof)).hexdigest(),'test_ids':test_ids,'security_accepted':False,'deployment_eligible':False,
             'production_services_changed':False,'runtime_environment_read':False}
     published(repo,commit);write(output/'payload.json',encoded(record))
     return record
@@ -482,7 +513,8 @@ def image_metadata(helpers, root, image, record):
 
 
 NATIVE_PROGRAM = r'''
-import json,runpy,sys
+import json,os,runpy,sys
+assert os.getuid()==os.getgid()==10001
 sys.path[:0]=['/app','/opt/market-python']
 image=sys.argv[1]
 checks=(('/usr/local/libexec/verify_image_trust.py',[]),
@@ -496,20 +528,25 @@ for path,args in checks:
 import pydantic,psycopg2
 assert pydantic.__version__=='2.8.2' and psycopg2.__version__.split()[0]=='2.9.13'
 print(json.dumps({'schema':'market_security_native_checks/1','image_id':image,'status':'passed',
-                 'pydantic':'2.8.2','psycopg2':'2.9.13','runtime_data_used':False,'security_accepted':False},sort_keys=True))
+                 'pydantic':'2.8.2','psycopg2':'2.9.13','execution_uid':os.getuid(),'execution_gid':os.getgid(),
+                 'runtime_data_used':False,'security_accepted':False},sort_keys=True))
 '''
 
 
-def candidate_test_program(record):
+def candidate_test_program(record, *, root_fixture=False):
     """Bind the full historical suite and product bytes before test imports."""
     product=[row for row in record['files'] if copied_path(row['path'])]
-    setup="expected_proof="+repr(record['test_sources_sha256'])+"\nexpected_commit="+repr(record['source_commit'])+"\nexpected_product="+repr(product)+"\n"
+    require(type(root_fixture) is bool,'test_execution_profile')
+    setup=("expected_proof="+repr(record['test_sources_sha256'])+"\nexpected_commit="+repr(record['source_commit'])+
+           "\nexpected_product="+repr(product)+"\nroot_fixture="+repr(root_fixture)+
+           "\nexpected_ids="+repr(record['test_ids'])+"\nroot_test="+repr(ROOT_FIXTURE_TEST_ID)+"\n")
     return setup+r'''
-import ctypes,json,os,pathlib,resource,signal,socket,subprocess,sys,types,unittest,urllib.request
+import ctypes,json,os,pathlib,resource,signal,socket,subprocess,sys,threading,types,unittest,urllib.request
 from contextlib import ExitStack
 from hashlib import sha1,sha256
 from unittest.mock import patch
 image=sys.argv[1]
+assert os.getuid()==os.getgid()==(0 if root_fixture else 10001)
 def read(path,maximum):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     try:
@@ -529,6 +566,7 @@ assert sha256(proof_raw).hexdigest()==expected_proof
 proof=json.loads(proof_raw)
 assert proof['schema']=='market_security_candidate_test_sources/1' and proof['source_commit']==expected_commit
 assert proof['baseline_commit']=='a6dcd636a1525a3a3d47e2a6083ca887b16080db' and proof['expected_tests']==85 and proof['runtime_data_used'] is False
+assert proof['test_ids']==expected_ids and len(expected_ids)==len(set(expected_ids))==85 and root_test in expected_ids
 assert proof['modules']==['test_market_pipeline_stage3_foundation','test_market_pipeline_stage4_capture','test_market_pipeline_stage5_coin_processor','test_market_pipeline_stage6_channel_processor','test_market_private_pipeline_contracts']
 rows={row['path']:row for row in proof['files']};assert len(rows)==len(proof['files'])
 assert {p.relative_to(evidence).as_posix() for p in evidence.rglob('*') if p.is_file()}==set(rows)|{'test-sources.json','public-baseline.json'}
@@ -561,10 +599,9 @@ for name,row in expected.items():
     assert len(raw)==row['bytes'] and sha256(raw).hexdigest()==row['sha256'] and info.st_uid==info.st_gid==10001
     assert info.st_mode&0o777==(0o755 if row['mode']=='100755' else 0o644)
 sys.path[:0]=['/app','/opt/market-python','/evidence']
-denied=lambda *a,**k:(_ for _ in ()).throw(AssertionError('ambient_host_network_denied'))
+__TEST_GUARD__
 with ExitStack() as fence:
-    for target in ('socket.socket','socket.create_connection','socket.getaddrinfo','subprocess.run','subprocess.Popen','os.system','os.kill','os.killpg','urllib.request.urlopen','urllib.request.OpenerDirector.open','ctypes.CDLL','ctypes.PyDLL','resource.setrlimit','signal.signal','signal.alarm'):
-        fence.enter_context(patch(target,side_effect=denied))
+    apply_test_fence(fence)
     package=types.ModuleType('scripts');package.__path__=[str(evidence/'scripts')];sys.modules['scripts']=package
     for name in ('scripts/manage_market_pipeline_stage3.py','scripts/audit_production_market_catchup.py','scripts/export_market_private_pipeline_schemas.py'):
         key=name[:-3].replace('/','.');module=types.ModuleType(key);module.__file__=str(evidence/name);sys.modules[key]=module
@@ -576,11 +613,85 @@ with ExitStack() as fence:
         exec(compile(sources[path],module.__file__,'exec'),module.__dict__)
         suite.addTests(unittest.defaultTestLoader.loadTestsFromModule(module))
     assert suite.countTestCases()==85
-    result=unittest.TextTestRunner(verbosity=2,stream=sys.stderr).run(suite)
-ok=result.wasSuccessful() and not result.skipped and result.testsRun==85
-print(json.dumps({'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':expected_proof,'status':'passed' if ok else 'failed','tests':result.testsRun,'skips':len(result.skipped),'product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False},sort_keys=True))
+    def cases(value):
+        for test in value:
+            if isinstance(test,unittest.TestSuite):yield from cases(test)
+            else:yield test
+    tests=list(cases(suite));assert sorted(test.id() for test in tests)==expected_ids
+    selected=[test for test in tests if (test.id()==root_test)==root_fixture]
+    assert len(selected)==(1 if root_fixture else 84)
+    selected_ids=sorted(test.id() for test in selected)
+    results=[]
+    def run_tests():
+        results.append(unittest.TextTestRunner(verbosity=2,stream=sys.stderr).run(unittest.TestSuite(selected)))
+    # asyncio's main-thread Runner installs SIGINT handlers. Keep the absolute
+    # signal fence and use one owned ordinary test thread instead.
+    worker=threading.Thread(target=run_tests,name='market-historical-fixtures',daemon=True)
+    worker.start();worker.join(150)
+    assert not worker.is_alive() and len(results)==1
+    result=results[0]
+ok=result.wasSuccessful() and not result.skipped and result.testsRun==(1 if root_fixture else 84)
+print(json.dumps({'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':expected_proof,'status':'passed' if ok else 'failed','tests':result.testsRun,'skips':len(result.skipped),'selected_test_ids':selected_ids,'scope':'root_owned_metadata_fixture' if root_fixture else 'nonroot_product_tests','execution_uid':os.getuid(),'execution_gid':os.getgid(),'suite_execution_thread':'owned_nonmain_test_thread','product_files_equal_baseline':True,'runtime_data_used':False,'security_accepted':False},sort_keys=True))
 raise SystemExit(0 if ok else 1)
-'''.replace('TEST_NEW',repr(TEST_NEW)).replace('TEST_OLD',repr(TEST_OLD))
+'''.replace('TEST_NEW',repr(TEST_NEW)).replace('TEST_OLD',repr(TEST_OLD)).replace('__TEST_GUARD__',TEST_GUARD_SOURCE)
+
+
+def root_fixture_container(helpers,root,image,program):
+    """One unchanged host-metadata unit fixture; no product service runs as root."""
+    token=os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+    require(re.fullmatch('[0-9]+-[0-9]+',token),'ci_identity')
+    name='security-market-root-fixture-'+token;cid=None
+    argv=['create','--name',name,'--label','io.gold-trade.os-compose-owner='+token,'--user=0:0',
+          '--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
+          '--memory=1g','--memory-swap=1g','--cpus=2','--pids-limit=128','--ulimit','core=0',
+          '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=128m',
+          '--mount','type=bind,source='+str(root/'payload/tests')+',target=/evidence,readonly',
+          '--entrypoint','/usr/local/bin/python3',image,'-I','-B','-c',program,image]
+    try:
+        observed=helpers.docker(root,argv,maximum=256).decode().strip()
+        require(re.fullmatch('[a-f0-9]{64}',observed),'fixture_container_identity');cid=observed
+        output=helpers.docker(root,['start','--attach',cid],seconds=180,maximum=4*1024**2,
+                              combine_stderr=True,log_path=root/'reports/market-root-fixture-run.log')
+        require(helpers.docker(root,['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip()==b'0','fixture_exit')
+        return output
+    finally:
+        if cid is None:
+            cleanup='not_confirmed'
+            try:helpers.cleanup_isolated(root,name,name,token,image);cleanup='removed_owned_container'
+            except Exception:pass
+            try:write(root/'reports/root-fixture-daemon-outcome.json',encoded({'daemon_outcome':'UNKNOWN',
+                'best_effort_cleanup':cleanup,'name':name,'image_id':image,'cancellation_proven':False,'security_accepted':False}))
+            except OSError:pass
+        else:helpers.cleanup_isolated(root,cid,name,token,image)
+
+
+def validate_test_receipts(record,image,normal,fixture):
+    expected=record['test_ids']
+    require(type(expected) is list and len(expected)==len(set(expected))==85
+            and expected==sorted(expected) and ROOT_FIXTURE_TEST_ID in expected,'historical_test_inventory')
+    selections=[]
+    for value,uid,count,scope in ((normal,10001,84,'nonroot_product_tests'),(fixture,0,1,'root_owned_metadata_fixture')):
+        require(type(value) is dict and value.get('schema')=='market_security_candidate_tests/1'
+                and value.get('image_id')==image and value.get('test_sources_sha256')==record['test_sources_sha256']
+                and value.get('status')=='passed' and type(value.get('tests')) is int and value['tests']==count
+                and value.get('suite_execution_thread')=='owned_nonmain_test_thread'
+                and type(value.get('skips')) is int and value['skips']==0 and value.get('scope')==scope
+                and type(value.get('execution_uid')) is int and value['execution_uid']==uid
+                and type(value.get('execution_gid')) is int and value['execution_gid']==uid
+                and value.get('product_files_equal_baseline') is True
+                and all(value.get(field) is False for field in ('runtime_data_used','security_accepted')),'candidate_tests')
+        ids=value.get('selected_test_ids')
+        require(type(ids) is list and all(type(name) is str for name in ids) and ids==sorted(ids)
+                and len(ids)==len(set(ids))==count,'candidate_test_selection')
+        selections.append(set(ids))
+    require(selections[1]=={ROOT_FIXTURE_TEST_ID} and not selections[0]&selections[1]
+            and selections[0]|selections[1]==set(expected),'candidate_test_selection')
+    return {'schema':'market_security_candidate_tests/1','image_id':image,'test_sources_sha256':record['test_sources_sha256'],
+            'status':'passed','tests':85,'skips':0,'selected_test_ids':expected,'product_files_equal_baseline':True,
+            'execution_profiles':{'nonroot':{'uid':10001,'gid':10001,'tests':84},
+                                  'root_owned_metadata_fixture':{'uid':0,'gid':0,'tests':1,'test_id':ROOT_FIXTURE_TEST_ID}},
+            'test_selections_disjoint':True,'historical_test_bodies_unchanged_except_security_base_assertion':True,
+            'runtime_data_used':False,'security_accepted':False}
 
 
 def build_candidate(root, record):
@@ -607,22 +718,24 @@ def build_candidate(root, record):
     require(native.get('schema')=='market_security_native_checks/1' and native.get('image_id')==image
             and native.get('status')=='passed' and native.get('pydantic')=='2.8.2'
             and native.get('psycopg2')=='2.9.13' and native.get('runtime_data_used') is False
+            and type(native.get('execution_uid')) is int and native['execution_uid']==10001
+            and type(native.get('execution_gid')) is int and native['execution_gid']==10001
             and native.get('security_accepted') is False,'native_checks')
     write(root/'reports/native.json',encoded(native))
     program=candidate_test_program(record)
     phase(root,'historical_tests')
     raw=helpers.isolated(root,image,program,'market-focused',mounts=((output/'tests','/evidence'),),maximum=4*1024**2)
-    focused=json.loads(raw.splitlines()[-1])
-    require(focused.get('schema')=='market_security_candidate_tests/1' and focused.get('image_id')==image
-            and focused.get('test_sources_sha256')==record['test_sources_sha256']
-            and focused.get('status')=='passed' and focused.get('tests')==85 and type(focused.get('tests')) is int
-            and focused.get('skips')==0 and focused.get('product_files_equal_baseline') is True
-            and focused.get('runtime_data_used') is False and focused.get('security_accepted') is False,'candidate_tests')
+    normal=json.loads(raw.splitlines()[-1]);write(root/'reports/focused-nonroot.json',encoded(normal))
+    phase(root,'root_metadata_fixture')
+    raw=root_fixture_container(helpers,root,image,candidate_test_program(record,root_fixture=True))
+    fixture=json.loads(raw.splitlines()[-1]);write(root/'reports/focused-root-fixture.json',encoded(fixture))
+    focused=validate_test_receipts(record,image,normal,fixture)
     write(root/'reports/focused.json',encoded(focused))
     require(image_metadata(helpers,root,image,record)==facts,'candidate_image_drift')
     proof={'schema':'market_security_candidate_build/1',**facts,'payload_sha256':sha256(encoded(record)).hexdigest(),
            'test_sources_sha256':record['test_sources_sha256'],'native_sha256':sha256(encoded(native)).hexdigest(),
            'focused_sha256':sha256(encoded(focused)).hexdigest(),'product_files_equal_baseline':True,
+           'focused_nonroot_sha256':sha256(encoded(normal)).hexdigest(),'focused_root_fixture_sha256':sha256(encoded(fixture)).hexdigest(),
            'buildkit_resource_cgroup_asserted':False,'vendor_debs_reused':False,
            'full_runtime_matrix_completed':False,'security_accepted':False,'deployment_eligible':False}
     write(root/'reports/build-receipt.json',encoded(proof))
@@ -631,7 +744,7 @@ def build_candidate(root, record):
 
 
 PHASES=frozenset(('prepare_payload','build_image','inspect_candidate','native_checks','historical_tests',
-                  'bind_build_evidence','bind_raw_reports','export_image','complete'))
+                  'root_metadata_fixture','bind_build_evidence','bind_raw_reports','export_image','complete'))
 
 
 def phase(root,name):
@@ -659,7 +772,8 @@ def bind_reports(root,record,build,vulnerabilities,sbom):
             and build['product_files_equal_baseline'] is True
             and all(build[field] is False for field in ('buildkit_resource_cgroup_asserted','vendor_debs_reused',
                 'full_runtime_matrix_completed','security_accepted','deployment_eligible')),'build_receipt')
-    for name,field in (('native.json','native_sha256'),('focused.json','focused_sha256')):
+    for name,field in (('native.json','native_sha256'),('focused.json','focused_sha256'),
+                       ('focused-nonroot.json','focused_nonroot_sha256'),('focused-root-fixture.json','focused_root_fixture_sha256')):
         require(sha256(read(root/'reports'/name,4*1024**2)).hexdigest()==build[field],'build_evidence_changed')
     require(vulnerabilities.get('SchemaVersion')==2 and vulnerabilities.get('ArtifactType')=='container_image'
             and vulnerabilities.get('Metadata',{}).get('ImageID')==image
@@ -701,6 +815,7 @@ def finalize(root,record):
            'payload_sha256':sha256(encoded(record)).hexdigest(),'build_receipt_sha256':sha256(build_raw).hexdigest(),
            'public_source_binding':record['public_source_binding'],'test_sources_sha256':record['test_sources_sha256'],
            'native_sha256':build['native_sha256'],'focused_sha256':build['focused_sha256'],
+           'focused_nonroot_sha256':build['focused_nonroot_sha256'],'focused_root_fixture_sha256':build['focused_root_fixture_sha256'],
            'raw_counts':counts,'reports_sha256':{name:sha256(raw).hexdigest() for name,raw in reports.items()},
            'archive':archive,'product_files_equal_baseline':True,'vendor_debs_reused':False,
            'full_runtime_matrix_completed':False,'security_accepted':False,'findings_waived':False,
