@@ -1,0 +1,31 @@
+---
+# Native packages only. This play never restarts a service or a container.
+- name: Stage install or roll back only the two already installed Noble Brotli packages
+  hosts: boot_mount_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    brotli_install_action: check
+    brotli_package_bundle: /root/trading-bot/trading_bot/.local/security-brotli-candidate-20261024-01/packages.zip
+  tasks:
+    - name: Require the exact existing native local lane and finite package action
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | length == 1
+          - ansible_host == '65.109.216.187'
+          - ansible_connection == 'local'
+          - ansible_user == 'root'
+          - brotli_install_action in ['check', 'stage', 'install', 'rollback']
+          - brotli_package_bundle == '/root/trading-bot/trading_bot/.local/security-brotli-candidate-20261024-01/packages.zip'
+    - name: Run only the reviewed two-package helper with its production marker lock
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - '{{ playbook_dir }}/brotli_native_install.py'
+          - '{{ brotli_package_bundle }}'
+          - '{{ "check" if ansible_check_mode else brotli_install_action }}'
+      check_mode: false
+      changed_when: not ansible_check_mode and brotli_install_action != 'check'
+      timeout: 240
