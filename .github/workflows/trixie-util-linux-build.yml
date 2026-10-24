@@ -2,9 +2,15 @@ name: Trixie util-linux source candidate only
 
 on:
   workflow_dispatch:
+    inputs:
+      reuse_verified_packages:
+        description: Reuse the fixed reviewed package artifact; still perform real installation and scans
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: trixie-util-linux-source-candidate
@@ -66,10 +72,22 @@ jobs:
           with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('root='+str(root)+'\n')
           PY
 
-      - name: Build full coherent family offline as a nonroot user and test old callers
+      - name: Download only the fixed reviewed public package artifact
+        if: inputs.reuse_verified_packages
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: mohsenbarari/trading_bot
+          run-id: 40108449213
+          artifact-ids: 12565781476
+          merge-multiple: true
+          path: ${{ steps.recipe.outputs.root }}/reuse-download
+
+      - name: Prepare packages, install the real candidate and preserve build provenance
         id: build
         env:
           CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
+          REUSE_VERIFIED_PACKAGES: ${{ inputs.reuse_verified_packages }}
         run: |
           python3 -I -B - <<'PY'
           from hashlib import sha256
@@ -84,6 +102,58 @@ jobs:
           def image_id(path):
               with path.open('rb') as stream:raw=stream.read(257)
               value=raw.decode().strip();assert re.fullmatch('sha256:[a-f0-9]{64}',value);return value
+          def reuse_packages(root,expected_receipt_sha):
+              source=root/'reuse-download';assert source.resolve(strict=True)==source
+              def read(path,maximum):
+                  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                  try:
+                      before=os.fstat(fd)
+                      assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and 0<before.st_size<=maximum
+                      raw=bytearray()
+                      while chunk:=os.read(fd,min(65536,before.st_size+1-len(raw))):raw.extend(chunk);assert len(raw)<=before.st_size
+                      identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mode,s.st_nlink,s.st_mtime_ns,s.st_ctime_ns)
+                      assert len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+                      return bytes(raw)
+                  finally:os.close(fd)
+              raw=read(source/'build-receipt.json',1024**2);assert sha256(raw).hexdigest()==expected_receipt_sha
+              receipt=json.loads(raw)
+              assert receipt['schema']=='trixie_util_linux_source_candidate/1' and receipt['status']=='candidate_built_not_accepted'
+              assert all(receipt[key] is False for key in ('security_accepted','raw_scanner_gate_waived','production_installed','services_changed'))
+              assert receipt['abi']['status']=='passed' and receipt['source_regressions']['compiled_contracts']=='passed'
+              current=json.loads(read(root/'recipe-identity.json',65536))['recipe_sha256']
+              assert set(current)=={'Dockerfile','build.py','verify.py','source_regressions.py'} and receipt['recipe_sha256']==current
+              for name,digest in current.items():assert sha256(read(root/'context'/name,65536)).hexdigest()==digest
+              original=json.loads(read(source/'recipe-identity.json',65536))
+              assert original=={'source_commit':'e9cff872fe9d07718f50ef84eb8fb9362a085694','recipe_sha256':current}
+              names={'bsdutils','libblkid1','liblastlog2-2','libmount1','libsmartcols1','libuuid1','login','mount','util-linux'}
+              assert len(receipt['selected_runtime_packages'])==9 and set(receipt['selected_runtime_packages'])==names
+              rows=[row for row in receipt['all_family_packages'] if row['name'] in names]
+              assert len(rows)==9 and {row['name'] for row in rows}==names
+              records=receipt['build_records'];assert len(records)==2 and {pathlib.Path(row['path']).suffix for row in records}=={'.changes','.buildinfo'}
+              allowed={row['path'] for row in rows}|{row['path'] for row in records}|{'abi-tests.json','source-tests.json','build-receipt.json','upstream-build.log','toolchain-packages.txt','primary-config.h'}
+              assert len(allowed)==17 and all(pathlib.Path(name).name==name for name in allowed)
+              assert {path.name for path in source.iterdir()}==allowed|{'recipe-identity.json'}
+              buffers={};total=0
+              for name in sorted(allowed):
+                  value=raw if name=='build-receipt.json' else read(source/name,(32 if name=='upstream-build.log' else 16)*1024**2)
+                  total+=len(value);assert total<=64*1024**2;buffers[name]=value
+                  if name.endswith('.deb'):
+                      row=next(row for row in rows if row['path']==name);assert len(value)==row['bytes'] and sha256(value).hexdigest()==row['sha256']
+                  if name.endswith(('.changes','.buildinfo')):assert sha256(value).hexdigest()==next(row['sha256'] for row in records if row['path']==name)
+                  if name=='toolchain-packages.txt':assert sha256(value).hexdigest()==receipt['toolchain_inventory_sha256']
+                  if name=='primary-config.h':assert sha256(value).hexdigest()==receipt['primary_configuration_sha256']
+                  if name=='abi-tests.json':assert json.loads(value)==receipt['abi']
+                  if name=='source-tests.json':assert json.loads(value)==receipt['source_regressions']
+              log=buffers['upstream-build.log'].decode(errors='replace');assert 'Ignore util-linux test suite' not in log
+              counts=re.findall(r'All ([1-9][0-9]*) tests PASSED',log);assert counts
+              assert receipt['upstream_suite']=={'status':'passed','reported_suite_script_counts':[int(n) for n in counts],
+                  'skip_status_lines':len(re.findall(r'(?im)^.*\bSKIPPED\b.*$',log)),'skips_are_not_privileged_coverage':True}
+              target=root/'output/artifacts';target.mkdir(mode=0o700)
+              for name,value in buffers.items():
+                  fd=os.open(target/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                  with os.fdopen(fd,'wb') as output:output.write(value)
+              return receipt,{'compiled_in_this_run':False,'reused_from_run':40108449213,'reused_from_artifact':12565781476,
+                  'reused_receipt_sha256':expected_receipt_sha,'original_source_commit':original['source_commit']}
           def install_capsule(root,receipt):
               # Root with all DAC capabilities dropped cannot traverse the
               # nonroot builder's 0700 artifact directory. Expose only the ten
@@ -115,25 +185,31 @@ jobs:
                   fd=os.open(target/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
                   with os.fdopen(fd,'wb') as output:output.write(raw);output.flush();os.fchmod(output.fileno(),0o644)
               return target
+          reuse=os.environ['REUSE_VERIFIED_PACKAGES'];assert reuse in ('true','false')
+          if reuse=='true':
+              receipt,provenance=reuse_packages(root,'3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde')
           command([*docker,'build','--pull=false','--target','runtime','--iidfile',str(root/'runtime.id'),str(root/'context')],'runtime-prepare',900)
           runtime=image_id(root/'runtime.id')
-          command([*docker,'build','--pull=false','--target','builder','--iidfile',str(root/'builder.id'),str(root/'context')],'builder-prepare',1200)
-          builder=image_id(root/'builder.id')
           store=pathlib.Path('/var/lib/docker').resolve(strict=True);space=os.statvfs(store)
           assert space.f_bavail*space.f_frsize>=8*1024**3
           token=os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'];assert re.fullmatch('[0-9]+-[0-9]+',token)
-          compiler='trixie-util-linux-compile-'+token
-          try:
-              command([*docker,'run','--rm','--name',compiler,'--user=1001:1001','--network=none','--read-only',
-                  '--cap-drop=ALL','--security-opt=no-new-privileges','--cpus=2','--memory=4g','--memory-swap=4g',
-                  '--pids-limit=512','--ulimit','core=0',
-                  '--tmpfs','/tmp:rw,nosuid,nodev,size=256m,uid=1001,gid=1001',
-                  '--mount','type=bind,source='+str(root/'output')+',target=/work',builder,builder],'compile-tests',3750)
-          finally:
-              subprocess.run([*docker,'rm','--force',compiler],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,timeout=20,env=environment)
-          receipt=json.loads((root/'output/artifacts/build-receipt.json').read_bytes())
+          if reuse=='false':
+              command([*docker,'build','--pull=false','--target','builder','--iidfile',str(root/'builder.id'),str(root/'context')],'builder-prepare',1200)
+              builder=image_id(root/'builder.id');compiler='trixie-util-linux-compile-'+token
+              try:
+                  command([*docker,'run','--rm','--name',compiler,'--user=1001:1001','--network=none','--read-only',
+                      '--cap-drop=ALL','--security-opt=no-new-privileges','--cpus=2','--memory=4g','--memory-swap=4g',
+                      '--pids-limit=512','--ulimit','core=0',
+                      '--tmpfs','/tmp:rw,nosuid,nodev,size=256m,uid=1001,gid=1001',
+                      '--mount','type=bind,source='+str(root/'output')+',target=/work',builder,builder],'compile-tests',3750)
+              finally:
+                  subprocess.run([*docker,'rm','--force',compiler],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,timeout=20,env=environment)
+              receipt=json.loads((root/'output/artifacts/build-receipt.json').read_bytes())
+              provenance={'compiled_in_this_run':True,'build_receipt_sha256':sha256((root/'output/artifacts/build-receipt.json').read_bytes()).hexdigest()}
           assert receipt['status']=='candidate_built_not_accepted' and receipt['security_accepted'] is False
+          builder=receipt['builder_image_id'];assert re.fullmatch('sha256:[a-f0-9]{64}',builder)
           public_install=install_capsule(root,receipt)
+          (root/'build-provenance.json').write_text(json.dumps(provenance,sort_keys=True)+'\n')
           with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('builder_id='+builder+'\nruntime_id='+runtime+'\n')
           # Installation exists only in a disposable private CI container. The
           # narrow file-owner capabilities allow real dpkg setuid/group metadata;
@@ -172,7 +248,8 @@ jobs:
           finally:
               subprocess.run([*docker,'rm','--force',scanner],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False,timeout=20,env=environment)
           fd=os.open(root/'reports/candidate-image.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-          with os.fdopen(fd,'w') as out:json.dump({'image_id':candidate,'builder_image_id':builder,'runtime_base_id':runtime,'security_accepted':False},out,sort_keys=True)
+          with os.fdopen(fd,'w') as out:json.dump({'image_id':candidate,'builder_image_id':builder,'runtime_base_id':runtime,
+              'build_provenance':provenance,'security_accepted':False},out,sort_keys=True)
           with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('image_id='+candidate+'\n')
           PY
 
@@ -240,6 +317,7 @@ jobs:
               fd=os.open(target/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
               with os.fdopen(fd,'wb') as out:out.write(raw)
           (target/'recipe-identity.json').write_bytes(read(root/'recipe-identity.json',65536))
+          (target/'build-provenance.json').write_bytes(read(root/'build-provenance.json',65536))
           print(json.dumps({'status':'candidate_packages_exported_not_accepted','security_accepted':False},sort_keys=True))
           PY
 
@@ -301,14 +379,31 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Print bounded failure-only diagnostics from fixed PUBLIC build logs
-        if: failure() && steps.recipe.outputs.root != ''
+      - name: Retain bounded public installation diagnostics and print failure tails
+        id: diagnostics
+        if: always() && steps.recipe.outputs.root != ''
         env:
           CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
+          PRINT_FAILURE_TAILS: ${{ failure() }}
         run: |
           python3 -I -B - <<'PY'
           import json,os,pathlib,re,stat
           root=pathlib.Path(os.environ['CANDIDATE_ROOT']);total=0
+          def public_log_tail(path):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022 and before.st_size<=128*1024**2
+                  os.lseek(fd,max(0,before.st_size-65536),os.SEEK_SET);window=os.read(fd,65537);assert len(window)<=65536
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                  assert len(window)==min(before.st_size,65536) and identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+                  return before.st_size,window
+              finally:os.close(fd)
+          def failure_record(name,size,window):
+              errors=[line[:300] for line in window.decode(errors='replace').splitlines()
+                  if re.search(r'error|failed|failure|traceback|^E:',line,re.I)][-4:]
+              line=json.dumps({'schema':'trixie_util_linux_public_tail/1','name':name,'bytes':size,
+                  'tail':window[-4096:].decode(errors='replace'),'failure_lines':errors},ensure_ascii=True)
+              assert len(line.encode())<=32768;return line
           names=('runtime-prepare.log','builder-prepare.log','compile-tests.log','candidate-install.log',
                  'output/build.log','output/quilt.log','output/abi-tests.json','output/source-tests.json',
                  'output/primary-distclean.log','output/disabled-configure.log','output/disabled-build.log',
@@ -319,18 +414,25 @@ jobs:
                  'output/source-regressions/disabled-loader.log')
           for name in names:
               path=root/name
-              try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:size,window=public_log_tail(path)
               except FileNotFoundError:continue
-              try:
-                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022
-                  os.lseek(fd,max(0,before.st_size-65536),os.SEEK_SET);window=os.read(fd,65537);assert len(window)<=65536
-                  tail=window[-700:]
-                  errors=[line[:500] for line in window.decode(errors='replace').splitlines()
-                      if re.search(r'error|failed|failure|traceback|^E:',line,re.I)][-8:]
-                  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
-                  assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
-                  line=json.dumps({'schema':'trixie_util_linux_public_tail/1','name':name,'bytes':before.st_size,
-                      'tail':tail.decode(errors='replace'),'failure_lines':errors},ensure_ascii=True)
-                  assert len(line.encode())<=32768;total+=len(line.encode());assert total<=524288;print(line)
-              finally:os.close(fd)
+              if name=='candidate-install.log':
+                  target=root/'diagnostics';target.mkdir(mode=0o700)
+                  fd=os.open(target/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                  with os.fdopen(fd,'wb') as output:output.write(window)
+                  metadata={'schema':'trixie_util_linux_install_log/1','name':name,'bytes':size,
+                      'retained_bytes':len(window),'truncated':size>len(window),'public_inputs_only':True}
+                  (target/'install-log-metadata.json').write_text(json.dumps(metadata,sort_keys=True)+'\n')
+                  with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('install_log=true\n')
+              if os.environ['PRINT_FAILURE_TAILS']=='true':
+                  line=failure_record(name,size,window);total+=len(line.encode());assert total<=524288;print(line)
           PY
+
+      - name: Retain only the fixed public installation log for seven days
+        if: always() && steps.diagnostics.outputs.install_log == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trixie-util-linux-public-install-diagnostics
+          path: ${{ steps.recipe.outputs.root }}/diagnostics/*
+          if-no-files-found: error
+          retention-days: 7

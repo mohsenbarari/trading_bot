@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from hashlib import sha256
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import re
@@ -254,6 +255,183 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
         with self.assertRaises(AssertionError):create(root,receipt)
         self.assertFalse((root/'install-public').exists())
 
+    def reuse_packages_fixture(self):
+        block=next(value for value in blocks() if 'def reuse_packages(' in value)
+        node=next(n for n in ast.parse(block).body if isinstance(n,ast.FunctionDef) and n.name=='reuse_packages')
+        namespace={'os':os,'pathlib':__import__('pathlib'),'stat':__import__('stat'),'json':json,'sha256':sha256,'re':re}
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'<actual-public-package-reuse>','exec'),namespace)
+        root=self.root/('reuse-'+str(len(list(self.root.iterdir()))));root.mkdir(mode=0o700)
+        for name in ('context','output','reuse-download'):(root/name).mkdir(mode=0o700)
+        source=root/'reuse-download';recipe={}
+        for name in ('Dockerfile','build.py','verify.py','source_regressions.py'):
+            raw=('sealed-public-recipe-'+name).encode();(root/'context'/name).write_bytes(raw)
+            recipe[name]=sha256(raw).hexdigest()
+        old_commit='e9cff872fe9d07718f50ef84eb8fb9362a085694'
+        (root/'recipe-identity.json').write_text(json.dumps({'source_commit':'f'*40,'recipe_sha256':recipe}))
+        (source/'recipe-identity.json').write_text(json.dumps({'source_commit':old_commit,'recipe_sha256':recipe}))
+        packages=[]
+        for name in sorted(B.SELECTED):
+            raw=('retained-public-package-'+name).encode()
+            path=name+'_'+B.expected_version(name).split(':')[-1]+'_amd64.deb'
+            (source/path).write_bytes(raw)
+            packages.append({'name':name,'version':B.expected_version(name),'path':path,
+                             'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
+        records=[]
+        for suffix in ('.changes','.buildinfo'):
+            name='util-linux_2.41.6-0+deb13u0+gold1_amd64'+suffix;raw=('public-record-'+suffix).encode()
+            (source/name).write_bytes(raw);records.append({'path':name,'sha256':sha256(raw).hexdigest()})
+        abi={'status':'passed','libraries':{name:{'status':'passed'} for name in V.CALLERS}}
+        regressions={'compiled_contracts':'passed','mountfd_enabled_full_build':'passed',
+                     'mountfd_disabled_build_and_loader':'passed','security_accepted':False,'production_installed':False}
+        (source/'abi-tests.json').write_text(json.dumps(abi));(source/'source-tests.json').write_text(json.dumps(regressions))
+        (source/'toolchain-packages.txt').write_bytes(b'public-toolchain=1\n')
+        (source/'primary-config.h').write_bytes(b'#define USE_LIBMOUNT_MOUNTFD_SUPPORT 1\n')
+        upstream='Public build output\nAll 340 tests PASSED\n'+'suite: SKIPPED\n'*162
+        (source/'upstream-build.log').write_text(upstream)
+        receipt={'schema':'trixie_util_linux_source_candidate/1','status':'candidate_built_not_accepted',
+                 'builder_image_id':'sha256:'+'a'*64,'version':B.VERSION,'selected_runtime_packages':sorted(B.SELECTED),
+                 'all_family_packages':packages,'build_records':records,'recipe_sha256':recipe,'abi':abi,
+                 'source_regressions':regressions,'security_accepted':False,'raw_scanner_gate_waived':False,
+                 'production_installed':False,'services_changed':False,
+                 'toolchain_inventory_sha256':sha256((source/'toolchain-packages.txt').read_bytes()).hexdigest(),
+                 'primary_configuration_sha256':sha256((source/'primary-config.h').read_bytes()).hexdigest(),
+                 'upstream_suite':{'status':'passed','reported_suite_script_counts':[340],'skip_status_lines':162,
+                                   'skips_are_not_privileged_coverage':True}}
+        self.write_reuse_receipt(source,receipt)
+        return namespace['reuse_packages'],root,source,receipt
+
+    def write_reuse_receipt(self, source, receipt):
+        raw=(json.dumps(receipt,sort_keys=True)+'\n').encode();(source/'build-receipt.json').write_bytes(raw)
+        return sha256(raw).hexdigest()
+
+    def test_verified_reuse_copies_only_seventeen_artifacts_and_records_original_build(self):
+        reuse,root,source,receipt=self.reuse_packages_fixture()
+        expected=self.write_reuse_receipt(source,receipt);before={p.name:p.read_bytes() for p in source.iterdir()}
+        observed,provenance=reuse(root,expected)
+        self.assertEqual(observed,receipt)
+        self.assertEqual(len(before),18)
+        self.assertEqual({p.name:p.read_bytes() for p in (root/'output/artifacts').iterdir()},
+                         {name:raw for name,raw in before.items() if name!='recipe-identity.json'})
+        self.assertEqual({p.name:p.read_bytes() for p in source.iterdir()},before)
+        self.assertFalse(provenance['compiled_in_this_run'])
+        self.assertEqual(provenance['reused_from_run'],40108449213)
+        self.assertEqual(provenance['reused_from_artifact'],12565781476)
+        self.assertEqual(provenance['reused_receipt_sha256'],expected)
+        self.assertEqual(provenance['original_source_commit'],'e9cff872fe9d07718f50ef84eb8fb9362a085694')
+
+    def test_reuse_refuses_changed_missing_or_extra_download_before_copying(self):
+        for failure in ('receipt','package','record','toolchain','config','abi','source','suite','missing','extra','recipe','context'):
+            with self.subTest(failure=failure):
+                reuse,root,source,receipt=self.reuse_packages_fixture();expected=self.write_reuse_receipt(source,receipt)
+                name={'receipt':'build-receipt.json','package':receipt['all_family_packages'][0]['path'],
+                      'record':receipt['build_records'][0]['path'],'toolchain':'toolchain-packages.txt',
+                      'config':'primary-config.h','abi':'abi-tests.json','source':'source-tests.json',
+                      'suite':'upstream-build.log'}.get(failure)
+                if name:(source/name).write_bytes(b'changed-public-evidence')
+                elif failure=='missing':(source/'abi-tests.json').unlink()
+                elif failure=='extra':(source/'unexpected-public-file').write_bytes(b'extra')
+                elif failure=='recipe':
+                    value=json.loads((source/'recipe-identity.json').read_bytes());value['recipe_sha256']['build.py']='0'*64
+                    (source/'recipe-identity.json').write_text(json.dumps(value))
+                else:(root/'context/build.py').write_bytes(b'drifted-public-recipe')
+                with self.assertRaises((AssertionError,ValueError,FileNotFoundError)):reuse(root,expected)
+                self.assertFalse((root/'output/artifacts').exists())
+
+    def test_reuse_receipt_pin_does_not_replace_semantic_admission(self):
+        for field,value in (('schema','other/1'),('status','security_accepted'),('security_accepted',True),
+                            ('raw_scanner_gate_waived',True),('production_installed',True),('services_changed',True)):
+            with self.subTest(field=field):
+                reuse,root,source,receipt=self.reuse_packages_fixture();receipt[field]=value
+                expected=self.write_reuse_receipt(source,receipt)
+                with self.assertRaises(AssertionError):reuse(root,expected)
+                self.assertFalse((root/'output/artifacts').exists())
+
+    def test_reuse_rejects_download_links_and_oversize_receipt_before_read(self):
+        for failure in ('symlink','hardlink','oversize'):
+            with self.subTest(failure=failure):
+                reuse,root,source,receipt=self.reuse_packages_fixture();expected=self.write_reuse_receipt(source,receipt)
+                target=source/'build-receipt.json'
+                if failure=='symlink':
+                    target.rename(root/'outside-receipt');target.symlink_to(root/'outside-receipt')
+                elif failure=='hardlink':os.link(target,root/'receipt-alias')
+                else:
+                    with target.open('r+b') as stream:stream.truncate(1024**2+1)
+                target_info=target.stat();original_read=os.read
+                def guarded_read(fd,maximum):
+                    info=os.fstat(fd)
+                    if (info.st_dev,info.st_ino)==(target_info.st_dev,target_info.st_ino):
+                        raise AssertionError('body_read_before_metadata_gate')
+                    return original_read(fd,maximum)
+                with patch.object(os,'read',side_effect=guarded_read):
+                    with self.assertRaises((AssertionError,OSError)) as error:reuse(root,expected)
+                self.assertNotEqual(str(error.exception),'body_read_before_metadata_gate')
+                self.assertFalse((root/'output/artifacts').exists())
+
+    def diagnostic_functions(self):
+        block=next(value for value in blocks() if 'def public_log_tail(' in value)
+        nodes=[node for node in ast.parse(block).body if isinstance(node,ast.FunctionDef)]
+        namespace={'os':os,'stat':__import__('stat'),'json':json,'re':re}
+        exec(compile(ast.Module(body=nodes,type_ignores=[]),'<actual-public-diagnostics>','exec'),namespace)
+        return namespace['public_log_tail'],namespace['failure_record']
+
+    def test_small_install_log_retains_the_explanatory_continuation_in_full(self):
+        tail,record=self.diagnostic_functions();path=self.root/'candidate-install.log'
+        explanation=b' unable to install public file: operation not permitted\n'
+        beginning=b'dpkg: error processing archive public-package.deb (--install):\n'+explanation
+        ending=b'\nTraceback: disposable candidate install failed\n'
+        raw=beginning+b'x'*(3343-len(beginning)-len(ending))+ending;path.write_bytes(raw)
+        size,window=tail(path);value=json.loads(record(path.name,size,window))
+        self.assertEqual(size,3343);self.assertEqual(window,raw)
+        self.assertEqual(value['tail'].encode(),raw)
+        self.assertIn(explanation.decode(),value['tail'])
+        self.assertEqual(path.read_bytes(),raw)
+
+    def test_large_and_non_ascii_public_diagnostics_keep_byte_and_encoded_bounds(self):
+        tail,record=self.diagnostic_functions();path=self.root/'candidate-install.log'
+        raw=(b'error '+b'\xff'*600+b'\n')*150;path.write_bytes(raw)
+        size,window=tail(path);encoded=record(path.name,size,window);value=json.loads(encoded)
+        self.assertEqual(size,len(raw));self.assertEqual(window,raw[-65536:])
+        self.assertEqual(value['tail'],window[-4096:].decode(errors='replace'))
+        self.assertEqual(len(value['failure_lines']),4)
+        self.assertTrue(all(len(line)<=300 for line in value['failure_lines']))
+        self.assertLessEqual(len(encoded.encode()),32768)
+        self.assertLessEqual(sum(len(record('public-'+str(i),size,window).encode()) for i in range(16)),524288)
+
+    def test_public_log_tail_rejects_links_writable_or_oversize_before_body_read(self):
+        tail,_=self.diagnostic_functions()
+        for failure in ('symlink','hardlink','writable','oversize'):
+            with self.subTest(failure=failure):
+                path=self.root/('public-'+failure);path.write_bytes(b'public-log')
+                if failure=='symlink':
+                    path.rename(self.root/'public-link-target');path.symlink_to(self.root/'public-link-target')
+                elif failure=='hardlink':os.link(path,self.root/'public-hardlink-alias')
+                elif failure=='writable':path.chmod(0o666)
+                else:
+                    with path.open('r+b') as stream:stream.truncate(128*1024**2+1)
+                with patch.object(os,'read',side_effect=AssertionError('log_body_read_before_metadata_gate')):
+                    with self.assertRaises((AssertionError,OSError)) as error:tail(path)
+                self.assertNotEqual(str(error.exception),'log_body_read_before_metadata_gate')
+
+    def test_diagnostic_artifact_preserves_only_fixed_install_log_even_without_failure(self):
+        block=next(value for value in blocks() if 'def public_log_tail(' in value)
+        root=self.root/'diagnostic-ci';root.mkdir(mode=0o700)
+        raw=b'dpkg: error processing archive public.deb\n explanatory continuation\n'
+        (root/'candidate-install.log').write_bytes(raw)
+        (root/'unrelated-public.log').write_bytes(b'not an admitted diagnostic input')
+        output=root/'github-output';output.write_text('')
+        printed=io.StringIO()
+        with patch.dict(os.environ,{'CANDIDATE_ROOT':str(root),'GITHUB_OUTPUT':str(output),'PRINT_FAILURE_TAILS':'false'}), \
+             patch('sys.stdout',printed):
+            exec(compile(block,'<actual-public-diagnostic-step>','exec'),{})
+        self.assertEqual(printed.getvalue(),'')
+        target=root/'diagnostics'
+        self.assertEqual({p.name for p in target.iterdir()},{'candidate-install.log','install-log-metadata.json'})
+        self.assertEqual((target/'candidate-install.log').read_bytes(),raw)
+        self.assertEqual(json.loads((target/'install-log-metadata.json').read_bytes()),
+                         {'schema':'trixie_util_linux_install_log/1','name':'candidate-install.log','bytes':len(raw),
+                          'retained_bytes':len(raw),'truncated':False,'public_inputs_only':True})
+        self.assertIn('install_log=true\n',output.read_text())
+
     def test_negative_control_that_unexpectedly_passes_is_a_failure(self):
         with patch.object(S.B, 'command'), patch.object(S.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)):
             with self.assertRaisesRegex(RuntimeError, 'compiled_negative_control_failed'):
@@ -299,7 +477,48 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
         self.assertIn('8*1024**2', text)
         self.assertIn("steps.export.outcome == 'success'", text)
         self.assertIn("steps.reports.outcome == 'success'", text)
-        self.assertEqual(text.count('retention-days: 7'), 2)
+        self.assertEqual(text.count('retention-days: 7'), 3)
+
+    def test_reuse_is_explicit_default_off_and_downloads_only_the_fixed_public_artifact(self):
+        text=WORKFLOW.read_text()
+        inputs=text.split('reuse_verified_packages:',1)[1].split('\npermissions:',1)[0]
+        self.assertIn('type: boolean',inputs);self.assertIn('default: false',inputs)
+        self.assertIn('actions: read',text)
+        start=text.index('uses: actions/download-artifact@v4')
+        step=text[text.rfind('      - name:',0,start):text.index('\n      - name:',start)]
+        for expected in ('if: inputs.reuse_verified_packages','github-token: ${{ github.token }}',
+                         'repository: mohsenbarari/trading_bot','run-id: 40108449213','artifact-ids: 12565781476',
+                         'path: ${{ steps.recipe.outputs.root }}/reuse-download'):
+            self.assertIn(expected,step)
+        self.assertNotIn('continue-on-error',step)
+        self.assertIn("steps.diagnostics.outputs.install_log == 'true'",text)
+        self.assertIn('name: trixie-util-linux-public-install-diagnostics',text)
+
+    def test_reuse_validation_precedes_docker_and_skips_only_builder_and_compile(self):
+        block=next(value for value in blocks() if 'def reuse_packages(' in value);tree=ast.parse(block)
+        branches={ast.literal_eval(node.test.comparators[0]):node for node in tree.body
+                  if isinstance(node,ast.If) and isinstance(node.test,ast.Compare)
+                  and isinstance(node.test.left,ast.Name) and node.test.left.id=='reuse'}
+        self.assertEqual(set(branches),{'true','false'})
+        self.assertFalse(branches['true'].orelse);self.assertFalse(branches['false'].orelse)
+        validate=next(node for node in ast.walk(branches['true']) if isinstance(node,ast.Call)
+                      and isinstance(node.func,ast.Name) and node.func.id=='reuse_packages')
+        self.assertEqual(ast.literal_eval(validate.args[1]),'3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde')
+        def stages(node):
+            return {ast.literal_eval(call.args[1]) for call in ast.walk(node)
+                    if isinstance(call,ast.Call) and isinstance(call.func,ast.Name) and call.func.id=='command'
+                    and len(call.args)>1 and isinstance(call.args[1],ast.Constant)}
+        self.assertEqual(stages(branches['false']),{'builder-prepare','compile-tests'})
+        self.assertEqual(stages(branches['true']),set())
+        top_commands=[node.value for node in tree.body if isinstance(node,ast.Expr) and isinstance(node.value,ast.Call)
+                      and isinstance(node.value.func,ast.Name) and node.value.func.id=='command']
+        runtime=next(call for call in top_commands if ast.literal_eval(call.args[1])=='runtime-prepare')
+        self.assertLess(branches['true'].lineno,runtime.lineno)
+        install=next(node for node in tree.body if isinstance(node,ast.Try) and 'candidate-install' in stages(node))
+        self.assertLess(branches['false'].lineno,install.lineno)
+        self.assertLessEqual({'candidate-create','candidate-install','candidate-exit','candidate-image'},stages(install))
+        self.assertIn("'build_provenance':provenance",block)
+        self.assertIn("root/'build-provenance.json'",block)
 
     def test_candidate_entrypoint_cannot_be_used_as_a_host_build(self):
         with self.assertRaisesRegex(RuntimeError, 'immutable_builder_required'):

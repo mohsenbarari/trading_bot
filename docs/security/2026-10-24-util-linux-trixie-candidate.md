@@ -15,6 +15,13 @@ and raw scan remain required. Do not rebuild successful compilation merely
 to obtain this missing installation evidence; reuse the bound public artifact
 through a separately checked CI-only installation path.
 
+Follow-up CI40108449213 again passed compilation, all six ABI probes and source
+variants. It reached `dpkg --install` in the disposable candidate, then failed
+processing `mount` and `util-linux`; installation and scanner acceptance remain
+unproven. The old bounded diagnostic omitted dpkg's explanatory continuation
+lines, so no package or capability fix is inferred from that failure. Public
+artifact12565781476 retains the completed build evidence and nine packages.
+
 Actual diagnostic CI40083981841 completed the coherent Debian family, six
 old-caller ABI probes and normal distclean, then failed the isolated disabled
 variant at `configure: error: libblkid is needed to build libmount`.
@@ -26,8 +33,8 @@ That source fix alone proved no build or security pass; later CI40087272190
 provided the actual disabled-variant execution evidence described above.
 
 Status: the complete candidate job has not passed. Compilation, six old-caller
-ABI checks, the disabled variant and source regressions passed in40087272190;
-the public-capsule correction still needs actual installation/scan evidence.
+ABI checks, the disabled variant and source regressions passed in40087272190
+and40108449213; a successful actual installation and scan remain required.
 No production package installation or activation is asserted.
 
 First actual CI40082608496 failed during builder preparation. All seven
@@ -59,12 +66,31 @@ by the existing raw HIGH/CRITICAL gate.
 ## What the manual CI job actually does
 
 `trixie-util-linux-build.yml` is manual-only, admits only published `main` or
-the reviewed `security/remediation-20261023` branch, and has only `contents:read`.
+the reviewed `security/remediation-20261023` branch, and has only `contents:read`
+and `actions:read`.
 This disposable candidate is not a release. Keeping its source iterations on
 the security branch avoids additional full main acceptance runs; actual
 App release gates remain unchanged. It copies exactly four published Git blobs into a private,
 bounded context and records their hashes. No application source, runtime
 configuration, session, credential or production volume enters the job.
+
+The explicit manual input `reuse_verified_packages` defaults to false. When
+true, the official artifact downloader retrieves only run40108449213,
+artifact12565781476. Before any Docker command, admission requires build-receipt
+SHA256 `3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde`,
+the exact four current sealed recipe hashes and original source identity,
+passing unaccepted receipt states, and the exact eighteen downloaded files.
+All nine deb hashes, Debian build-record hashes, toolchain/config hashes,
+ABI/source receipt contents and upstream suite summary are checked in bounded
+buffers before the seventeen source artifacts are copied. The original receipt
+remains unchanged. Missing or changed inputs fail without falling back to a build.
+
+Reuse skips only builder preparation and compilation. Runtime preparation,
+the unchanged real installer and both scans still execute. The separate
+`build-provenance.json` identifies `reused_from_run`, `reused_from_artifact` and
+`reused_receipt_sha256`, and states `compiled_in_this_run:false`; successful
+candidate-image evidence carries the same provenance. This is a CI source
+change, not evidence that the next installation or scan has passed.
 
 The runtime base is the reviewed exact amd64 Python3.11.17/Trixie image. Debian
 repositories are authenticated, timestamped official Trixie snapshots; disabling
@@ -161,15 +187,20 @@ means evidence collected, never that vulnerabilities are waived or fixed.
 
 The public export contains exactly nine debs, build/ABI/source receipts, Debian
 `.changes`/`.buildinfo`, the exact public toolchain inventory, the bounded full
-upstream build log, primary config header and recipe identity. The receipt also hashes each old Debian
+upstream build log, primary config header, recipe identity and separate build
+provenance. The receipt also hashes each old Debian
 baseline package. Size/hash/regular-file/single-link/no-follow/stability guards
 apply. Raw reports have separate finite limits: 32MiB vulnerability JSON, 8MiB
 SBOM and 64KiB image identity, 48MiB total. Package export is independent of report
 admission, so a scanner/report failure preserves completed package evidence.
-Both artifact groups expire after seven days. Failure diagnostics read only
+All artifact groups expire after seven days. Failure diagnostics read only
 the last64KiB of sixteen fixed public build logs, at most32KiB per encoded
-record/512KiB total, including eight matching failure lines of at most500
-characters each and a700-byte tail.
+record/512KiB total, including four matching failure lines of at most300
+characters each and a4096-byte tail. Thus the complete3343-byte install log
+from40108449213 would retain its explanatory continuations. A separate public
+installation diagnostic artifact preserves the fixed install log's last64KiB
+with total-size/truncation metadata, including on installation failure; it
+contains no application or private runtime input.
 
 Every receipt remains `candidate_built_not_accepted`, `security_accepted:false`,
 `production_installed:false`. A green build does not close any advisory. Final
