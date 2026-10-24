@@ -1,6 +1,7 @@
 # Native Brotli: bounded consumer refresh
 
-SOURCE ONLY. No restart or fresh outage window is implied by this packet.
+The original source-only packet was subsequently executed as described below;
+source publication alone never grants a fresh outage window.
 Native stage02/install01 actually installed only the two patched Brotli packages.
 The immutable installation receipt remains
 `on_disk_patched_consumers_pending`; this helper never changes that receipt.
@@ -101,3 +102,34 @@ read-only before any separately reviewed recovery/window. The old two debs and
 installation rollback proof remain retained, but automatic downgrades would
 reintroduce the defect and are outside this refresh. All new public control
 evidence has a ten-day cleanup-review deadline; nothing deletes live data.
+
+## Actual first attempt and Golden-only continuation
+
+The user approved24Oct11:05:14–11:15:14 UTC. Exactly one restart request was
+issued for the public collector at11:05:41 UTC; Golden was never requested.
+The collector stayed active but remained STARTING longer than the original
+bounded observer, so the controller stopped with `partial_refresh_incident_open`.
+That historical receipt SHA-256 is
+`5955ba42d551f85bfdd1d4637240b7e06c68d34e1a4956cd7cc42b6adce441c7`
+and must never be rewritten as a successful first attempt.
+
+By11:13:10 UTC, a separate read-only observation proved old PID524702 ended,
+new PID829565 mapped the patched code, and the replacement-PID startup marker
+and fresh HEALTHY heartbeat were both present. All15 container identities
+still matched the installation receipt. Golden PID524800 remained unchanged
+and still needs refresh. High collector CPU and completed backfill events were
+observed during startup; no collector-code/database change or restart retry
+was made. The remaining time did not fit Golden's full stop/start/scan budget.
+
+`brotli_native_golden_resume.py/.yml` is a separate default-check continuation.
+It requires the exact failed-parent receipt, ended old collector, patched/ready
+current collector, original unchanged Golden, no pending unit jobs and a new
+explicit window no earlier than the previous end. It reuses the SHA-pinned
+original refresh/installer, including stable-PID/application/inode checks and
+the same M/source locks; only the fixed new journal root is substituted.
+Before any Golden request, every journal write records its immutable parent
+binding. A command guard permits exactly one Golden restart and denies any
+collector restart; out-of-scope writes and repeat attempts refuse. Parent
+evidence stays unchanged. No earlier deadline is extended and no Web/container
+action is authorized. The new receipt may verify both consumers only after
+real post-request readiness, while global security completion stays false.
