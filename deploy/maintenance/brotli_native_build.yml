@@ -1,0 +1,151 @@
+---
+# Build artifacts only. No package installation, restart, image activation or cleanup.
+- name: Build and test the exact Noble Brotli backport in one disposable builder
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    brotli_build_apply: false
+    brotli_build_root: /srv/trading-bot/backups/security-brotli-noble-build-20261024
+    brotli_build_image: trading-bot-brotli-noble-security:20261024
+    brotli_host_admission: |
+      import os,pathlib,stat,sys
+      site,docker_root=sys.argv[1:]
+      assert site in {'65.109.216.187','65.109.220.59'} and os.geteuid()==0
+      assert pathlib.Path('/proc/1/exe').readlink().name=='systemd' and not pathlib.Path('/.dockerenv').exists()
+      for ns in ('pid','mnt','user'): assert os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns)
+      release=dict(line.split('=',1) for line in pathlib.Path('/etc/os-release').read_text().splitlines() if '=' in line)
+      assert release['ID']=='ubuntu' and release['VERSION_ID'].strip('"')==('24.04' if site=='65.109.216.187' else '26.04')
+      root=pathlib.Path('/srv/trading-bot/backups/security-brotli-noble-build-20261024')
+      assert not os.path.lexists(root)
+      for path in (root.parent,pathlib.Path(docker_root)):
+          assert path.is_absolute() and path.resolve(strict=True)==path
+          for parent in (path,*path.parents):
+              s=parent.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+          available=os.statvfs(path)
+          # Keep the full pre-Web offhost floor PLUS a separate conservative build reserve.
+          floor=(12 if site=='65.109.216.187' else 44)*1024**3
+          assert available.f_bavail*available.f_frsize>=floor+2*1024**3
+      print('build-only admission passed; no files created')
+  tasks:
+    - name: Admit only one exact existing root lane
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | length == 1
+          - ansible_user == 'root'
+          - (ansible_host == '65.109.216.187' and ansible_connection | default('ssh') == 'local') or (ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none')
+          - brotli_build_root == '/srv/trading-bot/backups/security-brotli-noble-build-20261024'
+          - brotli_build_image == 'trading-bot-brotli-noble-security:20261024'
+    - name: Require the patched running Docker daemon before using it for a build
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, version, --format, '{% raw %}{{.Server.Version}}{% endraw %}']
+      register: brotli_daemon
+      changed_when: false
+      failed_when: brotli_daemon.stdout != '29.9.2'
+      check_mode: false
+    - name: Read only the Docker store path
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, info, --format, '{% raw %}{{.DockerRootDir}}{% endraw %}']
+      register: brotli_docker_root
+      changed_when: false
+      check_mode: false
+    - name: Refuse overwriting an existing candidate image tag
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, image, inspect, --format, '{% raw %}{{.Id}}{% endraw %}', '{{ brotli_build_image }}']
+      register: brotli_prior_image
+      changed_when: false
+      failed_when: brotli_prior_image.rc != 1
+      check_mode: false
+    - name: Require native identity secure ancestors and unchanged disk reserves before any write
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ brotli_host_admission }}', '{{ ansible_host }}', '{{ brotli_docker_root.stdout }}']
+      changed_when: false
+      check_mode: false
+    - name: Default and Ansible check mode never stage pull build or run a container
+      ansible.builtin.meta: end_play
+      when: not (brotli_build_apply | bool) or ansible_check_mode
+    - name: Exclusively create only the new private build workspace
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib
+            root=pathlib.Path('/srv/trading-bot/backups/security-brotli-noble-build-20261024')
+            os.mkdir(root,0o700)
+            for child in ('context','output','docker-config'):os.mkdir(root/child,0o700)
+    - name: Copy only the four public reviewed builder recipe files
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/brotli_build/{{ item }}'
+        dest: '{{ brotli_build_root }}/context/{{ item }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      loop: [Dockerfile, build.py, verify.py, CVE-2026-111497.patch]
+    - name: Snapshot existing application container identities without inspecting environment
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, ps, -aq, --no-trunc]
+      register: brotli_runtime_before
+      changed_when: false
+    - name: Prepare only the public Noble toolchain image with bounded private logs
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib,resource,subprocess
+            root=pathlib.Path('/srv/trading-bot/backups/security-brotli-noble-build-20261024')
+            def bounds():resource.setrlimit(resource.RLIMIT_FSIZE,(8*1024**2,)*2);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+            with open(root/'image-build.log','xb') as log:
+                subprocess.run(['/usr/bin/docker','build','--pull=false','--iidfile',str(root/'builder-image-id'),'--tag','trading-bot-brotli-noble-security:20261024',str(root/'context')],stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,timeout=900,check=True,preexec_fn=bounds,env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','DOCKER_HOST':'unix:///var/run/docker.sock','DOCKER_CONFIG':str(root/'docker-config'),'HOME':str(root),'LC_ALL':'C.UTF-8'})
+      timeout: 950
+    - name: Compile and test offline with explicit CPU memory PID and total time caps
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import pathlib,re,resource,subprocess
+            root=pathlib.Path('/srv/trading-bot/backups/security-brotli-noble-build-20261024')
+            image_path=root/'builder-image-id'
+            assert image_path.stat().st_size<=128
+            image=image_path.read_text().strip();assert re.fullmatch('sha256:[0-9a-f]{64}',image)
+            def bounds():resource.setrlimit(resource.RLIMIT_FSIZE,(8*1024**2,)*2);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+            with open(root/'container.log','xb') as log:
+                subprocess.run(['/usr/bin/docker','run','--rm','--name','security-brotli-noble-build-20261024','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--cpus=2','--memory=2g','--memory-swap=2g','--pids-limit=256','--tmpfs','/tmp:rw,nosuid,nodev,size=128m','--mount','type=bind,source='+str(root/'output')+',target=/work',image,image],stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,timeout=1600,check=True,preexec_fn=bounds,env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','DOCKER_HOST':'unix:///var/run/docker.sock','DOCKER_CONFIG':str(root/'docker-config'),'HOME':str(root),'LC_ALL':'C.UTF-8'})
+      timeout: 1650
+    - name: Require the actual candidate evidence without claiming a host fix
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import hashlib,json,os,pathlib,stat
+            p=pathlib.Path('/srv/trading-bot/backups/security-brotli-noble-build-20261024/output/artifacts/build-receipt.json')
+            fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            try:
+                s=os.fstat(fd);assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o077 and s.st_size<1048576
+                raw=os.read(fd,1048577);assert len(raw)==s.st_size
+                identity=lambda i:(i.st_dev,i.st_ino,i.st_mode,i.st_uid,i.st_nlink,i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+                assert identity(s)==identity(os.fstat(fd))==identity(p.lstat())
+            finally:os.close(fd)
+            value=json.loads(raw)
+            assert value['schema']=='noble_brotli_source_build/1' and value['status']=='passed' and len(value['packages'])==4
+            assert value['tests']['status']=='passed' and value['host_installed'] is False and value['services_changed'] is False
+            print('{"status":"candidate_build_passed","packages":4,"host_installed":false}')
+      changed_when: false
+    - name: Require every preexisting application container ID unchanged afterward
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, ps, -aq, --no-trunc]
+      register: brotli_runtime_after
+      changed_when: false
+      failed_when: brotli_runtime_after.stdout_lines | sort != brotli_runtime_before.stdout_lines | sort

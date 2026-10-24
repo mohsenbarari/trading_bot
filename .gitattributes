@@ -1,0 +1,2 @@
+# Preserve the authenticated upstream patch's blank context lines byte-for-byte.
+/deploy/maintenance/brotli_build/CVE-2026-111497.patch whitespace=-blank-at-eol
