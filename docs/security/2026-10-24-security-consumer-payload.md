@@ -82,7 +82,13 @@ its digest is stored in the completed sealing step output. Inside the offline
 candidate, the runner validates the complete fixture inventory and every byte
 against that proof, then compiles those same verified buffers. It never imports
 unverified post-npm test files from the checkout. No skipped or empty suite can
-pass. The only pre-fence import is the trusted `magic` native-loader bootstrap;
+pass. Only the closed six public fixture files and their proof use mode 0644,
+with their fixture directory 0755, so the read-only bind mounts are readable by
+the candidate's different UID without adding DAC capabilities. Their enclosing
+host `.local` and payload directories remain private 0700; source context and
+other configuration permissions are unchanged. The verified public test config
+is still copied to a private 0600 temporary file inside the candidate.
+The only pre-fence import is the trusted `magic` native-loader bootstrap;
 all application/test imports afterward retain absolute subprocess and network
 denial. This avoids libmagic's legitimate `ldconfig` discovery being confused
 with an application host command; it does not permit later host commands.
@@ -118,6 +124,9 @@ Trivy v0.76.1 through the immutable
 [official v0.36.0 action](https://github.com/aquasecurity/trivy-action/commit/ed142fd0673e97e23eac54620cfb913e5ce36c25)
 produces actual image findings and SBOM. Unfixed HIGH/CRITICAL findings remain
 visible and fail the job; there is no waiver, fake PASS or automatic promotion.
+The raw vulnerability scan still runs after a failed test step when the image
+build succeeded; that provides security feedback while the failed test continues
+to block acceptance.
 An open SQLite finding is expected to block until actually fixed. Scanner
 download/DB outages fail closed. Public reports have 30-day artifact retention.
 

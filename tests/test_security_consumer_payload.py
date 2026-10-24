@@ -340,6 +340,29 @@ class SecurityPayload(unittest.TestCase):
         self.assertIn('test_sources_sha256=', source)
         self.assertNotIn('cp tests/', json.dumps(job['steps']))
 
+    def test_only_closed_public_fixtures_are_readable_across_container_uids_under_private_parent(self):
+        previous = os.umask(0o077)
+        try:
+            out, _ = self.sealed_test_fixture()
+        finally:
+            os.umask(previous)
+        self.assertEqual(out.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.temp.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((out / 'tests').stat().st_mode & 0o777, 0o755)
+        self.assertEqual({path.name for path in out.iterdir()}, {'tests', 'test-sources.json'})
+        public = [out / 'test-sources.json', *(out / 'tests').iterdir()]
+        self.assertEqual(len(public), 7)
+        self.assertTrue(all(path.is_file() and not path.is_symlink() and
+                            path.stat().st_mode & 0o777 == 0o644 for path in public))
+        # Mount roots, rather than the private host ancestors, enter the container.
+        # With no DAC override, other-UID reads need these exact public r-x/r-- bits.
+        _, job = self.ci_program('Exercise exact candidate security and baseline Market behavior without live data')
+        script = next(step['run'] for step in job['steps'] if step['name'].startswith('Exercise exact candidate'))
+        self.assertIn("'--cap-drop','ALL'", script)
+        self.assertNotIn('--cap-add', json.dumps(job['steps']))
+        self.assertNotIn('--privileged', json.dumps(job['steps']))
+        self.assertIn("os.O_NOFOLLOW,0o600", script)
+
     def offline_runner(self, out):
         tree, _ = self.ci_program('Exercise exact candidate security and baseline Market behavior without live data')
         value = next(node.value for node in tree.body if isinstance(node, ast.Assign) and
@@ -375,6 +398,7 @@ class SecurityPayload(unittest.TestCase):
         expected = '${{ steps.payload-build.outputs.image_id }}'
         scans = [step for step in job['steps'] if step.get('uses', '').startswith('aquasecurity/trivy-action@')]
         self.assertTrue(all(step['with']['image-ref'] == expected for step in scans))
+        self.assertTrue(all(step['if'] == "always() && steps.payload-build.outcome == 'success'" for step in scans))
         export = next(step for step in job['steps'] if step.get('id') == 'payload_export')
         self.assertEqual(export['env']['PAYLOAD_IMAGE'], expected)
         self.assertEqual(export['if'], "always() && steps.payload-build.outcome == 'success'")

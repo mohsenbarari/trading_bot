@@ -382,7 +382,7 @@ jobs:
               specifications=[('test_chat_upload_image_security.py',commit),('test_jwt_codec_security.py',commit),
                   ('test_frontend_static_security.py',commit),('test_coin_intelligence_market_store.py',helper.BASELINE),
                   ('test_coin_intelligence_coin_rate_engine.py',helper.BASELINE),('unit-test.env.example',commit)]
-              target=out/'tests';target.mkdir(mode=0o700)
+              target=out/'tests';target.mkdir(mode=0o755);target.chmod(0o755)
               rows=[]
               for name,revision in specifications:
                   path='config/unit-test.env.example' if name=='unit-test.env.example' else 'tests/'+name
@@ -391,11 +391,13 @@ jobs:
                   blob=entries[path][1];raw=helper.git(root,'cat-file','blob',blob,maximum=1048576)
                   assert 0<len(raw)<=1048576 and sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==blob
                   helper.write_file(target/name,raw)
+                  (target/name).chmod(0o644)
                   rows.append({'name':name,'path':path,'source_commit':revision,'git_blob':blob,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
               proof={'schema':'security_consumer_test_sources/1','source_commit':commit,'baseline_commit':helper.BASELINE,
                   'files':rows,'runtime_data_included':False}
               raw=(json.dumps(proof,sort_keys=True)+'\n').encode()
               helper.write_file(out/'test-sources.json',raw)
+              (out/'test-sources.json').chmod(0o644)
               return sha256(raw).hexdigest()
           expected=os.environ['PAYLOAD_EXPECTED_MANIFEST']
           assert re.fullmatch('[a-f0-9]{64}',expected)
@@ -542,6 +544,7 @@ jobs:
           PY
 
       - name: Scan the actual candidate including unfixed HIGH and CRITICAL findings
+        if: always() && steps.payload-build.outcome == 'success'
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
