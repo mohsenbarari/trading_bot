@@ -19,6 +19,13 @@ from urllib.parse import urlsplit
 
 BASELINE_FACTS_SHA256 = '70889f7b6856039fa11a44eb3c208a52f9a1a13f1ea7b49b9360653e625d52f7'
 REGISTRY_FACTS_SHA256 = '47484f3eafd4c0ad7453593ec72350eb9267445992bde88acf384a390b9fe661'
+FOLLOWUP_FACTS_SHA256 = '846df3ae578ce7941d538fdc639409f5d523a4a7a7f66b73190748a53ac87d0e'
+USER_MODULE_VERSION = 'v0.4.1'
+USER_MODULE_SUMS = (
+    b'github.com/moby/sys/user v0.4.1 h1:RgjRlaDKi/Xmyrz4t8lyzXT6v2ooFeO/7xtchmhVWE0=',
+    b'github.com/moby/sys/user v0.4.1/go.mod h1:E9QsW5WRe1kUAf7kW8hXKwu1uhsZEAdPLYHYSDudF4Y=',
+)
+WINDOWS_SCOPE_MARKER = 'GOSU_WINDOWS_CODE_ABSENT linux amd64 package_absent symbols_absent'
 GOSU_COMMIT = '6456aaa0f3c854d199d0f037f068eb97515b7513'
 GO = ('go1.26.10.linux-amd64.tar.gz', 66936659,
       'ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5')
@@ -51,7 +58,14 @@ PROFILES = {'postgres': {'reference': 'postgres@sha256:fe0737ba566a2c5b2a28f3443
               'entrypoint_sha256': '9c440299ae04a0a79d55b8bf03307036d890a40979d2fb698073c9050d4b20a5',
               'gosu_sha256': '52c8749d0142edd234e9d6bd5237dff2d81e71f43537e2f4f66f75dd4b243dd0',
               'branch': 'v3.24',
-              'updates': {'libssl3': '3.5.9-r0', 'libcrypto3': '3.5.9-r0', 'libuuid': '2.42.3-r1'}},
+              'updates': {'libssl3': '3.5.9-r0',
+                          'libcrypto3': '3.5.9-r0',
+                          'libuuid': '2.42.3-r1',
+                          'musl': '1.2.6-r3',
+                          'musl-utils': '1.2.6-r3',
+                          'zlib': '1.3.2-r1'},
+              'musl_baseline_version': '1.2.6-r2',
+              'musl_target_version': '1.2.6-r3'},
  'redis': {'reference': 'redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf',
            'platform_manifest_digest': 'sha256:1db42ccef14898aa29bae778452d567534b59c107129cbc1163fb552de184d3c',
            'platform_manifest_bytes': 2288,
@@ -71,7 +85,13 @@ PROFILES = {'postgres': {'reference': 'postgres@sha256:fe0737ba566a2c5b2a28f3443
            'entrypoint_sha256': 'f8122ddc0eb2ae6ca7762725999f08b2ee7a6975da54e9061feee88f6d4ab2bb',
            'gosu_sha256': None,
            'branch': 'v3.21',
-           'updates': {'libssl3': '3.3.7-r2', 'libcrypto3': '3.3.7-r2'}}}
+           'updates': {'libssl3': '3.3.7-r2',
+                       'libcrypto3': '3.3.7-r2',
+                       'musl': '1.2.5-r12',
+                       'musl-utils': '1.2.5-r12',
+                       'zlib': '1.3.2-r1'},
+           'musl_baseline_version': '1.2.5-r11',
+           'musl_target_version': '1.2.5-r12'}}
 COMMON = None
 PHASE = 'controller_admission'
 LABEL = 'io.gold-trade.datastore-security-owner'
@@ -288,6 +308,8 @@ def validate_audit(profile, value, *, candidate=False):
     else:
         require(meta['gosu'] == 'ABSENT' and '/usr/local/bin/gosu' not in files, 'unexpected_gosu')
     require(set(pin['updates']) <= set(packages) and 'musl' in packages, 'package_baseline')
+    version = pin['musl_target_version'] if candidate else pin['musl_baseline_version']
+    require(packages['musl'] == packages['musl-utils'] == version, 'libc_revision')
 
 
 def compare_audits(profile, before, after):
@@ -295,13 +317,78 @@ def compare_audits(profile, before, after):
     left, right = before['packages'], after['packages']; updates = PROFILES[profile]['updates']
     require(set(left) == set(right) and {key for key in left if left[key] != right[key]} == set(updates)
             and all(right[key] == version for key, version in updates.items()), 'package_delta')
-    require(all(before['metadata'][key] == after['metadata'][key] for key in ('alpine', 'world', 'musl', 'server', 'repositories'))
-            and before['keys'] == after['keys']
-            and left['musl'] == right['musl'], 'protected_runtime_changed')
+    require(all(before['metadata'][key] == after['metadata'][key] for key in ('alpine', 'world', 'server', 'repositories'))
+            and before['keys'] == after['keys'], 'protected_runtime_changed')
+    require(left['musl'].split('-r')[0] == right['musl'].split('-r')[0]
+            and before['metadata']['musl'] != after['metadata']['musl'], 'libc_security_revision')
     a, b = dict(before['files']), dict(after['files'])
     if profile == 'postgres':
         require(a.pop('/usr/local/bin/gosu') != b.pop('/usr/local/bin/gosu'), 'gosu_not_rebuilt')
     require(a == b and before['nodes'] == after['nodes'] and before['links'] == after['links'], 'server_or_support_changed')
+
+
+def libc_patch_receipt(profile, before, after, inputs):
+    compare_audits(profile, before, after)
+    pin = PROFILES[profile]; names = ('musl', 'musl-utils')
+    artifacts = {name+'-'+pin['updates'][name]+'.apk': inputs[name+'-'+pin['updates'][name]+'.apk'] for name in names}
+    artifacts['APKINDEX.tar.gz'] = inputs['APKINDEX.tar.gz']
+    for name, row in artifacts.items():
+        require(type(row.get('bytes')) is int and 0 < row['bytes'] <= 16*1024**2
+                and type(row.get('sha256')) is str and re.fullmatch('[a-f0-9]{64}', row['sha256'])
+                and row.get('url') == 'https://dl-cdn.alpinelinux.org/alpine/'+pin['branch']+'/main/x86_64/'+name,
+                'libc_vendor_input')
+    return {'schema': 'alpine_datastore_libc_security_revision/1', 'profile': profile,
+        'branch': pin['branch'], 'cve': 'CVE-2026-107891',
+        'baseline_version': pin['musl_baseline_version'], 'target_version': pin['musl_target_version'],
+        'baseline_libc_sha256': before['metadata']['musl'], 'candidate_libc_sha256': after['metadata']['musl'],
+        'signed_vendor_inputs': artifacts, 'same_upstream_version': True,
+        'full_exported_symbol_abi_matrix': 'NOT_TESTED', 'security_accepted': False}
+
+
+def gosu_dependency_delta(context, records):
+    """The only approved upstream-source edits are the two explicit security lock files."""
+    original = {name: COMMON.read(context/'gosu'/name, 4096) for name in ('go.mod', 'go.sum')}
+    for name, raw in original.items():
+        size, blob = GOSU_FILES[name]
+        require(len(raw) == size and sha1(b'blob '+str(size).encode()+b'\0'+raw).hexdigest() == blob, 'gosu_original_lock')
+    old = b'github.com/moby/sys/user v0.1.0'; new = b'github.com/moby/sys/user v0.4.1'
+    require(original['go.mod'].count(old) == 1 and new not in original['go.mod'], 'gosu_original_lock')
+    effective = {'go.mod': original['go.mod'].replace(old, new, 1),
+        'go.sum': b'\n'.join(sorted(original['go.sum'].splitlines()+list(USER_MODULE_SUMS)))+b'\n'}
+    require(len(original['go.sum'].splitlines()) == 4
+            and len(set(effective['go.sum'].splitlines())) == 6, 'gosu_original_lock')
+    result = {'schema': 'gosu_locked_dependency_security_delta/1', 'base_source_commit': GOSU_COMMIT,
+        'gosu_cli_version': '1.19', 'changed_files': {},
+        'moby_sys_user': {'baseline_version': 'v0.1.0', 'effective_version': USER_MODULE_VERSION,
+            'cve': 'CVE-2026-61801', 'sumdb_lines': [line.decode() for line in USER_MODULE_SUMS]},
+        'x_sys_version': 'v0.1.0', 'three_go_code_files_unchanged': True, 'security_accepted': False}
+    for name, raw in effective.items():
+        path = context/'gosu'/name
+        # Original reads are already stable/hash-pinned; replace only this fresh owned build input.
+        temporary = path.with_name(name+'.security-new'); COMMON.write(temporary, raw)
+        os.replace(temporary, path)
+        key = 'gosu/'+name; previous = dict(records[key])
+        records[key] = {'url': previous['url'], 'bytes': len(raw), 'sha256': sha256(raw).hexdigest(),
+            'original_download': previous, 'transformation': 'moby_user_0_4_1_security_lock_only'}
+        result['changed_files'][name] = {'original_sha256': sha256(original[name]).hexdigest(),
+            'effective_sha256': sha256(raw).hexdigest()}
+    manifest = ''.join(row['sha256']+'  '+name.removeprefix('gosu/')+'\n'
+        for name, row in sorted(records.items()) if name.startswith('gosu/')).encode()
+    COMMON.write(context/'gosu/effective.sha256', manifest)
+    records['gosu/effective.sha256'] = {'bytes': len(manifest), 'sha256': sha256(manifest).hexdigest(),
+        'origin': 'controlled_effective_source_manifest'}
+    return result
+
+
+def windows_scope_proof(log):
+    require(type(log) is bytes and 0 < len(log) <= 32*1024**2, 'gosu_scope_log')
+    lines = [re.sub(r'^#[0-9]+\s+(?:[0-9]+(?:\.[0-9]+)?\s+)?', '', line)
+             for line in log.decode('utf-8').splitlines()]
+    require(lines.count(WINDOWS_SCOPE_MARKER) == 1, 'gosu_windows_scope')
+    return {'schema': 'gosu_windows_advisory_target_scope/1', 'cve': 'CVE-2026-39824',
+        'goos': 'linux', 'goarch': 'amd64', 'x_sys_version': 'v0.1.0',
+        'affected_windows_package_in_go_list_deps': False, 'affected_windows_symbols_in_go_nm': False,
+        'module_version_fixed': False, 'raw_finding_modified': False, 'security_accepted': False}
 
 
 AUDIT = r'''
@@ -441,13 +528,24 @@ def dockerfile(profile):
             '--mount=type=bind,source='+GO[0]+',target=/sdk.tar.gz,ro '
             'mkdir /build && cp /source/* /build/ && tar -xzf /sdk.tar.gz -C /usr/local && '
             'test "$(/usr/local/go/bin/go version)" = "go version go1.26.10 linux/amd64" && '
-            'cd /build && CGO_ENABLED=0 GOTOOLCHAIN=local GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org '
-            '/usr/local/go/bin/go mod download\n'
+            'cd /build && sha256sum -c effective.sha256 && CGO_ENABLED=0 GOTOOLCHAIN=local '
+            'GOENV=off GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org '
+            '/usr/local/go/bin/go mod download && sha256sum -c effective.sha256\n'
             'FROM gosu_acquire AS gosu_build\n'
             'RUN --network=none cd /build && CGO_ENABLED=0 GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off '
             '/usr/local/go/bin/go build -mod=readonly -trimpath -buildvcs=false -ldflags="-d -w" -o /gosu . && '
             'test "$(/gosu --version)" = "1.19 (go1.26.10 on linux/amd64; gc)" && '
-            '/usr/local/go/bin/go version -m /gosu\n')
+            'sha256sum -c effective.sha256 && /usr/local/go/bin/go version -m /gosu && '
+            'test "$(/usr/local/go/bin/go env GOOS)" = linux && '
+            'test "$(/usr/local/go/bin/go env GOARCH)" = amd64 && '
+            'test "$(GOPROXY=off GOSUMDB=off /usr/local/go/bin/go list -mod=readonly -m -f "{{.Version}}" github.com/moby/sys/user)" = v0.4.1 && '
+            'test "$(GOPROXY=off GOSUMDB=off /usr/local/go/bin/go list -mod=readonly -m -f "{{.Version}}" golang.org/x/sys)" = v0.1.0 && '
+            'CGO_ENABLED=0 GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off /usr/local/go/bin/go list -mod=readonly -deps . > /build/deps.txt && '
+            'grep -Fx golang.org/x/sys/unix /build/deps.txt && '
+            '! grep -Fx golang.org/x/sys/windows /build/deps.txt && '
+            '/usr/local/go/bin/go tool nm /gosu > /build/nm.txt && '
+            '! grep -F golang.org/x/sys/windows /build/nm.txt && '
+            'printf "'+WINDOWS_SCOPE_MARKER+'\\n"\n')
     command = ('/sbin/apk --no-network --no-cache --no-progress --repositories-file /capsule/repositories '
                'fix --upgrade '+ ' '.join(pin['updates']))
     # Preserve every inherited OCI Config field: no ENV, USER, CMD, LABEL or VOLUME instructions.
@@ -482,6 +580,8 @@ def acquire(root, profile, image):
         for name, (size, blob) in GOSU_FILES.items():
             records['gosu/'+name] = download('https://raw.githubusercontent.com/tianon/gosu/'+GOSU_COMMIT+'/'+name,
                 context/'gosu'/name, size, size=size, blob=blob)
+        overlay = gosu_dependency_delta(context, records)
+        COMMON.write(root/'reports/gosu-dependency-overlay.json', encoded(overlay))
     return records
 
 
@@ -589,13 +689,20 @@ def compose(root, profile):
     COMMON.write(root/'context/Dockerfile', dockerfile(profile).encode())
     phase('build_candidate')
     with retained_inputs(root, inputs):
-        docker(root, ['build', '--builder', 'default', '--platform=linux/amd64', '--pull=false', '--no-cache',
+        docker(root, ['build', '--builder', 'default', '--progress=plain', '--platform=linux/amd64', '--pull=false', '--no-cache',
                       '--iidfile', str(root/'candidate.id'), str(root/'context')], seconds=900, maximum=32*1024**2,
                combine_stderr=True, log_path=root/'reports/build.log')
     image = COMMON.read(root/'candidate.id', 256).decode().strip(); require(re.fullmatch(SHA, image), 'candidate_identity')
     after = COMMON.image_record(docker(root, ['image', 'inspect', image], maximum=2*1024**2), image)
     COMMON.compare_images(before, after)
     phase('candidate_inventory'); installed = parse_audit(isolated(root, profile, image, AUDIT, 'after')); compare_audits(profile, initial, installed)
+    libc = libc_patch_receipt(profile, initial, installed, inputs)
+    COMMON.write(root/'reports/libc-security-revision.json', encoded(libc))
+    scope = None
+    if profile == 'postgres':
+        scope = windows_scope_proof(COMMON.read(root/'reports/build.log', 32*1024**2))
+        scope['image_id'] = image; scope['gosu_sha256'] = installed['files']['/usr/local/bin/gosu']
+        COMMON.write(root/'reports/gosu-windows-scope.json', encoded(scope))
     phase('candidate_smoke'); smoke(root, profile, image, 'candidate-smoke')
     COMMON.write(root/'reports/baseline-inventory.json', encoded(initial))
     COMMON.write(root/'reports/candidate-inventory.json', encoded(installed))
@@ -608,10 +715,13 @@ def compose(root, profile):
         'profile': profile, 'image_id': image, 'baseline': pin, 'registry': registry,
         'parent_daemon_id': parent_image, 'baseline_public_facts_sha256': BASELINE_FACTS_SHA256,
         'public_registry_observation_sha256': REGISTRY_FACTS_SHA256,
+        'followup_public_facts_sha256': FOLLOWUP_FACTS_SHA256, 'libc_vendor_security_revision': libc,
+        'gosu_windows_advisory_scope': scope,
         'recipe': identity, 'inputs': inputs, 'runtime_config': before['Config'],
         'candidate_layers': after['RootFS']['Layers'], 'server_bytes_unchanged': True,
         'whole_runtime_config_unchanged': True, 'same_branch_signed_apk': True,
         'gosu_source_commit': GOSU_COMMIT if profile == 'postgres' else None,
+        'gosu_dependency_security_overlay': json.loads(COMMON.read(root/'reports/gosu-dependency-overlay.json', 65536)) if profile == 'postgres' else None,
         'compiler': 'go1.26.10' if profile == 'postgres' else None,
         'production_data_used': False, 'production_installed': False, 'security_accepted': False,
         'scanner_gate_waived': False, 'full_role_matrix': 'NOT_TESTED'}
@@ -654,6 +764,9 @@ def validate_reports(record, raw, sbom):
                  if r.get('name') == 'aquasecurity:trivy:ImageID'] == [record['image_id']], 'sbom_identity')
     for name, version in record['baseline']['updates'].items():
         require({r.get('version') for r in sbom.get('components', []) if r.get('name') == name} == {version}, 'sbom_package')
+    if record['baseline'] == PROFILES['postgres']:
+        for name, version in (('github.com/moby/sys/user', USER_MODULE_VERSION), ('golang.org/x/sys', 'v0.1.0')):
+            require({r.get('version') for r in sbom.get('components', []) if r.get('name') == name} == {version}, 'sbom_module')
     counts = {}
     for result in raw['Results']:
         for row in result.get('Vulnerabilities') or []:
@@ -670,6 +783,29 @@ def finalize(root, profile):
             and all(record.get(key) is False for key in ('security_accepted', 'scanner_gate_waived',
                 'production_installed', 'production_data_used'))
             and record.get('evidence_sha256') == evidence(root), 'candidate_state')
+    original = json.loads(COMMON.read(root/'reports/baseline-inventory.json', 4*1024**2))
+    installed = json.loads(COMMON.read(root/'reports/candidate-inventory.json', 4*1024**2))
+    libc = libc_patch_receipt(profile, original, installed, record['inputs'])
+    require(record.get('libc_vendor_security_revision') == libc
+            == json.loads(COMMON.read(root/'reports/libc-security-revision.json', 65536)), 'libc_receipt')
+    if profile == 'postgres':
+        scope = windows_scope_proof(COMMON.read(root/'reports/build.log', 32*1024**2))
+        scope['image_id'] = record['image_id']; scope['gosu_sha256'] = installed['files']['/usr/local/bin/gosu']
+        require(record.get('gosu_windows_advisory_scope') == scope
+                == json.loads(COMMON.read(root/'reports/gosu-windows-scope.json', 65536)), 'gosu_windows_scope')
+        overlay = json.loads(COMMON.read(root/'reports/gosu-dependency-overlay.json', 65536))
+        require(record.get('gosu_dependency_security_overlay') == overlay
+                and overlay.get('base_source_commit') == GOSU_COMMIT
+                and overlay.get('gosu_cli_version') == '1.19'
+                and overlay.get('three_go_code_files_unchanged') is True
+                and overlay.get('x_sys_version') == 'v0.1.0'
+                and overlay.get('moby_sys_user', {}).get('effective_version') == USER_MODULE_VERSION
+                and overlay['moby_sys_user'].get('sumdb_lines') == [line.decode() for line in USER_MODULE_SUMS]
+                and set(overlay.get('changed_files', {})) == {'go.mod', 'go.sum'}, 'gosu_dependency_receipt')
+        for name, change in overlay['changed_files'].items():
+            item = record['inputs']['gosu/'+name]
+            require(change == {'original_sha256': item['original_download']['sha256'],
+                               'effective_sha256': item['sha256']}, 'gosu_dependency_receipt')
     before = COMMON.image_record(docker(root, ['image', 'inspect', PROFILES[profile]['reference']], maximum=2*1024**2))
     require(registry_identity(root, profile) == record['registry'], 'registry_changed')
     baseline(profile, before, record['registry'])
@@ -684,6 +820,8 @@ def finalize(root, profile):
         'parent_config_id': PROFILES[profile]['config_id'], 'parent_reference': PROFILES[profile]['reference'],
         'archive': archive, 'candidate_receipt_sha256': sha256(raw).hexdigest(),
         'evidence_sha256': record['evidence_sha256'], 'raw_counts': counts,
+        'libc_vendor_security_revision': libc, 'gosu_windows_advisory_scope': record['gosu_windows_advisory_scope'],
+        'gosu_dependency_security_overlay': record['gosu_dependency_security_overlay'],
         'reports_sha256': {name: sha256(value).hexdigest() for name, value in reports.items()},
         'security_accepted': False, 'scanner_gate_waived': False, 'production_data_used': False,
         'production_installed': False, 'full_role_matrix': 'NOT_TESTED'}))
@@ -706,6 +844,8 @@ def main(argv=None):
             'baseline_identity', 'baseline_repository', 'audit_bound', 'audit_shape', 'audit_duplicate', 'audit_file',
             'audit_inventory', 'audit_nodes', 'software_baseline', 'gosu_version', 'gosu_baseline', 'unexpected_gosu',
             'package_baseline', 'package_delta', 'protected_runtime_changed', 'gosu_not_rebuilt', 'server_or_support_changed',
+            'libc_revision', 'libc_security_revision', 'libc_vendor_input', 'libc_receipt', 'gosu_original_lock',
+            'gosu_scope_log', 'gosu_windows_scope', 'gosu_dependency_receipt', 'sbom_module',
             'cleanup_unknown', 'cleanup_owner', 'fixture_capability', 'container_identity', 'fixture_failed',
             'build_input_changed', 'fixture_marker', 'gosu_fixture_marker', 'runner_space', 'candidate_identity',
             'public_repository_inventory', 'public_repository_metadata', 'public_repository_bytes', 'public_repository_changed',

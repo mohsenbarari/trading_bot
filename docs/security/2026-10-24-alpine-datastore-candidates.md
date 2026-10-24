@@ -1,7 +1,8 @@
 # Exact Alpine datastore security candidates
 
-This is a source packet for ordinary GitHub-hosted CI. It has not built, installed,
-accepted or deployed a datastore image. The existing App composition job remains
+The first canonical profiles actually built and passed ordinary GitHub-hosted CI
+as recorded below; no datastore image has been installed, accepted or deployed.
+The approved lower-finding follow-up remains source-only. The App composition job remains
 the default. `security-os-candidate-compose.yml` adds the explicit, default-off
 `datastore_profile=postgres|redis` choices and uses the existing composition
 controller only for bounded command/file I/O, image comparison and export.
@@ -33,12 +34,16 @@ config. Every local RootFS and server byte check remains strict. Buildx's
 documented `imagetools inspect --raw` preserves
 manifest bytes without an appended newline ([upstream implementation](https://github.com/docker/buildx/blob/v0.29.1/util/imagetools/printers.go)).
 
-These candidates preserve the **Native canonical image Config** exactly. The Web
-converted identities 7bf/823 have proved full RootFS/software equivalence only;
-their complete immutable image Config equivalence is still unproven. Before any
-Web role activation a trusted validator must compare those image Configs without
-exposing production container Env/private values. This packet grants no Web role
-eligibility and invents no Web Config hash or fe0737→7bf registry graph.
+These candidates preserve the **Native canonical image Config** exactly. A later
+read-only typed archive proof also bound Web 7bf→config aad and Web 823→config5509,
+with the complete eleven/seven ordered raw diffIDs. Its 3,904-byte public receipt
+is Native `.local/security-runtime-audit-controller-20261024-web-04/public-datastore-image-config-proof.json`,
+SHA256 `4af0d3e9d694e4869c0158bde2171b339713df4e4b2dcfc75d0b5e533a9ffbdb`.
+This closes immutable image Config equivalence by identical config digests; it
+does not compare/read/hash production container Env or per-role runtime overrides,
+verify publisher attestations, or grant activation. Earlier evidence is unchanged.
+No fe0737→7bf registry graph is invented: Web's local manifest and the canonical
+public platform manifest remain distinct identities.
 
 The distinct running Web image 994e5b… is PostgreSQL 15.18, server SHA256
 `bb5d3bd97463136573859b6b9db854289f6872f89ddf390f4e89e444d8bb8d67`,
@@ -50,9 +55,11 @@ upgrading it to 15.19.
 ## Closed security changes
 
 PostgreSQL requires Alpine 3.24.x and upgrades only `libssl3`/`libcrypto3` to
-3.5.9-r0 and `libuuid` to 2.42.3-r1. OpenSSL's current same-branch source is 3.5.9;
+3.5.9-r0, `libuuid` to 2.42.3-r1, `musl`/`musl-utils` from 1.2.6-r2 to 1.2.6-r3,
+and `zlib` from 1.3.2-r0 to 1.3.2-r1. OpenSSL's same-branch source is 3.5.9;
 its security history includes the 3.5.8 fixes. Redis requires Alpine 3.21.x and
-upgrades only `libssl3`/`libcrypto3` to 3.3.7-r2. These are vendor versions, with no
+upgrades only `libssl3`/`libcrypto3` to 3.3.7-r2, `musl`/`musl-utils` from 1.2.5-r11
+to 1.2.5-r12, and `zlib` from 1.3.2-r0 to 1.3.2-r1. These are vendor versions, with no
 locally invented fixed version. See the exact branch
 [OpenSSL 3.24 recipe](https://github.com/alpinelinux/aports/blob/3.24-stable/main/openssl/APKBUILD),
 [util-linux 3.24 recipe](https://github.com/alpinelinux/aports/blob/3.24-stable/main/util-linux/APKBUILD),
@@ -88,13 +95,19 @@ context; no new capability or DAC override is granted. Fixture certificates were
 already published in their separate 0755/0644 disposable public directory.
 
 PostgreSQL additionally rebuilds exactly gosu 1.19 source commit
-`6456aaa0f3c854d199d0f037f068eb97515b7513`. All five build source files have
-size/Git-blob pins; `go.mod` and `go.sum` stay unchanged. The official
+`6456aaa0f3c854d199d0f037f068eb97515b7513`. All five original source files have
+size/Git-blob pins. Its three Go code files and CLI/version1.19 stay unchanged;
+only `go.mod`/`go.sum` receive the declared security lock delta from
+`github.com/moby/sys/user` v0.1.0 to v0.4.1. Exact original/effective hashes and
+the two official SumDB h1 records are preserved. `golang.org/x/sys` stays v0.1.0.
+The official
 Go 1.26.10 Linux/amd64 SDK is 66,936,659 bytes, SHA256
 `ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5`
 ([official download metadata](https://go.dev/dl/?mode=json&include=all)). The first
 isolated build stage acquires the locked Go modules with normal checksum
-verification; compilation then uses `CGO_ENABLED=0`, `GOTOOLCHAIN=local`,
+verification; an exact five-file effective-source checksum manifest must still
+match before/after acquisition and compilation. Compilation then uses
+`CGO_ENABLED=0`, `GOTOOLCHAIN=local`,
 `GOPROXY=off`, `GOSUMDB=off`, `-mod=readonly`, and network none. No `-s` flag is
 used, preserving binary build information/symbols as in the
 [upstream recipe](https://github.com/tianon/gosu/blob/6456aaa0f3c854d199d0f037f068eb97515b7513/Dockerfile).
@@ -110,7 +123,13 @@ Both final stages start FROM the exact original public reference. They add no
 runtime `ENV`, label, user, entrypoint, command or volume instruction. Complete
 before/after Docker `Config` equality and an exact ordered RootFS prefix are
 required. Complete installed package inventories must show only the closed
-updates, with no package addition/removal, musl change or server upgrade. World,
+updates, with no package addition/removal or server upgrade. The former blanket
+musl-unchanged condition is replaced only by the exact per-profile revision above,
+the same upstream1.2.6/1.2.5 family, an actually changed loader/library hash and
+a separate receipt binding old/new library SHA256 to the signed vendor APK/index
+hashes. No generic libc override exists. A complete exported-symbol ABI matrix
+is NOT_TESTED; the required ordinary server/TLS/data/restore/restart matrix still
+runs against the exact preserved server binaries. World,
 original repositories and vendor key hashes remain unchanged. Every regular file
 under `/usr/local` is hashed, and all node modes/owners/types and symlink targets
 are compared; only PostgreSQL's exact gosu binary may change. This includes all
@@ -196,3 +215,64 @@ no automatic retry. Review also caught the still-unreached root/cap0 public-inpu
 permission seam; its scoped publication fix above grants no extra capability.
 The changed source is not an actual successful rebuild or activation. Fresh CI
 and its unchanged raw reports remain required.
+
+## Actual canonical candidates and remaining rows
+
+At source `ece8725125fdfdbbc376f9a764e14adf0dcd0255`, both ordinary CI jobs
+completed successfully; neither candidate was installed or accepted:
+
+- [PostgreSQL40140201428](https://github.com/mohsenbarari/trading_bot/actions/runs/40140201428):
+  image `sha256:7ba5515e3d172586f8f3ee9c9ddbc902b3897d7aa3f4e75f83396aa185bed54c`,
+  fourteen evidence hashes verified, full canonical Config equality, eleven-layer
+  prefix, unchanged 15.19 server/support bytes, fresh TLS/dump/restore/restart and
+  gosu checks. Public artifact12577334979 is 525,062 bytes, SHA256
+  `f7585594527fb6b2c0bd9fa2cd96514a81d7c61b20427b7c2d98111539a0eb49`.
+- [Redis40140214939](https://github.com/mohsenbarari/trading_bot/actions/runs/40140214939):
+  image `sha256:1225116e02298392d7e8e39c2da47933d52f4bfb8cb667059626e4a12028d9b0`,
+  twelve evidence hashes verified, full Config/seven-layer prefix and unchanged
+  7.4.11 server/support bytes, fresh TLS/AOF/RDB/restart checks and no gosu.
+  Public artifact12578701727 is 26,925 bytes, SHA256
+  `90a1591889bad0495e12c8bb8232d4abcdbeb587fecfc69e5673b9b63fa9633b`.
+
+Both unchanged raw reports contain zero CRITICAL/HIGH findings. PostgreSQL retains
+two MEDIUM and three UNKNOWN rows; Redis retains one MEDIUM and two UNKNOWN rows.
+UNKNOWN is not a disposition. The original reports and earlier failed runs remain
+unchanged. Image artifacts12579005232/12578316964 were not downloaded to Native.
+Those initial evidence ZIPs omitted the small `image-export.json`; this follow-up
+also publishes that public receipt alongside reports, without duplicating image
+bytes or changing the immutable export.
+
+## Approved lower-finding follow-up, source-only
+
+The new closed changes above address these remaining rows; a fresh build/scan
+and independent review are still required:
+
+| Finding | Actual scope and minimal disposition |
+| --- | --- |
+| CVE-2026-107891, musl and musl-utils (two rows per image) | Maintainer identifies libc `regcomp` integer overflow when compiling untrusted expressions, through 1.2.6. Exact complete-role reachability is not proved absent. Apply the vendor revisions above; never ignore the UNKNOWN severity. |
+| CVE-2026-85091, zlib | Affects nonblocking gzwrite/gzprintf state in gz_vacate. No universal role-absence claim is made. Both Alpine branches publish 1.3.2-r1; use the signed vendor fix. |
+| CVE-2026-61801, PostgreSQL's gosu dependency | `SetupUser` calls moby/sys/user's passwd/group parser; attacker-controlled file contents are the advisory's precondition. Rather than infer that condition absent, the exact lock-only delta selects the fixed 0.4.1 module. |
+| CVE-2026-39824, PostgreSQL's x/sys module | Go's advisory identifies only x/sys/windows.NewNTUnicodeString on Windows. The Linux/amd64 gosu imports x/sys/unix. Keep 0.1.0 and the raw UNKNOWN row, and produce the specific affected-code-absence proof below; do not call the module version fixed. |
+
+Primary sources: [musl maintainer advisory](https://www.openwall.com/lists/musl/2026/10/21/1),
+[Alpine's21October security release](https://www.alpinelinux.org/posts/Alpine-3.21.9-3.22.7-3.23.7-3.24.3-released.html),
+[Alpine zlib fixes](https://security.alpinelinux.org/vuln/CVE-2026-85091),
+[moby/sys/user advisory](https://github.com/moby/sys/security/advisories/GHSA-mjcv-p78q-w5fw),
+and [Go's platform-specific advisory](https://pkg.go.dev/vuln/GO-2026-5024).
+All six exact musl/utils/zlib APK URLs returned 200 to bounded HEAD observations;
+official SumDB/proxy records identify user 0.4.1 at source85a71bbe1faa36c552a960e6a5f3d0cfb632fbbe.
+The small public observations are Native
+`.local/security-datastore-followup-public-20261024-01.json`, SHA256
+`846df3ae578ce7941d538fdc639409f5d523a4a7a7f66b73190748a53ac87d0e`.
+HEAD/source metadata alone is not an APK signature, install or ABI result.
+
+The normal Go SDK must authenticate the newly pinned module through SumDB during
+acquisition, retain the exact effective mod/sum/code checksums, then compile
+offline with readonly modules. The actual compile stage checks Linux/amd64,
+module versions, its complete `go list -deps` result, and `go tool nm` absence of
+all x/sys/windows symbols before printing one fixed proof marker. The controller
+rejects a missing, duplicated, command-echo-only or wrong-platform marker and
+binds the proof to the actual image/gosu/log hashes. SBOM must show user0.4.1 and
+x/sys0.1.0. The receipt explicitly says module-version-fixed=false and
+raw-finding-modified=false. This is a scoped code/platform fact for review,
+not a scanner ignore, policy change or global security acceptance.

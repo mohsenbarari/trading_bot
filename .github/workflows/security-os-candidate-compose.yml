@@ -247,5 +247,6 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ steps.seal.outputs.root }}/source/identity.json
+            ${{ steps.seal.outputs.root }}/image-export.json
             ${{ steps.seal.outputs.root }}/reports/*.json
             ${{ steps.seal.outputs.root }}/reports/*.log

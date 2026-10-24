@@ -25,6 +25,11 @@ def load(name, path):
 M = load('datastore_recipe', ROOT/'scripts/compose_alpine_datastore_security.py')
 C = load('datastore_common', ROOT/'scripts/compose_security_os_candidate.py')
 M.COMMON = C
+ORIGINAL_GOSU_MOD = b'module github.com/tianon/gosu\n\ngo 1.20\n\nrequire (\n\tgithub.com/moby/sys/user v0.1.0\n\tgolang.org/x/sys v0.1.0\n)\n'
+ORIGINAL_GOSU_SUM = (b'github.com/moby/sys/user v0.1.0 h1:WmZ93f5Ux6het5iituh9x2zAG7NFY9Aqi49jjE1PaQg=\n'
+    b'github.com/moby/sys/user v0.1.0/go.mod h1:fKJhFOnsCN6xZ5gSfbM6zaHGgDJMrqt9/reuj4T7MmU=\n'
+    b'golang.org/x/sys v0.1.0 h1:kunALQeHf1/185U1i0GOB/fy1IPRDDpuoOOqRReG57U=\n'
+    b'golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=\n')
 
 
 class DatastoreTests(unittest.TestCase):
@@ -61,9 +66,10 @@ class DatastoreTests(unittest.TestCase):
         if profile == 'postgres':
             files['/usr/local/bin/gosu'] = '7'*64 if candidate else p['gosu_sha256']
         return {'metadata': {'alpine': '3.24.1' if profile == 'postgres' else '3.21.7',
-            'world': '1'*64, 'musl': '2'*64, 'repositories': '5'*64, 'server': p['version'],
+            'world': '1'*64, 'musl': ('6' if candidate else '2')*64, 'repositories': '5'*64, 'server': p['version'],
             'gosu': ('1.19 (go1.26.10 on linux/amd64; gc)' if candidate else '1.19 (go1.24.6 on linux/amd64; gc)') if profile == 'postgres' else 'ABSENT'},
-            'packages': {'musl': 'unchanged', 'ordinary': 'unchanged', **(p['updates'] if candidate else {n: 'old-version' for n in p['updates']})},
+            'packages': {'ordinary': 'unchanged', **(p['updates'] if candidate else
+                {**{n: 'old-version' for n in p['updates']}, 'musl': p['musl_baseline_version'], 'musl-utils': p['musl_baseline_version']})},
             'files': files, 'nodes': {name: '755:0:0:regular file' for name in files}, 'links': {},
             'keys': {'/etc/apk/keys/ordinary-vendor.rsa.pub': '4'*64}}
 
@@ -182,7 +188,6 @@ class DatastoreTests(unittest.TestCase):
     def test_extra_removed_downgraded_and_musl_packages_refuse(self):
         before, after = self.audit(), self.audit(candidate=True)
         cases = [lambda d: d['packages'].update({'extra': '1'}), lambda d: d['packages'].pop('ordinary'),
-                 lambda d: d['packages'].update({'musl': 'changed'}),
                  lambda d: d['packages'].update({'libssl3': '3.5.7-r0'})]
         for change in cases:
             candidate = deepcopy(after); change(candidate)
@@ -190,7 +195,7 @@ class DatastoreTests(unittest.TestCase):
 
     def test_world_libc_server_entrypoint_mode_and_symlink_changes_refuse(self):
         before, after = self.audit(), self.audit(candidate=True)
-        cases = [('world', 'protected_runtime_changed'), ('musl', 'protected_runtime_changed'), ('server', 'software_baseline'), ('repositories', 'protected_runtime_changed')]
+        cases = [('world', 'protected_runtime_changed'), ('server', 'software_baseline'), ('repositories', 'protected_runtime_changed')]
         for key, reason in cases:
             candidate = deepcopy(after); candidate['metadata'][key] = '3'*64
             with self.assertRaisesRegex(RuntimeError, reason): M.compare_audits('postgres', before, candidate)
@@ -209,6 +214,61 @@ class DatastoreTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'gosu_version'): M.compare_audits('postgres', before, after)
         after = self.audit('redis', candidate=True); after['metadata']['gosu'] = 'unexpected'
         with self.assertRaisesRegex(RuntimeError, 'unexpected_gosu'): M.compare_audits('redis', self.audit('redis'), after)
+
+    def test_libc_only_the_exact_same_upstream_vendor_revision_is_admitted(self):
+        before, after = self.audit(), self.audit(candidate=True)
+        for version in ('1.2.7-r0', '1.2.6-r4', '1.2.5-r12', before['packages']['musl']):
+            changed = deepcopy(after); changed['packages']['musl'] = changed['packages']['musl-utils'] = version
+            with self.assertRaisesRegex(RuntimeError, 'libc_revision'): M.compare_audits('postgres', before, changed)
+        after['metadata']['musl'] = before['metadata']['musl']
+        with self.assertRaisesRegex(RuntimeError, 'libc_security_revision'): M.compare_audits('postgres', before, after)
+
+    def test_libc_revision_receipt_binds_specific_vendor_inputs_and_observed_library_hashes(self):
+        before, after = self.audit(), self.audit(candidate=True); pin = M.PROFILES['postgres']; rows = {}
+        for name in ['APKINDEX.tar.gz']+[n+'-'+pin['updates'][n]+'.apk' for n in ['musl', 'musl-utils']]:
+            rows[name] = {'bytes': 123, 'sha256': 'a'*64,
+                'url': 'https://dl-cdn.alpinelinux.org/alpine/'+pin['branch']+'/main/x86_64/'+name}
+        receipt = M.libc_patch_receipt('postgres', before, after, rows)
+        self.assertEqual(receipt['baseline_version'], '1.2.6-r2'); self.assertEqual(receipt['target_version'], '1.2.6-r3')
+        self.assertEqual(receipt['candidate_libc_sha256'], after['metadata']['musl'])
+        self.assertEqual(receipt['signed_vendor_inputs'], rows); self.assertFalse(receipt['security_accepted'])
+        changed = deepcopy(rows); changed['APKINDEX.tar.gz']['url'] = 'https://other.invalid/index'
+        with self.assertRaisesRegex(RuntimeError, 'libc_vendor_input'): M.libc_patch_receipt('postgres', before, after, changed)
+
+    def gosu_sources(self):
+        context = self.root/'context'; records = {}
+        for name in M.GOSU_FILES:
+            raw = ORIGINAL_GOSU_MOD if name == 'go.mod' else ORIGINAL_GOSU_SUM if name == 'go.sum' else b'ordinary Go code '+name.encode()
+            self.write(context/'gosu'/name, raw)
+            records['gosu/'+name] = {'bytes': len(raw), 'sha256': sha256(raw).hexdigest(),
+                'url': 'https://raw.githubusercontent.com/tianon/gosu/'+M.GOSU_COMMIT+'/'+name}
+        return context, records
+
+    def test_gosu_security_delta_changes_only_two_locked_files_and_keeps_all_three_code_buffers(self):
+        context, records = self.gosu_sources(); code = {name: (context/'gosu'/name).read_bytes() for name in M.GOSU_FILES if name.endswith('.go')}
+        receipt = M.gosu_dependency_delta(context, records)
+        self.assertEqual(set(receipt['changed_files']), {'go.mod', 'go.sum'})
+        self.assertEqual((context/'gosu/go.mod').read_bytes().replace(b'github.com/moby/sys/user v0.4.1', b'github.com/moby/sys/user v0.1.0'), ORIGINAL_GOSU_MOD)
+        lines = (context/'gosu/go.sum').read_bytes().splitlines()
+        self.assertEqual(set(lines)-set(ORIGINAL_GOSU_SUM.splitlines()), set(M.USER_MODULE_SUMS))
+        for name, raw in code.items(): self.assertEqual((context/'gosu'/name).read_bytes(), raw)
+        self.assertEqual(receipt['x_sys_version'], 'v0.1.0'); self.assertFalse(receipt['security_accepted'])
+        self.assertEqual(receipt['moby_sys_user']['effective_version'], 'v0.4.1')
+        self.assertEqual(len((context/'gosu/effective.sha256').read_text().splitlines()), 5)
+
+    def test_gosu_original_lock_drift_refuses_before_any_replacement(self):
+        context, records = self.gosu_sources(); (context/'gosu/go.mod').write_bytes(b'ordinary altered lock')
+        with self.assertRaisesRegex(RuntimeError, 'gosu_original_lock'): M.gosu_dependency_delta(context, records)
+        self.assertEqual((context/'gosu/go.sum').read_bytes(), ORIGINAL_GOSU_SUM)
+        self.assertFalse((context/'gosu/effective.sha256').exists())
+
+    def test_windows_scope_requires_actual_unique_marker_not_command_echo_or_other_platform(self):
+        valid = ('#12 3.45 '+M.WINDOWS_SCOPE_MARKER+'\n').encode(); proof = M.windows_scope_proof(valid)
+        self.assertEqual((proof['goos'], proof['goarch']), ('linux', 'amd64'))
+        self.assertFalse(proof['module_version_fixed']); self.assertFalse(proof['raw_finding_modified'])
+        for raw in (b'ordinary build output\n', valid+valid, valid.replace(b'linux', b'windows'),
+                    ('#12 [gosu_build 1/1] RUN printf "'+M.WINDOWS_SCOPE_MARKER+'\\n"\n').encode()):
+            with self.assertRaisesRegex(RuntimeError, 'gosu_windows_scope'): M.windows_scope_proof(raw)
 
     def test_audit_duplicate_and_missing_records_refuse(self):
         raw = self.audit_raw(self.audit())
@@ -376,7 +436,8 @@ class DatastoreTests(unittest.TestCase):
             'Results': [{'Vulnerabilities': [{'VulnerabilityID': 'ordinary-unfixed', 'Severity': 'HIGH', 'FixedVersion': ''}]}]}
         sbom = {'metadata': {'component': {'name': image, 'type': 'container', 'properties': [
             {'name': 'aquasecurity:trivy:ImageID', 'value': image}]}},
-            'components': [{'name': n, 'version': v} for n, v in M.PROFILES['postgres']['updates'].items()]}
+            'components': [{'name': n, 'version': v} for n, v in M.PROFILES['postgres']['updates'].items()]+
+                [{'name': 'github.com/moby/sys/user', 'version': 'v0.4.1'}, {'name': 'golang.org/x/sys', 'version': 'v0.1.0'}]}
         return record, raw, sbom
 
     def test_raw_unfixed_rows_preserved_and_identity_sbom_versions_bound(self):
@@ -386,6 +447,9 @@ class DatastoreTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'raw_identity'): M.validate_reports(record, raw, sbom)
         record, raw, sbom = self.report_fixture(); sbom['components'][0]['version'] = 'old'
         with self.assertRaisesRegex(RuntimeError, 'sbom_package'): M.validate_reports(record, raw, sbom)
+        record, raw, sbom = self.report_fixture()
+        next(r for r in sbom['components'] if r['name'] == 'github.com/moby/sys/user')['version'] = 'v0.1.0'
+        with self.assertRaisesRegex(RuntimeError, 'sbom_module'): M.validate_reports(record, raw, sbom)
 
     def test_default_app_workflow_and_optional_datastore_flags(self):
         import yaml
@@ -398,6 +462,8 @@ class DatastoreTests(unittest.TestCase):
         self.assertEqual(scan['severity'], 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'); self.assertEqual(scan['ignore-unfixed'], 'false')
         self.assertEqual(scan['exit-code'], '0'); self.assertEqual(scan['scanners'], 'vuln')
         self.assertTrue(next(row for row in steps if row.get('id') == 'seal')['run'].startswith('python3 -I -B'))
+        public = next(row for row in steps if row.get('name') == 'Retain bounded public datastore evidence including failures')
+        self.assertIn('${{ steps.seal.outputs.root }}/image-export.json', public['with']['path'])
 
     def test_raw_api_default_omission_only_and_no_unknown_fields_or_false_int_equivalence(self):
         record, raw, sbom = self.report_fixture()
@@ -459,10 +525,13 @@ class DatastoreTests(unittest.TestCase):
                 recipe = (root/'context/Dockerfile').read_bytes()
                 self.assertEqual(recipe.decode(), M.dockerfile(profile))
                 self.write(Path(argv[argv.index('--iidfile')+1]), (after['Id']+'\n').encode())
-                self.write(kwargs['log_path'], b'ordinary offline security build\n'); return b'ordinary offline security build\n'
+                log = b'ordinary offline security build\n'
+                if profile == 'postgres': log += ('#12 3.45 '+M.WINDOWS_SCOPE_MARKER+'\n').encode()
+                self.write(kwargs['log_path'], log); return log
             raise AssertionError(('unexpected_mock_command', argv))
         def download(url, path, maximum, **kwargs):
-            raw = ('ordinary public acquisition '+path.name).encode(); self.write(path, raw)
+            raw = ORIGINAL_GOSU_MOD if path.name == 'go.mod' else ORIGINAL_GOSU_SUM if path.name == 'go.sum' else ('ordinary public acquisition '+path.name).encode()
+            self.write(path, raw)
             if path.name == M.GO[0]:
                 self.assertEqual((kwargs['size'], kwargs['digest']), (M.GO[1], M.GO[2]))
             return {'bytes': len(raw), 'sha256': sha256(raw).hexdigest(), 'url': url}
@@ -497,6 +566,7 @@ class DatastoreTests(unittest.TestCase):
             sbom = {'metadata': {'component': {'name': after['Id'], 'type': 'container', 'properties': [
                 {'name': 'aquasecurity:trivy:ImageID', 'value': after['Id']}]}},
                 'components': [{'name': n, 'version': v} for n, v in pin['updates'].items()]}
+            if profile == 'postgres': sbom['components'] += [{'name': 'github.com/moby/sys/user', 'version': 'v0.4.1'}, {'name': 'golang.org/x/sys', 'version': 'v0.1.0'}]
             self.write(self.root/'reports/vulnerabilities.json', M.encoded(raw)); self.write(self.root/'reports/sbom.cdx.json', M.encoded(sbom))
             with patch.object(C, 'export_image', return_value={'name': 'candidate-image.tar.gz', 'sha256': 'f'*64}) as export:
                 M.finalize(self.root, profile); export.assert_called_once_with(self.root, after['Id'])
