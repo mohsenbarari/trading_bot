@@ -15,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('native_refresh', ROOT/'deploy/maintenance/brotli_native_refresh.py')
 M = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
+BOOT_ID = '11111111-2222-4333-8444-555555555555'
 
 
 class NativeBrotliRefreshTests(unittest.TestCase):
@@ -123,10 +124,10 @@ class NativeBrotliRefreshTests(unittest.TestCase):
         self.assertFalse(M.heartbeat_ready(N,now-timedelta(minutes=3)))
 
     def test_old_pid_or_pre_request_ready_journal_cannot_satisfy_golden(self):
-        row={'_PID':'8','_SYSTEMD_UNIT':M.UNITS[1],'__MONOTONIC_TIMESTAMP':'200',
+        row={'_BOOT_ID':BOOT_ID.replace('-',''),'_PID':'8','_SYSTEMD_UNIT':M.UNITS[1],'__MONOTONIC_TIMESTAMP':'200',
              'MESSAGE':'2026-10-24 12:00:00,001 - telegram.ext.Application - INFO - Application started'}
         calls=[]
-        N=SimpleNamespace(command=lambda argv,**kw:calls.append(argv) or json.dumps(row))
+        N=SimpleNamespace(boot_id=lambda:BOOT_ID,command=lambda argv,**kw:calls.append(argv) or json.dumps(row))
         self.assertTrue(M.journal_ready(N,M.UNITS[1],8,100))
         self.assertFalse(M.journal_ready(N,M.UNITS[1],9,100))
         self.assertFalse(M.journal_ready(N,M.UNITS[1],8,201))
@@ -134,12 +135,37 @@ class NativeBrotliRefreshTests(unittest.TestCase):
         self.assertFalse(any('Environment' in arg for argv in calls for arg in argv))
 
     def test_collector_ready_requires_actual_live_event_from_new_pid(self):
-        row={'_PID':'7','_SYSTEMD_UNIT':M.UNITS[0],'__MONOTONIC_TIMESTAMP':'200',
+        row={'_BOOT_ID':BOOT_ID.replace('-',''),'_PID':'7','_SYSTEMD_UNIT':M.UNITS[0],'__MONOTONIC_TIMESTAMP':'200',
              'MESSAGE':json.dumps({'event':'telegram_live_ready','channels':['public-source']})}
-        N=SimpleNamespace(command=lambda *a,**kw:json.dumps(row))
+        N=SimpleNamespace(boot_id=lambda:BOOT_ID,command=lambda *a,**kw:json.dumps(row))
         self.assertTrue(M.journal_ready(N,M.UNITS[0],7,100))
         row['MESSAGE']=json.dumps({'event':'live_message','channels':['public-source']})
         self.assertFalse(M.journal_ready(N,M.UNITS[0],7,100))
+
+    def test_both_ready_markers_reject_old_boot_pid_reuse_and_missing_boot(self):
+        messages=(json.dumps({'event':'telegram_live_ready','channels':['public-source']}),
+                  '2026-10-24 12:00:00,001 - telegram.ext.Application - INFO - Application started')
+        for unit,message in zip(M.UNITS,messages):
+            calls=[]
+            row={'_BOOT_ID':'aaaaaaaa222243338444555555555555','_PID':'8','_SYSTEMD_UNIT':unit,
+                 '__MONOTONIC_TIMESTAMP':'900000000','MESSAGE':message}
+            N=SimpleNamespace(boot_id=lambda:BOOT_ID,command=lambda argv,**kw:calls.append(argv) or json.dumps(row))
+            with self.subTest(unit=unit,boot='previous'):
+                self.assertFalse(M.journal_ready(N,unit,8,100))
+            del row['_BOOT_ID']
+            with self.subTest(unit=unit,boot='missing'):
+                self.assertFalse(M.journal_ready(N,unit,8,100))
+            row['_BOOT_ID']=BOOT_ID.replace('-','')
+            with self.subTest(unit=unit,boot='current'):
+                self.assertTrue(M.journal_ready(N,unit,8,100))
+            self.assertTrue(all('--boot='+BOOT_ID.replace('-','') in argv for argv in calls))
+
+    def test_invalid_current_boot_identity_refuses_before_journal_query(self):
+        for value in ('',None,BOOT_ID.replace('-','')):
+            N=SimpleNamespace(boot_id=lambda:value,
+                              command=lambda *a,**kw:self.fail('invalid boot must not query journal'))
+            with self.subTest(boot=value),self.assertRaisesRegex(RuntimeError,'invalid_boot_identity'):
+                M.journal_ready(N,M.UNITS[1],8,100)
 
     def test_missing_golden_database_cannot_be_created(self):
         target=self.folder/'missing.db'

@@ -155,3 +155,12 @@ original `5955...41c7` digest; neither it nor the original installation receipt
 was rewritten. Global security completion remains false because other image,
 backup and Web-host gates are still open. No business transactions were used
 as test data and refactor automation remains stopped.
+
+## Current-boot readiness guard for future use
+
+The reviewed helper now restricts journal queries and accepted records to the
+validated current boot ID, in addition to the PID, unit and monotonic timestamp.
+Missing or foreign boot IDs refuse readiness, preventing an earlier boot's
+startup marker from passing after PID reuse. Golden continuation pins the updated
+refresh source. This source correction grants no execution window and changes no
+historical receipt or execution claim above.

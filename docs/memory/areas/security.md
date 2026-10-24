@@ -16,7 +16,8 @@
 - Capture2 f79 replay fixed by account-indexed streaming with equal hashes.
   Processor65–68s still flaps30s health. Legacy collectors stay inhibited; never
   duplicate owners or inspect/copy/hash session/config contents.
-- Native Brotli runtime verified: both consumers patched/ready. Golden-only
+- Native Brotli runtime verified: both consumers patched/ready; readiness binds
+  the current boot as well as PID/unit/monotonic time. Golden-only
   continuation preserved collector,15 containers and immutable failed-parent
   receipt. Never reinterpret that failure or reuse expired windows. See24Oct
   native-brotli-refresh runbook; global security remains incomplete.

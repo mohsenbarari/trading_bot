@@ -226,17 +226,21 @@ def heartbeat_ready(N, requested):
 
 
 def journal_ready(N, unit, pid, since_us):
+    boot_id = N.boot_id()
+    require(isinstance(boot_id, str) and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', boot_id),
+            'invalid_boot_identity')
+    journal_boot = boot_id.replace('-', '')
     pattern = '"event": "telegram_live_ready"' if unit == UNITS[0] else 'telegram\\.ext\\.Application.*Application started'
     try:
         raw = N.command(['/usr/bin/journalctl', '--quiet', '--no-pager', '--output=json', '--lines=80',
-                         '--unit='+unit, '_PID='+str(pid), '--grep='+pattern], seconds=15)
+                         '--boot='+journal_boot, '--unit='+unit, '_PID='+str(pid), '--grep='+pattern], seconds=15)
     except RuntimeError as error:
         if str(error) == 'native_command_failed_journalctl_1':
             return False
         raise
     for line in raw.splitlines():
         row = json.loads(line)
-        if (row.get('_PID') != str(pid) or row.get('_SYSTEMD_UNIT') != unit
+        if (row.get('_BOOT_ID') != journal_boot or row.get('_PID') != str(pid) or row.get('_SYSTEMD_UNIT') != unit
             or not str(row.get('__MONOTONIC_TIMESTAMP', '')).isdigit()
             or int(row['__MONOTONIC_TIMESTAMP']) < since_us):
             continue

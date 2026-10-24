@@ -11,7 +11,7 @@ import stat
 import time
 from types import ModuleType
 
-REFRESH_SHA = '98d195f6cd39e8ec1efe07264cd893d0eb56de7017ec3a6890d02e08dc1e35ef'
+REFRESH_SHA = 'b1af66336262dee1f742517c211bb62ab0ddb960884c8612883b775bb3e2a8bb'
 PARENT = Path('/srv/trading-bot/backups/security-brotli-native-refresh-20261024-01/receipt.json')
 PARENT_SHA = '5955ba42d551f85bfdd1d4637240b7e06c68d34e1a4956cd7cc42b6adce441c7'
 ROOT = Path('/srv/trading-bot/backups/security-brotli-native-golden-resume-20261024-02')
