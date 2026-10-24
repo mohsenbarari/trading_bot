@@ -29,7 +29,7 @@ PACKAGES = ROOT / 'packages'
 NATIVE_INPUTS = Path('/root/trading-bot/trading_bot/.local/security-web-engine-20261023-inputs.json')
 RECEIPTS = {
     'app_backup_receipt': ('/root/secure-envs/trading-bot/production-backups/evidence/security-host-maintenance-20261023.json', ROOT / 'app-backup-receipt.json'),
-    'app_offhost_receipt': ('/root/trading-bot/trading_bot/.local/security-maintenance-20261023-offhost.json', ROOT / 'app-offhost-receipt.json'),
+    'app_offhost_receipt': ('/root/trading-bot/trading_bot/.local/security-web-engine-20261024-app-offhost.json', ROOT / 'app-offhost-receipt.json'),
 }
 ANSIBLE = '/root/.local/security-kernel-reboot-20261023-task02/venv/bin/ansible-playbook'
 PUBLIC_SOURCES = (
@@ -42,7 +42,7 @@ PUBLIC_SOURCES = (
     'deploy/maintenance/web_engine_inventory.yml',
 )
 EMPTY_INIT = 'scripts/__init__.py'  # Generated EMPTY only in this private bundle.
-CONTROLLER_SHA = '7137b99be2cdb84d4efd715adca14c41f7e8185978463e7c91b8624806980fb5'
+CONTROLLER_SHA = '0b061d21d0b1a2afe592922be2fa1af111b927609f09ad4c7c0d43a6b959b8ee'
 OLD_URLS = {
     'docker.io': 'https://archive.ubuntu.com/ubuntu/pool/universe/d/docker.io-app/docker.io_29.1.3-0ubuntu4.1_amd64.deb',
     'containerd': 'https://security.ubuntu.com/ubuntu/pool/main/c/containerd-app/containerd_2.2.2-0ubuntu1.1_amd64.deb',

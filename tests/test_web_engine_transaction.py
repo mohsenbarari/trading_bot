@@ -188,6 +188,24 @@ class FiniteWebEngineTests(unittest.TestCase):
             with self.assertRaises(guard.P.Refusal): guard.run({}, Path('/private/manifest'), 'a' * 64, True)
             opened.assert_not_called()
 
+    def test_application_backup_selects_actual_web_iran_current_and_requires_its_four_offhost_hashes(self):
+        native_files = [{'sha256': f'{n:064x}'} for n in range(1, 5)]
+        web_files = [{'sha256': f'{n:064x}'} for n in range(5, 9)]
+        def role(name, project, files):
+            return {'role': name, 'project_label': project, 'status': 'ok', 'files': files,
+                    'restore_smoke': {'status': 'passed', 'cleanup': {'status': 'passed'}}}
+        app = {'status': 'ok', 'roles': ['foreign', 'iran'], 'created_at': datetime.now(timezone.utc).isoformat(),
+               'results': [role('foreign', 'trading_bot', native_files), role('iran', 'current', web_files)]}
+        offhost = {'schema': 'security_maintenance_offhost_sources/1.0', 'status': 'passed',
+                   'host_verification': 'strict', 'fsync_completed': True, 'files': web_files}
+        plan = {'app_backup_receipt': '/fixture/original', 'app_offhost_receipt': '/fixture/new-offhost'}
+        with patch.object(guard, 'bound_document', side_effect=[app, offhost]): guard.backup_contract(plan)
+        with patch.object(guard, 'bound_document', side_effect=[app, {**offhost, 'files': native_files}]), self.assertRaisesRegex(guard.P.Refusal, 'offhost_inventory_missing'):
+            guard.backup_contract(plan)
+        changed = deepcopy(app); changed['results'][1]['project_label'] = 'trading_bot'
+        with patch.object(guard, 'bound_document', side_effect=[changed, offhost]), self.assertRaisesRegex(guard.P.Refusal, 'backup_scope_changed'):
+            guard.backup_contract(plan)
+
     def test_start_requires_sixtyfive_minutes_before_any_reservation(self):
         plan = {'new_packages': [], 'backup_root': '/private/backup',
                 'deadline_utc': (datetime.now(timezone.utc) + timedelta(minutes=64)).isoformat()}
@@ -477,12 +495,13 @@ class PreinstallAbortTests(unittest.TestCase):
         plan['market_backup'] = {'image_id': baseline[0]['image'], 'release_sha': 'a' * 40,
                                  'release_tree': 'b' * 40, 'image_input_signature': 'c' * 64}
         plan['datastore_probes'] = [{'id': ident, 'kind': 'redis'} for ident in plan['datastore_ids']]
-        calls, active = [], set()
+        calls, active = [], {'nginx.service'}
         def command(argv):
             calls.append(argv)
             if argv[0] == '/usr/bin/systemctl':
                 if argv[1] == 'start': active.add(argv[-1]); return ''
-                return 'enabled' if 'UnitFileState' in argv else 'active'
+                if 'Job' in argv: return '0'
+                return 'enabled' if 'UnitFileState' in argv else 'active' if argv[2] in active else 'inactive'
             if argv[1:3] == ['image', 'inspect']:
                 return json.dumps({'revision': 'a' * 40, 'tree': 'b' * 40, 'input_signature': 'c' * 64})
             if argv[1] == 'ps': return '\n'.join(observed)
@@ -527,7 +546,9 @@ class PreinstallAbortTests(unittest.TestCase):
 
     def test_post_package_boundary_or_old_package_mismatch_never_attempts_restore(self):
         plan, current, calls, command = self.fixture()
-        for phase, versions in [('installing', {n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), ('backup_ready', {})]:
+        cases = [(phase, {n: p[0] for n, p in guard.P.OLD_PACKAGES.items()})
+                 for phase in ('quiescing', 'writers_quiesced', 'market_backed_up', 'quiesced', 'installing', 'installed', 'complete')]
+        for phase, versions in [*cases, ('backup_ready', {})]:
             with patch.object(guard, 'invariant_contract'), patch.object(guard, 'journal', return_value={'phase': phase}), \
                     patch.object(guard, 'package_versions', return_value=versions), \
                     patch.object(guard.B, 'command', side_effect=command), patch.object(guard, 'write_json') as write:
@@ -541,10 +562,13 @@ class PreinstallAbortTests(unittest.TestCase):
             with self.assertRaisesRegex(guard.P.Refusal, 'marker_drift'): guard.abort_restore(plan, 'b' * 64)
             self.assertEqual(calls, []); write.assert_not_called()
         plan['units'][0]['active'] = False
+        def unexpected(argv):
+            if 'ActiveState' in argv: return 'active'
+            return command(argv)
         with patch.object(guard, 'invariant_contract'), patch.object(guard, 'journal', return_value={'phase': 'backup_ready'}), \
                 patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
-                patch.object(guard.B, 'command', side_effect=command), patch.object(guard, 'write_json') as write:
-            with self.assertRaisesRegex(guard.P.Refusal, 'abort_unexpected_native_writer'):
+                patch.object(guard.B, 'command', side_effect=unexpected), patch.object(guard, 'write_json') as write:
+            with self.assertRaisesRegex(guard.P.Refusal, 'abort_target_not_quiescent'):
                 guard.abort_restore(plan, 'b' * 64)
             self.assertFalse(any(call[1] == 'start' for call in calls)); write.assert_not_called()
 
@@ -557,6 +581,15 @@ class PreinstallAbortTests(unittest.TestCase):
                 guard.abort_restore(plan, 'b' * 64)
             self.assertFalse(any(call[:2] in [['/usr/bin/docker', 'start'], ['/usr/bin/docker', 'update']] for call in calls))
             write.assert_not_called()
+
+    def test_pending_native_job_prevents_every_restore_write(self):
+        plan, current, calls, command = self.fixture()
+        with patch.object(guard, 'invariant_contract'), patch.object(guard, 'journal', return_value={'phase': 'backing_up'}), \
+                patch.object(guard, 'package_versions', return_value={n: p[0] for n, p in guard.P.OLD_PACKAGES.items()}), \
+                patch.object(guard.B, 'command', return_value='123') as native, patch.object(guard, 'write_json') as write:
+            with self.assertRaisesRegex(guard.P.Refusal, 'abort_native_job_pending'):
+                guard.abort_restore(plan, 'b' * 64)
+        self.assertEqual(native.call_count, 1); self.assertIn('Job', native.call_args.args[0]); write.assert_not_called()
 
     def test_failed_smoke_does_not_restore_policies_timers_or_publish_success(self):
         plan, current, calls, command = self.fixture(smoke_failure=True)

@@ -49,3 +49,7 @@
 - User renewed maintenance2026-10-24: immediate maximum90min downtime; current
   bounded outer limit04:41Z(08:11Tehran). Do not extend it silently. Admission
   needs a restore reserve; prep/source tests are not actual engine acceptance.
+- Actual combined backup roles are Native=foreign/trading_bot, Web=iran/current;
+  bind real host/project/artifacts, never infer geography from role names.
+  Process/cgroup death does not cancel accepted Docker/PID1 requests; ambiguous
+  interrupted stop phases must not automatically restart writers.

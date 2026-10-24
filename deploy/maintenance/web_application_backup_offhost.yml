@@ -1,0 +1,162 @@
+---
+# Four existing application backups only. No runtime, database or env operation.
+- name: Retain the actual Web iran current backup off host without overwriting evidence
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    web_app_offhost_action: check
+    web_app_offhost_names: [iran-db-security-host-maintenance-20261023.sql.gz, iran-redis-security-host-maintenance-20261023.tar.gz, iran-uploads-security-host-maintenance-20261023.tar.gz, iran-audit-security-host-maintenance-20261023.tar.gz]
+    web_app_offhost_validator: |
+      import ctypes,hashlib,json,os,pathlib,stat,sys,tempfile
+      P=pathlib.Path
+      SOURCE=P('/srv/trading-bot/backups/iran-security-host-maintenance-20261023-b7711e9e2233a32527852470')
+      DEST=P('/srv/trading-bot/backups/security-web-app-offhost-20261024-03')
+      RECEIPT=P('/root/trading-bot/trading_bot/.local/security-web-engine-20261024-app-offhost.json')
+      APP=P('/root/secure-envs/trading-bot/production-backups/evidence/security-host-maintenance-20261023.json')
+      APP_SHA='710e71ff893a319cb4fb10fd44c850c4845bafbdee68889fc128f7947fcf958d'
+      PINS=(('iran-db-security-host-maintenance-20261023.sql.gz',4303458,'824bc3649d6de59d4b2cc8d706355a417599a1dfb4ef7cfb1d077fd34d1c5b01'),('iran-redis-security-host-maintenance-20261023.tar.gz',109214,'5b15a84040afcae6e5df74c3ce362170ab9b36fcdb83b568b96a8a74e20e91a4'),('iran-uploads-security-host-maintenance-20261023.tar.gz',1082479,'5db419c0d20a04cc1bd5ae52760c9af310127b5cb42f5dfb1a889dcd3cd98364'),('iran-audit-security-host-maintenance-20261023.tar.gz',24225,'62ba205819d6e3c8fe65bb30b35b8708e2f27517edb5f26663fa5f5a6e2489b8'))
+      def require(ok):
+          if not ok: raise RuntimeError('web_app_offhost_refused')
+      def parents(path):
+          require(path.is_absolute() and path.resolve(strict=False)==path)
+          for p in path.parents:
+              s=p.lstat(); require(stat.S_ISDIR(s.st_mode) and s.st_uid in {0,os.geteuid()} and not s.st_mode&0o022)
+      def ident(s): return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+      def digest(path,size,expected,*,sync=False):
+          parents(path); fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              before=os.fstat(fd)
+              require(stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and before.st_size==size)
+              h=hashlib.sha256(); count=0
+              while chunk:=os.read(fd,min(65536,size+1-count)):
+                  count+=len(chunk); require(count<=size); h.update(chunk)
+              require(count==size and h.hexdigest()==expected and ident(before)==ident(os.fstat(fd))==ident(path.lstat()))
+              if sync: os.fsync(fd)
+          finally: os.close(fd)
+      def syncdir(path):
+          fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+          try: os.fsync(fd)
+          finally: os.close(fd)
+      def app_receipt():
+          parents(APP); fd=os.open(APP,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              s=os.fstat(fd); require(stat.S_ISREG(s.st_mode) and s.st_uid==os.geteuid() and s.st_nlink==1 and not s.st_mode&0o077 and s.st_size<=2097152)
+              raw=bytearray()
+              while chunk:=os.read(fd,min(65536,2097153-len(raw))): raw.extend(chunk); require(len(raw)<=2097152)
+              require(hashlib.sha256(raw).hexdigest()==APP_SHA and ident(s)==ident(os.fstat(fd))==ident(APP.lstat()))
+          finally: os.close(fd)
+          value=json.loads(raw)
+          matches=[r for r in value['results'] if r['role']=='iran']
+          require(value['status']=='ok' and len(matches)==1)
+          web=matches[0]
+          require(web['project_label']=='current' and web['status']=='ok' and web['restore_smoke']['status']=='passed' and web['restore_smoke']['cleanup']['status']=='passed')
+          expected={(str(SOURCE/name),size,sha) for name,size,sha in PINS}
+          require(len(web['files'])==4 and {(r['path'],r['bytes'],r['sha256']) for r in web['files']}==expected)
+      def native_check():
+          app_receipt(); parents(DEST); parents(RECEIPT)
+          require(not os.path.lexists(DEST) and not os.path.lexists(RECEIPT))
+          available=os.statvfs(DEST.parent)
+          require(available.f_bavail*available.f_frsize>=12*1024**3+sum(size for _,size,_ in PINS))
+      def publish():
+          app_receipt(); parents(DEST); parents(RECEIPT)
+          s=DEST.lstat(); require(stat.S_ISDIR(s.st_mode) and s.st_uid==os.geteuid() and stat.S_IMODE(s.st_mode)==0o700)
+          require(set(os.listdir(DEST))=={name for name,_,_ in PINS} and not os.path.lexists(RECEIPT))
+          for name,size,sha in PINS: digest(DEST/name,size,sha,sync=True)
+          syncdir(DEST)
+          value={'schema':'security_maintenance_offhost_sources/1.0','status':'passed','host_verification':'strict','fsync_completed':True,'source_host':'65.109.220.59','destination_host':'65.109.216.187','source_role':'iran','project_label':'current','backup_receipt_sha256':APP_SHA,'files':[{'remote_path':str(SOURCE/name),'path':str(DEST/name),'bytes':size,'sha256':sha} for name,size,sha in PINS]}
+          fd,tmp=tempfile.mkstemp(prefix='.web-app-offhost-',dir=RECEIPT.parent)
+          try:
+              raw=(json.dumps(value,sort_keys=True)+'\n').encode()
+              while raw:
+                  count=os.write(fd,raw); require(count>0); raw=raw[count:]
+              os.fsync(fd)
+              rename=ctypes.CDLL(None,use_errno=True).renameat2
+              rename.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]; rename.restype=ctypes.c_int
+              if rename(-100,os.fsencode(tmp),-100,os.fsencode(RECEIPT),1): raise OSError(ctypes.get_errno(),'exclusive publication refused')
+              syncdir(RECEIPT.parent)
+          finally: os.close(fd); P(tmp).unlink(missing_ok=True)
+          return value
+      def main(mode):
+          require(os.geteuid()==0 and P('/proc/1/exe').readlink().name=='systemd' and not P('/.dockerenv').exists())
+          for ns in ('pid','mnt','user'): require(os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns))
+          require(mode in {'remote-check','native-check','prepare','publish'})
+          if mode=='remote-check':
+              for name,size,sha in PINS: digest(SOURCE/name,size,sha)
+          elif mode=='native-check': native_check()
+          elif mode=='prepare': native_check(); os.mkdir(DEST,0o700); syncdir(DEST.parent)
+          else: publish()
+          print(json.dumps({'status':'passed','mode':mode,'files':4,'runtime_changed':False}))
+      if __name__=='__main__':
+          try: main(sys.argv[1])
+          except Exception: print('{"status":"refused","code":"web_app_offhost_refused"}',file=sys.stderr); raise SystemExit(1)
+  tasks:
+    - name: Admit only the strict existing Web lane and explicit backup transfer
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59'
+          - ansible_port | int == 37067
+          - ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - web_app_offhost_action in ['check', 'prepare']
+          - web_app_offhost_names == ['iran-db-security-host-maintenance-20261023.sql.gz', 'iran-redis-security-host-maintenance-20261023.tar.gz', 'iran-uploads-security-host-maintenance-20261023.tar.gz', 'iran-audit-security-host-maintenance-20261023.tar.gz']
+    - name: Verify original combined metadata and fresh Native destination before transfer
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ web_app_offhost_validator }}', native-check]
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+    - name: Verify only the four existing Web backup payloads before transfer
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ web_app_offhost_validator }}', remote-check]
+      changed_when: false
+      check_mode: false
+    - name: Default and Ansible check modes never create or transfer anything
+      ansible.builtin.meta: end_play
+      when: web_app_offhost_action == 'check' or ansible_check_mode
+    - name: Exclusively create only the new private Native backup directory
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ web_app_offhost_validator }}', prepare]
+      delegate_to: localhost
+    - name: Fetch only the exact four backups without logging their contents
+      ansible.builtin.fetch:
+        src: '/srv/trading-bot/backups/iran-security-host-maintenance-20261023-b7711e9e2233a32527852470/{{ item }}'
+        dest: '/srv/trading-bot/backups/security-web-app-offhost-20261024-03/{{ item }}'
+        flat: true
+        fail_on_missing: true
+        validate_checksum: true
+      loop: '{{ web_app_offhost_names }}'
+      no_log: true
+    - name: Inspect only the four newly fetched Native artifacts without following links
+      ansible.builtin.stat:
+        path: '/srv/trading-bot/backups/security-web-app-offhost-20261024-03/{{ item }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      loop: '{{ web_app_offhost_names }}'
+      delegate_to: localhost
+      register: web_app_fetched_metadata
+    - name: Refuse unsafe fetched files before normalizing only owned artifacts
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.uid == 0
+          - item.stat.nlink == 1
+          - item.stat.mode in ['0600', '0644']
+      loop: '{{ web_app_fetched_metadata.results }}'
+    - name: Make only the four newly fetched validated artifacts private before publication
+      ansible.builtin.file:
+        path: '/srv/trading-bot/backups/security-web-app-offhost-20261024-03/{{ item }}'
+        state: file
+        mode: '0600'
+        owner: root
+        group: root
+        follow: false
+      loop: '{{ web_app_offhost_names }}'
+      delegate_to: localhost
+    - name: Verify SHA256 and fsync all four then publish only the new exclusive receipt
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, '{{ web_app_offhost_validator }}', publish]
+      delegate_to: localhost

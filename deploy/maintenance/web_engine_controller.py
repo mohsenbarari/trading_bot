@@ -162,11 +162,12 @@ def backup_contract(plan):
     for value in app['results']:
         require(value['status'] == 'ok' and len(value['files']) == 4 and value['restore_smoke']['status'] == 'passed'
                 and value['restore_smoke']['cleanup']['status'] == 'passed', 'application_restore_missing')
-    foreign = next(v for v in app['results'] if v['role'] == 'foreign')
-    require(foreign['project_label'] == 'current', 'application_backup_scope_changed')
+    web = next(v for v in app['results'] if v['role'] == 'iran')
+    require(web['project_label'] == 'current', 'application_backup_scope_changed')
     require(offhost['schema'] == 'security_maintenance_offhost_sources/1.0' and offhost['status'] == 'passed'
             and offhost['host_verification'] == 'strict' and offhost['fsync_completed'] is True, 'application_offhost_missing')
-    expected = {entry['sha256'] for entry in foreign['files']}
+    expected = {entry['sha256'] for entry in web['files']}
+    require(len(expected) == 4, 'application_backup_artifact_identity_invalid')
     require(expected <= {e['sha256'] for e in offhost['files']}, 'application_offhost_inventory_missing')
     age = (datetime.now(timezone.utc) - datetime.fromisoformat(app['created_at'].replace('Z', '+00:00'))).total_seconds()
     require(0 <= age <= 24 * 3600, 'database_backup_stale')
@@ -746,9 +747,17 @@ def abort_restore(plan, digest):
 def _abort_restore(plan, digest):
     invariant_contract(plan, digest, owned=True)
     value = journal(plan, digest)
-    require(value['phase'] in PHASES[:PHASES.index('installing')], 'package_boundary_requires_review')
+    # Killing our cgroup cannot cancel already accepted Docker/PID1 jobs.
+    # These three phases precede writes or prove all engines already stopped;
+    # intermediate quiescing/backup-creation phases need separate recovery.
+    require(value['phase'] in {'reserved', 'backing_up', 'backup_ready'}, 'ambiguous_phase_requires_review')
     require(package_versions(P.OLD_PACKAGES) == {n: p[0] for n, p in P.OLD_PACKAGES.items()}, 'old_package_versions_changed')
     remaining_contract(plan, 60)
+    for name in sorted(UNITS | set(ENGINES)):
+        require(B.command(['/usr/bin/systemctl', 'show', name, '-p', 'Job', '--value']) == '0', 'abort_native_job_pending')
+        if value['phase'] != 'reserved':
+            require(B.command(['/usr/bin/systemctl', 'show', name, '-p', 'ActiveState', '--value'])
+                    in {'inactive', 'failed'}, 'abort_target_not_quiescent')
     for unit in plan['units']:
         if unit['kind'] != 'oneshot' and not unit['active']:
             require(B.command(['/usr/bin/systemctl', 'show', unit['name'], '-p', 'ActiveState', '--value'])

@@ -156,7 +156,7 @@
         force: false
       loop:
         - {source: /root/secure-envs/trading-bot/production-backups/evidence/security-host-maintenance-20261023.json, destination: app-backup-receipt.json}
-        - {source: /root/trading-bot/trading_bot/.local/security-maintenance-20261023-offhost.json, destination: app-offhost-receipt.json}
+        - {source: /root/trading-bot/trading_bot/.local/security-web-engine-20261024-app-offhost.json, destination: app-offhost-receipt.json}
       no_log: true
 
     - name: Hash only the staged enumerated public code before executing any transferred Python
