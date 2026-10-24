@@ -10,17 +10,18 @@ FROM patched-base AS wheel-builder
 RUN apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends "libpq-dev=$(dpkg-query -W -f='${Version}' libpq5)" build-essential \
     && rm -rf /var/lib/apt/lists/*
-COPY pip_packages/ /tmp/pip_packages/
+# Keep source admission strict: do not put this verified cache below 1777 /tmp.
+COPY pip_packages/ /opt/pip_packages/
 COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
 COPY scripts/prepare_psycopg2_source.py /tmp/prepare_psycopg2_source.py
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r /tmp/pip-bootstrap-requirements.txt \
-    && python -I -B /tmp/prepare_psycopg2_source.py check --cache-dir /tmp/pip_packages --requirements /app/requirements.txt \
+RUN python -m pip install --no-cache-dir --no-index --find-links=/opt/pip_packages/ -r /tmp/pip-bootstrap-requirements.txt \
+    && python -I -B /tmp/prepare_psycopg2_source.py check --cache-dir /opt/pip_packages --requirements /app/requirements.txt \
     && python -m pip wheel --no-cache-dir --no-index --no-deps --no-build-isolation \
-        --wheel-dir=/wheelhouse /tmp/pip_packages/psycopg2_binary-2.9.13.tar.gz \
-    && python -m pip wheel --no-cache-dir --no-index --find-links=/tmp/pip_packages/ --find-links=/wheelhouse \
-        --wheel-dir=/wheelhouse -r /tmp/pip_packages/.requirements-without-psycopg2.txt \
-    && python -m pip wheel --no-cache-dir --no-index --find-links=/tmp/pip_packages/ \
+        --wheel-dir=/wheelhouse /opt/pip_packages/psycopg2_binary-2.9.13.tar.gz \
+    && python -m pip wheel --no-cache-dir --no-index --find-links=/opt/pip_packages/ --find-links=/wheelhouse \
+        --wheel-dir=/wheelhouse -r /opt/pip_packages/.requirements-without-psycopg2.txt \
+    && python -m pip wheel --no-cache-dir --no-index --find-links=/opt/pip_packages/ \
         --wheel-dir=/wheelhouse -r /tmp/pip-bootstrap-requirements.txt
 
 FROM patched-base AS runtime

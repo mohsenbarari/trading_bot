@@ -4,6 +4,7 @@ from hashlib import sha256
 import importlib.util
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -125,6 +126,36 @@ class PsycopgSourceSecurity(unittest.TestCase):
         self.assertIn('SIZE = 378112', source)
         self.assertIn('e324ecf60f952d21dd11413b8bbed0951bbd99579a06fd06f28bfc37737cd373', source)
 
+    def test_actual_docker_copy_targets_admit_source_without_writable_ancestor_exemptions(self):
+        for name in ('Dockerfile', 'Dockerfile.iran'):
+            with self.subTest(name=name):
+                recipe = (REPO / name).read_text()
+                target = re.search(r'^COPY pip_packages/ (/[^\s]+)/$', recipe, re.MULTILINE)
+                self.assertIsNotNone(target)
+                # Model the actual base-image parent permissions, not a relaxed
+                # fake stat: /tmp is 1777, while /opt is owned and non-writable.
+                image = self.temp / ('image-' + name)
+                image.mkdir(mode=0o700)
+                (image / 'tmp').mkdir(mode=0o700); (image / 'tmp').chmod(0o1777)
+                (image / 'opt').mkdir(mode=0o755)
+                cache = image / target[1].lstrip('/')
+                cache.mkdir(mode=0o700)
+                requirements = image / 'requirements.txt'
+                requirements.write_bytes(self.requirements.read_bytes()); requirements.chmod(0o600)
+                archive = cache / P.FILENAME
+                archive.write_bytes(self.archive); archive.chmod(0o600)
+                P.prepare(cache, requirements, download=True)
+                P.prepare(cache, requirements)
+                self.assertEqual((cache / P.FILTERED).read_bytes(), b'# public fixture\nother==1.0\n')
+
+    def test_world_writable_cache_ancestor_stays_refused_before_any_download(self):
+        parent = self.temp / 'world-writable'
+        parent.mkdir(mode=0o700); parent.chmod(0o1777)
+        cache = parent / 'pip_packages'; cache.mkdir(mode=0o700)
+        with self.assertRaises(ValueError):
+            P.prepare(cache, self.requirements, download=True)
+        self.assertEqual(list(cache.iterdir()), [])
+
     def test_both_app_builders_use_direct_source_fresh_wheel_dir_and_compiler_free_runtime(self):
         for name in ('Dockerfile', 'Dockerfile.iran'):
             source = (REPO / name).read_text()
@@ -132,7 +163,7 @@ class PsycopgSourceSecurity(unittest.TestCase):
                 self.assertIn('3.11.17-slim-bookworm@sha256:f06d01d4', source)
                 builder, runtime = source.split('FROM patched-base AS runtime')
                 self.assertIn('prepare_psycopg2_source.py check', builder)
-                self.assertIn('--wheel-dir=/wheelhouse /tmp/pip_packages/psycopg2_binary-2.9.13.tar.gz', builder)
+                self.assertIn('--wheel-dir=/wheelhouse /opt/pip_packages/psycopg2_binary-2.9.13.tar.gz', builder)
                 self.assertIn('--no-cache-dir --no-index --no-deps --no-build-isolation', builder)
                 self.assertIn('libpq-dev=$(dpkg-query', builder)
                 self.assertNotIn('build-essential', runtime)

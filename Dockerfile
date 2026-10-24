@@ -15,23 +15,24 @@ RUN apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends "libpq-dev=$(dpkg-query -W -f='${Version}' libpq5)" build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 # Copy pre-downloaded packages (downloaded on fast German server)
-COPY pip_packages/ /tmp/pip_packages/
+# Source admission requires non-writable ancestors; /tmp is intentionally 1777.
+COPY pip_packages/ /opt/pip_packages/
 COPY scripts/prepare_psycopg2_source.py /tmp/prepare_psycopg2_source.py
 COPY requirements.txt .
-RUN if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
-            python -I -B /tmp/prepare_psycopg2_source.py check --cache-dir /tmp/pip_packages --requirements /app/requirements.txt; \
+RUN if find /opt/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
+            python -I -B /tmp/prepare_psycopg2_source.py check --cache-dir /opt/pip_packages --requirements /app/requirements.txt; \
         else \
-            python -I -B /tmp/prepare_psycopg2_source.py prepare --cache-dir /tmp/pip_packages --requirements /app/requirements.txt; \
+            python -I -B /tmp/prepare_psycopg2_source.py prepare --cache-dir /opt/pip_packages --requirements /app/requirements.txt; \
         fi \
         && python -m pip wheel --no-cache-dir --no-index --no-deps --no-build-isolation \
-            --wheel-dir=/wheelhouse /tmp/pip_packages/psycopg2_binary-2.9.13.tar.gz \
-        && if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
-            python -m pip wheel --no-cache-dir --no-index --find-links=/tmp/pip_packages/ --find-links=/wheelhouse \
-                --wheel-dir=/wheelhouse -r /tmp/pip_packages/.requirements-without-psycopg2.txt; \
+            --wheel-dir=/wheelhouse /opt/pip_packages/psycopg2_binary-2.9.13.tar.gz \
+        && if find /opt/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
+            python -m pip wheel --no-cache-dir --no-index --find-links=/opt/pip_packages/ --find-links=/wheelhouse \
+                --wheel-dir=/wheelhouse -r /opt/pip_packages/.requirements-without-psycopg2.txt; \
         else \
-            python -m pip wheel --no-cache-dir --wheel-dir=/wheelhouse -r /tmp/pip_packages/.requirements-without-psycopg2.txt; \
+            python -m pip wheel --no-cache-dir --wheel-dir=/wheelhouse -r /opt/pip_packages/.requirements-without-psycopg2.txt; \
         fi \
-        && rm -rf /tmp/pip_packages/
+        && rm -rf /opt/pip_packages/
 
 FROM patched-base AS runtime
 COPY requirements.txt .
