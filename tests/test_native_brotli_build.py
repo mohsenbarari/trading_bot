@@ -394,6 +394,30 @@ class NativeBrotliBuildTests(unittest.TestCase):
         finally:
             os.umask(previous)
 
+    def test_complete_large_vulnerability_report_is_admitted_but_oversize_refuses_before_read(self):
+        namespace = self.ci_functions('Require the actual scanner inventory', {'bound_reports'})
+        folder = self.temp / 'actual-sized-reports'; folder.mkdir(mode=0o700)
+        for name in ('candidate-image.json', 'sbom.cdx.json'):
+            path = folder / name; path.write_bytes(b'{}'); path.chmod(0o600)
+        path = folder / 'vulnerabilities.json'
+        # Preserve all raw findings: the hosted report was exactly 13,012,477B.
+        prefix, suffix = b'{"unfiltered":true,"padding":"', b'"}'
+        with path.open('wb') as stream:
+            stream.write(prefix)
+            stream.write(b'x' * (13012477 - len(prefix) - len(suffix)))
+            stream.write(suffix)
+        path.chmod(0o600)
+        self.assertEqual(path.stat().st_size, 13012477)
+        with patch('builtins.print'): namespace['bound_reports'](folder)
+        with path.open('r+b') as stream: stream.truncate(32 * 1024**2 + 1)
+        reads = []; original_read = os.read
+        def record_read(fd, size):
+            reads.append((os.fstat(fd).st_ino, size))
+            return original_read(fd, size)
+        with patch('builtins.print'), patch.object(os, 'read', side_effect=record_read), self.assertRaises(AssertionError):
+            namespace['bound_reports'](folder)
+        self.assertNotIn(path.stat().st_ino, {inode for inode, _ in reads})
+
     def test_ci_failed_build_tails_only_fixed_public_logs_with_per_file_and_total_caps(self):
         namespace = self.ci_functions('Print only bounded fixed', {'failure_diagnostics'})
         root = self.temp / 'diagnostics'; root.mkdir(mode=0o700); (root / 'output').mkdir(mode=0o700)

@@ -415,3 +415,14 @@ same-owner, no-follow, single-link, stable-file and 8 MiB per-report checks are
 unchanged. A real subsequent run must confirm these fields, all four SBOM
 versions and final admission; this source amendment is not a passing run or an
 exception to the gate.
+
+The next actual run `40076294401` made the remaining cause explicit: the
+13,012,477-byte unfiltered vulnerability report exceeded the old 8 MiB limit;
+ownership, mode and link checks passed for all three reports. The candidate
+record was 280 bytes and the SBOM 455,503 bytes. A complete report is now bounded
+at 32 MiB, the SBOM at 8 MiB and the candidate record at 64 KiB, with a 48 MiB
+aggregate ceiling. Admission checks size before body reads and enforces the
+same bound during streaming. No severity or finding is removed. Tests admit
+the observed legitimate report size and reject a report exceeding 32 MiB before
+reading its body. This corrects an evidence-size mismatch; the subsequent
+actual job still must prove inventory/report admission before acceptance.

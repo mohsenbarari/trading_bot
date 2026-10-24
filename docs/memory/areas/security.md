@@ -1,56 +1,38 @@
 # Security remediation
 
-- Security is not topology acceptance. Preserve behavior; source/tests are not
-  activation proof. Evidence: `docs/security/2026-10-23-remediation.md` and links.
-- Upgrade FastAPI/Starlette/Pydantic and aiogram/aiohttp as compatible families;
-  require parser/upload tests. Bound image bytes/pixels before EXIF/decode;
-  never persist the original after a safety failure. All frontend responses,
-  including SPA fallback, must remain inside immutable trusted dist.
-- Patch OS/certifi separately; CA checks are not CVE scans. Keep TLS verification.
-  Verify vendor Node fixes, not Brotli strings; enforce policy before cache lookup.
-  Bootstrap stays pinned, bounded, checkout-local with scoped PATH, never global.
-- Publishing existing main history plus reviewed security commits is authorized,
-  not unrelated Market activation. Preserve LEGACY, capture owners and mounts.
-- Keep complete publisher/chat fixtures and owner negatives; require PostgreSQL
-  and real multiworker Redis. CI subprocesses need public config before imports,
-  explicit scratch targets and disposable binds. Snapshots stay empty/read-only;
-  preserve production path-creation guards and check contracts before fan-out.
-- Native Docker/containerd29.9.2/2.4.2, kernel147 verified:
-  15IDs/DB/API/Golden/mounts/unchangedM/J. Web/App remain open;
-  see `docs/security/2026-10-24-native-postboot.md`.
-- Private control storage is an active attached bind: never prune it. Recovery
-  needs authentic crash-safe evidence, never marker deletion or weaker guards.
-- Old handoff is stale: group projects facts; private-gold/public still collect.
-  Reconcile ownership; never stop ingestion just to match an old receipt.
-- A root fixture accidentally reached systemctl; exact collectors/timers and
-  runtime/DB/API/oneshots were restored. Synthetic suites must deny all unmocked
-  host commands; use named contexts, never shifted positional mocks.
-- Resume refactor only after identified security findings are remediated and
-  activated/verified. Then monitor30 genuinely accepted completed units, not
-  health polls; failures must be repaired, never waived or counted as success.
-- Inactive oneshots can disappear before GetUnit: retain non-starting RefUnit on
-  one bus. Preserve guards/mounts/ownership/HEAD/manifest during owned recovery.
-- Self-revoking SSH can strand Ansible housekeeping. Final revocation uses
-  controller-local SSH; separately verify key/pin/authorized-entry absence and
-  retain failed-transport evidence.
-- 24Oct: maximum90min from ACTUAL first downtime. Fresh07 start is not before
-  05:30Z, deadline07:00Z; old02/03/04/05/06 expiries stay unchanged. Keep restore
-  reserve; preparation is not acceptance. Docker-only work does not close the
-  persistent collector-inhibition gap required before Web kernel reboot.
-- Diagnostic output and payload-file limits are independent: a small inherited
-  RLIMIT_FSIZE breaks pg_dump and dpkg. C966 streams diagnostics with early caps
-  and finite artifact budgets; real3MiB-file/oversized-output regressions apply.
-- 06 aborted/restored from reserved before quiescence: Ansible needs UTF-8.
-  07 uses one UTF-8 environment for real CLI preflight and execution, preserving
-  all06 terminal evidence; never adopt it as unapplied or reuse its journal.
-- Actual combined backup roles are Native=foreign/trading_bot, Web=iran/current;
-  bind real host/project/artifacts, never infer geography from role names.
-  Process/cgroup death does not cancel accepted Docker/PID1 requests; ambiguous
-  interrupted stop phases must not automatically restart writers.
-- C07 failed before install; original policies/four timers are restored, but
-  health is incomplete and fences/STOP remain. See the 24Oct runtime-observation
-  note: real processor progress can coexist with stale completion-only heartbeat;
-  blobs restart-loop timing is unknown. Missing counters are unknown, never zero.
-- Prove real HOT create/restore before future downtime; emit only static backup
-  refusal codes. CI must create its private output parent explicitly. Test the
-  actual dashboard handler AST alone; unrelated Python3.12 syntax breaks3.11 CI.
+- Source/tests are not activation. Preserve product baseline, Market behavior
+  and single capture ownership. Publishing security history is authorized,
+  unrelated feature activation is not.
+  See `docs/security/2026-10-23-remediation.md`.
+- Upgrade compatible Python families together; test parser/upload behavior.
+  Bound images before decode; discard unsafe originals. Static/SPA stays inside
+  trusted dist. CA trust differs from CVE scans; retain TLS/pinned bootstrap.
+- Native Docker/containerd29.9.2/2.4.2/kernel147 verified with15 IDs/Golden intact.
+  Web Docker/kernel/App activation remain unfinished.
+- C07 failed before installation. Original policies/four timers restored, but
+  health/security incomplete; retain fences/journal.24Oct downtime05:48:39Z;
+  90min expired07:18:39Z. Never extend manifests. Before reboot, prove persistent
+  collector inhibitors and attached-mount gates.
+- User confirmed old three-site QA unused:24Oct parking stopped exact10,
+  closed8443, verified17 retained configurations/Web/6DB. Four volumes/images/data
+  remain. Bind preservation uses Options.device/attached UUID, not transient
+  Docker_data inode. Parking keeps incidents/fences open.
+- Capture2 crash-loops; diagnostic image/parity passed, not activated/repaired.
+  Never duplicate session owners or read/copy/hash private session/config contents.
+  Legacy collectors remain inhibited.
+- Actual19d App candidate:56 focused tests passed, rawHIGH48→44 after pip
+  removal;8 OS advisory IDs remain. No acceptance/activation/waiver. See
+  `docs/security/2026-10-24-security-candidate-19d.md`.
+- Both watchdogs check Restarting before Running. Stale heartbeat can coexist
+  with progress; missing counters are unknown. Consult24Oct runtime-observation
+  and native-postboot evidence.
+- Never prune active attached control storage or delete markers. Recovery needs
+  crash-safe evidence; process death cannot cancel Docker/systemd requests.
+  Ambiguous stops never auto-restart writers.
+- Synthetic tests deny unmocked host/network commands; use named mocks and
+  nonroot fixtures. Stream caps differ from artifact budgets; tiny file limits
+  break pg_dump/dpkg. Backup roles Native=foreign/trading_bot, Web=iran/current;
+  bind real artifacts, never geography.
+- Keep STOP until security remediation is activated/verified, then monitor30
+  genuinely accepted complete clean units. Health polls never count; preserve
+  failures without counter reset or waiver.
