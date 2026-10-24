@@ -1,0 +1,33 @@
+---
+- name: Run the normal backup source validator without a backup or runtime action
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    probe_argv:
+      - /usr/bin/env
+      - -i
+      - PATH=/usr/sbin:/usr/bin:/sbin:/bin
+      - LC_ALL=C.UTF-8
+      - /usr/bin/python3
+      - -I
+      - -B
+      - -c
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/web_backup_env_probe.py', rstrip=false) }}"
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/../../scripts/backup_market_pipeline_archive.py', rstrip=false) }}"
+      - "{{ lookup('ansible.builtin.file', playbook_dir + '/../../scripts/prepare_market_pipeline_release.py', rstrip=false) }}"
+  tasks:
+    - name: Require exact Web host and reviewed read-only validator wrapper
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - probe_argv[8] | hash('sha256') == '741d6b9bcc786b6e6ee1dc9d3a037c4c352f51c8909125742be82cf02629c4fa'
+    - name: Stage only the two public scripts and discard validated private values
+      ansible.builtin.command:
+        argv: "{{ probe_argv }}"
+      timeout: 60
+      check_mode: false
+      register: backup_env_probe
+      changed_when: (backup_env_probe.stdout | from_json).public_scripts_staged | default(false)
