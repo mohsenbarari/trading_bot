@@ -401,6 +401,7 @@ run_with_local_resource_guard() {
         echo "setsid is required for guarded process-group containment." >&2
         return 1
     }
+    local started_seconds=$SECONDS
     setsid --wait "$@" &
     local cmd_pid=$!
     # A non-interactive background job is not a process-group leader, so
@@ -408,20 +409,40 @@ run_with_local_resource_guard() {
     # that identity even when a short leader exits before the first `ps`.
     local process_group="$cmd_pid"
     local observed_process_group
-    observed_process_group="$(ps -o pgid= -p "$cmd_pid" | tr -d '[:space:]')"
-    [[ -z "$observed_process_group" || "$observed_process_group" == "$process_group" ]] || {
+    local isolation_seconds=2
+    if [ "$maximum_seconds" -lt "$isolation_seconds" ]; then
+        isolation_seconds="$maximum_seconds"
+    fi
+    # The forked launcher initially inherits our PGID until setsid executes.
+    # User code cannot execute before setsid creates the isolated session.
+    # Wait only for that known-PID transition (or a finished leader), never
+    # interpret one pre-exec ps snapshot as a permanent isolation failure.
+    while :; do
+        observed_process_group="$(ps -o pgid= -p "$cmd_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+        if [[ "$observed_process_group" == "$process_group" ]] || ! kill -0 "$cmd_pid" 2>/dev/null; then
+            break
+        fi
+        if (( SECONDS - started_seconds >= isolation_seconds )); then
+            break
+        fi
+        sleep 0.01
+    done
+    if [[ "$observed_process_group" != "$process_group" ]] && kill -0 "$cmd_pid" 2>/dev/null; then
         echo "Could not isolate the guarded command in its own process group." >&2
         kill -TERM "$cmd_pid" 2>/dev/null || true
-        sleep 0.1
-        kill -KILL "$cmd_pid" 2>/dev/null || true
-        if ! wait_for_guarded_process_stop "$cmd_pid" "$cmd_pid" 5; then
+        if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
             echo "Could not stop the non-isolated guarded command within the safety bound." >&2
             return 1
         fi
-        wait "$cmd_pid" 2>/dev/null || true
         return 1
-    }
-    local started_seconds=$SECONDS
+    fi
+    if (( SECONDS - started_seconds >= maximum_seconds )); then
+        echo "❌ Wall-clock deadline reached for '$label' after ${maximum_seconds}s. Stopping the entire process group."
+        if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
+            return 125
+        fi
+        return 124
+    fi
     if [ "$monitor_resources" = "1" ]; then
         read -r prev_total prev_idle <<EOF
 $(sample_cpu_usage)

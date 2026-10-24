@@ -32,6 +32,17 @@ def run_sourced_script(body: str, *arguments: str) -> subprocess.CompletedProces
 
 
 class ProductionDeployChoreographyTests(unittest.TestCase):
+    @staticmethod
+    def resource_guard_fixture_script(body: str) -> str:
+        # Extract ONLY these eight reviewed functions, never source deploy.sh.
+        source = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')
+        names = ('resource_guard_enabled', 'sample_cpu_usage', 'sample_memory_usage',
+                 'guarded_process_is_live', 'guarded_process_group_has_live_members',
+                 'wait_for_guarded_process_stop', 'terminate_guarded_process', 'run_with_local_resource_guard')
+        functions = ''.join(name + '() {' + source.split(name + '() {', 1)[1].split('\n}', 1)[0] + '\n}\n'
+                            for name in names)
+        return 'set -euo pipefail\nprint_header() { :; }\n' + functions + body
+
     def test_production_compose_identity_ignores_ambient_pollution_and_is_fixed(self) -> None:
         locked = run_sourced_script(
             """
@@ -1949,7 +1960,7 @@ record_writer_replacement_inventory foreign foreign_replacement_creating foreign
             "run_with_local_resource_guard",
         ):
             functions.append(legacy.split(f"{name}() {{", 1)[1].split("\n}", 1)[0])
-        script = "print_header() { :; }\n"
+        script = "set -euo pipefail\nprint_header() { :; }\n"
         for name, body in zip(
             (
                 "resource_guard_enabled",
@@ -2008,7 +2019,7 @@ exit 9
             legacy.split(f"{name}() {{", 1)[1].split("\n}", 1)[0]
             for name in function_names
         ]
-        script = "print_header() { :; }\n"
+        script = "set -euo pipefail\nprint_header() { :; }\n"
         for name, body in zip(function_names, functions, strict=True):
             script += f"{name}() {{{body}\n}}\n"
         script += r'''
@@ -2062,7 +2073,7 @@ test ! -e "$DESCENDANT_MARKER"
             legacy.split(f"{name}() {{", 1)[1].split("\n}", 1)[0]
             for name in function_names
         ]
-        script = "print_header() { :; }\n"
+        script = "set -euo pipefail\nprint_header() { :; }\n"
         for name, body in zip(function_names, functions, strict=True):
             script += f"{name}() {{{body}\n}}\n"
         script += r'''
@@ -2071,20 +2082,31 @@ DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS=1
 DEPLOY_RESOURCE_GUARD_MAX_SECONDS=5
 DEPLOY_RESOURCE_GUARD_TERMINATION_GRACE_SECONDS=0
 DEPLOY_RESOURCE_GUARD_KILL_VERIFY_SECONDS=2
+cleanup_fixture_child() {
+  if [ -s "$CHILD_PID_FILE" ]; then
+    read -r child < "$CHILD_PID_FILE"
+    kill -KILL "$child" 2>/dev/null || true
+  fi
+}
+trap cleanup_fixture_child EXIT
+status=0
 run_with_local_resource_guard normal-return-probe bash -c '
-  (trap "" TERM; exec >/dev/null 2>&1; sleep 2; printf survived > "$DESCENDANT_MARKER") &
+  trap "" TERM
+  sleep 30 >/dev/null 2>&1 &
+  printf "%s\n" "$!" > "$CHILD_PID_FILE"
   exit 0
 ' || status=$?
-test "${status:-0}" -eq 125
-sleep 2.1
-test ! -e "$DESCENDANT_MARKER"
+test "$status" -eq 125
+child="$(cat "$CHILD_PID_FILE")"
+state="$(ps -o stat= -p "$child" 2>/dev/null | tr -d '[:space:]' || true)"
+[[ -z "$state" || "$state" == Z* ]]
 '''
         with tempfile.TemporaryDirectory(prefix="resource-guard-normal-return-") as temporary:
-            marker = Path(temporary) / "descendant-finished"
+            child_file = Path(temporary) / "child.pid"
             result = subprocess.run(
                 ["bash", "-c", script],
                 cwd=REPO_ROOT,
-                env={**os.environ, "DESCENDANT_MARKER": str(marker)},
+                env={"PATH": os.environ["PATH"], "LANG": "C.UTF-8", "CHILD_PID_FILE": str(child_file)},
                 text=True,
                 capture_output=True,
                 check=False,
@@ -2092,6 +2114,64 @@ test ! -e "$DESCENDANT_MARKER"
             )
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("live process-group members remained", result.stdout)
+
+    def test_resource_guard_waits_for_delayed_setsid_startup_without_false_rejection(self) -> None:
+        script = self.resource_guard_fixture_script(r'''
+DEPLOY_RESOURCE_GUARD_ENABLED=0
+DEPLOY_RESOURCE_GUARD_MAX_SECONDS=3
+DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS=1
+setsid() { sleep 0.3; exec /usr/bin/setsid "$@"; }
+status=0
+run_with_local_resource_guard startup-race /usr/bin/true || status=$?
+test "$status" -eq 0
+''')
+        result = subprocess.run(['bash', '-c', script], cwd=REPO_ROOT,
+                                env={'PATH': os.environ['PATH'], 'LANG': 'C.UTF-8'},
+                                capture_output=True, text=True, check=False, timeout=8, start_new_session=True)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertNotIn('Could not isolate', result.stderr)
+
+    def test_resource_guard_still_refuses_a_persistently_unverified_process_group(self) -> None:
+        script = self.resource_guard_fixture_script(r'''
+DEPLOY_RESOURCE_GUARD_ENABLED=0
+DEPLOY_RESOURCE_GUARD_MAX_SECONDS=5
+DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS=1
+DEPLOY_RESOURCE_GUARD_TERMINATION_GRACE_SECONDS=0
+DEPLOY_RESOURCE_GUARD_KILL_VERIFY_SECONDS=1
+ps() {
+  if [[ "${1:-}" == -o && "${2:-}" == pgid= ]]; then printf '%s\n' "$$"
+  else command /usr/bin/ps "$@"; fi
+}
+status=0
+run_with_local_resource_guard unverifiable-group /usr/bin/sleep 30 || status=$?
+test "$status" -eq 1
+''')
+        result = subprocess.run(['bash', '-c', script], cwd=REPO_ROOT,
+                                env={'PATH': os.environ['PATH'], 'LANG': 'C.UTF-8'},
+                                capture_output=True, text=True, check=False, timeout=8, start_new_session=True)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn('Could not isolate', result.stderr)
+
+    def test_resource_guard_wall_budget_includes_startup_observation_even_if_leader_finishes(self) -> None:
+        script = self.resource_guard_fixture_script(r'''
+DEPLOY_RESOURCE_GUARD_ENABLED=0
+DEPLOY_RESOURCE_GUARD_MAX_SECONDS=1
+DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS=1
+DEPLOY_RESOURCE_GUARD_TERMINATION_GRACE_SECONDS=0
+DEPLOY_RESOURCE_GUARD_KILL_VERIFY_SECONDS=1
+ps() {
+  if [[ "${1:-}" == -o && "${2:-}" == pgid= ]]; then sleep 1.2; fi
+  command /usr/bin/ps "$@"
+}
+status=0
+run_with_local_resource_guard startup-deadline /usr/bin/true || status=$?
+test "$status" -eq 124
+''')
+        result = subprocess.run(['bash', '-c', script], cwd=REPO_ROOT,
+                                env={'PATH': os.environ['PATH'], 'LANG': 'C.UTF-8'},
+                                capture_output=True, text=True, check=False, timeout=8, start_new_session=True)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn('Wall-clock deadline reached', result.stdout)
 
     def test_foreign_migration_has_an_explicit_conservative_wall_deadline(self) -> None:
         legacy = (REPO_ROOT / "deploy.sh").read_text(encoding="utf-8")
