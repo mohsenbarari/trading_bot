@@ -23,7 +23,8 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any, Mapping, Sequence
 
 if __package__:
@@ -32,7 +33,7 @@ if __package__:
         IMAGE_ID,
         RELEASE_SHA,
         ReleaseContractError,
-        parse_env,
+        parse_env_text,
         validate_source,
     )
 else:
@@ -42,7 +43,7 @@ else:
         IMAGE_ID,
         RELEASE_SHA,
         ReleaseContractError,
-        parse_env,
+        parse_env_text,
         validate_source,
     )
 
@@ -53,8 +54,12 @@ POSTGRES_IMAGE = (
 )
 CREATE_CONFIRMATION = "create-production-market-pipeline-archive-backup"
 HOT_CREATE_CONFIRMATION = "create-production-market-pipeline-archive-hot-backup"
-RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.2"
-JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.0"
+RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.3"
+JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.1"
+LEGACY_RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.2"
+LEGACY_JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.0"
+# Control documents only; never apply this bound to PostgreSQL dump artifacts.
+MAX_HISTORICAL_DOCUMENT_BYTES = 16 * 1024 * 1024
 PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{2,62}$")
 SAFE_SQL_ID = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -137,6 +142,144 @@ def _run_text(arguments: Sequence[str], *, label: str) -> str:
     return result.stdout.strip()
 
 
+def _parent_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode)
+
+
+def _file_identity(info: os.stat_result) -> dict[str, int]:
+    return {
+        "device": info.st_dev, "inode": info.st_ino,
+        "uid": info.st_uid, "gid": info.st_gid,
+        "mode": stat.S_IMODE(info.st_mode), "nlink": info.st_nlink,
+        "size_bytes": info.st_size, "mtime_ns": info.st_mtime_ns,
+        "ctime_ns": info.st_ctime_ns,
+    }
+
+
+def _trusted_env_parent(info: os.stat_result) -> bool:
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid in {0, os.geteuid()}
+        and not stat.S_IMODE(info.st_mode) & 0o022
+    )
+
+
+class BoundRoleEnv:
+    """Keep one private Env inode and its canonical parent chain open.
+
+    Only the ordinary validator consumes bounded contents in RAM. Receipts
+    record metadata, never a digest of the Env or its parsed values.
+    """
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.descriptors: list[int] = []
+        self.parents: list[tuple[Path, int, tuple[int, ...]]] = []
+        self.descriptor = -1
+        self.binding: dict[str, Any] = {}
+
+    def __enter__(self) -> "BoundRoleEnv":
+        try:
+            if not self.path.is_absolute():
+                raise BackupError("backup_role_env_path_invalid")
+            try:
+                canonical = self.path.resolve(strict=False)
+            except (OSError, RuntimeError):
+                # Path.resolve raises RuntimeError for symlink loops on some
+                # Python versions. Limit that conversion to this FS boundary.
+                raise BackupError("backup_role_env_path_invalid") from None
+            if canonical != self.path:
+                raise BackupError("backup_role_env_path_invalid")
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            directory = os.open("/", flags)
+            self.descriptors.append(directory)
+            parent_path = Path("/")
+            for component in (None, *self.path.parent.parts[1:]):
+                if component is not None:
+                    directory = os.open(component, flags, dir_fd=directory)
+                    self.descriptors.append(directory)
+                    parent_path /= component
+                info = os.fstat(directory)
+                if not _trusted_env_parent(info):
+                    raise BackupError("backup_role_env_parent_invalid")
+                self.parents.append((parent_path, directory, _parent_identity(info)))
+            self.descriptor = os.open(
+                self.path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                dir_fd=directory,
+            )
+            self.descriptors.append(self.descriptor)
+            info = os.fstat(self.descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                or not 0 < info.st_size <= 64 * 1024
+            ):
+                raise BackupError("backup_role_env_owner_mode_invalid")
+            self.binding = {
+                "schema": "market_pipeline_role_env_file_binding/1.0",
+                "path": str(self.path), **_file_identity(info),
+                "parents": [
+                    {"path": str(parent), "device": identity[0],
+                     "inode": identity[1], "uid": identity[2],
+                     "gid": identity[3], "mode": identity[4]}
+                    for parent, _, identity in self.parents
+                ],
+            }
+            self.check()
+            return self
+        except OSError:
+            self.close()
+            raise BackupError("backup_role_env_unavailable") from None
+        except BaseException:
+            self.close()
+            raise
+
+    def check(self) -> None:
+        try:
+            for path, descriptor, expected in self.parents:
+                if (
+                    _parent_identity(os.fstat(descriptor)) != expected
+                    or _parent_identity(path.lstat()) != expected
+                ):
+                    raise BackupError("backup_role_env_parent_drifted")
+            info = os.fstat(self.descriptor)
+            current = os.stat(
+                self.path.name, dir_fd=self.parents[-1][1], follow_symlinks=False
+            )
+            if (
+                not stat.S_ISREG(current.st_mode)
+                or _file_identity(info) != {k: self.binding[k] for k in _file_identity(info)}
+                or _file_identity(current) != _file_identity(info)
+            ):
+                raise BackupError("backup_role_env_drifted")
+        except OSError as exc:
+            raise BackupError("backup_role_env_drifted") from exc
+
+    def values(self) -> dict[str, str]:
+        self.check()
+        try:
+            raw = os.pread(self.descriptor, 64 * 1024 + 1, 0)
+            if len(raw) != self.binding["size_bytes"]:
+                raise BackupError("backup_role_env_drifted")
+            values = parse_env_text(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise BackupError("backup_role_env_read_failed") from exc
+        self.check()
+        return values
+
+    def close(self) -> None:
+        for descriptor in reversed(self.descriptors):
+            os.close(descriptor)
+        self.descriptors.clear()
+
+    def __exit__(self, kind: Any, value: Any, traceback: Any) -> None:
+        try:
+            if kind is None:
+                self.check()
+        finally:
+            self.close()
+
+
 def validate_release_env(
     env_file: Path,
     *,
@@ -144,7 +287,17 @@ def validate_release_env(
     image_id: str,
     allow_target_identity_mismatch: bool = False,
 ) -> dict[str, str]:
-    values = parse_env(env_file, secure_input=True)
+    with BoundRoleEnv(env_file) as bound:
+        return _validate_release_values(
+            bound.values(), release_sha=release_sha, image_id=image_id,
+            allow_target_identity_mismatch=allow_target_identity_mismatch,
+        )
+
+
+def _validate_release_values(
+    values: dict[str, str], *, release_sha: str, image_id: str,
+    allow_target_identity_mismatch: bool = False,
+) -> dict[str, str]:
     source_values = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
     validate_source("web", source_values)
     expected = {"MARKET_PIPELINE_MODE": "live"}
@@ -733,12 +886,16 @@ def _journal_path(root: Path) -> Path:
     return root / "market-pipeline-backup-journal.json"
 
 
-def _read_journal(path: Path) -> dict[str, Any]:
+def _read_journal(path: Path, *, historical: bool = False) -> dict[str, Any]:
     _secure_regular(path)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BackupError("backup_journal_invalid") from exc
+    if isinstance(payload, dict) and payload.get("schema") == LEGACY_JOURNAL_SCHEMA:
+        if historical:
+            return payload
+        raise BackupError("backup_role_env_binding_migration_required")
     if not isinstance(payload, dict) or payload.get("schema") != JOURNAL_SCHEMA:
         raise BackupError("backup_journal_invalid")
     return payload
@@ -840,33 +997,52 @@ def _abandon_empty_prepared_journal(path: Path, journal: Mapping[str, Any], *, r
         os.close(directory)
 
 
+def _same_env_binding(observed: Any, expected: Any) -> bool:
+    """Require exact JSON types, so booleans cannot impersonate stat integers."""
+    if type(observed) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(observed) == set(expected) and all(
+            _same_env_binding(observed[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(observed) == len(expected) and all(
+            _same_env_binding(left, right) for left, right in zip(observed, expected)
+        )
+    return observed == expected
+
+
 def _validate_journal_identity(
     payload: Mapping[str, Any],
     *,
     root: Path,
-    env_file: Path,
+    role_env_binding: Mapping[str, Any],
     receipt: Path,
     release_sha: str,
     release_tree: str,
     image_id: str,
     image_input_signature: str,
+    historical: bool = False,
 ) -> None:
+    env_key = "role_env_sha256" if historical else "role_env_binding"
     expected = {
-        "schema": JOURNAL_SCHEMA,
+        "schema": LEGACY_JOURNAL_SCHEMA if historical else JOURNAL_SCHEMA,
         "release_sha": release_sha,
         "release_tree": release_tree,
         "image_id": image_id,
         "image_input_signature": image_input_signature,
-        "role_env_sha256": file_digest(env_file),
+        env_key: role_env_binding[env_key],
         "receipt_path": str(receipt),
         "secrets_disclosed": False,
     }
-    if any(payload.get(key) != value for key, value in expected.items()):
+    if any(payload.get(key) != value for key, value in expected.items()) or not _same_env_binding(
+        payload.get(env_key), role_env_binding[env_key]
+    ):
         raise BackupError("backup_journal_identity_mismatch")
     journal_keys = {
         "schema", "status", "backup_status", "run_id", "created_at_utc",
         "release_sha", "release_tree", "image_id", "image_input_signature",
-        "role_env_sha256", "receipt_path", "artifact_path", "candidate_path",
+        env_key, "receipt_path", "artifact_path", "candidate_path",
         "source_before", "source_after", "backup", "restore_smoke",
         "restore_resources", "secrets_disclosed",
     }
@@ -910,14 +1086,14 @@ def _receipt_from_journal(journal: Mapping[str, Any]) -> dict[str, Any]:
     else:
         raise BackupError("backup_journal_status_invalid")
     return {
-        "schema": RECEIPT_SCHEMA,
+        "schema": (LEGACY_RECEIPT_SCHEMA if journal["schema"] == LEGACY_JOURNAL_SCHEMA else RECEIPT_SCHEMA),
         "status": status,
         "created_at_utc": journal["created_at_utc"],
         "release_sha": journal["release_sha"],
         "release_tree": journal["release_tree"],
         "image_id": journal["image_id"],
         "image_input_signature": journal["image_input_signature"],
-        "role_env_sha256": journal["role_env_sha256"],
+        **({"role_env_sha256": journal["role_env_sha256"]} if journal["schema"] == LEGACY_JOURNAL_SCHEMA else {"role_env_binding": journal["role_env_binding"]}),
         "backup_run_id": journal["run_id"],
         "source": source,
         "source_after": source_after,
@@ -930,9 +1106,10 @@ def _receipt_from_journal(journal: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def create_backup(
+def _create_backup_bound(
     *,
     env_file: Path,
+    _env_binding: BoundRoleEnv,
     backup_dir: Path,
     receipt: Path,
     release_sha: str,
@@ -943,8 +1120,8 @@ def create_backup(
     allow_running_writers: bool = False,
     allow_target_identity_mismatch: bool = False,
 ) -> dict[str, Any]:
-    values = validate_release_env(
-        env_file,
+    values = _validate_release_values(
+        _env_binding.values(),
         release_sha=release_sha,
         image_id=image_id,
         allow_target_identity_mismatch=allow_target_identity_mismatch,
@@ -960,23 +1137,26 @@ def create_backup(
     journal: dict[str, Any] | None = None
     if journal_path.exists() or journal_path.is_symlink():
         journal = _read_journal(journal_path)
-        if allow_running_writers and _empty_prepared_journal(journal, root=root):
-            _abandon_empty_prepared_journal(journal_path, journal, root=root)
-            journal = None
     if journal is not None:
         _validate_journal_identity(
             journal,
             root=root,
-            env_file=env_file,
+            role_env_binding={"role_env_binding": _env_binding.binding},
             receipt=receipt,
             release_sha=release_sha,
             release_tree=release_tree,
             image_id=image_id,
             image_input_signature=image_input_signature,
         )
+        if allow_running_writers and _empty_prepared_journal(journal, root=root):
+            _env_binding.check()
+            _abandon_empty_prepared_journal(journal_path, journal, root=root)
+            journal = None
+    if journal is not None:
         if journal.get("status") == "COMPLETE":
             payload = _receipt_from_journal(journal)
             if not refresh_complete:
+                _env_binding.check()
                 _write_receipt(receipt, payload)
                 return payload
             run_id = str(journal.get("run_id") or "")
@@ -1007,6 +1187,7 @@ def create_backup(
                 if archived_payload != payload or receipt.exists() or receipt.is_symlink():
                     raise BackupError("backup_refresh_archive_invalid")
             else:
+                _env_binding.check()
                 os.replace(receipt, archived_receipt)
                 directory = os.open(root, os.O_RDONLY)
                 try:
@@ -1015,6 +1196,7 @@ def create_backup(
                     os.close(directory)
             # If a kill happened after archiving the receipt but before this
             # replace, the exact archived receipt above authorizes resumption.
+            _env_binding.check()
             os.replace(journal_path, archived_journal)
             directory = os.open(root, os.O_RDONLY)
             try:
@@ -1044,7 +1226,7 @@ def create_backup(
                 "release_tree": release_tree,
                 "image_id": image_id,
                 "image_input_signature": image_input_signature,
-                "role_env_sha256": file_digest(env_file),
+                "role_env_binding": dict(_env_binding.binding),
                 "receipt_path": str(receipt),
                 "artifact_path": str(artifact),
                 "candidate_path": str(root / f".{artifact.name}.pending"),
@@ -1055,8 +1237,10 @@ def create_backup(
                 "restore_resources": None,
                 "secrets_disclosed": False,
             }
+            _env_binding.check()
             _write_journal(journal_path, journal)
         payload = _receipt_from_journal(journal)
+        _env_binding.check()
         _write_receipt(receipt, payload)
         return payload
 
@@ -1078,7 +1262,7 @@ def create_backup(
             "release_tree": release_tree,
             "image_id": image_id,
             "image_input_signature": image_input_signature,
-            "role_env_sha256": file_digest(env_file),
+            "role_env_binding": dict(_env_binding.binding),
             "receipt_path": str(receipt),
             "artifact_path": str(artifact),
             "candidate_path": str(root / f".{artifact.name}.pending"),
@@ -1093,21 +1277,25 @@ def create_backup(
             },
             "secrets_disclosed": False,
         }
+        _env_binding.check()
         _write_journal(journal_path, journal)
     source = journal["source_before"]
     current_source = inspect_source_database(values, require_quiesce=require_quiesce)
+    _env_binding.check()
     if not _source_window_compatible(
         source, current_source, allow_running_writers=allow_running_writers
     ):
         raise BackupError("backup_source_changed_before_dump")
     artifact = Path(str(journal["artifact_path"]))
     if not artifact.exists():
+        _env_binding.check()
         _write_dump(
             container_id=str(source["container_id"]),
             user=values.get("MARKET_POSTGRES_USER", "market_data"),
             database=values.get("MARKET_POSTGRES_DB", "market_archive"),
             destination=artifact,
         )
+    _env_binding.check()
     _secure_regular(artifact)
     if not _dump_archive_is_valid(
         container_id=str(source["container_id"]), path=artifact
@@ -1123,20 +1311,25 @@ def create_backup(
         raise BackupError("backup_artifact_drifted_during_resume")
     journal["backup"] = observed_backup
     journal["status"] = "DUMP_READY"
+    _env_binding.check()
     _write_journal(journal_path, journal)
     source_after = inspect_source_database(values, require_quiesce=require_quiesce)
+    _env_binding.check()
     if not _source_window_compatible(
         source, source_after, allow_running_writers=allow_running_writers
     ):
         raise BackupError("backup_source_changed_during_dump")
     journal["source_after"] = source_after
     journal["status"] = "RESTORE_RUNNING"
+    _env_binding.check()
     _write_journal(journal_path, journal)
+    _env_binding.check()
     restore = restore_smoke(
         artifact,
         source,
         resource_binding=journal["restore_resources"],
     )
+    _env_binding.check()
     if not _restore_window_compatible(
         source,
         source_after,
@@ -1147,52 +1340,82 @@ def create_backup(
     journal["restore_smoke"] = restore
     journal["backup_status"] = "PASS"
     journal["status"] = "COMPLETE"
+    _env_binding.check()
     _write_journal(journal_path, journal)
     payload = _receipt_from_journal(journal)
+    _env_binding.check()
     _write_receipt(receipt, payload)
     return payload
 
 
-def verify_receipt(
-    *,
-    env_file: Path,
-    receipt: Path,
-    release_sha: str,
-    release_tree: str,
-    image_id: str,
-    image_input_signature: str,
-    maximum_age_seconds: int | None,
-    now: datetime | None = None,
+def _refuse_legacy_receipt(path: Path) -> None:
+    if path.exists() or path.is_symlink():
+        _secure_regular(path)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise BackupError("backup_receipt_invalid") from exc
+        if isinstance(payload, dict) and payload.get("schema") == LEGACY_RECEIPT_SCHEMA:
+            raise BackupError("backup_role_env_binding_migration_required")
+
+
+def create_backup(
+    *, env_file: Path, backup_dir: Path, receipt: Path, release_sha: str,
+    release_tree: str, image_id: str, image_input_signature: str,
+    refresh_complete: bool = False, allow_running_writers: bool = False,
     allow_target_identity_mismatch: bool = False,
 ) -> dict[str, Any]:
-    values = validate_release_env(
-        env_file,
-        release_sha=release_sha,
-        image_id=image_id,
-        allow_target_identity_mismatch=allow_target_identity_mismatch,
-    )
+    # Refuse old transactions before any protected Env open/read.
+    _refuse_legacy_receipt(receipt)
+    journal_path = _journal_path(backup_dir)
+    if journal_path.exists() or journal_path.is_symlink():
+        _read_journal(journal_path)
+    with BoundRoleEnv(env_file) as bound:
+        return _create_backup_bound(
+            env_file=env_file, _env_binding=bound, backup_dir=backup_dir,
+            receipt=receipt, release_sha=release_sha, release_tree=release_tree,
+            image_id=image_id, image_input_signature=image_input_signature,
+            refresh_complete=refresh_complete,
+            allow_running_writers=allow_running_writers,
+            allow_target_identity_mismatch=allow_target_identity_mismatch,
+        )
+
+
+def _verify_receipt_evidence(
+    *, receipt: Path, role_env_binding: Mapping[str, Any],
+    release_sha: str, release_tree: str, image_id: str,
+    image_input_signature: str, maximum_age_seconds: int | None,
+    now: datetime | None = None, historical: bool = False,
+    _snapshots: tuple[dict[str, Any], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    env_key = "role_env_sha256" if historical else "role_env_binding"
     _secure_regular(receipt)
     _secure_directory(receipt.parent, create=False)
-    try:
-        payload = json.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise BackupError("backup_receipt_invalid") from exc
+    if _snapshots is None:
+        try:
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise BackupError("backup_receipt_invalid") from exc
+    else:
+        payload = _snapshots[0]
     expected = {
-        "schema": RECEIPT_SCHEMA,
+        "schema": LEGACY_RECEIPT_SCHEMA if historical else RECEIPT_SCHEMA,
         "release_sha": release_sha,
         "release_tree": release_tree,
         "image_id": image_id,
         "image_input_signature": image_input_signature,
-        "role_env_sha256": file_digest(env_file),
+        env_key: role_env_binding[env_key],
         "database_mutated": False,
         "services_started": False,
         "secrets_disclosed": False,
     }
-    if any(payload.get(key) != value for key, value in expected.items()):
+    if any(payload.get(key) != value for key, value in expected.items()) or not _same_env_binding(
+        payload.get(env_key), role_env_binding[env_key]
+    ):
         raise BackupError("backup_receipt_identity_mismatch")
     common_keys = {
         "schema", "status", "created_at_utc", "release_sha", "release_tree",
-        "image_id", "image_input_signature", "role_env_sha256", "backup_run_id",
+        "image_id", "image_input_signature", env_key, "backup_run_id",
         "source", "source_after",
         "backup", "restore_smoke", "off_host_copy_required", "database_mutated",
         "services_started", "secrets_disclosed",
@@ -1202,11 +1425,15 @@ def verify_receipt(
     if not re.fullmatch(r"[0-9a-f]{16}", str(payload.get("backup_run_id") or "")):
         raise BackupError("backup_receipt_run_id_invalid")
     journal_path = _journal_path(receipt.parent)
-    journal = _read_journal(journal_path)
+    journal = (
+        _read_journal(journal_path, historical=historical)
+        if _snapshots is None else _snapshots[1]
+    )
     _validate_journal_identity(
         journal,
         root=receipt.parent,
-        env_file=env_file,
+        role_env_binding=role_env_binding,
+        historical=historical,
         receipt=receipt,
         release_sha=release_sha,
         release_tree=release_tree,
@@ -1228,7 +1455,6 @@ def verify_receipt(
     ):
         raise BackupError("backup_receipt_stale")
     status = payload.get("status")
-    postgres = _postgres_path(values)
     if status == "INITIAL_EMPTY":
         if (
             payload.get("source") != {"database_initialized": False}
@@ -1238,8 +1464,6 @@ def verify_receipt(
             or payload.get("off_host_copy_required") is not False
         ):
             raise BackupError("backup_initial_empty_contract_invalid")
-        if not _initial_store_is_empty(postgres):
-            raise BackupError("backup_initial_store_changed")
     elif status == "PASS":
         backup = payload.get("backup")
         restore = payload.get("restore_smoke")
@@ -1327,6 +1551,129 @@ def verify_receipt(
     return payload
 
 
+def verify_receipt(
+    *, env_file: Path, receipt: Path, release_sha: str, release_tree: str,
+    image_id: str, image_input_signature: str, maximum_age_seconds: int | None,
+    now: datetime | None = None, allow_target_identity_mismatch: bool = False,
+) -> dict[str, Any]:
+    # Legacy evidence can be inspected separately, never adopted as a live gate.
+    _refuse_legacy_receipt(receipt)
+    _read_journal(_journal_path(receipt.parent))
+    with BoundRoleEnv(env_file) as bound:
+        values = _validate_release_values(
+            bound.values(), release_sha=release_sha, image_id=image_id,
+            allow_target_identity_mismatch=allow_target_identity_mismatch,
+        )
+        payload = _verify_receipt_evidence(
+            receipt=receipt, role_env_binding={"role_env_binding": bound.binding},
+            release_sha=release_sha, release_tree=release_tree, image_id=image_id,
+            image_input_signature=image_input_signature,
+            maximum_age_seconds=maximum_age_seconds, now=now,
+        )
+        if payload["status"] == "INITIAL_EMPTY" and not _initial_store_is_empty(_postgres_path(values)):
+            raise BackupError("backup_initial_store_changed")
+        return payload
+
+
+@contextmanager
+def _pinned_historical_snapshots(
+    receipt: Path, receipt_sha256: str, journal_sha256: str,
+) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+    """Hash and parse the same bounded bytes; retain both identities to return."""
+    if not HEX64.fullmatch(receipt_sha256) or not HEX64.fullmatch(journal_sha256):
+        raise BackupError("backup_historical_evidence_identity_mismatch")
+    _secure_directory(receipt.parent, create=False)
+    descriptors: list[int] = []
+    files: list[tuple[str, int, dict[str, int]]] = []
+    try:
+        parent = os.open(
+            receipt.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+        descriptors.append(parent)
+        parent_info = os.fstat(parent)
+        if parent_info.st_uid != os.geteuid() or stat.S_IMODE(parent_info.st_mode) != 0o700:
+            raise BackupError("backup_historical_evidence_invalid")
+        parent_identity = _parent_identity(parent_info)
+
+        def check() -> None:
+            if (
+                _parent_identity(os.fstat(parent)) != parent_identity
+                or _parent_identity(receipt.parent.lstat()) != parent_identity
+            ):
+                raise BackupError("backup_historical_evidence_identity_mismatch")
+            for name, descriptor, expected in files:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if (
+                    not stat.S_ISREG(current.st_mode)
+                    or _file_identity(os.fstat(descriptor)) != expected
+                    or _file_identity(current) != expected
+                ):
+                    raise BackupError("backup_historical_evidence_identity_mismatch")
+
+        documents: list[dict[str, Any]] = []
+        for name, expected_sha256 in (
+            (receipt.name, receipt_sha256),
+            (_journal_path(receipt.parent).name, journal_sha256),
+        ):
+            descriptor = os.open(
+                name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                dir_fd=parent,
+            )
+            descriptors.append(descriptor)
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                or not 0 < info.st_size <= MAX_HISTORICAL_DOCUMENT_BYTES
+            ):
+                raise BackupError("backup_historical_evidence_invalid")
+            files.append((name, descriptor, _file_identity(info)))
+            check()
+            raw = os.pread(descriptor, MAX_HISTORICAL_DOCUMENT_BYTES + 1, 0)
+            check()
+            if len(raw) != info.st_size or sha256(raw).hexdigest() != expected_sha256:
+                raise BackupError("backup_historical_evidence_identity_mismatch")
+            try:
+                document = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise BackupError("backup_historical_evidence_invalid") from None
+            if not isinstance(document, dict):
+                raise BackupError("backup_historical_evidence_invalid")
+            documents.append(document)
+        check()
+        yield documents[0], documents[1]
+        check()
+    except OSError:
+        raise BackupError("backup_historical_evidence_identity_mismatch") from None
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def verify_historical_receipt(
+    *, receipt: Path, receipt_sha256: str, journal_sha256: str,
+    release_sha: str, release_tree: str, image_id: str,
+    image_input_signature: str,
+) -> dict[str, Any]:
+    """Verify pinned historical evidence without accepting a current Env claim."""
+    with _pinned_historical_snapshots(receipt, receipt_sha256, journal_sha256) as snapshots:
+        journal = snapshots[1]
+        if journal.get("schema") != LEGACY_JOURNAL_SCHEMA or not HEX64.fullmatch(str(journal.get("role_env_sha256") or "")):
+            raise BackupError("backup_historical_evidence_invalid")
+        payload = _verify_receipt_evidence(
+            receipt=receipt, role_env_binding={"role_env_sha256": journal["role_env_sha256"]},
+            release_sha=release_sha, release_tree=release_tree, image_id=image_id,
+            image_input_signature=image_input_signature, maximum_age_seconds=None,
+            historical=True, _snapshots=snapshots,
+        )
+        return {
+            "status": "PASS", "historical_only": True,
+            "current_environment_verified": False,
+            "eligible_for_new_deployment": False, "receipt": payload,
+            "secrets_disclosed": False,
+        }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1347,6 +1694,14 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--maximum-age-seconds", type=int, default=3600)
             command.add_argument("--allow-stale", action="store_true")
         command.add_argument("--bluegreen-source-env", action="store_true")
+    history = commands.add_parser("verify-historical")
+    history.add_argument("--receipt", type=Path, required=True)
+    history.add_argument("--receipt-sha256", required=True)
+    history.add_argument("--journal-sha256", required=True)
+    history.add_argument("--release-sha", required=True)
+    history.add_argument("--release-tree", required=True)
+    history.add_argument("--image-id", required=True)
+    history.add_argument("--image-input-signature", required=True)
     return parser
 
 
@@ -1361,41 +1716,53 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise BackupError("backup_image_id_invalid")
         if not HEX64.fullmatch(args.image_input_signature):
             raise BackupError("backup_image_signature_invalid")
-        common = {
-            "env_file": args.env_file,
-            "receipt": args.receipt,
-            "release_sha": args.release_sha,
-            "release_tree": args.release_tree,
-            "image_id": args.image_id,
-            "image_input_signature": args.image_input_signature,
-            "allow_target_identity_mismatch": args.bluegreen_source_env,
-        }
-        if args.command == "create":
-            expected_confirm = (
-                HOT_CREATE_CONFIRMATION
-                if args.allow_running_writers
-                else CREATE_CONFIRMATION
+        if args.command == "verify-historical":
+            historical = verify_historical_receipt(
+                receipt=args.receipt, receipt_sha256=args.receipt_sha256,
+                journal_sha256=args.journal_sha256, release_sha=args.release_sha,
+                release_tree=args.release_tree, image_id=args.image_id,
+                image_input_signature=args.image_input_signature,
             )
-            if args.confirm != expected_confirm:
-                raise BackupError("backup_confirmation_invalid")
-            document = create_backup(
-                backup_dir=args.backup_dir,
-                refresh_complete=args.refresh_complete,
-                allow_running_writers=args.allow_running_writers,
-                **common,
-            )
+            document = historical["receipt"]
         else:
-            if not args.allow_stale and not 60 <= args.maximum_age_seconds <= 86400:
-                raise BackupError("backup_maximum_age_invalid")
-            document = verify_receipt(
-                maximum_age_seconds=(None if args.allow_stale else args.maximum_age_seconds),
-                **common,
-            )
+            common = {
+                "env_file": args.env_file,
+                "receipt": args.receipt,
+                "release_sha": args.release_sha,
+                "release_tree": args.release_tree,
+                "image_id": args.image_id,
+                "image_input_signature": args.image_input_signature,
+                "allow_target_identity_mismatch": args.bluegreen_source_env,
+            }
+            if args.command == "create":
+                expected_confirm = (
+                    HOT_CREATE_CONFIRMATION
+                    if args.allow_running_writers
+                    else CREATE_CONFIRMATION
+                )
+                if args.confirm != expected_confirm:
+                    raise BackupError("backup_confirmation_invalid")
+                document = create_backup(
+                    backup_dir=args.backup_dir,
+                    refresh_complete=args.refresh_complete,
+                    allow_running_writers=args.allow_running_writers,
+                    **common,
+                )
+            else:
+                if not args.allow_stale and not 60 <= args.maximum_age_seconds <= 86400:
+                    raise BackupError("backup_maximum_age_invalid")
+                document = verify_receipt(
+                    maximum_age_seconds=(None if args.allow_stale else args.maximum_age_seconds),
+                    **common,
+                )
         artifact = document.get("backup")
         print(
             json.dumps(
                 {
                     "status": "pass",
+                    **({"historical_only": True, "current_environment_verified": False,
+                        "eligible_for_new_deployment": False}
+                       if args.command == "verify-historical" else {}),
                     "backup_status": document["status"],
                     "release_sha": document["release_sha"],
                     "artifact_name": (

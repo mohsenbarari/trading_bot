@@ -10,6 +10,8 @@ from pathlib import Path
 import tempfile
 import subprocess
 import unittest
+import os
+import errno
 from unittest import mock
 
 from scripts import backup_market_pipeline_archive as backup
@@ -99,11 +101,34 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         )
         self.source_guard.start()
         self.directory_guard.start()
+        # Only ambient /tmp lies outside the private fixture boundary. Exercise
+        # real owner/mode and all stable-FD checks for the fixture itself.
+        trusted_parent = backup._trusted_env_parent
+        ambient = Path(tempfile.gettempdir()).stat()
+        def fixture_parent(info):
+            if (info.st_dev, info.st_ino) == (ambient.st_dev, ambient.st_ino):
+                return True
+            return trusted_parent(info)
+        self.parent_guard = mock.patch.object(backup, "_trusted_env_parent", side_effect=fixture_parent)
+        self.parent_guard.start()
+        self.command_guards = [
+            mock.patch.object(backup.subprocess, name, side_effect=AssertionError("unmocked_host_command"))
+            for name in ("run", "Popen")
+        ]
+        for guard in self.command_guards:
+            guard.start()
 
     def tearDown(self) -> None:
+        for guard in reversed(self.command_guards):
+            guard.stop()
+        self.parent_guard.stop()
         self.directory_guard.stop()
         self.source_guard.stop()
         self.temporary.cleanup()
+
+    def _env_binding(self) -> dict[str, object]:
+        with backup.BoundRoleEnv(self.env_file) as bound:
+            return dict(bound.binding)
 
     def _verify(self, **overrides: object) -> dict[str, object]:
         arguments: dict[str, object] = {
@@ -139,7 +164,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "receipt_path": str(self.receipt),
             "artifact_path": str(artifact_path),
             "candidate_path": str(self.backup_dir / f".{artifact_path.name}.pending"),
@@ -152,6 +177,387 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         }
         backup._write_journal(backup._journal_path(self.backup_dir), journal)
         backup._write_receipt(self.receipt, payload)
+
+    def _create_empty(self) -> dict[str, object]:
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            return backup.create_backup(
+                env_file=self.env_file, backup_dir=self.backup_dir,
+                receipt=self.receipt, release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+
+    def _legacy_evidence(self) -> tuple[str, str]:
+        self._create_empty()
+        journal_path = backup._journal_path(self.backup_dir)
+        for path, schema in ((self.receipt, backup.LEGACY_RECEIPT_SCHEMA),
+                             (journal_path, backup.LEGACY_JOURNAL_SCHEMA)):
+            payload = json.loads(path.read_text())
+            payload["schema"] = schema
+            del payload["role_env_binding"]
+            payload["role_env_sha256"] = "1" * 64  # historical stored value only
+            backup._write_receipt(path, payload)
+        return backup.file_digest(self.receipt), backup.file_digest(journal_path)
+
+    def test_create_verify_never_hash_or_reopen_env_path(self) -> None:
+        digest = backup.file_digest
+        open_path = Path.open
+        def guarded_digest(path):
+            self.assertNotEqual(path, self.env_file)
+            return digest(path)
+        def guarded_open(path, *args, **kwargs):
+            self.assertNotEqual(path, self.env_file)
+            return open_path(path, *args, **kwargs)
+        with mock.patch.object(backup, "file_digest", side_effect=guarded_digest), \
+                mock.patch.object(Path, "open", guarded_open):
+            payload = self._create_empty()
+            self.assertEqual(self._verify(), payload)
+        self.assertEqual(payload["schema"], "market_pipeline_backup_restore/1.3")
+        self.assertNotIn("role_env_sha256", payload)
+        self.assertEqual(payload["role_env_binding"], self._env_binding())
+        self.assertEqual(set(payload["role_env_binding"]), {
+            "schema", "path", "device", "inode", "uid", "gid", "mode", "nlink",
+            "size_bytes", "mtime_ns", "ctime_ns", "parents",
+        })
+
+    def test_file_identity_replacement_and_in_place_rewrite_fail_closed(self) -> None:
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                self._create_empty()
+                original = self.env_file.stat()
+                content = self.env_file.read_bytes()
+                if replacement:
+                    candidate = self.root / "replacement"
+                    candidate.write_bytes(content)
+                    candidate.chmod(0o600)
+                    candidate.replace(self.env_file)
+                else:
+                    self.env_file.write_bytes(content)
+                os.utime(self.env_file, ns=(original.st_atime_ns, original.st_mtime_ns))
+                with self.assertRaisesRegex(backup.BackupError, "receipt_identity_mismatch"):
+                    self._verify()
+                self.receipt.unlink()
+                backup._journal_path(self.backup_dir).unlink()
+
+    def test_bound_fd_refuses_path_swaps_symlinks_hardlinks_and_unsafe_modes(self) -> None:
+        with self.assertRaisesRegex(backup.BackupError, "role_env_drifted"):
+            with backup.BoundRoleEnv(self.env_file) as bound:
+                replacement = self.root / "replacement"
+                replacement.write_bytes(self.env_file.read_bytes())
+                replacement.chmod(0o600)
+                replacement.replace(self.env_file)
+                bound.check()
+        link = self.root / "linked-env"
+        os.link(self.env_file, link)
+        with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+            with backup.BoundRoleEnv(self.env_file):
+                self.fail("hardlinked Env accepted")
+        link.unlink()
+        link.symlink_to(self.env_file)
+        with self.assertRaisesRegex(backup.BackupError, "path_invalid"):
+            with backup.BoundRoleEnv(link):
+                self.fail("symlink Env accepted")
+        self.env_file.chmod(0o640)
+        with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+            with backup.BoundRoleEnv(self.env_file):
+                self.fail("nonprivate Env accepted")
+
+    def _assert_open_failure_closes_descriptors(self, path, reason, *, deny_env_open=False):
+        real_open, real_close = os.open, os.close
+        opened, closed = [], []
+        bound = backup.BoundRoleEnv(path)
+        def tracked_open(target, *args, **kwargs):
+            if deny_env_open and target == path.name:
+                raise PermissionError(errno.EACCES, "private permission detail", str(path))
+            descriptor = real_open(target, *args, **kwargs)
+            opened.append(descriptor)
+            return descriptor
+        def tracked_close(descriptor):
+            closed.append(descriptor)
+            return real_close(descriptor)
+        with mock.patch.object(backup.os, "open", side_effect=tracked_open), \
+                mock.patch.object(backup.os, "close", side_effect=tracked_close), \
+                mock.patch.object(backup.os, "pread", side_effect=AssertionError("unexpected_env_read")):
+            with self.assertRaises(backup.BackupError) as failure:
+                with bound:
+                    self.fail("unavailable Env accepted")
+        self.assertEqual(str(failure.exception), reason)
+        self.assertTrue(failure.exception.__suppress_context__)
+        self.assertNotIn(str(path), str(failure.exception))
+        self.assertNotIn("private", str(failure.exception))
+        self.assertEqual(closed, list(reversed(opened)))
+        self.assertEqual(bound.descriptors, [])
+        for descriptor in opened:
+            with self.assertRaises(OSError) as bad_fd:
+                os.fstat(descriptor)
+            self.assertEqual(bad_fd.exception.errno, errno.EBADF)
+        return opened
+
+    def test_real_symlink_loop_is_content_free_and_leaks_no_descriptors(self) -> None:
+        first, second = self.root / "loop-a", self.root / "loop-b"
+        first.symlink_to(second)
+        second.symlink_to(first)
+        self.assertEqual(self._assert_open_failure_closes_descriptors(
+            first, "backup_role_env_path_invalid"
+        ), [])
+
+    def test_real_enoent_closes_all_opened_parent_descriptors(self) -> None:
+        opened = self._assert_open_failure_closes_descriptors(
+            self.root / "missing-env", "backup_role_env_unavailable"
+        )
+        self.assertGreater(len(opened), 0)
+
+    def test_eacces_at_env_open_closes_real_parent_descriptors(self) -> None:
+        # EACCES is injected at the syscall boundary: root can read mode 000.
+        opened = self._assert_open_failure_closes_descriptors(
+            self.env_file, "backup_role_env_unavailable", deny_env_open=True
+        )
+        self.assertGreater(len(opened), 0)
+
+    def test_canonicalization_runtimeerror_mapping_does_not_mask_logic_errors(self) -> None:
+        with mock.patch.object(backup, "_trusted_env_parent", side_effect=RuntimeError("logic_failure")):
+            with self.assertRaisesRegex(RuntimeError, "logic_failure") as failure:
+                with backup.BoundRoleEnv(self.env_file):
+                    self.fail("logic error swallowed")
+        self.assertNotIsInstance(failure.exception, backup.BackupError)
+
+    def test_current_binding_rejects_json_boolean_for_integer_identity(self) -> None:
+        self._create_empty()
+        payload = json.loads(self.receipt.read_text())
+        # nlink=1 must not compare equal to True in a persisted contract.
+        payload["role_env_binding"]["nlink"] = True
+        backup._write_receipt(self.receipt, payload)
+        with self.assertRaisesRegex(backup.BackupError, "receipt_identity_mismatch"):
+            self._verify()
+
+    def test_bound_env_refuses_special_files_and_oversized_inputs_without_read(self) -> None:
+        special = self.root / "fifo-env"
+        os.mkfifo(special, 0o600)
+        with mock.patch.object(backup.os, "pread", side_effect=AssertionError("special_read")):
+            with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+                with backup.BoundRoleEnv(special):
+                    self.fail("FIFO Env accepted")
+        self.env_file.write_bytes(b"X" * (64 * 1024 + 1))
+        with mock.patch.object(backup.os, "pread", side_effect=AssertionError("oversized_read")):
+            with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+                with backup.BoundRoleEnv(self.env_file):
+                    self.fail("oversized Env accepted")
+
+    def test_trusted_0755_parent_allowed_but_writable_or_replaced_parent_refused(self) -> None:
+        parent = self.root / "env-parent"
+        parent.mkdir(mode=0o755)
+        env_file = parent / "role.env"
+        _write_env(env_file, self.values)
+        with backup.BoundRoleEnv(env_file) as bound:
+            (parent / "ordinary-sibling").touch()
+            bound.check()  # parent mtime/ctime are intentionally not a binding
+        parent.chmod(0o775)
+        with self.assertRaisesRegex(backup.BackupError, "parent_invalid"):
+            with backup.BoundRoleEnv(env_file):
+                self.fail("writable parent accepted")
+        parent.chmod(0o755)
+        with self.assertRaisesRegex(backup.BackupError, "parent_drifted"):
+            with backup.BoundRoleEnv(env_file) as bound:
+                parent.rename(self.root / "old-parent")
+                parent.mkdir(mode=0o755)
+                bound.check()
+
+    def test_drift_during_external_work_never_publishes_complete_receipt(self) -> None:
+        def drift(project):
+            self.env_file.write_bytes(self.env_file.read_bytes())
+            return []
+        with mock.patch.object(backup, "_running_project_services", side_effect=drift):
+            with self.assertRaisesRegex(backup.BackupError, "role_env_drifted"):
+                backup.create_backup(
+                    env_file=self.env_file, backup_dir=self.backup_dir,
+                    receipt=self.receipt, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertFalse(self.receipt.exists())
+        self.assertFalse(backup._journal_path(self.backup_dir).exists())
+
+    def test_legacy_create_verify_refuse_before_any_env_open_or_hash(self) -> None:
+        self._legacy_evidence()
+        self.env_file.unlink()
+        for operation in (self._create_empty, self._verify):
+            with self.subTest(operation=operation.__name__), \
+                    mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")), \
+                    mock.patch.object(backup, "file_digest", side_effect=AssertionError("content_hashed")):
+                with self.assertRaisesRegex(backup.BackupError, "binding_migration_required"):
+                    operation()
+        # A legacy journal alone also refuses before Env access, even for hot
+        # empty PREPARED transactions; no legacy transaction is auto-adopted.
+        self.receipt.unlink()
+        journal_path = backup._journal_path(self.backup_dir)
+        journal = json.loads(journal_path.read_text())
+        journal["status"] = "PREPARED"
+        backup._write_journal(journal_path, journal)
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "binding_migration_required"):
+                self._create_empty()
+        self.assertTrue(journal_path.exists())
+
+    def test_historical_verifier_never_opens_env_and_cannot_prove_current_state(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        self.env_file.unlink()
+        arguments = dict(
+            receipt=self.receipt, receipt_sha256=receipt_sha,
+            journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+        )
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            result = backup.verify_historical_receipt(**arguments)
+        self.assertTrue(result["historical_only"])
+        self.assertFalse(result["current_environment_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
+        with self.assertRaisesRegex(backup.BackupError, "historical_evidence_identity_mismatch"):
+            backup.verify_historical_receipt(**{**arguments, "journal_sha256": "0" * 64})
+        payload = json.loads(self.receipt.read_text())
+        payload["role_env_sha256"] = "2" * 64
+        backup._write_receipt(self.receipt, payload)
+        with self.assertRaisesRegex(backup.BackupError, "receipt_identity_mismatch"):
+            backup.verify_historical_receipt(**{**arguments, "receipt_sha256": backup.file_digest(self.receipt)})
+
+    def test_historical_pins_and_parses_one_snapshot_under_real_digest_interleaving(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        journal_path = backup._journal_path(self.backup_dir)
+        originals = {path: path.read_bytes() for path in (self.receipt, journal_path)}
+        created_at = json.loads(originals[self.receipt])["created_at_utc"]
+        real_digest = backup.file_digest
+        observed = []
+        def raced_digest(path):
+            digest = real_digest(path)  # never return a fabricated digest
+            observed.append(path)
+            if len(observed) == 2:
+                for target, raw in originals.items():
+                    payload = json.loads(raw)
+                    payload["created_at_utc"] = backup.utc_text(backup.utc_now() - timedelta(seconds=5))
+                    target.write_text(json.dumps(payload))
+            elif len(observed) == 3:
+                for target, raw in originals.items():
+                    target.write_bytes(raw)
+                digest = real_digest(path)
+            return digest
+        with mock.patch.object(backup, "file_digest", side_effect=raced_digest), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            result = backup.verify_historical_receipt(
+                receipt=self.receipt, receipt_sha256=receipt_sha,
+                journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+        self.assertEqual(result["receipt"]["created_at_utc"], created_at)
+        # Control pins use their parsed buffers, never an independent digest
+        # open. The prior implementation returned the raced, unpinned payload.
+        self.assertEqual(observed, [])
+        self.assertEqual(real_digest(self.receipt), receipt_sha)
+        self.assertEqual(real_digest(journal_path), journal_sha)
+
+    def test_historical_read_rewrite_and_restore_is_rejected_by_retained_fd(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        original = self.receipt.read_bytes()
+        identity = self.receipt.stat()
+        real_pread = os.pread
+        mutated = []
+        def raced_pread(descriptor, size, offset):
+            raw = real_pread(descriptor, size, offset)
+            info = os.fstat(descriptor)
+            if not mutated and (info.st_dev, info.st_ino) == (identity.st_dev, identity.st_ino):
+                payload = json.loads(original)
+                payload["created_at_utc"] = backup.utc_text(backup.utc_now() - timedelta(seconds=5))
+                self.receipt.write_text(json.dumps(payload))
+                self.receipt.write_bytes(original)
+                os.utime(self.receipt, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+                mutated.append(True)
+            return raw
+        with mock.patch.object(backup.os, "pread", side_effect=raced_pread), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "historical_evidence_identity_mismatch"):
+                backup.verify_historical_receipt(
+                    receipt=self.receipt, receipt_sha256=receipt_sha,
+                    journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertEqual(mutated, [True])
+        self.assertEqual(backup.file_digest(self.receipt), receipt_sha)
+
+    def test_historical_controls_stay_bound_until_validation_returns(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        journal_path = backup._journal_path(self.backup_dir)
+        originals = {path: path.read_bytes() for path in (self.receipt, journal_path)}
+        real_evidence = backup._verify_receipt_evidence
+        validated = []
+        def raced_evidence(**arguments):
+            payload = real_evidence(**arguments)
+            validated.append(True)
+            for target, raw in originals.items():
+                changed = json.loads(raw)
+                changed["created_at_utc"] = backup.utc_text(backup.utc_now() - timedelta(seconds=5))
+                target.write_text(json.dumps(changed))
+                target.write_bytes(raw)
+            return payload
+        with mock.patch.object(backup, "_verify_receipt_evidence", side_effect=raced_evidence), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "historical_evidence_identity_mismatch"):
+                backup.verify_historical_receipt(
+                    receipt=self.receipt, receipt_sha256=receipt_sha,
+                    journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertEqual(validated, [True])
+        self.assertEqual(backup.file_digest(self.receipt), receipt_sha)
+        self.assertEqual(backup.file_digest(journal_path), journal_sha)
+
+    def test_historical_control_size_is_bounded_before_read_and_fds_close(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        os.truncate(self.receipt, backup.MAX_HISTORICAL_DOCUMENT_BYTES + 1)
+        opened, closed = [], []
+        real_open, real_close = os.open, os.close
+        def tracked_open(*args, **kwargs):
+            descriptor = real_open(*args, **kwargs)
+            opened.append(descriptor)
+            return descriptor
+        def tracked_close(descriptor):
+            closed.append(descriptor)
+            return real_close(descriptor)
+        with mock.patch.object(backup.os, "open", side_effect=tracked_open), \
+                mock.patch.object(backup.os, "close", side_effect=tracked_close), \
+                mock.patch.object(backup.os, "pread", side_effect=AssertionError("oversized_control_read")):
+            with self.assertRaisesRegex(backup.BackupError, "historical_evidence_invalid"):
+                backup.verify_historical_receipt(
+                    receipt=self.receipt, receipt_sha256=receipt_sha,
+                    journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertEqual(closed, list(reversed(opened)))
+        self.assertGreater(len(opened), 1)
+        for descriptor in opened:
+            with self.assertRaises(OSError) as bad_fd:
+                os.fstat(descriptor)
+            self.assertEqual(bad_fd.exception.errno, errno.EBADF)
+
+    def test_historical_cli_requires_no_env_and_reports_no_deployment_eligibility(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        self.env_file.unlink()
+        output = io.StringIO()
+        with mock.patch.object(backup.sys, "stdout", output), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            status = backup.main([
+                "verify-historical", "--receipt", str(self.receipt),
+                "--receipt-sha256", receipt_sha, "--journal-sha256", journal_sha,
+                "--release-sha", RELEASE_SHA, "--release-tree", RELEASE_TREE,
+                "--image-id", IMAGE_ID, "--image-input-signature", IMAGE_SIGNATURE,
+            ])
+        self.assertEqual(status, 0)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["historical_only"])
+        self.assertFalse(result["current_environment_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
 
     def test_initial_empty_store_receipt_is_non_mutating_and_fresh(self) -> None:
         with mock.patch.object(backup, "_running_project_services", return_value=[]):
@@ -217,7 +623,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "source": {
                 "container_id": "e" * 64,
                 "database": "market_archive",
@@ -269,7 +675,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "source": {
                 "container_id": "e" * 64,
                 "database": "market_archive",
@@ -740,7 +1146,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "source": source,
             "source_after": source_after,
             "backup": {

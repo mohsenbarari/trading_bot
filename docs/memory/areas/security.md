@@ -29,9 +29,10 @@
 - Tests deny unmocked host/network commands; use named mocks/nonroot fixtures.
   Stream caps differ from artifact budgets. Backup roles bind actual artifacts,
   not geography: Native=foreign/trading_bot, Web=iran/current.
-- Backup probe rejects source image identity. Archive code still hashes Env:
-  no CREATE/VERIFY until reviewed non-content binding; no diagnostic Env copies
-  or relaxed image gate. util-linux compile/ABI/variants/source tests passed;
-  installer DAC capsule fix still needs actual install/scan. Reuse bound artifacts.
+- Backup source still rejects image identity. Archive metadata binding is source-
+  tested: retain Env FDs; hash and parse pinned controls from the same bounded
+  FD buffer, never separate pathname reads. Legacy evidence cannot pass a new
+  gate. Renderer/HOT3 provisioning remains open; no diagnostic Env copies or
+  relaxed image checks. util-linux build/ABI/source passed; install/scan remains.
 - Keep STOP until activated/verified security, then monitor30 accepted complete
   clean units. Health polls never count; preserve failures/counters without waiver.

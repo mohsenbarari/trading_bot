@@ -146,6 +146,11 @@ def parse_env(path: Path, *, secure_input: bool) -> dict[str, str]:
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise ReleaseContractError("env_read_failed") from exc
+    return parse_env_text(raw)
+
+
+def parse_env_text(raw: str) -> dict[str, str]:
+    """Apply the normal Env grammar to already bounded, privately read text."""
     values: dict[str, str] = {}
     for number, line in enumerate(raw.splitlines(), start=1):
         stripped = line.strip()

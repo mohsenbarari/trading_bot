@@ -105,3 +105,87 @@ instruction forbids using that path unchanged. Prepare a reviewed non-content
 identity binding and appropriate contract tests before actual CREATE/VERIFY;
 do not silently weaken immutable image validation, rewrite the original plan,
 or make a diagnostic copy of the protected Env to work around either blocker.
+
+## Source-only successor binding contract
+
+The archive tool now creates receipt `market_pipeline_backup_restore/1.3` and
+journal `market_pipeline_backup_journal/1.1`. Their `role_env_binding` records
+only canonical path, device, inode, owner/group, mode, link count, size and
+nanosecond modification/change times. It also records the opened parent chain's
+path/device/inode/owner/group/mode. No Env content digest is created, compared,
+printed or copied. The normal grammar and source/image/lane validators still
+consume the bounded Env in memory, directly from one retained file descriptor.
+They do not reopen the Env by path.
+
+Every parent must be canonical, owned by root or the effective user and not
+writable by group/others. A safe `0755` parent is accepted; the Env itself must
+remain effective-user owned, regular, mode `0600`, singly linked and at most
+64 KiB. The file and directory descriptors stay open through the operation.
+File metadata, parent identities and path-to-inode bindings are rechecked around
+transaction work, before journal/receipt publication, and before successful
+return. Parent modification/change times are deliberately excluded because
+creating backup siblings changes them. Replacing a parent/file, changing modes,
+adding a hard link, or rewriting the file even while restoring its old mtime
+refuses the transaction. Existing source database, artifact digest, restore
+inventory, immutable release/image and authority gates retain their contracts.
+
+Current `create`/`verify` reject historical v1.2/v1.0 evidence with
+`backup_role_env_binding_migration_required` before opening the protected Env.
+They never upgrade, rewrite or resume an old journal as a metadata-bound one.
+The separate `verify-historical` command requires explicit receipt and journal
+SHA-256 pins plus the original release/image identity. It checks their old
+stored Env digest agreement and the ordinary artifact/source/restore evidence
+without any Env argument or read. Its result always includes
+`historical_only: true`, `current_environment_verified: false` and
+`eligible_for_new_deployment: false`. Historical `INITIAL_EMPTY` evidence makes
+no present-day empty-store claim.
+
+Historical control documents are each capped at 16 MiB, independently of the
+PostgreSQL artifact size. Each document is hashed and parsed from the same
+bounded buffer read through one retained no-follow descriptor. The containing
+directory and both file descriptors stay open through validation and successful
+return; parent/path/inode and complete file metadata, including ctime, are
+rechecked. Rewriting and restoring public controls between separate hash and
+JSON reads cannot produce a successful pinned-evidence claim.
+
+Existing v1.2-only deploy/controller gates remain unchanged and reject v1.3.
+Old public script pins and CREATE02 remain unchanged. A new HOT3 consumer and
+operational packet require separate review and fresh source pins; this source
+change authorizes no backup, renderer, service, fence or deadline operation.
+The existing hot CREATE window allows row drift, while the ordinary VERIFY
+contract still requires exact source/after/restore row inventories. A future
+HOT3 acceptance contract must explicitly address that difference without
+weakening database identity, schema, archive integrity or restore checks.
+
+## Legitimate source image provisioning remains outstanding
+
+The last actual normal source verdict remains
+`backup_source_image_identity_invalid`. The metadata-binding change does not
+repair that verdict or accept a tag where an immutable `sha256:` image identity
+is required. Do not edit a diagnostic copy, substitute a candidate identity for
+the running source, or infer the private Env's contents from this reason code.
+
+The next provisioning design must use the authoritative managed topology
+sources and their owner, then bind the actual source daemon's immutable image
+ID, release SHA/tree and image-input provenance to that managed configuration.
+The current retained runtime and its capture `6a16...`/`f79...` identity must be
+proved afresh; target release identity remains a separate binding. Preserve the
+observed coherent source lane and project/data roots. Use the established
+Shadow or PRIMARY renderer appropriate to that authoritative lane only after
+its contract has been reviewed; regeneration must not change product authority
+or create another capture/session owner.
+
+The existing Shadow and PRIMARY render/check/verify implementations also hash
+source/output Env contents. Consequently neither is approved to run unchanged
+under the current no-content-hashing instruction. First review a successor
+managed rendering and verification contract with non-content file identities,
+then provision atomically at the authoritative managed destination through its
+normal owner. Existing authorization covers necessary reviewed security work;
+it does not require another routine permission request. Retain the original protected Env and evidence; no ad hoc export,
+copy, transformation or hash of it is part of this plan. Rerun only a freshly
+pinned normal validator after that reviewed managed provisioning. A real
+HOT3 still needs its own finite operation deadline, current runtime proof and the
+completed closure SHA
+`712af9788ef73e3934252d7b7e50bd0681bbfea13c25088da59a123efabb5dc0`.
+An operation that actually stops production services is separate and must fit
+a valid user-approved downtime window; a hot backup does not grant that window.
