@@ -631,22 +631,10 @@ def checkpoint(plan, digest, phase):
 
 
 def verify_private_inputs(plan):
-    # Existing reviewed tools validate their own private inputs internally.
-    # Only a fixed success marker is returned; no value/env/key is emitted.
-    options = plan['market_backup']
-    code = ('import runpy,sys;from pathlib import Path;'
-            'm=runpy.run_path(sys.argv[1],run_name="_maintenance_validation");'
-            'm["validate_release_env"](Path(sys.argv[2]),release_sha=sys.argv[3],'
-            'image_id=sys.argv[4],allow_target_identity_mismatch=True);print("validated")')
-    require(bounded(['/usr/bin/python3', '-I', '-B', '-c', code,
-                     str(PROJECT / 'scripts/backup_market_pipeline_archive.py'), options['env_file'],
-                     options['release_sha'], options['image_id']], timeout=30) == 'validated', 'market_private_input_invalid')
-    code = ('import runpy,sys;from pathlib import Path;'
-            'm=runpy.run_path(sys.argv[1],run_name="_maintenance_validation");'
-            'm["_master_key"](Path(sys.argv[2]));print("validated")')
-    require(bounded(['/usr/bin/python3', '-I', '-B', '-c', code,
-                     str(PROJECT / 'scripts/crypt_market_pipeline_backup.py'), plan['backup_key_file']], timeout=30)
-            == 'validated', 'backup_key_invalid')
+    # invariant_contract already checks private paths/ownership/modes/identity.
+    # Never open env/key contents merely for a diagnostic preflight. The normal
+    # approved create/verify/encrypt operations validate their own inputs when
+    # actually performed; invalid input then fails honestly in its owned phase.
     restore_image = 'postgres:15-alpine@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b'
     require(re.fullmatch('sha256:[0-9a-f]{64}', B.command(['/usr/bin/docker', 'image', 'inspect', '--format', '{{.Id}}', restore_image])), 'market_restore_image_not_cached')
 

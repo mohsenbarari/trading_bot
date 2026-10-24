@@ -188,6 +188,18 @@ class FiniteWebEngineTests(unittest.TestCase):
             with self.assertRaises(guard.P.Refusal): guard.run({}, Path('/private/manifest'), 'a' * 64, True)
             opened.assert_not_called()
 
+    def test_preflight_never_reads_env_or_key_contents_or_calls_diagnostic_validators(self):
+        with patch.object(guard.B, 'command', return_value='sha256:' + 'a' * 64) as metadata, \
+                patch.object(guard, 'bounded', side_effect=AssertionError('no diagnostic subprocess')) as diagnostic, \
+                patch.object(guard.B, 'read', side_effect=AssertionError('no private content read')) as reader, \
+                patch.object(guard.os, 'open', side_effect=AssertionError('no content open')) as opened:
+            guard.verify_private_inputs({'market_backup': {'env_file': '/private/do-not-read'}, 'backup_key_file': '/private/do-not-read-key'})
+        reader.assert_not_called(); opened.assert_not_called(); diagnostic.assert_not_called()
+        self.assertEqual(metadata.call_count, 1)
+        self.assertEqual(metadata.call_args.args[0][:3], ['/usr/bin/docker', 'image', 'inspect'])
+        source = (HERE / 'web_engine_controller.py').read_text()
+        self.assertNotIn('runpy.run_path', source); self.assertNotIn('_master_key', source)
+
     def test_application_backup_selects_actual_web_iran_current_and_requires_its_four_offhost_hashes(self):
         native_files = [{'sha256': f'{n:064x}'} for n in range(1, 5)]
         web_files = [{'sha256': f'{n:064x}'} for n in range(5, 9)]

@@ -88,6 +88,17 @@ enablement intents, 8 datastores/probes, immutable public source files and exact
 old/new offline debs. It refers to the actual existing application backup and
 off-host-copy receipts. No placeholder Market/off-host `PASS` receipt is used.
 
+Actual combined application evidence identifies Native's `foreign` role as
+project `trading_bot`, but Web's `iran` role as project `current`. These real
+identities are preserved, not relabeled. Web maintenance requires the four
+**Web/iran/current** backup digests off-host; the older receipt covering only
+Native/foreign backups does not satisfy this gate. The finite
+`web_application_backup_offhost.yml` verifies the original combined receipt and
+four exact existing Web files, fetches only those four into a new private Native
+directory, verifies size/SHA256 and fsync, then exclusively publishes
+`security-web-engine-20261024-app-offhost.json`. It never overwrites the old
+combined or old off-host receipt and never starts a database or changes runtime.
+
 The backup tool's explicit `--bluegreen-source-env` tuple correlates the backup
 journal with a real immutable Market image for **host-maintenance correlation**;
 it is not a claim about a future activation target, that the current processor
@@ -199,6 +210,12 @@ security gates and the separately requested clean-unit acceptance are complete.
   actual existing Market role metadata and release/image binding, encryption
   key managed by the existing tool, and verified temporary SSH lane valid for
   the whole window. Do not invent receipts or change legacy authority.
+- Preflight checks private paths/metadata, not env/key contents. It never runs a
+  custom `runpy` validator or reads a key merely to diagnose validity. The normal
+  approved backup create/verify and encryption operations validate internally.
+  Invalid role data can therefore fail in `writers_quiesced`, which deliberately
+  has no automatic restore; retain its owned evidence/fences and use reviewed
+  recovery. This is not a claim of failure-free prevalidation or full automation.
 - Close the unrelated read-only image scanner's Docker socket tunnel before
   maintenance. Root owns that coordination; authors never execute this tool.
 - Native default full guard must pass before explicit apply. Observe and retain
@@ -240,7 +257,16 @@ starts only when that 35-minute margin remains. Immediately before recording
 that a 12 GB backup or vendor migration will finish in the window.
 
 If the first child fails or time is insufficient **before** `installing`, only
-the original still-fenced parent may attempt the narrow abort/restore path. It
+the original still-fenced parent may consider the narrow abort/restore path. It
+is admitted only from `reserved`, `backing_up` or `backup_ready`, with no pending
+jobs on all 10 captured native targets and three engine units; both backup phases
+also require all 13 targets inactive/failed. Intermediate quiescing, Market dump,
+database-stop and engine-stop phases require separate recovery and retain fences.
+This distinction is necessary because a daemon-side Docker stop can outlive its
+client; a cgroup kill or fixed sleep is not proof that accepted daemon jobs ended.
+See the [upstream stop implementation](https://github.com/moby/moby/blob/docker-v29.1.3/daemon/stop.go)
+and [kill implementation](https://github.com/moby/moby/blob/docker-v29.1.3/daemon/kill.go).
+The admitted abort/restore path
 requires the exact old four package versions, unchanged source/marker/control
 proof, unchanged 27 IDs/images/mounts/networks and compatible original/no restart
 policies. It restarts the old engine, proves the original containerd store and

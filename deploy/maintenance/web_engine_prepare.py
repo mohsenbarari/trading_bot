@@ -42,7 +42,7 @@ PUBLIC_SOURCES = (
     'deploy/maintenance/web_engine_inventory.yml',
 )
 EMPTY_INIT = 'scripts/__init__.py'  # Generated EMPTY only in this private bundle.
-CONTROLLER_SHA = '0b061d21d0b1a2afe592922be2fa1af111b927609f09ad4c7c0d43a6b959b8ee'
+CONTROLLER_SHA = '41a09538af34528213a7b93ec883934521381c676b654bea38c700ccba451a14'
 OLD_URLS = {
     'docker.io': 'https://archive.ubuntu.com/ubuntu/pool/universe/d/docker.io-app/docker.io_29.1.3-0ubuntu4.1_amd64.deb',
     'containerd': 'https://security.ubuntu.com/ubuntu/pool/main/c/containerd-app/containerd_2.2.2-0ubuntu1.1_amd64.deb',
