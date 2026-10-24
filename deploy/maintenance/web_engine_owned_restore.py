@@ -272,9 +272,22 @@ def main():
     print(json.dumps(execute(C, args.action), sort_keys=True))
 
 
+def refusal(error):
+    # Every recovery guard uses a constant metadata-only code. Never render a
+    # traceback, arbitrary exception text, private path or command output.
+    code = str(error)
+    if not isinstance(error, RuntimeError) or not re.fullmatch(r'[a-z0-9_]{1,96}', code):
+        code = 'owned_web_restore_refused'
+    result = {'status': 'refused', 'code': code, 'completion_unverified': True}
+    name = getattr(error, 'get_dbus_name', lambda: '')()
+    if isinstance(name, str) and re.fullmatch(r'org\.freedesktop\.[A-Za-z0-9_.]{1,100}', name):
+        result['dbus_error'] = name
+    return result
+
+
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
-        print('{"status":"refused","code":"owned_web_restore_refused","completion_unverified":true}')
+    except Exception as error:
+        print(json.dumps(refusal(error), sort_keys=True))
         raise SystemExit(1)

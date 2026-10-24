@@ -24,6 +24,16 @@ class OwnedRestore(unittest.TestCase):
             self.stack.enter_context(patch(name, side_effect=AssertionError('no host/network')))
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='.owned-restore-fixture-', dir=ROOT)))
 
+    def test_refusal_reports_static_guard_codes_but_never_arbitrary_exception_text(self):
+        self.assertEqual(M.refusal(RuntimeError('unit_job_pending'))['code'], 'unit_job_pending')
+        for error in (ValueError('/private/never-print'), RuntimeError('private value with spaces'),
+                      RuntimeError('x' * 97), OSError('never-print')):
+            result = M.refusal(error)
+            self.assertEqual(result, {'status': 'refused', 'code': 'owned_web_restore_refused', 'completion_unverified': True})
+        error = RuntimeError('metadata_failed')
+        error.get_dbus_name = lambda: 'org.freedesktop.systemd1.NoSuchUnit'
+        self.assertEqual(M.refusal(error)['dbus_error'], 'org.freedesktop.systemd1.NoSuchUnit')
+
     def test_restore_starts_only_eighteen_original_writers_then_policies_and_timers_last(self):
         events = []
         rows = [{'id': str(i), 'running': i < 26, 'restart_policy': {'Name': 'unless-stopped', 'MaximumRetryCount': 0}}
