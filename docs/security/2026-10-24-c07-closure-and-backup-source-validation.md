@@ -438,3 +438,22 @@ reconciliation, receiver receive/separate verification, and final source/control
 checks pass. Capacity or durability refusal remains unaccepted; this operation
 has no ObjectStorage fallback, production service stop, deployment eligibility,
 engine upgrade, reboot or security acceptance.
+
+HOT3 attempt01 from `f384a1b8` refused before intent publication. Its stage holds
+only public source; no work directory, watchdog, dump or restore was created.
+Read-only diagnosis proved all preceding source/control/transport checks passed,
+then found the public plan's PostgreSQL probes have exactly `database`, `id`,
+`kind`, `user` fields. The caller had incorrectly indexed a nonexistent `name`.
+The corrected producer selects and validates that exact probe shape by immutable
+container ID. A sanitized actual-schema fixture exercises this pre-intent path.
+
+Attempt01 evidence is retained untouched. Continuation uses fresh stage/work
+paths ending in `security-web-market-hot3-20261024-01-attempt02`, an explicit
+intent `attempt_id` and a fresh nonce, while preserving the same operation and
+transport receipt. The original deadline `2026-10-24T20:08:55.730262Z` is required
+in source and wrapper; this continuation extends no authority. Before each
+preflight boundary, an exclusive public checkpoint records only its fixed phase
+name. A refusal emits only a closed reason token from an exact trusted helper
+exception type, or a fixed safe error category, plus that phase and verdict
+booleans. Exception text, private paths/values and tracebacks are not emitted;
+failure evidence is written only to the producer's own fresh stage.

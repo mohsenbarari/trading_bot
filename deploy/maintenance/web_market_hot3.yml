@@ -1,5 +1,5 @@
 ---
-- name: Create one bounded hot backup and verified cipher-only offhost copy
+- name: Continue HOT3 in fresh attempt02 with the original finite deadline
   hosts: web_engine
   gather_facts: false
   any_errors_fatal: true
@@ -25,7 +25,7 @@
       - --own-source
       - '{{ hot3_source }}'
       - --own-sha256
-      - bea39b28b3d58cbf3b02831509413f5b187dc30e0411072cfbd0fcefd1bdb2f7
+      - d2cbb79e9bd3bddee493fc5a6f139a7fbddfef3538b4f8f2b2b33db4b9137806
       - --web-engine-preflight
       - "{{ lookup('ansible.builtin.file', playbook_dir + '/web_engine_preflight.py', rstrip=false) }}"
       - --web-market-managed-config
@@ -47,10 +47,10 @@
           - groups['all'] == ['web_engine']
           - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
           - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
-          - hot3_deadline_utc is defined
+          - hot3_deadline_utc == '2026-10-24T20:08:55.730262Z'
           - hot3_nonce is defined and hot3_nonce is match('^[a-f0-9]{32}$')
           - hot3_transport_sha256 == '539910168632df009a175f373693bb441d499292fd24413bdca9328141f394e0'
-          - hot3_source | hash('sha256') == 'bea39b28b3d58cbf3b02831509413f5b187dc30e0411072cfbd0fcefd1bdb2f7'
+          - hot3_source | hash('sha256') == 'd2cbb79e9bd3bddee493fc5a6f139a7fbddfef3538b4f8f2b2b33db4b9137806'
     - name: Run the reviewed finite producer under retained marker and independent watchdog scopes
       # The producer stages only public source before taking M. Its watchdog
       # survives this client and owns only nonce-labelled restores/backends.

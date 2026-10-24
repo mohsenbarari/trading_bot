@@ -21,14 +21,24 @@ import time
 from types import ModuleType
 
 OP = 'security-web-market-hot3-20261024-01'
-STAGE = Path('/root/.local') / OP
-WORK = Path('/srv/trading-bot') / OP
+ATTEMPT_ID = OP+'-attempt02'
+OPERATION_DEADLINE = '2026-10-24T20:08:55.730262Z'
+STAGE = Path('/root/.local') / ATTEMPT_ID
+WORK = Path('/srv/trading-bot') / ATTEMPT_ID
 MANAGED = Path('/srv/trading-bot/market-pipeline-releases/security-backup-managed-20261024-04')
 TRANSPORT = Path('/root/.ssh/security-web-market-hot3-20261024-01/transport.json')
 MANAGED_RECEIPT_SHA = '305de6c1fc3a1997e53f91c689f83d038c37383d27b15d6d4571281dfb233e9c'
 MANAGED_EVIDENCE_SHA = '2e13ad0997eacd9ec8cf1f6cd6dc22494b3f81b0216a4ec684559f28e4520f3c'
 RESERVE, WAL_TEMP, CIPHER_ALLOWANCE = 8 * 1024**3, 4 * 1024**3, 4096
 CLEANUP_SECONDS = 120
+CURRENT_PHASE = 'cli_admission'
+OWNED_STAGE = None
+TRUSTED_ERRORS = ()
+PREFLIGHT_PHASES = frozenset(('cli_admission', 'source_validation', 'fresh_namespace', 'public_staging',
+    'controls', 'machine_identity', 'marker_open', 'marker_lock', 'marker_validation', 'control_boundaries',
+    'public_profile', 'managed_receipt', 'database_binding', 'transport_binding', 'native_capacity',
+    'intent_publish', 'native_recheck', 'work_directory', 'watchdog_arm', 'worker_launch', 'worker_wait',
+    'cleanup_wait', 'complete_publish'))
 PINS = {
     'web_engine_preflight.py': 'cbadbc1085dd5e351510ed719a9e6c779523c4d644f53198d4f9c0c1d7750679',
     'web_market_managed_config.py': 'b9bedbe70b449e1d21e3c6472c414cd69f8c8c11c5cafafc46b0b887fc886fba',
@@ -42,6 +52,37 @@ PINS = {
 
 class Refusal(RuntimeError):
     pass
+
+
+def safe_reason(error):
+    if type(error) in (Refusal, *TRUSTED_ERRORS) and len(error.args) == 1:
+        code = error.args[0]
+        if type(code) is str and re.fullmatch('[a-z][a-z0-9_]{0,79}', code): return code
+    for kind, code in ((OSError, 'hot3_unexpected_os_error'), (KeyError, 'hot3_unexpected_key_error'),
+            (TypeError, 'hot3_unexpected_type_error'), (ValueError, 'hot3_unexpected_value_error'),
+            (subprocess.TimeoutExpired, 'hot3_unexpected_timeout'), (KeyboardInterrupt, 'hot3_interrupted')):
+        if isinstance(error, kind): return code
+    return 'hot3_unexpected_exception'
+
+
+def preflight_step(name, *, persist=False):
+    global CURRENT_PHASE
+    require(name in PREFLIGHT_PHASES, 'hot3_unknown_preflight_phase')
+    CURRENT_PHASE = name
+    if persist:
+        write_json(STAGE/('preflight-'+name+'.json'), {'schema':'security_web_market_hot3_preflight/1',
+            'operation_id':OP,'attempt_id':ATTEMPT_ID,'phase':name,'status':'entered'})
+
+
+def failure_result(error):
+    payload = {'status':'FAIL','reason_code':safe_reason(error),'phase':CURRENT_PHASE,
+        'security_accepted':False,'deployment_eligible':False,'production_services_changed':False}
+    try:
+        require(OWNED_STAGE is not None and identity(STAGE.lstat())[:5] == OWNED_STAGE, 'hot3_foreign_stage')
+        write_json(STAGE/'preflight-failure.json', payload)
+    except BaseException:
+        pass
+    return payload
 
 
 def require(ok, code):
@@ -144,6 +185,7 @@ def native(arguments, *, seconds=10, maximum=65536, stdin=None):
 
 
 def load_modules(sources):
+    global TRUSTED_ERRORS
     require(set(sources) == set(PINS), 'hot3_recipe_inventory')
     for name, raw in sources.items():
         require(0 < len(raw) <= 131072 and sha256(raw).hexdigest() == PINS[name], 'hot3_recipe_changed')
@@ -157,6 +199,10 @@ def load_modules(sources):
         module = ModuleType(fullname); module.__file__ = str(STAGE/'source'/name); module.__package__ = 'scripts'
         sys.modules[fullname] = module; exec(compile(sources[name], str(STAGE/'source'/name), 'exec'), module.__dict__)
         modules[name] = module
+    TRUSTED_ERRORS = tuple(getattr(modules[name], kind) for name, kind in (
+        ('web_engine_preflight.py','Refusal'), ('web_market_managed_config.py','Refusal'),
+        ('backup_market_pipeline_archive.py','BackupError'), ('prepare_market_pipeline_primary_release.py','PrimaryReleaseError'),
+        ('prepare_market_pipeline_release.py','ReleaseContractError'), ('crypt_market_pipeline_backup.py','BackupCryptError')))
     return modules
 
 
@@ -184,6 +230,26 @@ def check_marker(P, H, fd, expected=None):
 def resource_binding(nonce):
     return {'container': 'market_pipeline_restore_' + nonce, 'volume': 'market_pipeline_restore_' + nonce + '_data',
             'label': 'market-pipeline-backup-' + nonce}
+
+
+def database_binding(plan):
+    rows = plan.get('containers')
+    require(type(rows) is list, 'hot3_database_scope')
+    selected = [row for row in rows if type(row) is dict and row.get('project') == 'market-private-pipeline-primary'
+        and type(row.get('name')) is str and row['name'].endswith('-market-database-1')]
+    require(len(selected) == 1, 'hot3_database_scope')
+    database = selected[0]
+    require(type(database.get('id')) is str and re.fullmatch('[a-f0-9]{64}', database['id'])
+        and type(database.get('image')) is str and re.fullmatch('sha256:[a-f0-9]{64}', database['image']), 'hot3_database_scope')
+    probes = plan.get('datastore_probes')
+    require(type(probes) is list, 'hot3_database_probe_scope')
+    matching = [row for row in probes if type(row) is dict and row.get('id') == database['id']]
+    require(len(matching) == 1, 'hot3_database_probe_scope')
+    probe = matching[0]
+    require(set(probe) == {'database','id','kind','user'} and probe['kind'] == 'postgres'
+        and all(type(probe[key]) is str and re.fullmatch('[a-z_][a-z0-9_]{0,62}', probe[key]) for key in ('user','database')),
+        'hot3_database_probe_scope')
+    return {'container_id':database['id'],'image':database['image'],'user':probe['user'],'database':probe['database']}
 
 
 def phase(intent_sha, name, *, daemon_deadline=None, daemon_complete=False, **evidence):
@@ -589,58 +655,79 @@ def worker(rt, marker):
 
 
 def execute(args, sources, own_source):
+    global OWNED_STAGE
+    require(args.deadline_utc == OPERATION_DEADLINE, 'hot3_operation_deadline_changed')
     clock = Clock(args.deadline_utc)
     require(os.geteuid() == 0 and re.fullmatch('[a-f0-9]{32}', args.nonce)
             and args.nonce[:16] != args.nonce[16:], 'hot3_owner_invalid')
+    preflight_step('source_validation')
     modules = load_modules(sources); P, B, R, H, C = roles(modules)
+    preflight_step('fresh_namespace')
     require(not os.path.lexists(STAGE) and not os.path.lexists(WORK), 'hot3_partial_operation_exists')
     P.safe_parent(STAGE); P.safe_parent(WORK)
     STAGE.mkdir(mode=0o700); (STAGE/'source').mkdir(mode=0o700)
+    OWNED_STAGE = identity(STAGE.lstat())[:5]
+    preflight_step('public_staging', persist=True)
     for name, raw in {**sources, 'producer.py': own_source}.items():
         fd = os.open(STAGE/'source'/name, os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, 'wb') as output: output.write(raw); output.flush(); os.fsync(output.fileno())
+    preflight_step('controls', persist=True)
     plan, parking, controls = H.controls(P)
+    preflight_step('machine_identity', persist=True)
     require(Path('/etc/machine-id').read_text().strip() == plan['machine_id'], 'hot3_wrong_host')
+    preflight_step('marker_open', persist=True)
     marker = os.open(H.MARKER, os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
     watch = worker_process = rt = None
     try:
+        preflight_step('marker_lock', persist=True)
         until = time.monotonic()+5
         while True:
             try: fcntl.flock(marker, fcntl.LOCK_EX|fcntl.LOCK_NB); break
             except BlockingIOError:
                 clock.check(); require(time.monotonic() < until, 'hot3_marker_busy'); time.sleep(.1)
+        preflight_step('marker_validation', persist=True)
         check_marker(P, H, marker)
+        preflight_step('control_boundaries', persist=True)
         H.boundaries(P, clock, plan, controls, marker, identity(os.fstat(marker)))
+        preflight_step('public_profile', persist=True)
         require(H.public_profile(P, clock, plan, parking) == P.document(MANAGED/'public-source-evidence.json', MANAGED_EVIDENCE_SHA), 'hot3_source_profile_changed')
+        preflight_step('managed_receipt', persist=True)
         P.document(MANAGED/'web-managed-receipt.json', MANAGED_RECEIPT_SHA)
-        database = [row for row in plan['containers'] if row['project'] == 'market-private-pipeline-primary' and row['name'].endswith('-market-database-1')]
-        require(len(database) == 1, 'hot3_database_scope')
-        probes = [row for row in plan['datastore_probes'] if row['name'] == database[0]['name'] and row['kind'] == 'postgres']
-        require(len(probes) == 1 and all(re.fullmatch('[a-z_][a-z0-9_]{0,62}', probes[0][key]) for key in ('user', 'database')), 'hot3_database_probe_scope')
-        intent = {'schema': 'security_web_market_hot3_intent/1', 'operation_id': OP, 'nonce': args.nonce,
+        preflight_step('database_binding', persist=True)
+        database = database_binding(plan)
+        preflight_step('transport_binding', persist=True)
+        offhost = transport(P, plan, args.transport_sha256, clock.deadline)
+        intent = {'schema': 'security_web_market_hot3_intent/1', 'operation_id': OP, 'attempt_id':ATTEMPT_ID, 'nonce': args.nonce,
             'created_at_utc': datetime.now(timezone.utc).isoformat().replace('+00:00','Z'), 'deadline_utc': args.deadline_utc,
             'marker_identity': list(identity(os.fstat(marker))),
-            'offhost': transport(P, plan, args.transport_sha256, clock.deadline), 'transport_receipt_sha256': args.transport_sha256,
-            'database': {'container_id': database[0]['id'], 'image': database[0]['image'], 'user': probes[0]['user'], 'database': probes[0]['database']},
+            'offhost': offhost, 'transport_receipt_sha256': args.transport_sha256,
+            'database': database,
             'pg_application_name': 'hot3-dump-'+args.nonce, 'restores': [resource_binding(args.nonce[:16]), resource_binding(args.nonce[16:])],
             'scopes': {kind: 'security-market-hot3-'+args.nonce+'-'+kind+'.scope' for kind in ('worker','watchdog')},
             'managed_receipt_sha256': MANAGED_RECEIPT_SHA, 'public_source_evidence_sha256': MANAGED_EVIDENCE_SHA,
             'recipe_sha256': {**PINS, 'producer.py': sha256(own_source).hexdigest()}}
         rt = Runtime(intent, MANAGED_RECEIPT_SHA, modules); rt.clock = clock
+        preflight_step('native_capacity', persist=True)
         capacity = rt.offhost('capacity')
         require(type(capacity.get('max_cipher_bytes')) is int and capacity['max_cipher_bytes'] > CIPHER_ALLOWANCE, 'hot3_native_capacity_insufficient')
         intent.update(max_cipher_bytes=capacity['max_cipher_bytes'], dump_max_bytes=min(64*1024**3,capacity['max_cipher_bytes']-CIPHER_ALLOWANCE))
+        preflight_step('intent_publish', persist=True)
         digest = write_json(STAGE/'intent.json', intent)
         rt.intent_sha = digest
+        preflight_step('native_recheck', persist=True)
         require(rt.offhost('capacity')['max_cipher_bytes'] >= intent['max_cipher_bytes'], 'hot3_native_capacity_changed')
+        preflight_step('work_directory', persist=True)
         WORK.mkdir(mode=0o700)
+        preflight_step('watchdog_arm', persist=True)
         watch = launch_scope(intent, digest, 'watchdog', marker, own_source)
         ready_until = time.monotonic()+15
         while not (STAGE/'watchdog-ready.json').exists():
             require(watch.poll() is None and time.monotonic() < ready_until, 'hot3_watchdog_not_armed'); time.sleep(.1)
         require(document(STAGE/'watchdog-ready.json').get('intent_sha256') == digest, 'hot3_watchdog_binding')
+        preflight_step('worker_launch', persist=True)
         write_json(STAGE/'worker-launch-requested.json', {'intent_sha256': digest, 'worker_launch_requested': True})
         worker_process = launch_scope(intent, digest, 'worker', marker, own_source)
+        preflight_step('worker_wait', persist=True)
         while worker_process.poll() is None:
             clock.check()
             if watch.poll() is not None:
@@ -648,6 +735,7 @@ def execute(args, sources, own_source):
                         'hot3_watchdog_died')
             time.sleep(.25)
         require(worker_process.returncode == 0, 'hot3_worker_failed')
+        preflight_step('cleanup_wait', persist=True)
         cleanup_until = time.monotonic()+CLEANUP_SECONDS
         while watch.poll() is None:
             require(time.monotonic() < cleanup_until, 'hot3_cleanup_wait_expired'); time.sleep(.25)
@@ -656,6 +744,7 @@ def execute(args, sources, own_source):
             'original_marker_retained': True, 'pending_requests_adopted': False}, 'hot3_cleanup_not_verified')
         result = document(STAGE/'result.json')
         require(result.get('intent_sha256') == digest and result.get('security_accepted') is False, 'hot3_result_binding')
+        preflight_step('complete_publish', persist=True)
         write_json(STAGE/'complete.json', {'intent_sha256': digest, 'result_sha256': sha256(read_public(STAGE/'result.json')).hexdigest(),
             'cleanup_sha256': sha256(read_public(STAGE/'cleanup.json')).hexdigest(), 'phase': 'hot_backup_offhost_verified_not_accepted',
             'security_accepted': False, 'deployment_eligible': False, 'production_services_changed': False})
@@ -707,12 +796,13 @@ def main(argv=None):
             worker(rt, args.marker_fd)
             write_json(STAGE/'worker-complete.json', {'intent_sha256': args.intent_sha256, 'status': 'PASS'})
             return 0
-        except BaseException:
-            write_json(STAGE/'worker-complete.json', {'intent_sha256': args.intent_sha256, 'status': 'FAIL', 'daemon_outcome_unknown': True})
+        except BaseException as error:
+            write_json(STAGE/'worker-complete.json', {'intent_sha256': args.intent_sha256, 'status': 'FAIL',
+                'reason_code':safe_reason(error),'daemon_outcome_unknown': True})
             return 1
-    except BaseException:
+    except BaseException as error:
         if args.mode == 'run':
-            print('{"status":"FAIL","reason_code":"hot3_refused_pending_evidence_retained","security_accepted":false,"deployment_eligible":false,"production_services_changed":false}')
+            print(json.dumps(failure_result(error), sort_keys=True))
         return 1
 
 

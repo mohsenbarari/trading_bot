@@ -33,6 +33,9 @@ class Hot3Tests(unittest.TestCase):
         for path in (self.stage, self.work, self.managed): path.mkdir(mode=0o700)
         for name, value in (('STAGE',self.stage),('WORK',self.work),('MANAGED',self.managed)):
             self.stack.enter_context(patch.object(M,name,value))
+        self.stack.enter_context(patch.object(M,'CURRENT_PHASE','cli_admission'))
+        self.stack.enter_context(patch.object(M,'OWNED_STAGE',None))
+        self.stack.enter_context(patch.object(M,'TRUSTED_ERRORS',()))
         self.nonce = '1'*16+'2'*16
         self.digest = 'a'*64
         self.deadline = (datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat().replace('+00:00','Z')
@@ -45,6 +48,82 @@ class Hot3Tests(unittest.TestCase):
 
     def state(self, name, value):
         M.write_json(self.stage/name, value)
+
+    def test_failure_codes_allow_only_exact_trusted_types_and_closed_tokens(self):
+        class Trusted(RuntimeError):pass
+        class PretendRefusal(M.Refusal):pass
+        with patch.object(M,'TRUSTED_ERRORS',(Trusted,)):
+            self.assertEqual(M.safe_reason(Trusted('backup_source_schema_changed')),'backup_source_schema_changed')
+            self.assertEqual(M.safe_reason(M.Refusal('hot3_marker_busy')),'hot3_marker_busy')
+            for error in (Trusted('/private/path value'),Trusted('x'*81),Trusted('safe', 'private'),
+                    RuntimeError('private_alphanumeric_secret'),PretendRefusal('private_alphanumeric_secret')):
+                self.assertEqual(M.safe_reason(error),'hot3_unexpected_exception')
+        for error,reason in ((FileNotFoundError('/private/path'),'hot3_unexpected_os_error'),
+                (KeyError('private_value'),'hot3_unexpected_key_error'),(TypeError('private_value'),'hot3_unexpected_type_error')):
+            self.assertEqual(M.safe_reason(error),reason)
+
+    def test_preflight_checkpoints_precede_actions_and_failure_log_contains_no_exception_data(self):
+        M.OWNED_STAGE=M.identity(self.stage.lstat())[:5]
+        M.preflight_step('database_binding',persist=True)
+        checkpoint=M.document(self.stage/'preflight-database_binding.json')
+        self.assertEqual(checkpoint,{'schema':'security_web_market_hot3_preflight/1','operation_id':M.OP,
+            'attempt_id':M.ATTEMPT_ID,'phase':'database_binding','status':'entered'})
+        payload=M.failure_result(KeyError('/private/SECRET_ENV_VALUE'))
+        self.assertEqual(payload['reason_code'],'hot3_unexpected_key_error')
+        self.assertEqual(payload['phase'],'database_binding')
+        self.assertEqual(M.document(self.stage/'preflight-failure.json'),payload)
+        self.assertNotIn('SECRET',json.dumps(payload));self.assertNotIn('/private',json.dumps(payload))
+
+    def test_diagnostics_never_adopt_or_write_an_unowned_or_replaced_stage(self):
+        M.preflight_step('fresh_namespace')
+        M.failure_result(M.Refusal('hot3_partial_operation_exists'))
+        self.assertEqual(list(self.stage.iterdir()),[])
+        M.OWNED_STAGE=M.identity(self.stage.lstat())[:5]
+        moved=self.folder/'old-stage';self.stage.rename(moved);self.stage.mkdir(mode=0o700)
+        M.failure_result(OSError('/private/value'))
+        self.assertEqual(list(self.stage.iterdir()),[]);self.assertEqual(list(moved.iterdir()),[])
+
+    def public_plan_fixture(self):
+        # Sanitized actual datastore-probe shape: immutable ID, no name field.
+        return {'machine_id':'synthetic-public-machine-id','containers':[
+            {'id':'b'*64,'image':'sha256:'+'c'*64,'project':'market-private-pipeline-primary',
+             'name':'/market-private-pipeline-primary-market-database-1'}],
+            'datastore_probes':[{'id':'d'*64,'kind':'redis'},
+                {'id':'b'*64,'kind':'postgres','database':'market_archive','user':'market_data'}]}
+
+    def test_actual_public_probe_schema_binds_exact_container_id_without_name(self):
+        plan=self.public_plan_fixture()
+        self.assertEqual(M.database_binding(plan),self.intent['database'])
+        for probe in ({'name':plan['containers'][0]['name'],'kind':'postgres','database':'market_archive','user':'market_data'},
+                {**plan['datastore_probes'][1],'id':'d'*64},
+                {**plan['datastore_probes'][1],'name':plan['containers'][0]['name']},
+                {**plan['datastore_probes'][1],'user':True}):
+            changed={**plan,'datastore_probes':[probe]}
+            with self.subTest(probe=probe),self.assertRaisesRegex(M.Refusal,'database_probe_scope'):M.database_binding(changed)
+        with self.assertRaisesRegex(M.Refusal,'database_probe_scope'):
+            M.database_binding({**plan,'datastore_probes':[plan['datastore_probes'][1]]*2})
+
+    def test_preintent_execute_reaches_transport_with_sanitized_actual_schema(self):
+        self.stage.rmdir();self.work.rmdir();plan=self.public_plan_fixture();profile={'public':'fixture'}
+        P=SimpleNamespace(safe_parent=Mock(),document=Mock(return_value=profile))
+        marker=self.folder/'marker';marker.write_bytes(b'public-marker-fixture');marker.chmod(0o600)
+        H=SimpleNamespace(controls=Mock(return_value=(plan,{},{})),MARKER=marker,
+            boundaries=Mock(),public_profile=Mock(return_value=profile))
+        args=SimpleNamespace(deadline_utc=self.deadline,nonce=self.nonce,transport_sha256='f'*64)
+        with patch.object(M,'OPERATION_DEADLINE',self.deadline),patch.object(M,'load_modules',return_value={}),\
+             patch.object(M,'roles',return_value=(P,object(),object(),H,object())),\
+             patch.object(Path,'read_text',return_value=plan['machine_id']),patch.object(M,'check_marker'),\
+             patch.object(M.fcntl,'flock'),patch.object(M,'transport',side_effect=M.Refusal('hot3_transport_scope')):
+            with self.assertRaisesRegex(M.Refusal,'transport_scope'):M.execute(args,{'public.py':b'public-only'},b'producer-public')
+        self.assertTrue((self.stage/'preflight-database_binding.json').is_file())
+        self.assertTrue((self.stage/'preflight-transport_binding.json').is_file())
+        self.assertFalse((self.stage/'intent.json').exists());self.assertFalse(self.work.exists())
+
+    def test_attempt02_keeps_operation_transport_and_original_deadline_without_adopting_attempt01(self):
+        self.assertEqual(M.ATTEMPT_ID,M.OP+'-attempt02')
+        self.assertEqual(M.TRANSPORT,Path('/root/.ssh')/M.OP/'transport.json')
+        args=SimpleNamespace(deadline_utc='2099-01-01T00:00:00Z')
+        with self.assertRaisesRegex(M.Refusal,'operation_deadline_changed'):M.execute(args,{},b'')
 
     def fake_watch(self, *, succeeded=True, phase_deadline=None, daemon_complete=False, phase='source-metadata'):
         now = [99.]
