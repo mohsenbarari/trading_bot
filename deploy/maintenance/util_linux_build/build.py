@@ -66,7 +66,7 @@ ERROR_CODES = frozenset(('actual_upstream_test_count_missing', 'archive_member',
     'input_metadata', 'inputs_not_empty', 'main_config_identity', 'main_mountfd_not_enabled',
     'nonroot_container_required', 'offline_input_digest', 'packaging_series_changed',
     'public_input_digest', 'trixie_only', 'upstream_suite_skipped_as_root',
-    'archive_symlink_prefix', 'primary_distclean_incomplete'))
+    'archive_symlink_prefix', 'primary_distclean_incomplete', 'disabled_library_dependency_missing'))
 
 
 def require(condition, code):
@@ -102,6 +102,13 @@ def read(path, maximum=16 * 1024**2):
 
 def expected_version(name, version=VERSION):
     return ('1:' if name == 'bsdutils' else '1:4.16.0-2+really' if name == 'login' else '') + version
+
+
+def disabled_configuration(config):
+    require(all(re.search(r'(?m)^#define '+name+r' 1$', config) for name in ('HAVE_LIBBLKID', 'HAVE_LIBMOUNT')),
+            'disabled_library_dependency_missing')
+    require(not re.search(r'(?m)^\s*#\s*define\s+USE_LIBMOUNT_MOUNTFD_SUPPORT\b', config),
+            'disabled_mountfd_enabled')
 
 
 def fetch_inputs():
@@ -284,9 +291,9 @@ def run(builder_image):
     command(['/usr/bin/make', 'distclean'], statuses[0].parent, work / 'primary-distclean.log', 180)
     require(not statuses[0].exists(), 'primary_distclean_incomplete')
     disabled = work / 'mountfd-disabled'; disabled.mkdir()
-    command([str(source / 'configure'), '--disable-all-programs', '--enable-libmount',
+    command([str(source / 'configure'), '--disable-all-programs', '--enable-libblkid', '--enable-libmount',
              '--disable-libmount-mountfd-support', '--without-python'], disabled, work / 'disabled-configure.log', 120)
-    require('#define USE_LIBMOUNT_MOUNTFD_SUPPORT 1' not in read(disabled / 'config.h').decode(), 'disabled_mountfd_enabled')
+    disabled_configuration(read(disabled / 'config.h').decode())
     command(['/usr/bin/make', '-j2', 'libmount.la'], disabled, work / 'disabled-build.log', 240)
     command(['/usr/local/bin/python3', '-I', '-B', str(recipe / 'source_regressions.py'),
              str(oldsource), str(source), str(disabled)], work, work / 'source-tests.json', 120)

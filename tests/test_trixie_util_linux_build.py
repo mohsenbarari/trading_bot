@@ -212,6 +212,19 @@ class TrixieUtilLinuxBuildTests(unittest.TestCase):
         self.assertLess(abi, primary); self.assertLess(primary, clean); self.assertLess(clean, configure)
         self.assertIn("'primary_distclean_incomplete'", source)
 
+    def test_disabled_mountfd_variant_builds_required_libblkid_and_libmount(self):
+        source=ast.parse((RECIPE/'build.py').read_text())
+        commands=[n.args[0] for n in ast.walk(source) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
+                  and n.func.id=='command' and n.args and isinstance(n.args[0],ast.List)]
+        variant=next(n for n in commands if any(isinstance(v,ast.Constant) and v.value=='--disable-libmount-mountfd-support' for v in n.elts))
+        options={v.value for v in variant.elts if isinstance(v,ast.Constant)}
+        self.assertLessEqual({'--disable-all-programs','--enable-libblkid','--enable-libmount'},options)
+        good='#define HAVE_LIBBLKID 1\n#define HAVE_LIBMOUNT 1\n/* #undef USE_LIBMOUNT_MOUNTFD_SUPPORT */\n'
+        B.disabled_configuration(good)
+        for invalid in (good.replace('#define HAVE_LIBBLKID 1\n',''),good.replace('#define HAVE_LIBMOUNT 1\n',''),
+                        good+'#define USE_LIBMOUNT_MOUNTFD_SUPPORT 1\n',good+'#define USE_LIBMOUNT_MOUNTFD_SUPPORT 0\n'):
+            with self.assertRaises(RuntimeError):B.disabled_configuration(invalid)
+
     def test_negative_control_that_unexpectedly_passes_is_a_failure(self):
         with patch.object(S.B, 'command'), patch.object(S.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)):
             with self.assertRaisesRegex(RuntimeError, 'compiled_negative_control_failed'):

@@ -1,7 +1,21 @@
 # Stable Trixie util-linux candidate: build evidence only
 
-Status: first actual CI40082608496 failed during builder preparation; no
-compilation, package installation or production change is asserted. All seven
+Actual diagnostic CI40083981841 completed the coherent Debian family, six
+old-caller ABI probes and normal distclean, then failed the isolated disabled
+variant at `configure: error: libblkid is needed to build libmount`.
+`--disable-all-programs` disables libraries as well; that variant now explicitly
+enables both libblkid and its libmount consumer. The actual generated config
+must prove both libraries enabled and mountfd undefined. This changes only the
+separate feature-regression build, not the full Debian package configuration.
+Successful execution of the corrected variant is still required; no build or
+security pass is inferred from this source fix.
+
+Status: the complete candidate job has not passed. Full-family compilation and
+six old-caller ABI checks actually passed, but the later disabled variant and
+compiled source regressions still need a successful corrected CI execution.
+No production package installation or activation is asserted.
+
+First actual CI40082608496 failed during builder preparation. All seven
 public input sizes/digests independently match. BuildKit does not create the
 Docker runtime-only `/.dockerenv`; preparation now binds the sealed recipe
 location instead. Compilation still requires the nonroot Docker runtime.
