@@ -1,0 +1,123 @@
+name: Existing App OS package composition evidence only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-os-compose-19d
+  cancel-in-progress: false
+
+jobs:
+  composition:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Seal only the published composition and image admission helpers
+        id: seal
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,stat,subprocess,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          os.umask(0o077)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          root=pathlib.Path(tempfile.mkdtemp(prefix='security-os-compose-',dir=parent))
+          (root/'source').mkdir(mode=0o700)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          records={}
+          for name in ('compose_security_os_candidate.py','admit_security_component_image_reuse.py','verify_image_component_presence.py'):
+              path='scripts/'+name
+              size=subprocess.run(['git','--no-optional-locks','cat-file','-s',commit+':'+path],check=True,capture_output=True,timeout=10).stdout
+              assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=131072
+              raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',commit+':'+path],check=True,capture_output=True,timeout=10).stdout
+              assert len(raw)==int(size)
+              if name=='verify_image_component_presence.py':assert sha256(raw).hexdigest()=='36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3'
+              fd=os.open(root/'source'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+              records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
+          with (root/'source/identity.json').open('x') as out:json.dump({'recipe_commit':commit,'files':records},out,sort_keys=True)
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:out.write('root='+str(root)+'\n')
+          PY
+
+      - name: Admit fixed public artifacts and compose without rebuilding the App
+        id: compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_security_os_candidate.py" compose --root "$CAPSULE_ROOT"
+
+      - name: Preserve every raw vulnerability including unfixed findings
+        id: vulnerabilities
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.seal.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Record the actual composed image SBOM
+        id: sbom
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          format: cyclonedx
+          output: ${{ steps.seal.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Bind raw reports and export the same unaccepted immutable image
+        id: export
+        if: always() && steps.compose.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/source/compose_security_os_candidate.py" finalize --root "$CAPSULE_ROOT"
+
+      - name: Retain only complete public image exports
+        if: always() && steps.export.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-os-composed-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.seal.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.seal.outputs.root }}/image-export.json
+
+      - name: Retain bounded public composition evidence including failed attempts
+        if: always() && steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-os-composition-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.seal.outputs.root }}/source/identity.json
+            ${{ steps.seal.outputs.root }}/reports/*.json
+            ${{ steps.seal.outputs.root }}/reports/*.log

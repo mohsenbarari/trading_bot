@@ -21,7 +21,7 @@ import time
 from types import ModuleType
 
 OP = 'security-web-market-hot3-20261024-01'
-ATTEMPT_ID = OP+'-attempt02'
+ATTEMPT_ID = OP+'-attempt03'
 OPERATION_DEADLINE = '2026-10-24T20:08:55.730262Z'
 STAGE = Path('/root/.local') / ATTEMPT_ID
 WORK = Path('/srv/trading-bot') / ATTEMPT_ID
@@ -30,6 +30,7 @@ TRANSPORT = Path('/root/.ssh/security-web-market-hot3-20261024-01/transport.json
 MANAGED_RECEIPT_SHA = '305de6c1fc3a1997e53f91c689f83d038c37383d27b15d6d4571281dfb233e9c'
 MANAGED_EVIDENCE_SHA = '2e13ad0997eacd9ec8cf1f6cd6dc22494b3f81b0216a4ec684559f28e4520f3c'
 RESERVE, WAL_TEMP, CIPHER_ALLOWANCE = 8 * 1024**3, 4 * 1024**3, 4096
+OFFHOST_CONTROL_ALLOWANCE = 1024**2
 CLEANUP_SECONDS = 120
 CURRENT_PHASE = 'cli_admission'
 OWNED_STAGE = None
@@ -283,6 +284,19 @@ def web_dump_budget(native_cap, database_bytes, available, *, same_filesystem):
     result = min(native_cap, 64*1024**3, affordable)
     require(result > 0, 'hot3_web_capacity_insufficient')
     return result
+
+
+def native_cipher_capacity(value):
+    require(type(value) is dict and all(type(value.get(key)) is int for key in
+        ('free_bytes','reserve_bytes','control_allowance_bytes','max_cipher_bytes','device'))
+        and value['free_bytes'] >= 0 and value['reserve_bytes'] == RESERVE
+        and value['control_allowance_bytes'] == OFFHOST_CONTROL_ALLOWANCE
+        and value['max_cipher_bytes'] == max(0,value['free_bytes']-RESERVE-OFFHOST_CONTROL_ALLOWANCE)
+        and value['device'] == 2064 and value.get('root') == '/srv/trading-bot/backups'
+        and value.get('files_created') is False and value.get('plaintext_materialized_offhost') is False,
+        'hot3_native_capacity_invalid')
+    require(value['max_cipher_bytes'] > CIPHER_ALLOWANCE, 'hot3_native_capacity_insufficient')
+    return value['max_cipher_bytes']
 
 
 def transport(P, old_plan, digest, deadline):
@@ -589,14 +603,22 @@ def worker(rt, marker):
         require(source['container_id'] == intent['database']['container_id'], 'hot3_database_changed')
         same = WORK.stat().st_dev == Path('/var/lib/docker').stat().st_dev
         available = [free_bytes(WORK)] if same else [free_bytes(WORK), free_bytes(Path('/var/lib/docker'))]
-        dump_cap = web_dump_budget(intent['dump_max_bytes'], source['database_size_bytes'], available, same_filesystem=same)
+        native_measurement = rt.offhost('capacity')
+        native_max = native_cipher_capacity(native_measurement)
+        dump_cap = web_dump_budget(min(intent['dump_max_bytes'],native_max-CIPHER_ALLOWANCE),
+            source['database_size_bytes'], available, same_filesystem=same)
         needed = capacity_required(dump_cap, source['database_size_bytes'], same_filesystem=same)
         require(all(free >= required for free, required in zip(available, needed)), 'hot3_web_capacity_insufficient')
+        budget_sha = write_json(STAGE/'dump-budget.json', {'intent_sha256':digest,'schema':'security_web_market_hot3_dump_budget/1',
+            'original_dump_max_bytes':intent['dump_max_bytes'],'native_capacity':native_measurement,'native_capacity_reserved':False,
+            'web_available_bytes':available,'web_required_bytes':list(needed),'source_database_bytes':source['database_size_bytes'],
+            'same_filesystem':same,'effective_dump_max_bytes':dump_cap})
         backup_root = WORK/'archive'; backup_root.mkdir(mode=0o700)
         receipt = backup_root/'market-pipeline-backup-receipt.json'
         create_deadline = min(int(clock.deadline.timestamp()), int(time.time())+3600)
         phase(digest, 'create', daemon_deadline=create_deadline, source_database_bytes=source['database_size_bytes'],
-              free_bytes=available, required_bytes=list(needed), effective_dump_max_bytes=dump_cap)
+              free_bytes=available, required_bytes=list(needed), effective_dump_max_bytes=dump_cap,
+              dump_budget_sha256=budget_sha)
         created = B.create_backup(backup_dir=backup_root, receipt=receipt, allow_running_writers=True,
             execution_limits=limits(B, intent, clock, create_deadline, checkpoint, dump_cap=dump_cap), restore_resource_binding=intent['restores'][0], **common)
         require(created['status'] == 'PASS' and created['backup_mode'] == 'hot' and created['restore_smoke']['cleanup_status'] == 'PASS', 'hot3_create_not_verified')
@@ -627,7 +649,7 @@ def worker(rt, marker):
                 and encrypted['plaintext_size_bytes'] == created['backup']['size_bytes'], 'hot3_encryption_reconciliation')
         checkpoint(); require(encrypted['ciphertext_size_bytes'] <= intent['max_cipher_bytes'], 'hot3_native_cipher_does_not_fit')
         current_capacity = rt.offhost('capacity')
-        require(current_capacity['max_cipher_bytes'] >= encrypted['ciphertext_size_bytes'], 'hot3_native_capacity_changed')
+        require(native_cipher_capacity(current_capacity) >= encrypted['ciphertext_size_bytes'], 'hot3_native_cipher_does_not_fit')
         phase(digest, 'offhost', daemon_complete=True, ciphertext_size_bytes=encrypted['ciphertext_size_bytes'], ciphertext_sha256=encrypted['ciphertext_sha256'])
         with B._pinned_backup_artifact(cipher, {'size_bytes': encrypted['ciphertext_size_bytes'], 'sha256': encrypted['ciphertext_sha256']}) as descriptor:
             with os.fdopen(os.dup(descriptor), 'rb') as stream:
@@ -644,6 +666,7 @@ def worker(rt, marker):
         result = {'intent_sha256': digest, 'phase': 'hot_backup_offhost_verified_not_accepted',
             'create_receipt_sha256': receipt_sha, 'create_journal_sha256': journal_sha,
             'independent_restore_sha256': verify_sha, 'encryption_receipt_sha256': B.file_digest(encryption_receipt),
+            'dump_budget_sha256':budget_sha,
             'ciphertext_sha256': encrypted['ciphertext_sha256'], 'ciphertext_size_bytes': encrypted['ciphertext_size_bytes'],
             'offhost': remote, 'managed_receipt_sha256': MANAGED_RECEIPT_SHA, 'public_source_evidence_sha256': MANAGED_EVIDENCE_SHA,
             'configuration_source': H.CONFIGURATION, 'source_image': H.PROVENANCE,
@@ -709,13 +732,15 @@ def execute(args, sources, own_source):
         rt = Runtime(intent, MANAGED_RECEIPT_SHA, modules); rt.clock = clock
         preflight_step('native_capacity', persist=True)
         capacity = rt.offhost('capacity')
-        require(type(capacity.get('max_cipher_bytes')) is int and capacity['max_cipher_bytes'] > CIPHER_ALLOWANCE, 'hot3_native_capacity_insufficient')
-        intent.update(max_cipher_bytes=capacity['max_cipher_bytes'], dump_max_bytes=min(64*1024**3,capacity['max_cipher_bytes']-CIPHER_ALLOWANCE))
+        initial_max = native_cipher_capacity(capacity)
+        intent.update(max_cipher_bytes=initial_max, dump_max_bytes=min(64*1024**3,initial_max-CIPHER_ALLOWANCE),
+            native_capacity=capacity,native_capacity_reserved=False)
         preflight_step('intent_publish', persist=True)
         digest = write_json(STAGE/'intent.json', intent)
         rt.intent_sha = digest
         preflight_step('native_recheck', persist=True)
-        require(rt.offhost('capacity')['max_cipher_bytes'] >= intent['max_cipher_bytes'], 'hot3_native_capacity_changed')
+        rechecked = rt.offhost('capacity'); native_cipher_capacity(rechecked)
+        write_json(STAGE/'native-recheck.json', {'intent_sha256':digest,'native_capacity':rechecked,'native_capacity_reserved':False})
         preflight_step('work_directory', persist=True)
         WORK.mkdir(mode=0o700)
         preflight_step('watchdog_arm', persist=True)

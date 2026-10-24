@@ -457,3 +457,23 @@ name. A refusal emits only a closed reason token from an exact trusted helper
 exception type, or a fixed safe error category, plus that phase and verdict
 booleans. Exception text, private paths/values and tracebacks are not emitted;
 failure evidence is written only to the producer's own fresh stage.
+
+Attempt02 then refused at `native_recheck`, before creating its work directory,
+watchdog, dump or restore. Its stage/intent/failure evidence remains untouched.
+The initial caller incorrectly required the second free-space sample to be at
+least the first. Native production writes can reduce free bytes between samples;
+the first measurement is an upper bound, never a reservation.
+
+Fresh attempt03 keeps the same operation, transport and original deadline, with
+stage/work names ending in `-attempt03` and a new nonce. Each Native sample must
+retain exact typed capacity arithmetic with the full 8-GiB reserve and 1-MiB
+control allowance. The pre-work recheck requires a positive usable cap. After
+reading source database metadata, the worker obtains another fresh Native sample
+and chooses the smallest of its original dump ceiling, fresh Native capacity
+minus cipher overhead, measured Web budget and the helper limit. The public
+`dump-budget.json` records these measurements and the effective cap; its hash is
+bound into the create phase and final result. A decreasing sample does not
+authorize additional bytes or reduce any reserve. Before transfer, the actual
+ciphertext must still fit a fresh Native measurement, and receiver streaming,
+fsync and independent verification retain their strict checks. A genuinely
+insufficient pre-work sample still refuses before work/scopes are created.

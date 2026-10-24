@@ -119,11 +119,64 @@ class Hot3Tests(unittest.TestCase):
         self.assertTrue((self.stage/'preflight-transport_binding.json').is_file())
         self.assertFalse((self.stage/'intent.json').exists());self.assertFalse(self.work.exists())
 
-    def test_attempt02_keeps_operation_transport_and_original_deadline_without_adopting_attempt01(self):
-        self.assertEqual(M.ATTEMPT_ID,M.OP+'-attempt02')
+    def test_attempt03_keeps_operation_transport_and_original_deadline_without_adopting_prior_attempts(self):
+        self.assertEqual(M.ATTEMPT_ID,M.OP+'-attempt03')
         self.assertEqual(M.TRANSPORT,Path('/root/.ssh')/M.OP/'transport.json')
         args=SimpleNamespace(deadline_utc='2099-01-01T00:00:00Z')
         with self.assertRaisesRegex(M.Refusal,'operation_deadline_changed'):M.execute(args,{},b'')
+
+    def capacity_fixture(self, maximum):
+        return {'max_cipher_bytes':maximum,'free_bytes':maximum+M.RESERVE+M.OFFHOST_CONTROL_ALLOWANCE,
+            'reserve_bytes':M.RESERVE,'control_allowance_bytes':M.OFFHOST_CONTROL_ALLOWANCE,
+            'device':2064,'root':'/srv/trading-bot/backups','files_created':False,'plaintext_materialized_offhost':False}
+
+    def capacity_preflight(self, capacities):
+        self.stage.rmdir();self.work.rmdir();plan=self.public_plan_fixture();profile={'public':'fixture'}
+        P=SimpleNamespace(safe_parent=Mock(),document=Mock(return_value=profile))
+        marker=self.folder/'marker';marker.write_bytes(b'public-marker-fixture');marker.chmod(0o600)
+        H=SimpleNamespace(controls=Mock(return_value=(plan,{},{})),MARKER=marker,
+            boundaries=Mock(),public_profile=Mock(return_value=profile))
+        args=SimpleNamespace(deadline_utc=self.deadline,nonce=self.nonce,transport_sha256='f'*64)
+        remote=Mock(side_effect=[self.capacity_fixture(value) for value in capacities])
+        self.stack.enter_context(patch.object(M,'OPERATION_DEADLINE',self.deadline))
+        self.stack.enter_context(patch.object(M,'load_modules',return_value={}))
+        self.stack.enter_context(patch.object(M,'roles',return_value=(P,object(),object(),H,object())))
+        self.stack.enter_context(patch.object(Path,'read_text',return_value=plan['machine_id']))
+        self.stack.enter_context(patch.object(M,'check_marker'))
+        self.stack.enter_context(patch.object(M.fcntl,'flock'))
+        self.stack.enter_context(patch.object(M,'transport',return_value={'public_transport':'fixture'}))
+        self.stack.enter_context(patch.object(M,'Runtime',side_effect=lambda intent,digest,modules:
+            SimpleNamespace(intent=intent,intent_sha=digest,offhost=remote)))
+        return args,remote
+
+    def test_declining_native_capacity_with_actual_public_schema_reaches_watchdog_arm(self):
+        initial=4*1024**3
+        args,remote=self.capacity_preflight([initial,initial-4096])
+        with patch.object(M,'launch_scope',side_effect=M.Refusal('hot3_test_watchdog_boundary')) as launch:
+            with self.assertRaisesRegex(M.Refusal,'test_watchdog_boundary'):
+                M.execute(args,{'public.py':b'public-only'},b'producer-public')
+        self.assertEqual(remote.call_count,2);launch.assert_called_once()
+        self.assertEqual(launch.call_args.args[2],'watchdog')
+        self.assertTrue(self.work.is_dir());self.assertTrue((self.stage/'preflight-watchdog_arm.json').is_file())
+        intent=M.document(self.stage/'intent.json');recheck=M.document(self.stage/'native-recheck.json')
+        self.assertEqual(intent['max_cipher_bytes'],initial);self.assertFalse(intent['native_capacity_reserved'])
+        self.assertEqual(recheck['native_capacity']['max_cipher_bytes'],initial-4096)
+
+    def test_genuinely_insufficient_native_recheck_refuses_before_work_or_watchdog(self):
+        args,remote=self.capacity_preflight([4*1024**3,M.CIPHER_ALLOWANCE])
+        with patch.object(M,'launch_scope') as launch,self.assertRaisesRegex(M.Refusal,'native_capacity_insufficient'):
+            M.execute(args,{'public.py':b'public-only'},b'producer-public')
+        launch.assert_not_called();self.assertFalse(self.work.exists())
+        self.assertTrue((self.stage/'intent.json').exists());self.assertEqual(remote.call_count,2)
+
+    def test_native_capacity_arithmetic_preserves_full_reserve_and_control_allowance(self):
+        capacity=self.capacity_fixture(10000)
+        self.assertEqual(M.native_cipher_capacity(capacity),10000)
+        for change in ({'reserve_bytes':M.RESERVE-1},{'control_allowance_bytes':0},
+                {'free_bytes':capacity['free_bytes']-1},{'max_cipher_bytes':True},
+                {'device':2049},{'root':'/'},{'files_created':True}):
+            with self.subTest(change=change),self.assertRaisesRegex(M.Refusal,'native_capacity_invalid'):
+                M.native_cipher_capacity({**capacity,**change})
 
     def fake_watch(self, *, succeeded=True, phase_deadline=None, daemon_complete=False, phase='source-metadata'):
         now = [99.]
@@ -388,7 +441,8 @@ class Hot3Tests(unittest.TestCase):
         clock=M.Clock(self.deadline);clock.started-=1000
         with self.assertRaisesRegex(M.Refusal,'deadline_expired'):clock.check()
 
-    def worker_fixture(self, *, bad_crypto=False, bad_remote=False, dirty_cleanup=False):
+    def worker_fixture(self, *, bad_crypto=False, bad_remote=False, dirty_cleanup=False, native_caps=None,
+            dump_payload=b'synthetic-verified-dump', cipher_payload=b'authenticated-synthetic-cipher'):
         events=[]
         original=self.folder/'original.env';original.write_bytes(b'private-fixture-unopened');original.chmod(0o600)
         managed=self.managed/'web.release.env';managed.write_bytes(b'private-fixture-unopened');managed.chmod(0o600)
@@ -403,11 +457,12 @@ class Hot3Tests(unittest.TestCase):
             def check(self):events.append('bound-check')
         def create(**arguments):
             events.append('create-restore')
+            self.created_limits=arguments['execution_limits']
             self.assertTrue(arguments['allow_running_writers']);self.assertFalse(arguments['allow_target_identity_mismatch'])
             self.assertTrue(arguments['allow_private_primary_source'])
             self.assertEqual(arguments['restore_resource_binding'],self.intent['restores'][0])
             self.assertEqual(arguments['release_sha'],cfg['release_sha'])
-            artifact=arguments['backup_dir']/'synthetic.dump';artifact.write_bytes(b'synthetic-verified-dump');artifact.chmod(0o600)
+            artifact=arguments['backup_dir']/'synthetic.dump';artifact.write_bytes(dump_payload);artifact.chmod(0o600)
             arguments['receipt'].write_bytes(b'public-create-receipt');arguments['receipt'].chmod(0o600)
             journal=arguments['backup_dir']/'journal.json';journal.write_bytes(b'public-journal');journal.chmod(0o600)
             return {'status':'PASS','backup_mode':'hot','restore_smoke':{'cleanup_status':'PASS'},
@@ -424,11 +479,12 @@ class Hot3Tests(unittest.TestCase):
             create_backup=create,verify_hot_receipt=verify,file_digest=B.file_digest,
             _journal_path=lambda folder:folder/'journal.json',_pinned_backup_artifact=B._pinned_backup_artifact)
         encrypted={}
+        native_caps=iter(native_caps or [self.intent['max_cipher_bytes']]*2)
         def encrypt(**arguments):
             events.append('encrypt')
             self.assertGreater(events.index('independent-restore'),events.index('create-restore'))
             self.assertEqual(events[-2],'pg-absent')
-            arguments['destination'].write_bytes(b'authenticated-synthetic-cipher');arguments['destination'].chmod(0o600)
+            arguments['destination'].write_bytes(cipher_payload);arguments['destination'].chmod(0o600)
             arguments['receipt'].write_bytes(b'public-encryption-receipt');arguments['receipt'].chmod(0o600)
             encrypted.update(plaintext_sha256='0'*64 if bad_crypto else B.file_digest(arguments['source']),
                 plaintext_size_bytes=arguments['source'].stat().st_size,
@@ -436,13 +492,13 @@ class Hot3Tests(unittest.TestCase):
             return encrypted
         def decrypt_verify(**arguments):
             events.append('decrypt-verify')
-            self.assertEqual(arguments['expected_plaintext_sha256'],sha256(b'synthetic-verified-dump').hexdigest())
-            self.assertEqual(arguments['expected_plaintext_size_bytes'],len(b'synthetic-verified-dump'))
+            self.assertEqual(arguments['expected_plaintext_sha256'],sha256(dump_payload).hexdigest())
+            self.assertEqual(arguments['expected_plaintext_size_bytes'],len(dump_payload))
             return encrypted
         def remote(mode,**arguments):
             events.append('offhost-'+mode)
-            if mode=='capacity':return {'max_cipher_bytes':self.intent['max_cipher_bytes']}
-            if mode=='receive':self.assertEqual(arguments['stream'].read(),b'authenticated-synthetic-cipher')
+            if mode=='capacity':return self.capacity_fixture(next(native_caps))
+            if mode=='receive':self.assertEqual(arguments['stream'].read(),cipher_payload)
             return {'ciphertext_size_bytes':encrypted['ciphertext_size_bytes'],'ciphertext_sha256':encrypted['ciphertext_sha256'],
                 'fsync_completed':False if bad_remote else True,'plaintext_materialized_offhost':False}
         rt=SimpleNamespace(intent=self.intent,intent_sha=self.digest,B=fakeB,
@@ -487,6 +543,24 @@ class Hot3Tests(unittest.TestCase):
             M.worker(rt,70)
         self.assertNotIn('create-restore',events);self.assertNotIn('independent-restore',events)
         self.assertNotIn('encrypt',events)
+
+    def test_worker_fresh_native_measurement_reduces_effective_dump_budget(self):
+        rt,events=self.worker_fixture(native_caps=[self.intent['max_cipher_bytes']-4096,self.intent['max_cipher_bytes']-8192])
+        M.worker(rt,70)
+        self.assertLess(events.index('offhost-capacity'),events.index('create-restore'))
+        self.assertEqual(self.created_limits.dump_max_bytes,self.intent['dump_max_bytes']-4096)
+        budget=M.document(self.stage/'dump-budget.json')
+        self.assertEqual(budget['effective_dump_max_bytes'],self.created_limits.dump_max_bytes)
+        self.assertEqual(budget['native_capacity']['max_cipher_bytes'],self.intent['max_cipher_bytes']-4096)
+        self.assertFalse(budget['native_capacity_reserved'])
+        self.assertEqual(M.document(self.stage/'result.json')['dump_budget_sha256'],sha256((self.stage/'dump-budget.json').read_bytes()).hexdigest())
+
+    def test_actual_cipher_must_fit_a_later_fresh_native_sample(self):
+        rt,events=self.worker_fixture(native_caps=[self.intent['max_cipher_bytes'],M.CIPHER_ALLOWANCE+1],
+            dump_payload=b's'*6000,cipher_payload=b'c'*6016)
+        with self.assertRaisesRegex(M.Refusal,'native_cipher_does_not_fit'):M.worker(rt,70)
+        self.assertIn('decrypt-verify',events);self.assertNotIn('offhost-receive',events)
+        self.assertFalse((self.stage/'result.json').exists())
 
     def test_crypto_reconciliation_or_offhost_durability_failure_cannot_publish_result(self):
         rt,events=self.worker_fixture(bad_crypto=True)
