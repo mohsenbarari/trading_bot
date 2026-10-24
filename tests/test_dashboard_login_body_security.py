@@ -23,12 +23,31 @@ SOURCE = Path(__file__).resolve().parents[1] / "apps/coin_rate_estimator/live_se
 
 
 def actual_factory():
-    syntax = ast.parse(SOURCE.read_text(encoding="utf-8"), str(SOURCE))
-    factory = next(node for node in syntax.body if isinstance(node, ast.FunctionDef)
-                   and node.name == "handler_factory")
+    import inspect
+    lines = SOURCE.read_text(encoding="utf-8").splitlines(keepends=True)
+    starts = [index for index, line in enumerate(lines) if line.startswith("def handler_factory(")]
+    assert len(starts) == 1, "exactly one top-level dashboard handler factory is required"
+    start = starts[0]
+    # Tokenize only this real function block. Unrelated dashboard rendering uses
+    # Python 3.12 f-strings and must not prevent CI's Python 3.11 handler tests.
+    block = "".join(inspect.getblock(lines[start:]))
+    syntax = ast.parse(block, str(SOURCE), feature_version=(3, 11))
+    assert len(syntax.body) == 1 and isinstance(syntax.body[0], ast.FunctionDef)
+    factory = syntax.body[0]
+    assert factory.name == "handler_factory"
+    ast.increment_lineno(factory, start)
     names = {"MAX_LOGIN_FORM_BYTES", "LOGIN_BODY_TIMEOUT_SECONDS"}
-    constants = [node for node in syntax.body if isinstance(node, ast.Assign)
-                 and any(isinstance(target, ast.Name) and target.id in names for target in node.targets)]
+    constants = []
+    for index, line in enumerate(lines):
+        if not any(re.match(rf"^{name}\s*=", line) for name in names):
+            continue
+        statement = ast.parse(line, str(SOURCE), feature_version=(3, 11))
+        assert len(statement.body) == 1 and isinstance(statement.body[0], ast.Assign)
+        node = statement.body[0]
+        assert len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+        assert type(ast.literal_eval(node.value)) in (int, float)
+        constants.append(ast.increment_lineno(node, index))
+    assert len(constants) == 2 and {node.targets[0].id for node in constants} == names
     import time
     namespace = {
         "BaseHTTPRequestHandler": BaseHTTPRequestHandler, "HTTPStatus": HTTPStatus,
@@ -44,6 +63,7 @@ def actual_factory():
     future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
     module = ast.fix_missing_locations(ast.Module(body=[future, *constants, factory], type_ignores=[]))
     exec(compile(module, str(SOURCE), "exec"), namespace)
+    assert namespace["handler_factory"].__code__.co_firstlineno == start + 1
     return namespace
 
 
