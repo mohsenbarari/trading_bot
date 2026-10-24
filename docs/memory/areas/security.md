@@ -29,10 +29,11 @@
 - Tests deny unmocked host/network commands; use named mocks/nonroot fixtures.
   Stream caps differ from artifact budgets. Backup roles bind actual artifacts,
   not geography: Native=foreign/trading_bot, Web=iran/current.
-- Backup source still rejects image identity. Archive metadata binding is source-
-  tested: retain Env FDs; hash and parse pinned controls from the same bounded
-  FD buffer, never separate pathname reads. Legacy evidence cannot pass a new
-  gate. Renderer/HOT3 provisioning remains open; no diagnostic Env copies or
-  relaxed image checks. util-linux build/ABI/source passed; install/scan remains.
+- Backup source still rejects image identity. Managed renderer/archive v1.4 are
+  source-tested, not provisioned: retain Env/artifact FDs; hash and parse pinned
+  controls from the same bounded buffers. Explicit hot mode needs independent
+  restore parity/canonical schema; legacy evidence cannot pass new gates. HOT3
+  capacity/cleanup/offhost remains open. No diagnostic Env copies or relaxed
+  image checks. CI vendor builds use a child-only022 mask; controller stays077.
 - Keep STOP until activated/verified security, then monitor30 accepted complete
   clean units. Health polls never count; preserve failures/counters without waiver.

@@ -250,3 +250,40 @@ normal managed owner and then run a freshly pinned normal backup validator;
 never activate containers as part of configuration staging. A bounded operation
 deadline is required. Staging without downtime does not itself require a new
 human permission; any actual stop still requires a valid downtime window.
+
+## Explicit hot backup contract (source-only)
+
+The current archive receipt/journal schemas are `market_pipeline_backup_restore/1.4`
+and `market_pipeline_backup_journal/1.2`. They bind `backup_mode` as `hot` or
+`quiesced`; a mode cannot be chosen retrospectively. Earlier 1.3/1.1 and 1.2/1.0
+controls refuse live use before opening the Env. Explicit, pinned historical
+inspection remains separate and preserves the older strict verification rules.
+Unknown historical mode never grants permission to ignore row differences.
+
+Ordinary `verify` remains strict for quiesced backups. The distinct `verify-hot`
+requires exact receipt/journal SHA256 pins, a fresh 60–86400-second age bound and
+an independent restore run ID. Both controls are parsed from the same bounded
+descriptor buffers whose hashes were verified, with their identities retained
+through return. The source Env remains metadata-bound without content hashing.
+Hot receipts bind the actual source release/image, not a Blue/Green target.
+
+Source database/container identity, migration versions and complete schema must
+match before and after each operation. Schema introspection runs an ordered
+`SET search_path TO pg_catalog` and checks that setting in the same connection
+before canonical JSON hashing; a CTE evaluation-order assumption is insufficient.
+Hot source rows/sequences may advance, while table/sequence identities and schema
+remain fixed. Source and restored schema hashes must match in both backup modes.
+
+Hot verification hashes the dump through a retained descriptor, bounds reads to
+the advertised actual size plus one byte, and gives a duplicate of that same
+descriptor to `pg_restore`. It performs a fresh isolated restore with different
+owned resources, then requires its entire invariant inventory to equal CREATE's
+stored restored inventory. A changed source, artifact, control, restored schema,
+row/sequence inventory or incomplete cleanup refuses verification. Malformed
+control types and bools impersonating integer metadata are closed refusals.
+
+Success explicitly remains `eligible_for_new_deployment: false`: HOT3 still
+needs a finite owning producer, measured capacity, daemon-side deadline/cleanup,
+managed source provenance, and durable verified offhost transport. This source
+packet has not created a production dump or independent restore. It grants no
+production stop, daemon upgrade, reboot or activation authority.

@@ -54,8 +54,10 @@ POSTGRES_IMAGE = (
 )
 CREATE_CONFIRMATION = "create-production-market-pipeline-archive-backup"
 HOT_CREATE_CONFIRMATION = "create-production-market-pipeline-archive-hot-backup"
-RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.3"
-JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.1"
+RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.4"
+JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.2"
+METADATA_LEGACY_RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.3"
+METADATA_LEGACY_JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.1"
 LEGACY_RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.2"
 LEGACY_JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.0"
 # Control documents only; never apply this bound to PostgreSQL dump artifacts.
@@ -435,7 +437,27 @@ def _database_invariants(query: Any) -> dict[str, Any]:
             "last_value": int(value),
             "is_called": called in {"t", "true"},
         }
-    catalogue = query(
+    def schema_document(sql: str, *, label: str) -> str:
+        # Each query runs in one psql connection with -q: SET must complete
+        # before introspection, and the returned setting is checked before
+        # hashing. A CTE/cross join does not guarantee this evaluation order.
+        raw = query(
+            "SET search_path TO pg_catalog;\n"
+            "SELECT current_setting('search_path');\n" + sql,
+            label=label,
+        )
+        setting, separator, document = raw.partition("\n")
+        if setting != "pg_catalog" or not separator:
+            raise BackupError("backup_schema_search_path_invalid")
+        try:
+            value = json.loads(document)
+        except (ValueError, TypeError):
+            raise BackupError("backup_schema_catalogue_invalid") from None
+        if not isinstance(value, list):
+            raise BackupError("backup_schema_catalogue_invalid")
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+    catalogue = schema_document(
         "SELECT COALESCE(json_agg(row_to_json(x) ORDER BY "
         "x.table_name,x.ordinal_position)::text,'[]') FROM ("
         "SELECT table_name,ordinal_position,column_name,data_type,is_nullable,"
@@ -443,9 +465,7 @@ def _database_invariants(query: Any) -> dict[str, Any]:
         "FROM information_schema.columns WHERE table_schema='market_data') x",
         label="backup_schema_catalogue",
     )
-    schema_objects = query(
-        "WITH canonical_search_path AS MATERIALIZED ("
-        "SELECT set_config('search_path','pg_catalog',true) AS configured) "
+    schema_objects = schema_document(
         "SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.kind,x.identity)::text,'[]') "
         "FROM ("
         "SELECT 'constraint' AS kind, c.oid::regclass::text || ':' || con.conname || ':' || "
@@ -462,7 +482,7 @@ def _database_invariants(query: Any) -> dict[str, Any]:
         "WHERE n.nspname='market_data' AND NOT t.tgisinternal "
         "UNION ALL SELECT 'function', p.oid::regprocedure::text || ':' || pg_get_functiondef(p.oid) "
         "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-        "WHERE n.nspname='market_data') x CROSS JOIN canonical_search_path",
+        "WHERE n.nspname='market_data') x",
         label="backup_schema_objects",
     )
     return {
@@ -546,7 +566,7 @@ def inspect_source_database(
         return _run_text(
             [
                 "docker", "exec", container_id, "psql",
-                "-X", "-v", "ON_ERROR_STOP=1", "-At",
+                "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At",
                 "-U", user, "-d", database, "-c", sql,
             ],
             label=label,
@@ -656,7 +676,7 @@ def _write_dump(
 def _restore_query(container: str, sql: str) -> str:
     return _run_text(
         [
-            "docker", "exec", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+            "docker", "exec", container, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1",
             "-At", "-U", "restore", "-d", "restore", "-c", sql,
         ],
         label="backup_restore_query",
@@ -700,12 +720,26 @@ def _cleanup_owned_restore_resource(kind: str, name: str, label: str) -> None:
     _assert_restore_resource_absent(kind, name)
 
 
+def _valid_restore_resources(binding: Any) -> bool:
+    if (not isinstance(binding, Mapping) or set(binding) != {"container", "volume", "label"}
+            or any(type(value) is not str for value in binding.values())):
+        return False
+    nonce = binding["container"].removeprefix("market_pipeline_restore_")
+    return bool(
+        re.fullmatch(r"[0-9a-f]{16}", nonce)
+        and binding["container"] == f"market_pipeline_restore_{nonce}"
+        and binding["volume"] == f"market_pipeline_restore_{nonce}_data"
+        and binding["label"] == f"market-pipeline-backup-{nonce}"
+    )
+
+
 def restore_smoke(
     artifact: Path,
     source: Mapping[str, Any],
     *,
     resource_binding: Mapping[str, str] | None = None,
     before_cleanup: Callable[[str], None] | None = None,
+    artifact_descriptor: int | None = None,
 ) -> dict[str, Any]:
     if resource_binding is None:
         nonce = secrets.token_hex(8)
@@ -714,18 +748,11 @@ def restore_smoke(
             "volume": f"market_pipeline_restore_{nonce}_data",
             "label": f"market-pipeline-backup-{nonce}",
         }
-    if set(resource_binding) != {"container", "volume", "label"}:
+    if not _valid_restore_resources(resource_binding):
         raise BackupError("backup_restore_resource_binding_invalid")
     container = str(resource_binding["container"])
     volume = str(resource_binding["volume"])
     label = str(resource_binding["label"])
-    nonce = container.removeprefix("market_pipeline_restore_")
-    if (
-        not re.fullmatch(r"[0-9a-f]{16}", nonce)
-        or volume != f"{container}_data"
-        or label != f"market-pipeline-backup-{nonce}"
-    ):
-        raise BackupError("backup_restore_resource_binding_invalid")
     _cleanup_owned_restore_resource("container", container, label)
     _cleanup_owned_restore_resource("volume", volume, label)
     created_volume = False
@@ -786,7 +813,11 @@ def restore_smoke(
             raise BackupError("backup_restore_not_ready")
         result = None
         for attempt in range(2):
-            with artifact.open("rb") as stream:
+            # HOT verification restores the same retained inode it hashed.
+            stream = (artifact.open("rb") if artifact_descriptor is None
+                      else os.fdopen(os.dup(artifact_descriptor), "rb"))
+            with stream:
+                stream.seek(0)
                 result = subprocess.run(
                     [
                         "docker", "exec", "-i", container, "pg_restore",
@@ -896,6 +927,10 @@ def _read_journal(path: Path, *, historical: bool = False) -> dict[str, Any]:
         if historical:
             return payload
         raise BackupError("backup_role_env_binding_migration_required")
+    if isinstance(payload, dict) and payload.get("schema") == METADATA_LEGACY_JOURNAL_SCHEMA:
+        if historical:
+            return payload
+        raise BackupError("backup_mode_migration_required")
     if not isinstance(payload, dict) or payload.get("schema") != JOURNAL_SCHEMA:
         raise BackupError("backup_journal_invalid")
     return payload
@@ -922,6 +957,8 @@ def _same_database_identity(left: Mapping[str, Any], right: Mapping[str, Any]) -
     return (
         left.get("database_identity_sha256")
         and left.get("database_identity_sha256") == right.get("database_identity_sha256")
+        and left.get("container_id") == right.get("container_id")
+        and left.get("database") == right.get("database")
     )
 
 
@@ -933,6 +970,46 @@ def _same_schema_window(left: Mapping[str, Any], right: Mapping[str, Any]) -> bo
         and bool(left.get("schema_versions"))
         and HEX64.fullmatch(str(left.get("schema_catalog_sha256") or ""))
         and HEX64.fullmatch(str(left.get("schema_objects_sha256") or ""))
+    )
+
+
+def _valid_invariants(payload: Mapping[str, Any]) -> bool:
+    versions = payload.get("schema_versions")
+    tables = payload.get("table_row_counts")
+    sequences = payload.get("sequence_values")
+    return (
+        isinstance(versions, list) and bool(versions)
+        and all(type(item) is int and item > 0 for item in versions)
+        and versions == sorted(set(versions))
+        and type(payload.get("table_count")) is int and payload["table_count"] > 0
+        and type(payload.get("fact_count")) is int and payload["fact_count"] >= 0
+        and isinstance(tables, dict) and len(tables) == payload["table_count"]
+        and tables.get("market_facts", 0) == payload["fact_count"]
+        and all(SAFE_SQL_ID.fullmatch(str(key)) and type(value) is int and value >= 0
+                for key, value in tables.items())
+        and isinstance(sequences, dict)
+        and all(SAFE_SQL_ID.fullmatch(str(key)) and isinstance(value, dict)
+                and set(value) == {"last_value", "is_called"}
+                and type(value["last_value"]) is int and type(value["is_called"]) is bool
+                for key, value in sequences.items())
+        and type(payload.get("schema_catalog_sha256")) is str
+        and bool(HEX64.fullmatch(payload["schema_catalog_sha256"]))
+        and type(payload.get("schema_objects_sha256")) is str
+        and bool(HEX64.fullmatch(payload["schema_objects_sha256"]))
+    )
+
+
+def _valid_source_metadata(payload: Mapping[str, Any]) -> bool:
+    return (
+        type(payload.get("container_id")) is str
+        and bool(re.fullmatch(r"[0-9a-f]{12,64}", payload["container_id"]))
+        and type(payload.get("database")) is str
+        and bool(SAFE_SQL_ID.fullmatch(payload["database"]))
+        and type(payload.get("database_identity_sha256")) is str
+        and bool(HEX64.fullmatch(payload["database_identity_sha256"]))
+        and type(payload.get("database_size_bytes")) is int
+        and payload["database_size_bytes"] > 0
+        and _valid_invariants(payload)
     )
 
 
@@ -967,9 +1044,10 @@ def _restore_window_compatible(
         source, source_after, allow_running_writers=allow_running_writers
     ):
         return False
-    if source.get("schema_versions") != restore.get("schema_versions") or not source.get(
-        "schema_versions"
-    ):
+    if not _same_schema_window(source, restore):
+        return False
+    if (set(source.get("table_row_counts", {})) != set(restore.get("table_row_counts", {}))
+            or set(source.get("sequence_values", {})) != set(restore.get("sequence_values", {}))):
         return False
     if allow_running_writers:
         return True
@@ -1023,10 +1101,12 @@ def _validate_journal_identity(
     image_id: str,
     image_input_signature: str,
     historical: bool = False,
+    backup_mode: str | None = None,
 ) -> None:
-    env_key = "role_env_sha256" if historical else "role_env_binding"
+    old_digest = historical and payload.get("schema") == LEGACY_JOURNAL_SCHEMA
+    env_key = "role_env_sha256" if old_digest else "role_env_binding"
     expected = {
-        "schema": LEGACY_JOURNAL_SCHEMA if historical else JOURNAL_SCHEMA,
+        "schema": (LEGACY_JOURNAL_SCHEMA if old_digest else METADATA_LEGACY_JOURNAL_SCHEMA) if historical else JOURNAL_SCHEMA,
         "release_sha": release_sha,
         "release_tree": release_tree,
         "image_id": image_id,
@@ -1035,9 +1115,7 @@ def _validate_journal_identity(
         "receipt_path": str(receipt),
         "secrets_disclosed": False,
     }
-    if any(payload.get(key) != value for key, value in expected.items()) or not _same_env_binding(
-        payload.get(env_key), role_env_binding[env_key]
-    ):
+    if not _same_env_binding({key: payload.get(key) for key in expected}, expected):
         raise BackupError("backup_journal_identity_mismatch")
     journal_keys = {
         "schema", "status", "backup_status", "run_id", "created_at_utc",
@@ -1046,10 +1124,16 @@ def _validate_journal_identity(
         "source_before", "source_after", "backup", "restore_smoke",
         "restore_resources", "secrets_disclosed",
     }
+    if not historical:
+        journal_keys.add("backup_mode")
+        if type(payload.get("backup_mode")) is not str or payload["backup_mode"] not in {"hot", "quiesced"} or (
+            backup_mode is not None and payload.get("backup_mode") != backup_mode
+        ):
+            raise BackupError("backup_mode_mismatch")
     if (
         set(payload) != journal_keys
-        or payload.get("status")
-        not in {"PREPARED", "DUMP_READY", "RESTORE_RUNNING", "COMPLETE"}
+        or type(payload.get("status")) is not str
+        or payload["status"] not in {"PREPARED", "DUMP_READY", "RESTORE_RUNNING", "COMPLETE"}
         or not re.fullmatch(r"[0-9a-f]{16}", str(payload.get("run_id") or ""))
     ):
         raise BackupError("backup_journal_schema_invalid")
@@ -1062,10 +1146,7 @@ def _validate_journal_identity(
     ):
         raise BackupError("backup_journal_artifact_invalid")
     resources = payload.get("restore_resources")
-    if resources is not None and (
-        not isinstance(resources, dict)
-        or set(resources) != {"container", "volume", "label"}
-    ):
+    if resources is not None and not _valid_restore_resources(resources):
         raise BackupError("backup_journal_resource_binding_invalid")
 
 
@@ -1086,7 +1167,10 @@ def _receipt_from_journal(journal: Mapping[str, Any]) -> dict[str, Any]:
     else:
         raise BackupError("backup_journal_status_invalid")
     return {
-        "schema": (LEGACY_RECEIPT_SCHEMA if journal["schema"] == LEGACY_JOURNAL_SCHEMA else RECEIPT_SCHEMA),
+        "schema": {LEGACY_JOURNAL_SCHEMA: LEGACY_RECEIPT_SCHEMA,
+                   METADATA_LEGACY_JOURNAL_SCHEMA: METADATA_LEGACY_RECEIPT_SCHEMA,
+                   JOURNAL_SCHEMA: RECEIPT_SCHEMA}[journal["schema"]],
+        **({"backup_mode": journal["backup_mode"]} if journal["schema"] == JOURNAL_SCHEMA else {}),
         "status": status,
         "created_at_utc": journal["created_at_utc"],
         "release_sha": journal["release_sha"],
@@ -1127,6 +1211,7 @@ def _create_backup_bound(
         allow_target_identity_mismatch=allow_target_identity_mismatch,
     )
     require_quiesce = not allow_running_writers
+    backup_mode = "hot" if allow_running_writers else "quiesced"
     root = _secure_directory(backup_dir, create=True)
     if receipt.parent != root or receipt.name != "market-pipeline-backup-receipt.json":
         raise BackupError("backup_receipt_destination_invalid")
@@ -1147,6 +1232,7 @@ def _create_backup_bound(
             release_tree=release_tree,
             image_id=image_id,
             image_input_signature=image_input_signature,
+            backup_mode=backup_mode,
         )
         if allow_running_writers and _empty_prepared_journal(journal, root=root):
             _env_binding.check()
@@ -1218,6 +1304,7 @@ def _create_backup_bound(
             )
             journal = {
                 "schema": JOURNAL_SCHEMA,
+                "backup_mode": backup_mode,
                 "status": "COMPLETE",
                 "backup_status": "INITIAL_EMPTY",
                 "run_id": nonce,
@@ -1254,6 +1341,7 @@ def _create_backup_bound(
         )
         journal = {
             "schema": JOURNAL_SCHEMA,
+            "backup_mode": backup_mode,
             "status": "PREPARED",
             "backup_status": None,
             "run_id": nonce,
@@ -1357,6 +1445,8 @@ def _refuse_legacy_receipt(path: Path) -> None:
             raise BackupError("backup_receipt_invalid") from exc
         if isinstance(payload, dict) and payload.get("schema") == LEGACY_RECEIPT_SCHEMA:
             raise BackupError("backup_role_env_binding_migration_required")
+        if isinstance(payload, dict) and payload.get("schema") == METADATA_LEGACY_RECEIPT_SCHEMA:
+            raise BackupError("backup_mode_migration_required")
 
 
 def create_backup(
@@ -1387,8 +1477,11 @@ def _verify_receipt_evidence(
     image_input_signature: str, maximum_age_seconds: int | None,
     now: datetime | None = None, historical: bool = False,
     _snapshots: tuple[dict[str, Any], dict[str, Any]] | None = None,
+    backup_mode: str = "quiesced",
+    _artifact_verified: bool = False,
 ) -> dict[str, Any]:
-    env_key = "role_env_sha256" if historical else "role_env_binding"
+    old_digest = historical and _snapshots is not None and _snapshots[1].get("schema") == LEGACY_JOURNAL_SCHEMA
+    env_key = "role_env_sha256" if old_digest else "role_env_binding"
     _secure_regular(receipt)
     _secure_directory(receipt.parent, create=False)
     if _snapshots is None:
@@ -1399,7 +1492,7 @@ def _verify_receipt_evidence(
     else:
         payload = _snapshots[0]
     expected = {
-        "schema": LEGACY_RECEIPT_SCHEMA if historical else RECEIPT_SCHEMA,
+        "schema": (LEGACY_RECEIPT_SCHEMA if old_digest else METADATA_LEGACY_RECEIPT_SCHEMA) if historical else RECEIPT_SCHEMA,
         "release_sha": release_sha,
         "release_tree": release_tree,
         "image_id": image_id,
@@ -1409,9 +1502,7 @@ def _verify_receipt_evidence(
         "services_started": False,
         "secrets_disclosed": False,
     }
-    if any(payload.get(key) != value for key, value in expected.items()) or not _same_env_binding(
-        payload.get(env_key), role_env_binding[env_key]
-    ):
+    if not _same_env_binding({key: payload.get(key) for key in expected}, expected):
         raise BackupError("backup_receipt_identity_mismatch")
     common_keys = {
         "schema", "status", "created_at_utc", "release_sha", "release_tree",
@@ -1420,6 +1511,10 @@ def _verify_receipt_evidence(
         "backup", "restore_smoke", "off_host_copy_required", "database_mutated",
         "services_started", "secrets_disclosed",
     }
+    if not historical:
+        common_keys.add("backup_mode")
+        if payload.get("backup_mode") != backup_mode:
+            raise BackupError("backup_mode_mismatch")
     if set(payload) != common_keys:
         raise BackupError("backup_receipt_schema_invalid")
     if not re.fullmatch(r"[0-9a-f]{16}", str(payload.get("backup_run_id") or "")):
@@ -1439,6 +1534,7 @@ def _verify_receipt_evidence(
         release_tree=release_tree,
         image_id=image_id,
         image_input_signature=image_input_signature,
+        backup_mode=backup_mode,
     )
     if journal.get("status") != "COMPLETE" or payload != _receipt_from_journal(journal):
         raise BackupError("backup_receipt_journal_mismatch")
@@ -1495,44 +1591,17 @@ def _verify_receipt_evidence(
             raise BackupError("backup_restore_receipt_invalid")
         source = payload["source"]
         if (
-            not re.fullmatch(r"[0-9a-f]{12,64}", str(source.get("container_id") or ""))
-            or not SAFE_SQL_ID.fullmatch(str(source.get("database") or ""))
-            or not HEX64.fullmatch(str(source.get("database_identity_sha256") or ""))
-            or int(source.get("database_size_bytes") or 0) <= 0
-            or not isinstance(source.get("table_count"), int)
-            or source["table_count"] <= 0
-            or not isinstance(source.get("fact_count"), int)
-            or source["fact_count"] < 0
-            or not isinstance(source.get("table_row_counts"), dict)
-            or set(source["table_row_counts"]) == set()
-            or len(source["table_row_counts"]) != source.get("table_count")
-            or any(
-                not SAFE_SQL_ID.fullmatch(str(key))
-                or not isinstance(value, int)
-                or value < 0
-                for key, value in source["table_row_counts"].items()
-            )
-            or source["table_row_counts"].get("market_facts")
-            != source.get("fact_count")
-            or not isinstance(source.get("sequence_values"), dict)
-            or any(
-                not SAFE_SQL_ID.fullmatch(str(key))
-                or not isinstance(value, dict)
-                or set(value) != {"last_value", "is_called"}
-                or not isinstance(value.get("last_value"), int)
-                or not isinstance(value.get("is_called"), bool)
-                for key, value in source["sequence_values"].items()
-            )
-            or not HEX64.fullmatch(str(source.get("schema_catalog_sha256") or ""))
-            or not HEX64.fullmatch(str(source.get("schema_objects_sha256") or ""))
-            or not isinstance(source.get("schema_versions"), list)
-            or not source["schema_versions"]
-            or source["schema_versions"] != sorted(set(source["schema_versions"]))
-            or any(not isinstance(item, int) or item <= 0 for item in source["schema_versions"])
+            not all(_valid_source_metadata(row) for row in (source, source_after))
+            or not _valid_invariants(restore)
             or source.get("database_identity_sha256")
             != source_after.get("database_identity_sha256")
-            or _invariant_view(source) != _invariant_view(source_after)
-            or _row_inventory_view(source) != _row_inventory_view(restore)
+            or (not historical and not _restore_window_compatible(
+                source, source_after, restore, allow_running_writers=backup_mode == "hot"
+            ))
+            or (historical and (
+                _invariant_view(source) != _invariant_view(source_after)
+                or _row_inventory_view(source) != _row_inventory_view(restore)
+            ))
         ):
             raise BackupError("backup_source_restore_metadata_invalid")
         artifact = Path(str(backup.get("path") or ""))
@@ -1541,8 +1610,9 @@ def _verify_receipt_evidence(
         _secure_regular(artifact)
         if (
             not HEX64.fullmatch(str(backup.get("sha256") or ""))
-            or file_digest(artifact) != backup["sha256"]
-            or artifact.stat().st_size != int(backup.get("size_bytes") or -1)
+            or type(backup.get("size_bytes")) is not int or backup["size_bytes"] <= 0
+            or (not _artifact_verified and file_digest(artifact) != backup["sha256"])
+            or artifact.stat().st_size != backup["size_bytes"]
             or backup.get("format") != "postgres_custom"
         ):
             raise BackupError("backup_artifact_drifted")
@@ -1576,12 +1646,14 @@ def verify_receipt(
 
 
 @contextmanager
-def _pinned_historical_snapshots(
+def _pinned_control_snapshots(
     receipt: Path, receipt_sha256: str, journal_sha256: str,
+    *, hot: bool = False,
 ) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
     """Hash and parse the same bounded bytes; retain both identities to return."""
+    prefix = "backup_hot" if hot else "backup_historical"
     if not HEX64.fullmatch(receipt_sha256) or not HEX64.fullmatch(journal_sha256):
-        raise BackupError("backup_historical_evidence_identity_mismatch")
+        raise BackupError(prefix + "_evidence_identity_mismatch")
     _secure_directory(receipt.parent, create=False)
     descriptors: list[int] = []
     files: list[tuple[str, int, dict[str, int]]] = []
@@ -1592,7 +1664,7 @@ def _pinned_historical_snapshots(
         descriptors.append(parent)
         parent_info = os.fstat(parent)
         if parent_info.st_uid != os.geteuid() or stat.S_IMODE(parent_info.st_mode) != 0o700:
-            raise BackupError("backup_historical_evidence_invalid")
+            raise BackupError(prefix + "_evidence_invalid")
         parent_identity = _parent_identity(parent_info)
 
         def check() -> None:
@@ -1600,7 +1672,7 @@ def _pinned_historical_snapshots(
                 _parent_identity(os.fstat(parent)) != parent_identity
                 or _parent_identity(receipt.parent.lstat()) != parent_identity
             ):
-                raise BackupError("backup_historical_evidence_identity_mismatch")
+                raise BackupError(prefix + "_evidence_identity_mismatch")
             for name, descriptor, expected in files:
                 current = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 if (
@@ -1608,7 +1680,7 @@ def _pinned_historical_snapshots(
                     or _file_identity(os.fstat(descriptor)) != expected
                     or _file_identity(current) != expected
                 ):
-                    raise BackupError("backup_historical_evidence_identity_mismatch")
+                    raise BackupError(prefix + "_evidence_identity_mismatch")
 
         documents: list[dict[str, Any]] = []
         for name, expected_sha256 in (
@@ -1626,28 +1698,149 @@ def _pinned_historical_snapshots(
                 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
                 or not 0 < info.st_size <= MAX_HISTORICAL_DOCUMENT_BYTES
             ):
-                raise BackupError("backup_historical_evidence_invalid")
+                raise BackupError(prefix + "_evidence_invalid")
             files.append((name, descriptor, _file_identity(info)))
             check()
             raw = os.pread(descriptor, MAX_HISTORICAL_DOCUMENT_BYTES + 1, 0)
             check()
             if len(raw) != info.st_size or sha256(raw).hexdigest() != expected_sha256:
-                raise BackupError("backup_historical_evidence_identity_mismatch")
+                raise BackupError(prefix + "_evidence_identity_mismatch")
             try:
                 document = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
-                raise BackupError("backup_historical_evidence_invalid") from None
+                raise BackupError(prefix + "_evidence_invalid") from None
             if not isinstance(document, dict):
-                raise BackupError("backup_historical_evidence_invalid")
+                raise BackupError(prefix + "_evidence_invalid")
             documents.append(document)
         check()
         yield documents[0], documents[1]
         check()
     except OSError:
-        raise BackupError("backup_historical_evidence_identity_mismatch") from None
+        raise BackupError(prefix + "_evidence_identity_mismatch") from None
     finally:
         for descriptor in reversed(descriptors):
             os.close(descriptor)
+
+
+@contextmanager
+def _pinned_backup_artifact(artifact: Path, expected: Mapping[str, Any]) -> Iterator[int]:
+    if type(expected.get("size_bytes")) is not int or expected["size_bytes"] <= 0:
+        raise BackupError("backup_artifact_drifted")
+    _secure_regular(artifact)
+    descriptor = os.open(artifact, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        identity = _file_identity(info)
+        def check() -> None:
+            if (_file_identity(os.fstat(descriptor)) != identity
+                    or _file_identity(artifact.lstat()) != identity):
+                raise BackupError("backup_artifact_drifted")
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                or info.st_size != expected["size_bytes"]):
+            raise BackupError("backup_artifact_drifted")
+        digest = sha256()
+        total = 0
+        while chunk := os.read(descriptor, min(1024 * 1024, expected["size_bytes"] + 1 - total)):
+            total += len(chunk)
+            if total > expected["size_bytes"]:
+                raise BackupError("backup_artifact_drifted")
+            digest.update(chunk)
+        check()
+        if total != expected["size_bytes"] or digest.hexdigest() != expected["sha256"]:
+            raise BackupError("backup_artifact_drifted")
+        yield descriptor
+        check()
+    except OSError:
+        raise BackupError("backup_artifact_drifted") from None
+    finally:
+        os.close(descriptor)
+
+
+def verify_hot_receipt(
+    *, env_file: Path, receipt: Path, receipt_sha256: str, journal_sha256: str,
+    release_sha: str, release_tree: str, image_id: str, image_input_signature: str,
+    maximum_age_seconds: int | None, now: datetime | None = None,
+    allow_target_identity_mismatch: bool = False,
+    restore_resource_binding: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Verify an explicit hot snapshot with a fresh independent isolated restore.
+
+    The finite owning caller remains responsible for capacity, daemon-side
+    deadline cleanup, current application image provenance and offhost proof.
+    """
+    if type(maximum_age_seconds) is not int or not 60 <= maximum_age_seconds <= 86400:
+        raise BackupError("backup_maximum_age_invalid")
+    with _pinned_control_snapshots(receipt, receipt_sha256, journal_sha256, hot=True) as snapshots:
+        payload, journal = snapshots
+        if type(payload.get("schema")) is not str or type(journal.get("schema")) is not str:
+            raise BackupError("backup_hot_evidence_invalid")
+        if payload.get("schema") in {LEGACY_RECEIPT_SCHEMA, METADATA_LEGACY_RECEIPT_SCHEMA} or journal.get("schema") in {LEGACY_JOURNAL_SCHEMA, METADATA_LEGACY_JOURNAL_SCHEMA}:
+            raise BackupError("backup_mode_migration_required")
+        if payload.get("backup_mode") != "hot" or journal.get("backup_mode") != "hot":
+            raise BackupError("backup_mode_mismatch")
+        if restore_resource_binding is None:
+            nonce = secrets.token_hex(8)
+            restore_resource_binding = {
+                "container": f"market_pipeline_restore_{nonce}",
+                "volume": f"market_pipeline_restore_{nonce}_data",
+                "label": f"market-pipeline-backup-{nonce}",
+            }
+        if not _valid_restore_resources(restore_resource_binding):
+            raise BackupError("backup_restore_resource_binding_invalid")
+        previous_resources = journal.get("restore_resources")
+        if previous_resources is not None and not _valid_restore_resources(previous_resources):
+            raise BackupError("backup_journal_resource_binding_invalid")
+        previous_resources = previous_resources or {}
+        if any(restore_resource_binding.get(key) == previous_resources.get(key)
+               for key in ("container", "volume", "label")):
+            raise BackupError("backup_hot_restore_resources_not_independent")
+        with BoundRoleEnv(env_file) as bound:
+            values = _validate_release_values(
+                bound.values(), release_sha=release_sha, image_id=image_id,
+                allow_target_identity_mismatch=allow_target_identity_mismatch,
+            )
+            # A hot backup is bound to the actual source, never an unrelated
+            # deployment target accepted by the older Blue/Green interface.
+            if (values.get("MARKET_PIPELINE_RELEASE_SHA") != release_sha
+                    or values.get("MARKET_PIPELINE_IMAGE") != image_id):
+                raise BackupError("backup_hot_source_identity_mismatch")
+            payload = _verify_receipt_evidence(
+                receipt=receipt, role_env_binding={"role_env_binding": bound.binding},
+                release_sha=release_sha, release_tree=release_tree, image_id=image_id,
+                image_input_signature=image_input_signature,
+                maximum_age_seconds=maximum_age_seconds, now=now,
+                _snapshots=snapshots, backup_mode="hot", _artifact_verified=True,
+            )
+            if payload["status"] != "PASS":
+                raise BackupError("backup_hot_initialized_source_required")
+            source = inspect_source_database(values, require_quiesce=False)
+            bound.check()
+            if not _valid_source_metadata(source) or not _source_window_compatible(payload["source_after"], source, allow_running_writers=True):
+                raise BackupError("backup_hot_current_source_mismatch")
+            with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"]) as descriptor:
+                restored = restore_smoke(
+                    Path(payload["backup"]["path"]), source,
+                    resource_binding=restore_resource_binding,
+                    artifact_descriptor=descriptor,
+                )
+                bound.check()
+                if (restored.get("status") != "PASS" or restored.get("cleanup_status") != "PASS"
+                        or not _valid_invariants(restored)
+                        or not _same_env_binding(_invariant_view(restored), _invariant_view(payload["restore_smoke"]))):
+                    raise BackupError("backup_hot_independent_restore_mismatch")
+                source_after = inspect_source_database(values, require_quiesce=False)
+                bound.check()
+                if not _valid_source_metadata(source_after) or not _source_window_compatible(source, source_after, allow_running_writers=True):
+                    raise BackupError("backup_hot_current_source_mismatch")
+            return {
+                "status": "PASS", "backup_mode": "hot", "receipt": payload,
+                "current_environment_verified": True, "fresh_restore_verified": True,
+                "eligible_for_new_deployment": False, "off_host_copy_required": True,
+                "current_source": source, "current_source_after": source_after,
+                "independent_restore": restored, "secrets_disclosed": False,
+                "restore_resources": dict(restore_resource_binding),
+            }
 
 
 def verify_historical_receipt(
@@ -1655,13 +1848,20 @@ def verify_historical_receipt(
     release_sha: str, release_tree: str, image_id: str,
     image_input_signature: str,
 ) -> dict[str, Any]:
-    """Verify pinned historical evidence without accepting a current Env claim."""
-    with _pinned_historical_snapshots(receipt, receipt_sha256, journal_sha256) as snapshots:
+    """Verify pinned historical evidence without accepting a current Env claim.
+
+    Old controls have no backup mode. Preserve their strict VERIFY inventory
+    contract; never retrospectively assume hot CREATE semantics for row drift.
+    """
+    with _pinned_control_snapshots(receipt, receipt_sha256, journal_sha256) as snapshots:
         journal = snapshots[1]
-        if journal.get("schema") != LEGACY_JOURNAL_SCHEMA or not HEX64.fullmatch(str(journal.get("role_env_sha256") or "")):
+        if type(journal.get("schema")) is not str or journal["schema"] not in {LEGACY_JOURNAL_SCHEMA, METADATA_LEGACY_JOURNAL_SCHEMA}:
+            raise BackupError("backup_historical_evidence_invalid")
+        env_key = "role_env_sha256" if journal["schema"] == LEGACY_JOURNAL_SCHEMA else "role_env_binding"
+        if env_key not in journal or (env_key == "role_env_sha256" and not HEX64.fullmatch(str(journal[env_key]))):
             raise BackupError("backup_historical_evidence_invalid")
         payload = _verify_receipt_evidence(
-            receipt=receipt, role_env_binding={"role_env_sha256": journal["role_env_sha256"]},
+            receipt=receipt, role_env_binding={env_key: journal[env_key]},
             release_sha=release_sha, release_tree=release_tree, image_id=image_id,
             image_input_signature=image_input_signature, maximum_age_seconds=None,
             historical=True, _snapshots=snapshots,
@@ -1677,7 +1877,7 @@ def verify_historical_receipt(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("create", "verify"):
+    for name in ("create", "verify", "verify-hot"):
         command = commands.add_parser(name)
         command.add_argument("--env-file", type=Path, required=True)
         command.add_argument("--receipt", type=Path, required=True)
@@ -1692,7 +1892,12 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--confirm", required=True)
         else:
             command.add_argument("--maximum-age-seconds", type=int, default=3600)
-            command.add_argument("--allow-stale", action="store_true")
+            if name == "verify":
+                command.add_argument("--allow-stale", action="store_true")
+            else:
+                command.add_argument("--receipt-sha256", required=True)
+                command.add_argument("--journal-sha256", required=True)
+                command.add_argument("--restore-run-id", required=True)
         command.add_argument("--bluegreen-source-env", action="store_true")
     history = commands.add_parser("verify-historical")
     history.add_argument("--receipt", type=Path, required=True)
@@ -1749,12 +1954,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     **common,
                 )
             else:
-                if not args.allow_stale and not 60 <= args.maximum_age_seconds <= 86400:
+                if not getattr(args, "allow_stale", False) and not 60 <= args.maximum_age_seconds <= 86400:
                     raise BackupError("backup_maximum_age_invalid")
-                document = verify_receipt(
-                    maximum_age_seconds=(None if args.allow_stale else args.maximum_age_seconds),
-                    **common,
-                )
+                if args.command == "verify-hot":
+                    if not re.fullmatch(r"[0-9a-f]{16}", args.restore_run_id):
+                        raise BackupError("backup_restore_resource_binding_invalid")
+                    hot = verify_hot_receipt(
+                        receipt_sha256=args.receipt_sha256, journal_sha256=args.journal_sha256,
+                        maximum_age_seconds=args.maximum_age_seconds,
+                        restore_resource_binding={
+                            "container": f"market_pipeline_restore_{args.restore_run_id}",
+                            "volume": f"market_pipeline_restore_{args.restore_run_id}_data",
+                            "label": f"market-pipeline-backup-{args.restore_run_id}",
+                        }, **common,
+                    )
+                    document = hot["receipt"]
+                else:
+                    document = verify_receipt(
+                        maximum_age_seconds=(None if args.allow_stale else args.maximum_age_seconds),
+                        **common,
+                    )
         artifact = document.get("backup")
         print(
             json.dumps(
@@ -1763,6 +1982,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     **({"historical_only": True, "current_environment_verified": False,
                         "eligible_for_new_deployment": False}
                        if args.command == "verify-historical" else {}),
+                    **({"backup_mode": "hot", "current_environment_verified": True,
+                        "fresh_restore_verified": True, "eligible_for_new_deployment": False}
+                       if args.command == "verify-hot" else {}),
                     "backup_status": document["status"],
                     "release_sha": document["release_sha"],
                     "artifact_name": (
