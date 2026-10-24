@@ -1,0 +1,38 @@
+---
+# The reviewed public helper runs inside one command, holding the current marker
+# flock across all four exact writes/reload/postchecks. No helper is installed.
+- name: Persist only exact Web boot guards after completed CE maintenance
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    web_boot_action: check
+    web_boot_confirmation: ''
+  tasks:
+    - name: Admit only strict Web scope and explicit exact boot-guard action
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - web_boot_action in ['check', 'setup', 'cleanup']
+          - web_boot_action == 'check' or web_boot_confirmation == 'WEB-BOOT-GUARDS-20261024'
+          - web_boot_completed_manifest_sha256 is match('^[a-f0-9]{64}$')
+    - name: Run the exact public helper with no writes by default or in check mode
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - "{{ lookup('ansible.builtin.file', playbook_dir + '/web_boot_guard.py') }}"
+          - --action
+          - "{{ 'check' if ansible_check_mode else web_boot_action }}"
+          - --completed-manifest-sha256
+          - '{{ web_boot_completed_manifest_sha256 }}'
+          - --confirmation
+          - '{{ web_boot_confirmation }}'
+      check_mode: false
+      register: web_boot_result
+      changed_when: (web_boot_result.stdout | from_json).configuration_changed | default(false) | bool
+      timeout: 300
