@@ -18,6 +18,11 @@
       action, role, ident, expected = sys.argv[1:]
       def require(ok, message):
           if not ok: raise SystemExit(message)
+      def setup_deadline(task_id):
+          # Only the fresh03 Web-engine lane is admitted in the new window;
+          # existing02 and all other task identities retain their old expiry.
+          hour, minute = (4, 41) if task_id == 'host-patch-03' else (1, 30)
+          return datetime.datetime(2026, 10, 24, hour, minute, tzinfo=datetime.timezone.utc)
       require(action in ('check', 'setup', 'cleanup'), 'invalid action')
       require(role in ('bot', 'web'), 'invalid role')
       require(re.fullmatch(r'[a-z0-9][a-z0-9-]{0,47}', ident), 'invalid task identifier')
@@ -30,7 +35,7 @@
       expected_address = '65.109.216.187' if role == 'bot' else '65.109.220.59'
       require(any(value.get('local') == expected_address for link in addresses for value in link.get('addr_info', [])), 'wrong native host address')
       if action == 'setup':
-          require(datetime.datetime.now(datetime.timezone.utc) < datetime.datetime(2026, 10, 24, 1, 30, tzinfo=datetime.timezone.utc), 'setup window expired')
+          require(datetime.datetime.now(datetime.timezone.utc) < setup_deadline(ident), 'setup window expired')
       def metadata(path, directory=False):
           value = os.lstat(path)
           require(value.st_uid == 0 and not stat.S_ISLNK(value.st_mode), 'unsafe owner or symlink')
@@ -113,7 +118,7 @@
           - hostvars.controller_web.ansible_ssh_private_key_file == '/root/.ssh/id_ed25519_iran'
           - hostvars.controller_web.ansible_ssh_common_args == '-o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes'
           - controller_access_action in ['check', 'setup', 'cleanup']
-          - controller_access_action == 'check' or controller_access_confirmation == 'TEMPORARY-ROOT-SSH-20261024T013000Z'
+          - controller_access_action == 'check' or controller_access_confirmation == ('TEMPORARY-ROOT-SSH-20261024T044100Z' if controller_access_id == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T013000Z')
 
     - name: Inspect persistent native to Web identity metadata without opening its bytes
       ansible.builtin.stat:
@@ -198,7 +203,7 @@
 
     - name: Derive exactly one options-prefixed managed public key
       ansible.builtin.set_fact:
-        controller_managed_line: "{{ ('restrict,from=\"65.109.220.59\",expiry-time=\"20261024013000Z\" ' + (controller_web_owned.stdout | from_json).public_key) if (controller_web_owned.stdout | from_json).public_key else '' }}"
+        controller_managed_line: "{{ ('restrict,from=\"65.109.220.59\",expiry-time=\"' + ('20261024044100Z' if controller_access_id == 'host-patch-03' else '20261024013000Z') + '\" ' + (controller_web_owned.stdout | from_json).public_key) if (controller_web_owned.stdout | from_json).public_key else '' }}"
 
     - name: Require private key and exact public file set for setup
       ansible.builtin.assert:

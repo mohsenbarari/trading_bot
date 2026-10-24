@@ -15,6 +15,7 @@ import types
 import unittest
 from unittest.mock import patch
 
+from jinja2 import Environment, StrictUndefined
 import yaml
 
 
@@ -76,8 +77,8 @@ class ControllerPlaybookContracts(unittest.TestCase):
 
     def test_explicit_fixed_window_and_native_host_guards(self):
         guards = TASKS[0]["ansible.builtin.assert"]["that"]
-        self.assertIn("controller_access_action == 'check' or controller_access_confirmation == 'TEMPORARY-ROOT-SSH-20261024T013000Z'", guards)
-        for value in ("os.geteuid() == 0", "'/proc/1/exe'", "'systemd'", "'/proc/self/ns/'", "'/.dockerenv'", "'/usr/sbin/ip'", "'65.109.216.187' if role == 'bot' else '65.109.220.59'", "datetime.datetime(2026, 10, 24, 1, 30"):
+        self.assertIn("controller_access_action == 'check' or controller_access_confirmation == ('TEMPORARY-ROOT-SSH-20261024T044100Z' if controller_access_id == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T013000Z')", guards)
+        for value in ("os.geteuid() == 0", "'/proc/1/exe'", "'systemd'", "'/proc/self/ns/'", "'/.dockerenv'", "'/usr/sbin/ip'", "'65.109.216.187' if role == 'bot' else '65.109.220.59'", "< setup_deadline(ident)"):
             self.assertIn(value, SOURCE)
         self.assertNotIn("402653", SOURCE)  # Namespace inode magic is not host proof.
         compile(SOURCE, "<read-only-controller-validator>", "exec")
@@ -111,10 +112,33 @@ class ControllerPlaybookContracts(unittest.TestCase):
         for metadata in ("owner", "group", "mode"):
             self.assertIn("controller_authorized_metadata.stat.", line[metadata])
         managed = task("Derive exactly one options-prefixed managed public key")["ansible.builtin.set_fact"]["controller_managed_line"]
-        self.assertIn('restrict,from="65.109.220.59",expiry-time="20261024013000Z" ', managed)
+        self.assertIn('restrict,from="65.109.220.59",expiry-time="', managed)
         self.assertNotIn("command=", managed)  # Restrict is not a command sandbox.
         index = TASKS.index(task("Append or remove only the exact owned timed public key preserving other lines"))
         self.assertIn("Refuse unsafe authorized keys metadata", TASKS[index - 1]["name"])
+
+    def test_new_window_and_key_expiry_extend_only_fresh03_not_previous_or_unknown_ids(self):
+        environment = Environment(undefined=StrictUndefined)
+        environment.filters['from_json'] = json.loads
+        expression = next(value for value in TASKS[0]['ansible.builtin.assert']['that']
+                          if 'controller_access_confirmation ==' in value)
+        confirm = environment.compile_expression(expression)
+        managed = task('Derive exactly one options-prefixed managed public key')['ansible.builtin.set_fact']['controller_managed_line']
+        for ident, expiry, confirmation in (
+                ('host-patch-03', '20261024044100Z', 'TEMPORARY-ROOT-SSH-20261024T044100Z'),
+                ('host-patch-02', '20261024013000Z', 'TEMPORARY-ROOT-SSH-20261024T013000Z'),
+                ('fixture', '20261024013000Z', 'TEMPORARY-ROOT-SSH-20261024T013000Z')):
+            context = dict(controller_access_action='setup', controller_access_id=ident,
+                           controller_access_confirmation=confirmation,
+                           controller_web_owned={'stdout': json.dumps({'public_key': KEY + ' ' + COMMENT})})
+            with self.subTest(identity=ident):
+                self.assertTrue(confirm(**context))
+                wrong = 'TEMPORARY-ROOT-SSH-20261024T013000Z' if ident == 'host-patch-03' else 'TEMPORARY-ROOT-SSH-20261024T044100Z'
+                self.assertFalse(confirm(**{**context, 'controller_access_confirmation': wrong}))
+                self.assertEqual(environment.from_string(managed).render(**context),
+                                 'restrict,from="65.109.220.59",expiry-time="' + expiry + '" ' + KEY + ' ' + COMMENT)
+                self.assertEqual(environment.from_string(managed).render(**{
+                    **context, 'controller_web_owned': {'stdout': json.dumps({'public_key': ''})}}), '')
 
     def test_public_host_pin_comes_from_trusted_native_file_not_tofu(self):
         self.assertIn("public('/etc/ssh/ssh_host_ed25519_key.pub')", SOURCE)
@@ -146,7 +170,7 @@ class PublicValidatorFixtures(unittest.TestCase):
         # Execute ONLY standalone read-only functions on synthetic temp files,
         # never the script's native-host preamble or real /root paths.
         functions = [node for node in ast.parse(SOURCE).body if isinstance(node, ast.FunctionDef)]
-        namespace = dict(base64=base64, os=os, stat=stat, struct=struct)
+        namespace = dict(base64=base64, datetime=datetime, os=os, stat=stat, struct=struct)
         exec(compile(ast.Module(body=functions, type_ignores=[]), "<validator-fixture-functions>", "exec"), namespace)
         self.functions = namespace
         self.temp = tempfile.TemporaryDirectory()
@@ -162,6 +186,15 @@ class PublicValidatorFixtures(unittest.TestCase):
         self.owner = patch("os.lstat", side_effect=owned_stat)
         self.owner.start()
         self.addCleanup(self.owner.stop)
+
+    def test_setup_deadline_is_closed_and_only_fresh03_has_new_window(self):
+        cutoff = self.functions['setup_deadline']
+        now = datetime.datetime(2026, 10, 24, 3, 11, tzinfo=datetime.timezone.utc)
+        self.assertEqual(cutoff('host-patch-03'), datetime.datetime(2026, 10, 24, 4, 41, tzinfo=datetime.timezone.utc))
+        self.assertLess(now, cutoff('host-patch-03'))
+        for ident in ('host-patch-02', 'host-patch-04', 'fixture', 'host-patch-03-extra'):
+            self.assertEqual(cutoff(ident), datetime.datetime(2026, 10, 24, 1, 30, tzinfo=datetime.timezone.utc))
+            self.assertFalse(now < cutoff(ident))
 
     def test_valid_ed25519_public_key_and_comment(self):
         self.assertEqual(self.functions["ed25519"](KEY + " " + COMMENT + "\n", COMMENT), KEY)
