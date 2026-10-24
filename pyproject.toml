@@ -1,4 +1,6 @@
 [tool.mutmut]
+# Preserve the original instrumented-pytest error instead of only a usage wrapper.
+debug = true
 source_paths = ["core", "api", "bot", "models"]
 also_copy = ["schemas.py", "main.py", "deploy"]
 only_mutate = [

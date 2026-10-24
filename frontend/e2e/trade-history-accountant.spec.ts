@@ -785,6 +785,32 @@ async function setHistoryDatePicker(page: Page, triggerTestId: string, gregorian
   await expect(picker.locator('.jalali-calendar-panel')).toBeVisible({ timeout: 30000 })
   await picker.locator('.jalali-calendar-select').first().selectOption(String(parsed.jMonth()))
   await picker.locator('.jalali-calendar-select.year-select').selectOption(String(parsed.jYear()))
+  const geometry = await picker.locator('.jalali-calendar-panel').evaluate((panel) => {
+    const bounds = panel.getBoundingClientRect()
+    const days = [...panel.querySelectorAll<HTMLElement>('.jalali-calendar-day:not(.is-empty)')]
+      .map((day) => ({ key: day.dataset.dayKey, bounds: day.getBoundingClientRect() }))
+    const overlaps: string[] = []
+    for (let i = 0; i < days.length; i += 1) {
+      for (let j = i + 1; j < days.length; j += 1) {
+        const a = days[i]!
+        const b = days[j]!
+        if (Math.min(a.bounds.right, b.bounds.right) > Math.max(a.bounds.left, b.bounds.left)
+          && Math.min(a.bounds.bottom, b.bounds.bottom) > Math.max(a.bounds.top, b.bounds.top)) {
+          overlaps.push(`${a.key}/${b.key}`)
+        }
+      }
+    }
+    return {
+      minimumWidth: Math.min(...days.map((day) => day.bounds.width)),
+      minimumHeight: Math.min(...days.map((day) => day.bounds.height)),
+      insideViewport: bounds.left >= 0 && bounds.right <= window.innerWidth,
+      overlaps,
+    }
+  })
+  expect(geometry.minimumWidth).toBeGreaterThanOrEqual(40)
+  expect(geometry.minimumHeight).toBeGreaterThanOrEqual(40)
+  expect(geometry.insideViewport).toBe(true)
+  expect(geometry.overlaps).toEqual([])
   await picker
     .locator('.jalali-calendar-day:not(.is-empty)')
     .filter({ hasText: toPersianDigits(parsed.jDate()) })

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class Stage9MutationRunnerTests(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((ROOT / "config/stage9_mutation_manifest.json").read_text())
+
+    def test_instrumented_baseline_keeps_original_pytest_error_visible(self):
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["mutmut"]
+        self.assertIs(config["debug"], True)
 
     def test_parser_and_grouping_require_every_matching_mutant_killed(self):
         raw = "\n".join(
