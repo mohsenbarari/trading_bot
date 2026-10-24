@@ -1,12 +1,13 @@
 ---
 # The reviewed public helper runs inside one command, holding the current marker
 # flock across all four exact writes/reload/postchecks. No helper is installed.
-- name: Persist only exact Web boot guards after completed CE maintenance
+- name: Persist only exact Web boot guards after completed current08 maintenance
   hosts: web_engine
   gather_facts: false
   any_errors_fatal: true
   vars:
     web_boot_action: check
+    web_boot_profile: current08
     web_boot_confirmation: ''
   tasks:
     - name: Admit only strict Web scope and explicit exact boot-guard action
@@ -16,8 +17,11 @@
           - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
           - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
           - web_boot_action in ['check', 'setup', 'cleanup']
-          - web_boot_action == 'check' or web_boot_confirmation == 'WEB-BOOT-GUARDS-20261024'
+          - web_boot_profile == 'current08'
+          - web_boot_action == 'check' or web_boot_confirmation == 'WEB-BOOT-GUARDS-CURRENT08-20261024'
           - web_boot_completed_manifest_sha256 is match('^[a-f0-9]{64}$')
+          - web_boot_completed_journal_sha256 is match('^[a-f0-9]{64}$')
+          - web_boot_completed_cleanup_sha256 is match('^[a-f0-9]{64}$')
     - name: Run the exact public helper with no writes by default or in check mode
       ansible.builtin.command:
         argv:
@@ -28,8 +32,14 @@
           - "{{ lookup('ansible.builtin.file', playbook_dir + '/web_boot_guard.py') }}"
           - --action
           - "{{ 'check' if ansible_check_mode else web_boot_action }}"
+          - --profile
+          - '{{ web_boot_profile }}'
           - --completed-manifest-sha256
           - '{{ web_boot_completed_manifest_sha256 }}'
+          - --completed-journal-sha256
+          - '{{ web_boot_completed_journal_sha256 }}'
+          - --completed-cleanup-sha256
+          - '{{ web_boot_completed_cleanup_sha256 }}'
           - --confirmation
           - '{{ web_boot_confirmation }}'
       check_mode: false
