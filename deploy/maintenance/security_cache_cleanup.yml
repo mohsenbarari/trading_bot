@@ -1,0 +1,41 @@
+---
+# Delete only unused BuildKit cache older than ten days. Never images/volumes.
+- name: Recover native backup headroom without touching runtime or data
+  hosts: boot_mount_bot
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require the exact existing native local host
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['boot_mount_bot']
+          - ansible_connection == 'local'
+          - ansible_host == '65.109.216.187'
+          - ansible_user == 'root'
+
+    - name: Capture only the fifteen running immutable container IDs
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, ps, --quiet, --no-trunc]
+      changed_when: false
+      register: cache_runtime_before
+
+    - name: Refuse cleanup while runtime is not fully restored
+      ansible.builtin.assert:
+        that: cache_runtime_before.stdout_lines | length == 15
+
+    - name: Default and check mode never prune anything
+      ansible.builtin.meta: end_play
+      when: not (security_cache_cleanup_apply | default(false) | bool) or ansible_check_mode
+
+    - name: Remove only unlocked unused build cache older than ten days
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, buildx, prune, --force, --filter, 'until=240h', --timeout, 20s]
+      timeout: 90
+      register: cache_cleanup_result
+
+    - name: Require identical fifteen running containers afterward
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, ps, --quiet, --no-trunc]
+      changed_when: false
+      register: cache_runtime_after
+      failed_when: cache_runtime_after.stdout_lines | sort != cache_runtime_before.stdout_lines | sort
