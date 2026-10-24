@@ -7,7 +7,7 @@ and Docker is available; Native waits for Web stability and fresh admission.
 
 The Web worker replaces its hardcoded E46 parser/eligibility with the reviewed
 `runtime_image_archive_transport.py`, SHA256
-`6a47f4f1352e720c8ea8fee8903e565462180ef04f62149b1e6c42437057b1ae`.
+`20c4b90f1c719d4cdee69df8ad1c31c2bcd663b99619b1d58dcbafa1eafecad2`.
 The launcher stages both public sources exclusively in the fresh nonce-owned
 tools directory and verifies both source hashes before launch. The worker loads
 the parser lazily, verifies a bounded retained source buffer and compiles those
@@ -31,23 +31,31 @@ FD's normal OCI/Docker closure, manifest/config hashes and complete ordered laye
 DiffIDs, including bounded supported gzip expansion. It neither extracts nor
 loads the image. The existing4GiB/CPU1/private scratch limits remain unchanged.
 
-Trivy reads that same rewound FD via `--input /proc/self/fd/<fd>` with the original
-unfiltered severities, OS/library scanners, unfixed findings and all update/
+After source validation, one second exclusive FD receives a standard Docker
+archive with every runtime layer stored uncompressed. Only the outer wrapper
+changes: configuration bytes and each complete inner TAR byte stream, including
+all headers, padding and payload, are copied exactly. Nothing is extracted,
+rewritten, squashed or reordered. Layer member names contain their ordered index,
+so repeated empty-layer DiffIDs remain separate members. The original typed
+index/manifest/config source proof stays intact; a separate scan-transport proof
+binds the original archive SHA and Docker ID to the new wrapper SHA/size, unchanged
+scanner-config ID and all ordered DiffIDs. Both input and output retain independent
+512MiB caps and share the original600-second image deadline and4GiB worker limit.
+
+Trivy reads the normalized pinned FD via `--input /proc/self/fd/<fd>` with the
+original unfiltered severities, OS/library scanners, unfixed findings and update/
 telemetry/credential isolation flags. Its untouched raw report must identify the
-actual scanner config digest and full RootFS from the archive proof. A summary
-keeps the actual Docker ID, scanner ID, transport and proof hashes distinct; raw
-IDs and JSON bytes are never rewritten. After the scan the archive is rehashed
-and pinned metadata and public image observation are rechecked. Only then is the
-archive binding accepted. Its exclusive creation FD is retained from creation
-through export, parsing and scan; the existing bounded command helper writes
-through a duplicate FD and records client reaping and post-write identity.
-A `finally` cleanup checks every client is reaped and the named file exactly
-matches that retained owned FD/snapshot before unlinking it, on success and
-every known failed export/parser/scan outcome. Raw reports/logs and public proof
-hashes stay retained. Failed512MiB exports therefore do not accumulate within
-the4GiB worker. Preexisting, foreign, replaced or changed files are not adopted
-or removed. Unknown reaping/ownership retains the artifact and stops the batch
-with `archive_cleanup_unknown`; it grants no cleanup success or acceptance.
+same scanner config and full original RootFS. Raw IDs and JSON bytes are never
+rewritten. After the scan both archives are rehashed, both retained FD/path
+identities and the public image observation are rechecked. The normalized writer
+guards ownership/identity before and after every write/read and retains its last
+known snapshot, including a known partial output. A `finally` cleanup requires
+every client reaped and each named file matching its own creation FD/snapshot
+before removing it on success or known failure. Raw reports/logs and proof hashes
+stay retained. Failed source/normalized archives therefore do not accumulate.
+Preexisting, foreign, replaced or changed files are not adopted or removed;
+unknown reaping/ownership stops the batch with `archive_cleanup_unknown` and no
+cleanup success or acceptance.
 
 Archive-format/identity failures remain image failures, preserving their original
 Docker failure and continuing other images only while global gates hold. An
@@ -121,3 +129,26 @@ identity and unfiltered raw finding checks. Regressions include nine subjects,
 unknown future semantics and non-JSON bytes as untrusted auxiliary data, plus
 wrong attachment/hash/media and runtime-selection failures. Changing opaque bytes
 cannot select another runtime or remove/waive any raw finding.
+
+Web04's immutable result is ten successful images of twelve, all attempted;
+PostgreSQL now scans directly after the separate content repair. F79 and994
+passed source validation but vendor archive-input scanning still failed. Their
+reported DiffIDs identify the first gzip layers after raw layers: F79 index6
+(`fc872c0e...`, stored8547 bytes/raw40448 bytes) and994 index11 (`ce279406...`,
+stored3707 bytes/raw20992 bytes). Bounded header-only inspection found four and
+five ordinary POSIX USTAR headers respectively, all numeric fields/checksums
+valid, exact sizes and two zero terminators/zero tails. Application bodies and
+names were not inspected or printed.
+
+The pinned vendor reader explains this mixed transport failure: Trivy0.76.1
+[tries the Docker archive reader first](https://raw.githubusercontent.com/aquasecurity/trivy/v0.76.1/pkg/fanal/image/archive.go),
+whose pinned go-containerregistry0.22.1
+[chooses compression for the entire archive from its first layer](https://raw.githubusercontent.com/google/go-containerregistry/v0.22.1/pkg/v1/tarball/image.go).
+A later gzip member can therefore reach the TAR walker as compressed bytes.
+Removing Docker compatibility metadata from the TAR cannot select OCI handling:
+the vendor's [OCI reader requires a layout directory](https://raw.githubusercontent.com/google/go-containerregistry/v0.22.1/pkg/v1/layout/read.go).
+The all-raw standard Docker wrapper fixes that transport assumption without a
+vendor patch, image change or finding filter. Source/output byte equivalence,
+caps, repeated empty layers, tampering, ABA and both-file cleanup are tested.
+Targeted real scanner validation and any later batch remain separate root gates;
+this source change claims no new successful scan or security acceptance.

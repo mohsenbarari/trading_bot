@@ -5,6 +5,8 @@ The audit caller owns its retained file descriptor, one fallback attempt, common
 600-second deadline, database/capacity checks, scanner flags and child bounds.
 """
 from hashlib import sha256
+import gzip
+import io
 import json
 import math
 import os
@@ -238,7 +240,7 @@ def layer_digest(reader, length, compressed, maximum):
     return stored.hexdigest(), raw.hexdigest(), total
 
 
-def inventory(reader):
+def inventory(reader, permitted_files=None):
     """Read bounded standard TAR headers; extensions/links/unknown names refuse.
 
     Docker's short OCI blob names need no PAX/GNU extension. Inspecting each
@@ -260,10 +262,11 @@ def inventory(reader):
             raise TransportError('archive_shape') from None
         directory = item.isdir()
         name = item.name.rstrip('/') if directory else item.name
+        allowed_file = (name in {'manifest.json', 'index.json', 'oci-layout'} or BLOB.fullmatch(name)) \
+                       if permitted_files is None else name in permitted_files
         require(name not in members and
-                ((directory and name in {'blobs', 'blobs/sha256'} and item.size == 0)
-                 or (item.isreg() and (name in {'manifest.json', 'index.json', 'oci-layout'}
-                                      or BLOB.fullmatch(name)) and 0 < item.size <= ARCHIVE_BYTES)),
+                ((permitted_files is None and directory and name in {'blobs', 'blobs/sha256'} and item.size == 0)
+                 or (item.isreg() and allowed_file and 0 < item.size <= ARCHIVE_BYTES)),
                 'archive_shape')
         start = reader.tell()
         padded = ((item.size + 511) // 512) * 512
@@ -440,6 +443,129 @@ def validate_archive(stream, size, end, observation):
     if index_binding is not None:
         proof['index_binding'] = index_binding
     return proof
+
+
+def normalize_scan_archive(source, size, end, observation, target):
+    """Write one bounded classic Docker transport with unchanged config/raw layers.
+
+    Both streams are borrowed. The caller exclusively creates, retains, guards
+    and removes its output FD. This changes only the outer transport wrapper;
+    every inner TAR byte, including headers and padding, is copied verbatim.
+    """
+    source_proof = validate_archive(source, size, end, observation)
+    require(target.seek(0, os.SEEK_END) == 0 and target.tell() == 0, 'archive_identity')
+    reader = ArchiveReader(source, size, end)
+    members, _ = inventory(reader)
+    def control(name):
+        require(name in members, 'archive_shape')
+        offset, length = members[name]
+        require(length <= CONTROL_BYTES, 'archive_bound')
+        reader.seek(offset)
+        raw = reader.read(length)
+        return raw, parse(raw, CONTROL_BYTES, 'archive_shape')
+    config_raw, _ = control('blobs/sha256/' + source_proof['config_sha256'])
+    manifest_raw, manifest = control('blobs/sha256/' + source_proof['manifest_sha256'])
+    require(sha256(config_raw).hexdigest() == source_proof['config_sha256']
+            and sha256(manifest_raw).hexdigest() == source_proof['manifest_sha256'], 'archive_identity')
+    config_name = source_proof['config_sha256'] + '.json'
+    layer_names = ['layers/' + str(index).zfill(3) + '/layer.tar'
+                   for index in range(len(source_proof['rootfs_layers']))]
+    docker_value = [{'Config': config_name, 'RepoTags': None, 'Layers': layer_names}]
+    docker_raw = json.dumps(docker_value, sort_keys=True, separators=(',', ':')).encode()
+
+    class Output:
+        count = 0
+        def write(self, raw):
+            require(time.monotonic() < end, 'command_timeout')
+            require(type(raw) is bytes and len(raw) <= ARCHIVE_BYTES - self.count, 'archive_bound')
+            remaining = raw
+            while remaining:
+                require(time.monotonic() < end, 'command_timeout')
+                written = target.write(remaining)
+                require(type(written) is int and 0 < written <= len(remaining), 'archive_bound')
+                self.count += written; remaining = remaining[written:]
+            return len(raw)
+        def flush(self):
+            target.flush()
+
+    class Slice:
+        def __init__(self, offset, length):
+            self.offset, self.length, self.position = offset, length, 0
+        def read(self, count=-1):
+            require(type(count) is int, 'archive_bound')
+            count = min(65536, self.length-self.position, count if count >= 0 else 65536)
+            reader.seek(self.offset+self.position)
+            raw = reader.read(count); self.position += len(raw)
+            return raw
+        def tell(self):
+            return self.position
+
+    class RawLayer:
+        def __init__(self, inner, maximum):
+            self.inner, self.maximum, self.count, self.hash = inner, maximum, 0, sha256()
+        def read(self, count):
+            require(time.monotonic() < end, 'command_timeout')
+            require(type(count) is int and 0 <= count <= 65536, 'archive_bound')
+            raw = self.inner.read(count)
+            require(type(raw) is bytes and self.count + len(raw) <= self.maximum, 'archive_bound')
+            self.count += len(raw); self.hash.update(raw)
+            return raw
+
+    def add(archive, name, length, stream):
+        item = tarfile.TarInfo(name)
+        item.size, item.mode, item.uid, item.gid, item.mtime = length, 0o600, 0, 0, 0
+        archive.addfile(item, stream)
+
+    writer, expanded = Output(), 0
+    try:
+        with tarfile.open(fileobj=writer, mode='w|', format=tarfile.USTAR_FORMAT) as archive:
+            add(archive, config_name, len(config_raw), io.BytesIO(config_raw))
+            add(archive, 'manifest.json', len(docker_raw), io.BytesIO(docker_raw))
+            for name, diff_id, descriptor in zip(layer_names, source_proof['rootfs_layers'], manifest['layers']):
+                offset, length = members['blobs/sha256/' + descriptor['digest'][7:]]
+                compressed = LAYER_MEDIA[descriptor['mediaType']]
+                if compressed:
+                    reader.seek(offset)
+                    stored, uncompressed, raw_size = layer_digest(reader, length, True, EXPANDED_BYTES-expanded)
+                    require(stored == descriptor['digest'][7:] and uncompressed == diff_id[7:], 'archive_identity')
+                else:
+                    raw_size = length
+                expanded += raw_size; require(expanded <= EXPANDED_BYTES, 'archive_bound')
+                part = Slice(offset, length)
+                inner = gzip.GzipFile(fileobj=part, mode='rb') if compressed else part
+                try:
+                    layer = RawLayer(inner, raw_size)
+                    add(archive, name, raw_size, layer)
+                    require(not layer.read(1) and layer.count == raw_size and layer.hash.hexdigest() == diff_id[7:], 'archive_identity')
+                finally:
+                    if compressed: inner.close()
+        writer.flush()
+    except (OSError, EOFError, tarfile.TarError, zlib.error):
+        raise TransportError('archive_shape') from None
+    require(expanded == source_proof['expanded_layer_bytes'], 'archive_identity')
+    output_size = writer.count
+    output = ArchiveReader(target, output_size, end)
+    allowed = {config_name, 'manifest.json', *layer_names}
+    physical, tail = inventory(output, allowed)
+    require(set(physical) == allowed, 'archive_shape')
+    for name, expected in ((config_name, config_raw), ('manifest.json', docker_raw)):
+        offset, length = physical[name]
+        require(length == len(expected), 'archive_identity'); output.seek(offset)
+        require(output.read(length) == expected, 'archive_identity')
+    for name, expected in zip(layer_names, source_proof['rootfs_layers']):
+        offset, length = physical[name]; output.seek(offset)
+        require(digest(output, length) == expected[7:], 'archive_identity')
+    _tail(target, tail, output_size, end)
+    output.seek(0); output_sha256 = digest(output, output_size)
+    reader.seek(0)
+    require(digest(reader, size) == source_proof['archive_sha256'], 'archive_identity')
+    return source_proof, {'schema': 'runtime_image_scan_transport/1', 'kind': 'all_raw_docker_archive',
+        'source_archive_sha256': source_proof['archive_sha256'], 'source_docker_image_id': source_proof['docker_image_id'],
+        'scanner_config_id': source_proof['scanner_config_id'], 'rootfs_layers': list(source_proof['rootfs_layers']),
+        'archive_sha256': output_sha256, 'archive_bytes': output_size, 'raw_layer_bytes': expanded,
+        'layer_members': layer_names, 'config_bytes_preserved': True, 'all_raw_layer_bytes_preserved': True,
+        'inner_headers_or_payload_rewritten': False, 'layers_reordered': False,
+        'security_accepted': False, 'findings_waived': False}
 
 
 def validate_report(raw, proof):

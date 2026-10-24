@@ -50,7 +50,7 @@ ACTUAL_F79_FORMAT = {
 
 
 def fixture(*, identity='manifest', repeated=False, docker_media=False, compressed=False, stored_layer=None,
-            layer_media_types=None):
+            layer_media_types=None, empty_first=False):
     media = M.DOCKER_MANIFEST if docker_media else M.OCI_MANIFEST
     config_media, layer_media = M.MEDIA[media]
     media_types = list(layer_media_types) if layer_media_types is not None else [
@@ -60,6 +60,7 @@ def fixture(*, identity='manifest', repeated=False, docker_media=False, compress
     if layer_media_types is not None:
         payloads = [ordinary_layer('ordinary-'+str(index), ('public file '+str(index)).encode())
                     for index in range(len(media_types))]
+    if empty_first:payloads[0]=bytes(1024)
     layer_ids = ['sha256:' + sha256(value).hexdigest() for value in payloads]
     first = payloads[0] if stored_layer is None else stored_layer
     payloads[0] = first
@@ -375,6 +376,81 @@ class ArchiveTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(M.TransportError,'archive_identity'):self.validate(changed,seen)
         changed,seen=rewrite_auxiliary(entries,observation,b'X'*(M.CONTROL_BYTES+1))
         with self.assertRaises(M.TransportError):self.validate(changed,seen)
+
+    def normalize(self,entries,observation,target=None):
+        raw=archive_bytes(entries);source=io.BytesIO(raw);target=io.BytesIO() if target is None else target
+        original,scan=M.normalize_scan_archive(source,len(raw),time.monotonic()+10,observation,target)
+        self.assertEqual(source.getvalue(),raw)
+        self.assertEqual(scan['archive_bytes'],len(target.getvalue()))
+        self.assertEqual(scan['archive_sha256'],sha256(target.getvalue()).hexdigest())
+        self.assertEqual(scan['source_archive_sha256'],sha256(raw).hexdigest())
+        return original,scan,target.getvalue()
+
+    def test_mixed_normalization_preserves_exact_config_and_every_raw_tar_byte(self):
+        for docker in (False,True):
+            entries,observation,config_id=fixture(docker_media=docker,layer_media_types=(
+                'application/vnd.oci.image.layer.v1.tar','application/vnd.docker.image.rootfs.diff.tar.gzip',
+                'application/vnd.docker.image.rootfs.diff.tar','application/vnd.oci.image.layer.v1.tar+gzip'))
+            original,scan,raw=self.normalize(entries,observation)
+            self.assertEqual(scan['scanner_config_id'],config_id)
+            self.assertEqual(scan['rootfs_layers'],observation['rootfs_layers'])
+            self.assertTrue(scan['config_bytes_preserved']);self.assertTrue(scan['all_raw_layer_bytes_preserved'])
+            self.assertFalse(scan['inner_headers_or_payload_rewritten']);self.assertFalse(scan['layers_reordered'])
+            self.assertFalse(scan['security_accepted']);self.assertFalse(scan['findings_waived'])
+            source_manifest=json.loads(entries[blob('sha256:'+original['manifest_sha256'])])
+            with tarfile.open(fileobj=io.BytesIO(raw),mode='r:') as archive:
+                names=archive.getnames();manifest=json.loads(archive.extractfile('manifest.json').read())
+                self.assertNotIn('index.json',names);self.assertNotIn('oci-layout',names)
+                self.assertEqual(archive.extractfile(manifest[0]['Config']).read(),entries[blob(config_id)])
+                for name,descriptor,diff in zip(manifest[0]['Layers'],source_manifest['layers'],observation['rootfs_layers']):
+                    actual=archive.extractfile(name).read();stored=entries[blob(descriptor['digest'])]
+                    expected=gzip.decompress(stored) if M.LAYER_MEDIA[descriptor['mediaType']] else stored
+                    self.assertEqual(actual,expected);self.assertEqual(sha256(actual).hexdigest(),diff[7:])
+
+    def test_normalized_index_keeps_original_typed_identity_and_repeated_empty_layers(self):
+        entries,observation,_=indexed_fixture();original,scan,_=self.normalize(entries,observation)
+        self.assertEqual(original['kind'],'OCI_index_to_manifest_to_config')
+        self.assertEqual(scan['source_docker_image_id'],observation['image_id'])
+        self.assertNotEqual(scan['source_docker_image_id'],scan['scanner_config_id'])
+        entries,observation,_=fixture(compressed=True,repeated=True,empty_first=True)
+        _,scan,raw=self.normalize(entries,observation)
+        self.assertEqual(len(set(scan['layer_members'])),3)
+        with tarfile.open(fileobj=io.BytesIO(raw),mode='r:') as archive:
+            self.assertEqual(archive.extractfile(scan['layer_members'][0]).read(),bytes(1024))
+            self.assertEqual(archive.extractfile(scan['layer_members'][2]).read(),bytes(1024))
+        self.assertEqual(scan['rootfs_layers'][0],scan['rootfs_layers'][2])
+
+    def test_normalization_refuses_existing_output_overflow_and_zero_writes(self):
+        entries,observation,_=fixture(layer_media_types=('application/vnd.oci.image.layer.v1.tar+gzip',)*2)
+        raw=archive_bytes(entries);existing=io.BytesIO(b'public existing output')
+        with self.assertRaisesRegex(M.TransportError,'archive_identity'):
+            M.normalize_scan_archive(io.BytesIO(raw),len(raw),time.monotonic()+10,observation,existing)
+        self.assertEqual(existing.getvalue(),b'public existing output')
+        target=io.BytesIO()
+        with patch.object(M,'ARCHIVE_BYTES',len(raw)+512),self.assertRaisesRegex(M.TransportError,'archive_bound'):
+            M.normalize_scan_archive(io.BytesIO(raw),len(raw),time.monotonic()+10,observation,target)
+        self.assertLessEqual(len(target.getvalue()),len(raw)+512)
+        target=Mock(wraps=io.BytesIO());target.write.return_value=0
+        with self.assertRaisesRegex(M.TransportError,'archive_bound'):
+            M.normalize_scan_archive(io.BytesIO(raw),len(raw),time.monotonic()+10,observation,target)
+
+    def test_source_change_during_output_and_target_change_before_validation_cannot_pass(self):
+        entries,observation,_=fixture();raw=archive_bytes(entries);source=io.BytesIO(raw)
+        class ChangesSource(io.BytesIO):
+            changed=False
+            def write(stream,data):
+                if not stream.changed:
+                    position=source.tell();source.seek(1024);value=source.read(1);source.seek(1024);source.write(bytes([value[0]^1]));source.seek(position);stream.changed=True
+                return super().write(data)
+        with self.assertRaises(M.TransportError):
+            M.normalize_scan_archive(source,len(raw),time.monotonic()+10,observation,ChangesSource())
+        class ChangesOutput(io.BytesIO):
+            changed=False
+            def flush(stream):
+                if not stream.changed:
+                    position=stream.tell();stream.seek(512);value=stream.read(1);stream.seek(512);stream.write(bytes([value[0]^1]));stream.seek(position);stream.changed=True
+        with self.assertRaises(M.TransportError):
+            M.normalize_scan_archive(io.BytesIO(raw),len(raw),time.monotonic()+10,observation,ChangesOutput())
 
     def test_present_auxiliary_bytes_and_unreferenced_members_are_never_ignored(self):
         entries,observation,_=indexed_fixture();_,proof=self.validate(entries,observation)
