@@ -152,6 +152,30 @@ def ports_from_inspect(bindings):
                   for port, values in (bindings or {}).items() for value in (values or []))
 
 
+def extra_hosts(value, *, mapping=False):
+    """Preserve host/address pairs and multiplicity; normalize only the separator."""
+    if value is None:return []
+    pairs=[]
+    def pair(host,address):
+        require(type(host) is str and type(address) is str and host and address
+                and not any(c in host for c in '=:\x00\r\n\t ')
+                and not any(c in address for c in '=\x00\r\n\t '), 'consumer_host_policy_drift')
+        pairs.append((host,address))
+    if type(value) is list:
+        for item in value:
+            require(type(item) is str, 'consumer_host_policy_drift')
+            separators=[i for i,c in enumerate(item) if c in '=:']
+            require(separators, 'consumer_host_policy_drift')
+            first=separators[0];pair(item[:first],item[first+1:])
+    else:
+        require(mapping and type(value) is dict, 'consumer_host_policy_drift')
+        for host,addresses in value.items():
+            require(type(addresses) is str or type(addresses) is list and addresses,
+                    'consumer_host_policy_drift')
+            for address in ([addresses] if type(addresses) is str else addresses):pair(host,address)
+    return sorted(pairs)
+
+
 def assert_config_parity(site, service_name, actual, rendered, old_image, new_image, managed_override=None, running=True,
                          strict_serving=False):
     """No hashing of Env. Fail before stopping anything on unresolved drift."""
@@ -189,10 +213,12 @@ def assert_config_parity(site, service_name, actual, rendered, old_image, new_im
         require(not service.get(key), 'unsupported_consumer_feature')
     require(not host.get('Privileged') and not service.get('privileged') and
             host.get('ReadonlyRootfs', False) == service.get('read_only', False), 'consumer_privilege_drift')
-    for key, docker_key in (('cap_add', 'CapAdd'), ('cap_drop', 'CapDrop'), ('security_opt', 'SecurityOpt'), ('extra_hosts', 'ExtraHosts')):
+    for key, docker_key in (('cap_add', 'CapAdd'), ('cap_drop', 'CapDrop'), ('security_opt', 'SecurityOpt')):
         expected = service.get(key) or []
         if isinstance(expected, dict): expected = [name + ':' + str(value) for name, value in expected.items()]
         require(sorted(host.get(docker_key) or []) == sorted(expected), 'consumer_host_policy_drift')
+    require(extra_hosts(host.get('ExtraHosts')) == extra_hosts(service.get('extra_hosts'),mapping=True),
+            'consumer_host_policy_drift')
     limits = []
     for name, value in (service.get('ulimits') or {}).items():
         limits.append((name, value['soft'], value['hard']) if isinstance(value, dict) else (name, value, value))

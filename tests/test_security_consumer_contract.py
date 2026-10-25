@@ -85,6 +85,49 @@ class ConsumerContracts(unittest.TestCase):
         self.assertEqual(set(result), {'id', 'name', 'image', 'project', 'service'})
         self.assertNotIn(self.env['SYNTHETIC_SECRET'], repr(result))
 
+    def test_confirmed_public_native_extra_host_assignment_representation_has_parity(self):
+        self.actual['HostConfig']['ExtraHosts']=['coin.gold-trade.ir:65.109.220.59']
+        self.service['extra_hosts']=['coin.gold-trade.ir=65.109.220.59']
+        self.verify()
+        for key,docker_key,value in (('cap_add','CapAdd',['NET_BIND_SERVICE']),('cap_drop','CapDrop',['ALL']),('security_opt','SecurityOpt',['no-new-privileges:true'])):
+            self.service[key]=value;self.actual['HostConfig'][docker_key]=value.copy();self.verify()
+            self.actual['HostConfig'][docker_key]=[]
+            with self.assertRaisesRegex(M.Refusal,'consumer_host_policy_drift'):self.verify()
+            self.actual['HostConfig'][docker_key]=value.copy()
+
+    def test_extra_host_changed_hostname_address_or_multiplicity_is_not_normalized_away(self):
+        self.actual['HostConfig']['ExtraHosts']=['coin.gold-trade.ir:65.109.220.59']
+        for expected in (['changed.gold-trade.ir=65.109.220.59'],['coin.gold-trade.ir=65.109.220.60'],[],['coin.gold-trade.ir=65.109.220.59']*2):
+            with self.subTest(expected=expected):
+                self.service['extra_hosts']=expected
+                with self.assertRaisesRegex(M.Refusal,'consumer_host_policy_drift'):self.verify()
+        self.actual['HostConfig']['ExtraHosts']*=2;self.service['extra_hosts']=['coin.gold-trade.ir=65.109.220.59']*2;self.verify()
+        self.service['extra_hosts']=['coin.gold-trade.ir=65.109.220.59']
+        with self.assertRaisesRegex(M.Refusal,'consumer_host_policy_drift'):self.verify()
+
+    def test_extra_host_first_separator_preserves_entire_ipv6_target(self):
+        for target in ('::1','2001:db8::12','[2001:db8::12]'):
+            with self.subTest(target=target):
+                self.actual['HostConfig']['ExtraHosts']=['v6.example:'+target];self.service['extra_hosts']=['v6.example='+target];self.verify()
+                self.service['extra_hosts']=['v6.example='+target+'0']
+                with self.assertRaisesRegex(M.Refusal,'consumer_host_policy_drift'):self.verify()
+        self.assertEqual(M.extra_hosts(['v6.example:::1']),[('v6.example','::1')])
+        self.assertNotEqual(M.extra_hosts(['v6.example:[::1]']),M.extra_hosts(['v6.example:::1']))
+
+    def test_compose_extra_host_mapping_accepts_only_string_or_string_list_targets(self):
+        self.actual['HostConfig']['ExtraHosts']=['ordinary.example:192.0.2.1','ordinary.example:2001:db8::1']
+        self.service['extra_hosts']={'ordinary.example':['192.0.2.1','2001:db8::1']};self.verify()
+        self.actual['HostConfig']['ExtraHosts']=['ordinary.example:192.0.2.1'];self.service['extra_hosts']={'ordinary.example':'192.0.2.1'};self.verify()
+        for value in ({'ordinary.example':None},{'ordinary.example':True},{'ordinary.example':1},{'ordinary.example':[]},{'ordinary.example':['192.0.2.1',False]},{1:'192.0.2.1'}):
+            with self.subTest(value=value):
+                self.service['extra_hosts']=value
+                with self.assertRaisesRegex(M.Refusal,'consumer_host_policy_drift'):self.verify()
+
+    def test_extra_hosts_unknown_or_ambiguous_shapes_refuse_without_coercion(self):
+        for value in (False,True,0,1,'ordinary.example=192.0.2.1',(),[False],[1],[{}],['no-separator'],['=192.0.2.1'],['ordinary.example='],['ordinary.example=192.0.2.1=extra'],[' ordinary.example=192.0.2.1'],['ordinary.example=192.0.2.1\n']):
+            with self.subTest(value=value),self.assertRaisesRegex(M.Refusal,'consumer_host_policy_drift'):M.extra_hosts(value,mapping=True)
+        with self.assertRaises(M.Refusal):M.extra_hosts({'ordinary.example':'192.0.2.1'})
+
     def test_secrets_never_appear_in_failure_diagnostics(self):
         self.actual['Config']['Env'].append('EXTRA_SECRET=another-never-emit')
         with self.assertRaises(M.Refusal) as caught: self.verify()
