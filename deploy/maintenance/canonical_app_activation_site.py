@@ -516,22 +516,37 @@ class OpaqueReference:
             C.require(C.same(identity(path.lstat()),alias['identity']),'env_alias_changed')
             self.links.append((path,alias['identity'],chain))
         self.held = Held(proof['target'],stack,expected=proof['identity'],opaque=True)
+        self.reference_parents = None
+        self.alias_chain(capture=True)
         self.check(); stack.callback(self.final_check)
-    def alias_chain(self):
+    def alias_chain(self, *, capture=False):
         declared = {str(path):before for path,before,_ in self.links}
         C.require(len(declared) == len(self.links),'env_alias_inventory')
-        current = Path(self.proof['path']); visited = set()
+        current = Path(self.proof['path']); visited = set(); reference_parents = {}
         for _ in range(9):
             # Parent aliases are deliberately unsupported; they must never be
             # silently resolved outside this explicit metadata-only contract.
             parents(current); actual = identity(current.lstat())
             if not stat.S_ISLNK(actual[2]):
-                C.require(str(current) == self.proof['target'] and visited == set(declared),'env_alias_inventory'); return
+                C.require(str(current) == self.proof['target'] and visited == set(declared)
+                    and Path(self.proof['path']).resolve(strict=True) == Path(self.proof['target']),'env_alias_inventory')
+                if capture:self.reference_parents = reference_parents
+                else:C.require(reference_parents == self.reference_parents,'env_alias_parent_changed')
+                return
             C.require(str(current) in declared and str(current) not in visited
                 and C.same(actual,declared[str(current)]),'env_alias_inventory')
             visited.add(str(current)); reference = os.readlink(current)
             C.require(type(reference) is str and 0 < len(reference) <= 4096 and '\x00' not in reference,'env_alias_inventory')
-            current = Path(os.path.normpath(reference if reference.startswith('/') else str(current.parent/reference)))
+            C.require(C.same(identity(current.lstat()),actual),'env_alias_changed')
+            unresolved = Path(reference) if reference.startswith('/') else current.parent/reference
+            # Inspect every raw parent before collapsing '..'. A discarded
+            # directory symlink can otherwise redirect the real consumer away
+            # from the metadata-only leaf FD held by this reference.
+            for parent in unresolved.parents:
+                normalized = Path(os.path.normpath(str(parent))); C.absolute(str(normalized))
+                for path,proof in parents(normalized/'opaque-reference-child'):
+                    reference_parents[path] = proof
+            current = Path(os.path.normpath(str(unresolved)))
             C.absolute(str(current))
         raise RuntimeError('env_alias_inventory')
     def check(self):

@@ -1,45 +1,40 @@
 # Security remediation
 
-- Global acceptance false: serving App/Market/datastores not upgraded; refactor
-  STOP/streak0. After security closure require30 consecutive accepted clean units;
-  failures reset streak with history; tests/polls never count. Preserve behavior,
-  single capture owner/user changes. Writer/DNS human.
-- Host/TLS complete; fresh backups pending.
-  Final accepts ciphertext backups only, no App provisioning/migration authority.
-- ed59 cannot become main. Ordinary665220a2/e1a727de built/exported;
-  CI40196208692 passed32/32 not serving.
-  Raw44HIGH gate failed. Freeze main; controllers advance on security branch;
-  merge after activation. Preserve dirty coin-market-retention.md untouched.
-- Failed App COW restored Web/API200. Never retry/reroute C/S/R fresh-profile
-  or COW guard adaptation/probe. Ordinary main artifact requires fresh serving/
-  config/backup/functional proof; preserve rollback overrides/images/history.
-- Raw44HIGH retain43 assessments; ACL caller gap/capture conflicts OPEN.
-  Image-store-only observation never permits serving or mutating-RPC retry.
-  Preserve F79 source overrides.
-- PG49a8/Redis98c4 built/scanned, not activated. PG Windows UNKNOWN retains Linux
-  absence proof. Datastore03 Redis LOAD passed both; PG Web passed, Native0bd
-  failed before header/LOAD request. Abort02 d27c actual two-host durable closure
-  removed its exact RES; same-inode retirement b651 preserved history, no LOAD.
-  Watchdog M-lock race proved; finite monitor-only windows auto-restore.
-  e31 no-request proof674527af passed; fresh health-observation entries
-  (Marketv3/Appv2/DBv3) passed41 Root fixtures, not staged/executed.
-  Market06 a37/f365 Native LOAD passed; batch STOP after e31 Web admission and
-  Native NOAPPLY refusal. Fresh request approved only after no-LOAD proof/cause
-  fix; never resume old batch. Keep eight production reader units.
-- Expired controls grant no future authority. Unknown RPC never proves cancel
-  or retry. Config/manifest differ; classic branches never query Descriptor.
-  Physical TAR members stay unique; repeated logical layers are valid with
-  every ordered DiffID checked.
-- Native SOURCE is an existing empty permanent mutex: metadata/flock only,
-  preserve inode; never read/hash/write/remove/replace payload. Permanent M
-  payload is also forbidden. Remove only exact owned temporary guards after
-  verified durable closure; preserve all active Compose references.
+- Global acceptance false: serving App/Market/datastores old; refactor STOP/streak0.
+  After closure require30 consecutive accepted clean units; failures reset streak
+  with history. Tests/polls never count. Preserve behavior/capture owner/user dirt;
+  Writer/DNS human.
+- Host/TLS complete. App9ee39b0b backups/baselineDBrestore passed both; candidate/
+  old-image/uploads compatibility OPEN. Final accepts ciphertext backups only;
+  no App provisioning/migration authority.
+- Ordinary665220a2/e1a727de built; CI40196208692 passed32. Not serving.
+  ed59 cannot become main. Freeze main; security branch advances; merge after
+  activation. Preserve dirty coin-market-retention.md, rollback overrides/history.
+- Never retry/reroute App C/S/R fresh-profile/COW adaptation/probe. Use ordinary
+  main artifact with fresh config/backup/functional evidence.
+- Raw44HIGH retain43 assessments; ACL/capture conflicts OPEN. Image-store success
+  grants no serving eligibility or mutating-RPC retry. Preserve F79 source binds.
+- PG49a8/Redis98c4 not activated; Windows UNKNOWN retains Linux absence proof.
+  Redis both/PGWeb LOAD passed. Native0bd failed preLOAD, closed d27/b651.
+  Fresh PG preparation failed on impossible Native-only Web proof requirements;
+  no new control/RPC. Corrected source633bdd pending fresh-authority integration.
+- MarketNative a37/f365/e31/2c, Web414 loaded. Old batch stays FAILED, never resume.
+  E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
+  memoryfloor failure retired/guards closed under2ddd; no LOAD. Both watchdogs
+  auto-restored normal apply. Keep eight production reader units.
+- Expired controls grant no authority; unknown RPC never proves cancel/retry.
+  Config/manifest differ; classic branches never query Descriptor. Physical TAR
+  members unique; repeated logical layers valid, every ordered DiffID strict.
+- Permanent empty Native SOURCE: metadata/flock only, preserve inode; never
+  read/hash/write/remove/replace payload. Permanent M payload also forbidden.
+  Close only exact owned temporary guards after durable closure.
 - No diagnostic Env/session/key read/copy/hash. Trusted normal backup/crypto/
-  Compose parity may consume protected inputs in RAM; public Config comparisons
-  stay RAM, never value hashes/output. Hold archive/source FDs and protected
-  parent checks through final checkpoint; detach only exact closing checker.
-- Root fixtures require genuine UID0/CAP_CHOWN, result/2; App smoke UID1001/caps0.
-  No UID/stat/mode waiver or hostdata fixture; preserve hosted multiplicity/guards. No Go RLIMIT_AS; bound CPU/wall/RAM
-  and output before accumulation. Never inherit RLIMIT_FSIZE into backup/payload
-  writers; use bounded pipes. Failed4194305B backup retained; fresh restore pending.
+  Compose parity may consume in RAM; no private value hashes/output. Keep
+  archive/source FDs/parent checks through final checkpoint.
+- Env/secret alias guards must check raw parents before '..' normalization and
+  actual OS-resolved held leaf; hidden directory hops refuse even same target.
+- CI40215599492 passed611 Root/0skips. Require genuine UID0/CAP_CHOWN/result2;
+  App smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixture; preserve
+  multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
+  inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.

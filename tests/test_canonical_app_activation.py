@@ -525,6 +525,37 @@ class ActivationTests(unittest.TestCase):
                     with ExitStack() as stack:S.OpaqueReference({**proof,'aliases':missing},stack)
             with self.assertRaisesRegex(RuntimeError,'env_alias_inventory'):
                 with ExitStack() as stack:S.OpaqueReference({**proof,'aliases':aliases+[aliases[0]]},stack)
+
+    def test_raw_parent_directory_symlink_before_dotdot_cannot_hide_a_different_or_undeclared_target(self):
+        for name in ('target','other','other/nested','other/target'):
+            (self.root/name).mkdir(mode=0o700)
+        target=self.file('target/normal.env',b'PUBLIC DECLARED')
+        other=self.file('other/target/normal.env',b'PUBLIC DIFFERENT')
+        redirect=self.root/'redirect';redirect.symlink_to(self.root/'other/nested',target_is_directory=True)
+        alias=self.root/'normal-alias';alias.symlink_to('redirect/../target/normal.env')
+        proof={'path':str(alias),'target':str(target),'identity':S.identity(target.stat()),
+            'aliases':[{'path':str(alias),'identity':S.identity(alias.lstat())}]}
+        self.assertEqual(alias.resolve(strict=True),other)
+        with patch.object(S.os,'pread',side_effect=AssertionError('opaque payload read denied')):
+            with ExitStack() as stack,self.assertRaises(RuntimeError):S.OpaqueReference(proof,stack)
+            # Equality of the final target alone also cannot admit an undeclared
+            # directory-symlink hop discarded by lexical '..' normalization.
+            redirect.unlink();redirect.symlink_to(self.root/'other',target_is_directory=True)
+            self.assertEqual(alias.resolve(strict=True),target)
+            with ExitStack() as stack,self.assertRaises(RuntimeError):S.OpaqueReference(proof,stack)
+
+    def test_safe_relative_dotdot_alias_remains_opaque_and_parent_metadata_stays_bound(self):
+        directory=self.root/'normal-aliases';directory.mkdir(mode=0o700)
+        target=self.file('normal-relative.env',b'PUBLIC NORMAL REFERENCE')
+        alias=directory/'normal.env';alias.symlink_to('../normal-relative.env')
+        proof={'path':str(alias),'target':str(target),'identity':S.identity(target.stat()),
+            'aliases':[{'path':str(alias),'identity':S.identity(alias.lstat())}]}
+        with patch.object(S.os,'pread',side_effect=AssertionError('opaque payload read denied')):
+            reference=S.OpaqueReference(proof,self.stack);reference.check()
+            directory.chmod(0o750)
+            try:
+                with self.assertRaises(RuntimeError):reference.check()
+            finally:directory.chmod(0o700)
     def test_scope_duration_requires_positive_known_finite_max7200seconds(self):
         for text,total in (('2h',7200),('7200s',7200),('1h 30min',5400),('500ms',.5),('1000000us',1)):
             self.assertEqual(float(C.scope_seconds(text)),total)
