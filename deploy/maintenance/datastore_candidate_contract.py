@@ -276,6 +276,20 @@ def legacy_configs(config, moby):
     return expected
 
 
+def expected_inspect_comment(config):
+    """Moby v28.5.1 ImageInspect's exact Comment projection, not OCI mutation.
+
+    https://github.com/moby/moby/blob/v28.5.1/daemon/images/image_inspect.go#L41
+    Nonempty img.Comment wins; only its empty value falls back to the LAST
+    history entry's Comment. No earlier matching entry can establish identity.
+    """
+    need(type(config) is dict, 'archive_image_metadata')
+    comment, history = config.get('comment', ''), config.get('history', [])
+    need(type(comment) is str and type(history) is list
+         and all(type(row) is dict and type(row.get('comment', '')) is str for row in history), 'archive_image_metadata')
+    return comment if comment else history[-1].get('comment', '') if history else ''
+
+
 def validate_archive(stream, size, end, data, transport, moby):
     """Authenticate source archive bytes; no daemon observation is invented."""
     spec, image = data['spec'], data['image']
@@ -309,8 +323,10 @@ def validate_archive(stream, size, end, data, transport, moby):
          and config['architecture'] == 'amd64' and config['os'] == 'linux'
          and same(config['rootfs'], {'type': 'layers', 'diff_ids': spec['layers']})
          and same(container_config(config['config']), container_config(image['Config'])), 'archive_config')
-    need(config.get('comment', '') == image.get('Comment', '') and config.get('author', '') == image.get('Author', '')
-         and config.get('docker_version', '') == image.get('DockerVersion', ''), 'archive_image_metadata')
+    need(type(image.get('Comment', '')) is str and expected_inspect_comment(config) == image.get('Comment', '')
+         and all(type(config.get(source, '')) is str and type(image.get(target, '')) is str
+                 and config.get(source, '') == image.get(target, '')
+                 for source, target in (('author', 'Author'), ('docker_version', 'DockerVersion'))), 'archive_image_metadata')
     descriptors = manifest['layers']; need(type(descriptors) is list and len(descriptors) == len(spec['layers']), 'archive_layers')
     allowed = {'manifest.json', 'index.json', 'oci-layout', manifest_name, config_name}
     names, checked, expanded = [], {}, 0

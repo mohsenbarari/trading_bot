@@ -68,3 +68,24 @@ LOAD and daemon comparison failures without publishing response bodies, Config,
 tokens or raw HTTP logs. Root passed42 independent genuineUID1001 fenced tests;
 focused controller coverage is298/298 statements, zero exclusions, branches35/36.
 These tests validate diagnostics, not the still-unexecuted32 image scenarios.
+
+Run40174234435 on840010d4 then identified `postgres_archive_admission` /
+`archive_image_metadata` (`Refusal`). Artifact12591412110 is2053bytes, SHA256
+`ec4caf65d1ce4bb68485e1a82ed89b81aafd8b991033a727e21251510ad3a4ae`.
+App admission again passed; no runtime/component case or container/network ran,
+and cleanup completed. The original failed report stays unchanged.
+
+The shared validator now implements [Moby's documented inspect Comment
+projection](https://github.com/moby/moby/blob/v28.5.1/daemon/images/image_inspect.go#L41):
+a nonempty top-level comment wins; an empty value falls back only to the final
+history comment. The actual public PostgreSQL evidence has no top-level comment
+and its inspect Comment matches that final history entry. An earlier matching
+entry cannot satisfy the guard. Malformed types/history are refused. Author,
+DockerVersion, Config SHA, full typed Config, ordered layers and physical graph
+checks remain strict; raw scanner gates are unchanged.
+
+Root independently passed85 affected datastore tests and42 genuineUID1001 smoke
+controller tests after the pin update. The shared validator has327/327 statements
+and56/56 branches covered, zero exclusions. Current helper consumers use the
+new exact bytes; historical sealed operations are unchanged. Actual PostgreSQL
+archive/import and the32 image scenarios still require successful CI evidence.

@@ -28,7 +28,7 @@ HELPERS = {
     'compose_app_mountpoint_image.py': ('scripts/compose_app_mountpoint_image.py','14849bd8c616b27ade1c8488b8e6f276b369480456d0acc1a8c8eb4284f40226'),
     'compose_market_security_os_candidate.py': ('scripts/compose_market_security_os_candidate.py','c53cfd7ae4570314ef7f13d43ecd73de26436cf56407676ac2fe24d19dc1caa9'),
     'admit_security_component_image_reuse.py': ('scripts/admit_security_component_image_reuse.py','9adddae3d6966443f33040f54a57ce597a1816af918e8c606557801d27bf4025'),
-    'datastore_candidate_contract.py': ('deploy/maintenance/datastore_candidate_contract.py','5b8bbcc51869dcb1a1d8a4cf617af330cb365ffdf2553c6266817f157c4cba6b'),
+    'datastore_candidate_contract.py': ('deploy/maintenance/datastore_candidate_contract.py','d210020e24fedd4986803a3fe2618a5016ecd99f9e3ca9588af02d77a967e17d'),
     'runtime_image_archive_transport.py': ('deploy/maintenance/runtime_image_archive_transport.py','20c4b90f1c719d4cdee69df8ad1c31c2bcd663b99619b1d58dcbafa1eafecad2'),
 }
 SELECTORS = {

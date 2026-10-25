@@ -63,7 +63,7 @@ class DatastoreCandidateTests(unittest.TestCase):
                 archive.addfile(info, io.BytesIO(raw))
         return stream.getvalue()
 
-    def archive(self, *, legacy=True, damage=None):
+    def archive(self, *, legacy=True, damage=None, metadata=None, inspect_metadata=None):
         bodies = [b'ordinary fixed source layer', b'ordinary second source layer']
         layers = ['sha256:' + sha256(v).hexdigest() for v in bodies]
         config = {'architecture': 'amd64', 'created': '2026-10-25T01:02:03.120000000Z',
@@ -72,6 +72,7 @@ class DatastoreCandidateTests(unittest.TestCase):
             'config': {'Env': ['PUBLIC_FIXTURE=ordinary'], 'Cmd': ['postgres'],
                 'Entrypoint': ['docker-entrypoint.sh'], 'Volumes': {'/ordinary': {}},
                 'ExposedPorts': {'5432/tcp': {}}, 'WorkingDir': '', 'StopSignal': 'SIGINT'}}
+        if metadata: metadata(config)
         config_raw = C.encode(config); config_id = 'sha256:' + sha256(config_raw).hexdigest()
         name = lambda raw: 'blobs/sha256/' + sha256(raw).hexdigest()
         if damage == 'diffid': bodies[0] = b'X' + bodies[0][1:]
@@ -95,7 +96,8 @@ class DatastoreCandidateTests(unittest.TestCase):
         if damage == 'duplicate': rows.append(rows[0])
         data = {'spec': {'profile': 'postgres', 'config_id': config_id, 'layers': layers,
                         'archive': {'uncompressed_bytes': 0}},
-                'image': {'Config': deepcopy(config['config']), 'Comment': config['comment'], 'Author': '', 'DockerVersion': ''}}
+                'image': {'Config': deepcopy(config['config']), 'Comment': config.get('comment', ''), 'Author': '', 'DockerVersion': ''}}
+        if inspect_metadata: data['image'].update(inspect_metadata)
         raw = self.tar(rows); data['spec']['archive']['uncompressed_bytes'] = len(raw)
         return raw, data, config
 
@@ -175,6 +177,60 @@ class DatastoreCandidateTests(unittest.TestCase):
         for damage in ('layer', 'diffid', 'legacy', 'extra', 'duplicate'):
             raw, data, _ = self.archive(damage=damage)
             with self.subTest(damage=damage), self.assertRaises(Exception): C.validate_archive(io.BytesIO(raw), len(raw), __import__('time').monotonic()+30, data, T, M)
+
+    def metadata_admission(self, mutate, expected):
+        raw,data,config=self.archive(metadata=mutate,inspect_metadata=expected)
+        proof=C.validate_archive(io.BytesIO(raw),len(raw),__import__('time').monotonic()+30,data,T,M)
+        self.assertEqual(proof['config_id'],data['spec']['config_id']);self.assertTrue(proof['physical_graph_closed'])
+        self.assertFalse(proof['security_accepted']);self.assertEqual(proof['rootfs_layers'],config['rootfs']['diff_ids'])
+        return proof
+
+    def test_nonempty_top_comment_wins_over_every_history_comment(self):
+        def mutate(config):config['history']=[{'comment':'earlier'},{'comment':'last differs'}]
+        self.metadata_admission(mutate,{'Comment':'ordinary builder comment'})
+        raw,data,_=self.archive(metadata=mutate,inspect_metadata={'Comment':'last differs'})
+        with self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.validate_archive(io.BytesIO(raw),len(raw),__import__('time').monotonic()+30,data,T,M)
+
+    def test_missing_and_empty_top_comment_use_only_the_last_history_comment(self):
+        for missing in (True,False):
+            def mutate(config):
+                if missing:config.pop('comment')
+                else:config['comment']=''
+                config['history']=[{'comment':'earlier'},{'comment':'last exact'}]
+            with self.subTest(missing=missing):
+                self.metadata_admission(mutate,{'Comment':'last exact'})
+                raw,data,_=self.archive(metadata=mutate,inspect_metadata={'Comment':'earlier'})
+                with self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.validate_archive(io.BytesIO(raw),len(raw),__import__('time').monotonic()+30,data,T,M)
+
+    def test_empty_history_or_last_missing_comment_projects_empty_without_searching_backwards(self):
+        for history in ([],[{}],[{'comment':'earlier'},{}],[{'comment':'earlier'},{'comment':''}]):
+            def mutate(config):config.pop('comment');config['history']=deepcopy(history)
+            with self.subTest(history=history):self.metadata_admission(mutate,{'Comment':''})
+        self.assertEqual(C.expected_inspect_comment({}),'')
+
+    def test_actual_public_postgres_shape_no_top_comment_25_history_comments(self):
+        # Actual public artifact12579072479 / SHA5a56ff8c901fb7553b596cbab6d706360163e1de07b895a61a5baa4b964b361d:
+        # OCI top comment absent; inspect Comment equals every one of25 history comments.
+        # This owned tiny archive reproduces that shape; it is not the actual image or a raw-gate waiver.
+        def mutate(config):config.pop('comment');config['history']=[{'comment':'buildkit.dockerfile.v0'} for _ in range(25)]
+        self.metadata_admission(mutate,{'Comment':'buildkit.dockerfile.v0'})
+
+    def test_comment_projection_rejects_malformed_history_and_comment_types(self):
+        invalid=[None,False,0,{},'history', [None],[False],['row'],[{'comment':None}],[{'comment':False}],[{'comment':1}]]
+        for history in invalid:
+            with self.subTest(history=history),self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.expected_inspect_comment({'comment':'nonempty','history':history})
+        for comment in (None,False,0,[],{}):
+            with self.subTest(comment=comment),self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.expected_inspect_comment({'comment':comment,'history':[]})
+        for config in (None,[],False):
+            with self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.expected_inspect_comment(config)
+
+    def test_direct_author_docker_version_and_inspect_comment_types_remain_strict(self):
+        for field,value in [('Author','drift'),('DockerVersion','drift'),('Comment',None),('Author',False),('DockerVersion',0)]:
+            raw,data,_=self.archive(inspect_metadata={field:value})
+            with self.subTest(field=field,value=value),self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.validate_archive(io.BytesIO(raw),len(raw),__import__('time').monotonic()+30,data,T,M)
+        def both_numeric(config):config['author']=1
+        raw,data,_=self.archive(legacy=False,metadata=both_numeric,inspect_metadata={'Author':True})
+        with self.assertRaisesRegex(C.Refusal,'archive_image_metadata'):C.validate_archive(io.BytesIO(raw),len(raw),__import__('time').monotonic()+30,data,T,M)
 
     def test_retained_fd_metadata_aba_and_preexisting_output_refuse_without_unlink(self):
         path = self.private(self.root/'public', b'ordinary')
