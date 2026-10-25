@@ -203,9 +203,24 @@ class HotPreflight(unittest.TestCase):
         self.stack.enter_context(patch.object(M, 'stage'))
         self.stack.enter_context(patch.object(M, 'TARGET', self.root / 'absent-backup'))
         self.stack.enter_context(patch.object(M, 'ROOT', self.root))
+        # Translate only the simulated filesystem root to this owned fixture.
+        # Its real metadata stays intact; the production same-device guard runs.
+        self.stack.enter_context(patch.object(M, 'Path', side_effect=lambda value: self.root if value == '/' else Path(value)))
         self.stack.enter_context(patch.object(M, 'command', return_value=['public-cli', 'create']))
         self.stack.enter_context(patch.object(M.os, 'statvfs', return_value=SimpleNamespace(f_bavail=44 * 1024**3, f_frsize=1)))
         return writes, (marker, source, reservation)
+
+    def test_hot_refuses_cross_device_target_before_create_without_mutating_fences(self):
+        writes, paths = self.hot_fixture()
+        before = [p.read_bytes() for p in paths]
+        foreign_root = SimpleNamespace(stat=lambda: SimpleNamespace(st_dev=self.root.stat().st_dev + 1))
+        with patch.object(M, 'Path', return_value=foreign_root), patch.object(M, 'run_cli') as cli, \
+             self.assertRaisesRegex(RuntimeError, '^backup_filesystem_changed$'):
+            M.execute('hot', {})
+        self.assertEqual(cli.call_count, 1)
+        self.assertTrue(cli.call_args.kwargs['expected_help'])
+        self.assertEqual(writes, [])
+        self.assertEqual(before, [p.read_bytes() for p in paths])
 
     def test_real_hot_success_is_create_only_and_never_quiesced_upgrade_acceptance(self):
         writes, paths = self.hot_fixture()

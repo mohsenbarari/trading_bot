@@ -366,7 +366,10 @@ class FiniteWebEngineTests(unittest.TestCase):
         namespace = {'argparse': argparse, 'Path': Path, '__doc__': 'synthetic contract'}
         exec(compile(ast.Module(body=[parser_function], type_ignores=[]), '<actual-backup-parser>', 'exec'), namespace)
         create = next(node for node in backup_tree.body if isinstance(node, ast.FunctionDef) and node.name == 'create_backup')
-        receipt_condition = next(node.test for node in create.body if isinstance(node, ast.If)
+        self.assertTrue(any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                            and node.func.id == '_create_backup_bound' for node in ast.walk(create)))
+        bound = next(node for node in backup_tree.body if isinstance(node, ast.FunctionDef) and node.name == '_create_backup_bound')
+        receipt_condition = next(node.test for node in bound.body if isinstance(node, ast.If)
                                  and any(isinstance(part, ast.Attribute) and isinstance(part.value, ast.Name)
                                          and part.value.id == 'receipt' and part.attr == 'name' for part in ast.walk(node.test)))
         controller_tree = ast.parse((HERE / 'web_engine_controller.py').read_text())

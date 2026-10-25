@@ -18,7 +18,7 @@ from unittest.mock import patch
 ROOT_MODULES = tuple('tests.test_' + name for name in (
     'native_brotli_install', 'native_dashboard_tls', 'native_runtime_vulnerability_audit',
     'security_consumer_bootstrap', 'web_runtime_vulnerability_audit', 'web_market_hot3',
-    'web_market_hot_preflight', 'web_market_managed_config'))
+    'web_market_hot_preflight', 'web_market_managed_config', 'web_engine_current_controller'))
 AMBIENT = ('subprocess.run', 'subprocess.Popen', 'subprocess.call', 'subprocess.check_call',
     'subprocess.check_output', 'os.system', 'os.popen', 'os.fork', 'os.forkpty',
     'os.posix_spawn', 'os.posix_spawnp', 'os.kill', 'os.killpg', 'socket.socket',
@@ -130,6 +130,10 @@ def root_guard():
 
 def root_lane(args):
     root_guard(); os.umask(0o077)
+    import coverage
+    collector = coverage.Coverage.current()
+    need(collector is not None and collector.config.data_file == '/work/.coverage.root-fixtures',
+         'root_fixture_process_coverage_required')
     def expired(*_): raise RuntimeError('root_fixture_wall_deadline')
     signal.signal(signal.SIGALRM, expired); signal.alarm(840)
     reviewed = Path('/reviewed'); work = Path('/work/source')
@@ -138,9 +142,7 @@ def root_lane(args):
     need(all(p.lstat().st_uid == p.lstat().st_gid == 0 for p in work.rglob('*')), 'root_fixture_source_ownership')
     os.chdir(work); sys.path.insert(0, str(work))
     expected = expected_ok(json.loads(read(args.expectation, 4 * 1024**2)), args.commit)
-    import coverage
-    collector = coverage.Coverage(branch=True, data_file='/work/.coverage.root-fixtures', config_file=str(work/'.coveragerc'))
-    collector.start(); log = BoundedLog()
+    log = BoundedLog()
     try:
         with ExitStack() as fence, redirect_stdout(log), redirect_stderr(log):
             for target in AMBIENT: fence.enter_context(patch(target, side_effect=AssertionError('root_fixture_ambient_forbidden')))

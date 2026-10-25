@@ -187,11 +187,11 @@ jobs:
             status=$redis_status
           fi
           python3 -m coverage combine --append || status=$?
-          python3 -m coverage json -o tmp/backend-coverage.json || status=$?
+          python3 -m coverage json --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml \
             --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' \
             -o tmp/backend-coverage.xml || status=$?
-          python3 -m coverage html -d tmp/backend-coverage-html || status=$?
+          python3 -m coverage html --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' -d tmp/backend-coverage-html || status=$?
           printf '%s\n' "$status" > tmp/backend-coverage.exitcode
           exit "$status"
 
@@ -243,11 +243,11 @@ jobs:
           status=0
           if [[ "$client_status" -ne 0 || "$report_status" -ne 0 ]]; then status=1; fi
           python3 -m coverage combine --append || status=1
-          python3 -m coverage json -o tmp/backend-coverage.json || status=1
+          python3 -m coverage json --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' -o tmp/backend-coverage.json || status=1
           python3 -m coverage xml \
             --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' \
             -o tmp/backend-coverage.xml || status=1
-          python3 -m coverage html -d tmp/backend-coverage-html || status=1
+          python3 -m coverage html --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' -d tmp/backend-coverage-html || status=1
           printf '%s\n' "$status" > tmp/backend-root-fixtures.exitcode
           exit "$status"
 
