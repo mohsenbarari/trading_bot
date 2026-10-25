@@ -91,6 +91,16 @@ class AdmissionTests(unittest.TestCase):
    self.assertNotIn('PRIVATE_SENTINEL',json.dumps(public));self.assertIn('PRIVATE_SENTINEL',' '.join(private['roles']['app']['actual']['Config']['Env']))
    self.assertFalse(public['api_clone_started']);self.assertFalse(public['network_or_firewall_changed'])
    for argv in calls:self.assertFalse(set(argv)&{'create','start','run','up','stop','kill','load','rm','build'})
+ def test_historical_replace_label_keeps_exact_normal_name_validation(self):
+  control,fixtures,rows,capture,calls=self.case()
+  identifier=control['roles']['app']['container_id'];labels=rows[identifier]['Config']['Labels']
+  labels['com.docker.compose.replace']=fixtures['app'].old['services']['app']['container_name']
+  public,_=self.invoke(control,capture)
+  self.assertTrue(all(r['normal_command_valid'] for r in public['normal_role_eligibility']))
+  for wrong in ('foreign_container','',False,0,None):
+   with self.subTest(wrong=wrong):
+    labels['com.docker.compose.replace']=wrong
+    with self.assertRaises(RuntimeError):self.invoke(control,capture)
  def test_real_Normal_C_rejects_complete_config_env_command_and_host_mismatch(self):
   for field,bad in (('Env',['SECRET=PRIVATE_SENTINEL']),('Cmd',['python','special_probe.py']),('User','10001')):
    c,f,rows,capture,calls=self.case();rows[c['roles']['app']['container_id']]['Config'][field]=bad

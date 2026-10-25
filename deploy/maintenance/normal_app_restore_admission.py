@@ -184,7 +184,11 @@ def collect(value,stack,self_pin,*,capture=None):
   need(actual['Id']==spec['container_id'] and actual['State']['Running'] is True,'normal_runtime')
   image=inspect_one(command([*docker,'image','inspect',actual['Image']]))
   stable[actual['Id']]=stable_view(actual)
-  C.normal_baseline(model,role,row(actual),image,spec,[b['path'] for b in spec['compose_files']])
+  # A previously recreated container legitimately retains this creation label.
+  # C still requires its exact value to equal the declared container name;
+  # this classification grants no replacement or serving authority.
+  recreated='com.docker.compose.replace' in (actual['Config'].get('Labels') or {})
+  C.normal_baseline(model,role,row(actual),image,spec,[b['path'] for b in spec['compose_files']],replacement=recreated)
   record={**loader_scope(C,role,actual,aliases),'creation_compose_version':spec['compose_version']};scope.append(record)
   private['roles'][role]={'model':model,'actual':actual,'image':image,'scope':spec}
  for identifier,before in stable.items():

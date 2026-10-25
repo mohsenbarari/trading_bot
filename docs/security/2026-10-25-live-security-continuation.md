@@ -481,3 +481,24 @@ One reviewed selector now requires the existing mobile h1 `ورود به سام�
 exactly; redirect, session revocation, reactivation and recovered-market
 assertions remain unchanged. This is a test-contract correction; actual full
 matrix acceptance is still pending.
+
+Actual read-only admission01 refused `compose_labels` on both sites, without
+state changes or private output. Nonces8aec5c992ae742398ed223074ed9d023 and
+e798d03d093c4f2b968b49657ad93fc4, closed result SHA256
+`a4c72660cf4ef7d129ed27efa57830ccff554b62398bee29a88e31b44211984f`,
+remain preserved. Public metadata then showed a valid historical
+`com.docker.compose.replace=trading_bot_app` on both Apps; all label keys were
+already allowed. The caller had incorrectly treated previously recreated
+containers as first creations. The narrow caller correction classifies this
+observed creation metadata and still delegates exact declared-name/type checks
+to unchanged C. Root passed16 genuine Root/CAP_CHOWN/NNP fixtures, including
+wrong-name/empty/bool/integer/null refusals. Used source files and controls are
+not overwritten; a fresh source instance/control is required for observation02.
+
+Backup04 freshly completed at2026-10-25T23:33:32.593974Z with stamp
+security-canonical-app-20261025-f909548647aa4b91. Both sites have four fresh
+artifacts, candidate PostgreSQL isolated restore and cleanup passed, and the
+authorized Web-to-Native protected copy completed. Normal manifest values were
+neither disclosed nor hashed. Backup03's expired age is not rewritten; no live
+data was restored or serving component replaced. Redis persistence compatibility
+and the ordinary same-clone App compatibility remain separate open gates.
