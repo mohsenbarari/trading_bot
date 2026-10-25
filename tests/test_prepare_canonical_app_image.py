@@ -197,6 +197,29 @@ hash_file_or_dir() {
             M.input_files(self.repo,{'Dockerfile','scripts/approved.py'})
         self.assertNotIn(str(private),seen)
 
+    def test_actual_authenticated_vendor_lock_names_are_admitted_before_build(self):
+        relative='scripts/app_security_os_packages.lock.json'
+        raw=(ROOT/relative).read_bytes()
+        path=self.file(relative,raw)
+        _,metadata=M.read_file(path,65536)
+        source={'files':[{'path':relative,'identity':metadata,'sha256':sha256(raw).hexdigest()}]}
+        lock=json.loads(raw)
+        allowed=M.public_input_names(self.repo,source)
+        expected={'pip_packages/security-os-capsule/'+r['path'] for r in lock['packages']}
+        self.assertEqual(len(expected),15)
+        self.assertEqual(sum('~' in name for name in expected),6)
+        self.assertTrue(expected<=allowed)
+        for name in expected:self.file(name,b'owned public package-name fixture')
+        observed={r['path'] for r in M.input_files(self.repo,allowed)}
+        self.assertEqual(observed,expected|{relative})
+        for bad in ('../foreign.deb','nested/package.deb','foreign\\package.deb','package\n.deb'):
+            changed=json.loads(raw);changed['packages'][0]['path']=bad
+            payload=M.encode(changed);self.file(relative,payload)
+            _,changed_metadata=M.read_file(path,65536)
+            changed_source={'files':[{'path':relative,'identity':changed_metadata,'sha256':sha256(payload).hexdigest()}]}
+            with self.assertRaisesRegex(RuntimeError,'^input_inventory$'):
+                M.public_input_names(self.repo,changed_source)
+
     def test_source_descriptor_budget_refuses_before_open_without_changing_limits(self):
         with ExitStack() as stack,patch.object(M.resource,'getrlimit',return_value=(3,3)),\
                 patch.object(M.os,'open',side_effect=AssertionError('must refuse before open')),\

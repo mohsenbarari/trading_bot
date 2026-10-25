@@ -177,7 +177,7 @@ def public_input_names(repo,source):
     need(type(lock) is dict and len(lock['packages'])==15,'input_inventory')
     names|={'pip_packages/.security-os-capsule.lock','pip_packages/security-os-capsule/manifest.json'}
     for row in lock['packages']:
-        path=row['path'];need(type(path) is str and re.fullmatch(r'[A-Za-z0-9_.+-]+\.deb',path),'input_inventory')
+        path=row['path'];need(type(path) is str and re.fullmatch(r'[A-Za-z0-9_.+~\-]+\.deb',path),'input_inventory')
         names.add('pip_packages/security-os-capsule/'+path)
     return names
 

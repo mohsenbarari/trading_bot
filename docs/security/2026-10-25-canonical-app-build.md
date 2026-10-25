@@ -153,3 +153,13 @@ ordinary signature comparison; core/cache combined91 tests also passed.
 No actual run/export of this new workflow is claimed yet. A separately reviewed
 App-only immutable-artifact activation contract is still required; existing
 C/S/R/COW guards remain untouched.
+
+The first actual run40189220376 on a5af2137 passed Git/cache preparation and
+the normal frontend build, then refused before Docker with input_inventory.
+The admission alphabet omitted the tilde used by six of the15 authenticated
+Debian package filenames. No image/export/scan exists for that attempt.
+The narrow correction adds tilde to the basename alphabet without accepting
+path separators or whitespace. A regression now consumes the actual Git-bound
+15-name vendor lock and exercises those six names plus traversal/unsafe-name
+negatives. Root and an independent reviewer each passed all15 focused tests.
+The failed run remains failed; a fresh actual build is required.
