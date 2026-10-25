@@ -10,6 +10,7 @@ uses a temporary PostgreSQL container and never touches the production DB.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -160,6 +161,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-uploads", action="store_true")
     parser.add_argument("--skip-audit", action="store_true")
     parser.add_argument("--skip-redis", action="store_true")
+    parser.add_argument("--postgres-candidate-control", type=Path)
+    parser.add_argument("--postgres-candidate-sha256")
     parser.add_argument(
         "--restore-smoke",
         action="store_true",
@@ -195,6 +198,43 @@ def shell_bool(value: bool) -> str:
     return "1" if value else "0"
 
 
+def candidate_program(raw: bytes, pin: str, site: str, *, restore: bool | None = False) -> str:
+    """Seal only public source/control buffers into the existing host command."""
+    from scripts import backup_postgres_candidate as pg
+    pg.validate(raw, pin, site)
+    path = Path(pg.__file__)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = pg.identity(os.fstat(fd));source = os.pread(fd,65537,0)
+        if (not 0 < len(source) <= 65536 or len(source) != before[6]
+                or before != pg.identity(os.fstat(fd)) or before != pg.identity(path.lstat())):
+            raise RuntimeError("postgres_candidate_validator_changed")
+    finally: os.close(fd)
+    source64,control64 = base64.b64encode(source).decode(),base64.b64encode(raw).decode()
+    mode = "(sys.argv[1] == 'restore')" if restore is None else repr(restore)
+    argument = 2 if restore is None else 1
+    return f'''import base64,json,os,re,sys
+from hashlib import sha256
+from types import ModuleType
+source=base64.b64decode({source64!r},validate=True)
+assert sha256(source).hexdigest()=={hashlib.sha256(source).hexdigest()!r}
+P=ModuleType('_sealed_backup_pg');exec(compile(source,'<sealed-public-pg-validator>','exec'),P.__dict__)
+raw=base64.b64decode({control64!r},validate=True);d=P.validate(raw,{pin!r},{site!r});c=P.Candidate(d,{pin!r},{site!r})
+restore={mode}
+name=sys.argv[{argument}] if restore else 'trading_bot_db'
+template='{{"Id":{{{{json .Id}}}},"Name":{{{{json .Name}}}},"Image":{{{{json .Image}}}},"Config":{{"Image":{{{{json .Config.Image}}}},"Labels":{{"com.docker.compose.project":{{{{json (index .Config.Labels "com.docker.compose.project")}}}}}}}}}}'
+document=json.loads(P.probe([*P.DOCKER,'container','inspect','--format',template,name]))
+c.image_check();binding=c.runtime_check(document,restore=restore)
+value={{'control_sha256':{pin!r},'validator_sha256':sha256(source).hexdigest(),'source_container_id':document['Id'],'source_binding':binding,'restore_image_id':c.image,'candidate_config_id':P.CONFIG,'security_accepted':False,'raw_finding_waived':False}}
+if not restore and sys.argv[{argument}]:
+ assert json.loads(sys.argv[{argument}])==value,'postgres_candidate_source_changed'
+if not restore and len(sys.argv)>{argument+1}:
+ out=os.open(sys.argv[{argument+1}],os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+ with os.fdopen(out,'w') as f:json.dump(value,f,sort_keys=True);f.write('\\n');f.flush();os.fsync(f.fileno())
+print(json.dumps(value,sort_keys=True))
+'''
+
+
 def build_backup_shell(
     target: HostTarget,
     *,
@@ -204,6 +244,8 @@ def build_backup_shell(
     include_audit: bool = True,
     include_redis: bool = True,
     restore_smoke: bool = False,
+    postgres_candidate_control: bytes | None = None,
+    postgres_candidate_sha256: str | None = None,
 ) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", stamp):
         raise ValueError("backup timestamp contains unsafe characters")
@@ -229,7 +271,7 @@ def build_backup_shell(
         )
     )
     required_restore_tables = shlex.quote(" ".join(REGISTRATION_STAGE1_RESTORE_TABLES))
-    return f"""
+    script = f"""
 set -euo pipefail
 umask 077
 cd {project_dir}
@@ -669,6 +711,27 @@ if [ "$restore_smoke" = "1" ] && [ "$restore_cleanup_status" != "passed" ]; then
   exit 126
 fi
 """
+    if postgres_candidate_control is None and postgres_candidate_sha256 is None:
+        return script
+    if postgres_candidate_control is None or postgres_candidate_sha256 is None:
+        raise RuntimeError("postgres_candidate_control_required")
+    from scripts import backup_postgres_candidate as pg
+    data = pg.validate(postgres_candidate_control, postgres_candidate_sha256, target.role)
+    image = data['sites'][target.role]['daemon_image_id']
+    program = candidate_program(postgres_candidate_control, postgres_candidate_sha256, target.role, restore=None)
+    before = "postgres_candidate_probe() {\npython3 - \"$@\" <<'PG_CANDIDATE'\n"+program+"PG_CANDIDATE\n}\npostgres_candidate_observed=\"$(postgres_candidate_probe source '')\"\n"
+    after = 'postgres_candidate_final="$(postgres_candidate_probe source "$postgres_candidate_observed" "$run_dir/postgres-candidate-identity.json")"\n'
+    script = script.replace('project_label="$(docker inspect', before+'project_label="$(docker inspect', 1)
+    script = script.replace('postgres:15-alpine >/dev/null; then', shlex.quote(image)+' >/dev/null; then\n'+
+        '    postgres_candidate_probe restore '+restore_name+' >/dev/null\n', 1)
+    script = script.replace('manifest_file="$run_dir/', after+'manifest_file="$run_dir/', 1)
+    script = script.replace('"$restore_cleanup_error" <<\'PY\'', '"$restore_cleanup_error" "$run_dir/postgres-candidate-identity.json" <<\'PY\'', 1)
+    script = script.replace('cleanup_error = sys.argv[1:]', 'cleanup_error = sys.argv[1:-1]', 1)
+    script = script.replace('flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL',
+        'payload["postgres_candidate"] = json.loads(Path(sys.argv[-1]).read_text(encoding="utf-8"))\nflags = os.O_WRONLY | os.O_CREAT | os.O_EXCL', 1)
+    if len(script.encode()) > 120*1024:
+        raise RuntimeError("postgres_candidate_host_command_bound")
+    return script
 
 
 def _sha256_file(path: Path) -> str:
@@ -845,6 +908,7 @@ def backup_role(
     include_audit: bool,
     include_redis: bool,
     restore_smoke: bool,
+    postgres_candidate: Any = None,
 ) -> dict[str, Any]:
     script = build_backup_shell(
         target,
@@ -854,10 +918,14 @@ def backup_role(
         include_audit=include_audit,
         include_redis=include_redis,
         restore_smoke=restore_smoke,
+        **({"postgres_candidate_control": postgres_candidate.raw,
+            "postgres_candidate_sha256": postgres_candidate.pin} if postgres_candidate is not None else {}),
     )
     args = remote_args(settings, script) if target.remote else ["bash", "-lc", script]
     started = time.perf_counter()
     result = run_command(args, timeout=3600 if restore_smoke else 1800)
+    if postgres_candidate is not None:
+        postgres_candidate.check()
     elapsed = round(time.perf_counter() - started, 3)
     if result.returncode != 0:
         raise RuntimeError(
@@ -952,8 +1020,7 @@ def pull_iran_files(settings: dict[str, str], payload: dict[str, Any], destinati
     return pulled
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def _main(args: argparse.Namespace, postgres_candidate: Any = None) -> int:
     if Path(args.backup_dir) != Path(DEFAULT_BACKUP_DIR):
         raise RuntimeError("production backup directory must use the approved root")
     if args.pull_to and (
@@ -980,6 +1047,7 @@ def main(argv: list[str] | None = None) -> int:
             include_audit=not args.skip_audit,
             include_redis=not args.skip_redis,
             restore_smoke=args.restore_smoke,
+            **({"postgres_candidate": postgres_candidate} if postgres_candidate is not None else {}),
         )
         if args.pull_to and role == "iran":
             payload["pulled_files"] = pull_iran_files(settings, payload, Path(args.pull_to))
@@ -992,6 +1060,8 @@ def main(argv: list[str] | None = None) -> int:
         "roles": list(roles),
         "results": results,
     }
+    if postgres_candidate is not None:
+        postgres_candidate.check()
     if args.receipt:
         supplied_receipt = Path(args.receipt).expanduser()
         approved_parent = DEFAULT_BACKUP_RECEIPT_DIR
@@ -1044,6 +1114,8 @@ def main(argv: list[str] | None = None) -> int:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+    if postgres_candidate is not None:
+        postgres_candidate.check()
     if args.json:
         print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
     else:
@@ -1051,6 +1123,21 @@ def main(argv: list[str] | None = None) -> int:
         for item in results:
             print(f"- {item['role']}: {item.get('manifest_path')}")
     return 0 if output["status"] == "ok" else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    control,digest = args.postgres_candidate_control,args.postgres_candidate_sha256
+    if control is None and digest is None:
+        return _main(args)
+    if control is None or digest is None:
+        raise RuntimeError("postgres_candidate_control_required")
+    from scripts import backup_postgres_candidate as pg
+    roles = ('foreign','iran') if args.role == 'both' else (args.role,)
+    # Public control shape/hash is checked before the normal manifest/Env reader.
+    with pg.bound(control,digest,roles[0]) as candidate:
+        for role in roles:pg.validate(candidate.raw,digest,role)
+        return _main(args,candidate)
 
 
 if __name__ == "__main__":

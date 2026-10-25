@@ -120,6 +120,30 @@ def _execution_kwargs(limits: BackupExecutionLimits | None) -> dict[str, Any]:
     return {} if limits is None else {"execution_limits": limits}
 
 
+@contextmanager
+def _postgres_candidate_context(control: Path | None, digest: str | None):
+    if control is None and digest is None:
+        yield None
+        return
+    if control is None or digest is None:
+        raise BackupError("backup_postgres_candidate_control_required")
+    # Lazy: historical/default staged callers retain their two-script contract.
+    from scripts.backup_postgres_candidate import bound
+    with bound(control, digest, "iran") as candidate:
+        candidate.image_check()
+        yield candidate
+
+
+def _candidate_kwargs(candidate: Any) -> dict[str, Any]:
+    return {} if candidate is None else {"postgres_candidate": candidate}
+
+
+def _candidate_inputs(bound: Any, candidate: Any) -> None:
+    bound.check()
+    if candidate is not None:
+        candidate.check()
+
+
 def _checkpoint(limits: BackupExecutionLimits | None) -> None:
     if limits is not None:
         if time.time() >= limits.daemon_deadline_epoch_seconds:
@@ -653,6 +677,7 @@ def inspect_source_database(
     *,
     require_quiesce: bool = True,
     execution_limits: BackupExecutionLimits | None = None,
+    postgres_candidate: Any = None,
 ) -> dict[str, Any]:
     project = values["MARKET_PIPELINE_PROJECT_NAME"]
     running = _running_project_services(project, **_execution_kwargs(execution_limits))
@@ -682,7 +707,7 @@ def inspect_source_database(
     if (
         document.get("State", {}).get("Running") is not True
         or health != "healthy"
-        or document.get("Config", {}).get("Image") != POSTGRES_IMAGE
+        or (postgres_candidate is None and document.get("Config", {}).get("Image") != POSTGRES_IMAGE)
         or labels.get("com.docker.compose.project")
         != values["MARKET_PIPELINE_PROJECT_NAME"]
         or labels.get("com.docker.compose.service") != "market-database"
@@ -690,6 +715,7 @@ def inspect_source_database(
         or Path(str(mounts[0].get("Source") or "")) != postgres_path
     ):
         raise BackupError("backup_database_runtime_identity_mismatch")
+    candidate_binding = (None if postgres_candidate is None else postgres_candidate.runtime_check(document))
     user = values.get("MARKET_POSTGRES_USER", "market_data")
     database = values.get("MARKET_POSTGRES_DB", "market_archive")
 
@@ -730,6 +756,7 @@ def inspect_source_database(
             f"web\0{database}\0{system_identifier}".encode("utf-8")
         ).hexdigest(),
         **invariants,
+        **({"postgres_candidate": candidate_binding} if candidate_binding is not None else {}),
     }
 
 
@@ -954,8 +981,13 @@ def restore_smoke(
     before_cleanup: Callable[[str], None] | None = None,
     artifact_descriptor: int | None = None,
     execution_limits: BackupExecutionLimits | None = None,
+    postgres_candidate: Any = None,
 ) -> dict[str, Any]:
     _validate_execution_options(execution_limits, False, hot=True)
+    if source.get("postgres_candidate") is not None and postgres_candidate is None:
+        raise BackupError("backup_postgres_candidate_control_required")
+    if postgres_candidate is not None:
+        postgres_candidate.image_check()
     if resource_binding is None:
         nonce = secrets.token_hex(8)
         resource_binding = {
@@ -997,7 +1029,8 @@ def restore_smoke(
                 "-e", "POSTGRES_DB=restore",
                 "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
                 *(["--entrypoint", "/bin/sh"] if execution_limits is not None else []),
-                POSTGRES_IMAGE,
+                *(["--pull", "never"] if postgres_candidate is not None else []),
+                POSTGRES_IMAGE if postgres_candidate is None else postgres_candidate.image,
                 *(_guarded_arguments(execution_limits, ["/usr/local/bin/docker-entrypoint.sh", "postgres"],
                                      execution_limits.restore_timeout_seconds)[1:] if execution_limits is not None else []),
             ],
@@ -1005,6 +1038,10 @@ def restore_smoke(
             **_execution_kwargs(execution_limits),
         )
         created_container = True
+        if postgres_candidate is not None:
+            restored_document = json.loads(_run_text(["docker", "inspect", container],
+                label="backup_candidate_restore_inspect", **_execution_kwargs(execution_limits)))[0]
+            postgres_candidate.runtime_check(restored_document, restore=True)
         ready = False
         consecutive = 0
         for _attempt in range(90):
@@ -1081,7 +1118,10 @@ def restore_smoke(
             raise BackupError("backup_restore_reconciliation_mismatch")
         if before_cleanup is not None:
             before_cleanup(container)
-        return {"status": "PASS", **restored, "cleanup_status": "PASS"}
+        if postgres_candidate is not None:
+            postgres_candidate.check()
+        return {"status": "PASS", **restored, "cleanup_status": "PASS",
+                **({"postgres_restore_candidate": postgres_candidate.summary()} if postgres_candidate is not None else {})}
     finally:
         try:
             if created_container:
@@ -1190,6 +1230,7 @@ def _same_database_identity(left: Mapping[str, Any], right: Mapping[str, Any]) -
         and left.get("database_identity_sha256") == right.get("database_identity_sha256")
         and left.get("container_id") == right.get("container_id")
         and left.get("database") == right.get("database")
+        and left.get("postgres_candidate") == right.get("postgres_candidate")
     )
 
 
@@ -1437,6 +1478,7 @@ def _create_backup_bound(
     allow_private_primary_source: bool = False,
     execution_limits: BackupExecutionLimits | None = None,
     restore_resource_binding: Mapping[str, str] | None = None,
+    postgres_candidate: Any = None,
 ) -> dict[str, Any]:
     values = _validate_release_values(
         _env_binding.values(),
@@ -1476,14 +1518,20 @@ def _create_backup_bound(
         if restore_resource_binding is not None and journal.get("restore_resources") != restore_resource_binding:
             raise BackupError("backup_restore_resource_binding_mismatch")
         if allow_running_writers and _empty_prepared_journal(journal, root=root):
-            _env_binding.check()
+            _candidate_inputs(_env_binding, postgres_candidate)
             _abandon_empty_prepared_journal(journal_path, journal, root=root)
             journal = None
     if journal is not None:
+        if postgres_candidate is not None:
+            actual = inspect_source_database(values, require_quiesce=require_quiesce,
+                **_execution_kwargs(execution_limits), **_candidate_kwargs(postgres_candidate))
+            if not _source_window_compatible(journal["source_before"], actual,
+                                             allow_running_writers=allow_running_writers):
+                raise BackupError("backup_postgres_candidate_journal_mismatch")
         if journal.get("status") == "COMPLETE":
             payload = _receipt_from_journal(journal)
             if not refresh_complete:
-                _env_binding.check()
+                _candidate_inputs(_env_binding, postgres_candidate)
                 _write_receipt(receipt, payload)
                 return payload
             run_id = str(journal.get("run_id") or "")
@@ -1514,7 +1562,7 @@ def _create_backup_bound(
                 if archived_payload != payload or receipt.exists() or receipt.is_symlink():
                     raise BackupError("backup_refresh_archive_invalid")
             else:
-                _env_binding.check()
+                _candidate_inputs(_env_binding, postgres_candidate)
                 os.replace(receipt, archived_receipt)
                 directory = os.open(root, os.O_RDONLY)
                 try:
@@ -1523,7 +1571,7 @@ def _create_backup_bound(
                     os.close(directory)
             # If a kill happened after archiving the receipt but before this
             # replace, the exact archived receipt above authorizes resumption.
-            _env_binding.check()
+            _candidate_inputs(_env_binding, postgres_candidate)
             os.replace(journal_path, archived_journal)
             directory = os.open(root, os.O_RDONLY)
             try:
@@ -1565,15 +1613,15 @@ def _create_backup_bound(
                 "restore_resources": None,
                 "secrets_disclosed": False,
             }
-            _env_binding.check()
+            _candidate_inputs(_env_binding, postgres_candidate)
             _write_journal(journal_path, journal)
         payload = _receipt_from_journal(journal)
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         _write_receipt(receipt, payload)
         return payload
 
     if journal is None:
-        source = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits))
+        source = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits), **_candidate_kwargs(postgres_candidate))
         nonce = secrets.token_hex(8)
         stamp = created_at.strftime("%Y%m%dT%H%M%SZ")
         restore_nonce = secrets.token_hex(8)
@@ -1606,18 +1654,18 @@ def _create_backup_bound(
             },
             "secrets_disclosed": False,
         }
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         _write_journal(journal_path, journal)
     source = journal["source_before"]
-    current_source = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits))
-    _env_binding.check()
+    current_source = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits), **_candidate_kwargs(postgres_candidate))
+    _candidate_inputs(_env_binding, postgres_candidate)
     if not _source_window_compatible(
         source, current_source, allow_running_writers=allow_running_writers
     ):
         raise BackupError("backup_source_changed_before_dump")
     artifact = Path(str(journal["artifact_path"]))
     if not artifact.exists():
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         _write_dump(
             container_id=str(source["container_id"]),
             user=values.get("MARKET_POSTGRES_USER", "market_data"),
@@ -1625,7 +1673,7 @@ def _create_backup_bound(
             destination=artifact,
             **_execution_kwargs(execution_limits),
         )
-    _env_binding.check()
+    _candidate_inputs(_env_binding, postgres_candidate)
     _secure_regular(artifact)
     if execution_limits is not None and artifact.stat().st_size > execution_limits.dump_max_bytes:
         raise BackupError("backup_dump_byte_bound")
@@ -1642,7 +1690,7 @@ def _create_backup_bound(
     if journal.get("backup") is not None and journal["backup"] != observed_backup:
         raise BackupError("backup_artifact_drifted_during_resume")
     pinned = (_pinned_backup_artifact(artifact, observed_backup, **_execution_kwargs(execution_limits))
-              if execution_limits is not None else nullcontext(None))
+              if execution_limits is not None or postgres_candidate is not None else nullcontext(None))
     with pinned as descriptor:
         identity = None if descriptor is None else _file_identity(os.fstat(descriptor))
         def check_artifact() -> None:
@@ -1653,25 +1701,26 @@ def _create_backup_bound(
                 raise BackupError("backup_artifact_drifted")
         journal["backup"] = observed_backup
         journal["status"] = "DUMP_READY"
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         _write_journal(journal_path, journal)
-        source_after = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits))
-        _env_binding.check()
+        source_after = inspect_source_database(values, require_quiesce=require_quiesce, **_execution_kwargs(execution_limits), **_candidate_kwargs(postgres_candidate))
+        _candidate_inputs(_env_binding, postgres_candidate)
         if not _source_window_compatible(
             source, source_after, allow_running_writers=allow_running_writers
         ):
             raise BackupError("backup_source_changed_during_dump")
         journal["source_after"] = source_after
         journal["status"] = "RESTORE_RUNNING"
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         _write_journal(journal_path, journal)
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         restore = restore_smoke(
             artifact, source, resource_binding=journal["restore_resources"],
+            **_candidate_kwargs(postgres_candidate),
             **({"artifact_descriptor": descriptor} if descriptor is not None else {}),
             **_execution_kwargs(execution_limits),
         )
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         check_artifact()
         if not _restore_window_compatible(
             source, source_after, restore, allow_running_writers=allow_running_writers,
@@ -1680,11 +1729,11 @@ def _create_backup_bound(
         journal["restore_smoke"] = restore
         journal["backup_status"] = "PASS"
         journal["status"] = "COMPLETE"
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         check_artifact()
         _write_journal(journal_path, journal)
         payload = _receipt_from_journal(journal)
-        _env_binding.check()
+        _candidate_inputs(_env_binding, postgres_candidate)
         check_artifact()
         _write_receipt(receipt, payload)
         return payload
@@ -1711,6 +1760,8 @@ def create_backup(
     allow_private_primary_source: bool = False,
     execution_limits: BackupExecutionLimits | None = None,
     restore_resource_binding: Mapping[str, str] | None = None,
+    postgres_candidate_control: Path | None = None,
+    postgres_candidate_sha256: str | None = None,
 ) -> dict[str, Any]:
     _validate_execution_options(execution_limits, allow_private_primary_source, hot=allow_running_writers)
     if restore_resource_binding is not None and not _valid_restore_resources(restore_resource_binding):
@@ -1720,7 +1771,7 @@ def create_backup(
     journal_path = _journal_path(backup_dir)
     if journal_path.exists() or journal_path.is_symlink():
         _read_journal(journal_path)
-    with BoundRoleEnv(env_file) as bound:
+    with _postgres_candidate_context(postgres_candidate_control, postgres_candidate_sha256) as candidate, BoundRoleEnv(env_file) as bound:
         return _create_backup_bound(
             env_file=env_file, _env_binding=bound, backup_dir=backup_dir,
             receipt=receipt, release_sha=release_sha, release_tree=release_tree,
@@ -1731,6 +1782,7 @@ def create_backup(
             allow_private_primary_source=allow_private_primary_source,
             **_execution_kwargs(execution_limits),
             restore_resource_binding=restore_resource_binding,
+            **_candidate_kwargs(candidate),
         )
 
 
@@ -1764,6 +1816,7 @@ def create_quiesced_primary_backup(
     *, env_file: Path, backup_dir: Path, receipt: Path, release_sha: str,
     release_tree: str, image_id: str, image_input_signature: str,
     execution_limits: BackupExecutionLimits, restore_resource_binding: Mapping[str, str],
+    postgres_candidate_control: Path | None = None, postgres_candidate_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Fresh bounded PRIMARY backup, with strict writer and restore parity.
 
@@ -1783,7 +1836,7 @@ def create_quiesced_primary_backup(
         _secure_directory(backup_dir, create=False)
         if any(backup_dir.iterdir()):
             raise BackupError("backup_quiesced_primary_fresh_required")
-    with BoundRoleEnv(env_file) as bound:
+    with _postgres_candidate_context(postgres_candidate_control, postgres_candidate_sha256) as candidate, BoundRoleEnv(env_file) as bound:
         values = _quiesced_primary_values(bound, release_sha=release_sha, image_id=image_id)
         _assert_writer_workloads_quiesced(values["MARKET_PIPELINE_PROJECT_NAME"],
                                          execution_limits=execution_limits)
@@ -1794,12 +1847,14 @@ def create_quiesced_primary_backup(
             image_input_signature=image_input_signature, allow_running_writers=False,
             allow_target_identity_mismatch=False, allow_private_primary_source=True,
             execution_limits=execution_limits, restore_resource_binding=restore_resource_binding,
+            **_candidate_kwargs(candidate),
         )
         if payload.get("status") != "PASS" or payload.get("backup_mode") != "quiesced":
             raise BackupError("backup_quiesced_primary_initialized_source_required")
         with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"],
                                      execution_limits=execution_limits):
-            current = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits)
+            current = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits,
+                                               **_candidate_kwargs(candidate))
             bound.check()
             if (not _valid_source_metadata(current)
                     or not _source_window_compatible(payload["source_after"], current, allow_running_writers=False)):
@@ -1961,11 +2016,12 @@ def verify_receipt(
     *, env_file: Path, receipt: Path, release_sha: str, release_tree: str,
     image_id: str, image_input_signature: str, maximum_age_seconds: int | None,
     now: datetime | None = None, allow_target_identity_mismatch: bool = False,
+    postgres_candidate_control: Path | None = None, postgres_candidate_sha256: str | None = None,
 ) -> dict[str, Any]:
     # Legacy evidence can be inspected separately, never adopted as a live gate.
     _refuse_legacy_receipt(receipt)
     _read_journal(_journal_path(receipt.parent))
-    with BoundRoleEnv(env_file) as bound:
+    with _postgres_candidate_context(postgres_candidate_control, postgres_candidate_sha256) as candidate, BoundRoleEnv(env_file) as bound:
         values = _validate_release_values(
             bound.values(), release_sha=release_sha, image_id=image_id,
             allow_target_identity_mismatch=allow_target_identity_mismatch,
@@ -1978,6 +2034,13 @@ def verify_receipt(
         )
         if payload["status"] == "INITIAL_EMPTY" and not _initial_store_is_empty(_postgres_path(values)):
             raise BackupError("backup_initial_store_changed")
+        if candidate is not None:
+            current = inspect_source_database(values, require_quiesce=payload["backup_mode"] == "quiesced",
+                                               **_candidate_kwargs(candidate))
+            _candidate_inputs(bound, candidate)
+            if not _source_window_compatible(payload["source_after"], current,
+                                             allow_running_writers=payload["backup_mode"] == "hot"):
+                raise BackupError("backup_postgres_candidate_current_mismatch")
         return payload
 
 
@@ -2102,6 +2165,7 @@ def verify_quiesced_primary_receipt(
     release_sha: str, release_tree: str, image_id: str, image_input_signature: str,
     maximum_age_seconds: int, execution_limits: BackupExecutionLimits,
     now: datetime | None = None,
+    postgres_candidate_control: Path | None = None, postgres_candidate_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Strict current PRIMARY verification; CREATE's owned restore is retained.
 
@@ -2126,7 +2190,7 @@ def verify_quiesced_primary_receipt(
             raise BackupError("backup_mode_migration_required")
         if payload.get("backup_mode") != "quiesced" or journal.get("backup_mode") != "quiesced":
             raise BackupError("backup_mode_mismatch")
-        with BoundRoleEnv(env_file) as bound:
+        with _postgres_candidate_context(postgres_candidate_control, postgres_candidate_sha256) as candidate, BoundRoleEnv(env_file) as bound:
             values = _quiesced_primary_values(bound, release_sha=release_sha, image_id=image_id)
             payload = _verify_receipt_evidence(
                 receipt=receipt, role_env_binding={"role_env_binding": bound.binding},
@@ -2137,14 +2201,16 @@ def verify_quiesced_primary_receipt(
             )
             if payload["status"] != "PASS":
                 raise BackupError("backup_quiesced_primary_initialized_source_required")
-            current = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits)
+            current = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits,
+                                               **_candidate_kwargs(candidate))
             bound.check()
             if (not _valid_source_metadata(current)
                     or not _source_window_compatible(payload["source_after"], current, allow_running_writers=False)):
                 raise BackupError("backup_quiesced_primary_current_source_mismatch")
             with _pinned_backup_artifact(Path(payload["backup"]["path"]), payload["backup"],
                                          execution_limits=execution_limits):
-                after = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits)
+                after = inspect_source_database(values, require_quiesce=True, execution_limits=execution_limits,
+                                                 **_candidate_kwargs(candidate))
                 bound.check()
                 if (not _valid_source_metadata(after)
                         or not _source_window_compatible(current, after, allow_running_writers=False)):
@@ -2160,6 +2226,7 @@ def verify_hot_receipt(
     restore_resource_binding: Mapping[str, str] | None = None,
     allow_private_primary_source: bool = False,
     execution_limits: BackupExecutionLimits | None = None,
+    postgres_candidate_control: Path | None = None, postgres_candidate_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Verify an explicit hot snapshot with a fresh independent isolated restore.
 
@@ -2193,7 +2260,7 @@ def verify_hot_receipt(
         if any(restore_resource_binding.get(key) == previous_resources.get(key)
                for key in ("container", "volume", "label")):
             raise BackupError("backup_hot_restore_resources_not_independent")
-        with BoundRoleEnv(env_file) as bound:
+        with _postgres_candidate_context(postgres_candidate_control, postgres_candidate_sha256) as candidate, BoundRoleEnv(env_file) as bound:
             values = _validate_release_values(
                 bound.values(), release_sha=release_sha, image_id=image_id,
                 allow_target_identity_mismatch=allow_target_identity_mismatch,
@@ -2213,7 +2280,8 @@ def verify_hot_receipt(
             )
             if payload["status"] != "PASS":
                 raise BackupError("backup_hot_initialized_source_required")
-            source = inspect_source_database(values, require_quiesce=False, **_execution_kwargs(execution_limits))
+            source = inspect_source_database(values, require_quiesce=False, **_execution_kwargs(execution_limits),
+                                             **_candidate_kwargs(candidate))
             bound.check()
             if not _valid_source_metadata(source) or not _source_window_compatible(payload["source_after"], source, allow_running_writers=True):
                 raise BackupError("backup_hot_current_source_mismatch")
@@ -2223,6 +2291,7 @@ def verify_hot_receipt(
                     Path(payload["backup"]["path"]), source,
                     resource_binding=restore_resource_binding,
                     artifact_descriptor=descriptor,
+                    **_candidate_kwargs(candidate),
                     **_execution_kwargs(execution_limits),
                 )
                 bound.check()
@@ -2230,7 +2299,8 @@ def verify_hot_receipt(
                         or not _valid_invariants(restored)
                         or not _same_env_binding(_invariant_view(restored), _invariant_view(payload["restore_smoke"]))):
                     raise BackupError("backup_hot_independent_restore_mismatch")
-                source_after = inspect_source_database(values, require_quiesce=False, **_execution_kwargs(execution_limits))
+                source_after = inspect_source_database(values, require_quiesce=False, **_execution_kwargs(execution_limits),
+                                                       **_candidate_kwargs(candidate))
                 bound.check()
                 if not _valid_source_metadata(source_after) or not _source_window_compatible(source, source_after, allow_running_writers=True):
                     raise BackupError("backup_hot_current_source_mismatch")
@@ -2300,6 +2370,8 @@ def build_parser() -> argparse.ArgumentParser:
                 command.add_argument("--journal-sha256", required=True)
                 command.add_argument("--restore-run-id", required=True)
         command.add_argument("--bluegreen-source-env", action="store_true")
+        command.add_argument("--postgres-candidate-control", type=Path)
+        command.add_argument("--postgres-candidate-sha256")
     history = commands.add_parser("verify-historical")
     history.add_argument("--receipt", type=Path, required=True)
     history.add_argument("--receipt-sha256", required=True)
@@ -2339,6 +2411,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "image_id": args.image_id,
                 "image_input_signature": args.image_input_signature,
                 "allow_target_identity_mismatch": args.bluegreen_source_env,
+                **({"postgres_candidate_control": args.postgres_candidate_control,
+                    "postgres_candidate_sha256": args.postgres_candidate_sha256}
+                   if args.postgres_candidate_control is not None or args.postgres_candidate_sha256 is not None else {}),
             }
             if args.command == "create":
                 expected_confirm = (
