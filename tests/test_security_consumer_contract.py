@@ -401,6 +401,38 @@ class SuccessorContracts(unittest.TestCase):
             with self.subTest(path=path), self.assertRaisesRegex(M.Refusal, 'successor_public_code_cow_changed'):
                 M.assert_public_diff('A ' + path + '\n')
 
+    def test_cow_receipt_names_only_sealed_public_paths_and_never_hashes_raw_private_names(self):
+        raw='C /app/main.py\nA /app/__pycache__/main.cpython-311.pyc\nC /app/runtime\nA /app/uploads/private-tenant\nA /unknown/private-value\n'
+        with patch.object(M,'sha256',side_effect=AssertionError('raw/private metadata hashing forbidden')):
+            result=M.cow_receipt(raw,self.record,'web','app','a'*64,[{'path':'main.py'}])
+        self.assertEqual(result['entries'],5);self.assertEqual(result['withheld_entries'],2)
+        self.assertEqual({r['public_path']for r in result['public_entries']},
+                         {'/app/main.py','/app/__pycache__/main.cpython-311.pyc','/app/runtime'})
+        self.assertEqual(result['categories'],{'known_public':3,'writable_data':1,'unclassified':1})
+        self.assertNotIn('private-tenant',repr(result));self.assertNotIn('private-value',repr(result))
+        for key in ('raw_cow_persisted_or_hashed','private_or_unclassified_paths_reported',
+                    'cow_gate_changed','security_accepted','global_security_eligible'):self.assertIs(result[key],False)
+        with self.assertRaisesRegex(M.Refusal,'successor_public_code_cow_changed'):M.assert_public_diff('C /app/runtime')
+
+    def test_cow_receipt_hard_caps_rows_names_and_escaped_json_without_truncated_private_prefixes(self):
+        path='core/'+('ی'*220)+'.py';raw=('C /app/'+path+'\n')*1000
+        result=M.cow_receipt(raw,self.record,'web','app','a'*64,[{'path':path}])
+        self.assertLessEqual(len(json.dumps(result,sort_keys=True).encode())+1,16384)
+        self.assertLessEqual(len(result['public_entries']),32)
+        self.assertEqual(result['withheld_entries']+len(result['public_entries']),1000)
+        self.assertTrue(all(r['public_path']=='/app/'+path for r in result['public_entries']))
+        with self.assertRaises(M.Refusal):M.cow_receipt('C /app/main.py\n'*10001,self.record,'web','app','a'*64,[])
+
+    def test_primary_and_recovery_failure_fields_are_distinct_without_changing_unknown_status(self):
+        old={'status':'rollback_failed','first_failure_stage':'rollback_postcheck',
+             'first_failure_code':'successor_normal_imports_failed','security_accepted':False}
+        result=M.preserve_target_failure(old,'successor_public_code_cow_changed')
+        self.assertEqual(result['first_failure_code'],'successor_public_code_cow_changed')
+        self.assertEqual(result['recovery_failure_code'],'successor_normal_imports_failed')
+        self.assertEqual(result['recovery_failure_stage'],'rollback_postcheck')
+        self.assertEqual(old['first_failure_code'],'successor_normal_imports_failed')
+        self.assertEqual(result['status'],'rollback_failed');self.assertIs(result['security_accepted'],False)
+
     def test_postload_proof_separates_native_config_id_and_web_manifest_id(self):
         layers = ['sha256:' + format(index+1, '064x') for index in range(32)]
         pin = sha256(json.dumps(layers, sort_keys=True, separators=(',', ':')).encode()).hexdigest()

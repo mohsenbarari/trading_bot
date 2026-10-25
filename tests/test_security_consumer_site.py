@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
+from types import SimpleNamespace,ModuleType
 import unittest
 from unittest.mock import Mock,patch
 
@@ -32,7 +32,8 @@ class OwnedTargetTransitions(unittest.TestCase):
         spec=importlib.util.spec_from_file_location('_target_contract_fixture',SOURCE.parent/'security_consumer_contract.py')
         self.C=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.C)
         self.c=SimpleNamespace(**{n:getattr(self.C,n) for n in ['ROLE_ORDER','CANDIDATE','OLD_IMAGES','RUNTIME_ENV_DELTA',
-            'SUCCESSOR_OPERATION','target_override','target_apply_argv','assert_role_launch','assert_public_diff']},assert_window=Mock())
+            'SUCCESSOR_OPERATION','target_override','target_apply_argv','assert_role_launch','assert_public_diff',
+            'cow_receipt','preserve_target_failure']},assert_window=Mock())
         self.record={'nonce':'a'*32,'source_commit':'b'*40,'images':{'web':self.C.CANDIDATE,'bot':self.C.CANDIDATE},
             'deadline_utc':'2099-01-01T00:00:00Z','recovery':{'deadline_utc':'2099-01-01T00:30:00Z'}}
         self.original={'targets':{'app':{'id':'1'*64,'restart_policy':{'Name':'always','MaximumRetryCount':0}}}}
@@ -49,6 +50,7 @@ class OwnedTargetTransitions(unittest.TestCase):
         self.smoke=self.stack.enter_context(patch.object(M,'role_smoke',return_value={'passed':True}))
         self.stack.enter_context(patch.object(M,'datastore_smoke'))
         self.stack.enter_context(patch.object(M,'private_json',return_value=b''))
+        self.stack.enter_context(patch.object(M,'evidence_documents',return_value={'payload_manifest':{'files':[{'path':'main.py'}]}}))
         def item(site,service,image,contract):
             env=['PATH='+self.C.PUBLIC_PATH,'PYTHON_VERSION=3.11.17','PYTHON_SHA256='+'c'*64,
                  'LANG=C.UTF-8','GPG_KEY='+'A'*40,'SYNTHETIC_BUSINESS=never-emit']
@@ -77,6 +79,37 @@ class OwnedTargetTransitions(unittest.TestCase):
         self.assertTrue(self.command.call_args.kwargs['recovery'])
         self.assertNotIn('environment',json.loads((self.temp/'rollback-app.override.json').read_bytes())['services']['app'])
         self.assertEqual(result['image'],self.C.OLD_IMAGES['web'])
+
+    def test_distinct_primary_and_secondary_rollback_postcheck_failures_both_survive(self):
+        self.smoke.side_effect=[RuntimeError('successor_public_source_drift'),RuntimeError('successor_normal_imports_failed')]
+        result=self.apply();self.assertEqual(result['status'],'rollback_failed')
+        self.assertEqual(result['first_failure_code'],'successor_public_source_drift')
+        self.assertEqual(result['recovery_failure_code'],'successor_normal_imports_failed')
+        self.assertEqual(result['recovery_failure_stage'],'rollback_postcheck')
+        self.assertEqual(result['id'],'3'*64);self.assertEqual(self.command.call_count,2)
+
+    def test_cow_evidence_is_durable_before_rollback_removes_candidate_and_gate_stays_strict(self):
+        raw=b'C /app/main.py\nC /app/runtime\nA /app/uploads/private-child-name\n'
+        with patch.object(M,'private_json',return_value=raw):
+            def command(*a,**kw):
+                if kw.get('recovery'):
+                    path=self.temp/'candidate-app-cow.json';self.assertEqual(path.stat().st_mode&0o777,0o600)
+                    receipt=json.loads(path.read_bytes());self.assertEqual(receipt['container_id'],'2'*64)
+                    self.assertNotIn('private-child-name',path.read_text());self.assertFalse(receipt['cow_gate_changed'])
+            self.command.side_effect=command
+            result=self.apply()
+        self.assertEqual(result['status'],'rolled_back_after_postcheck_failure')
+        self.assertEqual(result['first_failure_code'],'successor_public_code_cow_changed')
+        self.assertEqual(self.command.call_count,2)
+
+    def test_non_utf8_private_filename_is_withheld_before_strict_refusal_and_rollback(self):
+        with patch.object(M,'private_json',return_value=b'A /app/uploads/private-\xff\n'):
+            result=self.apply()
+        self.assertEqual(result['status'],'rolled_back_after_postcheck_failure')
+        receipt=json.loads((self.temp/'candidate-app-cow.json').read_bytes())
+        self.assertEqual(receipt['entries'],1);self.assertEqual(receipt['withheld_entries'],1)
+        self.assertEqual(receipt['public_entries'],[]);self.assertFalse(receipt['cow_gate_changed'])
+        self.assertNotIn('private-',repr(receipt));self.assertEqual(self.command.call_count,2)
 
     def test_unknown_client_failure_is_not_cancellation_and_never_triggers_rollback(self):
         self.command.side_effect=RuntimeError('consumer_command_failed')
@@ -118,6 +151,50 @@ class OwnedTargetTransitions(unittest.TestCase):
         self.smoke.side_effect=[RuntimeError('never-emit-private-like-value'),{'passed':True}]
         result=self.apply();self.assertEqual(result['first_failure_code'],'guard_failed')
         self.assertNotIn('never-emit',repr(result))
+
+
+class ImportTrustProbe(unittest.TestCase):
+    def setUp(self):
+        self.stack=ExitStack();self.addCleanup(self.stack.close)
+        for name in ('subprocess.run','subprocess.Popen','os.system','socket.create_connection',
+                     'socket.getaddrinfo','urllib.request.urlopen','ctypes.CDLL','ctypes.PyDLL',
+                     'resource.setrlimit','signal.signal','signal.alarm'):
+            self.stack.enter_context(patch(name,side_effect=AssertionError('ambient host/network denied')))
+
+    def probe(self,candidate,trust,missing=None):
+        modules={name:ModuleType(name)for name in ('ssl','sqlite3','psycopg2','magic','pydantic')}
+        modules['ssl'].create_default_context=lambda:SimpleNamespace(get_ca_certs=lambda:[{}]if trust else[])
+        original_import=__import__
+        def importing(name,*a,**kw):
+            if name==missing:raise ImportError('synthetic required dependency absent')
+            return original_import(name,*a,**kw)
+        output=io.StringIO()
+        with patch.dict(sys.modules,modules),patch.object(sys,'argv',['probe','candidate'if candidate else'rollback']),\
+             patch.object(os,'environ',{'PYTHONDONTWRITEBYTECODE':'1'}),patch('resource.setrlimit'),\
+             patch('signal.signal'),patch('signal.alarm'),patch('builtins.__import__',side_effect=importing),redirect_stdout(output):
+            exec(compile(M.IMPORT_PROBE,'<exact-ordinary-import-probe>','exec'),{})
+        return json.loads(output.getvalue())
+
+    def test_exact_probe_records_old_empty_trust_but_candidate_still_requires_nonempty_trust(self):
+        old=self.probe(False,False);self.assertTrue(old['passed']);self.assertIs(old['tls_trust_store_nonempty'],False)
+        self.assertIs(old['runtime_no_bytecode_verified'],False)
+        self.assertTrue(self.probe(False,True)['tls_trust_store_nonempty'])
+        self.assertTrue(self.probe(True,True)['tls_trust_store_nonempty'])
+        with self.assertRaises(AssertionError):self.probe(True,False)
+
+    def test_all_five_imports_remain_required_for_legacy_recovery(self):
+        for name in ('ssl','sqlite3','psycopg2','magic','pydantic'):
+            with self.subTest(name=name),self.assertRaises(ImportError):self.probe(False,False,missing=name)
+
+    def test_role_smoke_validates_typed_trust_and_never_accepts_empty_candidate_receipt(self):
+        record={'deadline_utc':'2099-01-01T00:00:00Z','recovery':{'deadline_utc':'2099-01-01T00:30:00Z'}}
+        receipt=self.probe(False,False)
+        with patch.object(M,'private_json',return_value=receipt):
+            self.assertIs(M.role_smoke('sync_worker',{'Id':'a'*64},record,None,candidate=False)['tls_trust_store_nonempty'],False)
+        for value in (False,0,None):
+            bad={**receipt,'runtime_no_bytecode_verified':True,'tls_trust_store_nonempty':value}
+            with patch.object(M,'private_json',return_value=bad),self.assertRaisesRegex(RuntimeError,'successor_normal_imports_failed'):
+                M.role_smoke('sync_worker',{'Id':'a'*64},record,None,candidate=True)
 
 
 class SiteControlFiles(unittest.TestCase):

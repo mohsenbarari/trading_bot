@@ -509,6 +509,65 @@ def assert_public_diff(raw, *, verified_app_root=False):
                 'successor_public_code_cow_changed')
 
 
+def cow_receipt(raw, record, site, service, container_id, public_files):
+    """Public metadata before rollback; never retain raw/private path strings.
+
+    Only exact sealed payload paths, their parent directories and deterministic
+    CPython cache names may be named. Known snapshot ancestors are diagnostic
+    names only: this function changes no COW acceptance rule.
+    """
+    require((site, service) in ROLE_ORDER and type(container_id) is str
+            and re.fullmatch('[a-f0-9]{64}', container_id)
+            and type(raw) is str and len(raw.encode('utf-8', 'surrogateescape')) <= 1024**2,
+            'successor_cow_bound')
+    require(type(public_files) is list and len(public_files) <= 20000, 'successor_cow_bound')
+    known = {'/app', '/app/runtime', *SNAPSHOTS}
+    for row in public_files:
+        require(type(row) is dict and type(row.get('path')) is str, 'successor_cow_shape')
+        path = Path('/app') / row['path']
+        require(not row['path'].startswith('/') and '..' not in path.parts, 'successor_cow_shape')
+        known.add(str(path));known.update(str(p) for p in path.parents if p != Path('/'))
+        if path.suffix == '.py':
+            cache = path.parent / '__pycache__';known.add(str(cache))
+            known.update(str(cache / (path.stem + '.cpython-311' + suffix + '.pyc'))
+                         for suffix in ('', '.opt-1', '.opt-2'))
+    private = ('/tmp', '/var/tmp', '/run', '/app/app_logs', '/app/audit_trail', '/app/uploads')
+    lines = raw.splitlines();require(len(lines) <= 10000, 'successor_cow_bound')
+    counts = {'known_public': 0, 'writable_data': 0, 'unclassified': 0}
+    changes = {'A': 0, 'C': 0, 'D': 0};reported = [];withheld = 0
+    for line in lines:
+        valid = len(line) > 2 and len(line) <= 4096 and line[0] in changes and line[1] == ' '
+        if not valid:
+            counts['unclassified'] += 1;withheld += 1;continue
+        change, path = line[0], line[2:];changes[change] += 1
+        data = any(path == p or path.startswith(p + '/') for p in private)
+        category = 'writable_data' if data else 'known_public' if path in known else 'unclassified'
+        counts[category] += 1
+        if category == 'known_public' and len(path) <= 256 and len(reported) < 32:
+            reported.append({'change': change, 'public_path': path})
+        else:withheld += 1
+    result = {'schema': 'security_consumer_cow_observation/1', 'operation_id': SUCCESSOR_OPERATION,
+        'nonce': record['nonce'], 'source_commit': record['source_commit'], 'site': site, 'service': service,
+        'container_id': container_id, 'image_id': record['images'][site], 'source_image_id': CANDIDATE, 'entries': len(lines),
+        'changes': changes, 'categories': counts, 'public_entries': reported, 'withheld_entries': withheld,
+        'raw_cow_persisted_or_hashed': False, 'private_or_unclassified_paths_reported': False,
+        'cow_gate_changed': False, 'security_accepted': False, 'global_security_eligible': False}
+    while len(json.dumps(result, sort_keys=True).encode()) + 1 > 16384 and reported:
+        reported.pop();result['withheld_entries'] += 1
+    require(len(json.dumps(result, sort_keys=True).encode()) + 1 <= 16384, 'successor_cow_bound')
+    return result
+
+
+def preserve_target_failure(restored, code):
+    """Retain both the forward cause and the distinct recovery cause."""
+    result = dict(restored)
+    result['recovery_failure_stage'] = result.get('first_failure_stage')
+    result['recovery_failure_code'] = result.get('first_failure_code')
+    result['first_failure_stage'] = 'target_postcheck'
+    result['first_failure_code'] = code
+    return result
+
+
 def mount_projection(values):
     require(type(values) is list and len(values) <= 256, 'successor_mount_shape')
     fields = ('Destination', 'Mode', 'Propagation', 'RW', 'Source', 'Type')

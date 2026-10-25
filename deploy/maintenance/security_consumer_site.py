@@ -152,10 +152,11 @@ start=time.monotonic()
 candidate=sys.argv[1]=='candidate'
 assert not candidate or os.environ.get('PYTHONDONTWRITEBYTECODE')=='1'
 import ssl,sqlite3,psycopg2,magic,pydantic
-assert ssl.create_default_context().get_ca_certs()
+trusted=bool(ssl.create_default_context().get_ca_certs())
+assert not candidate or trusted
 import json
 print(json.dumps({'schema':'security_consumer_normal_imports/1','passed':True,'elapsed_ms':int((time.monotonic()-start)*1000),
-                  'runtime_no_bytecode_verified':candidate,'application_imported':False,'private_environment_output':False},sort_keys=True))
+                  'runtime_no_bytecode_verified':candidate,'tls_trust_store_nonempty':trusted,'application_imported':False,'private_environment_output':False},sort_keys=True))
 '''
 
 
@@ -608,6 +609,8 @@ def role_smoke(service, item, record, b, *, candidate):
                             IMPORT_PROBE, 'candidate' if candidate else 'rollback'], timeout=25, maximum=4096)
     require(imports.get('schema') == 'security_consumer_normal_imports/1' and imports.get('passed') is True
             and imports.get('runtime_no_bytecode_verified') is candidate
+            and type(imports.get('tls_trust_store_nonempty')) is bool
+            and (not candidate or imports['tls_trust_store_nonempty'] is True)
             and imports.get('private_environment_output') is False
             and type(imports.get('elapsed_ms')) is int and 0 <= imports['elapsed_ms'] <= 20000,
             'successor_normal_imports_failed')
@@ -678,7 +681,8 @@ def target_action(site, service, record, original, projection, contract, b, lock
     next_projection = {**projection, key: {'id': item['Id'], 'image': expected}}
     try:
         contract.assert_role_launch(site, service, item, candidate=not rollback)
-        cow = private_json(['/usr/bin/docker', 'diff', item['Id']], maximum=1024**2, raw_output=True).decode()
+        cow = private_json(['/usr/bin/docker', 'diff', item['Id']], maximum=1024**2, raw_output=True).decode('utf-8','surrogateescape')
+        if not rollback:write(b,HERE/('candidate-'+service+'-cow.json'),contract.cow_receipt(cow,record,site,service,item['Id'],evidence_documents(record,site)['payload_manifest']['files']),exclusive=True)
         if not rollback:contract.assert_public_diff('\n'.join(line for line in cow.splitlines() if line != 'C /app'))
         checked = successor_phase(site, record, contract, b, original=original, projection=next_projection,
                                   verify_sources=True, recovery=rollback)
@@ -698,9 +702,7 @@ def target_action(site, service, record, original, projection, contract, b, lock
         restored = target_action(site, service, record, original, next_projection,
                                  contract, b, lock_fd, rollback=True)
         if restored['status'] == 'rolled_back':restored['status'] = 'rolled_back_after_postcheck_failure'
-        restored['first_failure_stage'] = 'target_postcheck'
-        restored['first_failure_code'] = failure
-        return restored
+        return contract.preserve_target_failure(restored, failure)
 
 
 def target_failure(error):
