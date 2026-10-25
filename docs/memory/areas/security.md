@@ -1,51 +1,44 @@
 # Security remediation
 
-- Global acceptance false: patched App/Market/datastores are not activated;
-  refactor STOP, streak0. After verified activation require30 consecutive
-  completed accepted clean units; polls/tests never count. Failure resets streak
-  with history/counters retained.
-- Preserve product/Market behavior, single capture ownership and user changes.
-  Necessary maintenance needs no routine approval; Writer/DNS remain human.
-  Build/test receipts never imply activation or acceptance.
-- Native/Web/Final host maintenance and authenticated backups completed;
-  infrastructure memory records exact scope. No Final App provisioning/migration
-  authority.
-- Failed App COW attempt restored old Web/API200. Exact owned temporary fences
-  were released after fresh canonical parity; history and active rollback
-  override remain. Capture identity conflicts stay OPEN; generated endpoint
-  changes require stable observation and strict persistent policy.
-- Runtime scans Native8/8/Web12/12 complete. Apped59 admitted/loaded on both:
-  Web manifeste477/Native configed59,33layers/56tests; no role activated.
-  Parent8da stays loaded. Raw44HIGH/eight IDs:
-  43component assessments plus conditional ACL, never globally FIXED.
-  Serving-role/full functional gates remain.
-- PG49a8/Redis98c4 built/scanned, not activated; PG Windows-only UNKNOWN retains
-  Linux code-absence proof. E46 2c6 and nine exact Market overlays exported;
-  raw44HIGH remain. Preserve F79's two source overrides and failed evidence.
-- Market05 a37 actual Native LOAD ce20b50b passed; exact consumed316MB public
-  archives removed. f365 receive failed at peer capture_singleton before Web
-  attempt; retain failed intent/guards for reconciliation, never blind retry.
-  Canonical App export source tested; actual export/activation still pending.
-- Expired windows/receipts grant no future authority. Unknown RPC never implies
-  cancellation or retry. Config and OCI manifest identities are distinct; classic
-  Config branches never query Descriptor. Repeated logical OCI layer references
-  are valid; physical TAR members stay unique and every ordered DiffID strict.
-- Permanent Native SOURCE is an existing empty mutex: hold flock, preserve inode,
-  never read/hash/write/remove/replace its payload. Changed/nonempty/busy refuses.
-  Preserve permanent markers and all active Compose file references.
-- No diagnostic Env/session/key read/copy/hash. Trusted normal backup/crypto
-  may consume protected inputs; public image Config comparison stays in RAM.
-  Retain archive FD through the operation's final checkpoint; scoped closure
-  detaches only its own checker before final validation/close.
-- No green by waiver/deletion or hostdata fixtures. Required root tests use
-  genuine-root public COPY with separate init, tar.umask0022 and disjoint IDs;
-  preserve hosted multiplicity. Test guards are import-scoped/per-case; restore
-  globals and make fixture modes explicit. No production UID/mode waiver.
-- CI40178229864 (50e) coverage passed. Apped59 hosted40183878216 (2302)
-  passed8runtime+24components, migration0/cleanup complete; no activation.
-  New ordinary-build integration needs separate evidence. Host-idleness needs
-  host-visible processes; shared image sizes never prove reclaim.
-  Preserve rollback/history/data.
-- Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not
-  adopt working-layer cache/code changes. No Go address-space inheritance; bound
-  CPU/wall/RAM and output before accumulation.
+- Global acceptance false: patched serving App/Market/datastores not activated;
+  refactor STOP/streak0. After actual closure require30 consecutive completed,
+  accepted clean units. Failures reset streak with history retained; tests/polls
+  never count. Preserve product behavior, single capture owner and user changes.
+  Necessary work needs no routine permission; Writer/DNS remain human.
+- Host maintenance/backups/TLS completed; infrastructure memory binds scope.
+  Final accepts ciphertext backups only, no App provisioning/migration authority.
+- Apped59 loaded both hosts; hosted40183878216 passed8runtime+24components.
+  Historical provenance cannot become main. Ordinary665220a2 built/scanned/exported as e1a727de; actual ZIP is on Web.
+  Raw44HIGH gate remains failed; fresh32 runtime/presence proof pending. Freeze that
+  main release while reviewed controllers advance on security branch; merge after
+  activation. Preserve dirty coin-market-retention.md; never stage/reset/stash it.
+- Failed App COW restored old Web/API200. No repeat/reroute of C/S/R fresh-profile
+  or COW guard adaptation/probe. Ordinary main artifact is the legitimate path;
+  fresh strict serving/config/backup/functional proof remains required. Keep
+  active rollback override, old images, receipts and failure history.
+- Raw44HIGH/eight IDs retain43component assessments plus conditional ACL caller
+  gap; never globally FIXED. E46 and nine Market OS overlays exported. a37 actual
+  Native LOAD ce20b50b passed; consumed316MB public archives removed. f365 c96
+  prearchive failure remains FAILED; c715 actual two-host abort closure proved
+  NativeRES removed. New image-store06 keeps fixed processor health-only
+  observation and bounded capture readiness; never mutating-RPC retry.
+  Capture conflicts/F79's two source overrides remain OPEN.
+- PG49a8/Redis98c4 built/scanned, not activated. PG Windows UNKNOWN retains Linux
+  absence proof. New datastore image-store02 does not require fake App/parking
+  receipts and grants no serving authority. Keep eight production reader units.
+- Expired controls grant no future authority. Unknown RPC never proves cancel
+  or retry. Config/manifest differ; classic branches never query Descriptor.
+  Physical TAR members stay unique; repeated logical layers are valid with
+  every ordered DiffID checked.
+- Native SOURCE is an existing empty permanent mutex: metadata/flock only,
+  preserve inode; never read/hash/write/remove/replace payload. Permanent M
+  payload is also forbidden. Remove only exact owned temporary guards after
+  verified durable closure; preserve all active Compose references.
+- No diagnostic Env/session/key read/copy/hash. Trusted normal backup/crypto/
+  Compose parity may consume protected inputs in RAM; public Config comparisons
+  stay RAM, never value hashes/output. Hold archive/source FDs and protected
+  parent checks through final checkpoint; detach only exact closing checker.
+- Root fixtures use genuine UID0 and only CAP_CHOWN, typed result/2; App smoke
+  uses UID1001/caps0. No UID/stat/mode waiver or hostdata fixture. Preserve hosted
+  multiplicity and restore per-case guards. No Go RLIMIT_AS; bound CPU/wall/RAM
+  and output before accumulation. Shared image size never proves reclaim.

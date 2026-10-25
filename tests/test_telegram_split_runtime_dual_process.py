@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,7 @@ import unittest
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -145,6 +146,47 @@ def _docker_available() -> bool:
     return shutil.which("docker") is not None
 
 
+def _scratch_postgres_ready(url: str, deadline: float) -> bool:
+    """Authenticate and query the migration's TCP target within its one budget."""
+    import psycopg2
+    from psycopg2 import extensions
+
+    connection = None
+    try:
+        connection = psycopg2.connect(url, async_=True)
+
+        def wait() -> None:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                state = connection.poll()
+                if state == extensions.POLL_OK:
+                    return
+                if state == extensions.POLL_READ:
+                    ready = select.select([connection.fileno()], [], [], remaining)[0]
+                elif state == extensions.POLL_WRITE:
+                    ready = select.select([], [connection.fileno()], [], remaining)[1]
+                else:
+                    raise RuntimeError("scratch postgres polling state")
+                if not ready:
+                    raise TimeoutError
+
+        wait()
+        cursor = connection.cursor()
+        try:
+            cursor.execute("SELECT 1")
+            wait()
+            return cursor.fetchone() == (1,) and time.monotonic() < deadline
+        finally:
+            cursor.close()
+    except (psycopg2.Error, OSError, TimeoutError):
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def _start_scratch() -> tuple[str, str]:
     postgres_port = os.environ.get("TELEGRAM_SPLIT_SCRATCH_PG_PORT", "55433")
     redis_port = os.environ.get("TELEGRAM_SPLIT_SCRATCH_REDIS_PORT", "56379")
@@ -207,19 +249,15 @@ def _start_scratch() -> tuple[str, str]:
         f"postgresql://split_runtime:split_runtime@127.0.0.1:{postgres_port}/{SCRATCH_DB_NAME}"
     )
     redis_url = f"redis://127.0.0.1:{redis_port}/15"
-    deadline = time.time() + 45
-    while time.time() < deadline:
-        ready = subprocess.run(
-            ["docker", "exec", POSTGRES_CONTAINER, "pg_isready", "-U", "split_runtime"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if ready.returncode == 0:
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        if _scratch_postgres_ready(url, deadline):
             return url, redis_url
-        time.sleep(1)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(1, remaining))
     _stop_scratch()
-    raise unittest.SkipTest("scratch postgres did not become ready")
+    raise RuntimeError("scratch postgres TCP query did not become ready")
 
 
 def _stop_scratch() -> None:
@@ -255,6 +293,79 @@ class TelegramSplitRuntimeScratchCleanupTests(unittest.TestCase):
                 ),
             ],
         )
+
+
+class TelegramSplitRuntimeScratchReadinessTests(unittest.TestCase):
+    def test_start_waits_for_exact_tcp_target_even_when_socket_tools_succeed(self):
+        module = sys.modules[__name__]
+        environment = {
+            "TELEGRAM_SPLIT_SCRATCH_PG_PORT": "55434",
+            "TELEGRAM_SPLIT_SCRATCH_REDIS_PORT": "56380",
+        }
+        with patch.dict(os.environ, environment), patch.object(
+            module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+        ) as run, patch.object(
+            module, "_scratch_postgres_ready", side_effect=[False, True]
+        ) as ready, patch.object(module.time, "monotonic", return_value=100), patch.object(
+            module.time, "sleep"
+        ) as sleep:
+            url, redis_url = _start_scratch()
+        expected = f"postgresql://split_runtime:split_runtime@127.0.0.1:55434/{SCRATCH_DB_NAME}"
+        self.assertEqual(url, expected)
+        self.assertEqual(redis_url, "redis://127.0.0.1:56380/15")
+        self.assertEqual(ready.call_args_list, [call(expected, 145), call(expected, 145)])
+        sleep.assert_called_once_with(1)
+        self.assertFalse(any("pg_isready" in args.args[0] for args in run.call_args_list))
+
+    def test_tcp_timeout_cleans_scratch_and_fails_without_advancing_or_skipping(self):
+        module = sys.modules[__name__]
+        with patch.object(
+            module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+        ), patch.object(module, "_scratch_postgres_ready", return_value=False) as ready, patch.object(
+            module.time, "monotonic", side_effect=[0, 0, 44.5, 45]
+        ), patch.object(module.time, "sleep") as sleep, patch.object(module, "_stop_scratch") as stop:
+            with self.assertRaisesRegex(RuntimeError, "^scratch postgres TCP query did not become ready$"):
+                _start_scratch()
+        ready.assert_called_once()
+        sleep.assert_called_once_with(0.5)
+        stop.assert_called_once_with()
+
+    def test_driver_authenticates_and_queries_exact_target_before_readiness(self):
+        import psycopg2
+        from psycopg2 import extensions
+
+        module = sys.modules[__name__]
+        connection = Mock()
+        connection.poll.side_effect = [extensions.POLL_WRITE, extensions.POLL_OK, extensions.POLL_READ, extensions.POLL_OK]
+        connection.fileno.return_value = 7
+        connection.cursor.return_value.fetchone.return_value = (1,)
+        url = f"postgresql://split_runtime:split_runtime@127.0.0.1:55433/{SCRATCH_DB_NAME}"
+        with patch.object(psycopg2, "connect", return_value=connection) as connect, patch.object(
+            module.time, "monotonic", return_value=0
+        ), patch.object(module.select, "select", side_effect=[([], [7], []), ([7], [], [])]) as poll:
+            self.assertTrue(_scratch_postgres_ready(url, 45))
+        connect.assert_called_once_with(url, async_=True)
+        self.assertEqual(poll.call_args_list, [call([], [7], [], 45), call([7], [], [], 45)])
+        connection.cursor.return_value.execute.assert_called_once_with("SELECT 1")
+        connection.cursor.return_value.close.assert_called_once_with()
+        connection.close.assert_called_once_with()
+
+    def test_connected_socket_cannot_advance_until_query_completes(self):
+        import psycopg2
+        from psycopg2 import extensions
+
+        module = sys.modules[__name__]
+        connection = Mock()
+        connection.poll.side_effect = [extensions.POLL_OK, extensions.POLL_READ]
+        connection.fileno.return_value = 7
+        with patch.object(psycopg2, "connect", return_value=connection), patch.object(
+            module.time, "monotonic", return_value=0
+        ), patch.object(module.select, "select", return_value=([], [], [])):
+            self.assertFalse(_scratch_postgres_ready("postgresql://public-fixture", 45))
+        connection.cursor.return_value.execute.assert_called_once_with("SELECT 1")
+        connection.cursor.return_value.fetchone.assert_not_called()
+        connection.cursor.return_value.close.assert_called_once_with()
+        connection.close.assert_called_once_with()
 
 
 @unittest.skipUnless(_docker_available(), "docker is required for isolated scratch dual-process tests")
