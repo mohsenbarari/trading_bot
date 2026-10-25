@@ -1,5 +1,5 @@
 """Pinned public source and owned synthetic spools; no runtime or image actions."""
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -8,6 +8,7 @@ import base64
 import errno
 import fcntl
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -184,6 +185,31 @@ class F79DiagnosticTests(unittest.TestCase):
                          'process_ram_rate_limit': {'attempts': 1, 'seconds': 60, 'event_identifiers_stored': False}})
         self.assertIn(b'COPY --chown=10001:10001 --chmod=0644', (output/'Dockerfile').read_bytes())
         with self.assertRaises(FileExistsError): H.prepare(source, output)
+
+    def test_cli_prepares_actual_pinned_public_overlay_and_refuses_replacing_existing_output(self):
+        source = self.root/'public-historical.py'; source.write_bytes(public_source()); source.chmod(0o600)
+        output = self.root/'cli-overlay'; captured = io.StringIO()
+        with redirect_stdout(captured):
+            self.assertEqual(H.main(['--source',str(source),'--output',str(output)]),0)
+        value = json.loads(captured.getvalue())
+        self.assertEqual(value,{'status':'public_source_overlay_prepared',
+            'overlay_sha256':sha256((output/'private_capture.py').read_bytes()).hexdigest(),
+            'image_built':False,'security_accepted':False})
+        before = {p.name:p.read_bytes() for p in output.iterdir()}; captured = io.StringIO()
+        with redirect_stdout(captured):
+            self.assertEqual(H.main(['--source',str(source),'--output',str(output)]),1)
+        self.assertEqual(json.loads(captured.getvalue()),{'status':'refused','code':'diagnostic_preparation_refused','security_accepted':False})
+        self.assertEqual({p.name:p.read_bytes() for p in output.iterdir()},before)
+
+    def test_cli_bad_arguments_and_untrusted_source_return_only_closed_failure(self):
+        marker = 'PUBLIC_SYNTHETIC_ARGUMENT_NEVER_EMIT'; source = self.root/(marker+'.py')
+        source.write_bytes(b'PUBLIC WRONG SOURCE'); source.chmod(0o600)
+        for arguments in ([],['--unknown-'+marker],['--source',str(source),'--output',str(self.root/'never-created')]):
+            captured = io.StringIO()
+            with self.subTest(arguments=arguments),redirect_stdout(captured):
+                self.assertEqual(H.main(arguments),1)
+            self.assertEqual(captured.getvalue(),'{"status":"refused","code":"diagnostic_preparation_refused","security_accepted":false}\n')
+            self.assertNotIn(marker,captured.getvalue()); self.assertFalse((self.root/'never-created').exists())
 
     def test_error_keeps_original_args_and_context_is_private_typed_and_value_free_on_output(self):
         old = self.document(); context = self.context(old)

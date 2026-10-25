@@ -1,17 +1,15 @@
 # Security remediation
 
-- Global acceptance false: patched serving App/Market/datastores not activated;
-  refactor STOP/streak0. After actual closure require30 consecutive completed,
-  accepted clean units. Failures reset streak with history retained; tests/polls
-  never count. Preserve product behavior, single capture owner and user changes.
-  Necessary work needs no routine permission; Writer/DNS remain human.
-- Host maintenance/backups/TLS completed; infrastructure memory binds scope.
+- Global acceptance false: serving App/Market/datastores not upgraded; refactor
+  STOP/streak0. After security closure require30 consecutive accepted clean units;
+  failures reset streak with history; tests/polls never count. Preserve behavior,
+  single capture owner/user changes. No routine permission; Writer/DNS human.
+- Host/backups/TLS complete; infrastructure memory.
   Final accepts ciphertext backups only, no App provisioning/migration authority.
-- Historical ed59 provenance cannot become main. Ordinary665220a2/e1a727de built/exported;
+- Historical ed59 cannot become main. Ordinary665220a2/e1a727de built/exported;
   actual CI40196208692 passed32/32, physical graph/presence/cleanup. Not serving.
-  Raw44HIGH gate remains failed. Freeze that
-  main release while reviewed controllers advance on security branch; merge after
-  activation. Preserve dirty coin-market-retention.md; never stage/reset/stash it.
+  Raw44HIGH gate failed. Freeze main; controllers advance on security branch;
+  merge after activation. Preserve dirty coin-market-retention.md untouched.
 - Failed App COW restored old Web/API200. No repeat/reroute of C/S/R fresh-profile
   or COW guard adaptation/probe. Ordinary main artifact is the legitimate path;
   fresh serving/config/backup/functional proof remains required. Keep rollback
@@ -25,8 +23,10 @@
   Capture conflicts/F79's two source overrides remain OPEN.
 - PG49a8/Redis98c4 built/scanned, not activated. PG Windows UNKNOWN retains Linux
   absence proof. Datastore03 Redis LOAD passed both; PG Web passed, Native0bd
-  failed before header/LOAD request. Retain its exact RES until fresh verified
-  preload abort closure; never blind retry. Market06 a37/f365 Native LOAD passed;
+  failed before header/LOAD request. Abort02 d27c actual two-host durable closure
+  removed its exact RES; preserve failed attempt, no blind retry. Watchdog M-lock
+  restart race proved; finite monitor-only maintenance is being verified before
+  further imports. Market06 a37/f365 Native LOAD passed;
   remaining8 batch unexecuted. Keep eight production reader units.
 - Expired controls grant no future authority. Unknown RPC never proves cancel
   or retry. Config/manifest differ; classic branches never query Descriptor.

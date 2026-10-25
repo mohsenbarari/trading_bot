@@ -199,3 +199,34 @@ assertions. Its controller source advances on the security branch while main
 stays665220a2; the controller commit must never be relabelled as the image source.
 No serving replacement, runtime-smoke success or security acceptance is claimed
 by this source packet.
+
+## Actual smoke and new normal activation contract
+
+Actual canonical smoke run40196208692 on controller200f5c71 succeeded:8 runtime
+and24 component assertions, strict complete archive/Config association,
+migration headff6c7d8e9f01, fresh component/ACL inventories and owned cleanup.
+Artifact12599936628 is392398 bytes, SHA256
+`5cd1ab49b517bcd04c7adc1e883ecf351020f96b16ccfec70278037c5c013e99`.
+This does not change the failed raw44HIGH gate or the serving containers.
+
+The new `canonical_app_activation_{contract,site,coordinator}.py` is an
+independent normal-Compose entrypoint. It remains UNARMED until actual two-host
+LOAD receipts, fresh backup/restore, schema and complete normal configuration
+evidence exist. Historical C/S/R/COW tools are not imported or invoked.
+The fixed order is Web App, Web sync, Native App, Native Bot, Native sync.
+It retains the complete active Compose prefix, opaque environment references,
+eight reader units, existing business configuration and single execution owners.
+Each handoff proves the old cgroup empty before stopped-first creation, checks
+the full candidate configuration before start and validates normal readiness.
+Known measured failures permit only proved owned rollback; ambiguous RPCs retain
+the guards and evidence. Writer and DNS changes are outside this authority.
+
+Pre-stop admission now rejects unexplained StopTimeout values as well as
+unsupported Compose features. Actual32 public fixtures passed inside a real
+isolated read-only Root container: CAP_CHOWN only, no network/private mounts,
+unchanged pre-import ambient fence and no skips. Result SHA256
+`38ecb17f5932448b0210a6b147d467ee1bcf2728070ff5cbc7f0c4e40c256ef6`.
+Two separate owned-child bound/timeout/cleanup tests passed as real UID1001
+with no capabilities. Root ownership tests remain mandatory in the dedicated
+CI lane; generic child-process tests stay in the ordinary hosted lane.
+No serving activation or global security acceptance follows from these tests.

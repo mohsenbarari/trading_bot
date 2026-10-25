@@ -433,7 +433,7 @@ class CaptureConflictTests(unittest.TestCase):
              patch.object(H, 'bounded', side_effect=H.Unknown()) as command:
             with self.assertRaises(H.Unknown): H.native_run(args, self.root, control, [], held)
         self.assertEqual(command.call_count, 1); self.assertTrue(reservation.exists())
-        records = [json.loads(path.read_bytes()) for path in self.root.glob('[0-9]*.json')]
+        records = [json.loads(path.read_bytes()) for path in sorted(self.root.glob('[0-9]*.json'))]
         self.assertEqual(records[-1]['phase'], 'outcome_unknown')
         self.assertFalse((self.root/'terminal.json').exists())
 
