@@ -471,3 +471,13 @@ the genuine Root lane. Independent reverse comparison proves these are only a
 path change and one registry entry; no capture logic, Root guard, assertion,
 UID/stat check or skip changed. Author passed all15 using the tracked helper.
 This prevents a predictable missing-file/ordinary-UID failure in full CI.
+
+Selected run40243098439 at53349a19 passed the actual candidate Vitest4.1.12
+two-file/13-test unit step, accountant flow, and real chat-menu delete/database
+case. Its only failed case expected the obsolete login heading after successful
+global-lock redirect. Artifact12618180609 is219533 bytes, SHA256
+`cf6749dbcbe52edff234c950500e116c6ba83ee27eb10d1675badca1e4bffd04`.
+One reviewed selector now requires the existing mobile h1 `ورود به سامانه`
+exactly; redirect, session revocation, reactivation and recovered-market
+assertions remain unchanged. This is a test-contract correction; actual full
+matrix acceptance is still pending.

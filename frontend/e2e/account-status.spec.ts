@@ -366,7 +366,7 @@ test.describe('Account status browser regression', () => {
 
       await userPage.reload({ waitUntil: 'domcontentloaded' })
       await userPage.waitForURL(/\/login$/)
-      await expect(userPage.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
+      await expect(userPage.getByRole('heading', { name: 'ورود به سامانه', exact: true })).toBeVisible()
 
       await toggleAccountStatusFromAdminProfile(adminPage, 'active')
 
