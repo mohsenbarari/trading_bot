@@ -411,6 +411,22 @@ class AppImageCISmokeTests(unittest.TestCase):
         self.assertIn(['network','create','--internal','--label',M.LABEL+'=123-1','app-ci-net-123-1'],[a for a,_ in calls])
         self.assertEqual(ctx.write.call_args.args[0],self.root/'reports/actual-smoke.json')
 
+    def test_postgres_official_setup_client_and_server_share_owned_standard_socket_without_pghost_workaround(self):
+        # Exact admitted entrypoint SHA9c440299ae04a0a79d55b8bf03307036d890a40979d2fb698073c9050d4b20a5:
+        # docker_temp_server_start preserves -c options and disables TCP, while
+        # docker_process_sql explicitly clears PGHOST and PGHOSTADDR before psql.
+        ctx,calls=self.execute_context();self.execute_patches(ctx);M.execute(ctx)
+        args,kwargs=M.create.call_args_list[0].args,M.create.call_args_list[0].kwargs
+        self.assertEqual(args[0],ctx);self.assertEqual(args[1],'app-ci-pg-123-1')
+        self.assertEqual(args[3][:3],['postgres','-c','unix_socket_directories=/var/run/postgresql'])
+        self.assertNotIn('unix_socket_directories=/tmp',args[3])
+        self.assertEqual(kwargs['user'],'postgres')
+        self.assertIn('/var/run/postgresql:rw,nosuid,nodev,size=16m,uid=70,gid=70,mode=0775',kwargs['tmpfs'])
+        self.assertFalse({'PGHOST','PGHOSTADDR'}&set(kwargs['env']))
+        launch=M.container_args(ctx,args[1],args[2],args[3],**kwargs)
+        self.assertIn('--cap-drop=ALL',launch);self.assertIn('--security-opt=no-new-privileges',launch)
+        self.assertNotIn('--entrypoint',launch);self.assertEqual(launch[-len(args[3]):],args[3])
+
     def test_dependency_readiness_retries_are_finite_and_failed_capsule_receipt_is_preserved(self):
         ctx,calls=self.execute_context(success=False,readiness_failures=1);self.execute_patches(ctx)
         with patch.object(M.time,'sleep') as sleep,self.assertRaisesRegex(RuntimeError,'smoke_container_exit'):M.execute(ctx)
@@ -523,6 +539,41 @@ class AppImageCISmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'dependency_startup_bound'):M.startup_classification('postgres',raw)
         with self.assertRaisesRegex(RuntimeError,'diagnostic_subphase'):M.startup_classification('private-profile',b'')
 
+    def test_comprehensive_startup_tokens_classify_shell_client_and_server_errors_without_echoing_values(self):
+        examples=[('missing_file','No such file or directory'),('operation_not_permitted','Operation not permitted'),
+            ('permission_denied','Permission denied'),('readonly_filesystem','Read-only file system'),
+            ('filesystem_capacity','No space left on device'),('invalid_option','illegal option'),
+            ('invalid_argument','unrecognized configuration parameter'),('unknown_user','user ordinary-private-user does not exist'),
+            ('command_not_found','ordinary-private-command: not found'),('shared_memory','could not create shared memory'),
+            ('unix_socket','connection to server on socket ordinary-private-path'),('connection_failure','connection refused'),
+            ('invalid_locale','invalid locale'),('directory_not_empty','is not empty'),
+            ('configuration_file','could not access the server configuration file'),('shell_syntax','syntax error'),
+            ('cannot_execute','exec format error'),('resource_unavailable','cannot allocate memory'),
+            ('initdb_error','initdb: error:'),('postgres_fatal','FATAL:'),
+            ('password_required','Database is uninitialized and superuser password is not specified'),
+            ('data_version','database files are incompatible with server')]
+        for expected,text in examples:
+            with self.subTest(expected=expected):
+                raw=('psql: '+text+' ordinary-private-value').encode();value=M.startup_tokens(raw)
+                self.assertEqual(value['bytes'],len(raw));self.assertFalse(value['empty']);self.assertEqual(value['line_count'],1)
+                self.assertEqual(value['closed_lines'][0]['process'],'psql');self.assertIn(expected,value['closed_lines'][0]['markers'])
+                self.assertNotIn('ordinary-private',M.encode(value).decode());M.public(value)
+        raw=b'psql: error: connection to server on socket ordinary-private-path failed: No such file or directory'
+        self.assertEqual(M.startup_tokens(raw)['closed_lines'][0]['markers'],['missing_file','unix_socket','connection_failure'])
+
+    def test_startup_tokens_limit_sequence_and_accept_only_closed_process_prefixes(self):
+        for process in ('bash','sh','ls','mkdir','chmod','chown','find','initdb','postgres','psql','pg_ctl',
+                        'pg_isready','id','locale','getent','docker-entrypoint.sh','redis-server','redis-cli'):
+            value=M.startup_tokens(('/ordinary-private-path/'+process+': ordinary-private-body').encode())
+            self.assertEqual(value['closed_lines'],[{'line':0,'process':process,'markers':[]}])
+        self.assertEqual(M.startup_tokens(b'ordinary-private-process: ordinary-private-body')['closed_lines'],
+            [{'line':0,'process':'unclassified','markers':[]}])
+        empty=M.startup_tokens(b'');self.assertTrue(empty['empty']);self.assertEqual(empty['bytes'],0);self.assertEqual(empty['closed_lines'],[])
+        full=M.startup_tokens(b'x\n'*4096);self.assertEqual(full['bytes'],8192);self.assertEqual(full['line_count'],4096)
+        self.assertEqual(len(full['closed_lines']),64);self.assertEqual(full['additional_lines'],4032)
+        for raw in ('ordinary-private-text',b'x'*8193):
+            with self.assertRaisesRegex(RuntimeError,'dependency_startup_bound'):M.startup_tokens(raw)
+
     def state(self):
         return {'running':False,'status':'exited','exit_code':1,'oom_killed':False,'restarting':False,'dead':False}
 
@@ -555,8 +606,11 @@ class AppImageCISmokeTests(unittest.TestCase):
             M.readiness_failure(ctx,{'postgres':'pg-fixture','redis':'redis-fixture'},'redis',RuntimeError('redis_readiness'))
             value=ctx.write.call_args.args[1]
             self.assertEqual(ctx.docker.call_count,4)
-            self.assertTrue(all(row=={'state_observation':'unavailable','startup_classification':'unclassified_startup'}
-                for row in value['services'].values()))
+            for row in value['services'].values():
+                self.assertEqual(row['state_observation'],'unavailable');self.assertNotIn('state',row)
+                self.assertEqual(row['startup_classification'],'unclassified_startup')
+                self.assertEqual(row['startup_log']['bytes'],len(b'ordinary-private-value'));self.assertFalse(row['startup_log']['empty'])
+                self.assertEqual(row['startup_log']['closed_lines'],[{'line':0,'process':'unclassified','markers':[]}])
             self.assertNotIn('ordinary-private',M.encode(value).decode())
 
     def test_readiness_diagnostic_rpc_and_report_loss_cannot_replace_primary_or_skip_second_service(self):

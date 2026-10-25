@@ -424,6 +424,37 @@ def startup_classification(profile,raw):
     return next((code for marker,code in common+specific if marker in raw),'unclassified_startup')
 
 
+def startup_tokens(raw):
+    """Closed enums only: never return arbitrary words, paths, or log excerpts."""
+    need(type(raw) is bytes and len(raw)<=8192,'dependency_startup_bound')
+    patterns=(('missing_file',rb'no such file or directory'),('operation_not_permitted',rb'operation not permitted'),
+        ('permission_denied',rb'permission denied'),('readonly_filesystem',rb'read-only file system'),
+        ('filesystem_capacity',rb'no space left on device|disk full'),
+        ('invalid_option',rb'invalid option|illegal option|unrecognized option|unknown option'),
+        ('invalid_argument',rb'invalid argument|invalid parameter|unrecognized configuration parameter'),
+        ('unknown_user',rb'unknown user|unknown uid|no passwd entry|could not look up effective user id|(?:user|uid)[^\r\n]{0,128}(?:does not exist|not found)'),
+        ('command_not_found',rb'command not found|:\s*not found\b'),
+        ('shared_memory',rb'shared memory|shared-memory'),
+        ('unix_socket',rb'connection to server on socket|unix[ -]domain socket|unix_socket_directories'),
+        ('connection_failure',rb'connection refused|could not connect to server|connection[^\r\n]{0,256}failed'),
+        ('invalid_locale',rb'invalid locale|no usable system locales'),('directory_not_empty',rb'not empty'),
+        ('configuration_file',rb'could not access the server configuration file|can.t open config file|fatal config file error'),
+        ('shell_syntax',rb'syntax error|unexpected token|bad substitution|unbound variable'),
+        ('cannot_execute',rb'cannot execute|exec format error'),
+        ('resource_unavailable',rb'resource temporarily unavailable|cannot allocate memory|out of memory'),
+        ('initdb_error',rb'initdb: error:'),('postgres_fatal',rb'fatal:'),
+        ('password_required',rb'database is uninitialized and superuser password is not specified'),
+        ('data_version',rb'database files are incompatible with server'))
+    lines=raw.splitlines();closed=[]
+    for number,line in enumerate(lines[:64]):
+        line=line.lower().lstrip()
+        process=re.match(rb'^(?:/[^\s:]+/)?(bash|sh|ls|mkdir|chmod|chown|find|initdb|postgres|psql|pg_ctl|pg_isready|id|locale|getent|docker-entrypoint\.sh|redis-server|redis-cli)(?=[:\s\[])',line)
+        closed.append({'line':number,'process':process.group(1).decode('ascii') if process else 'unclassified',
+            'markers':[label for label,pattern in patterns if re.search(pattern,line)]})
+    return {'bytes':len(raw),'empty':not raw,'line_count':len(lines),'additional_lines':max(0,len(lines)-64),
+        'scope':'fixed_public_error_markers_only_not_raw_text','closed_lines':closed}
+
+
 def readiness_failure(ctx,containers,profile,error):
     # Only fields from these newly owned public CI dependencies are inspected.
     # Their log text stays in bounded RAM and cannot reach an artifact or stdout.
@@ -444,6 +475,7 @@ def readiness_failure(ctx,containers,profile,error):
         try:
             raw=ctx.docker(['logs','--tail','40',cid],seconds=10,maximum=8192,combine_stderr=True)
             row['startup_classification']=startup_classification(name,raw)
+            row['startup_log']=startup_tokens(raw)
         except BaseException:pass
         receipt['services'][name]=row
     # Observational failure must never replace the primary failed readiness probe.
@@ -460,9 +492,13 @@ def execute(ctx):
     proof=prepare_proof(ctx,database);ctx.network='app-ci-net-'+owner()
     PHASE='disposable_internal_network'
     ctx.docker(['network','create','--internal','--label',LABEL+'='+owner(),ctx.network],maximum=256)
-    pg=create(ctx,'app-ci-pg-'+owner(),postgres,['postgres','-c','unix_socket_directories=/tmp','-c','shared_buffers=64MB','-c','max_connections=20','-c','max_wal_size=128MB'],alias='pg',user='postgres',
+    # Exact official entrypoint SHA9c4402 clears PGHOST for its setup psql calls.
+    # Use that client's standard socket, with a volatile directory owned by the
+    # admitted Alpine image's postgres UID/GID70; PGHOST=/tmp would not fix it.
+    pg=create(ctx,'app-ci-pg-'+owner(),postgres,['postgres','-c','unix_socket_directories=/var/run/postgresql','-c','shared_buffers=64MB','-c','max_connections=20','-c','max_wal_size=128MB'],alias='pg',user='postgres',
         env={'POSTGRES_USER':'ci_public','POSTGRES_PASSWORD':'ci_public_fixture','POSTGRES_DB':database,'PGDATA':'/var/lib/postgresql/data/pgdata'},
-        tmpfs=('/var/lib/postgresql/data:rw,nosuid,nodev,size=1g,mode=1777','/tmp:rw,nosuid,nodev,size=64m,mode=1777'))
+        tmpfs=('/var/lib/postgresql/data:rw,nosuid,nodev,size=1g,mode=1777','/tmp:rw,nosuid,nodev,size=64m,mode=1777',
+            '/var/run/postgresql:rw,nosuid,nodev,size=16m,uid=70,gid=70,mode=0775'))
     rd=create(ctx,'app-ci-redis-'+owner(),redis,['redis-server','--save','','--appendonly','no'],alias='redis',user='1000:1000',
         tmpfs=('/data:rw,nosuid,nodev,size=128m,uid=1000,gid=1000','/tmp:rw,nosuid,nodev,size=16m,mode=1777'))
     ctx.docker(['start',pg,rd],maximum=512)

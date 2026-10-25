@@ -116,3 +116,37 @@ tests as genuine UID1001 with all capabilities dropped and ambient effects
 fenced (1.083s, no skips). Startup users, capabilities, entrypoints and readiness
 thresholds are unchanged; the diagnostic is not evidence of a repaired
 dependency or successful32-case smoke.
+
+## Fourth actual run and fixture socket correction
+
+Run40175972718 on216d41a1 failed specifically at `postgres_readiness`:
+PostgreSQL exited2, without OOM/restarting/dead; Redis was still running.
+All three archive/daemon admissions passed again and owned cleanup completed
+with no causes, preserving the failure. Artifact12592540955 is4893 bytes,
+SHA256 `b956ee1ce2a119f731e5c4deab175baf240d0c239fd48a1d1893b895cb1d7ce1`.
+Its closed startup classification was insufficient to reconstruct the discarded
+log buffer; arbitrary text is not recovered or invented. No32-case result exists.
+
+The exact admitted official entrypoint (SHA256
+`9c440299ae04a0a79d55b8bf03307036d890a40979d2fb698073c9050d4b20a5`)
+clears PGHOST/PGHOSTADDR for its setup psql calls. Our disposable fixture had
+overridden the temporary server socket to `/tmp`, making that normal client
+path inconsistent. The fixture now uses the standard `/var/run/postgresql`
+socket and a16MiB volatile directory owned by admitted postgres UID/GID70.
+Its nonroot user, dropped capabilities, no-new-privileges, actual immutable
+image and official entrypoint remain unchanged. A PGHOST-only workaround would
+not satisfy that entrypoint. The correction needs actual hosted verification.
+
+Root independently passed50 genuineUID1001 fenced tests (1.086s, no skips).
+Closed startup observations now also include byte/line counts and at most64
+ordered fixed process/reason enums; no raw words, paths, Config or Env escape.
+Controller source coverage is337/337 statements with zero exclusions,41/42
+branches; the remaining arc is the existing main cleanup exception path.
+
+Separately, full CI40174926884 for the earlier exact SHA df85708f succeeded:
+hosted8093 (350 existing skips), genuine-root366 (no skips), frontend2037;
+all errors/failures zero and all three exits0. Changed-code gates and13 mutation
+targets passed. Artifact12593205178 is17208135 bytes, SHA256
+`9841306807a501fb4b515e444ae146e352d41a7c18340729401bb9157dee00c1`.
+This result proves that earlier SHA, not the later socket correction, serving
+activation, full architecture matrix or overall security acceptance.
