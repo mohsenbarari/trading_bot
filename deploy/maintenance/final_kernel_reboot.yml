@@ -1,0 +1,176 @@
+---
+- name: Reboot only the installed Final Finland security kernel
+  hosts: final_kernel
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    final_kernel_action: check
+    final_kernel_confirmation: ''
+    final_kernel_probe: &final_kernel_probe |
+      import hashlib,json,os,re,shlex,stat,subprocess,time
+      from pathlib import Path
+      TARGET='7.0.0-38-generic'
+      OLD='7.0.0-29-generic'
+      def need(ok,code):
+          if not ok:raise RuntimeError(code)
+      def identity(s):
+          return [s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+      def public_read(path,maximum):
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              before=os.fstat(fd);need(stat.S_ISREG(before.st_mode) and before.st_uid==0 and not before.st_mode&0o022 and 0<before.st_size<=maximum,'public_boot_metadata')
+              raw=os.pread(fd,before.st_size+1,0)
+              need(len(raw)==before.st_size and identity(before)==identity(os.fstat(fd))==identity(path.lstat()),'public_boot_changed')
+              return raw
+          finally:os.close(fd)
+      def command(argv):
+          result=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=10,check=True)
+          need(len(result.stdout)<=16384,'public_command_bound');return result.stdout.decode()
+      def backup_metadata(root,owner=0):
+          need(root.resolve(strict=True)==root,'backup_root_redirected')
+          rows=[];started=time.monotonic()
+          def walk(fd,relative,depth,named):
+              need(depth<=16 and time.monotonic()-started<15,'backup_metadata_bound')
+              try:
+                  before=os.fstat(fd);need(before.st_uid==before.st_gid==owner and not before.st_mode&0o022,'backup_directory_metadata')
+                  rows.append([relative,identity(before)]);need(len(rows)<=4096,'backup_metadata_bound')
+                  with os.scandir(fd) as entries:
+                      for entry in entries:
+                          need(len(entry.name.encode())<=512 and time.monotonic()-started<15,'backup_metadata_bound')
+                          value=os.stat(entry.name,dir_fd=fd,follow_symlinks=False)
+                          name=relative+'/'+entry.name
+                          if stat.S_ISDIR(value.st_mode):
+                              child=os.open(entry.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+                              try:need(identity(value)==identity(os.fstat(child)),'backup_directory_changed')
+                              except BaseException:os.close(child);raise
+                              walk(child,name,depth+1,lambda leaf=entry.name,parent=fd:os.stat(leaf,dir_fd=parent,follow_symlinks=False))
+                          else:
+                              need(stat.S_ISREG(value.st_mode) and value.st_uid==value.st_gid==owner and value.st_nlink==1 and not value.st_mode&0o022,'backup_entry_metadata')
+                              item=os.open(entry.name,os.O_PATH|os.O_NOFOLLOW,dir_fd=fd)
+                              try:need(identity(value)==identity(os.fstat(item))==identity(os.stat(entry.name,dir_fd=fd,follow_symlinks=False)),'backup_entry_changed')
+                              finally:os.close(item)
+                              rows.append([name,identity(value)]);need(len(rows)<=4096,'backup_metadata_bound')
+                  need(identity(before)==identity(os.fstat(fd))==identity(named()),'backup_directory_changed')
+              finally:os.close(fd)
+          fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+          walk(fd,'',0,root.lstat);rows.sort()
+          return {'root_device':rows[0][1][0],'root_inode':rows[0][1][1],'entries':len(rows),
+                  'metadata_sha256':hashlib.sha256(json.dumps(rows,separators=(',',':')).encode()).hexdigest(),
+                  'file_contents_read':False}
+      def boot_selection(raw,environment):
+          defaults=[];selected=[];initrd=[];inside=False
+          lines=raw.decode().splitlines()
+          for line in lines:
+              match=re.fullmatch(r'\s*set\s+default=(.+)',line)
+              if match:defaults.extend(shlex.split(match[1]))
+          for line in lines:
+              if re.match(r'^(?:menuentry|submenu)\s',line):
+                  if inside:break
+                  need(line.startswith('menuentry '),'target_boot_selection_unknown')
+                  inside=True
+              if inside:
+                  parts=shlex.split(line,comments=True)
+                  if parts and parts[0] in ('linux','linuxefi'):selected.append(Path(parts[1]).name)
+                  if parts and parts[0] in ('initrd','initrdefi'):initrd.extend(Path(p).name for p in parts[1:])
+          values=dict(line.split('=',1)for line in environment.splitlines()if '='in line)
+          need(defaults and set(defaults)<={'0','${next_entry}'} and '0'in defaults and not values.get('next_entry')
+               and selected==['vmlinuz-'+TARGET] and 'initrd.img-'+TARGET in initrd,'target_boot_selection_unknown')
+      def snapshot():
+          need(os.geteuid()==0,'root_required')
+          release={}
+          for line in public_read(Path('/etc/os-release').resolve(strict=True),8192).decode().splitlines():
+              if '='in line:
+                  key,value=line.split('=',1);release[key]=shlex.split(value)[0]
+          need(release.get('ID')=='ubuntu' and release.get('VERSION_ID')=='26.04' and release.get('VERSION_CODENAME')=='resolute','final_release_changed')
+          kernel=os.uname().release;need(kernel in (OLD,TARGET),'unexpected_final_kernel')
+          expected={'linux-image-'+TARGET:'7.0.0-38.38','linux-modules-'+TARGET:'7.0.0-38.38'}
+          raw=command(['/usr/bin/dpkg-query','-W','-f=${binary:Package}\t${Version}\t${Status}\n',*expected])
+          packages={}
+          for line in raw.splitlines():
+              name,version,status=line.split('\t');need(status=='install ok installed','target_kernel_package_state');packages[name]=version
+          need(packages==expected,'target_kernel_not_installed')
+          for path in (Path('/boot/vmlinuz-'+TARGET),Path('/boot/initrd.img-'+TARGET)):
+              info=path.lstat();need(stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_size>0,'target_boot_file')
+          boot_selection(public_read(Path('/boot/grub/grub.cfg'),1024**2),command(['/usr/bin/grub-editenv','/boot/grub/grubenv','list']))
+          boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();need(re.fullmatch('[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}',boot),'boot_identity')
+          backup=backup_metadata(Path('/srv/trading-bot/security-backups'))
+          need(backup['root_device']==2049,'backup_filesystem_changed')
+          return {'schema':'security_final_kernel_observation/1','host':'65.109.214.203','kernel':kernel,'boot_id':boot,
+                  'target_packages':packages,'target_boot_selected':True,'reboot_required':os.path.lexists('/run/reboot-required'),
+                  'backup_metadata':backup,'package_or_configuration_changes':False,'application_activation':False,'security_accepted':False}
+      if __name__=='__main__':print(json.dumps(snapshot(),sort_keys=True))
+  tasks:
+    - name: Require exact isolated Final inventory and reboot-only action
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['final_kernel'] and inventory_hostname == 'final_kernel'
+          - ansible_host == '65.109.214.203' and ansible_port | int == 22 and ansible_user == 'root'
+          - ansible_ssh_private_key_file == '/root/.ssh/id_ed25519_finland_primary'
+          - ansible_ssh_common_args == '-F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - ansible_ssh_extra_args | default('') == ''
+          - ansible_connection | default('ssh') == 'ssh'
+          - final_kernel_action in ['check', 'apply']
+          - final_kernel_action == 'check' or final_kernel_confirmation == 'ONE-FINAL-KERNEL-REBOOT-20261025-01'
+
+    - name: Verify the existing pinned Final ED25519 known-host identity locally
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import json,subprocess
+            raw=subprocess.run(['/usr/bin/ssh-keygen','-F','65.109.214.203','-f','/root/.ssh/known_hosts'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5,check=True).stdout
+            assert 0<len(raw)<=16384
+            ed=b'\n'.join(line for line in raw.splitlines()if not line.startswith(b'#') and len(line.split())>=3 and line.split()[1]==b'ssh-ed25519')+b'\n'
+            assert ed.strip()
+            rows=subprocess.run(['/usr/bin/ssh-keygen','-l','-E','sha256','-f','/dev/stdin'],input=ed,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5,check=True).stdout
+            assert len(rows)<=16384
+            assert {line.split()[1]for line in rows.decode().splitlines()}=={'SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs'}
+            assert all(line.endswith('(ED25519)')for line in rows.decode().splitlines())
+            print(json.dumps({'final_pinned_ed25519_verified':True}))
+      delegate_to: localhost
+      changed_when: false
+      check_mode: false
+      timeout: 15
+
+    - name: Read installed target boot selection and ciphertext metadata before reboot
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, *final_kernel_probe]
+      register: final_kernel_before
+      changed_when: false
+      check_mode: false
+      timeout: 60
+
+    - name: Reboot only when the old kernel or reboot-required flag remains
+      ansible.builtin.reboot:
+        reboot_command: /usr/sbin/reboot
+        boot_time_command: /usr/bin/cat /proc/sys/kernel/random/boot_id
+        test_command: /usr/bin/true
+        connect_timeout: 5
+        reboot_timeout: 300
+        pre_reboot_delay: 0
+        post_reboot_delay: 0
+      timeout: 600
+      when:
+        - final_kernel_action == 'apply' and not ansible_check_mode
+        - (final_kernel_before.stdout | from_json).kernel != '7.0.0-38-generic' or (final_kernel_before.stdout | from_json).reboot_required
+
+    - name: Read exact target kernel new boot and unchanged ciphertext metadata
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, *final_kernel_probe]
+      register: final_kernel_after
+      changed_when: false
+      check_mode: false
+      timeout: 60
+      when: final_kernel_action == 'apply' and not ansible_check_mode
+
+    - name: Require target readiness and retain the exact existing backup metadata
+      ansible.builtin.assert:
+        that:
+          - (final_kernel_after.stdout | from_json).kernel == '7.0.0-38-generic'
+          - not (final_kernel_after.stdout | from_json).reboot_required
+          - (final_kernel_after.stdout | from_json).backup_metadata == (final_kernel_before.stdout | from_json).backup_metadata
+          - "((final_kernel_before.stdout | from_json).kernel == '7.0.0-38-generic' and not (final_kernel_before.stdout | from_json).reboot_required) or (final_kernel_after.stdout | from_json).boot_id != (final_kernel_before.stdout | from_json).boot_id"
+      when: final_kernel_action == 'apply' and not ansible_check_mode
