@@ -11,20 +11,24 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-FENCE=ExitStack()
-for target in ('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
+FENCE_TARGETS=('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
     'socket.create_connection','socket.getaddrinfo','urllib.request.urlopen','urllib.request.OpenerDirector.open',
-    'ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm','resource.setrlimit'):
-    FENCE.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
+    'ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm','resource.setrlimit')
 ROOT=Path(__file__).resolve().parents[1]
 def load(name,path):
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
-M=load('profile_preparer',ROOT/'scripts/prepare_market_security_profile.py')
-P=load('profile_original_preparer',ROOT/'scripts/prepare_market_security_payload.py')
+with ExitStack() as _import_fence:
+    for target in FENCE_TARGETS:
+        _import_fence.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
+    M=load('profile_preparer',ROOT/'scripts/prepare_market_security_profile.py')
+    P=load('profile_original_preparer',ROOT/'scripts/prepare_market_security_payload.py')
 
 
 class ProfilePreparationTests(unittest.TestCase):
     def setUp(self):
+        self.fence=ExitStack();self.addCleanup(self.fence.close)
+        for target in FENCE_TARGETS:
+            self.fence.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
         self.dossier=M.document((ROOT/M.DOSSIER[0]).read_bytes());self.stack=M.document((ROOT/M.STACK[0]).read_bytes())
 
     def test_actual_closed_nine_metadata_and_scopes_match(self):

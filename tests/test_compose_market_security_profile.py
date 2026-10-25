@@ -16,24 +16,48 @@ import unittest
 from unittest.mock import Mock,patch
 from zipfile import ZipFile
 
-FENCE=ExitStack()
-for target in ('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
+FENCE_TARGETS=('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
     'socket.create_connection','socket.getaddrinfo','urllib.request.urlopen','urllib.request.OpenerDirector.open',
-    'ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm','resource.setrlimit'):
-    FENCE.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
+    'ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm','resource.setrlimit')
 ROOT=Path(__file__).resolve().parents[1]
 def load(name,path):
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
-M=load('profile_composition',ROOT/'scripts/compose_market_security_profile.py')
-C=load('profile_common',ROOT/'scripts/compose_security_os_candidate.py')
-O=load('profile_prior',ROOT/'scripts/compose_market_security_os_candidate.py')
-P=load('profile_original',ROOT/'scripts/prepare_market_security_payload.py')
-Q=load('profile_preparer_again',ROOT/'scripts/prepare_market_security_profile.py')
+with ExitStack() as _import_fence:
+    for target in FENCE_TARGETS:
+        _import_fence.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
+    M=load('profile_composition',ROOT/'scripts/compose_market_security_profile.py')
+    C=load('profile_common',ROOT/'scripts/compose_security_os_candidate.py')
+    O=load('profile_prior',ROOT/'scripts/compose_market_security_os_candidate.py')
+    P=load('profile_original',ROOT/'scripts/prepare_market_security_payload.py')
+    Q=load('profile_preparer_again',ROOT/'scripts/prepare_market_security_profile.py')
+
+# Independently extracted from the authenticated public parent evidence ZIP,
+# not synthesized from a target profile or from the implementation constants.
+PARENT_LABEL_FIXTURE={
+    'image_id':'sha256:2c6ddd332f0aac17613208e66980e0154933bcb23cf2b94bd3d228c3ad5fd4e7',
+    'evidence_artifact_id':12580311665,'evidence_bytes':241567,
+    'evidence_sha256':'04e051e29ad84c34180317033f7ab3210c8629b9c6bc14d6b037a14544121280',
+    'report':'reports/vulnerabilities.json',
+    'raw_report_sha256':'3315aacb7bfde6284090d8d648bc5bd658935bddde127ffd0e9bdbf5f56fee8c',
+    'json_pointer':'/Metadata/ImageConfig/config/Labels',
+    'labels':{
+        'io.gold-trade.release.input-signature':'2df1bc87630d4fc86926daa6d9f3e3a50120ebb10bee6bebc102cb87b0c25ccf',
+        'io.gold-trade.release.tree':'73863439a60e39629a21ecd52daa5305f5beaf1c',
+        'io.gold-trade.security.baseline.image':'sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd',
+        'io.gold-trade.security.baseline.tree':'259c9c4964864b7acfd92f94c9856e664130d082',
+        'io.gold-trade.security.overlay.revision':'88299eb42bfa05361f8b8ed82358873336a6480e',
+        'io.gold-trade.security.overlay.tree':'52d90fc10fb851298c256ef101c178beeaea934f',
+        'org.opencontainers.image.description':'Docker-native private market data pipeline',
+        'org.opencontainers.image.revision':'a6dcd636a1525a3a3d47e2a6083ca887b16080db',
+        'org.opencontainers.image.title':'Trading Bot Private Market Pipeline',
+        'org.opencontainers.image.version':'stage5-coin-parser-shadow'}}
 
 
 class ProfileCompositionTests(unittest.TestCase):
     def setUp(self):
         self.stack=ExitStack();self.addCleanup(self.stack.close)
+        for target in FENCE_TARGETS:
+            self.stack.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
         self.root=Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='public-market-profile-')))
         self.root.chmod(0o700);previous=os.umask(0o077);self.addCleanup(os.umask,previous)
         for name,value in (('COMMON',C),('PRIOR',O),('MARKET',P),('PREP',Q)):
@@ -83,18 +107,57 @@ class ProfileCompositionTests(unittest.TestCase):
         if duplicate:rows.append(rows[0])
         return self.tar(rows),config,image,product
 
-    def public_payload(self):
+    def public_payload(self,profile='f79cdda21c19'):
         stack=json.loads((ROOT/Q.STACK[0]).read_bytes());dossier=json.loads((ROOT/Q.DOSSIER[0]).read_bytes())
-        selected,actual=Q.choose_profile(dossier,stack,'f79cdda21c19')
-        payload={'profile':'f79cdda21c19','old_public_source_revision':selected['label_commit'],
+        selected,actual=Q.choose_profile(dossier,stack,profile)
+        baseline=next(row for row in stack['profiles'] if row['image_id']==stack['baseline_image_id'])
+        payload={'profile':profile,'old_public_source_revision':selected['label_commit'],
             'old_image_nonenv_config':actual['image']['config'],'source_commit':'a'*40,
             'source_binding':{'source_sha256':selected['source']['sha256'],'cache_sha256':selected['cache']['sha256']},
-            'source_overrides':{'ordinary':'proof'},'image_input_signature':'d'*64}
-        before={k:v for k,v in actual['image']['config'].items() if v is not None}
-        before['Labels']={k:v for k,v in before['Labels'].items() if not k.startswith(('io.gold-trade.capture.','io.gold-trade.observability.'))}
+            'source_overrides':{'ordinary':'proof'} if profile=='f79cdda21c19' else None,'image_input_signature':'d'*64}
+        before={k:v for k,v in baseline['image']['config'].items() if v is not None}
+        before['Labels']=deepcopy(PARENT_LABEL_FIXTURE['labels'])
         before['Env']=['PYTHON_VERSION=3.11.17','PYTHONDONTWRITEBYTECODE=1','PUBLIC_OTHER=unchanged',
             'MARKET_PIPELINE_IMAGE_REVISION=a6dcd636a1525a3a3d47e2a6083ca887b16080db']
         return before,payload
+
+    def test_actual_pinned_parent_and_all_nine_sealed_target_label_transitions(self):
+        self.assertEqual(PARENT_LABEL_FIXTURE['image_id'],M.PARENT)
+        self.assertEqual((PARENT_LABEL_FIXTURE['evidence_artifact_id'],PARENT_LABEL_FIXTURE['evidence_bytes'],
+            PARENT_LABEL_FIXTURE['evidence_sha256']),M.EVIDENCE_ARTIFACT)
+        self.assertEqual(PARENT_LABEL_FIXTURE['labels'],M.PARENT_LABELS)
+        for profile in Q.PROFILES:
+            with self.subTest(profile=profile):
+                before,payload=self.public_payload(profile);old=payload['old_image_nonenv_config']['Labels']
+                self.assertEqual(set(before['Labels'])-set(old),set(M.PARENT_STACK_LABELS))
+                expected=M.expected_config(before,payload)
+                for key,value in M.PARENT_STACK_LABELS.items():self.assertEqual(expected['Labels'][key],value)
+                for key,value in old.items():
+                    self.assertEqual(expected['Labels'][key],payload['image_input_signature'] if key=='io.gold-trade.release.input-signature' else value)
+                current={'io.gold-trade.security.parent-image','io.gold-trade.security.product-proof',
+                    'io.gold-trade.security.recipe','io.gold-trade.security.product-overrides'}
+                self.assertEqual(set(expected['Labels']),set(old)|set(M.PARENT_STACK_LABELS)|current)
+                self.assertEqual(expected['Env'][:-1],before['Env'][:-1]);self.assertEqual(expected['User'],before['User'])
+                recipe=M.dockerfile('security-market-profile-base-123-1:ci',payload,expected)
+                for key,value in M.PARENT_STACK_LABELS.items():self.assertIn(json.dumps(key)+'='+json.dumps(value),recipe)
+                if profile=='f79cdda21c19':
+                    self.assertEqual(expected['Labels']['io.gold-trade.capture.replay.fix-commit'],Q.CAPTURE_SOURCE)
+                    self.assertEqual(expected['Labels']['io.gold-trade.observability.source-sha256'],
+                        'f9d2b55921431e069b06e7de463d8b1d36ecbc01a94d5d0d98cd59f1dc9260da')
+
+    def test_unknown_missing_mutated_parent_and_unknown_target_labels_refuse_for_all_nine(self):
+        for profile in Q.PROFILES:
+            for change in ('unknown','missing','mutated'):
+                before,payload=self.public_payload(profile)
+                if change=='unknown':before['Labels']['io.gold-trade.security.unreviewed']='ordinary'
+                elif change=='missing':del before['Labels']['io.gold-trade.security.overlay.tree']
+                else:before['Labels']['io.gold-trade.security.baseline.image']='sha256:'+'0'*64
+                with self.subTest(profile=profile,change=change),self.assertRaisesRegex(RuntimeError,'parent_label_inventory'):
+                    M.expected_config(before,payload)
+            before,payload=self.public_payload(profile)
+            payload['old_image_nonenv_config']['Labels']['io.gold-trade.security.unreviewed']='ordinary'
+            with self.subTest(profile=profile,change='target_unknown'),self.assertRaisesRegex(RuntimeError,'target_label_inventory'):
+                M.expected_config(before,payload)
 
     def test_full_ordered_repeated_layer_archive_and_exact_public_overlay_pass(self):
         for compressed in (False,True):

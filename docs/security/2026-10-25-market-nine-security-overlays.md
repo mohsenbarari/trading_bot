@@ -20,6 +20,14 @@ or `all` uses the closed nine-element matrix, at most three independent hosted C
 jobs at once, with fail-fast disabled. No deployment permission or private input
 exists in this lane.
 
+The first actual matrix run, `40150829907`, failed closed for all nine profiles
+at `prepare_profile` / `parent_label_inventory`. It built, tested and exported no
+profile candidate. The draft compared the parent's label keys with each old
+runtime image's labels and incorrectly assumed the parent had no additional
+security provenance. The pinned parent actually has exactly four additional
+labels. The corrected source and tests below preserve those exact labels; this
+is not a successful rerun or a waiver of the failed history.
+
 ## Evidence that permits stack reuse
 
 The existing nine-profile dossier is pinned at SHA256
@@ -154,6 +162,27 @@ labels identify the actual overlay. Historical revision/tree labels describe the
 observed product base, including explicit F79 overrides; they are not a whole-Git
 equality claim. The old input signature is retained separately as
 `baseline_input_signature` in the public receipts.
+
+The parent is admitted with its complete exact ten-label key/value map. Its four
+additional labels are retained with their exact original values:
+
+| Inherited label | Meaning and fixed value |
+| --- | --- |
+| `io.gold-trade.security.baseline.image` | E46 stack ancestor `sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd` |
+| `io.gold-trade.security.baseline.tree` | Ancestor tree `259c9c4964864b7acfd92f94c9856e664130d082` |
+| `io.gold-trade.security.overlay.revision` | Prior stack recipe `88299eb42bfa05361f8b8ed82358873336a6480e` |
+| `io.gold-trade.security.overlay.tree` | Prior stack recipe tree `52d90fc10fb851298c256ef101c178beeaea934f` |
+
+These four describe inherited E46 security-stack ancestry, **not the current
+target product**. The target's exact six historical label keys, or those six
+plus the exact seven F79 functional/diagnostic keys, are overlaid explicitly.
+Only the reviewed new input digest and four current parent/proof/recipe/override
+labels are then added or replaced. Unknown, missing or changed parent labels
+and unknown target label keys refuse. The input closure and export receipt
+record the four inherited values and this ancestry-only scope explicitly.
+Regression fixtures use the actual pinned parent report's label map with all
+nine independently sealed target maps; they do not synthesize a parent from a
+target. Full other Config and ordered Env checks remain unchanged.
 
 `io.gold-trade.release.input-signature` is replaced with a truthful new digest.
 Its explicit schema is `market_security_profile_overlay_inputs/1`: SHA256 of the

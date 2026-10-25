@@ -13,17 +13,21 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-FENCE = ExitStack()
-for target in ('subprocess.Popen', 'subprocess.run', 'os.system', 'os.kill', 'os.killpg',
-               'socket.socket', 'socket.create_connection', 'socket.getaddrinfo',
-               'urllib.request.urlopen', 'urllib.request.OpenerDirector.open', 'ctypes.CDLL'):
-    FENCE.enter_context(patch(target, side_effect=AssertionError('ambient_host_network_forbidden')))
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'os.system', 'os.kill', 'os.killpg',
+                 'socket.socket', 'socket.create_connection', 'socket.getaddrinfo',
+                 'urllib.request.urlopen', 'urllib.request.OpenerDirector.open', 'ctypes.CDLL')
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(patch(target, side_effect=AssertionError('ambient_host_network_forbidden')))
+    return stack
 ROOT = Path(__file__).resolve().parents[1]
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
-M = load('datastore_recipe', ROOT/'scripts/compose_alpine_datastore_security.py')
-C = load('datastore_common', ROOT/'scripts/compose_security_os_candidate.py')
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    M = load('datastore_recipe', ROOT/'scripts/compose_alpine_datastore_security.py')
+    C = load('datastore_common', ROOT/'scripts/compose_security_os_candidate.py')
 M.COMMON = C
 ORIGINAL_GOSU_MOD = b'module github.com/tianon/gosu\n\ngo 1.20\n\nrequire (\n\tgithub.com/moby/sys/user v0.1.0\n\tgolang.org/x/sys v0.1.0\n)\n'
 ORIGINAL_GOSU_SUM = (b'github.com/moby/sys/user v0.1.0 h1:WmZ93f5Ux6het5iituh9x2zAG7NFY9Aqi49jjE1PaQg=\n'
@@ -35,6 +39,7 @@ ORIGINAL_GOSU_SUM = (b'github.com/moby/sys/user v0.1.0 h1:WmZ93f5Ux6het5iituh9x2
 class DatastoreTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='public-datastore-')))
         self.root.chmod(0o700)
         previous = os.umask(0o077); self.addCleanup(os.umask, previous)

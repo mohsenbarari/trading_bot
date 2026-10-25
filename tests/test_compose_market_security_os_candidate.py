@@ -16,22 +16,27 @@ import unittest
 from unittest.mock import Mock, patch
 from zipfile import ZipFile
 
-FENCE=ExitStack()
-for target in ('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
+FENCE_TARGETS=('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
                'socket.create_connection','socket.getaddrinfo','urllib.request.urlopen',
-               'urllib.request.OpenerDirector.open','ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm'):
-    FENCE.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
+               'urllib.request.OpenerDirector.open','ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm')
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
+    return stack
 ROOT=Path(__file__).resolve().parents[1]
 def load(name,path):
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
-M=load('market_os_recipe',ROOT/'scripts/compose_market_security_os_candidate.py')
-C=load('market_os_common',ROOT/'scripts/compose_security_os_candidate.py')
-P=load('market_os_payload',ROOT/'scripts/prepare_market_security_payload.py')
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    M=load('market_os_recipe',ROOT/'scripts/compose_market_security_os_candidate.py')
+    C=load('market_os_common',ROOT/'scripts/compose_security_os_candidate.py')
+    P=load('market_os_payload',ROOT/'scripts/prepare_market_security_payload.py')
 
 
 class MarketCompositionTests(unittest.TestCase):
     def setUp(self):
         self.stack=ExitStack();self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.root=Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='public-market-os-')))
         self.root.chmod(0o700);previous=os.umask(0o077);self.addCleanup(os.umask,previous)
         self.stack.enter_context(patch.object(M,'COMMON',C));self.stack.enter_context(patch.object(M,'MARKET',P))

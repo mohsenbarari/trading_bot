@@ -14,18 +14,23 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
-FENCE=ExitStack()
-for name in ('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
-    'socket.create_connection','socket.getaddrinfo','urllib.request.urlopen','ctypes.CDLL','signal.signal','signal.setitimer'):
-    FENCE.enter_context(patch(name,side_effect=AssertionError('ambient_host_network_forbidden')))
+FENCE_TARGETS=('subprocess.Popen','subprocess.run','os.system','os.kill','os.killpg','socket.socket',
+    'socket.create_connection','socket.getaddrinfo','urllib.request.urlopen','ctypes.CDLL','signal.signal','signal.setitimer')
+def fenced(stack):
+    for name in FENCE_TARGETS:
+        stack.enter_context(patch(name,side_effect=AssertionError('ambient_host_network_forbidden')))
+    return stack
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('dashboard_tls',ROOT/'deploy/maintenance/native_dashboard_tls.py')
-M=importlib.util.module_from_spec(spec);spec.loader.exec_module(M)
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    spec=importlib.util.spec_from_file_location('dashboard_tls',ROOT/'deploy/maintenance/native_dashboard_tls.py')
+    M=importlib.util.module_from_spec(spec);spec.loader.exec_module(M)
 
 
 class DashboardTests(unittest.TestCase):
     def setUp(self):
         self.stack=ExitStack();self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.root=Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='public-dashboard-tls-')))
         self.root.chmod(0o700);old=os.umask(0o077);self.addCleanup(os.umask,old)
         self.stack.enter_context(patch.object(M,'parents',lambda path:None))

@@ -21,6 +21,28 @@ PARENT_SOURCE='e2948eefc6b4e186b13895d298bca38eb6a1a53b'
 IMAGE_ARTIFACT=(12580172031,63183253,'88f4a81f387f357d7e7dc4c4812cbce324ec209606e565d153dd261af13c1a9d')
 EVIDENCE_ARTIFACT=(12580311665,241567,'04e051e29ad84c34180317033f7ab3210c8629b9c6bc14d6b037a14544121280')
 EXPORT_SHA='c241819a46f6a8cbebda4f60937655b90544312e0e7a1f31ff6a99d22da2a812'
+# Exact public Config.Labels from the pinned2c6 parent export. These four
+# inherited security labels describe its E46 stack ancestry, not the replacement
+# product. Unknown parent keys/values are never silently retained or discarded.
+PARENT_STACK_LABELS={
+    'io.gold-trade.security.baseline.image':'sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd',
+    'io.gold-trade.security.baseline.tree':'259c9c4964864b7acfd92f94c9856e664130d082',
+    'io.gold-trade.security.overlay.revision':'88299eb42bfa05361f8b8ed82358873336a6480e',
+    'io.gold-trade.security.overlay.tree':'52d90fc10fb851298c256ef101c178beeaea934f'}
+PARENT_LABELS={**PARENT_STACK_LABELS,
+    'io.gold-trade.release.input-signature':'2df1bc87630d4fc86926daa6d9f3e3a50120ebb10bee6bebc102cb87b0c25ccf',
+    'io.gold-trade.release.tree':'73863439a60e39629a21ecd52daa5305f5beaf1c',
+    'org.opencontainers.image.description':'Docker-native private market data pipeline',
+    'org.opencontainers.image.revision':'a6dcd636a1525a3a3d47e2a6083ca887b16080db',
+    'org.opencontainers.image.title':'Trading Bot Private Market Pipeline',
+    'org.opencontainers.image.version':'stage5-coin-parser-shadow'}
+PRODUCT_LABEL_KEYS=frozenset(('io.gold-trade.release.input-signature','io.gold-trade.release.tree',
+    'org.opencontainers.image.description','org.opencontainers.image.revision',
+    'org.opencontainers.image.title','org.opencontainers.image.version'))
+F79_LABEL_KEYS=frozenset(('io.gold-trade.capture.replay.baseline','io.gold-trade.capture.replay.fix-commit',
+    'io.gold-trade.capture.replay.source-sha256','io.gold-trade.capture.replay.status',
+    'io.gold-trade.observability.base-image','io.gold-trade.observability.source-sha256',
+    'io.gold-trade.observability.status'))
 HELPERS={'prepare_market_security_profile.py':'c998a45c5777df52e575ef3ea70cd65699708f05194d67b0ea3f1f52dd2b3e50',
     'compose_security_os_candidate.py':'10ccbe216fef04e5f7a7ce2ad31ac30eca7eeae090dfaaf8074fa3cc5c789d44',
     'compose_market_security_os_candidate.py':'c53cfd7ae4570314ef7f13d43ecd73de26436cf56407676ac2fe24d19dc1caa9',
@@ -368,10 +390,14 @@ def expected_config(before,payload):
     require(len(positions)==1 and before['Env'][positions[0]]==key+'a6dcd636a1525a3a3d47e2a6083ca887b16080db'
         and before['Env'].count('PYTHONDONTWRITEBYTECODE=1')==1,'public_source_default')
     result={**before,'Env':list(before['Env'])};result['Env'][positions[0]]=key+payload['old_public_source_revision']
-    old=payload['old_image_nonenv_config'];require(set(before['Labels'])<=set(old['Labels']),'parent_label_inventory')
+    old=payload['old_image_nonenv_config']
+    require(PRIOR.same_json_value(before['Labels'],PARENT_LABELS),'parent_label_inventory')
+    expected_keys=PRODUCT_LABEL_KEYS|(F79_LABEL_KEYS if payload['profile']=='f79cdda21c19' else frozenset())
+    require(type(old.get('Labels')) is dict and set(old['Labels'])==expected_keys
+        and all(type(k) is str and type(v) is str for k,v in old['Labels'].items()),'target_label_inventory')
     signature=payload.get('image_input_signature')
     require(type(signature) is str and re.fullmatch('[a-f0-9]{64}',signature),'overlay_input_signature')
-    result['Labels']={**old['Labels'],'io.gold-trade.release.input-signature':signature,
+    result['Labels']={**PARENT_STACK_LABELS,**old['Labels'],'io.gold-trade.release.input-signature':signature,
         'io.gold-trade.security.parent-image':PARENT,
         'io.gold-trade.security.product-proof':payload['source_binding']['source_sha256'],
         'io.gold-trade.security.recipe':payload['source_commit'],
@@ -452,6 +478,8 @@ def bind_overlay_inputs(before,payload,seed_files,identity,alias):
     recipe=dockerfile(alias,placeholder,expected_config(before,placeholder)).encode()
     closure={'schema':'market_security_profile_overlay_inputs/1','profile':payload['profile'],'parent_image_id':PARENT,
         'parent_image_artifact':IMAGE_ARTIFACT,'parent_evidence_artifact':EVIDENCE_ARTIFACT,'parent_export_sha256':EXPORT_SHA,
+        'parent_stack_ancestry_labels':dict(PARENT_STACK_LABELS),
+        'parent_stack_label_scope':'inherited_E46_security_stack_ancestry_not_current_target_product',
         'product_files':payload['files'],'recipe':identity,
         'controls':{'dossier_sha256':PREP.DOSSIER[1],'stack_sha256':PREP.STACK[1],
             'source_sha256':payload['source_binding']['source_sha256'],'cache_sha256':payload['source_binding']['cache_sha256']},
@@ -703,6 +731,8 @@ def finalize(root):
             and payload['overlay_inputs'].get('schema')=='market_security_profile_overlay_inputs/1'
             and payload['overlay_inputs'].get('recipe')==identity
             and payload['overlay_inputs'].get('product_files')==payload['files']
+            and PRIOR.same_json_value(payload['overlay_inputs'].get('parent_stack_ancestry_labels'),PARENT_STACK_LABELS)
+            and payload['overlay_inputs'].get('parent_stack_label_scope')=='inherited_E46_security_stack_ancestry_not_current_target_product'
             and all(record.get(k) is True for k in ('all_dependencies_reused','all_non_product_stack_hashes_equal',
                                                   'source_revision_default_only_env_delta'))
             and all(record.get(k) is False for k in ('final_new_layer_scope_verified','security_accepted','deployment_eligible',
@@ -735,6 +765,8 @@ def finalize(root):
             'payload_sha256':record['payload_sha256'],'evidence_sha256':record['evidence_sha256'],
             'image_input_signature':payload['image_input_signature'],'baseline_input_signature':payload['baseline_input_signature'],
             'input_signature_schema':'market_security_profile_overlay_inputs/1',
+            'parent_stack_ancestry_labels':dict(PARENT_STACK_LABELS),
+            'parent_stack_label_scope':'inherited_E46_security_stack_ancestry_not_current_target_product',
             'reports_sha256':{n:sha256(b).hexdigest() for n,b in reports.items()},
             'export_scope_sha256':sha256(read(root/'reports/export-scope.json')).hexdigest(),'raw_counts':counts,'archive':archive,
             'historical_tests':payload['historical']['expected_tests'],
@@ -774,7 +806,7 @@ def main(argv=None):
         print(json.dumps(failure,sort_keys=True),file=sys.stderr);return 1
 
 
-ERROR_CODES=frozenset(('admission_output', 'alias_cleanup_unknown', 'alias_exists', 'alias_identity', 'alias_owner', 'archive_changed', 'archive_closed_inventory', 'archive_config_identity', 'archive_expected_image', 'archive_interval', 'archive_json_bound', 'archive_layer_diff_id', 'archive_layer_expansion', 'archive_layers', 'archive_member', 'archive_missing', 'archive_size', 'archive_tags', 'archive_timeout', 'archive_trailer', 'archive_trailing_payload', 'baseline_copy_input', 'baseline_copy_scope_drift', 'baseline_product_drift', 'baseline_public_fingerprint_pin', 'baseline_public_fingerprint_unreviewed', 'baseline_test_assertion', 'baseline_test_missing', 'baseline_tree_identity', 'build_evidence_changed', 'build_receipt', 'cache_classification_header', 'cache_classification_identity', 'cache_classification_inventory', 'cache_classification_metadata', 'cache_classification_path', 'cache_classification_pin', 'cache_classification_scope', 'cache_classification_shape', 'cache_classification_source', 'cache_classification_unknown', 'candidate_config_drift', 'candidate_identity', 'candidate_image_contract', 'candidate_image_drift', 'candidate_image_identity', 'candidate_rootfs_drift', 'candidate_test_selection', 'candidate_tests', 'ci_identity', 'ci_root', 'classic_layout', 'classic_metadata', 'classic_repositories', 'classic_version', 'command_helper_pin', 'composition_evidence_changed', 'context_byte_bound', 'context_directory_mode', 'context_inventory', 'context_metadata', 'context_source_drift', 'controller_source_changed', 'dependency_lock_shape', 'dependency_product_drift', 'dependency_security_delta', 'docker_manifest', 'export_changed', 'export_receipt', 'file_changed', 'file_metadata', 'fixture_container_identity', 'fixture_exit', 'gate_receipt', 'git_tree_bound', 'git_tree_shape', 'github_ci_only', 'gzip_bound', 'historical_runtime_config_drift', 'historical_test_inventory', 'image_drift', 'input_bound', 'input_changed', 'input_metadata', 'input_path', 'legacy_bytes', 'native_checks', 'native_receipt', 'non_product_stack_changed', 'oci_blob', 'oci_depth', 'oci_descriptor', 'oci_index', 'oci_layout', 'oci_manifest', 'output_parent', 'output_scope', 'overlay_build_input_changed', 'overlay_input_signature', 'overlay_recipe_self_reference', 'parent_archive_metadata', 'parent_cleanup', 'parent_evidence_bound', 'parent_evidence_hash', 'parent_evidence_identity', 'parent_evidence_inventory', 'parent_evidence_member', 'parent_evidence_scope', 'parent_evidence_zip', 'parent_export_changed', 'parent_export_pin', 'parent_gzip_identity', 'parent_image_drift', 'parent_image_expansion', 'parent_image_inventory', 'parent_image_member', 'parent_image_zip', 'parent_label_inventory', 'parent_product_inventory', 'parent_rootfs', 'parent_runtime_config', 'parent_security_packages_changed', 'payload_identity', 'phase_invalid', 'product_layer_bound', 'product_layer_directory', 'product_layer_file', 'product_layer_member', 'product_layer_outside_scope', 'product_layer_padding', 'product_layer_short', 'product_layer_trailer', 'product_layer_whiteout', 'profile_cache_control', 'profile_control_pin', 'profile_dependency_control', 'profile_dossier', 'profile_historical_tree', 'profile_json', 'profile_json_bound', 'profile_output', 'profile_override_base', 'profile_override_control', 'profile_override_result', 'profile_patch_context', 'profile_patch_shape', 'profile_product_drift', 'profile_product_inventory', 'profile_product_mode', 'profile_recipe', 'profile_replay_inventory', 'profile_runtime_control', 'profile_source_control', 'profile_source_identity', 'profile_source_missing', 'profile_stack_control', 'profile_test_execution', 'profile_test_inventory', 'profile_test_result', 'profile_unknown', 'public_fingerprint_bound', 'public_fingerprint_digest', 'public_fingerprint_identity', 'public_fingerprint_json', 'public_fingerprint_metadata', 'public_fingerprint_missing', 'public_fingerprint_path', 'public_fingerprint_scope', 'public_fingerprint_shape', 'public_git_output_bound', 'public_git_read_failed', 'public_output_directory', 'public_output_path', 'public_source_default', 'published_main_required', 'raw_gate_failed', 'raw_high_critical_findings', 'raw_python_packages', 'raw_report_config', 'raw_report_identity', 'raw_report_shape', 'repository_required', 'runner_space', 'sbom_image_identity', 'sbom_package_version', 'security_overlay_inventory', 'source_blob_identity', 'source_changed', 'source_commit', 'source_file_bound', 'source_inventory', 'source_link_refused', 'source_pin', 'source_publication_drift', 'source_repository', 'source_tree_identity', 'stream_bound', 'stream_size', 'test_execution_profile', 'unreviewed_market_profile'))
+ERROR_CODES=frozenset(('admission_output', 'alias_cleanup_unknown', 'alias_exists', 'alias_identity', 'alias_owner', 'archive_changed', 'archive_closed_inventory', 'archive_config_identity', 'archive_expected_image', 'archive_interval', 'archive_json_bound', 'archive_layer_diff_id', 'archive_layer_expansion', 'archive_layers', 'archive_member', 'archive_missing', 'archive_size', 'archive_tags', 'archive_timeout', 'archive_trailer', 'archive_trailing_payload', 'baseline_copy_input', 'baseline_copy_scope_drift', 'baseline_product_drift', 'baseline_public_fingerprint_pin', 'baseline_public_fingerprint_unreviewed', 'baseline_test_assertion', 'baseline_test_missing', 'baseline_tree_identity', 'build_evidence_changed', 'build_receipt', 'cache_classification_header', 'cache_classification_identity', 'cache_classification_inventory', 'cache_classification_metadata', 'cache_classification_path', 'cache_classification_pin', 'cache_classification_scope', 'cache_classification_shape', 'cache_classification_source', 'cache_classification_unknown', 'candidate_config_drift', 'candidate_identity', 'candidate_image_contract', 'candidate_image_drift', 'candidate_image_identity', 'candidate_rootfs_drift', 'candidate_test_selection', 'candidate_tests', 'ci_identity', 'ci_root', 'classic_layout', 'classic_metadata', 'classic_repositories', 'classic_version', 'command_helper_pin', 'composition_evidence_changed', 'context_byte_bound', 'context_directory_mode', 'context_inventory', 'context_metadata', 'context_source_drift', 'controller_source_changed', 'dependency_lock_shape', 'dependency_product_drift', 'dependency_security_delta', 'docker_manifest', 'export_changed', 'export_receipt', 'file_changed', 'file_metadata', 'fixture_container_identity', 'fixture_exit', 'gate_receipt', 'git_tree_bound', 'git_tree_shape', 'github_ci_only', 'gzip_bound', 'historical_runtime_config_drift', 'historical_test_inventory', 'image_drift', 'input_bound', 'input_changed', 'input_metadata', 'input_path', 'legacy_bytes', 'native_checks', 'native_receipt', 'non_product_stack_changed', 'oci_blob', 'oci_depth', 'oci_descriptor', 'oci_index', 'oci_layout', 'oci_manifest', 'output_parent', 'output_scope', 'overlay_build_input_changed', 'overlay_input_signature', 'overlay_recipe_self_reference', 'parent_archive_metadata', 'parent_cleanup', 'parent_evidence_bound', 'parent_evidence_hash', 'parent_evidence_identity', 'parent_evidence_inventory', 'parent_evidence_member', 'parent_evidence_scope', 'parent_evidence_zip', 'parent_export_changed', 'parent_export_pin', 'parent_gzip_identity', 'parent_image_drift', 'parent_image_expansion', 'parent_image_inventory', 'parent_image_member', 'parent_image_zip', 'parent_label_inventory', 'parent_product_inventory', 'parent_rootfs', 'parent_runtime_config', 'parent_security_packages_changed', 'payload_identity', 'phase_invalid', 'product_layer_bound', 'product_layer_directory', 'product_layer_file', 'product_layer_member', 'product_layer_outside_scope', 'product_layer_padding', 'product_layer_short', 'product_layer_trailer', 'product_layer_whiteout', 'profile_cache_control', 'profile_control_pin', 'profile_dependency_control', 'profile_dossier', 'profile_historical_tree', 'profile_json', 'profile_json_bound', 'profile_output', 'profile_override_base', 'profile_override_control', 'profile_override_result', 'profile_patch_context', 'profile_patch_shape', 'profile_product_drift', 'profile_product_inventory', 'profile_product_mode', 'profile_recipe', 'profile_replay_inventory', 'profile_runtime_control', 'profile_source_control', 'profile_source_identity', 'profile_source_missing', 'profile_stack_control', 'profile_test_execution', 'profile_test_inventory', 'profile_test_result', 'profile_unknown', 'public_fingerprint_bound', 'public_fingerprint_digest', 'public_fingerprint_identity', 'public_fingerprint_json', 'public_fingerprint_metadata', 'public_fingerprint_missing', 'public_fingerprint_path', 'public_fingerprint_scope', 'public_fingerprint_shape', 'public_git_output_bound', 'public_git_read_failed', 'public_output_directory', 'public_output_path', 'public_source_default', 'published_main_required', 'raw_gate_failed', 'raw_high_critical_findings', 'raw_python_packages', 'raw_report_config', 'raw_report_identity', 'raw_report_shape', 'repository_required', 'runner_space', 'sbom_image_identity', 'sbom_package_version', 'security_overlay_inventory', 'source_blob_identity', 'source_changed', 'source_commit', 'source_file_bound', 'source_inventory', 'source_link_refused', 'source_pin', 'source_publication_drift', 'source_repository', 'source_tree_identity', 'stream_bound', 'stream_size', 'target_label_inventory', 'test_execution_profile', 'unreviewed_market_profile'))
 
 
 if __name__=='__main__':raise SystemExit(main())

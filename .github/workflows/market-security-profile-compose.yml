@@ -47,7 +47,7 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       MARKET_PROFILE: ${{ matrix.profile }}
-      CONTROLLER_SHA: e1bbe96da97a4f533fba6d9c20dc8e8fb7f4cffd31ac2e750b9619861cd30981
+      CONTROLLER_SHA: 64c7755037a0bd4cd9cc2224624e1ea5c7c596ba63a430a69da36ab8aaf7398a
       PREPARER_SHA: c998a45c5777df52e575ef3ea70cd65699708f05194d67b0ea3f1f52dd2b3e50
     steps:
       - uses: actions/checkout@v4
