@@ -339,10 +339,11 @@ class ActivationTests(unittest.TestCase):
                 'media_type':'application/vnd.oci.image.manifest.v1+json','size':5254},
             'sha256:'+C.IMAGE['archive_observation']['index_sha256']:{'kind':'OCI_index_to_manifest_to_config',
                 'media_type':'application/vnd.oci.image.index.v1+json','size':241}}
-        return {'schema':'canonical_app_preloaded_image/1','operation':'security-canonical-app-candidate-images-20261025-01',
+        return {'schema':'canonical_app_preloaded_image/2','operation':'security-canonical-app-candidate-images-20261025-01',
             'site':'native' if site == 'bot' else 'web','host_machine_id':'a'*32,
             'host':'65.109.216.187' if site == 'bot' else '65.109.220.59',
             'catalog_sha256':C.LOAD_CATALOG,'controller_sha256':C.LOAD_CONTROLLER,'engine_sha256':C.LOAD_ENGINE,
+            'health_policy_sha256':C.LOAD_HEALTH_POLICY,'health_adapter_sha256':C.LOAD_HEALTH_ADAPTER,
             'ci_run_id':C.IMAGE['run_id'],'image_artifact_sha256':C.IMAGE['image_zip_sha256'],
             'actual_ci_run_id':C.SMOKE['run_id'],'actual_ci_artifact_sha256':C.SMOKE['zip_sha256'],
             'role':'app','profile':'canonical_app','candidate_config_id':C.IMAGE['image_id'],
@@ -353,14 +354,49 @@ class ActivationTests(unittest.TestCase):
             'archive_and_config_association_verified':True,'whole_typed_config_compared_in_ram':True,
             'physical_graph_closed':True,'runtime_policy_preserved':True,'serving_app_roles_unchanged':True,
             'serving_roles_activated':[],'serving_validation':'NOT_TESTED','configuration_values_disclosed':False,
-            'runtime_health_issues_open':True,'capture_issue_open':True,'security_accepted':False}
+            'runtime_health_issues_open':True,'capture_issue_open':True,'security_accepted':False,'runtime_health_observations':[]}
     def test_host_load_requires_actual_new_receipt_contract_and_measured_identity(self):
+        for pin,name in ((C.LOAD_CONTROLLER,'canonical_app_candidate_images_v2.py'),
+            (C.LOAD_HEALTH_POLICY,'runtime_health_observation_policy.py'),(C.LOAD_HEALTH_ADAPTER,'market_candidate_images_v3.py')):
+            self.assertEqual(pin,sha256((ROOT/'deploy/maintenance'/name).read_bytes()).hexdigest())
         for site in C.SITES:
             value = self.public_load_receipt(site); self.assertEqual(C.host_load(value,site,{'machine_id':'a'*32}),C.IMAGE['image_id'])
             for change in ({'schema':'market_preloaded_image/1'},{'actual_ci_run_id':0},{'physical_graph_closed':False},
+                {'schema':'canonical_app_preloaded_image/1'},
+                {'controller_sha256':'43029071a8e67d55d16a31b413d861a6f5ad446ad1f8e8723d4795e13044b4ae'},
+                {'health_policy_sha256':'0'*64},{'health_adapter_sha256':'0'*64},
                 {'controller_sha256':'0'*64},{'candidate_local_image_id':'sha256:'+'0'*64},
                 {'rootfs':list(reversed(value['rootfs']))},{'security_accepted':True},{'site':'other'}):
                 with self.subTest(site=site,change=change),self.assertRaises(RuntimeError):C.host_load({**value,**change},site,{'machine_id':'a'*32})
+    def test_image_store_observations_remain_bound_history_with_no_serving_health_waiver(self):
+        value = self.public_load_receipt('bot')
+        row = {'schema':'runtime_image_store_health_observation/1','operation':value['operation'],
+            'operation_sha256':value['operation_sha256'],'health_policy_sha256':C.LOAD_HEALTH_POLICY,'nonce':value['nonce'],
+            'site':'bot','container_id':'1'*64,'image_id':'sha256:'+'2'*64,'pid':123,'started':'2026-10-25T12:00:00Z',
+            'restarts':0,'baseline_health':'healthy','observed_health':'unhealthy','observed_at':100,
+            'runtime_health_issues_open':True,'security_accepted':False}
+        value['runtime_health_observations'] = [row]
+        value['peer_runtime_health_observations'] = [{**row,'site':'web','container_id':'3'*64}]
+        before = deepcopy(value)
+        self.assertEqual(C.host_load(value,'bot',{'machine_id':'a'*32}),C.IMAGE['image_id']); self.assertEqual(value,before)
+        for change in ({'nonce':'e'*32},{'operation_sha256':'f'*64},{'site':'web'},{'health_policy_sha256':'0'*64},
+            {'pid':True},{'restarts':False},{'observed_at':True},{'started':'2026-99-25T12:00:00Z'},
+            {'observed_health':'starting'},{'observed_health':'healthy'},{'Env':['PRIVATE must refuse']},
+            {'container_id':'6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752'},
+            {'security_accepted':True}):
+            changed = deepcopy(value); changed['runtime_health_observations'][0].update(change)
+            with self.subTest(change=change),self.assertRaises(RuntimeError):C.host_load(changed,'bot',{'machine_id':'a'*32})
+        for rows in (None,[row,row],[{**row,'container_id':'2'*64},row],[row]*129):
+            changed = deepcopy(value); changed['runtime_health_observations'] = rows
+            with self.subTest(rows=type(rows).__name__),self.assertRaises(RuntimeError):C.host_load(changed,'bot',{'machine_id':'a'*32})
+        web = self.public_load_receipt('web'); web['peer_runtime_health_observations'] = [{**row,'site':'web'}]
+        with self.assertRaises(RuntimeError):C.host_load(web,'web',{'machine_id':'a'*32})
+        # The normal serving health requirement remains strict even though the
+        # historical image-store receipt truthfully records an unhealthy role.
+        f = fixture(); f.old_row['health'] = 'unhealthy'; backend = S.Site.__new__(S.Site)
+        backend.deadline = time.monotonic()-1; backend.inspect = lambda cid:deepcopy(f.old_row)
+        backend.singleton = lambda *a,**kw:None; backend.units_check = lambda:None
+        with self.assertRaisesRegex(RuntimeError,'normal_role_unready'):backend.functional('app',f.old_row)
     def test_fresh_backup_and_schema_evidence_cannot_be_replaced_by_missing_or_generic_proof(self):
         # Unit schema fixtures are not actual production restore/LOAD receipts.
         # The real fixed CI ZIP is intentionally mocked only in this pure routing test.

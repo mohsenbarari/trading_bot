@@ -3,21 +3,19 @@
 - Global acceptance false: serving App/Market/datastores not upgraded; refactor
   STOP/streak0. After security closure require30 consecutive accepted clean units;
   failures reset streak with history; tests/polls never count. Preserve behavior,
-  single capture owner/user changes. No routine permission; Writer/DNS human.
-- Host/TLS complete; fresh backups pending; infrastructure memory.
+  single capture owner/user changes. Writer/DNS human.
+- Host/TLS complete; fresh backups pending.
   Final accepts ciphertext backups only, no App provisioning/migration authority.
 - ed59 cannot become main. Ordinary665220a2/e1a727de built/exported;
-  CI40196208692 passed32/32 including graph/cleanup; not serving.
+  CI40196208692 passed32/32 not serving.
   Raw44HIGH gate failed. Freeze main; controllers advance on security branch;
   merge after activation. Preserve dirty coin-market-retention.md untouched.
 - Failed App COW restored Web/API200. Never retry/reroute C/S/R fresh-profile
   or COW guard adaptation/probe. Ordinary main artifact requires fresh serving/
   config/backup/functional proof; preserve rollback overrides/images/history.
-- Raw44HIGH retain43 assessments; ACL caller gap OPEN, no global FIXED.
-  Image-store06 keeps fixed
-  processor health-only observation and bounded capture readiness;
-  never mutating-RPC retry.
-  Capture conflicts/F79's two source overrides remain OPEN.
+- Raw44HIGH retain43 assessments; ACL caller gap/capture conflicts OPEN.
+  Image-store-only observation never permits serving or mutating-RPC retry.
+  Preserve F79 source overrides.
 - PG49a8/Redis98c4 built/scanned, not activated. PG Windows UNKNOWN retains Linux
   absence proof. Datastore03 Redis LOAD passed both; PG Web passed, Native0bd
   failed before header/LOAD request. Abort02 d27c actual two-host durable closure

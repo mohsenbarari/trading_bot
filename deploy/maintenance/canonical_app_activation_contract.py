@@ -4,6 +4,7 @@ No historical consumer/COW controller or probe is imported. Missing actual host
 LOAD, backup/restore, schema or normal-prefix evidence leaves this UNARMED.
 """
 from copy import deepcopy
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import PurePosixPath
 import io
@@ -645,18 +646,49 @@ def other_containers(before,after,old_id,new_id=None):
     return True
 
 
-LOAD_CONTROLLER = '43029071a8e67d55d16a31b413d861a6f5ad446ad1f8e8723d4795e13044b4ae'
+LOAD_CONTROLLER = 'd7ca623be49facc51a58a58dd38bfa06760287a46b2b30e9db0b73d53e7f19e6'
 LOAD_CATALOG = 'bebdd67daf4ef7950b2c4278cd338ec0d11130ea84df0a7fd8c41d4a9ddc13d0'
 LOAD_ENGINE = '1041cc2d04100e2f6aebb95dca30c2339de41342b350ef44522c05277e9c146e'
+LOAD_HEALTH_POLICY = '2e520dcb1ac3ab9b0da96959caad3035170d792284bf3df531f128f43a3f9c86'
+LOAD_HEALTH_ADAPTER = '5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
+
+
+def load_observation_history(value,site):
+    """Closed image-store history only; this grants no serving health exception."""
+    fields = {'schema','operation','operation_sha256','health_policy_sha256','nonce','site',
+        'container_id','image_id','pid','started','restarts','baseline_health','observed_health','observed_at',
+        'runtime_health_issues_open','security_accepted'}
+    for name,record_site in (('runtime_health_observations',site),('peer_runtime_health_observations','web')):
+        rows = value.get(name,[]) if name.startswith('peer_') else value.get(name)
+        require(type(rows) is list and len(rows) <= 128 and (site == 'bot' or not name.startswith('peer_') or not rows),'host_load_gate')
+        ids = []
+        for row in rows:
+            require(type(row) is dict and set(row) == fields,'host_load_gate')
+            require(all(same(row.get(k),v) for k,v in {
+                'schema':'runtime_image_store_health_observation/1','operation':value['operation'],
+                'operation_sha256':value['operation_sha256'],'health_policy_sha256':LOAD_HEALTH_POLICY,
+                'nonce':value['nonce'],'site':record_site,'runtime_health_issues_open':True,'security_accepted':False}.items()),'host_load_gate')
+            require(hex64(row['container_id']) and row['container_id'] != '6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752'
+                and image_id(row['image_id']) and type(row['pid']) is int and row['pid'] > 0
+                and type(row['restarts']) is int and row['restarts'] >= 0
+                and type(row['observed_at']) is int and row['observed_at'] >= 0
+                and type(row['baseline_health']) is str and type(row['observed_health']) is str
+                and {row['baseline_health'],row['observed_health']} == {'healthy','unhealthy'}
+                and type(row['started']) is str and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z',row['started']), 'host_load_gate')
+            try: valid_start = datetime.fromisoformat(row['started'].replace('Z','+00:00')).tzinfo == timezone.utc
+            except ValueError: valid_start = False
+            require(valid_start,'host_load_gate'); ids.append(row['container_id'])
+        require(ids == sorted(set(ids)),'host_load_gate')
 
 
 def host_load(value,site,scope):
     """Actual new App receipt, never a historical Market receipt or future ID."""
-    fixed = {'schema':'canonical_app_preloaded_image/1',
+    fixed = {'schema':'canonical_app_preloaded_image/2',
         'operation':'security-canonical-app-candidate-images-20261025-01',
         'site':'native' if site == 'bot' else 'web','host_machine_id':scope['machine_id'],
         'host':'65.109.216.187' if site == 'bot' else '65.109.220.59',
         'catalog_sha256':LOAD_CATALOG,'controller_sha256':LOAD_CONTROLLER,'engine_sha256':LOAD_ENGINE,
+        'health_policy_sha256':LOAD_HEALTH_POLICY,'health_adapter_sha256':LOAD_HEALTH_ADAPTER,
         'ci_run_id':IMAGE['run_id'],'image_artifact_sha256':IMAGE['image_zip_sha256'],
         'actual_ci_run_id':SMOKE['run_id'],'actual_ci_artifact_sha256':SMOKE['zip_sha256'],
         'role':'app','profile':'canonical_app','candidate_config_id':IMAGE['image_id'],
@@ -676,6 +708,7 @@ def host_load(value,site,scope):
         and value.get('candidate_local_image_id') in identities
         and hex64(value.get('source_admission_sha256')) and hex64(value.get('operation_sha256'))
         and type(value.get('nonce')) is str and re.fullmatch('[a-f0-9]{32}',value['nonce']),'host_load_gate')
+    load_observation_history(value,site)
     public(value); return value['candidate_local_image_id']
 
 
