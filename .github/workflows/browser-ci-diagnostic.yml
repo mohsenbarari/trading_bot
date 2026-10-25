@@ -127,6 +127,19 @@ jobs:
         DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
       working-directory: frontend
       run: npx playwright install --with-deps "$DIAGNOSTIC_BROWSER"
+    - name: Observe selected browser secure-cookie loopback policy
+      id: cookie
+      timeout-minutes: 2
+      working-directory: frontend
+      env:
+        DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
+      shell: bash
+      run: |
+        node --test ../scripts/probe_browser_ci_secure_cookie.test.mjs
+        mkdir -p ../tmp
+        timeout --signal=TERM --kill-after=2s 75s \
+          node ../scripts/probe_browser_ci_secure_cookie.mjs "$DIAGNOSTIC_BROWSER" \
+          > ../tmp/browser-ci-secure-cookie.json
     - name: Build frontend
       working-directory: frontend
       run: npm run build
@@ -261,6 +274,7 @@ jobs:
       if: always()
       env:
         SOURCE_OUTCOME: ${{ steps.source.outcome }}
+        COOKIE_OUTCOME: ${{ steps.cookie.outcome }}
         BOOTSTRAP_OUTCOME: ${{ steps.bootstrap.outcome }}
         SURFACE_OUTCOME: ${{ steps.surface.outcome }}
         BROWSER_OUTCOME: ${{ steps.browser.outcome }}
@@ -275,7 +289,7 @@ jobs:
             'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
         }
         allowed = {'success', 'failure', 'cancelled', 'skipped', ''}
-        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'bootstrap', 'surface', 'browser', 'cleanup')}
+        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'bootstrap', 'surface', 'browser', 'cleanup')}
         if not all(item in allowed for item in outcomes.values()):
             raise SystemExit('unknown diagnostic outcome')
         value['step_outcomes'] = outcomes
@@ -295,6 +309,7 @@ jobs:
           frontend/test-results-production-login
           tmp/browser-ci-backend-exceptions.json
           tmp/browser-ci-backend-exception-status.json
+          tmp/browser-ci-secure-cookie.json
 
           tmp/browser-ci-diagnostic.json
         if-no-files-found: ignore

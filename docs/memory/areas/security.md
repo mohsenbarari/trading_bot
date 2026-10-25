@@ -13,8 +13,8 @@
   main artifact with fresh config/backup/functional evidence.
 - Raw44HIGH retain43 assessments; ACL/capture conflicts OPEN. Image-store success
   grants no serving eligibility or mutating-RPC retry. Preserve F79's two baked
-  functional source changes: actual five mounts include no code binds. Existing
-  bind-assuming role/diagnostic source contracts must be corrected before use.
+  functional source changes: actual five mounts include no code binds. Reviewed
+  contracts prove both baked files/layers/lifecycle; actual diagnostic remains OPEN.
 - PG49a8/Redis98c4 not activated; Windows UNKNOWN retains Linux absence proof.
   Both candidates now loaded both hosts. Native0bd closed d27/b651; preparation
   failure preserved, distinct PG02 daa94 passed actual Native LOAD0a6f760f.
@@ -23,7 +23,8 @@
   E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
   memoryfloor failure retired/guards closed under2ddd; no LOAD. Both watchdogs
   auto-restored normal apply; finite windows only. Keep eight readers.
-  Fixed-TAR probes measured Python only; no daemon heap bound. Appv3 source reviewed.
+  Probes exclude daemon heap. Appv3 admitted8139/f19;
+  Native prepare failed pre-LOAD, cause UNPROVEN; keep once/history.
 - Expired controls grant no authority; unknown RPC never proves cancel/retry.
   Config/manifest differ; classic branches never query Descriptor. Physical TAR
   members unique; repeated logical layers valid, every ordered DiffID strict.

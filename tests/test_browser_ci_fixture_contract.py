@@ -135,6 +135,24 @@ class BrowserFixtureTests(unittest.TestCase):
             self.assertIn('tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions', step['run'])
             self.assertNotIn('continue-on-error', step)
 
+    def test_cookie_observation_is_owned_selected_job_only_and_preserved_as_diagnostic_evidence(self):
+        job = workflow('browser-ci-diagnostic.yml')['jobs']['browser-diagnostic']
+        steps = job['steps']
+        probe = next(s for s in steps if s.get('id') == 'cookie')
+        self.assertEqual(probe['env'], {'DIAGNOSTIC_BROWSER': '${{ inputs.browser }}'})
+        self.assertEqual(probe['timeout-minutes'], 2)
+        self.assertNotIn('continue-on-error', probe)
+        self.assertIn('node --test ../scripts/probe_browser_ci_secure_cookie.test.mjs', probe['run'])
+        self.assertIn('node ../scripts/probe_browser_ci_secure_cookie.mjs "$DIAGNOSTIC_BROWSER"', probe['run'])
+        self.assertIn('timeout --signal=TERM --kill-after=2s 75s', probe['run'])
+        self.assertLess(steps.index(probe), next(i for i, s in enumerate(steps) if s.get('id') == 'bootstrap'))
+        upload = next(s for s in steps if s['name'] == 'Upload diagnostic evidence')
+        self.assertEqual(upload['if'], 'always()')
+        self.assertIn('tmp/browser-ci-secure-cookie.json', upload['with']['path'].splitlines())
+        for name in ('merge-gate.yml', 'pre-release-gate.yml'):
+            normal = workflow(name)['jobs']['frontend-browser-matrix']
+            self.assertFalse(any('probe_browser_ci_secure_cookie' in s.get('run', '') for s in normal['steps']))
+
     def test_actual_telegram_policy_allows_queue_production_but_never_provider_execution(self):
         source = ast.parse((ROOT / 'core/telegram_delivery_runtime_policy.py').read_bytes())
         # Keep every policy definition unchanged; inject only its configuration
@@ -279,16 +297,18 @@ class BrowserFixtureTests(unittest.TestCase):
     def test_manual_final_record_preserves_failure_and_never_becomes_global_acceptance(self):
         job = workflow('browser-ci-diagnostic.yml')['jobs']['browser-diagnostic']
         step = next(s for s in job['steps'] if s['name'] == 'Record diagnostic outcome')
-        for browser in ('success', 'failure'):
+        for browser, cookie in (('success', 'success'), ('failure', 'success'), ('success', 'failure')):
             with tempfile.TemporaryDirectory() as directory:
                 self.binding(directory, 'a' * 40, 'a' * 40)
-                environment = {key.upper() + '_OUTCOME': 'success' for key in ('source', 'bootstrap', 'surface', 'browser', 'cleanup')}
+                environment = {key.upper() + '_OUTCOME': 'success' for key in ('source', 'cookie', 'bootstrap', 'surface', 'browser', 'cleanup')}
                 environment['BROWSER_OUTCOME'] = browser
+                environment['COOKIE_OUTCOME'] = cookie
                 with chdir(directory), patch.dict(os.environ, environment, clear=True):
                     exec(compile(inline_python(step), 'owned_diagnostic_outcome_fixture', 'exec'), {})
                 value = json.loads((Path(directory) / 'tmp/browser-ci-diagnostic.json').read_text())
-                self.assertEqual(value['diagnostic_complete'], browser == 'success')
+                self.assertEqual(value['diagnostic_complete'], browser == cookie == 'success')
                 self.assertEqual(value['step_outcomes']['browser'], browser)
+                self.assertEqual(value['step_outcomes']['cookie'], cookie)
                 self.assertFalse(value['full_matrix_accepted'])
                 self.assertFalse(value['security_accepted'])
 

@@ -635,12 +635,23 @@ test.describe('accountant owner lifecycle', () => {
     await expect(workspace).toContainText(relationDisplayName, { timeout: 30000 })
     await expect(workspace).toContainText(dutyDescription, { timeout: 30000 })
 
+    const publicProfileResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'GET'
+      && response.url().endsWith(`/api/users-public/${owner.userId}`),
+    )
     await page.goto(`/users/${owner.userId}`)
+    const publicProfileResponse = await publicProfileResponsePromise
+    expect(publicProfileResponse.ok()).toBeTruthy()
+    const publicProfile = await publicProfileResponse.json()
+    expect(publicProfile.id).toBe(owner.userId)
+    expect(publicProfile.account_name).toBe(owner.accountName)
+    expect(publicProfile).not.toHaveProperty('accountant_relations')
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
       timeout: 30000,
     })
-    await expect(page.locator('.accountant-relations-section')).toContainText(relationDisplayName)
-    await expect(page.locator('.accountant-relations-section')).toContainText(dutyDescription)
+    // The public profile exposes contact fields; owner relation details remain
+    // in the authenticated accountant workspace checked above and below.
+    await expect(page.locator('.accountant-relations-section')).toHaveCount(0)
 
     await page
       .locator('.owner-profile-section .settings-btn')

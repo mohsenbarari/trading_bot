@@ -253,7 +253,7 @@ async function openAdminUserProfile(page: Page, user: SessionUser) {
   await expect(identityTitle).toHaveText(user.accountName)
 }
 
-async function toggleAccountStatusFromAdminProfile(page: any) {
+async function toggleAccountStatusFromAdminProfile(page: Page, targetStatus: 'active' | 'inactive') {
   const profile = page.locator('.admin-user-profile:visible')
   await expect(profile).toHaveCount(1)
   const settings = profile.locator('.settings-menu.profile-menu-card')
@@ -264,27 +264,25 @@ async function toggleAccountStatusFromAdminProfile(page: any) {
   }
   await expect(settings).toBeVisible({ timeout: 30000 })
   await expect(settings.locator('.ui-inset-group__title')).toHaveText('تنظیمات کاربر')
+  const currentLabel = targetStatus === 'inactive' ? 'فعال' : 'غیرفعال'
   const toggleButton = settings.getByRole('button', {
-    name: /^تغییر وضعیت حساب \((فعال|غیرفعال)\)$/,
+    name: `تغییر وضعیت حساب (${currentLabel})`, exact: true,
   })
   await expect(toggleButton).toBeVisible({ timeout: 30000 })
-  const playwrightPage = page as any
-  const dialogHandler: any = async (dialog: any) => {
-    await dialog.accept()
-  }
-  // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
-  playwrightPage.on('dialog', dialogHandler)
+  await toggleButton.click()
+  const verb = targetStatus === 'inactive' ? 'غیرفعال' : 'فعال'
+  const confirmation = page.getByRole('dialog', {
+    name: `تأیید ${verb}‌سازی حساب`, exact: true,
+  })
+  await expect(confirmation).toBeVisible()
   const updateResponsePromise = page.waitForResponse((response) => {
     return response.request().method() === 'PUT' && /\/api\/users\/\d+$/.test(response.url())
   })
-  try {
-    await toggleButton.click()
-    const response = await updateResponsePromise
-    expect(response.ok()).toBeTruthy()
-  } finally {
-    // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
-    playwrightPage.off('dialog', dialogHandler)
-  }
+  await confirmation.getByRole('button', { name: `${verb} کردن`, exact: true }).click()
+  const response = await updateResponsePromise
+  expect(response.request().postDataJSON()).toEqual({ account_status: targetStatus })
+  expect(response.ok()).toBeTruthy()
+  await expect(confirmation).toBeHidden()
 }
 
 async function createIsolatedPage(browser: any, tokens: AuthTokens) {
@@ -344,7 +342,7 @@ test.describe('Account status browser regression', () => {
       await expect(userPage.getByText('حساب کاربری غیرفعال شده است')).toHaveCount(0)
 
       await openAdminUserProfile(adminPage, targetUser)
-      await toggleAccountStatusFromAdminProfile(adminPage)
+      await toggleAccountStatusFromAdminProfile(adminPage, 'inactive')
 
       await expect
         .poll(async () => {
@@ -369,7 +367,7 @@ test.describe('Account status browser regression', () => {
       await userPage.waitForURL(/\/login$/)
       await expect(userPage.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
 
-      await toggleAccountStatusFromAdminProfile(adminPage)
+      await toggleAccountStatusFromAdminProfile(adminPage, 'active')
 
       const reactivatedTokens = mintFreshSession(targetUser.userId)
       await setAuthTokens(userPage, reactivatedTokens)

@@ -294,3 +294,14 @@ passed with no errors/failures/skips in an actual readonly, networkless containe
 separate init and genuine UID0/CAP_CHOWN-only/NNP. Packet0ce5e9bb binds the final
 sources. Earlier04/05 fixture attempts retain their startup/missing-public-input
 failures; neither was represented as passing.
+
+Browser triage confirmed two stale fixture contracts: account-status now uses
+the actual application confirmation dialog and verifies its target PUT body;
+accountant self public-profile checks preserve contact-only serialization and
+keep relation/workspace checks on the authenticated workspace. Independent source
+review passed. A selected-job-only synthetic loopback cookie probe separately
+measures browser-store acceptance and retransmission; URL-filtered cookie lookup
+was corrected before publication. Root11 owned HTTP/child fixtures and13 workflow
+contracts passed; this is not an actual browser result. No product cookie/CSRF
+policy, ordinary workflow gate, timeout or retry was relaxed. The hosted cookie
+observation and current selected scenarios remain pending.
