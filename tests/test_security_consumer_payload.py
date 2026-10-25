@@ -259,7 +259,10 @@ class SecurityPayload(unittest.TestCase):
     def test_ci_is_explicit_public_payload_only_no_activation_or_scanner_waiver(self):
         workflow = yaml.safe_load((REPO / '.github/workflows/pre-release-gate.yml').read_text())
         job = workflow['jobs']['security-consumer-payload']
-        self.assertEqual(job['if'], "github.event_name == 'workflow_dispatch' && inputs.security_payload && !inputs.market_security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha)")
+        original_guard = "github.event_name == 'workflow_dispatch' && inputs.security_payload && !inputs.market_security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha)"
+        self.assertEqual(job['if'], '!inputs.browser_diagnostic_only && (' + original_guard + ')')
+        inputs = yaml.load((REPO / '.github/workflows/pre-release-gate.yml').read_text(), Loader=yaml.BaseLoader)['on']['workflow_dispatch']['inputs']
+        self.assertEqual(inputs['browser_diagnostic_only']['default'], 'false')
         self.assertEqual(job['permissions'], {'contents': 'read'})
         self.assertEqual(job['runs-on'], 'ubuntu-latest')
         self.assertEqual(job['env']['TRIVY_IGNORE_UNFIXED'], 'false')

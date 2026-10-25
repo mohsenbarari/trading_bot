@@ -212,6 +212,9 @@ jobs:
           make observability-gate
           python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
           python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions
+          python3 -m unittest -v \
+            tests.test_prepare_market_security_payload.MarketSecurityPayloadTests.test_actual_workflow_opt_in_and_raw_scan_export_gate_contract \
+            tests.test_security_consumer_payload.SecurityPayload.test_ci_is_explicit_public_payload_only_no_activation_or_scanner_waiver
 
   frontend-browser-matrix:
     permissions:

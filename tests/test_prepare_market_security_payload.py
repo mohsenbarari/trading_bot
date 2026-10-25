@@ -477,14 +477,28 @@ class MarketSecurityPayloadTests(unittest.TestCase):
             self.assertEqual(json.loads(output.getvalue())['code'],'raw_high_critical_findings' if mode=='original' else 'export_receipt')
 
     def test_actual_workflow_opt_in_and_raw_scan_export_gate_contract(self):
+        import shlex
         import yaml
         value=yaml.load((ROOT/'.github/workflows/pre-release-gate.yml').read_text(),Loader=yaml.BaseLoader)
         self.assertEqual(value['on']['workflow_dispatch']['inputs']['market_security_payload']['default'],'false')
+        self.assertEqual(value['on']['workflow_dispatch']['inputs']['browser_diagnostic_only']['default'],'false')
         jobs=value['jobs'];job=jobs['market-security-payload'];self.assertNotIn('needs',job)
         self.assertEqual(job['steps'][0]['with']['ref'],'main')
         for name in ('repository-governance','market-postgres-gate','observability-gate','frontend-browser-matrix'):
-            self.assertEqual(jobs[name]['if'],'!inputs.market_security_payload')
+            self.assertEqual(jobs[name]['if'],'!inputs.browser_diagnostic_only && (!inputs.market_security_payload)')
         self.assertIn('!inputs.market_security_payload',jobs['security-consumer-payload']['if'])
+        required={
+            'tests.test_prepare_market_security_payload.MarketSecurityPayloadTests.test_actual_workflow_opt_in_and_raw_scan_export_gate_contract',
+            'tests.test_security_consumer_payload.SecurityPayload.test_ci_is_explicit_public_payload_only_no_activation_or_scanner_waiver',
+        }
+        for name in ('pre-release-gate.yml','merge-gate.yml'):
+            workflow=yaml.load((ROOT/'.github/workflows'/name).read_text(),Loader=yaml.BaseLoader)
+            self.assertIn('observability-gate',workflow['jobs']['frontend-browser-matrix']['needs'])
+            commands=[shlex.split(line) for step in workflow['jobs']['observability-gate']['steps']
+                      for line in step.get('run','').replace('\\\n',' ').splitlines()
+                      if line.strip().startswith('python3 -m unittest ')]
+            self.assertTrue(any(command[:4]==['python3','-m','unittest','-v'] and set(command[4:])==required
+                                for command in commands),name+' must execute exactly the two workflow contract methods before browsers')
         steps={step['id']:step for step in job['steps'] if 'id' in step}
         self.assertIn(sha256((ROOT/'scripts/prepare_market_security_payload.py').read_bytes()).hexdigest(),steps['market_seal']['run'])
         self.assertIn(M.COMMAND_HELPERS_SHA256,steps['market_seal']['run'])
