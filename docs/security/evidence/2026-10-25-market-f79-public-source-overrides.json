@@ -1,0 +1,36 @@
+{
+  "all_other_source_files_match_label_commit": true,
+  "cache_execution_selection": "NOT_ASSESSED_HERE",
+  "cache_files": 171,
+  "container_id": "6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752",
+  "copied_non_pyc_source_files": 93,
+  "git_label_mismatch_count": 2,
+  "image": "sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b",
+  "label_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+  "new_candidate_built": false,
+  "observed_at_utc": "2026-10-25T00:03:07.213409+00:00",
+  "overrides": {
+    "core/market_intelligence/private_capture.py": {
+      "actual_bytes": 111954,
+      "actual_sha256": "1b9c611692978edec4c37de217e77abf00f5a0e456006060c936d40c53978929",
+      "commit": "adca507b261d3e139befc67b4a937c48c96bb949",
+      "kind": "exact_committed_public_source"
+    },
+    "core/market_intelligence/private_pipeline_foundation.py": {
+      "actual_bytes": 37187,
+      "actual_sha256": "f9d2b55921431e069b06e7de463d8b1d36ecbc01a94d5d0d98cd59f1dc9260da",
+      "assessment": "bounded static error type/origin/line reporting only; preserve exact active variant; not a whole-program behavior equivalence claim",
+      "base_sha256": "2b9bcc1b92626cbc1378003bad75f68fb55826cacc45c46e31aadf07be92965f",
+      "exact_patch_replay_verified": true,
+      "kind": "observed_public_patch_from_label_commit",
+      "patch_format": "unified diff with zero context; require exact base SHA before git apply --unidiff-zero",
+      "patch_path": "docs/security/evidence/2026-10-25-market-f79-public-foundation.patch",
+      "patch_sha256": "40d0bcaf33d5ef5b5ec714b333274f57af1057973ad757f330c71f6eb09cd292"
+    }
+  },
+  "public_fingerprint_sha256": "2c1db0b6314e5473770030fa8a23cafc39f9507837fc6fddd8ccd37d3f973e58",
+  "runtime_changed": false,
+  "runtime_private_inputs_read": false,
+  "schema": "market_f79_observed_public_source_overrides/1",
+  "security_accepted": false
+}

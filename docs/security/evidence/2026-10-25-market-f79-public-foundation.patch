@@ -1,0 +1,45 @@
+--- a/core/market_intelligence/private_pipeline_foundation.py
++++ b/core/market_intelligence/private_pipeline_foundation.py
+@@ -900,5 +900,37 @@
+-    except (OSError, ValueError, sqlite3.Error):
+-        print(
+-            safe_json({"status": "fail", "reason_code": "runtime_dependency_failure"}),
+-            file=sys.stderr,
+-        )
++    except (OSError, ValueError, sqlite3.Error) as exc:
++        # Static bounded code identity only: never message, locals or paths.
++        allowed_types = {
++            "OSError", "ValueError", "FileNotFoundError", "PermissionError",
++            "NotADirectoryError", "IsADirectoryError", "FileExistsError",
++            "TimeoutError", "ConnectionError", "ConnectionResetError",
++            "ConnectionRefusedError", "ConnectionAbortedError", "BrokenPipeError",
++            "BlockingIOError", "InterruptedError", "UnicodeDecodeError",
++            "Error", "DatabaseError", "OperationalError", "IntegrityError",
++            "ProgrammingError", "InterfaceError", "DataError", "NotSupportedError",
++        }
++        name = type(exc).__name__
++        evidence = {"status": "fail", "reason_code": "runtime_dependency_failure",
++                    "error_type": name if len(name) <= 64 and name in allowed_types else "OtherDependencyError",
++                    "origin": "other_runtime", "origin_line": 0}
++        origins = {
++            "/core/market_intelligence/private_pipeline_foundation.py": "pipeline_foundation",
++            "/core/market_intelligence/private_capture.py": "private_capture",
++            "/core/market_intelligence/private_capture_service.py": "capture_service",
++            "/core/market_intelligence/private_capture_telegram.py": "telegram_capture",
++            "/telethon/sessions/sqlite.py": "telethon_sqlite_session",
++            "/telethon/client/telegrambaseclient.py": "telethon_client",
++            "/telethon/client/auth.py": "telethon_auth",
++            "/telethon/network/connection/connection.py": "telethon_connection",
++        }
++        trace = exc.__traceback__
++        for _ in range(64):
++            if trace is None:
++                break
++            filename = trace.tb_frame.f_code.co_filename
++            for suffix, origin in origins.items():
++                if filename.endswith(suffix) and 1 <= trace.tb_lineno <= 1000000:
++                    evidence.update(origin=origin, origin_line=trace.tb_lineno)
++            trace = trace.tb_next
++        if trace is not None:
++            evidence.update(origin="trace_depth_limit", origin_line=0)
++        print(safe_json(evidence), file=sys.stderr)
