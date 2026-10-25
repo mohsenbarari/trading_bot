@@ -6,6 +6,14 @@ container. App activation is not a prerequisite. It changes no App controller,
 C/S/R or COW policy, Writer/DNS authority, reader unit, database, model or volume.
 The separate `market_security_rollout.py` draft remains unapproved and untouched.
 
+The first01 namespace completed public staging only. Its first actual Native
+read-only snapshot refused because optional Docker Health metadata was absent;
+no controls, attempts, guards or image operations existed. Its staged sources
+and failure evidence remain unchanged. The02 namespace uses guarded optional
+map access for Health/Healthcheck, preserving null values and F79's mandatory
+healthy predicate. Fixed snapshot-command subphases identify future refusals
+without exposing raw stderr, configuration or exception arguments.
+
 The closed catalog is
 [`market_candidate_images.json`](../../deploy/maintenance/market_candidate_images.json),
 55511 bytes, SHA256
@@ -58,8 +66,8 @@ into the Web daemon.
    0700 and staged regular files0600/single-link. Existing namespaces and files
    must never be replaced to bypass an old attempt.
 2. Native namespace is
-   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-01`;
-   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-01`.
+   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-02`;
+   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-02`.
    Root collects a fresh read-only snapshot at each site with
    `--site bot|web --phase snapshot --source-sha256 <reviewed-worker-sha>`.
    Snapshot reads only explicit public daemon/container/store/unit metadata,
@@ -79,7 +87,7 @@ into the Web daemon.
    LOAD; the receive phase does not consume an admission receipt.
 4. Root invokes Native coordination in a named finite systemd scope, with
    `--site bot --phase <phase> --control <exact-control-path>` and
-   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-01`.
+   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-02`.
    The required unit name is `market-images-bot-<phase>-<nonce>`; set CPUQuota100%,
    MemoryMax2G, MemorySwapMax0, TasksMax64, RuntimeMaxSec900 and TimeoutStopSec5.
    Normal `systemd-run --scope --quiet --collect` supplies the scope. The worker
@@ -144,3 +152,11 @@ Its owned files, pipes and mocked process clients test archive admission,
 bounded I/O, identity drift, full-budget pulses, unknown outcomes and exact
 cleanup without Docker, network, SSH, private data or production effects. Tests
 and source coverage are source-validation evidence, never actual LOAD results.
+
+Root independently passed73 genuine-root fenced tests (1.667s, no skips).
+The exact new formatter was separately executed read-only against all15 real
+Native containers: exit0, no stderr, and8 null Health/Healthcheck pairs. It
+read only the approved public metadata projection; no image/container mutation
+or Env access occurred. This proves the previously failing optional-field
+boundary, not archive admission or LOAD. The original01 staged files remain
+unchanged and02 uses a new namespace; no operation control/attempt existed for01.

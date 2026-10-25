@@ -24,7 +24,7 @@ import sys
 import time
 import zipfile
 
-OPERATION = 'security-market-candidate-images-20261025-01'
+OPERATION = 'security-market-candidate-images-20261025-02'
 CATALOG_SHA = 'c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 TOOLS = {'bot': Path('/root/trading-bot/trading_bot/.local')/OPERATION,
          'web': Path('/srv/trading-bot')/OPERATION}
@@ -40,7 +40,7 @@ SSH = ['/usr/bin/ssh','-F','/dev/null','-p','37067','-oBatchMode=yes',
        '-oClearAllForwardings=yes','-oConnectTimeout=15','root@65.109.220.59']
 LIMIT = 2*1024**2
 MARGIN = 64*1024**2
-CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-01'
+CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-02'
 PHASES = ('receive-web','load-web','load-native')
 CAPTURE = '6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752'
 SUBPHASE = 'control_admission'
@@ -242,10 +242,13 @@ def command(ctx, argv, *, maximum=LIMIT, stdin=subprocess.DEVNULL):
 
 
 def snapshot(ctx):
+    global SUBPHASE
+    SUBPHASE='snapshot_container_inventory'
     ids=command(ctx,[*DOCKER,'ps','-aq','--no-trunc'],maximum=65536).decode().splitlines()
     need(len(ids)==(15 if ctx.site=='bot' else 27) and len(set(ids))==len(ids)
          and all(re.fullmatch('[a-f0-9]{64}',i) for i in ids),'container_inventory')
-    fmt='{"id":{{json .Id}},"image":{{json .Image}},"name":{{json .Name}},"host":{{json .HostConfig}},"mounts":{{json .Mounts}},"networks":{{json .NetworkSettings.Networks}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"pid":{{json .State.Pid}},"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},"execution":{"entry":{{json .Config.Entrypoint}},"cmd":{{json .Config.Cmd}},"user":{{json .Config.User}},"workdir":{{json .Config.WorkingDir}},"labels":{{json .Config.Labels}},"healthcheck":{{json .Config.Healthcheck}}}}'
+    fmt='{"id":{{json .Id}},"image":{{json .Image}},"name":{{json .Name}},"host":{{json .HostConfig}},"mounts":{{json .Mounts}},"networks":{{json .NetworkSettings.Networks}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"pid":{{json .State.Pid}},"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}},"health":{{with index .State "Health"}}{{json .Status}}{{else}}null{{end}},"execution":{"entry":{{json .Config.Entrypoint}},"cmd":{{json .Config.Cmd}},"user":{{json .Config.User}},"workdir":{{json .Config.WorkingDir}},"labels":{{json .Config.Labels}},"healthcheck":{{with index .Config "Healthcheck"}}{{json .}}{{else}}null{{end}}}}'
+    SUBPHASE='snapshot_container_contracts'
     rows=[document(r) for r in command(ctx,[*DOCKER,'inspect','--format',fmt,*ids]).splitlines()]
     for row in rows:row['host']=host_projection(row['host'])
     need(len(rows)==len(ids) and {r['id'] for r in rows}==set(ids),'container_inventory')
@@ -253,6 +256,7 @@ def snapshot(ctx):
         capture=[r for r in rows if r['id']==CAPTURE]
         need(len(capture)==1 and capture[0]['running'] is True and capture[0]['restarting'] is False
              and capture[0]['health']=='healthy' and type(capture[0]['pid']) is int and capture[0]['pid']>0,'capture_singleton')
+    SUBPHASE='snapshot_image_inventory'
     raw=command(ctx,[*DOCKER,'image','ls','--all','--no-trunc','--format','{"id":{{json .ID}},"repository":{{json .Repository}},"tag":{{json .Tag}}}'])
     image_map=sorted([document(r) for r in raw.splitlines()],key=lambda r:(r['id'],r['repository'],r['tag']))
     return {'containers':sorted(rows,key=lambda r:r['id']),'image_map':image_map}
@@ -274,6 +278,8 @@ def stable(ctx):
 
 
 def daemon_policy(ctx):
+    global SUBPHASE
+    SUBPHASE='snapshot_daemon_unit_metadata'
     raw=command(ctx,['/usr/bin/systemctl','show','docker.service',
         '--property=FragmentPath,DropInPaths,NeedDaemonReload,PrivateTmp,RootDirectory,RootImage,TemporaryFileSystem'],maximum=8192)
     fields=dict(line.split('=',1) for line in raw.decode().splitlines())
@@ -290,10 +296,13 @@ def daemon_policy(ctx):
 
 
 def store_view(ctx):
+    global SUBPHASE
+    SUBPHASE='snapshot_store_info'
     store=document(command(ctx,[*DOCKER,'info','--format',
         '{"root":{{json .DockerRootDir}},"driver":{{json .Driver}},"version":{{json .ServerVersion}}}'],maximum=2048))
     path=Path(store['root']);need(path.is_absolute() and path.resolve(strict=True)==path,'store_root')
     store['identity']=identity(path.lstat())[:5]
+    SUBPHASE='snapshot_store_mount'
     store['mount']=document(command(ctx,['/usr/bin/findmnt','--json','--target',str(path),
         '--output','SOURCE,UUID,FSTYPE,MAJ:MIN'],maximum=8192))
     return store
@@ -301,6 +310,8 @@ def store_view(ctx):
 
 def collect(site,source_pin):
     """Read-only fresh observation; no locks, workspace, Config/Env or hashes of them."""
+    global SUBPHASE
+    SUBPHASE='snapshot_source_admission'
     need(os.geteuid()==0,'root_required')
     with ExitStack() as stack:
         _,check=seal(stack,Path(__file__).resolve(),source_pin)

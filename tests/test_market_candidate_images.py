@@ -287,8 +287,12 @@ class MarketCandidateImageTests(unittest.TestCase):
         calls = []
         def command(ctx, argv, **kwargs):
             calls.append(argv)
-            if argv[len(M.DOCKER):] == ['ps', '-aq', '--no-trunc']: return ('\n'.join(ids) + '\n').encode()
-            if argv[len(M.DOCKER)] == 'inspect': return b'\n'.join(M.encode(row).rstrip() for row in rows) + b'\n'
+            if argv[len(M.DOCKER):] == ['ps', '-aq', '--no-trunc']:
+                self.assertEqual(M.SUBPHASE, 'snapshot_container_inventory'); return ('\n'.join(ids) + '\n').encode()
+            if argv[len(M.DOCKER)] == 'inspect':
+                self.assertEqual(M.SUBPHASE, 'snapshot_container_contracts')
+                return b'\n'.join(M.encode(row).rstrip() for row in rows) + b'\n'
+            self.assertEqual(M.SUBPHASE, 'snapshot_image_inventory')
             self.assertEqual(argv[len(M.DOCKER):len(M.DOCKER)+2], ['image', 'ls'])
             return b'\n'.join(M.encode(row).rstrip() for row in image_map) + b'\n'
         return ids, rows, image_map, calls, command
@@ -312,6 +316,60 @@ class MarketCandidateImageTests(unittest.TestCase):
                 original = rows[0][field]; rows[0][field] = value
                 with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, '^capture_singleton$'): M.snapshot(ctx)
                 rows[0][field] = original
+
+    def test_optional_inspect_maps_use_safe_formatter_and_only_non_capture_health_may_be_null(self):
+        ids, rows, _, _, command = self.snapshot_fixture('web'); ctx = SimpleNamespace(site='web')
+        for row in rows:
+            row['health'] = 'healthy' if row['id'] == M.CAPTURE else None
+            row['execution']['healthcheck'] = None
+        def observe(current, argv, **kwargs):
+            if argv[len(M.DOCKER)] == 'inspect':
+                fmt = argv[argv.index('--format') + 1]
+                self.assertIn('with index .State "Health"', fmt)
+                self.assertIn('with index .Config "Healthcheck"', fmt)
+                self.assertNotIn('.State.Health', fmt); self.assertNotIn('.Config.Healthcheck', fmt)
+                self.assertIn('{{else}}null{{end}}', fmt)
+            return command(current, argv, **kwargs)
+        # The inert formatter output represents optional fields absent in the
+        # source maps, not an assertion that a native Go formatter ran here.
+        with patch.object(M, 'command', side_effect=observe): value = M.snapshot(ctx)
+        M.public(value); by_id = {row['id']: row for row in value['containers']}
+        self.assertEqual(by_id[M.CAPTURE]['health'], 'healthy')
+        self.assertTrue(all(row['health'] is None for cid, row in by_id.items() if cid != M.CAPTURE))
+        self.assertTrue(all(row['execution']['healthcheck'] is None for row in by_id.values()))
+        rows[0]['health'] = None
+        with patch.object(M, 'command', side_effect=observe), self.assertRaisesRegex(RuntimeError, '^capture_singleton$'):
+            M.snapshot(ctx)
+
+    def test_snapshot_contract_command_failure_reports_fixed_phase_and_never_echoes_error_arguments(self):
+        worker = self.private('snapshot-worker.py', (ROOT / 'deploy/maintenance/market_candidate_images.py').read_bytes())
+        machine = self.private('snapshot-machine-id', b'a' * 32 + b'\n')
+        store = self.root / 'snapshot-store'; store.mkdir(mode=0o700); real_path = Path
+        ids, _, _, _, _ = self.snapshot_fixture('bot')
+        for error, expected in [(RuntimeError('command_outcome_unknown'), 'command_outcome_unknown'),
+                                (ValueError('EXPLICIT_PRIVATE_LOOKING_FORMATTER_DIAGNOSTIC'), 'refused_or_unknown')]:
+            calls = []
+            def command(ctx, argv, **kwargs):
+                ctx.capacity(); calls.append(argv)
+                if argv[len(M.DOCKER):len(M.DOCKER)+1] == ['info']:
+                    self.assertEqual(M.SUBPHASE, 'snapshot_store_info')
+                    return M.encode({'root': str(store), 'driver': 'public', 'version': 'public'})
+                if argv[0] == '/usr/bin/findmnt':
+                    self.assertEqual(M.SUBPHASE, 'snapshot_store_mount'); return M.encode({'filesystems': []})
+                if argv[len(M.DOCKER):] == ['ps', '-aq', '--no-trunc']:
+                    self.assertEqual(M.SUBPHASE, 'snapshot_container_inventory'); return ('\n'.join(ids) + '\n').encode()
+                self.assertEqual(argv[len(M.DOCKER)], 'inspect'); self.assertEqual(M.SUBPHASE, 'snapshot_container_contracts')
+                raise error
+            out = io.StringIO()
+            with self.subTest(error=type(error).__name__), patch.object(M, '__file__', str(worker)), \
+                 patch.object(M, 'Path', side_effect=lambda p: machine if p == '/etc/machine-id' else real_path(p)), \
+                 patch.object(M, 'command', side_effect=command), patch.object(M.signal, 'alarm'), redirect_stdout(out):
+                self.assertEqual(M.main(['--site', 'bot', '--phase', 'snapshot',
+                    '--source-sha256', sha256(worker.read_bytes()).hexdigest()]), 1)
+            result = json.loads(out.getvalue()); self.assertEqual(result['subphase'], 'snapshot_container_contracts')
+            self.assertEqual(result['code'], expected); self.assertEqual(len(calls), 4)
+            self.assertIs(result['retry_allowed'], False); self.assertIs(result['security_accepted'], False)
+            self.assertNotIn('EXPLICIT_PRIVATE', out.getvalue())
 
     def test_remote_argv_is_fixed_finite_and_does_not_add_a_serving_command(self):
         ctx = SimpleNamespace(op={'nonce': 'a' * 32}, pin='b' * 64)
