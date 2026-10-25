@@ -1,7 +1,8 @@
 # Native dashboard TLS transport candidate
 
 The default read-only check passed on Native with five Ansible tasks and zero
-changes. Apply has not run. This packet proposes one explicit
+changes. The corrected second apply and the independent Web-to-Native TLS check
+also completed, as recorded below. This packet makes one explicit
 transport change to the existing Native dashboard, with check as the default.
 It grants no global security acceptance and changes no App/Market image,
 Telegram collector, Writer, DNS, IP allowlist or authentication implementation.
@@ -101,3 +102,26 @@ that inode, rather than deleting it or treating an old file as fresh authority.
 Real-FD regressions cover retained bytes/inode, busy ownership, nonempty data,
 hardlinks and replacement. The failed attempt remains failed; any new attempt
 requires the reviewed corrected source and a new nonce/window.
+
+The second apply used helper `e01a57d1…`, committed in
+`9cbe05d6f0fb210cf8c7ad3be694282e78f5d751`, and fresh nonce
+`6b660890ba72635bb5ff55345c363b98`. All five Ansible tasks passed, with one
+changed task. The local result was `tls_local_verified_external_peer_pending`.
+An independent body-free HEAD from Web then verified the normal trust chain and
+hostname, TLS501 and plaintext308 to the canonical HTTPS URL. Its public receipt
+SHA256 is `34d3107df5156803e5ba448f232b4c6d476f586ddebbd554efb92eec02883002`.
+
+A separate read-only reconciliation verified both exact config bodies and
+nine-field file identities, unchanged launcher/source bytes, replacement PID
+1743965 and its loopback30487 listener, nginx30486 and the unchanged persistent
+source-mutex metadata. The original PID was524703. The actual operation record
+SHA256 is `d954ceb343cf94b0c547370565772b6f94f009dae9e5a136af496fb8512257a4`;
+the independently fsynced public verification receipt is8633 bytes, SHA256
+`d03485a8e8c7a0018f9af58f5c098b0b930424bcc46e055c7a524d43e38171e4`.
+Existing collector829565 and Golden973595 still mapped the patched Brotli
+module, with no old mapping; the replacement dashboard currently mapped no
+target Brotli file. This is a current PID-specific observation, not a future
+absence or synthetic module-execution claim. No private Env/session/key/body
+diagnostics or additional runtime changes were used. The defined dashboard
+transport item is verified; authentication/business flows and global security
+acceptance remain separate, and no blanket network-exposure claim is made.

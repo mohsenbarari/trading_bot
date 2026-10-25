@@ -15,15 +15,15 @@
 - Four persistent current08 boot guards were validated. Separate Web
   kernel reboot completed at 7.0.0-38-generic with changed boot ID and full
   inventory/datastore/API readiness. Owned temporary fences released, permanent
-  marker/history retained. See current08 boot/kernel runbooks for full SHA chains.
-  Known Market incidents remain OPEN, unwaived; no image activation occurred.
+  marker/history retained. See current08 runbooks. Market incidents remain OPEN.
 - Completed evidence/expired windows grant no future authority. Never infer daemon
   cancellation from death/absence or adopt old C07/Native15 controls. Configf3 and
   OCIa6 are distinct. Normal backup/crypto may consume protected inputs; no
   diagnostic Env/session/key read/copy/hash, quota bypass or hostdata fixtures.
 - Runtime audits completed Native 8/8 and Web05 12/12. Mixed-archive normalization
   passed actual F79/994 scans; preserve earlier failed evidence.
-- App8da archive admitted, not loaded; raw 44 HIGH/eight IDs remain. Its dossier records 43
+- App8da Web loaded/measured (manifest c610 to config8da); Native pending.
+  Raw 44 HIGH/eight IDs remain. Its dossier records 43
   source/component/version assessments and conditional ACL, never blanket FIXED.
   Actual candidate binding/role checks remain required. PG49a8/Redis98c4 passed
   revised vendor builds/scans; PostgreSQL retains Windows-only UNKNOWN with Linux
@@ -38,3 +38,5 @@
 - Native immutable-source lock is a persistent empty mutex: preserve its inode
   and hold flock; presence alone is not an operation. Never replace/delete it
   or accept nonempty/changed/busy state as fresh authority.
+- Native dashboard TLS activated and independently verified from Web on existing
+  coin hostname/30486; backend loopback30487. No Writer/DNS or auth-code change.

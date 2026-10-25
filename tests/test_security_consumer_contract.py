@@ -1,7 +1,10 @@
 """Pure security-release contracts. No live Docker/SSH/env/config reads."""
 from contextlib import ExitStack
 from copy import deepcopy
+from datetime import datetime, timezone
+from hashlib import sha256
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -209,6 +212,205 @@ class ConsumerContracts(unittest.TestCase):
             self.assertNotIn('migration', after)
             self.assertNotIn('db', after)
             self.assertNotIn('redis', after)
+
+    def test_strict_serving_aliases_and_actual_static_endpoint_cannot_be_silently_reset(self):
+        network=self.actual['NetworkSettings']['Networks']['trading_bot_trading_net']
+        network['Aliases']=['trading_bot_app','app']
+        M.assert_config_parity('bot','app',self.actual,self.rendered,self.old,self.new,strict_serving=True)
+        network['Aliases'].append('unreviewed-manual-alias')
+        with self.assertRaisesRegex(M.Refusal,'unreviewed_endpoint_policy'):
+            M.assert_config_parity('bot','app',self.actual,self.rendered,self.old,self.new,strict_serving=True)
+        network['Aliases'].pop();network['IPAMConfig']={'IPv4Address':'192.0.2.1'}
+        with self.assertRaisesRegex(M.Refusal,'unreviewed_endpoint_policy'):
+            M.assert_config_parity('bot','app',self.actual,self.rendered,self.old,self.new,strict_serving=True)
+
+
+class SuccessorContracts(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 10, 24, 23, 0, tzinfo=timezone.utc)
+        self.record = {'schema': M.SUCCESSOR_SCHEMA, 'operation_id': M.SUCCESSOR_OPERATION,
+            'status': 'approved_for_finite_conditional_activation', 'nonce': 'a' * 32,
+            'source_commit': '1' * 40, 'source_tree': '2' * 40,
+            'not_before_utc': '2026-10-24T22:59:00Z', 'cutoff_utc': '2026-10-24T23:30:00Z',
+            'deadline_utc': '2026-10-24T23:50:00Z', 'images': {'bot': M.CANDIDATE, 'web': M.CANDIDATE},
+            'candidate_source_image_id': M.CANDIDATE,
+            'recovery': {'purpose': 'owned_rollback_only', 'not_before_utc': '2026-10-24T22:59:00Z',
+                'deadline_utc': '2026-10-25T00:20:00Z', 'owned_targets_only': True,
+                'new_forward_actions_allowed': False, 'unknown_rpc_observation_only': True},
+            'baseline_images': dict(M.OLD_IMAGES), 'permissions': {'five_consumer_images': True,
+                'migrations': False, 'capture': False, 'writer_dns': False, 'engine_packages': False, 'reboot': False},
+            'runtime_env_delta': dict(M.RUNTIME_ENV_DELTA), 'global_security_eligible': False,
+            'checkout_exception': dict(M.USER_DOCUMENT_EXCEPTION),
+            'payload': {'baseline_commit': M.BASELINE, 'baseline_tree': M.BASELINE_TREE,
+                        'payload_tree': M.PAYLOAD_TREE, 'manifest_sha256': M.PAYLOAD_SHA256},
+            'control_files': {'/owned/marker': '7' * 64, '/owned/history': '8' * 64, '/owned/stop': '9' * 64},
+            'control_identities': {name: [1, index+1, 0o100600, 0, 0, 1, 5, 10, 10]
+                                   for index, name in enumerate(['/owned/marker', '/owned/history', '/owned/stop'])},
+            'source_mutex': [2064, 1835555, 0o100600, 0, 0, 1, 0, 1787336928392178187, 1788695466612272194],
+            'raw_gate_passed': False, 'raw_gate_waived': False, 'acl_global_library_fixed': False,
+            'evidence': {name: {'path': '/owned/public/' + name + '.json', 'sha256': '3' * 64}
+                         for name in M.EVIDENCE_NAMES},
+            'control_sources': {name: '4' * 64 for name in M.CONTROL_SOURCES}}
+        for name, pin in [('finding_dispositions', M.DISPOSITION_SHA256),
+                          ('source_closures', M.SOURCE_CLOSURE_SHA256), ('payload_manifest', M.PAYLOAD_SHA256),
+                          ('web_current_profile', M.WEB_COMPLETED_PLAN_SHA256),
+                          ('web_engine_completion', M.WEB_ENGINE_COMPLETION_SHA256),
+                          ('web_kernel_postboot', M.WEB_KERNEL_POSTBOOT_SHA256),
+                          ('web_host_maintenance', M.WEB_KERNEL_COMPLETION_SHA256),
+                          ('native_public_baseline', M.NATIVE_PUBLIC_BASELINE_SHA256)]:
+            self.record['evidence'][name]['sha256'] = pin
+        self.record['evidence']['web_artifact_admission']['sha256'] = M.WEB_ARTIFACT_ADMISSION_SHA256
+        self.defaults = ['PATH=' + M.PUBLIC_PATH, 'LANG=C.UTF-8', 'GPG_KEY=' + 'A' * 40,
+                         'PYTHON_VERSION=3.11.17', 'PYTHON_SHA256=' + '5' * 64]
+
+    def test_fresh_window_requires_explicit_scoped_authority_and_cleanup_reserve(self):
+        M.assert_window(self.record, self.now, activating=True)
+        for key, value in [('schema', 'security_consumer_acceptance/1'),
+                           ('operation_id', 'security-consumers-20261023-01'), ('nonce', 'old'),
+                           ('deadline_utc', '2026-10-24T01:30:00Z'),
+                           ('cutoff_utc', '2026-10-24T23:39:00Z'), ('global_security_eligible', True),
+                           ('raw_gate_waived', True), ('acl_global_library_fixed', True)]:
+            with self.subTest(key=key), self.assertRaises(M.Refusal):
+                M.assert_window({**self.record, key: value}, self.now)
+        with self.assertRaises(M.Refusal):
+            M.assert_window(self.record, datetime(2026, 10, 24, 23, 31, tzinfo=timezone.utc), activating=True)
+        # Read-only verification still has its separately bounded cleanup allowance.
+        M.assert_window(self.record, datetime(2026, 10, 24, 23, 31, tzinfo=timezone.utc))
+        after = datetime(2026, 10, 25, 0, 0, tzinfo=timezone.utc)
+        with self.assertRaises(M.Refusal): M.assert_window(self.record, after)
+        M.assert_window(self.record, after, recovering=True)
+        with self.assertRaises(M.Refusal): M.assert_window(self.record, after, activating=True, recovering=True)
+
+    def test_changed_candidate_static_evidence_or_permission_never_adopts_old_authority(self):
+        for mutate in [lambda x: x.update(candidate_source_image_id='sha256:' + '9' * 64),
+                       lambda x: x['permissions'].update(capture=True),
+                       lambda x: x['permissions'].update(five_consumer_images=1),
+                       lambda x: x['runtime_env_delta'].update(PYTHONPATH='/unapproved'),
+                       lambda x: x['checkout_exception'].update(status='M '),
+                       lambda x: x['evidence']['finding_dispositions'].update(sha256='0' * 64),
+                       lambda x: x['evidence'].pop('candidate_admission')]:
+            value = deepcopy(self.record); mutate(value)
+            with self.assertRaises(M.Refusal): M.assert_window(value, self.now)
+
+    def test_source_mutex_requires_exact_typed_empty_regular_root_private_metadata(self):
+        for index,value in [(0,True),(1,0),(2,0o120600),(2,0o100644),(3,1000),(4,1000),(5,2),(6,1),(7,-1)]:
+            record=deepcopy(self.record);record['source_mutex'][index]=value
+            with self.subTest(index=index,value=value),self.assertRaisesRegex(M.Refusal,'successor_source_mutex_identity'):
+                M.assert_window(record,self.now)
+
+    def test_payload_overlay_and_controller_revision_are_independent(self):
+        record = {**self.record, 'payload': {'baseline_commit': M.BASELINE, 'baseline_tree': M.BASELINE_TREE,
+                    'payload_tree': M.PAYLOAD_TREE, 'manifest_sha256': M.PAYLOAD_SHA256}}
+        labels = {'org.opencontainers.image.revision': M.BASELINE,
+            'org.opencontainers.image.source': 'https://github.com/mohsenbarari/trading_bot',
+            'io.gold-trade.release.tree': M.PAYLOAD_TREE, 'io.gold-trade.security.baseline.tree': M.BASELINE_TREE,
+            'io.gold-trade.security.overlay.revision': M.PAYLOAD_OVERLAY,
+            'io.gold-trade.security.overlay.tree': M.PAYLOAD_OVERLAY_TREE,
+            'io.gold-trade.security.payload.sha256': M.PAYLOAD_SHA256}
+        M.assert_payload_provenance(record, labels)
+        with self.assertRaises(M.Refusal):
+            M.assert_payload_provenance(record, {**labels, 'io.gold-trade.security.overlay.revision': record['source_commit']})
+
+    def test_only_measured_python_metadata_default_changes_are_allowed(self):
+        new = {'Config': {'Env': list(self.defaults)}};old = deepcopy(new)
+        old['Config']['Env'][-2:] = ['PYTHON_VERSION=3.11.14', 'PYTHON_SHA256=' + '6' * 64]
+        M.assert_loader_defaults(old, new)
+        for addition in ['SSL_CERT_FILE=/synthetic/unreviewed', 'PATH=/synthetic/bin', 'EXTRA_FLAG=true']:
+            changed = deepcopy(new);changed['Config']['Env'].append(addition)
+            with self.assertRaises(M.Refusal): M.assert_loader_defaults(old, changed)
+
+    def test_exact_five_commands_pid_namespace_and_loader_inputs_are_independent_checks(self):
+        for site, service in M.ROLE_ORDER:
+            workers = '4' if site == 'web' else '2'
+            cmd = (['sh', '-c', 'exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ' + workers]
+                   if service == 'app' else ['python', 'run_bot.py'] if service == 'bot'
+                   else ['python', '-m', 'core.sync_worker'])
+            item = {'Config': {'Cmd': cmd, 'Entrypoint': None, 'WorkingDir': '/app', 'User': '',
+                              'Env': [*self.defaults, 'PYTHONDONTWRITEBYTECODE=1', 'SYNTHETIC_BUSINESS=unchanged']},
+                    'HostConfig': {'PidMode': '', 'Privileged': False}}
+            M.assert_role_launch(site, service, item, candidate=True)
+            for key in ['PYTHONPATH', 'PYTHONHOME', 'PYTHONUSERBASE', 'LD_PRELOAD', 'LD_AUDIT', 'LD_LIBRARY_PATH']:
+                value = deepcopy(item);value['Config']['Env'].append(key + '=/synthetic/unapproved')
+                with self.subTest(role=(site, service), loader=key), self.assertRaises(M.Refusal) as caught:
+                    M.assert_role_launch(site, service, value, candidate=True)
+                self.assertNotIn('/synthetic', str(caught.exception))
+            value = deepcopy(item);value['HostConfig']['PidMode'] = 'host'
+            with self.assertRaises(M.Refusal): M.assert_role_launch(site, service, value, candidate=True)
+            value = deepcopy(item);value['Config']['Env'] = list(self.defaults)
+            with self.assertRaises(M.Refusal): M.assert_role_launch(site, service, value, candidate=True)
+
+    def test_owned_override_adds_only_no_bytecode_flag_and_rollback_restores_original_environment(self):
+        for site, service in M.ROLE_ORDER:
+            value = M.target_override(site, service, M.CANDIDATE, 'always')
+            self.assertEqual(value, {'services': {service: {'image': M.CANDIDATE, 'pull_policy': 'never',
+                'restart': 'always', 'environment': {'PYTHONDONTWRITEBYTECODE': '1'}}}})
+            old = M.target_override(site, service, M.OLD_IMAGES[site], 'always', rollback=True)
+            self.assertNotIn('environment', old['services'][service])
+            argv = M.target_apply_argv(site, service, '/owned/override.json')
+            self.assertEqual(argv[argv.index('--force-recreate') + 1:], [service])
+            self.assertIn('--no-deps', argv);self.assertIn('--no-build', argv)
+        with self.assertRaises(M.Refusal): M.target_override('web', 'bot', M.CANDIDATE, 'always')
+
+    def test_normal_data_cow_is_metadata_only_and_no_code_or_cache_extension_is_ignored(self):
+        M.assert_public_diff('A /tmp/ordinary\nC /app/app_logs\nA /app/uploads/owned-placeholder\n')
+        for path in ['/app/main.py', '/app/core/__pycache__/ordinary.cpython-311.pyc',
+                     '/usr/local/lib/python3.11/sitecustomize.py', '/usr/bin/tar', '/tmp/../app/main.py']:
+            with self.subTest(path=path), self.assertRaisesRegex(M.Refusal, 'successor_public_code_cow_changed'):
+                M.assert_public_diff('A ' + path + '\n')
+
+    def test_postload_proof_separates_native_config_id_and_web_manifest_id(self):
+        layers = ['sha256:' + format(index+1, '064x') for index in range(32)]
+        pin = sha256(json.dumps(layers, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        record = deepcopy(self.record);record['images']['web'] = 'sha256:' + '9' * 64
+        def observation(site):
+            proof = {'kind': 'Docker_config_identity', 'docker_image_id': record['images'][site],
+                'config_sha256': M.CANDIDATE[7:], 'rootfs_layers': list(layers), 'security_accepted': False}
+            if site == 'web':proof.update(kind='OCI_manifest_to_config', schema='runtime_image_archive_binding/1',
+                scanner_config_id=M.CANDIDATE, findings_waived=False, archive_sha256='a' * 64,
+                archive_bytes=10240, manifest_sha256='9' * 64)
+            return {'host': M.SITES[site]['host'], 'port': M.SITES[site]['port'], 'image_loaded': True,
+                'stable_before_after': True, 'daemon_image_id': record['images'][site],
+                'configuration_values_disclosed': False, 'binding': proof}
+        admission = {'schema': 'security_consumer_loaded_candidate/2', 'source_image_id': M.CANDIDATE,
+            'config_sha256': M.CANDIDATE[7:], 'artifact_zip_sha256': M.IMAGE_ZIP_SHA256,
+            'artifact_zip_bytes': M.IMAGE_ZIP_BYTES, 'rootfs_layers_sha256': pin,
+            'artifact_admission_sha256': M.WEB_ARTIFACT_ADMISSION_SHA256,
+            'source_tar_sha256': M.SOURCE_TAR_SHA256, 'source_tar_bytes': M.SOURCE_TAR_BYTES,
+            'artifact_bytes_verified': True, 'security_accepted': False,
+            'sites': {site: observation(site) for site in ('bot', 'web')}}
+        with patch.object(M, 'CANDIDATE_ROOTFS_SHA256', pin):
+            M.assert_window(record, self.now)
+            M.assert_loaded_candidate(record, admission)
+            mutations = [lambda x: x.update(schema='app8da_candidate_staging_recovery/1'),
+                lambda x: x['sites']['web'].update(image_loaded=False),
+                lambda x: x['sites']['bot'].update(host=M.SITES['web']['host']),
+                lambda x: x['sites']['web']['binding'].update(config_sha256='b' * 64),
+                lambda x: x['sites']['web']['binding'].update(manifest_sha256='c' * 64),
+                lambda x: x['sites']['web']['binding']['rootfs_layers'].reverse()]
+            for mutation in mutations:
+                value = deepcopy(admission);mutation(value)
+                with self.assertRaises(M.Refusal): M.assert_loaded_candidate(record, value)
+
+    def test_phase_projection_preserves_protected_identity_policy_and_stopped_recovery_scope(self):
+        app={'id':'a'*64,'name':'/trading_bot_app','image':M.OLD_IMAGES['web'],'running':True,
+            'paused':False,'restarting':False,'project':'current','service':'app','mounts':[],
+            'restart_policy':{'Name':'always','MaximumRetryCount':0},'ports':{},'network_names':['current_net'],
+            'network_mode':'current_net','pid_mode':'','privileged':False,'read_only':False,
+            'network_policy':{'current_net':{'Aliases':['trading_bot_app','app'],'IPAMConfig':None}}}
+        protected={**deepcopy(app),'id':'b'*64,'name':'/protected-market','image':'sha256:'+'c'*64,'service':'market'}
+        initial=[app,protected];current=deepcopy(initial);current[0].update(id='d'*64,image=M.CANDIDATE)
+        projection={'web/app':{'id':'d'*64,'image':M.CANDIDATE}}
+        M.assert_phase_inventory('web',initial,current,projection)
+        for field,value in [('id','e'*64),('image','sha256:'+'f'*64),('restart_policy',{'Name':'no','MaximumRetryCount':0}),
+                            ('mounts',[{'unexpected':True}])]:
+            changed=deepcopy(current);changed[1][field]=value
+            with self.subTest(field=field),self.assertRaisesRegex(M.Refusal,'successor_nonselected_runtime_drift'):
+                M.assert_phase_inventory('web',initial,changed,projection)
+        stopped=deepcopy(current);stopped[0].update(running=False,restarting=True)
+        with self.assertRaises(M.Refusal):M.assert_phase_inventory('web',initial,stopped,projection)
+        M.assert_phase_inventory('web',initial,stopped,projection,recovering_service='app')
+        stopped[1]['running']=False
+        with self.assertRaises(M.Refusal):M.assert_phase_inventory('web',initial,stopped,projection,recovering_service='app')
 
 
 if __name__ == '__main__': unittest.main()
