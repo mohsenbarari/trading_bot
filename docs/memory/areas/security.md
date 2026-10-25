@@ -7,18 +7,16 @@
 - Preserve product/Market behavior, single capture ownership and user changes.
   Necessary maintenance needs no routine approval; Writer/DNS remain human.
   Build/test receipts never imply activation or acceptance.
-- Native engine/kernel/Brotli completed,15 containers; bind Brotli to boot/PID/unit.
-  Web OP08: Docker29.9.2/containerd2.4.2/runc1.5.2/kernel38,27/16/six stores,
-  QA10 parked/F79 preserved. PRIMARY restore/parity/cleanup/cold compare passed.
-  Final ciphertext authenticated/fsynced/reread; kernel38/new boot/four backup
-  metadata entries unchanged. No Final App provisioning/migration authority.
+- Native/Web/Final host maintenance and authenticated backups completed;
+  infrastructure memory records exact scope. No Final App provisioning/migration
+  authority.
 - Failed App COW attempt restored old Web/API200. Exact owned temporary fences
   were released after fresh canonical parity; history and active rollback
   override remain. Capture identity conflicts stay OPEN; generated endpoint
   changes require stable observation and strict persistent policy.
-- Runtime scans Native8/8/Web12/12 complete. Apped59 exported:33layers,
-  unchanged8da prefix plus3directories;56tests. Parent8da remains loaded
-  (Web manifestc610/Native config8da); ed59 is not loaded. Raw44HIGH/eight IDs:
+- Runtime scans Native8/8/Web12/12 complete. Apped59 admitted/loaded on both:
+  Web manifeste477/Native configed59,33layers/56tests; no role activated.
+  Parent8da stays loaded. Raw44HIGH/eight IDs:
   43component assessments plus conditional ACL, never globally FIXED.
   Serving-role/full functional gates remain.
 - PG49a8/Redis98c4 built/scanned, not activated; PG Windows-only UNKNOWN retains
@@ -39,6 +37,9 @@
   genuine-root public COPY with separate init, tar.umask0022 and disjoint IDs;
   preserve hosted multiplicity. Test guards are import-scoped/per-case; restore
   globals and make fixture modes explicit. No production UID/mode waiver.
+- CI40168702739 verified hosted8051/root360/frontend2037 plus changed coverage
+  and13mutations. Host-idleness proof requires host-visible processes;
+  shared image sizes never estimate reclaim. Preserve rollback/history/data.
 - Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not
   adopt working-layer cache/code changes. No Go address-space inheritance; bound
   CPU/wall/RAM and output before accumulation.

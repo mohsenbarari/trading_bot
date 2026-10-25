@@ -3,7 +3,9 @@
 The child `sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd`
 was built and exported by run40165530395 from9a4bec1e. Its new raw report contains
 0CRITICAL,44HIGH,68MEDIUM,82LOW and1UNKNOWN. The raw HIGH gate failed and stays
-failed. The image has not been loaded or activated on either production host.
+failed. At dossier creation the image had not been loaded or activated.
+The later [actual two-host LOAD record](2026-10-25-app-ed59-two-host-loads.md)
+proves image-store admission and LOAD; no serving role is activated.
 
 Root independently checked the complete advisory/package/installed-version/
 fixed-version/severity/PURL multiset against the actual parent report: every

@@ -95,3 +95,15 @@ Root's source-only hermetic run passed60 fixture-lane/legacy tests, and the
 independent reviewer passed all15 fixture-lane tests. The next actual CI run
 must verify the isolated integration; these local results are not an official
 CI pass or runtime security acceptance.
+
+## Actual corrected run3641: identified CI causes closed
+
+Run40168702739 on3641d39fd073b07626d7c97a6659d750dad6cdec completed successfully.
+Artifact12589739251 is17170259bytes, SHA256
+`5ba06748e55f339ec33d6bd32630ac5ba2fb687ccec93a8cba5911752315f743`.
+Its actual exit files are all zero: hosted8051tests/0failures/0errors/350existing
+skips; required-root360tests/0failures/0errors/0skips/UID0; frontend171files and
+2037tests passed. Both changed-code coverage gates and all13 mutation targets
+passed. No production PID, ownership, mode, coverage threshold or test-skip
+exception was introduced. This closes the identified CI failures, not the
+remaining image findings, serving activation or global security acceptance.

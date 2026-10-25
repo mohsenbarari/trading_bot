@@ -1,5 +1,12 @@
 # Infrastructure
 
+- 2026-10-25 | Security maintenance: Native engine/kernel/Brotli completed,
+ 15 containers; bind Brotli evidence to current boot/PID/unit. Web OP08 has
+ Docker29.9.2/containerd2.4.2/runc1.5.2/kernel38,27 containers/16 running/six
+ stores, QA10 parked/F79 preserved. PRIMARY restore/parity/cleanup/cold compare
+ passed. Final ciphertext authenticated/fsynced/reread; kernel38/new boot/four
+ backup metadata entries unchanged. No Final App provisioning/migration authority.
+
 - 2026-10-25 | Native dashboard TLS verified independently from Web on existing
   coin.362514.ir/30486; backend is loopback30487. No Writer/DNS/auth-code change.
 
