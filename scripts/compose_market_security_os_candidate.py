@@ -1,5 +1,6 @@
 """One CI-only E46 export plus fifteen already built runtime DEBs; no deployment."""
 from contextlib import contextmanager, ExitStack
+from datetime import datetime, timedelta, timezone
 from hashlib import sha1, sha256
 import argparse
 import gzip
@@ -203,6 +204,58 @@ def oci_runtime_config(value):
     return {k:v for k,v in value.items() if k not in defaults or type(v) is not type(defaults[k]) or v!=defaults[k]}
 
 
+def same_json_value(left,right):
+    """JSON equality also distinguishes bool/int and int/float representations."""
+    if type(left) is not type(right):return False
+    if type(left) is dict:return set(left)==set(right) and all(same_json_value(left[k],right[k]) for k in left)
+    if type(left) is list:return len(left)==len(right) and all(same_json_value(a,b) for a,b in zip(left,right))
+    return left==right
+
+
+def trivy_history_second(value):
+    """The Docker-history second projected by Trivy, never instant equivalence.
+
+    Trivy v0.76.1 pkg/fanal/image/daemon/image.go configHistory constructs
+    history.Created as time.Unix(h.Created, 0).UTC(). Only this history field
+    loses subsecond precision; the raw config's SHA remains authoritative.
+    """
+    require(type(value) is str,'history_timestamp_invalid')
+    match=re.fullmatch(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})',value)
+    require(match is not None,'history_timestamp_invalid')
+    try:
+        date=datetime.strptime(match[1],'%Y-%m-%dT%H:%M:%S');offset=match[3]
+        if offset=='Z':zone=timezone.utc
+        else:
+            hours,minutes=int(offset[1:3]),int(offset[4:6]);require(hours<24 and minutes<60,'history_timestamp_invalid')
+            zone=timezone((1 if offset[0]=='+' else -1)*timedelta(hours=hours,minutes=minutes))
+        result=date.replace(tzinfo=zone).astimezone(timezone.utc)
+    except (ValueError,OverflowError):raise RuntimeError('history_timestamp_invalid') from None
+    # No microsecond conversion, rounding or generic field removal. Discarding
+    # the validated fractional digits is precisely the observed daemon policy.
+    return result.isoformat(timespec='seconds').replace('+00:00','Z')
+
+
+def compare_scanner_config(actual,scanner):
+    require(type(actual) is dict and type(scanner) is dict and type(actual.get('history')) is list
+        and type(scanner.get('history')) is list,'archive_config_changed')
+    projected={**actual};history=[];changed=0;subseconds_lost=0
+    for row in actual['history']:
+        require(type(row) is dict and 'created' in row,'archive_config_changed')
+        second=trivy_history_second(row['created']);changed+=second!=row['created']
+        fraction=re.search(r'\.(\d+)',row['created']);subseconds_lost+=bool(fraction and int(fraction[1]))
+        history.append({**row,'created':second})
+    projected['history']=history
+    require(same_json_value(projected,scanner),'archive_config_changed')
+    return {'schema':'trivy_0761_docker_history_second_projection/1','scope':'history.created_only',
+        'source':'https://github.com/aquasecurity/trivy/blob/v0.76.1/pkg/fanal/image/daemon/image.go#L213',
+        'history_created_entries_changed':changed,'nonzero_subsecond_entries_lost':subseconds_lost,
+        'scanner_history_projection_lossy':subseconds_lost>0,
+        'full_metadata_identical':same_json_value(actual,scanner),'every_other_key_type_value_equal':True,
+        'whole_runtime_config_equal':same_json_value(actual.get('config'),scanner.get('config')),
+        'ordered_rootfs_equal':same_json_value(actual.get('rootfs'),scanner.get('rootfs')),
+        'original_nanosecond_config_sha256':IMAGE[7:],'raw_scanner_report_modified':False,'security_accepted':False}
+
+
 def safe_name(name):
     return type(name) is str and 0<len(name)<=256 and re.fullmatch(r'[A-Za-z0-9._+/-]+',name) is not None and not name.startswith('/') \
         and all(part not in ('','..','.') for part in name.split('/')) and str(PurePosixPath(name))==name
@@ -302,7 +355,7 @@ def validate_archive(stream,size,expected_config):
     row=manifest[0];require({'Config','Layers'}<=set(row)<={'Config','Layers','RepoTags','LayerSources'},'docker_manifest')
     config_name,layers=row['Config'],row['Layers']
     require(config_name in (IMAGE[7:]+'.json','blobs/sha256/'+IMAGE[7:]) and stored(config_name)==IMAGE[7:],'archive_config_identity')
-    config=document(data(config_name));require(config==expected_config,'archive_config_changed')
+    config=document(data(config_name));projection=compare_scanner_config(config,expected_config)
     diffs=config['rootfs']['diff_ids'];require(type(layers) is list and 0<len(layers)==len(diffs)<=128
         and all(safe_name(n) for n in layers),'archive_layers')
     tags=row.get('RepoTags');require(tags is None or type(tags) is list and len(tags)<=8
@@ -356,7 +409,8 @@ def validate_archive(stream,size,expected_config):
     require(set(members)<=allowed|directories and all(isdir==(n in directories) for n,(_,_,isdir) in members.items()),'archive_closed_inventory')
     whole.seek(0);archive_sha=digest(whole,size)
     return {'image_id':IMAGE,'docker_archive_bytes':size,'docker_archive_sha256':archive_sha,
-        'layers':len(layers),'legacy_compatibility_configs':legacy,'original_oci_config':config['config']}
+        'layers':len(layers),'legacy_compatibility_configs':legacy,'original_oci_config':config['config'],
+        'scanner_history_projection':projection}
 
 
 def admit_image(path,output,evidence):
@@ -651,7 +705,7 @@ ERROR_CODES=frozenset(('duplicate_json_key','invalid_json_number','input_path','
     'test_source_size','test_source_blob','test_source_mode','test_capsule_inventory','test_source_digest','public_control_pin','audit_scope','alias_identity',
     'ci_identity','alias_owner','alias_exists','alias_cleanup_unknown','runner_space','archive_changed','baseline_image_drift','package_inventory',
     'candidate_identity','native_receipt','composition_evidence_changed','image_drift','repository_required','gate_receipt','raw_gate_failed',
-    'runtime_config','component_receipt_bound','component_receipt_identity','component_receipt_scope','raw_report_identity','raw_report_config',
+    'runtime_config','history_timestamp_invalid','component_receipt_bound','component_receipt_identity','component_receipt_scope','raw_report_identity','raw_report_config',
     'sbom_image_identity','sbom_package_version','raw_report_shape'))
 
 

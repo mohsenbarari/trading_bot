@@ -282,7 +282,7 @@ jobs:
           root=pathlib.Path(tempfile.mkdtemp(prefix='security-market-os-',dir=parent))
           (root/'source').mkdir(mode=0o700)
           commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
-          pins={'compose_market_security_os_candidate.py':'5cb9afd1d33db53e8906f9222572636580a4dbc7c33c7d027fba9e09344034c7',
+          pins={'compose_market_security_os_candidate.py':'7950a1bc5e3ef54cdde6a3d4148db18fc70b227863199fe9b632f23c5c0b1655',
                 'compose_security_os_candidate.py':'10ccbe216fef04e5f7a7ce2ad31ac30eca7eeae090dfaaf8074fa3cc5c789d44',
                 'prepare_market_security_payload.py':'9131fe760b94d54f2f3fcc577b8cb4d36f0170a0f28a2f0d8adfb750c2b78c84',
                 'verify_image_component_presence.py':'36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3',

@@ -452,5 +452,74 @@ class MarketCompositionTests(unittest.TestCase):
         value=json.loads(output.getvalue());self.assertEqual(value['code'],'unclassified_refusal')
         self.assertNotIn('ordinary-unrecognized-detail',output.getvalue())
 
+    def test_actual_nine_python_base_history_vectors_use_explicit_lossy_policy(self):
+        actual=self.config(['sha256:'+'1'*64]);actual['history']=[{'created':'2026-10-21T00:00:00Z','created_by':'ordinary base'}]
+        actual['history'] += [{'created':created,'created_by':'ordinary inherited layer','comment':'buildkit.dockerfile.v0'}
+            for created in ['2026-10-21T01:01:43.788094843Z']*6+['2026-10-21T01:09:58.239258151Z']+['2026-10-21T01:09:58.372959533Z']*2]
+        scanner=deepcopy(actual)
+        for row in scanner['history']:row['created']=row['created'].split('.')[0]+'Z' if '.' in row['created'] else row['created']
+        proof=M.compare_scanner_config(actual,scanner)
+        self.assertEqual(proof['history_created_entries_changed'],9);self.assertIs(proof['scanner_history_projection_lossy'],True)
+        self.assertEqual(proof['nonzero_subsecond_entries_lost'],9)
+        self.assertIs(proof['full_metadata_identical'],False);self.assertIs(proof['every_other_key_type_value_equal'],True)
+        self.assertIs(proof['whole_runtime_config_equal'],True);self.assertIs(proof['ordered_rootfs_equal'],True)
+        self.assertIs(proof['raw_scanner_report_modified'],False);self.assertEqual(proof['original_nanosecond_config_sha256'],M.IMAGE[7:])
+        self.assertEqual(actual['history'][1]['created'],'2026-10-21T01:01:43.788094843Z')
+
+    def test_history_seconds_projection_timezone_fraction_precision_and_invalid_refusal(self):
+        vectors={'2026-10-21T01:01:43.788094843Z':'2026-10-21T01:01:43Z',
+            '2026-10-21T02:01:43.000000001+01:00':'2026-10-21T01:01:43Z',
+            '2026-10-20T23:01:43.999999999-02:00':'2026-10-21T01:01:43Z',
+            '2026-10-21T01:01:43.000000000Z':'2026-10-21T01:01:43Z'}
+        for raw,second in vectors.items():self.assertEqual(M.trivy_history_second(raw),second)
+        for value in ('2026-10-21T01:01:43.0000000001Z','2026-10-21T01:01:60Z','2026-02-30T01:01:43Z',
+                      '2026-10-21T01:01:43+24:00','2026-10-21T01:01:43+01:60','2026-10-21T01:01:43',True):
+            with self.assertRaisesRegex(RuntimeError,'history_timestamp_invalid'):M.trivy_history_second(value)
+
+    def test_wrong_second_other_history_runtime_rootfs_unknown_and_type_drift_refuse(self):
+        actual=self.config(['sha256:'+'1'*64]);actual['history']=[{'created':'2026-10-21T01:01:43.788094843Z','created_by':'ordinary','empty_layer':True}]
+        scanner=deepcopy(actual);scanner['history'][0]['created']='2026-10-21T01:01:43Z'
+        M.compare_scanner_config(actual,scanner)
+        mutations=[lambda x:x['history'][0].update(created='2026-10-21T01:01:44Z'),
+            lambda x:x['history'][0].update(created_by='changed'),lambda x:x['history'][0].update(empty_layer=1),
+            lambda x:x['config'].update(User='0:0'),lambda x:x['rootfs']['diff_ids'].append('sha256:'+'2'*64),
+            lambda x:x.update(unknown_metadata=None),lambda x:x['history'][0].update(unknown_metadata=None),
+            lambda x:x.update(created='2026-10-24T22:01:02Z')]
+        for mutate in mutations:
+            changed=deepcopy(scanner);mutate(changed)
+            with self.assertRaisesRegex(RuntimeError,'archive_config_changed'):M.compare_scanner_config(actual,changed)
+
+    def test_same_second_subsecond_raw_mutation_still_refuses_known_config_digest(self):
+        raw,image,config,rows=self.archive();old=next(i for i,r in enumerate(rows) if r[0].endswith(image[7:]))
+        value=deepcopy(config);value['created']='2026-10-24T22:01:02.123499999Z'
+        rows[old]=(rows[old][0],M.encoded(value),tarfile.REGTYPE)
+        with self.assertRaisesRegex(RuntimeError,'archive_config_identity'):self.validate(self.tar(rows),image,config)
+
+    def test_actual_archive_parser_uses_raw_history_for_legacy_chain_and_only_projects_comparison(self):
+        raw,image,config,rows=self.archive(legacy=True)
+        # Existing fixture timestamps are integral; put the real inherited
+        # nanoseconds into one history entry and regenerate its config identity.
+        actual=deepcopy(config);actual['history']=[{'created':'2026-10-21T01:01:43.788094843Z','created_by':'ordinary'}]
+        actual_raw=M.encoded(actual);new_image='sha256:'+sha256(actual_raw).hexdigest();old_name='blobs/sha256/'+image[7:];new_name='blobs/sha256/'+new_image[7:]
+        changed=[]
+        old_legacy=M.legacy_configs(config)
+        for name,body,kind in rows:
+            if name in old_legacy:continue
+            if name==old_name:changed.append((new_name,actual_raw,kind))
+            elif name=='manifest.json':
+                value=json.loads(body);value[0]['Config']=new_name;changed.append((name,M.encoded(value),kind))
+            elif name in ('index.json','oci-layout') or name.startswith('blobs/sha256/') and name not in [r[0] for r in rows[:2]]:
+                # Rebuild only the standard OCI controls below.
+                if name in [r[0] for r in rows[:2]]:changed.append((name,body,kind))
+            else:changed.append((name,body,kind))
+        manifest=json.loads(next(r[1] for r in rows if r[0] not in (old_name,'manifest.json','index.json','oci-layout') and r[0] not in old_legacy and r[1].startswith(b'{')))
+        manifest['config']={'digest':new_image,'size':len(actual_raw)};body=M.encoded(manifest);digest=sha256(body).hexdigest()
+        changed.extend([('blobs/sha256/'+digest,body,tarfile.REGTYPE),('index.json',M.encoded({'schemaVersion':2,'manifests':[{'digest':'sha256:'+digest,'size':len(body)}]}),tarfile.REGTYPE),('oci-layout',M.encoded({'imageLayoutVersion':'1.0.0'}),tarfile.REGTYPE)])
+        changed.extend((n,b,tarfile.REGTYPE) for n,b in M.legacy_configs(actual).items())
+        scanner=deepcopy(actual);scanner['history'][0]['created']='2026-10-21T01:01:43Z'
+        result=self.validate(self.tar(changed),new_image,scanner)
+        self.assertEqual(result['legacy_compatibility_configs'],3)
+        self.assertIs(result['scanner_history_projection']['scanner_history_projection_lossy'],True)
+
 
 if __name__=='__main__':unittest.main()

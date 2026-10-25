@@ -2,7 +2,8 @@
 
 This default-off `market_e46_os` lane in the existing OS composition workflow
 reuses one tested E46 candidate, without rebuilding its product or Python
-dependencies. This source packet has not run in CI. It grants no deployment,
+dependencies. The first actual composition run refused before loading an image,
+as recorded below. The correction has not rerun. It grants no deployment,
 scanner exception or acceptance. App and datastore jobs keep their own inputs;
 requesting a datastore profile together with this lane refuses admission.
 
@@ -75,4 +76,38 @@ separate review; this packet does not claim zero findings, whole-library ACL
 repair or deployment eligibility. Capture2/F79 and its functional layers remain
 outside this E46-only lane. Full role/runtime/Telegram/database integration and
 activation remain NOT_TESTED. BuildKit cgroup limits are not asserted; commands
-and the50-minute job are finite. No image was downloaded to Native for this work.
+and the50-minute job are finite. No image file was written on Native.
+
+Actual [run40143991326](https://github.com/mohsenbarari/trading_bot/actions/runs/40143991326),
+source `398a86fd63568276450d0763e1315d954ae54963`, failed closed at
+`admit_image/archive_config_changed`. The fixed image ZIP/export/gzip seals and
+the raw config's exact c22 SHA passed. No Docker load, package install, alias or
+scan occurred. Its1542-byte public failure ZIP12579897715, SHA256
+`fb7550d1f92c0daaf4c634c59e6c0141c9e45143fd26f1efbdc34be40a602dcc`,
+remains immutable. The old comparison incorrectly required full raw OCI metadata
+to equal Trivy's daemon-derived metadata.
+
+One separately authorized normal download of the same59,814,206-byte image ZIP
+went only to a sealed64MiB memfd, never a Native image file. Its outside SHA was
+verified; bounded streaming skipped layer bodies and selected the12,989-byte
+public config whose content SHA equals c22. The complete runtime Config and
+ordered RootFS matched exactly. Only nine `history[1..9].created` strings differed.
+The exact official Python base digest `b95327ce…` leads to public config
+`b4403f3b7acf5e0700a5dd4e7ab01456d62b557a208a04f8a42d3470d93b5730`.
+Its inherited timestamps contain `.788094843`, `.239258151` or `.372959533`
+fractions; the original raw scanner records only their whole seconds.
+
+This is a lossy scanner projection, not equal nanosecond instants. Trivy0.76.1's
+[daemon configHistory](https://github.com/aquasecurity/trivy/blob/v0.76.1/pkg/fanal/image/daemon/image.go#L213)
+explicitly uses `time.Unix(h.Created,0).UTC()` from Docker history. The correction
+applies only that named whole-second UTC projection to raw `history.created`
+for the scanner comparison, then requires exact recursive key/type/value
+equality everywhere else. Invalid RFC3339 nanosecond timestamps, changed seconds,
+other history fields, unknown keys, runtime Config or RootFS changes refuse.
+The original raw config remains bound by its unchanged exact c22 SHA, including
+every nanosecond and subsecond change; no source or scanner bytes are rewritten.
+The admission receipt explicitly reports lossy history projection and whether
+the full metadata was identical. Legacy compatibility JSON is still derived
+from the authenticated actual raw config. No generic time normalization or
+unknown-field omission is added, and no second large ZIP or image layer download
+was made. The corrected source still requires actual CI and independent review.
