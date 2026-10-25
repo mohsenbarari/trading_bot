@@ -1,0 +1,239 @@
+name: Closed historical Market product security overlays
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Optional sealed historical product; all is the closed nine-profile matrix
+        type: choice
+        default: none
+        options: [none, all, 2239469ab3dd, 2c3731f573e1, 2e325778cb28, 414f6bc8f9bf, 678aaf5cd8e9, a37ec78ec097, e31aed440f25, f365061d2e76, f79cdda21c19]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-market-profile-overlays
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023') && inputs.profile != 'none'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          SELECTED_PROFILE: ${{ inputs.profile }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          import json,os,pathlib
+          profiles=('2239469ab3dd','2c3731f573e1','2e325778cb28','414f6bc8f9bf','678aaf5cd8e9','a37ec78ec097','e31aed440f25','f365061d2e76','f79cdda21c19')
+          selected=os.environ['SELECTED_PROFILE'];assert selected=='all' or selected in profiles
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:
+              out.write('matrix='+json.dumps({'profile':list(profiles) if selected=='all' else [selected]})+'\n')
+          PY
+
+  profile:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      MARKET_PROFILE: ${{ matrix.profile }}
+      CONTROLLER_SHA: e1bbe96da97a4f533fba6d9c20dc8e8fb7f4cffd31ac2e750b9619861cd30981
+      PREPARER_SHA: c998a45c5777df52e575ef3ea70cd65699708f05194d67b0ea3f1f52dd2b3e50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Seal only the published closed profile recipe and reviewed helpers
+        id: seal
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,resource,stat,subprocess,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          os.umask(0o077)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          root=pathlib.Path(tempfile.mkdtemp(prefix='security-market-profile-',dir=parent));(root/'source').mkdir(mode=0o700)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          def capture(argv,maximum):
+              fd=os.memfd_create('public-source-buffer',os.MFD_CLOEXEC)
+              def limits():
+                  resource.setrlimit(resource.RLIMIT_FSIZE,(maximum+1,maximum+1));resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+              try:
+                  with os.fdopen(os.dup(fd),'wb') as out:
+                      subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.DEVNULL,timeout=15,check=True,preexec_fn=limits)
+                  size=os.fstat(fd).st_size;assert 0<size<=maximum;os.lseek(fd,0,0);return os.read(fd,size+1)
+              finally:os.close(fd)
+          assert capture(['git','--no-optional-locks','rev-parse','HEAD'],64).strip()==commit.encode()
+          records={}
+          names=('compose_market_security_profile.py','prepare_market_security_profile.py','compose_market_security_os_candidate.py',
+                 'compose_security_os_candidate.py','prepare_market_security_payload.py','verify_image_component_presence.py','verify_acl_consumer_presence.py')
+          for name in names:
+              operand=commit+':scripts/'+name
+              size=capture(['git','--no-optional-locks','cat-file','-s',operand],64)
+              assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=131072
+              raw=capture(['git','--no-optional-locks','cat-file','blob',operand],int(size));assert len(raw)==int(size)
+              if name=='compose_market_security_profile.py':assert sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              if name=='prepare_market_security_profile.py':assert sha256(raw).hexdigest()==os.environ['PREPARER_SHA']
+              fd=os.open(root/'source'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+              records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
+          fd=os.open(root/'source/identity.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'w') as out:json.dump({'recipe_commit':commit,'files':records},out,sort_keys=True);out.flush();os.fsync(out.fileno())
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:out.write('root='+str(root)+'\n')
+          PY
+
+      - name: Admit the fixed E46 OS export and replace only this public product
+        id: compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: |
+          python3 -I -B - "$CAPSULE_ROOT/source/compose_market_security_profile.py" compose --root "$CAPSULE_ROOT" --repo "$GITHUB_WORKSPACE" --profile "$MARKET_PROFILE" <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          path=pathlib.Path(sys.argv[1]);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          try:
+              before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.read(fd,before.st_size+1);assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=sys.argv[1:]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          PY
+
+      - name: Preserve every raw vulnerability including unfixed and UNKNOWN rows
+        id: vulnerabilities
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.seal.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Record the same profile image SBOM
+        id: sbom
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          format: cyclonedx
+          output: ${{ steps.seal.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Validate every new layer path and export the same unaccepted image
+        id: export
+        if: always() && steps.compose.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: |
+          python3 -I -B - "$CAPSULE_ROOT/source/compose_market_security_profile.py" finalize --root "$CAPSULE_ROOT" <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          path=pathlib.Path(sys.argv[1]);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          try:
+              before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.read(fd,before.st_size+1);assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=sys.argv[1:]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          PY
+
+      - name: Release only the owned parent alias after its final consumer
+        id: cleanup
+        if: always() && steps.seal.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: |
+          python3 -I -B - "$CAPSULE_ROOT/source/compose_market_security_profile.py" cleanup --root "$CAPSULE_ROOT" <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          path=pathlib.Path(sys.argv[1]);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          try:
+              before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.read(fd,before.st_size+1);assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=sys.argv[1:]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          PY
+
+      - name: Retain only complete public image exports
+        if: always() && steps.export.outcome == 'success' && steps.cleanup.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-market-profile-${{ matrix.profile }}-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.seal.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.seal.outputs.root }}/image-export.json
+
+      - name: Preserve bounded public evidence including failed attempts
+        if: always() && steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-market-profile-${{ matrix.profile }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.seal.outputs.root }}/source/identity.json
+            ${{ steps.seal.outputs.root }}/reports/*.json
+            ${{ steps.seal.outputs.root }}/reports/*.log
+            ${{ steps.seal.outputs.root }}/image-export.json
+
+      - name: Keep the raw HIGH and CRITICAL gate unwaived
+        if: always() && steps.export.outcome == 'success' && steps.cleanup.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: |
+          python3 -I -B - "$CAPSULE_ROOT/source/compose_market_security_profile.py" gate --root "$CAPSULE_ROOT" <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          path=pathlib.Path(sys.argv[1]);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          try:
+              before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.read(fd,before.st_size+1);assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=sys.argv[1:]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          PY

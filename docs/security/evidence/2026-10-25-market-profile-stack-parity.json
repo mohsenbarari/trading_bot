@@ -1,0 +1,1197 @@
+{
+  "all_application_distribution_names_versions_equal_E46": true,
+  "all_nonenv_config_fields_except_labels_equal_E46": true,
+  "application_imported": false,
+  "baseline_image_id": "sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd",
+  "candidate_built": false,
+  "deployment_eligible": false,
+  "full_runtime_matrix_completed": false,
+  "metadata_interpreter_arguments": [
+    "-I",
+    "-S",
+    "-B"
+  ],
+  "metadata_path": "/opt/market-python",
+  "new_seed_stack_bytes_protected_in_CI": true,
+  "observations": {
+    "native": {
+      "bytes": 9915,
+      "observed_at_utc": "2026-10-25T00:34:44.981843+00:00",
+      "sha256": "97d6d3af0c41b9afeb048507350093088ec5ad2f10a9ace1982f89ae43be8003"
+    },
+    "web": {
+      "bytes": 15629,
+      "observed_at_utc": "2026-10-25T00:34:44.302805+00:00",
+      "sha256": "1f45f3944c3c3aefc9a7865f613582103ecd97a18f580e6db47d211ee1103570"
+    }
+  },
+  "old_installed_dependency_file_bytes_equivalence_asserted": false,
+  "private_container_env_read": false,
+  "profiles": [
+    {
+      "container_id": "731e55357f911c35ebbce383d7f88602cf5d490e4313e36535fb4dd6f01e3b43",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "e61042326c7599c2974d8760211b88975bdaf8077106afece8d176f60a1bc02c",
+            "io.gold-trade.release.tree": "ee7c053b0cc077c1b8a3f83ffb69e69251f0c2e8",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-private-primary"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:de0a4d9f20d1269261f430addd5e62777dff9bde6fa3abdd32b40b0cbc03a48e",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+        "image_id": "sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6"
+      },
+      "running": true,
+      "site": "web"
+    },
+    {
+      "container_id": "6739fe86e99e8356375949038ba4a0883913b9a3ff506991fea53c7118fef6a3",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "",
+            "io.gold-trade.release.tree": "546476f701566ee7880cef68b9e2f38cbb4b4241",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "7aa96bdd55d90113daf2712ec39185c2a02bd3af",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "market-pipeline-resilience-20261003"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:2c3731f573e152203c25548a944150f957714037d52b4a17aabd1f7908c3cbfb",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:15d219b254125483a6faa655156338546c816fc49434c094933a554a85fe9367",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:2c3731f573e152203c25548a944150f957714037d52b4a17aabd1f7908c3cbfb",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "7aa96bdd55d90113daf2712ec39185c2a02bd3af",
+        "image_id": "sha256:2c3731f573e152203c25548a944150f957714037d52b4a17aabd1f7908c3cbfb"
+      },
+      "running": true,
+      "site": "native"
+    },
+    {
+      "container_id": "132962d7bf4dfef52f618f4dbd2601ccf344a3868b4a691e40d37dc25e7e9682",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "2ed83460a9f2907e25d497da97d461736eae25dbbf9b62691fb5d061061244cb",
+            "io.gold-trade.release.tree": "989779aaa85b49a526aeaea2dfbb86d6e013e8ca",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "532a980404ed10f88e4c713abadb3554568a7419",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-market-resilience"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:2e325778cb281581b3f532ac27f0c3fc78902772fd39cec6d9755169b658d3c1",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:21e910bb5a657542599a3caa81ea0fc0bab1408afe34da5c5b2400f21d24b509",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:2e325778cb281581b3f532ac27f0c3fc78902772fd39cec6d9755169b658d3c1",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "532a980404ed10f88e4c713abadb3554568a7419",
+        "image_id": "sha256:2e325778cb281581b3f532ac27f0c3fc78902772fd39cec6d9755169b658d3c1"
+      },
+      "running": true,
+      "site": "web"
+    },
+    {
+      "container_id": "f0f5ddc3efe1a55cc8a6f800ad59d1f41556a4f896cdc8ed7d20864c9d360e2a",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "12528f6ea661054816420492a5b2e640fd5170b5221d001a034b07214cf90da4",
+            "io.gold-trade.release.tree": "1be9d0537ca3a13763cc6c2fd3ca98734efd18e3",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "75db7dc7635709d72c93a4e21a0dedc32c52ae65",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-market-resilience"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:414f6bc8f9bfba443d72357e31c1e1a0f7c23cd43ebf787798a6c18f6f936c59",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:03b6e65740cccead204026a55681e05c8a96c1d995adc722fbc689884d87bc30",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:414f6bc8f9bfba443d72357e31c1e1a0f7c23cd43ebf787798a6c18f6f936c59",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "75db7dc7635709d72c93a4e21a0dedc32c52ae65",
+        "image_id": "sha256:414f6bc8f9bfba443d72357e31c1e1a0f7c23cd43ebf787798a6c18f6f936c59"
+      },
+      "running": true,
+      "site": "web"
+    },
+    {
+      "container_id": "f2dbc15b9c9a2d14ef9669d1f6de37096161469a50c47bf6609f0383886b3a27",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "",
+            "io.gold-trade.release.tree": "b1e421c99882e44ce3b6bb05da918a1f8bfd05ce",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "aeaa3f0c2be3fab3ce440575b5ce2e2ed22fb0d1",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "market-numeric-isolation-20261018"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:678aaf5cd8e954f368fc514430e5e63e638d84b2883194465ed0847287bc511c",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:31ac451dcdebab67265cb832ba4b0f509417cedbdf2d2e60e7cf94c4e6a6b4a5",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:678aaf5cd8e954f368fc514430e5e63e638d84b2883194465ed0847287bc511c",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "aeaa3f0c2be3fab3ce440575b5ce2e2ed22fb0d1",
+        "image_id": "sha256:678aaf5cd8e954f368fc514430e5e63e638d84b2883194465ed0847287bc511c"
+      },
+      "running": true,
+      "site": "web"
+    },
+    {
+      "container_id": "4ccd4cd2bf58887604c9c1ca87ac666fe783d7b3d95cff25b32a192f8791d0ea",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "53d2107dd0dd8ee2cc7e74946b71f10042cfa3d15568fcca2edc38768dd72b94",
+            "io.gold-trade.release.tree": "0a45e3416a373fa7d14f99a1110db5bac71eadcf",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "f5b98fee4b7916f0aba4f4676c78a2228714957f",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-imam-cash-anchor-fix"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:a37ec78ec0977479f534d73d7228b9619362ec36bdb18ce94bebbead8d414b9a",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:fe232c69b5fe407083eac851513a8dce263979ed41e0589585c14c472d9619f2",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:a37ec78ec0977479f534d73d7228b9619362ec36bdb18ce94bebbead8d414b9a",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "f5b98fee4b7916f0aba4f4676c78a2228714957f",
+        "image_id": "sha256:a37ec78ec0977479f534d73d7228b9619362ec36bdb18ce94bebbead8d414b9a"
+      },
+      "running": true,
+      "site": "native"
+    },
+    {
+      "container_id": "78b8e7b4faa83c374660155b30b3a607f302aef2511dc4f12fa120ac5297df47",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "bcfd5f0b5f1be54abe26f0b8fb1bbf912262a73883a6bfb462da60be4602a05f",
+            "io.gold-trade.release.tree": "6acebd9497736b2caf0c689aa2a7cdc35681728c",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "59e2461d06ffaa81d874d81ca7a4a1a8dd00c751",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-market-resilience"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:e31aed440f259db5fc58bd05fdd41d37a5b21595671a5d9fb9310ae6856fc61b",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:511ec3a21b3e5d5659c1c5c6227fd73116cd8c001f3718d211ea4e6cf19254f1",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:e31aed440f259db5fc58bd05fdd41d37a5b21595671a5d9fb9310ae6856fc61b",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "59e2461d06ffaa81d874d81ca7a4a1a8dd00c751",
+        "image_id": "sha256:e31aed440f259db5fc58bd05fdd41d37a5b21595671a5d9fb9310ae6856fc61b"
+      },
+      "running": true,
+      "site": "native"
+    },
+    {
+      "container_id": "47f05db122d8e1acde43e8eb75ac55436b44d54de3200cfec6497759ba57a465",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "669ee2267889d54bb36ef4cd8184d7a02c10fadeb4f39609e60ddce9f6f62a69",
+            "io.gold-trade.release.tree": "259c9c4964864b7acfd92f94c9856e664130d082",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "a6dcd636a1525a3a3d47e2a6083ca887b16080db",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-account1-liveness-hotfix"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:30ba125bc668086963ecf288a06fa7f4c695a7d2364ed34d0752bfc6f58eebde",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "a6dcd636a1525a3a3d47e2a6083ca887b16080db",
+        "image_id": "sha256:e46aedbe135117301fb19183ff39587174162ca4a454ac60c7fccb2b302033cd"
+      },
+      "running": true,
+      "site": "web"
+    },
+    {
+      "container_id": "c100957764470598c0414ba3369447869c4c9537ee10e44c82c555187503db45",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.release.input-signature": "e61042326c7599c2974d8760211b88975bdaf8077106afece8d176f60a1bc02c",
+            "io.gold-trade.release.tree": "ee7c053b0cc077c1b8a3f83ffb69e69251f0c2e8",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-private-primary"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:f365061d2e7650f623fc0394018b9ba36b336fafb3290b8de9e4f08f2dee2b29",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:de0a4d9f20d1269261f430addd5e62777dff9bde6fa3abdd32b40b0cbc03a48e",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:f365061d2e7650f623fc0394018b9ba36b336fafb3290b8de9e4f08f2dee2b29",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+        "image_id": "sha256:f365061d2e7650f623fc0394018b9ba36b336fafb3290b8de9e4f08f2dee2b29"
+      },
+      "running": true,
+      "site": "native"
+    },
+    {
+      "container_id": "6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752",
+      "container_identity_stable": true,
+      "image": {
+        "architecture": "amd64",
+        "config": {
+          "ArgsEscaped": true,
+          "AttachStderr": null,
+          "AttachStdin": null,
+          "AttachStdout": null,
+          "Cmd": [
+            "service",
+            "--role",
+            "market-processor"
+          ],
+          "Domainname": null,
+          "Entrypoint": [
+            "python",
+            "-m",
+            "core.market_intelligence.private_pipeline_foundation"
+          ],
+          "ExposedPorts": null,
+          "Healthcheck": null,
+          "Hostname": null,
+          "Image": null,
+          "Labels": {
+            "io.gold-trade.capture.replay.baseline": "d8f15f8212b9510e3abb5301d0201b2ba1eca13224f5a01c682d1de6716cb7d5",
+            "io.gold-trade.capture.replay.fix-commit": "adca507b261d3e139befc67b4a937c48c96bb949",
+            "io.gold-trade.capture.replay.source-sha256": "1b9c611692978edec4c37de217e77abf00f5a0e456006060c936d40c53978929",
+            "io.gold-trade.capture.replay.status": "functional_fix_not_security_acceptance",
+            "io.gold-trade.observability.base-image": "sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6",
+            "io.gold-trade.observability.source-sha256": "f9d2b55921431e069b06e7de463d8b1d36ecbc01a94d5d0d98cd59f1dc9260da",
+            "io.gold-trade.observability.status": "diagnostic_not_security_acceptance",
+            "io.gold-trade.release.input-signature": "e61042326c7599c2974d8760211b88975bdaf8077106afece8d176f60a1bc02c",
+            "io.gold-trade.release.tree": "ee7c053b0cc077c1b8a3f83ffb69e69251f0c2e8",
+            "org.opencontainers.image.description": "Docker-native private market data pipeline",
+            "org.opencontainers.image.revision": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+            "org.opencontainers.image.title": "Trading Bot Private Market Pipeline",
+            "org.opencontainers.image.version": "production-private-primary"
+          },
+          "MacAddress": null,
+          "NetworkDisabled": null,
+          "OnBuild": null,
+          "OpenStdin": null,
+          "Shell": null,
+          "StdinOnce": null,
+          "StopSignal": null,
+          "StopTimeout": null,
+          "Tty": null,
+          "User": "10001:10001",
+          "Volumes": null,
+          "WorkingDir": "/app"
+        },
+        "image_id": "sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b",
+        "os": "linux",
+        "rootfs": {
+          "Layers": [
+            "sha256:1d69a5fd31932841d7825ef4780c06f008eea65aaa9f3110fe09d5832ed5c7d8",
+            "sha256:b04faa200fd3e9f30040cf3c40ff77c01c85d517ddfb74b5fb3c27e71216e2a1",
+            "sha256:155a0d2cc3cb8d1948825bf4f73a22597780c8a87efc7e6927ba3b69840ac195",
+            "sha256:e976e5e29e2fe118de00b078e756776953e3345cd39ab2f8dcc48aa809f42305",
+            "sha256:de0a4d9f20d1269261f430addd5e62777dff9bde6fa3abdd32b40b0cbc03a48e",
+            "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+            "sha256:fc872c0e1fed4ac37483fbc7ae6df96273acd00add680262c3757dc0623e71ad",
+            "sha256:07f5ee5029833c61e05944bb657108c0a0eb1824316569dcaec85de8557fd982"
+          ],
+          "Type": "layers"
+        }
+      },
+      "image_id": "sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b",
+      "public_installed_metadata": {
+        "packages": [
+          {
+            "name": "Telethon",
+            "version": "1.44.0"
+          },
+          {
+            "name": "annotated-types",
+            "version": "0.7.0"
+          },
+          {
+            "name": "psycopg2-binary",
+            "version": "2.9.9"
+          },
+          {
+            "name": "pyaes",
+            "version": "1.6.1"
+          },
+          {
+            "name": "pyasn1",
+            "version": "0.6.4"
+          },
+          {
+            "name": "pydantic",
+            "version": "2.8.2"
+          },
+          {
+            "name": "pydantic_core",
+            "version": "2.20.1"
+          },
+          {
+            "name": "rsa",
+            "version": "4.9.1"
+          },
+          {
+            "name": "typing_extensions",
+            "version": "4.15.0"
+          }
+        ],
+        "python_version": [
+          3,
+          11,
+          16
+        ],
+        "site_packages": "/opt/market-python"
+      },
+      "public_source_revision": {
+        "exactly_one_default_matches": true,
+        "expected_public_source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+        "image_id": "sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b"
+      },
+      "running": true,
+      "site": "web"
+    }
+  ],
+  "runtime_changed": false,
+  "schema": "market_security_profiles_public_stack_parity/1",
+  "security_accepted": false,
+  "site_or_pth_startup_allowed": false,
+  "source_dossier_sha256": "20c08b20e5797891b5c262a4b4310bc2a7ba75f64850fd3a08c786eb78018f6a",
+  "source_revision_default_scope": "only immutable public image MARKET_PIPELINE_IMAGE_REVISION equals the sealed public release_sha; no other default values disclosed or hashed"
+}
