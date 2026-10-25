@@ -264,6 +264,35 @@ class ActivationTests(unittest.TestCase):
         path = self.root/'owned.guard'; guard = S.Guard(path,control,self.stack)
         with self.assertRaises(FileExistsError):S.Guard(path,control,self.stack)
         guard.close(); self.assertFalse(path.exists()); guard.check()
+    def test_invalid_leaf_metadata_refuses_before_open_or_payload_read(self):
+        path = self.file('preopen-public')
+        wrong_owner = self.file('foreign-owner')
+        os.chown(wrong_owner,1,1)
+        self.addCleanup(os.chown,wrong_owner,0,0)
+        linked = self.file('hardlinked-public'); os.link(linked,self.root/'other-link')
+        fifo = self.root/'public-fifo'; os.mkfifo(fifo,0o600)
+        path.chmod(0o666)
+        oversized = self.file('oversized-public',b'PUBLIC')
+        for leaf,kwargs in ((path,{}),(wrong_owner,{}),(linked,{}),(fifo,{}),(oversized,{'maximum':2})):
+            with self.subTest(leaf=leaf.name), patch.object(S.os,'open',side_effect=AssertionError('leaf must not open')), \
+                    patch.object(S.os,'pread',side_effect=AssertionError('payload must not read')), self.assertRaises(RuntimeError):
+                with ExitStack() as local:S.Held(leaf,local,**kwargs)
+    def test_stale_expected_regular_inode_refuses_before_open(self):
+        path = self.file('expected-public'); expected = S.identity(path.stat())
+        path.rename(self.root/'original-public'); self.file('expected-public')
+        with patch.object(S.os,'open',side_effect=AssertionError('stale inode must not open')), \
+                patch.object(S.os,'pread',side_effect=AssertionError('payload must not read')), self.assertRaisesRegex(RuntimeError,'held_identity'):
+            with ExitStack() as local:S.Held(path,local,expected=expected)
+    def test_regular_replacement_between_lstat_and_open_refuses_before_pread(self):
+        path = self.file('racing-public'); expected = S.identity(path.stat()); actual_open = S.os.open
+        def replacing(value,*args,**kwargs):
+            if Path(value) == path:
+                path.rename(self.root/'retained-public'); self.file('racing-public',b'PUBLIC REPLACEMENT')
+            return actual_open(value,*args,**kwargs)
+        with patch.object(S.os,'open',side_effect=replacing), \
+                patch.object(S.os,'pread',side_effect=AssertionError('replacement payload must not read')), \
+                self.assertRaisesRegex(RuntimeError,'held_identity'):
+            with ExitStack() as local:S.Held(path,local,expected=expected)
     def test_primary_error_survives_final_held_metadata_fault(self):
         path = self.file('held-public')
         with self.assertRaisesRegex(RuntimeError,'PRIMARY_PUBLIC'):

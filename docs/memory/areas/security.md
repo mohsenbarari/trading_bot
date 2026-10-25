@@ -32,14 +32,13 @@
   read/hash/write/remove/replace payload. Permanent M payload also forbidden.
   Close only exact owned temporary guards after durable closure.
 - No diagnostic Env/session/key read/copy/hash. Trusted normal backup/crypto/
-  Compose parity may consume in RAM; no private value hashes/output. Keep
-  archive/source FDs/parent checks through final checkpoint.
+  Compose parity may consume in RAM; no private value hashes/output. Admit
+  leaf/full9 before open, FD/full9 before payload; retain FDs/parents through end.
 - Env/secret aliases require raw-parent and resolved-held-leaf checks; hidden hops refuse.
 - CI40215599492 passed611 Root/0skips. Require genuine UID0/CAP_CHOWN/result2;
   App smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixture; preserve
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
-- Browser64580e68 selected40226247190 passed2; full40226940183 failed three
-  shard1s (nine passed). Coverage40226942334 failed two stale guard assertions;
-  reviewed96a8b2c6 corrects these and checks them before browsers. Acceptance OPEN.
+- Browser full40226940183 failed3/12; coverage40226942334 stale assertions fixed96a8.
+  HTTPS selected40238901129 passed2; direct HTTPS cookie/full matrix still OPEN.

@@ -68,15 +68,21 @@ class Held:
     def __init__(self,path,stack,*,expected=None,pin=None,maximum=131072,opaque=False,lock=False,public_source=False):
         self.path = Path(path); self.parents = parents(self.path)
         C.require(self.path.resolve(strict=True) == self.path,'source_alias')
-        self.fd = os.open(self.path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
-        stack.callback(os.close,self.fd); self.before = identity(os.fstat(self.fd))
+        # Refuse special files, aliases, foreign owners and stale expected
+        # inodes before opening. Recheck the full identity on the retained FD
+        # before any payload read; O_NOFOLLOW alone does not reject hardlinks
+        # or replacement of one regular file with another.
+        self.before = identity(self.path.lstat())
         if public_source:
             C.require(self.before[2] in {0o100600,0o100644} and self.before[3:6] == [0,0,1],'public_source_identity')
         else:C.metadata(self.before)
         if expected is not None:C.require(C.same(self.before,expected),'held_identity')
+        if not opaque:C.require(0 < self.before[6] <= maximum,'held_bound')
+        self.fd = os.open(self.path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+        stack.callback(os.close,self.fd)
+        C.require(C.same(identity(os.fstat(self.fd)),self.before),'held_identity')
         self.raw = None
         if not opaque:
-            C.require(0 < self.before[6] <= maximum,'held_bound')
             self.raw = os.pread(self.fd,self.before[6]+1,0)
             C.require(len(self.raw) == self.before[6] and (pin is None or sha256(self.raw).hexdigest() == pin),'held_content')
         if lock:

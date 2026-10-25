@@ -338,3 +338,29 @@ verified association to that same config. Full ordered layers and typed Config
 were verified. Neither LOAD activates a serving role or closes backup/schema,
 functional, F79, ACL or full-matrix gates. Global acceptance remains false and
 refactor automation/30-unit witness remain stopped/not started.
+### Normal activation file admission and selected HTTPS result
+
+The not-yet-executed normal activation `Held` file reader now admits the real
+leaf's type, owner, group, link count, advertised size and expected full inode
+identity before `open`, then compares the retained FD's complete identity before
+`pread`. Its opaque permanent-lock path still never reads or hashes payloads.
+Three added regressions use actual foreign ownership, hardlinks, FIFO/mode/size
+refusals, a stale expected inode and a real regular-file replacement during open.
+
+The direct host CAP_CHOWN fixture lane ran41 tests but one existing namespace
+inspection received EACCES for `/proc/1/ns/mnt`; that failure remains recorded.
+The unchanged41 assertions then passed in a genuine separate-init Root container,
+read-only root, network none, CAP_CHOWN only and no-new-privileges, with no
+operational mounts or socket. No namespace/stat/UID check was mocked or skipped.
+Source manifest `39e3c92a29221bfb57b515e0d6aec9724ea63ed6be750730f6c682c4347effc8`
+binds the packet; actual result SHA256 is
+`6b9b8f3789015527c1c97c83cacbd50128e56e0a8718aa74caedf460c457b80f`.
+
+Hosted selected HTTPS run40238901129 at exact1396cb13 completed successfully:
+both selected tests passed in10.6 seconds with strict certificate verification.
+Root independently authenticated artifact12615829280,201701 bytes, ZIP SHA256
+`c0bdd8f41353531cdfc86bd28cd1fc74607a63aa5d78a389260839a260a1c9de`,
+and its bounded closed diagnostic. Its cookie JSON was still the earlier HTTP
+probe and truthfully retains accepted=false/retransmitted=false; it is not
+relabeled as a direct HTTPS measurement. Full browser acceptance, serving
+activation, ACL/capture closure and global security acceptance remain open.
