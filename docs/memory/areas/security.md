@@ -15,13 +15,13 @@
 - Raw44HIGH retain43 assessments; ACL/capture conflicts OPEN. Image-store success
   grants no serving eligibility or mutating-RPC retry. Preserve F79 source binds.
 - PG49a8/Redis98c4 not activated; Windows UNKNOWN retains Linux absence proof.
-  Redis both/PGWeb LOAD passed. Native0bd failed preLOAD, closed d27/b651.
-  Fresh PG preparation failed on impossible Native-only Web proof requirements;
-  no new control/RPC. Corrected source633bdd pending fresh-authority integration.
-- MarketNative a37/f365/e31/2c, Web414 loaded. Old batch stays FAILED, never resume.
+  Both candidates now loaded both hosts. Native0bd closed d27/b651; preparation
+  failure preserved, distinct PG02 daa94 passed actual Native LOAD0a6f760f.
+- MarketNative a37/f365/e31/2c, Web414/F79/223 loaded. Old batch stays FAILED.
   E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
   memoryfloor failure retired/guards closed under2ddd; no LOAD. Both watchdogs
-  auto-restored normal apply. Keep eight production reader units.
+  auto-restored normal apply; new finite windows expire19:42UTC. Keep eight readers.
+  Actual fixed-TAR Python probe peak35.8MB under512MiB; no Docker/RAM-policy proof.
 - Expired controls grant no authority; unknown RPC never proves cancel/retry.
   Config/manifest differ; classic branches never query Descriptor. Physical TAR
   members unique; repeated logical layers valid, every ordered DiffID strict.
@@ -38,3 +38,6 @@
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
+- Browser40215795297 ended9/12pass, three shard1 failures. JSON-stacktrace/parser
+  and CI same-origin fixes published bf8ec120 after45 tests/independent review;
+  actual selected diagnostic40224728108 running. Full browser acceptance OPEN.

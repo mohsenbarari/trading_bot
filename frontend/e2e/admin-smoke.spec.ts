@@ -48,13 +48,18 @@ test.describe('Admin smoke regressions', () => {
       .filter({ hasText: /ارسال لینک دعوت/ })
       .first()
       .click()
-    const accountNameInput = page.locator('#account_name:visible').first()
-    const mobileInput = page.locator('#mobile_number:visible').first()
-    const roleSelect = page.locator('#role:visible').first()
+    const invitationManager = page.locator('.invitation-manager:visible')
+    await expect(invitationManager).toHaveCount(1)
+    await expect(invitationManager).toBeVisible()
+    const accountNameInput = invitationManager.locator('#account_name')
+    const mobileInput = invitationManager.locator('#mobile_number')
+    const roleSelect = invitationManager.locator('#role')
     await expect(accountNameInput).toBeVisible()
     await expect(mobileInput).toBeVisible()
     await expect(roleSelect).toBeVisible()
-    await expect(page.getByRole('region', { name: 'دعوت‌نامه‌های در انتظار', exact: true })).toBeVisible()
+    await expect(
+      invitationManager.getByRole('region', { name: 'دعوت‌نامه‌های در انتظار', exact: true }),
+    ).toBeVisible()
   })
 
   test('admin can open the user management panel', async ({ page, request }) => {

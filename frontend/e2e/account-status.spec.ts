@@ -1,7 +1,13 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+} from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -240,22 +246,28 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
 async function openAdminUserProfile(page: Page, user: SessionUser) {
   await page.goto(`/admin/users/${user.userId}`)
   await expect(page.getByRole('heading', { name: 'پروفایل کاربر' })).toBeVisible({ timeout: 30000 })
-  const identityTitle = page.locator('.admin-user-profile [data-test="profile-identity-header"] .profile-identity-title')
+  const identityTitle = page.locator(
+    '.admin-user-profile [data-test="profile-identity-header"] .profile-identity-title',
+  )
   await expect(identityTitle).toBeVisible({ timeout: 30000 })
   await expect(identityTitle).toHaveText(user.accountName)
 }
 
 async function toggleAccountStatusFromAdminProfile(page: any) {
-  const settingsHeading = page.getByRole('heading', { name: 'مدیریت کاربر' })
-  if (!(await settingsHeading.isVisible())) {
-    await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
-    await expect(settingsHeading).toBeVisible()
+  const profile = page.locator('.admin-user-profile:visible')
+  await expect(profile).toHaveCount(1)
+  const settings = profile.locator('.settings-menu.profile-menu-card')
+  if (!(await settings.isVisible())) {
+    const management = profile.locator('.main-actions.profile-menu-card')
+    await expect(management.locator('.ui-inset-group__title')).toHaveText('مدیریت کاربر')
+    await management.getByRole('button', { name: 'تنظیمات کاربر', exact: true }).click()
   }
-  const toggleButton = page.getByRole('button', { name: /تغییر وضعیت حساب/ }).first()
-  if (!(await toggleButton.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
-    await expect(toggleButton).toBeVisible({ timeout: 30000 })
-  }
+  await expect(settings).toBeVisible({ timeout: 30000 })
+  await expect(settings.locator('.ui-inset-group__title')).toHaveText('تنظیمات کاربر')
+  const toggleButton = settings.getByRole('button', {
+    name: /^تغییر وضعیت حساب \((فعال|غیرفعال)\)$/,
+  })
+  await expect(toggleButton).toBeVisible({ timeout: 30000 })
   const playwrightPage = page as any
   const dialogHandler: any = async (dialog: any) => {
     await dialog.accept()
@@ -303,7 +315,10 @@ async function readCurrentUserPayload(page: Page) {
 }
 
 test.describe('Account status browser regression', () => {
-  test('admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery', async ({ browser, request }) => {
+  test('admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery', async ({
+    browser,
+    request,
+  }) => {
     test.setTimeout(90000)
 
     const adminTokens = await fetchDevLoginTokens(request)
@@ -331,13 +346,15 @@ test.describe('Account status browser regression', () => {
       await openAdminUserProfile(adminPage, targetUser)
       await toggleAccountStatusFromAdminProfile(adminPage)
 
-      await expect.poll(async () => {
-        const payload = await readCurrentUserPayload(userPage)
-        if (payload.status !== 200) {
-          return `${payload.status}:${String(payload.body)}`
-        }
-        return (payload.body as { account_status?: string | null })?.account_status
-      }).toBe('inactive')
+      await expect
+        .poll(async () => {
+          const payload = await readCurrentUserPayload(userPage)
+          if (payload.status !== 200) {
+            return `${payload.status}:${String(payload.body)}`
+          }
+          return (payload.body as { account_status?: string | null })?.account_status
+        })
+        .toBe('inactive')
 
       await userPage.reload({ waitUntil: 'domcontentloaded' })
       const blockedAlert = userPage.locator('.alert-blocked')

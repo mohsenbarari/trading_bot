@@ -34,13 +34,13 @@ interface OwnerCustomerRelationPayload {
   max_daily_trades?: number | null
   max_daily_commodity_volume?: number | null
   status: 'pending' | 'active' | 'expired' | 'revoked' | 'deleted'
-  invitation_token?: string | null
+  short_code?: string | null
   registration_link?: string | null
 }
 
 type PendingOwnerCustomerRelation = OwnerCustomerRelationPayload & {
   status: 'pending'
-  invitation_token: string
+  short_code: string
   registration_link: string
 }
 
@@ -747,11 +747,10 @@ function toRelativeRegistrationPath(registrationLink: string): string {
   }
 }
 
-function seedRegistrationVerified(token: string) {
-  runRedisCli(
-    ['SETEX', `reg_verified:${token}`, '600', '1'],
-    'customer registration Redis verification helper',
-  )
+function seedRegistrationOtp(token: string) {
+  const code = '12345'
+  runRedisCli(['SETEX', `reg_otp:${token}`, '600', code], 'customer registration Redis OTP fixture')
+  return code
 }
 
 async function waitForBackendReady(request: APIRequestContext) {
@@ -768,21 +767,6 @@ async function waitForBackendReady(request: APIRequestContext) {
       { timeout: 60000 },
     )
     .toBe(true)
-}
-
-async function completeRegistrationViaApi(
-  request: APIRequestContext,
-  token: string,
-  address: string,
-) {
-  const response = await request.post(`${BACKEND_BASE_URL}/api/auth/register-complete`, {
-    data: {
-      token,
-      address,
-    },
-  })
-
-  expect(response.ok()).toBeTruthy()
 }
 
 async function setAuthTokens(page: Page, session: SessionUser) {
@@ -817,7 +801,12 @@ async function fetchOwnerCustomerRelations(
   })
 
   expect(response.ok()).toBeTruthy()
-  return response.json() as Promise<OwnerCustomerRelationPayload[]>
+  const relations = (await response.json()) as OwnerCustomerRelationPayload[]
+  for (const relation of relations) {
+    expect(relation).not.toHaveProperty('invitation_token')
+    expect(relation).not.toHaveProperty('token')
+  }
+  return relations
 }
 
 async function findOwnerCustomerRelation(
@@ -834,8 +823,8 @@ function isPendingOwnerCustomerRelation(
   return Boolean(
     relation &&
       relation.status === 'pending' &&
-      typeof relation.invitation_token === 'string' &&
-      relation.invitation_token.length > 0 &&
+      typeof relation.short_code === 'string' &&
+      /^[A-Za-z0-9]{8}$/.test(relation.short_code) &&
       typeof relation.registration_link === 'string' &&
       relation.registration_link.length > 0,
   )
@@ -956,7 +945,8 @@ test.describe('customer owner lifecycle', () => {
       .locator('.customer-pending-card')
       .filter({ hasText: cancelledManagementName })
     await expect(cancelledPendingCard).toContainText('دعوت', { timeout: 30000 })
-    await cancelledPendingCard.getByRole('button', { name: 'لغو دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('button', { name: 'اقدام‌های دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('menuitem', { name: 'لغو دعوت', exact: true }).click()
 
     const cancellationDialog = page.getByRole('dialog', {
       name: 'لغو رابطه در انتظار و دعوت مشتری',
@@ -1000,26 +990,99 @@ test.describe('customer owner lifecycle', () => {
       (relation) => relation.management_name === managementName,
     )
     const pendingRelationId = confirmedPendingRelation.id
-    const registrationToken = confirmedPendingRelation.invitation_token
     const registrationLink = confirmedPendingRelation.registration_link
+    const shortCode = confirmedPendingRelation.short_code
+    const registrationUrl = new URL(registrationLink)
 
-    expect(registrationLink).toContain('/register')
+    expect(registrationUrl.protocol).toMatch(/^https?:$/)
+    expect(registrationUrl.username).toBe('')
+    expect(registrationUrl.password).toBe('')
+    expect(registrationUrl.pathname).toBe(`/i/${shortCode}`)
+    expect(registrationUrl.search).toBe('')
+    expect(registrationUrl.hash).toBe('')
     await expect(
       workspace.locator('.customer-pending-card').filter({ hasText: managementName }),
     ).toContainText('دعوت')
 
-    seedRegistrationVerified(registrationToken)
+    const lookupResponse = await request.get(
+      `${BACKEND_BASE_URL}/api/invitations/lookup/${shortCode}`,
+    )
+    expect(lookupResponse.ok()).toBeTruthy()
+    const lookup = (await lookupResponse.json()) as { token: string }
+    expect(typeof lookup.token).toBe('string')
+    expect(lookup.token.length).toBeGreaterThan(0)
+    const registrationToken = lookup.token
+    expect(JSON.stringify(confirmedPendingRelation)).not.toContain(registrationToken)
 
     await page.goto(toRelativeRegistrationPath(registrationLink))
-    await expect(page).toHaveURL(new RegExp(`/register\\?token=${registrationToken}$`))
-    await expect(page.getByText(customerAccountName)).toBeVisible()
-    await expect(page.getByText(mobileNumber).first()).toBeVisible()
-
-    await completeRegistrationViaApi(
-      request,
-      registrationToken,
-      'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴',
+    const exchangeResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/api/auth/registration-context/exchange'),
     )
+    await page.getByRole('button', { name: 'ثبت‌نام از طریق وب', exact: true }).click()
+    const exchangeResponse = await exchangeResponsePromise
+    expect(exchangeResponse.ok()).toBeTruthy()
+    expect(exchangeResponse.request().headers()).not.toHaveProperty('authorization')
+    const registrationContext = await exchangeResponse.json()
+    expect(registrationContext.kind).toBe('invitation')
+    expect(registrationContext.account_name).toBe(customerAccountName)
+    expect(registrationContext.mobile_number).toBe(
+      `${mobileNumber.slice(0, 4)}****${mobileNumber.slice(-3)}`,
+    )
+    expect(registrationContext).not.toHaveProperty('token')
+    expect(registrationContext).not.toHaveProperty('invitation_token')
+    expect(JSON.stringify(registrationContext)).not.toContain(registrationToken)
+    await expect(page).toHaveURL(/\/register$/)
+    expect(page.url()).not.toContain(registrationToken)
+    await expect(page.getByText(customerAccountName)).toBeVisible()
+    await expect(page.getByText(mobileNumber, { exact: true })).toHaveCount(0)
+    await expect(
+      page.getByText(`${mobileNumber.slice(0, 4)}****${mobileNumber.slice(-3)}`, { exact: true }),
+    ).toBeVisible()
+
+    const requestOtpButton = page.getByRole('button', { name: 'دریافت کد تأیید', exact: true })
+    await expect(requestOtpButton).toBeVisible()
+    const registrationOtp = seedRegistrationOtp(registrationToken)
+    const requestOtpResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/api/auth/registration-context/otp/request'),
+    )
+    await requestOtpButton.click()
+    const requestOtpResponse = await requestOtpResponsePromise
+    expect(requestOtpResponse.ok()).toBeTruthy()
+    expect(requestOtpResponse.request().postDataJSON()).toEqual({})
+    const verifyResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/api/auth/registration-context/otp/verify'),
+    )
+    await page.locator('input[autocomplete="one-time-code"]').fill(registrationOtp)
+    await page.getByRole('button', { name: 'تأیید و ادامه', exact: true }).click()
+    const verifyResponse = await verifyResponsePromise
+    expect(verifyResponse.ok()).toBeTruthy()
+    expect(verifyResponse.request().postDataJSON()).toEqual({ code: registrationOtp })
+    const address = 'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴'
+    await page.locator('textarea[autocomplete="street-address"]').fill(address)
+    const completeResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/api/auth/registration-context/complete'),
+    )
+    await page.getByRole('button', { name: 'تکمیل ثبت‌نام', exact: true }).click()
+    const completeResponse = await completeResponsePromise
+    expect(completeResponse.ok()).toBeTruthy()
+    expect(completeResponse.request().postDataJSON()).toEqual({ address })
+    expect(page.url()).not.toContain(registrationToken)
+    const rawInvitationPersisted = await page.evaluate(
+      (token) =>
+        [localStorage, sessionStorage].some((storage) =>
+          Object.values(storage).some((value) => value.includes(token)),
+        ),
+      registrationToken,
+    )
+    expect(rawInvitationPersisted).toBe(false)
 
     await setAuthTokens(page, owner)
     await page.goto('/operations/customers')
@@ -1230,15 +1293,18 @@ test.describe('customer owner lifecycle', () => {
     await expect(ownerProfileView.locator('.history-section-card')).toHaveCount(0)
     await expect(ownerProfileView).not.toContainText(fixture.customerManagementName)
 
-    const deniedCustomerProfile = page.waitForResponse((response) =>
-      response.request().method() === 'GET'
-      && new URL(response.url()).pathname === `/api/users-public/${fixture.customerUserId}`,
+    const deniedCustomerProfile = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === `/api/users-public/${fixture.customerUserId}`,
     )
     await page.goto(`/users/${fixture.customerUserId}`)
     expect((await deniedCustomerProfile).status()).toBe(404)
     await expectIdOnlyPublicProfileUrl(page, fixture.customerUserId)
     const customerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(customerProfileView.getByRole('heading', { name: 'دریافت پروفایل انجام نشد', exact: true })).toBeVisible({ timeout: 30000 })
+    await expect(
+      customerProfileView.getByRole('heading', { name: 'دریافت پروفایل انجام نشد', exact: true }),
+    ).toBeVisible({ timeout: 30000 })
     await expect(customerProfileView.locator('.profile-content')).toHaveCount(0)
     await expect(customerProfileView).not.toContainText(fixture.customerAccountName)
     await expect(customerProfileView.locator('.customer-relations-section')).toHaveCount(0)
