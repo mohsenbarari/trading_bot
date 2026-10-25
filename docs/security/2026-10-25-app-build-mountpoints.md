@@ -30,9 +30,11 @@ not claim that this new child was produced by the old CI run.
 
 ## Exact future CI validation path
 
-This packet does not wire or dispatch a new CI lane. The existing
-`.github/workflows/security-os-candidate-compose.yml` supplies the normal scan,
-SBOM and export pattern. A future explicit default-off child lane must do this:
+The separate, explicit default-off `.github/workflows/app-mountpoint-image.yml`
+and `scripts/compose_app_mountpoint_image.py` implement this build-only lane.
+They reuse SHA-sealed bounded helpers without altering those helpers or any
+runtime control. The original OS composition lane remains unchanged. Only Root
+may publish/dispatch the reviewed new lane. Its required validation is:
 
 1. SHA-admit the original8da image artifact12573279010 from run40127349844:
    ZIP183811369 bytes, SHA256
@@ -61,8 +63,15 @@ SBOM and export pattern. A future explicit default-off child lane must do this:
 4. Compare the complete parent/child runtime Config in RAM. Only the four
    explicit child-label additions are allowed; all other labels and Env, User,
    Cmd, Entrypoint, working directory, ports, volumes and other fields remain
-   equal. Preserve all1450 regular payload paths/bytes/modes/UID/GID and all857
-   Python source paths (13,194,027 bytes) against the sealed parent manifests.
+   equal. The exact public330,066-byte build-input manifest is now a fixed
+   fixture, SHA256`cd2e64577576b9053b926d2e65620a98ca77b0ad71cc3100d9145b9409077c7b`.
+   Its1450 entries include frontend source and build recipes, so they must not
+   all be reported as installed image files. Verify every COPY-installed source
+   entry and all857Python paths (13,194,027 bytes) against the sealed manifest.
+   Independently compare every existing regular file, symlink and directory
+   under`/app` and`/usr/local`, including actual bytes, mode and UID/GID; only
+   the three new empty directories may differ. This also preserves the compiled
+   frontend distribution and honest build-only input distinction.
    Package inventory, libc, interpreter and `/usr/local` remain unchanged.
    The older directory-inclusive AUDIT digest changes honestly: record both
    values and prove the exact directory delta, without weakening its old gate.
@@ -74,7 +83,25 @@ SBOM and export pattern. A future explicit default-off child lane must do this:
    child provenance receipt. Preserve raw findings and all NOT_TESTED limits;
    no old raw finding, disposition or full-matrix status is silently inherited.
 
-Only source-contract tests have run here. Actual build,33-layer proof, complete
+Source-contract and negative graph/layer tests run with ambient native/network
+operations denied before imports and throughout each case. The actual original
+248,816-byte public evidence ZIP has also passed read-only admission locally,
+including all bound evidence hashes and the full32-layer identity. No Docker,
+SSH, image build/load or workflow dispatch was performed by the source author.
+Every CLI output is bounded before accumulation; artifact downloads have an
+exact byte/digest admission and a file-size limit, and no Go CLI inherits an
+address-space cap. Precise static refusal code and phase are retained without
+exception operands or runtime configuration values. New public receipts omit
+Config/Env projections; the required complete raw scanner report stays intact.
+The local focused suite passes55tests (44new lane tests plus11image/trust tests).
+Coverage.py7.13.5 measures every one of542executable controller statements and
+all82reported branches:100%, zero missing lines or partial branches. The tests
+exercise owned ZIP/gzip/TAR/OCI/Moby fixtures, first-buffer source admission,
+full Config/file parity, meaningful named-daemon build/test/export ordering,
+failure-before-publication, and last-tag cleanup without assuming that the
+parent's local image record survives. No coverage threshold is changed.
+
+Actual build,33-layer proof, complete
 payload parity, tests inside the new image and new scan/export are NOT_TESTED.
 All runtime COW/security guards, consumer controls, ACL/disposition gates and
 runtime allowlists remain unchanged. This packet grants no image admission,

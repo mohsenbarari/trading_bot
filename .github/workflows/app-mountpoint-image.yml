@@ -1,0 +1,174 @@
+name: Exact App image build-time mountpoints
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_candidate:
+        description: Build the fixed unaccepted App8da child with exactly three empty directories
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-app-mountpoints
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: inputs.build_candidate && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CONTROLLER_SHA: 97de14cd7990c4a249aa5f69ea529439f9abf64ee54e733227f8b8c216a30d75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Seal the exact published build-only recipe and existing bounded helpers
+        id: seal
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,resource,stat,subprocess,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          os.umask(0o077)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          root=pathlib.Path(tempfile.mkdtemp(prefix='security-app-mountpoints-',dir=parent));(root/'source').mkdir(mode=0o700)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          def capture(argv,maximum):
+              fd=os.memfd_create('public-recipe-buffer',os.MFD_CLOEXEC)
+              def limits():
+                  resource.setrlimit(resource.RLIMIT_FSIZE,(maximum+1,maximum+1));resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+              try:
+                  with os.fdopen(os.dup(fd),'wb') as out:
+                      subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.DEVNULL,timeout=15,check=True,preexec_fn=limits)
+                  size=os.fstat(fd).st_size;assert 0<size<=maximum;os.lseek(fd,0,0);return os.read(fd,size+1)
+              finally:os.close(fd)
+          assert capture(['git','--no-optional-locks','rev-parse','HEAD'],64).strip()==commit.encode()
+          names={name:'scripts/'+name for name in ('compose_app_mountpoint_image.py','compose_security_os_candidate.py',
+              'admit_security_component_image_reuse.py','compose_market_security_os_candidate.py',
+              'verify_image_component_presence.py','verify_acl_consumer_presence.py')}
+          names['Dockerfile']='deploy/maintenance/app_mountpoint_image/Dockerfile'
+          names['payload_manifest.json']='tests/fixtures/security_app_mountpoint_payload.json'
+          records={}
+          for name,path in names.items():
+              maximum=512*1024 if name=='payload_manifest.json' else 131072
+              operand=commit+':'+path
+              size=capture(['git','--no-optional-locks','cat-file','-s',operand],64)
+              assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=maximum
+              raw=capture(['git','--no-optional-locks','cat-file','blob',operand],int(size));assert len(raw)==int(size)
+              if name=='compose_app_mountpoint_image.py':assert sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              fd=os.open(root/'source'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+              records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
+          fd=os.open(root/'source/identity.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'w') as out:json.dump({'recipe_commit':commit,'files':records},out,sort_keys=True);out.flush();os.fsync(out.fileno())
+          launcher=b'''from hashlib import sha256
+          import os,pathlib,stat,sys
+          path=pathlib.Path(sys.argv[1]);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          identity=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.read(fd,before.st_size+1);assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['CONTROLLER_SHA']
+              assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=sys.argv[1:]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:assert identity(before)==identity(os.fstat(fd))==identity(path.lstat())
+          finally:os.close(fd)
+          '''
+          fd=os.open(root/'launch.py',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'wb') as out:out.write(launcher);out.flush();os.fsync(out.fileno())
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:out.write('root='+str(root)+'\n')
+          PY
+
+      - name: Admit App8da and build only its three empty mount directories
+        id: compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/launch.py" "$CAPSULE_ROOT/source/compose_app_mountpoint_image.py" compose --root "$CAPSULE_ROOT"
+
+      - name: Preserve complete unfiltered raw findings on this exact child
+        id: vulnerabilities
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.seal.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Record an SBOM for the same immutable child
+        id: sbom
+        if: always() && steps.compose.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.compose.outputs.image_id }}
+          format: cyclonedx
+          output: ${{ steps.seal.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Prove the physical directory-only last layer and export this child
+        id: export
+        if: always() && steps.compose.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/launch.py" "$CAPSULE_ROOT/source/compose_app_mountpoint_image.py" finalize --root "$CAPSULE_ROOT"
+
+      - name: Release only the owned parent alias after its last consumer
+        id: cleanup
+        if: always() && steps.seal.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/launch.py" "$CAPSULE_ROOT/source/compose_app_mountpoint_image.py" cleanup --root "$CAPSULE_ROOT"
+
+      - name: Retain only complete unaccepted public image exports
+        if: always() && steps.export.outcome == 'success' && steps.cleanup.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-app-mountpoints-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.seal.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.seal.outputs.root }}/image-export.json
+
+      - name: Preserve public evidence and failed attempts
+        if: always() && steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-app-mountpoints-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.seal.outputs.root }}/source/identity.json
+            ${{ steps.seal.outputs.root }}/reports/*.json
+            ${{ steps.seal.outputs.root }}/reports/*.log
+            ${{ steps.seal.outputs.root }}/image-export.json
+
+      - name: Keep the raw HIGH and CRITICAL gate unwaived
+        if: always() && steps.export.outcome == 'success' && steps.cleanup.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CAPSULE_ROOT/launch.py" "$CAPSULE_ROOT/source/compose_app_mountpoint_image.py" gate --root "$CAPSULE_ROOT"
