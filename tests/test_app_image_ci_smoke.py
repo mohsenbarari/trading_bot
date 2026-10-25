@@ -505,6 +505,86 @@ class AppImageCISmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'command_timeout'):M.admit_dependency(ctx,'postgres')
         self.assertEqual(M.SUBPHASE,'postgres_metadata');ctx.download.assert_not_called();self.assertEqual(ctx.command.call_count,1)
 
+    def test_startup_classification_emits_only_closed_markers_and_bounds_before_matching(self):
+        markers={
+            'postgres':[(b'No space left on device','filesystem_capacity_marker'),(b'Permission denied','filesystem_permission_marker'),
+                (b'Read-only file system','filesystem_readonly_marker'),
+                (b'Database is uninitialized and superuser password is not specified','postgres_password_required_marker'),
+                (b'database files are incompatible with server','postgres_data_version_marker'),
+                (b'initdb: error:','postgres_initdb_error_marker'),(b'FATAL:','postgres_fatal_marker')],
+            'redis':[(b"Fatal error, can't open config file",'redis_config_marker'),
+                (b'Failed listening on port','redis_listen_marker'),(b'FATAL CONFIG FILE ERROR','redis_config_marker')]}
+        for profile,rows in markers.items():
+            for marker,expected in rows:
+                with self.subTest(profile=profile,marker=marker):
+                    self.assertEqual(M.startup_classification(profile,b'ordinary-private-value '+marker),expected)
+        self.assertEqual(M.startup_classification('postgres',b'ordinary-private-value'),'unclassified_startup')
+        for raw in ('private text',b'x'*8193):
+            with self.assertRaisesRegex(RuntimeError,'dependency_startup_bound'):M.startup_classification('postgres',raw)
+        with self.assertRaisesRegex(RuntimeError,'diagnostic_subphase'):M.startup_classification('private-profile',b'')
+
+    def state(self):
+        return {'running':False,'status':'exited','exit_code':1,'oom_killed':False,'restarting':False,'dead':False}
+
+    def test_readiness_diagnostics_keep_typed_state_and_never_persist_log_text_or_exception_args(self):
+        def docker(args,**kwargs):
+            if args[:2]==['container','inspect']:return M.encode(self.state())
+            self.assertEqual(args[:3],['logs','--tail','40'])
+            self.assertEqual(kwargs,{'seconds':10,'maximum':8192,'combine_stderr':True})
+            return b'ordinary-private-value Permission denied'
+        ctx=SimpleNamespace(root=self.root,docker=Mock(side_effect=docker),write=Mock(),modules={})
+        M.subphase('postgres','readiness')
+        M.readiness_failure(ctx,{'postgres':'pg-fixture','redis':'redis-fixture'},'postgres',RuntimeError('ordinary-private-exception'))
+        path,value=ctx.write.call_args.args
+        self.assertEqual(path,self.root/'reports/dependency-readiness.json')
+        self.assertEqual(value['failed_service'],'postgres');self.assertFalse(value['security_accepted'])
+        self.assertEqual(value['probe_failure']['closed_code'],'unexpected_failure')
+        self.assertEqual(value['probe_failure']['subphase'],'postgres_readiness')
+        for row in value['services'].values():
+            self.assertEqual(row['state'],self.state());self.assertEqual(row['state_observation'],'observed')
+            self.assertEqual(row['startup_classification'],'filesystem_permission_marker')
+        M.public(value);self.assertNotIn('ordinary-private',M.encode(value).decode())
+
+    def test_readiness_diagnostics_refuse_malformed_state_but_attempt_every_owned_service_and_logs(self):
+        for key,bad in [('running',1),('oom_killed',0),('restarting',None),('dead','false'),('exit_code',True),
+                        ('exit_code',-1),('exit_code',256),('status','ordinary-private-status')]:
+            state=self.state();state[key]=bad
+            def docker(args,**kwargs):
+                return M.encode(state) if args[:2]==['container','inspect'] else b'ordinary-private-value'
+            ctx=SimpleNamespace(root=self.root,docker=Mock(side_effect=docker),write=Mock(),modules={})
+            M.readiness_failure(ctx,{'postgres':'pg-fixture','redis':'redis-fixture'},'redis',RuntimeError('redis_readiness'))
+            value=ctx.write.call_args.args[1]
+            self.assertEqual(ctx.docker.call_count,4)
+            self.assertTrue(all(row=={'state_observation':'unavailable','startup_classification':'unclassified_startup'}
+                for row in value['services'].values()))
+            self.assertNotIn('ordinary-private',M.encode(value).decode())
+
+    def test_readiness_diagnostic_rpc_and_report_loss_cannot_replace_primary_or_skip_second_service(self):
+        ctx=SimpleNamespace(root=self.root,docker=Mock(side_effect=OSError('ordinary-private-rpc')),
+            write=Mock(side_effect=OSError('ordinary-private-report')),modules={})
+        M.readiness_failure(ctx,{'postgres':'pg-fixture','redis':'redis-fixture'},'postgres',RuntimeError('dependency_readiness'))
+        self.assertEqual(ctx.docker.call_count,4);ctx.write.assert_called_once()
+        self.assertEqual(set(ctx.write.call_args.args[1]['services']),{'postgres','redis'})
+        self.assertTrue(all(row=={'state_observation':'unavailable','startup_classification':'log_observation_unavailable'}
+            for row in ctx.write.call_args.args[1]['services'].values()))
+
+    def test_actual_readiness_timeout_records_failing_service_before_cleanup_without_running_capsule(self):
+        for profile in ('postgres','redis'):
+            with self.subTest(profile=profile):
+                ctx,calls=self.execute_context();self.execute_patches(ctx);original=ctx.docker.side_effect
+                def docker(args,**kwargs):
+                    if args[:2]==['exec','pg-fixture'] and profile=='postgres':raise RuntimeError('command_failed')
+                    if args[:2]==['exec','redis-fixture']:return b'ordinary-wrong-pong'
+                    return original(args,**kwargs)
+                ctx.docker.side_effect=docker
+                with patch.object(M.time,'monotonic',side_effect=[0,91]),self.assertRaisesRegex(RuntimeError,'dependency_readiness'):
+                    M.execute(ctx)
+                self.assertEqual(M.SUBPHASE,profile+'_readiness')
+                path,value=ctx.write.call_args.args
+                self.assertEqual(path,self.root/'reports/dependency-readiness.json');self.assertEqual(value['failed_service'],profile)
+                self.assertEqual(value['probe_failure']['subphase'],profile+'_readiness')
+                self.assertFalse(any(args[:2]==['start','--attach'] for args,_ in calls))
+
     def test_every_literal_controller_refusal_has_a_closed_diagnostic_label(self):
         tree=ast.parse((ROOT/'scripts/run_app_image_ci_smoke.py').read_bytes())
         literals={n.args[1].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='need'

@@ -89,3 +89,30 @@ controller tests after the pin update. The shared validator has327/327 statement
 and56/56 branches covered, zero exclusions. Current helper consumers use the
 new exact bytes; historical sealed operations are unchanged. Actual PostgreSQL
 archive/import and the32 image scenarios still require successful CI evidence.
+
+## Third actual run: image admissions passed, dependency readiness failed
+
+Run `40175137576`, source `df85708f85dc264344230afe3bca2ddddb1b5302`,
+finished with failure. Public artifact `12591798478` is4466 bytes, SHA256
+`92b7ba0f13a82cdab7cd4e0ceb0ee392601c5e91ce7a077333e62cd8c7a93959`.
+All three physical archive admissions and actual daemon measurements passed:
+App `ed59`/33 layers, PostgreSQL `49a8`/12 layers and Redis `98c4`/8 layers.
+Whole typed image configuration was compared in RAM without disclosure. This
+actual result verifies the previous Moby Comment correction at its failing
+PostgreSQL archive boundary; the two earlier failed results remain preserved.
+
+The next boundary, `disposable_dependency_readiness`, failed with the closed
+code `dependency_readiness`. This artifact does not identify which dependency
+failed or why. No installed-application or selected component test ran; all32
+remain unproved. Exact owned cleanup completed with no reported causes and
+retained the primary failure. No production runtime was involved.
+
+The next source change adds separate PostgreSQL/Redis readiness subphases,
+strictly typed owned-dependency state, and fixed startup marker categories.
+At most8192 log bytes are classified in RAM; no raw log, Config, Env, command
+arguments or credentials enter artifacts. Diagnostic failure cannot replace
+the readiness failure or prevent owned cleanup. Root independently ran47
+tests as genuine UID1001 with all capabilities dropped and ambient effects
+fenced (1.083s, no skips). Startup users, capabilities, entrypoints and readiness
+thresholds are unchanged; the diagnostic is not evidence of a repaired
+dependency or successful32-case smoke.

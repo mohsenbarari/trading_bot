@@ -38,7 +38,7 @@ SELECTORS = {
 }
 PHASE = 'hosted_source_admission'
 SUBPHASE = 'none'
-FAILURE_CODES = frozenset(['app_archive_identity', 'app_export_scope', 'candidate_preexisting', 'ci_capacity', 'ci_identity', 'ci_root', 'container_identity', 'container_name', 'deadline', 'dependency_evidence_identity', 'dependency_readiness', 'diagnostic_subphase', 'duplicate_json_key', 'export_bound', 'export_pin', 'gzip_bound', 'gzip_pin', 'hosted_ci_only', 'image_import_delta', 'image_inventory', 'image_zip_inventory', 'image_zip_pin', 'installed_app_must_not_be_masked', 'json_bound', 'json_constant', 'loaded_descriptor', 'loaded_identity_unknown', 'loaded_image_identity', 'manifest_metadata', 'output_bound', 'owned_cleanup_identity', 'owned_cleanup_inventory', 'owned_network_cleanup_identity', 'owned_network_cleanup_inventory', 'private_output', 'redis_readiness', 'scratch_database_name', 'smoke_container_exit', 'smoke_counter_types', 'smoke_receipt', 'source_changed', 'source_metadata', 'source_path', 'source_pin', 'tar_size'])
+FAILURE_CODES = frozenset(['app_archive_identity', 'app_export_scope', 'candidate_preexisting', 'ci_capacity', 'ci_identity', 'ci_root', 'container_identity', 'container_name', 'deadline', 'dependency_evidence_identity', 'dependency_readiness', 'dependency_state_shape', 'dependency_startup_bound', 'diagnostic_subphase', 'duplicate_json_key', 'export_bound', 'export_pin', 'gzip_bound', 'gzip_pin', 'hosted_ci_only', 'image_import_delta', 'image_inventory', 'image_zip_inventory', 'image_zip_pin', 'installed_app_must_not_be_masked', 'json_bound', 'json_constant', 'loaded_descriptor', 'loaded_identity_unknown', 'loaded_image_identity', 'manifest_metadata', 'output_bound', 'owned_cleanup_identity', 'owned_cleanup_inventory', 'owned_network_cleanup_identity', 'owned_network_cleanup_inventory', 'private_output', 'redis_readiness', 'scratch_database_name', 'smoke_container_exit', 'smoke_counter_types', 'smoke_receipt', 'source_changed', 'source_metadata', 'source_path', 'source_pin', 'tar_size'])
 EXCEPTION_CLASSES = frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError',
     'PermissionError','TimeoutError','KeyError','TypeError','ValueError','JSONDecodeError'))
 APP = {'activation_allowed': False,
@@ -111,7 +111,7 @@ def need(ok, code):
 def subphase(profile,stage):
     global SUBPHASE
     need(profile in ('app','postgres','redis') and stage in ('metadata','evidence_download','evidence_admission',
-        'image_download','archive_unpack','archive_admission','image_load','daemon_config'),'diagnostic_subphase')
+        'image_download','archive_unpack','archive_admission','image_load','daemon_config','readiness'),'diagnostic_subphase')
     SUBPHASE=profile+'_'+stage
 
 
@@ -198,10 +198,11 @@ class Controller:
         need(time.monotonic()<(self.cleanup_end or self.end),'deadline')
         for check in self.checks:check()
 
-    def command(self,argv,*,seconds=30,maximum=MAX_JSON,input_stream=None,auth=False,public_log=None):
+    def command(self,argv,*,seconds=30,maximum=MAX_JSON,input_stream=None,auth=False,public_log=None,combine_stderr=False):
         self.check()
         return self.C.command(argv,seconds=min(seconds,max(.01,(self.cleanup_end or self.end)-time.monotonic())),maximum=maximum,input_stream=input_stream,
-            environment={'GH_TOKEN':os.environ['GH_TOKEN']} if auth else {'DOCKER_CONFIG':str(self.root/'docker-config')},log_path=public_log)
+            environment={'GH_TOKEN':os.environ['GH_TOKEN']} if auth else {'DOCKER_CONFIG':str(self.root/'docker-config')},log_path=public_log,
+            combine_stderr=combine_stderr)
 
     def docker(self,args,**kwargs):return self.command([*DOCKER,*args],**kwargs)
 
@@ -406,6 +407,50 @@ def cleanup(ctx):
     return sorted(set(failures))
 
 
+def startup_classification(profile,raw):
+    """Classify a bounded private RAM buffer; never retain text or exception args."""
+    need(profile in ('postgres','redis'),'diagnostic_subphase')
+    need(type(raw) is bytes and len(raw)<=8192,'dependency_startup_bound')
+    common=((b'No space left on device','filesystem_capacity_marker'),
+            (b'Permission denied','filesystem_permission_marker'),
+            (b'Read-only file system','filesystem_readonly_marker'))
+    specific=((b'Database is uninitialized and superuser password is not specified','postgres_password_required_marker'),
+              (b'database files are incompatible with server','postgres_data_version_marker'),
+              (b'initdb: error:','postgres_initdb_error_marker'),
+              (b'FATAL:','postgres_fatal_marker')) if profile=='postgres' else (
+              (b'Fatal error, can\'t open config file','redis_config_marker'),
+              (b'Failed listening on port','redis_listen_marker'),
+              (b'FATAL CONFIG FILE ERROR','redis_config_marker'))
+    return next((code for marker,code in common+specific if marker in raw),'unclassified_startup')
+
+
+def readiness_failure(ctx,containers,profile,error):
+    # Only fields from these newly owned public CI dependencies are inspected.
+    # Their log text stays in bounded RAM and cannot reach an artifact or stdout.
+    receipt={'schema':'app_ci_dependency_readiness/1','failed_service':profile,
+        'probe_failure':failure_diagnostic(error,ctx),'services':{},
+        'scope':'owned_disposable_hosted_dependencies_only','security_accepted':False}
+    fmt='{"running":{{json .State.Running}},"status":{{json .State.Status}},"exit_code":{{json .State.ExitCode}},"oom_killed":{{json .State.OOMKilled}},"restarting":{{json .State.Restarting}},"dead":{{json .State.Dead}}}'
+    for name,cid in containers.items():
+        row={'state_observation':'unavailable','startup_classification':'log_observation_unavailable'}
+        try:
+            state=document(ctx.docker(['container','inspect','--format',fmt,cid],seconds=10,maximum=1024))
+            need(type(state) is dict and set(state)=={'running','status','exit_code','oom_killed','restarting','dead'}
+                and all(type(state[k]) is bool for k in ('running','oom_killed','restarting','dead'))
+                and state['status'] in ('created','running','paused','restarting','removing','exited','dead')
+                and type(state['exit_code']) is int and 0<=state['exit_code']<=255,'dependency_state_shape')
+            row.update(state_observation='observed',state=state)
+        except BaseException:pass
+        try:
+            raw=ctx.docker(['logs','--tail','40',cid],seconds=10,maximum=8192,combine_stderr=True)
+            row['startup_classification']=startup_classification(name,raw)
+        except BaseException:pass
+        receipt['services'][name]=row
+    # Observational failure must never replace the primary failed readiness probe.
+    try:ctx.write(ctx.root/'reports/dependency-readiness.json',receipt)
+    except BaseException:pass
+
+
 def execute(ctx):
     global PHASE,SUBPHASE
     PHASE='exact_public_image_admission';app=admit_app(ctx)
@@ -425,10 +470,16 @@ def execute(ctx):
     deadline=time.monotonic()+90
     while True:
         try:
+            subphase('postgres','readiness');profile='postgres'
             ctx.docker(['exec',pg,'pg_isready','-h','127.0.0.1','-U','ci_public','-d',database],maximum=1024)
+            subphase('redis','readiness');profile='redis'
             need(ctx.docker(['exec',rd,'redis-cli','ping'],maximum=64).strip()==b'PONG','redis_readiness');break
-        except RuntimeError:
-            need(time.monotonic()<deadline,'dependency_readiness');time.sleep(1)
+        except RuntimeError as error:
+            if time.monotonic()>=deadline:
+                readiness_failure(ctx,{'postgres':pg,'redis':rd},profile,error)
+                need(False,'dependency_readiness')
+            time.sleep(1)
+    SUBPHASE='none'
     PHASE='installed_application_smoke'
     app_cid=create(ctx,'app-ci-api-'+owner(),app,['/usr/local/bin/python3','-I','-B','-c',CAPSULE],
         env={'APP_ENV_FILE':'/proof/runtime.env',**fixture_env(database)},proof=proof,output_limit=True,
