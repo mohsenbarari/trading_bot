@@ -320,8 +320,12 @@ def validate_archive(stream, size, image, scanner=None, *, last_layer=None):
         projection = PRIOR.compare_scanner_config(config, scanner)
         projection['original_nanosecond_config_sha256'] = image[7:]
     diffs = config['rootfs']['diff_ids']
+    # OCI may reference one physical blob several times in the ordered layer
+    # sequence (App8da repeats its empty layer three times). Physical TAR
+    # members remain unique; every logical position still hashes its referenced
+    # bytes against that position's exact Config diff_id below.
     require(type(layers) is list and 0 < len(layers) == len(diffs) <= 128
-            and all(PRIOR.safe_name(n) for n in layers) and len(set(layers)) == len(layers), 'archive_layers')
+            and all(PRIOR.safe_name(n) for n in layers), 'archive_layers')
     tags = row.get('RepoTags')
     require(tags is None or type(tags) is list and len(tags) <= 8
             and all(type(q) is str and re.fullmatch(r'[A-Za-z0-9_./:@-]{1,256}', q) for q in tags), 'archive_tags')

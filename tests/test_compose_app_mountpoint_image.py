@@ -303,6 +303,10 @@ class AppMountpointImageTests(unittest.TestCase):
         self.assertNotIn('docker login', source)
         self.assertNotIn('docker push', source)
         self.assertIn('gate --root', source)
+        import re
+        pin = re.search(r'(?m)^      CONTROLLER_SHA: ([a-f0-9]{64})$', source)
+        self.assertIsNotNone(pin)
+        self.assertEqual(pin.group(1), sha256((ROOT/'scripts/compose_app_mountpoint_image.py').read_bytes()).hexdigest())
 
 
 def load_prior():
@@ -657,12 +661,15 @@ class AppMountpointAdmissionTests(unittest.TestCase):
             self.assertEqual(M.main(['cleanup', '--root', str(self.root)]), 0)
         cleanup.assert_called_once_with(self.root)
 
-    def structured_archive(self, *, oci=True, depth=1):
+    def structured_archive(self, *, oci=True, depth=1, shared_references=1,
+                           mismatched_reference=False, duplicate_physical_member=False):
         import gzip
         layer = tar_rows([(name, tarfile.DIRTYPE, 0o755, 0, 0, b'') for name in M.DIRECTORIES]).getvalue()
         config = {'architecture': 'amd64', 'os': 'linux', 'created': '2026-10-25T01:00:00Z', 'history': [],
-                  'rootfs': {'type': 'layers', 'diff_ids': ['sha256:' + sha256(layer).hexdigest()]},
+                  'rootfs': {'type': 'layers', 'diff_ids': ['sha256:' + sha256(layer).hexdigest()] * shared_references},
                   'config': {'Cmd': ['server'], 'Env': ['PUBLIC_TEST=1'], 'Labels': {'parent': 'fixture'}, 'WorkingDir': '/app'}}
+        if mismatched_reference:
+            config['rootfs']['diff_ids'][1] = 'sha256:' + 'f' * 64
         raw_config = json.dumps(config, separators=(',', ':')).encode()
         image = 'sha256:' + sha256(raw_config).hexdigest()
         data = {}
@@ -674,14 +681,15 @@ class AppMountpointAdmissionTests(unittest.TestCase):
             config_descriptor = blob(raw_config)
             compressed = gzip.compress(layer)
             layer_descriptor = blob(compressed)
-            value = {'schemaVersion': 2, 'config': config_descriptor, 'layers': [layer_descriptor]}
+            value = {'schemaVersion': 2, 'config': config_descriptor,
+                     'layers': [layer_descriptor] * shared_references}
             selected = blob(M.encoded(value))
             for _ in range(depth):
                 selected = blob(M.encoded({'schemaVersion': 2, 'manifests': [selected]}))
             data['index.json'] = M.encoded({'schemaVersion': 2, 'manifests': [selected]})
             data['oci-layout'] = b'{"imageLayoutVersion":"1.0.0"}'
             config_name = 'blobs/sha256/' + image[7:]
-            layers = ['blobs/sha256/' + layer_descriptor['digest'][7:]]
+            layers = ['blobs/sha256/' + layer_descriptor['digest'][7:]] * shared_references
             data.update(M.LEGACY.moby_legacy_configs(config))
         else:
             legacy = next(iter(M.LEGACY.moby_legacy_configs(config).values()))
@@ -692,8 +700,30 @@ class AppMountpointAdmissionTests(unittest.TestCase):
             data.update({config_name: raw_config, layers[0]: layer, prefix + 'VERSION': b'1.0\n',
                          prefix + 'json': legacy, 'repositories': b'{"public-fixture":{}}'})
         data['manifest.json'] = M.encoded([{'Config': config_name, 'Layers': layers, 'RepoTags': None}])
-        raw = tar_rows([(name, tarfile.REGTYPE, 0o600, 0, 0, body) for name, body in data.items()]).getvalue()
+        rows = [(name, tarfile.REGTYPE, 0o600, 0, 0, body) for name, body in data.items()]
+        if duplicate_physical_member:
+            rows.append(next(row for row in rows if row[0] == layers[0]))
+        raw = tar_rows(rows).getvalue()
         return io.BytesIO(raw), len(raw), image, config
+
+    def test_repeated_logical_oci_references_share_one_unique_physical_blob(self):
+        stream, size, image, config = self.structured_archive(shared_references=3)
+        result = M.validate_archive(stream, size, image, config, last_layer=[0o755, 0, 0])
+        self.assertEqual(result['layers'], 3)
+        self.assertEqual(len(set(result['config']['rootfs']['diff_ids'])), 1)
+        self.assertEqual(len(result['oci_manifest_ids']), 1)
+        self.assertTrue(result['physical_graph_closed'])
+        self.assertEqual(result['new_layer']['new_directories'], list(M.DIRECTORIES))
+
+    def test_repeated_oci_reference_must_match_each_ordered_config_diff_id(self):
+        stream, size, image, config = self.structured_archive(shared_references=3, mismatched_reference=True)
+        with self.assertRaisesRegex(RuntimeError, 'archive_layer_diff_id'):
+            M.validate_archive(stream, size, image, config)
+
+    def test_reused_oci_blob_does_not_allow_duplicate_physical_tar_members(self):
+        stream, size, image, config = self.structured_archive(shared_references=3, duplicate_physical_member=True)
+        with self.assertRaisesRegex(RuntimeError, 'archive_member'):
+            M.validate_archive(stream, size, image, config)
 
     def test_nested_oci_graph_gzip_layer_and_exact_moby_compatibility_metadata_pass(self):
         stream, size, image, config = self.structured_archive()

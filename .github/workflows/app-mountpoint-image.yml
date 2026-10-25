@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      CONTROLLER_SHA: 97de14cd7990c4a249aa5f69ea529439f9abf64ee54e733227f8b8c216a30d75
+      CONTROLLER_SHA: 14849bd8c616b27ade1c8488b8e6f276b369480456d0acc1a8c8eb4284f40226
     steps:
       - uses: actions/checkout@v4
         with:

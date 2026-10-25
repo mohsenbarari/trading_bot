@@ -93,7 +93,7 @@ exact byte/digest admission and a file-size limit, and no Go CLI inherits an
 address-space cap. Precise static refusal code and phase are retained without
 exception operands or runtime configuration values. New public receipts omit
 Config/Env projections; the required complete raw scanner report stays intact.
-The local focused suite passes55tests (44new lane tests plus11image/trust tests).
+The local focused suite passes58tests (47new lane tests plus11image/trust tests).
 Coverage.py7.13.5 measures every one of542executable controller statements and
 all82reported branches:100%, zero missing lines or partial branches. The tests
 exercise owned ZIP/gzip/TAR/OCI/Moby fixtures, first-buffer source admission,
@@ -106,3 +106,37 @@ payload parity, tests inside the new image and new scan/export are NOT_TESTED.
 All runtime COW/security guards, consumer controls, ACL/disposition gates and
 runtime allowlists remain unchanged. This packet grants no image admission,
 deployment, COW exception or security acceptance.
+
+
+## Failed first build: shared OCI blob references
+
+Run `40164897246` at source `aa6e5e4ed80116a2eb69513aad88c1381f077d35`
+failed at `parent_image_admission` with the closed reason `archive_layers`.
+Public evidence artifact `12587826603` is993bytes, SHA256
+`d28c3870e9926c6a6d795f2e9e6c09c4375286c5a6c7df41deae2858bd32a9bb`.
+No candidate was built or activated. Preserve that original failed evidence.
+
+The exact public parent Config contains32ordered DiffIDs but30distinct values:
+empty-layer DiffID
+`sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef`
+occurs three times. OCI logical layer references may reuse one physical blob.
+The parser incorrectly demanded uniqueness in the logical reference sequence.
+The correction removes only that demand: physical TAR members remain unique,
+and every ordered reference must still hash to its exact Config DiffID and
+match the authenticated OCI descriptor. Closed inventory, archive/config SHA,
+layer count/prefix and the directory-only last-layer gate remain unchanged.
+Regressions cover a three-reference shared blob, a mismatched ordered DiffID,
+and duplicate physical TAR members. This source fix is not an actual successful
+build or security acceptance; the corrected published CI run must prove those.
+
+Root then ran the corrected parser read-only against the actual retained
+451,747,328-byte Web parent archive. Exact archive SHA7337, Config8da, all32
+ordered references,30distinct layers and the closed physical graph passed,
+with the same retained file identity before/after. The three SHA-sealed public
+source modules ran within a finite1GiB/oneCPU/240s scope; no Docker, LOAD,
+extraction, private operational data or runtime COW probe was used. The actual
+[public receipt](evidence/2026-10-25-app-parent-archive-preflight.json) has SHA256
+`a2447ae7126e0fce70bfd76761b799ab114a6466c7ef7d51f52a1d098c83e41a`.
+Root independently reran all58focused tests successfully; controller statement
+and branch coverage remain100%. This closes the observed parent-format defect,
+not the still-required actual child build, scan/export or runtime acceptance.
