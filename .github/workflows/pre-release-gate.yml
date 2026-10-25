@@ -211,7 +211,7 @@ jobs:
         run: |
           make observability-gate
           python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
-          python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions
+          python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions tests.test_browser_ci_https_contract
           python3 -m unittest -v \
             tests.test_prepare_market_security_payload.MarketSecurityPayloadTests.test_actual_workflow_opt_in_and_raw_scan_export_gate_contract \
             tests.test_security_consumer_payload.SecurityPayload.test_ci_is_explicit_public_payload_only_no_activation_or_scanner_waiver
@@ -277,7 +277,7 @@ jobs:
           DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
-          FRONTEND_URL=http://127.0.0.1:4173
+          FRONTEND_URL=https://127.0.0.1:4173
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
@@ -380,9 +380,28 @@ jobs:
             -H 'Content-Type: application/json'
           curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
             -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
-            -H 'Origin: http://127.0.0.1:4173' \
+            -H 'Origin: https://127.0.0.1:4173' \
             -H 'Access-Control-Request-Method: POST'
-          grep -qi '^access-control-allow-origin: http://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+          grep -qi '^access-control-allow-origin: https://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+
+      - name: Prepare CI HTTPS fixture
+        timeout-minutes: 2
+        run: |
+          node --test scripts/probe_browser_ci_https.test.mjs
+          node frontend/scripts/browser-ci-https.mjs prepare
+
+      - name: Trust synthetic CI CA
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          browser_ci_ca_anchor="/usr/local/share/ca-certificates/browser-ci-matrix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.crt"
+          [[ ! -e "$browser_ci_ca_anchor" && ! -L "$browser_ci_ca_anchor" ]]
+          sudo install -m 0644 -- "$BROWSER_CI_TLS_CA" "$browser_ci_ca_anchor"
+          browser_ci_ca_identity="$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$browser_ci_ca_anchor")"
+          printf 'BROWSER_CI_TLS_CA_ANCHOR=%s\nBROWSER_CI_TLS_CA_IDENTITY=%s\n' \
+            "$browser_ci_ca_anchor" "$browser_ci_ca_identity" >> "$GITHUB_ENV"
+          sudo update-ca-certificates >/dev/null 2>&1
 
       - name: Run Playwright browser gate
         working-directory: frontend
@@ -399,13 +418,13 @@ jobs:
         run: |
           case "${{ matrix.browser }}" in
             chromium)
-              npm run test:e2e -- --shard=${{ matrix.shard }}/4
+              npm run test:e2e -- --config=playwright.https-diagnostic.config.ts --shard=${{ matrix.shard }}/4
               ;;
             firefox)
-              npm run test:e2e:firefox -- --shard=${{ matrix.shard }}/4
+              npm run test:e2e:firefox -- --config=playwright.https-diagnostic.config.ts --shard=${{ matrix.shard }}/4
               ;;
             webkit)
-              npm run test:e2e:webkit -- --shard=${{ matrix.shard }}/4
+              npm run test:e2e:webkit -- --config=playwright.https-diagnostic.config.ts --shard=${{ matrix.shard }}/4
               ;;
             *)
               echo "Unsupported browser: ${{ matrix.browser }}" >&2
@@ -420,7 +439,7 @@ jobs:
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
         run: >-
-          npx playwright test --config=playwright.production-login.config.ts
+          npx playwright test --config=playwright.https-production-login.config.ts
           --project=${{ matrix.browser }}
 
       - name: Collect closed browser CI backend exception metadata
@@ -464,6 +483,18 @@ jobs:
       - name: Tear down backend stack
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+      - name: Remove only the owned synthetic CI CA anchor
+        if: always() && env.BROWSER_CI_TLS_CA_ANCHOR != ''
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          [[ "$BROWSER_CI_TLS_CA_ANCHOR" == "/usr/local/share/ca-certificates/browser-ci-matrix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.crt" ]]
+          [[ "$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$BROWSER_CI_TLS_CA_ANCHOR")" == "$BROWSER_CI_TLS_CA_IDENTITY" ]]
+          sudo cmp -s -- "$BROWSER_CI_TLS_CA" "$BROWSER_CI_TLS_CA_ANCHOR"
+          [[ "$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$BROWSER_CI_TLS_CA_ANCHOR")" == "$BROWSER_CI_TLS_CA_IDENTITY" ]]
+          sudo rm -- "$BROWSER_CI_TLS_CA_ANCHOR"
+          sudo update-ca-certificates >/dev/null 2>&1
 
   security-consumer-payload:
     name: security-consumer-payload

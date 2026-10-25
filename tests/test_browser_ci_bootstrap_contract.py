@@ -227,7 +227,7 @@ esac
                 values = dict(line.split('=', 1) for line in backend.splitlines())
                 self.assertEqual(values['ENVIRONMENT'], 'staging')
                 self.assertEqual(values['SERVER_MODE'], 'iran')
-                self.assertEqual(values['FRONTEND_URL'], 'http://127.0.0.1:4173')
+                self.assertEqual(values['FRONTEND_URL'], 'https://127.0.0.1:4173')
                 settings = SimpleNamespace(**{key.lower(): value for key, value in values.items()})
                 origin = 'https://browser-ci.iran.example'
                 self.assertEqual(validate_public_webapp_url(values['PUBLIC_WEBAPP_URL'], settings_obj=settings), origin)

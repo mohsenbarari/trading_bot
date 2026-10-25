@@ -90,7 +90,7 @@ class BrowserFixtureTests(unittest.TestCase):
             self.assertEqual(build['env'], {'FRONTEND_BUILD_OUT_DIR': 'dist/production-login',
                                             'VITE_STAGING_DEV_LOGIN': 'false'})
             self.assertIn('--project=${{ matrix.browser }}', gate['run'])
-            self.assertIn('--config=playwright.production-login.config.ts', gate['run'])
+            self.assertIn('--config=playwright.https-production-login.config.ts', gate['run'])
             self.assertNotIn('continue-on-error', gate)
             self.assertLess(steps.index(primary), steps.index(gate))
             upload = next(s for s in steps if s['name'] == 'Upload Playwright artifacts')
@@ -133,6 +133,7 @@ class BrowserFixtureTests(unittest.TestCase):
             step = next(s for s in jobs['observability-gate']['steps']
                         if s['name'] == 'Run focused observability gate')
             self.assertIn('tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions', step['run'])
+            self.assertIn('tests.test_browser_ci_https_contract', step['run'])
             self.assertNotIn('continue-on-error', step)
 
     def test_cookie_observation_is_owned_selected_job_only_and_preserved_as_diagnostic_evidence(self):

@@ -48,6 +48,38 @@ test('actual pinned Playwright config replaces the ordinary server rather than c
   assert.equal(ordinary.webServer.port, 4173)
 })
 
+test('full-matrix production login keeps its exact test selection and quality gates with one strict HTTPS server', () => {
+  const require = createRequire(path.join(process.cwd(), 'frontend/package.json'))
+  const { defineConfig } = require('@playwright/test')
+  const base = { timeout: 30000, expect: { timeout: 5000 }, forbidOnly: true, retries: 2, workers: 1,
+    grepInvert: /login stays keyboard-usable and hides developer shortcut/,
+    use: { baseURL: 'http://127.0.0.1:4173', actionTimeout: 0, trace: 'on-first-retry', headless: true },
+    projects: [{ name: 'chromium' }, { name: 'firefox' }, { name: 'webkit' }] }
+  const evaluate = (filename, bindings) => {
+    const source = fs.readFileSync(new URL(`../frontend/${filename}`, import.meta.url), 'utf8')
+      .replace(/^import .*$/gm, '').replace('export default', 'return')
+    return new Function('defineConfig', ...Object.keys(bindings), source)(defineConfig, ...Object.values(bindings))
+  }
+  const ordinary = evaluate('playwright.production-login.config.ts', { base })
+  const fixtureProcess = { env: { CI: 'true', BROWSER_CI_PREVIEW_TLS: '1' } }
+  const config = evaluate('playwright.https-production-login.config.ts', { process: fixtureProcess, ordinary })
+  for (const key of Object.keys(ordinary).filter(key => !['use', 'webServer'].includes(key))) {
+    assert.deepEqual(config[key], ordinary[key])
+  }
+  assert.equal(config.webServer.command, ordinary.webServer.command)
+  assert.equal(Array.isArray(config.webServer), false)
+  assert.equal(config.webServer.port, undefined)
+  assert.equal(config.webServer.url, 'https://127.0.0.1:4174')
+  assert.equal(config.webServer.ignoreHTTPSErrors, false)
+  assert.equal(config.webServer.reuseExistingServer, false)
+  assert.deepEqual(config.use, { ...ordinary.use, baseURL: 'https://127.0.0.1:4174', ignoreHTTPSErrors: false })
+  assert.equal(ordinary.use.baseURL, 'http://127.0.0.1:4174')
+  for (const env of [{}, { CI: 'true' }, { CI: 'false', BROWSER_CI_PREVIEW_TLS: '1' }]) {
+    assert.throws(() => evaluate('playwright.https-production-login.config.ts', { process: { env }, ordinary }),
+      /browser_ci_https_fixture_required/)
+  }
+})
+
 test('synthetic keys and certificates live only in the owned runner-temp namespace', t => {
   const { env } = enabled(t)
   const root = env.BROWSER_CI_TLS_ROOT

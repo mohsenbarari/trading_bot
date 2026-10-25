@@ -398,3 +398,23 @@ name matches include ordinary method-name false positives. Public inventory
 SHA256 `9357b7fa71d9160b20dcfeeac4607775b6647b8d107481a74858266e5394a1ed`
 retains every file hash and all matches. This narrows the caller review; it
 does not prove runtime callpaths or change raw findings/global acceptance.
+
+Selected run40240543343 at d3107a6e completed unsuccessfully: accountant passed;
+inactive-account and real chat-delete assertions failed. Its independent HTTPS
+cookie artifact reports accepted=true/retransmitted=true, while the separate
+HTTP observation remains false/false. Artifact12616693300 is227519 bytes, SHA256
+`dae6ace62c1d1053a558e70d6eff95c7ade322a52d3a962e9857a563eacb939a`.
+The first numeric menu observation was inside the viewport; a later-loaded
+reaction panel requires further analysis. No menu-fix or full-matrix success is
+claimed. Candidate E1 still contains only its actual665 source.
+
+The full browser-matrix HTTPS packet reuses the reviewed synthetic-CA preparation,
+trust and owned cleanup in both ordinary workflows. Its separate strict4174
+wrapper retains the production-login test/configuration;4173 keeps the ordinary
+browser selections, shards, retries, workers, timeouts and assertions. Root passed
+35 Python contracts and10 real synthetic TLS/config tests, including actual
+Playwright1.59.1 single-server/inheritance checks. The first Root invocation used
+SEC without installed Playwright and failed two dependency imports; using the
+documented MAIN dependency working directory passed all10 without a mock/skip.
+Only a trailing blank line changed after those tests. Source packet44112fd0
+does not establish actual full-browser success or deployment acceptance.

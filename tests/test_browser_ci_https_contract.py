@@ -94,7 +94,7 @@ class BrowserHttpsContractTests(unittest.TestCase):
         self.assertNotIn('NODE_TLS_REJECT_UNAUTHORIZED', helper)
         self.assertNotIn('FORWARDED_ALLOW_IPS', helper)
 
-    def test_only_selected_job_prepares_and_trusts_ca_after_build_without_weakening_validation(self):
+    def test_selected_job_prepares_and_trusts_ca_after_build_without_weakening_validation(self):
         value = yaml.safe_load((ROOT / '.github/workflows/browser-ci-diagnostic.yml').read_text())
         job = value['jobs']['browser-diagnostic']
         steps = job['steps']
@@ -131,11 +131,54 @@ class BrowserHttpsContractTests(unittest.TestCase):
         artifact = next(step for step in steps if step['name'] == 'Upload diagnostic evidence')['with']['path']
         self.assertNotIn('RUNNER_TEMP', artifact)
         self.assertNotIn('BROWSER_CI_TLS', artifact)
+
+    def test_full_browser_matrices_reuse_strict_tls_after_both_builds_and_preserve_every_gate(self):
+        selected = yaml.safe_load((ROOT / '.github/workflows/browser-ci-diagnostic.yml').read_text())['jobs']['browser-diagnostic']
+        selected_step = lambda name: next(step for step in selected['steps'] if step['name'] == name)
         for name in ('merge-gate.yml', 'pre-release-gate.yml'):
             normal = yaml.safe_load((ROOT / '.github/workflows' / name).read_text())['jobs']['frontend-browser-matrix']
-            self.assertNotIn('BROWSER_CI_PREVIEW_TLS', str(normal))
-            environment = next(step for step in normal['steps'] if step['name'] == 'Write CI environment file')['run']
-            self.assertIn('FRONTEND_URL=http://127.0.0.1:4173\n', environment)
+            steps = normal['steps']
+            step = lambda name: next(value for value in steps if value['name'] == name)
+            prepare = step('Prepare CI HTTPS fixture')
+            trust = step('Trust synthetic CI CA')
+            cleanup = step('Remove only the owned synthetic CI CA anchor')
+            gate = step('Run Playwright browser gate')
+            production = step('Run production login browser gate')
+            for build in ('Build frontend', 'Build production login browser fixture'):
+                self.assertLess(steps.index(step(build)), steps.index(prepare))
+            self.assertLess(steps.index(prepare), steps.index(trust))
+            self.assertLess(steps.index(trust), steps.index(gate))
+            self.assertLess(steps.index(gate), steps.index(production))
+            self.assertEqual(prepare['run'], selected_step('Prepare selected CI HTTPS fixture')['run'])
+            self.assertEqual(trust['run'], selected_step('Trust selected synthetic CI CA')['run']
+                             .replace('browser-ci-selected-', 'browser-ci-matrix-'))
+            self.assertEqual(cleanup['run'], selected_step('Remove only the owned synthetic CI CA anchor')['run']
+                             .replace('browser-ci-selected-', 'browser-ci-matrix-'))
+            self.assertEqual(cleanup['if'], "always() && env.BROWSER_CI_TLS_CA_ANCHOR != ''")
+            self.assertLess(steps.index(step('Tear down backend stack')), steps.index(cleanup))
+            for value in (prepare, trust, gate, production, cleanup):
+                self.assertNotIn('continue-on-error', value)
+            for command in ('npm run test:e2e --', 'npm run test:e2e:firefox --', 'npm run test:e2e:webkit --'):
+                self.assertIn(command + ' --config=playwright.https-diagnostic.config.ts --shard=${{ matrix.shard }}/4', gate['run'])
+            for option in ('--grep', '--retries', '--workers', '--timeout'):
+                self.assertNotIn(option, gate['run'])
+            self.assertIn('--config=playwright.https-production-login.config.ts', production['run'])
+            self.assertEqual(production['if'], 'matrix.shard == 1')
+            self.assertEqual(normal['strategy'], {'fail-fast': False, 'matrix': {
+                'browser': ['chromium', 'firefox', 'webkit'], 'shard': [1, 2, 3, 4]}})
+            self.assertEqual(normal['timeout-minutes'], 75)
+            self.assertEqual(normal['permissions'], {'contents': 'read', 'actions': 'read'})
+            environment = step('Write CI environment file')['run']
+            self.assertIn('ENVIRONMENT=staging\n', environment)
+            self.assertIn('FRONTEND_URL=https://127.0.0.1:4173\n', environment)
+            surface = step('Verify browser CI backend surface')['run']
+            self.assertIn("Origin: https://127.0.0.1:4173", surface)
+            self.assertIn('allow-origin: https://127.0.0.1:4173', surface)
+            self.assertNotIn('NODE_TLS_REJECT_UNAUTHORIZED', str(normal))
+            self.assertNotIn('FORWARDED_ALLOW_IPS', str(normal))
+            artifact = step('Upload Playwright artifacts')['with']['path']
+            self.assertNotIn('RUNNER_TEMP', artifact)
+            self.assertNotIn('BROWSER_CI_TLS', artifact)
 
     def test_https_cookie_evidence_is_separate_bounded_and_requires_true_typed_values(self):
         job = yaml.safe_load((ROOT / '.github/workflows/browser-ci-diagnostic.yml').read_text())['jobs']['browser-diagnostic']
