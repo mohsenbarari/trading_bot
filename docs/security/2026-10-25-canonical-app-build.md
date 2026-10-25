@@ -176,3 +176,26 @@ trivy-cache outside Git. The strict clean-checkout/input guards remain intact;
 no ignored-dirt exception or evidence deletion is introduced. Focused workflow
 contracts require this exact external cache path. The previous build/scans are
 real evidence for their exact SHA, not a successful export or new serving role.
+
+Third run40191605131 on frozen main665220a2 completed the ordinary build,
+native checks, raw scan, SBOM and both artifact uploads. Config is
+`sha256:e1a727de49c45befbcef82f2b93721b780c06b64643d749290ade390215cc9f1`;
+the ordered RootFS has33 layers. The strict raw gate alone failed on
+0CRITICAL/44HIGH/68MEDIUM/82LOW/1UNKNOWN. It remains failed and unaccepted.
+
+The actual image ZIP12598511333 is183170277 bytes, SHA256
+`46b1e1f0d826493db7d18b7835acccdb75af4282ac9d504dc21d842e8608b8d6`.
+It was transferred directly to Web, without a large Native archive. Actual
+Web observationaed34797d49f45d1973e846cbe98d73c verified ZIP/export identity,
+gzip/TAR hashes,71 physical TAR members and all33 ordered DiffIDs. The TAR is
+452719104 bytes, SHA256
+`e10090370762baf289dd55457f648b5c78b05e8e398c724397336b1d89006c67`.
+Measurement does not certify legacy compatibility bytes, full Config or LOAD.
+
+The separate canonical runtime workflow now binds those actual observations
+before any disposable image LOAD. It must prove the strict complete archive
+graph, fresh component/ACL inventories and the unchanged32 runtime/component
+assertions. Its controller source advances on the security branch while main
+stays665220a2; the controller commit must never be relabelled as the image source.
+No serving replacement, runtime-smoke success or security acceptance is claimed
+by this source packet.

@@ -22,6 +22,7 @@ ROOT_MODULES = tuple('tests.test_' + name for name in (
     'coverage_root_fixture_lane',
     'datastore_candidate_stage', 'datastore_candidate_contract_completion',
     'datastore_candidate_stage_completion', 'datastore_candidate_stage_entry', 'datastore_candidate_images',
+    'datastore_candidate_images_v2',
     'security_legacy_parking', 'security_legacy_parking_completion',
     'market_candidate_images', 'market_candidate_images_v2',
     'capture_conflict_diagnostic'))
