@@ -54,6 +54,8 @@ Each was one fresh independently gated request; none resumes the failed old batc
 | 678 / Web receive |c7b9aeae134b4a36be30f1a335a67cbd|cb95abfd2e223c2adad8c40bc607f24b4fcb1240884a731539f1e0515834dc0f|
 | 678 / Web LOAD |64a8a37550cd40ef9a2d1ce79266b6df|1a7a503523a47961f8d7d412db0fdb3b914411b9875ca7671d7dfa9c485e2a39|
 | PostgreSQL / Native LOAD |daa94b3c98804a5ba5b508010e65222f|0a6f760f297fdda7bf81519103823e42c43122dfd2e1e0fa43934e4b071d8bf1|
+| E46 / fresh Web receive |2cc6c03479f04f388041b93fb5251ac6|ff7828de090258c2db1e802d997b755a0dee1645407d61d5229b2a218e04822c|
+| E46 / Web LOAD |abd6b15bf1a84f5699a395611c368ea9|3ebe0243a2bb69817d1af2a780f1d6a7417d44b1dea8e5e31a625b1010506e18|
 
 E46 receive4d3f3913d6b14976b69a73d9ff6a2628 failed its Web NOAPPLY with
 runtime_changed. No issuing-request file or image operation followed. Later
@@ -61,6 +63,15 @@ read-only comparison proves account1 started a new lifecycle at17:27:55UTC,
 after the baseline and before the Web preflight; F79 also later restarted. This
 is real process drift. Later observations do not reconstruct every failure-time
 field. No general restart/health waiver or automatic retry is authorized.
+
+An independently reviewed13-fixture witness subsequently proved the old failure
+preceded any request, with both original histories held, no issued-request file,
+no matching attempts/aliases/guards/pending state, and dead empty old scopes.
+Its actual default proof was88a66b92. A distinct authority23a6a8fb then obtained
+fresh observations and invoked the unchanged pinned one-phase caller once;
+its operation2cc6 and subsequent unspent LOADabd6 succeeded as listed above.
+All ten Market candidates are now loaded on their intended hosts. No serving
+role was replaced and no old failed control/once record was resumed.
 
 ## Backup and open App admission incident
 
@@ -71,6 +82,17 @@ passed. The Web backups reached the protected Native backup destination through
 strict SSH. Configuration values were consumed in operational RAM only. This is
 baseline database restore evidence, not candidate/old compatibility or an isolated
 uploads restore. The earlier4194305-byte truncated attempt remains failed.
+
+The reviewed normal candidate-control producer then passed14 genuine Root
+fixtures, including real wrong-owner/replacement rejection and explicit SSH
+configuration/key/agent/control-socket boundaries. Its actual control0ffbcedc
+bound both original PG LOAD schemas without relabeling. Fresh normal backup03,
+stampsecurity-canonical-app-20261025-ddc5fe9c72794154, completed at19:31:15UTC:
+four artifacts/site and isolated restores using the actual15.19 candidate plus
+owned cleanup passed on both hosts. Baseline source modes and the candidate
+control/config were asserted in operational RAM. This still does not establish
+uploads restoration, candidate-written-clone/old-image persistence or App schema
+compatibility. The separate Market database needs its own fresh coverage.
 
 App admissiondf941a8414e94173a82d05eb8955bab1 passed both NOAPPLYs, then Web failed
 temporary_memory_floor during archive graph validation. Native reported the exact
@@ -176,3 +198,17 @@ must remain active. CI-only queue-v1/producer-only configuration, an explicit
 no-executor/no-credentials/schema surface check, and current OTP button/step
 fixtures passed49 Root tests and independent review. A new actual targeted run
 is required; neither source tests nor this failed run grants acceptance.
+
+The next exact64580e68 diagnostic40226247190 actually passed both selected cases
+with one worker in9.9s. Source binding, producer-only/schema surface, cleanup and
+outcome recording passed. Artifact12611397855 is201838 bytes, SHA256
+c413d4dc296e1d70cde1d64c40c39421e26873d468c6bdbe9a82a37c1cc58716.
+Its scope remains diagnostic-only. Full browser40226940183 and coverage40226942334
+were separately dispatched at exact64580e68; neither is yet a terminal acceptance.
+
+The coexisting Appv3/resource source packet passed19 genuine Root fixtures and
+two ordinary owned-child tests, plus independent review. The required Root module
+is registered separately from those children. Native policy and all disk floors
+are unchanged; Web's source-backed engineering RAM floor is3021996032 bytes plus
+actual tmpfs writes, with a hard512MiB client cgroup. Old workers/catalogs and
+df941/2ddd history remain immutable. No v3 admission/LOAD has yet occurred.

@@ -4,7 +4,7 @@
   After closure require30 consecutive accepted clean units; failures reset streak
   with history. Tests/polls never count. Preserve behavior/capture owner/user dirt;
   Writer/DNS human.
-- Host/TLS complete. App9ee39b0b backups/baselineDBrestore passed both; candidate/
+- Host/TLS complete. Appddc5fe9c backups/PG-candidate restores passed both;
   old-image/uploads compatibility OPEN. Final accepts ciphertext backups only;
   no App provisioning/migration authority.
 - Ordinary665220a2/e1a727de built, not serving. Freeze main; merge security after
@@ -18,12 +18,12 @@
 - PG49a8/Redis98c4 not activated; Windows UNKNOWN retains Linux absence proof.
   Both candidates now loaded both hosts. Native0bd closed d27/b651; preparation
   failure preserved, distinct PG02 daa94 passed actual Native LOAD0a6f760f.
-- MarketNative a37/f365/e31/2c, Web414/F79/223/2e32/678 loaded; E46 receive open.
-  Old batch stays FAILED.
+- All ten Market candidates loaded on intended hosts, none activated.
+  Old batch stays FAILED; distinct proven-no-request E46 authority succeeded.
   E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
   memoryfloor failure retired/guards closed under2ddd; no LOAD. Both watchdogs
   auto-restored normal apply; finite windows only. Keep eight readers.
-  Actual fixed-TAR Python probe peak35.8MB under512MiB; no Docker/RAM-policy proof.
+  Fixed-TAR probes measured Python only; no daemon heap bound. Appv3 source reviewed.
 - Expired controls grant no authority; unknown RPC never proves cancel/retry.
   Config/manifest differ; classic branches never query Descriptor. Physical TAR
   members unique; repeated logical layers valid, every ordered DiffID strict.
@@ -39,6 +39,6 @@
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
-- Browser40215795297 ended9/12pass, three shard1 failures. JSON-stacktrace/parser
-  and CI same-origin fixes published bf8ec120 after45 tests/independent review;
-  actual selected diagnostic40224728108 running. Full browser acceptance OPEN.
+- Browser40215795297 failed three shard1s. CI origin/parser/producer/OTP fixes64580e68
+  passed49 tests/review and actual selected40226247190 passed2. Full browser40226940183
+  and coverage40226942334 pending. Full browser acceptance OPEN.
