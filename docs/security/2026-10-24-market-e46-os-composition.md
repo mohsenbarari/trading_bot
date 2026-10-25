@@ -3,8 +3,9 @@
 This default-off `market_e46_os` lane in the existing OS composition workflow
 reuses one tested E46 candidate, without rebuilding its product or Python
 dependencies. The first actual composition run refused before loading an image;
-the second built, tested and scanned but refused before export. The latest report
-publication correction has not rerun. This lane grants no deployment,
+the second built, tested and scanned but refused before export. The third run
+completed composition, tests, both scans and export; the raw HIGH gate still
+refuses acceptance. This lane grants no deployment,
 scanner exception or acceptance. App and datastore jobs keep their own inputs;
 requesting a datastore profile together with this lane refuses admission.
 
@@ -138,4 +139,30 @@ Existing files, symlinks and aliases are never adopted. The strict reader is
 unchanged. An executable controller fixture now covers compose, separate-umask
 report writes, final validation/export and only-then alias cleanup. The candidate
 from this failed run was not exported or made deployable; the publication
-correction still needs independent review and actual CI.
+correction was independently reviewed and exercised in the actual run below.
+
+Actual [run40145507410](https://github.com/mohsenbarari/trading_bot/actions/runs/40145507410)
+at source `e2948eefc6b4e186b13895d298bca38eb6a1a53b` completed composition,
+all85 tests without skips, native/component checks, raw scan, SBOM, finalization,
+image export, both artifact uploads and owned-alias cleanup. Only the unchanged
+raw HIGH/CRITICAL gate failed. The exported candidate is
+`sha256:2c6ddd332f0aac17613208e66980e0154933bcb23cf2b94bd3d228c3ad5fd4e7`.
+Its public evidence artifact12580311665 is241,567 bytes, SHA256
+`04e051e29ad84c34180317033f7ab3210c8629b9c6bc14d6b037a14544121280`.
+Independent reconciliation verified all19 evidence hashes, unchanged complete
+Config/protected product trees/libc, exact15-package delta, ordered17-to18-layer
+prefix, the original17 compatibility configs, nine explicit lossy scanner-history
+entries, native checks, all85 test IDs,760 ELF observations and component absence.
+The root reviewer separately checked the artifact/export/raw/SBOM hash chain.
+
+Untouched raw counts remain0CRITICAL/44HIGH/69MEDIUM/83LOW/1UNKNOWN. No row is
+filtered or waived. The image artifact12580172031 is63,183,253 bytes, SHA256
+`88f4a81f387f357d7e7dc4c4812cbce324ec209606e565d153dd261af13c1a9d`;
+its immutable gzip is63,555,322 bytes, SHA256
+`0ffeb9ca7d3ae73928040cfe7eb611826063e5ce44eed81562dbadd8b62f82be`,
+with188,604,928 uncompressed bytes. Export-receipt SHA256 is
+`c241819a46f6a8cbebda4f60937655b90544312e0e7a1f31ff6a99d22da2a812`.
+Only metadata and the small evidence ZIP were retrieved on Native; no image
+file was written there. The source-specific HIGH assessments and exact-role ACL
+predicates, runtime matrix and controlled activation remain separate requirements.
+This is a usable unaccepted candidate, not a deployment or global security closure.

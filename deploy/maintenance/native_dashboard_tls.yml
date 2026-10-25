@@ -1,0 +1,70 @@
+---
+- name: Native dashboard TLS transport only
+  hosts: security_bot
+  gather_facts: false
+  become: false
+  vars:
+    dashboard_tls_action: check
+    dashboard_tls_nonce: ''
+    dashboard_tls_deadline_utc: ''
+    dashboard_tls_machine_id: ''
+  tasks:
+    - name: Require the fixed Native inventory and explicit transport action
+      ansible.builtin.assert:
+        that:
+          - ansible_connection == 'local'
+          - ansible_host == '65.109.216.187' and ansible_user == 'root'
+          - dashboard_tls_action in ['check', 'apply', 'rollback']
+          - dashboard_tls_action == 'check' or dashboard_tls_nonce is match('^[a-f0-9]{32}$')
+          - dashboard_tls_action == 'check' or dashboard_tls_machine_id is match('^[a-f0-9]{32}$')
+          - dashboard_tls_action == 'check' or dashboard_tls_deadline_utc is match('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')
+        fail_msg: native_dashboard_tls_scope_refused
+
+    - name: Run only the sealed public helper buffer with a finite work budget
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - >-
+            import base64,hashlib,sys;
+            raw=base64.b64decode({{ lookup('ansible.builtin.file', playbook_dir + '/native_dashboard_tls.py', rstrip=False) | b64encode | to_json }});
+            assert len(raw)<=65536 and hashlib.sha256(raw).hexdigest()=='5a9d92199c66a6afaa896121334ea1159b930123dcff0f550acbd833417b982e';
+            scope={'__name__':'sealed_native_dashboard_tls','__file__':'<sealed-native-dashboard-tls>'};
+            exec(compile(raw,'<sealed-native-dashboard-tls>','exec'),scope);
+            sys.exit(scope['main'](sys.argv[1:]))
+          - --action
+          - '{{ dashboard_tls_action }}'
+          - --nonce
+          - '{{ dashboard_tls_nonce }}'
+          - --deadline-utc
+          - '{{ dashboard_tls_deadline_utc }}'
+          - --machine-id
+          - '{{ dashboard_tls_machine_id }}'
+      environment:
+        LC_ALL: C
+      register: dashboard_tls_result
+      changed_when: dashboard_tls_action != 'check' and dashboard_tls_result.rc == 0
+      failed_when: false
+      timeout: 450
+      no_log: true
+
+    - name: Select only the helper's closed public result
+      ansible.builtin.set_fact:
+        dashboard_tls_report: >-
+          {{ ((dashboard_tls_result.stdout if dashboard_tls_result.stdout.startswith('{') else
+               dashboard_tls_result.stderr if dashboard_tls_result.stderr.startswith('{') else
+               '{"status":"refused","reason":"controller_invocation_failed","security_accepted":false}') | from_json) }}
+      no_log: true
+
+    - name: Report only the bounded transport status
+      ansible.builtin.debug:
+        var: dashboard_tls_report
+
+    - name: Require the transport helper to finish successfully
+      ansible.builtin.assert:
+        that:
+          - dashboard_tls_result.rc == 0
+          - dashboard_tls_report.security_accepted == false
+        fail_msg: 'native_dashboard_tls_refused: {{ dashboard_tls_report.reason | default("operation_failed") }}'
