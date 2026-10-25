@@ -213,3 +213,31 @@ dropped, only12 copied public files and ambient effects fenced:61 passed in3.489
 without skips. The capsule's private output limit and readonly mount contract
 remain intact. Source tests do not imply successful hosted32-case execution,
 serving activation or overall security acceptance.
+
+## Seventh actual run: migration passed, mixed fixture dotenv refused
+
+Run40180878087 on c1a7bbdf reached `installed_runtime_imports_config` and failed
+with a closed `ValidationError`. Its migration child actually completed with
+return code0. No runtime/component case ran, and owned cleanup completed without
+causes while retaining the primary failure. Artifact12593503917 is5401 bytes,
+SHA256 `2a2d42f260ec63b649ec4ef9bfd535856b4a8672fa2165c28bbfe3c36022f6b1`.
+The original failed result remains preserved; no configuration value or raw
+validation error was exposed.
+
+Root reproduced the cause using the unmodified frozen Settings source and the
+candidate's actual Pydantic2.13.4/settings2.3.4 pair in a cleared environment.
+Writing all28 public fixture variables into dotenv produces exactly five
+`extra_forbidden` errors: migration mode/checkout, the two selected Redis-test
+URLs and PYTHONDONTWRITEBYTECODE are process helpers, not Settings fields.
+The guarded migration reads its process environment directly, explaining its
+successful result before the later Settings import.
+
+The explicit readonly `runtime.env` is now comment-only, preventing fallback to
+another deployment file. All28 public values still enter the disposable App as
+explicit container environment variables; normal Settings source handling picks
+its recognized fields while migration/component helpers retain their variables.
+No production Settings source, required field, extra-forbid policy, role or
+validator changed. Root independently verified all219 fields construct with the
+corrected fixture and three negative production guard inputs still refuse.
+All61 genuineUID1001 fenced regressions then passed in3.427s, without skips.
+An actual new hosted result remains required before claiming any32-case success.

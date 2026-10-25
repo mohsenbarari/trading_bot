@@ -357,9 +357,9 @@ def prepare_proof(ctx,database):
         raw,check=sealed(ctx.stack,ctx.root/'source'/name,pin,131072);ctx.checks.append(check)
         ctx.C.write(proof/name,raw,0o444);identity[name]={'sha256':pin,'tests':count}
     ctx.C.write(proof/'selectors.json',encode(identity),0o444)
-    env=fixture_env(database)
-    ctx.C.write(proof/'runtime.env',''.join(k+'='+v+'\n' for k,v in env.items()).encode(),0o444)
-    # Settings comes from this public file; no inherited production env is used.
+    fixture_env(database)  # Retain scratch-name validation before preparing the capsule.
+    ctx.C.write(proof/'runtime.env',b'# Public fixture values are supplied explicitly through the container environment.\n',0o444)
+    # The explicit dotenv path prevents fallback; process env carries Settings and test helpers.
     return proof
 
 

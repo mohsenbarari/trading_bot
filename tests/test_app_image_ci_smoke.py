@@ -644,7 +644,7 @@ class AppImageCISmokeTests(unittest.TestCase):
         ctx.root=self.root/'bad-evidence';ctx.root.mkdir();ctx.command.return_value=M.encode({'artifacts':[{'id':42,'size_in_bytes':7,'digest':'sha256:'+'c'*64,'expired':False}]})
         with self.assertRaisesRegex(RuntimeError,'dependency_evidence_identity'):M.admit_dependency(ctx,'postgres')
 
-    def test_prepare_proof_copies_only_three_pinned_tests_and_explicit_synthetic_environment(self):
+    def test_prepare_proof_copies_only_three_pinned_tests_and_comment_only_dotenv(self):
         source=self.root/'source';source.mkdir(mode=0o700)
         for name,(_,_,pin) in M.SELECTORS.items():self.private('source/'+name,(ROOT/'tests'/name).read_bytes())
         writes=[]
@@ -657,6 +657,9 @@ class AppImageCISmokeTests(unittest.TestCase):
         self.assertEqual(proof.stat().st_uid,os.geteuid())
         self.assertEqual(set(p.name for p in proof.iterdir()),set(M.SELECTORS)|{'selectors.json','runtime.env'})
         self.assertTrue(all(stat.S_IMODE(p.stat().st_mode)==0o444 for p in writes));self.assertEqual(len(ctx.checks),3)
+        dotenv=(proof/'runtime.env').read_text()
+        self.assertTrue(dotenv.strip())
+        self.assertTrue(all(not line.strip() or line.lstrip().startswith('#') for line in dotenv.splitlines()))
 
     def execute_context(self,mounts=None,success=True,readiness_failures=0):
         result=self.receipt();raw=M.encode(result);calls=[];remaining=[readiness_failures]
@@ -690,6 +693,14 @@ class AppImageCISmokeTests(unittest.TestCase):
         self.assertEqual(M.execute(ctx)['components']['run'],24)
         self.assertIn(['network','create','--internal','--label',M.LABEL+'=123-1','app-ci-net-123-1'],[a for a,_ in calls])
         self.assertEqual(ctx.write.call_args.args[0],self.root/'reports/actual-smoke.json')
+        app=M.create.call_args_list[-1]
+        env=app.kwargs['env'];database=env['POSTGRES_DB']
+        self.assertEqual(env,{'APP_ENV_FILE':'/proof/runtime.env',**M.fixture_env(database)})
+        self.assertEqual(len(env),29)  # All 28 public fixture values plus the explicit dotenv path.
+        launch=M.container_args(ctx,*app.args[1:],**app.kwargs)
+        exported=[launch[index+1] for index,value in enumerate(launch[:-1]) if value=='--env']
+        self.assertEqual(len(exported),len(env))
+        self.assertEqual(dict(value.split('=',1) for value in exported),env)
 
     def test_postgres_official_setup_client_and_server_share_owned_standard_socket_without_pghost_workaround(self):
         # Exact admitted entrypoint SHA9c440299ae04a0a79d55b8bf03307036d890a40979d2fb698073c9050d4b20a5:
