@@ -1,0 +1,76 @@
+{
+  "activation_authorized": false,
+  "actual_readonly_preflight": "checked_no_guards_removed",
+  "author_tests": 19,
+  "capture_integrity_incident": "OPEN",
+  "cleanup_observation_sha256": "3a01370f2c32b50d71fdd9fc6b494a1ece2d11cab2e0cd59ca14f83705c635a2",
+  "cleanup_only_deadline_utc": "2026-10-25T05:13:54.732323Z",
+  "daemon_mutations": false,
+  "further_cleanup_authorized": false,
+  "global_security_eligible": false,
+  "historical_journal_rewritten": false,
+  "native_guard": {
+    "absent": true,
+    "parent_fsync": true,
+    "path": "/root/secure-envs/trading-bot/release-control/private-primary-controller.lock",
+    "removed_identity": [
+      2064,
+      1835029,
+      33152,
+      0,
+      0,
+      1,
+      417,
+      1792895152683842228,
+      1792895152690842485
+    ],
+    "sha256": "eae3ccc353539903535fe29a3e4b769a7f7443bfe468d8de19f58513f553d37a",
+    "size_bytes": 417
+  },
+  "old_activation_and_recovery_authority_unchanged": true,
+  "old_nonce": "a7de00ed3579b5e4faea4c8a4799b973",
+  "permanent_markers_preserved": true,
+  "permanent_source_mutex_preserved": true,
+  "profile_sha256": "9de3cca8726133d4c831f43cd77b7388e6ba783223e0ad0711915de82e42d908",
+  "raw_gate_passed": false,
+  "raw_gate_waived": false,
+  "reconciliation_sha256": "efce725de7d81a8c540c09a4b48385bdc0df59a2279688a4dadcdc25482dc9d6",
+  "root_tests": 19,
+  "schema": "security_app_exact_guard_cleanup/1",
+  "security_accepted": false,
+  "source_receipt_sha256": "2a47a63960621ff2c64144d20b2a5ef70f4486113dd4c6f990d144d477dc781f",
+  "status": "known_exact_guards_removed",
+  "web_guard": {
+    "absent": true,
+    "parent_fsync": true,
+    "path": "/srv/trading-bot/security-consumers-20261024-02-a7de00ed3579b5e4faea4c8a4799b973/site-operation.lock",
+    "removed_identity": [
+      2049,
+      414492,
+      33152,
+      0,
+      0,
+      1,
+      156,
+      1792895281947644599,
+      1792895281948456286
+    ],
+    "sha256": "56b5898048e0f0f3de334317bbc25042c5683d14f237d1e0fabf542bc3101f91",
+    "size_bytes": 156
+  },
+  "web_receipt": {
+    "identity": [
+      2049,
+      414856,
+      33152,
+      0,
+      0,
+      1,
+      5243,
+      1792904663511571623,
+      1792904663511571623
+    ],
+    "sha256": "40c4931c526f6de4f5b1bdeb9a9cbae0dd31349a63458cbfed675dbeb3bdbc20",
+    "size_bytes": 5243
+  }
+}

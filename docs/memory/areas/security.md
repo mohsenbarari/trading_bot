@@ -12,7 +12,8 @@
   Final ciphertext authenticated/fsynced/reread; installed kernel38 reboot completed
   with new boot ID, reboot-required false and exact four-entry backup metadata.
 - Web kernel38/boot guards verified; kernel fences released/history retained.
-  App failed COW; old Web restored/API200, App fences retained. Capture identity
+  App failed COW; old Web restored/API200. Exact failed-attempt fences released
+  after fresh parity; SOURCE inode preserved. Capture identity
   conflicts OPEN; generated network identities require stable live observation.
 - Completed evidence/expired windows grant no future authority. Never infer daemon
   cancellation from death/absence or adopt old C07/Native15 controls. Configf3 and
