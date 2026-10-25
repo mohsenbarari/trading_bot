@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -29,6 +30,74 @@ class BrowserCIBootstrapContractTests(unittest.TestCase):
         for name in ("merge-gate.yml", "pre-release-gate.yml"):
             workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
             yield name, workflow["jobs"]["frontend-browser-matrix"]
+
+    def test_security_os_artifact_token_has_only_browser_job_read_permissions_and_step_scope(self):
+        for name, job in self.workflows():
+            with self.subTest(workflow=name):
+                self.assertEqual(job['permissions'], {'contents': 'read', 'actions': 'read'})
+                self.assertNotIn('GH_TOKEN', job.get('env', {}))
+                token_steps = [step for step in job['steps'] if 'GH_TOKEN' in step.get('env', {})]
+                self.assertEqual(len(token_steps), 1)
+                self.assertEqual(token_steps[0]['name'], 'Bootstrap backend stack')
+                self.assertEqual(token_steps[0]['env'], {'GH_TOKEN': '${{ github.token }}'})
+
+    def test_security_os_bootstrap_prepares_before_build_and_refuses_without_cache(self):
+        source = (ROOT / 'scripts/bootstrap_ci_backend.sh').read_bytes()
+        for failure in ('0', '17'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(prefix='owned-ci-bootstrap-') as directory:
+                project = Path(directory)
+                scripts = project / 'scripts'; scripts.mkdir()
+                target = scripts / 'bootstrap_ci_backend.sh'; target.write_bytes(source)
+                binary = project / 'bin'; binary.mkdir()
+                python = binary / 'python3'
+                python.write_text('''#!/bin/sh
+set -eu
+[ "$1" = -I ] && [ "$2" = -B ]
+[ "${3##*/}" = prepare_app_security_os_cache.py ]
+[ "$4" = --cache-dir ]
+[ "$5" = "$CASE_ROOT/pip_packages/security-os-capsule" ]
+[ -d "${5%/*}" ]
+printf 'cache\\n' >> "$TRACE_FILE"
+exit "$CACHE_FAILURE"
+''')
+                docker = binary / 'docker'
+                docker.write_text('''#!/bin/sh
+set -eu
+case "$1 $2" in
+  'build -t') printf 'build\\n' >> "$TRACE_FILE" ;;
+  'compose version') printf 'version\\n' >> "$TRACE_FILE" ;;
+  'compose up') printf 'up\\n' >> "$TRACE_FILE" ;;
+  'compose exec') printf 'ready\\n' >> "$TRACE_FILE" ;;
+  'compose ps'|'compose logs') : ;;
+  *) exit 97 ;;
+esac
+''')
+                python.chmod(0o755); docker.chmod(0o755)
+                environment = {
+                    'PATH': str(binary) + os.pathsep + os.defpath,
+                    'APP_ENV_FILE': str(ROOT / 'config/unit-test.env.example'),
+                    'CASE_ROOT': str(project), 'TRACE_FILE': str(project / 'trace'),
+                    'CACHE_FAILURE': failure,
+                }
+                with patch('socket.socket', side_effect=AssertionError('network denied')), \
+                     patch('socket.getaddrinfo', side_effect=AssertionError('network denied')), \
+                     patch('urllib.request.urlopen', side_effect=AssertionError('network denied')), \
+                     patch('os.system', side_effect=AssertionError('ambient shell denied')):
+                    result = subprocess.run(
+                        ['bash', '--noprofile', '--norc', str(target)],
+                        cwd=project, env=environment, capture_output=True, text=True, timeout=10,
+                    )
+                events = (project / 'trace').read_text().splitlines()
+                self.assertEqual(events[:2], ['version', 'cache'])
+                if failure == '0':
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    self.assertLess(events.index('cache'), events.index('build'))
+                    self.assertLess(events.index('build'), events.index('up'))
+                    self.assertIn('ready', events)
+                else:
+                    self.assertEqual(result.returncode, 17, result.stderr + result.stdout)
+                    self.assertNotIn('build', events)
+                    self.assertNotIn('up', events)
 
     def test_all_bootstrapped_host_binds_use_prepared_ci_paths(self):
         compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())

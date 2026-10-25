@@ -687,6 +687,18 @@ build_frontend() {
 # ==========================================
 # 1.5. Prepare Pip Packages (Germany only)
 # ==========================================
+prepare_app_security_os_cache() {
+    local target="${1:?App image target is required}"
+    local -a mode=()
+    if [ "$target" = "foreign" ] && [ "$PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE" = "1" ]; then
+        mode+=(--check)
+    else
+        mkdir -p -- "$PROJECT_DIR/pip_packages"
+    fi
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/security-os-capsule" "${mode[@]}"
+}
+
 prepare_pip_packages() {
     print_header "📦 Checking pip dependencies"
     
@@ -749,6 +761,7 @@ deploy_iran() {
     print_header "🇮🇷 Deploying to Iran Server ($IRAN_HOST)"
 
     cd "$PROJECT_DIR"
+    prepare_app_security_os_cache iran
     ensure_iran_host_timezone
 
     # 2a. Check for uncommitted changes & push to GitHub
@@ -832,6 +845,7 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     verify_official_source_still_frozen
+    prepare_app_security_os_cache foreign
     ensure_local_host_timezone
     resolve_local_compose_cmd
 

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+export DOCKER_BUILDKIT=1
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
 
 compose_args=()
 if [[ -n "${CI_DOCKER_COMPOSE_ARGS:-}" ]]; then
@@ -62,6 +66,11 @@ wait_for_app_readiness() {
 
 echo '== docker compose version =='
 compose version
+
+echo '== prepare authenticated App OS security cache =='
+mkdir -p -- "$repo_root/pip_packages"
+python3 -I -B "$repo_root/scripts/prepare_app_security_os_cache.py" \
+  --cache-dir "$repo_root/pip_packages/security-os-capsule"
 
 echo '== build shared base image =='
 docker build -t trading_bot_base .

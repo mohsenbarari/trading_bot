@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import shutil
 import socket
@@ -53,6 +54,300 @@ def resolve_docker_compose_command() -> list[str] | None:
 
 
 class DeploySurfaceSmokeTests(unittest.TestCase):
+    def security_os_function(self, source: str, name: str) -> str:
+        marker = name + '() {'
+        return marker + source.split(marker, 1)[1].split('\n}', 1)[0] + '\n}\n'
+
+    def security_os_shell(self, shell: str, project: Path, **values: str):
+        environment = {
+            'PATH': os.defpath,
+            'LC_ALL': 'C.UTF-8',
+            'APP_ENV_FILE': str(REPO_ROOT / 'config/unit-test.env.example'),
+            'CASE_ROOT': str(project),
+            'TRACE_FILE': str(project / 'trace'),
+            **values,
+        }
+        with patch('socket.socket', side_effect=AssertionError('network denied')), \
+             patch('socket.getaddrinfo', side_effect=AssertionError('network denied')), \
+             patch('urllib.request.urlopen', side_effect=AssertionError('network denied')), \
+             patch('os.system', side_effect=AssertionError('ambient shell denied')):
+            result = subprocess.run(
+                ['bash', '--noprofile', '--norc', '-euc', shell],
+                cwd=project, env=environment, capture_output=True, text=True, timeout=10,
+            )
+        trace = project / 'trace'
+        return result, trace.read_text().splitlines() if trace.exists() else []
+
+    def test_security_os_runtime_hooks_are_offline_readonly_and_use_exact_installer_caps(self):
+        expected = [
+            '/usr/bin/setpriv', '--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid',
+            '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs',
+            '/usr/local/bin/python3', '-I', '-B', '/app/scripts/prepare_app_security_os_cache.py',
+            '--install-image-cache', '--cache-dir', '/capsule',
+        ]
+        for name in ('Dockerfile', 'Dockerfile.iran'):
+            source = (REPO_ROOT / name).read_text()
+            runtime = source.split('FROM patched-base AS runtime', 1)[1]
+            hook = next(line for line in runtime.replace('\\\n', ' ').splitlines() if line.startswith('RUN ') and '--install-image-cache' in line)
+            flags, argv = hook.split('[', 1)
+            self.assertEqual(flags.split(), [
+                'RUN', '--network=none',
+                '--mount=type=bind,source=pip_packages/security-os-capsule,target=/capsule,ro',
+                '--mount=type=tmpfs,target=/tmp',
+            ])
+            self.assertEqual(json.loads('[' + argv), expected)
+            self.assertLess(runtime.index('python -m pip check'), runtime.index('--install-image-cache'))
+            self.assertLess(runtime.index('COPY scripts/ ./scripts/'), runtime.index('--install-image-cache'))
+            self.assertLess(runtime.index('--install-image-cache'), runtime.index('scripts/verify_image_trust.py'))
+            self.assertNotIn('COPY pip_packages/security-os-capsule', runtime)
+        for name in ('scripts/bootstrap_ci_backend.sh', 'scripts/deploy_staging.sh'):
+            self.assertIn('export DOCKER_BUILDKIT=1', (REPO_ROOT / name).read_text())
+        online = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text()
+        self.assertIn('DOCKER_BUILDKIT=1 docker build', self.security_os_function(online, 'build_release'))
+
+    def test_security_os_foreign_build_cache_hits_and_prebuilt_mode_prepare_before_fingerprint(self):
+        source = (REPO_ROOT / 'deploy.sh').read_text()
+        functions = ''.join(self.security_os_function(source, name) for name in ('prepare_app_security_os_cache', 'deploy_foreign'))
+        shell = functions + r'''
+record() { printf '%s\n' "$*" >> "$TRACE_FILE"; }
+print_header() { :; }
+verify_official_source_still_frozen() { :; }
+ensure_local_host_timezone() { :; }
+resolve_local_compose_cmd() { LOCAL_COMPOSE_CMD=owned-test-double; }
+python3() {
+    if [[ " $* " != *" --check "* ]]; then
+        test -d "$CASE_ROOT/pip_packages" || return 96
+    fi
+    record "cache $*"; return "$CACHE_FAILURE"
+}
+foreign_image_signature() { record fingerprint; printf '%s\n' "$SIGNATURE"; }
+run_with_local_resource_guard() { record build; }
+docker() {
+    case "$*" in
+        *org.opencontainers.image.revision*) printf '%s\n' "$PRODUCTION_RELEASE_SHA" ;;
+        *io.gold-trade.release.tree*) printf '%s\n' "$PRODUCTION_RELEASE_TREE" ;;
+        *io.gold-trade.release.input-signature*) printf '%s\n' "$SIGNATURE" ;;
+        *'--format {{.Id}}'*) printf '%s\n' "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID" ;;
+        'image inspect trading_bot_base') : ;;
+        *) return 97 ;;
+    esac
+}
+PROJECT_DIR="$CASE_ROOT"
+DEPLOY_STATE_DIR="$CASE_ROOT/state"
+FOREIGN_IMAGE_SIGNATURE_FILE="$DEPLOY_STATE_DIR/foreign-image.signature"
+SIGNATURE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+DEPLOY_FORCE_REBUILD=0
+PRODUCTION_PREBUILD_ONLY=1
+PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED="$PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE"
+PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE="$SIGNATURE"
+PRODUCTION_RELEASE_SHA=cccccccccccccccccccccccccccccccccccccccc
+PRODUCTION_RELEASE_TREE=dddddddddddddddddddddddddddddddddddddddd
+deploy_foreign
+'''
+        for prebuilt, hit, failure in (('0', False, '0'), ('0', True, '0'), ('1', True, '0'), ('0', False, '17'), ('1', True, '17')):
+            with self.subTest(prebuilt=prebuilt, hit=hit, failure=failure), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                if hit:
+                    (project / 'state').mkdir()
+                    (project / 'state/foreign-image.signature').write_text('a' * 64 + '\n')
+                result, events = self.security_os_shell(shell, project,
+                    PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE=prebuilt, CACHE_FAILURE=failure)
+                self.assertTrue(events[0].startswith('cache '))
+                self.assertEqual('--check' in events[0].split(), prebuilt == '1')
+                self.assertIn(str(project / 'pip_packages/security-os-capsule'), events[0])
+                self.assertEqual((project / 'pip_packages').exists(), prebuilt == '0')
+                if failure != '0':
+                    self.assertEqual(result.returncode, 17, result.stderr)
+                    self.assertEqual(len(events), 1)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    self.assertLess(0, events.index('fingerprint'))
+                    self.assertEqual('build' in events, not hit)
+
+    def test_security_os_iran_legacy_cache_precedes_transfer_and_build(self):
+        source = (REPO_ROOT / 'deploy.sh').read_text()
+        body = self.security_os_function(source, 'deploy_iran')
+        self.assertIn('prepare_app_security_os_cache iran', body)
+        self.assertLess(body.index('prepare_app_security_os_cache'), body.index('rsync -avz --delete'))
+        self.assertLess(body.index('prepare_app_security_os_cache'), body.index('docker build -f Dockerfile.iran'))
+
+    def test_security_os_iran_prepare_ignores_foreign_prebuilt_flag_and_creates_cold_parent(self):
+        source = (REPO_ROOT / 'deploy.sh').read_text()
+        shell = self.security_os_function(source, 'prepare_app_security_os_cache') + r'''
+python3() {
+    test -d "$CASE_ROOT/pip_packages" || return 96
+    printf '%s\n' "$*" >> "$TRACE_FILE"
+}
+PROJECT_DIR="$CASE_ROOT"
+prepare_app_security_os_cache iran
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self.assertFalse((project / 'pip_packages').exists())
+            result, events = self.security_os_shell(shell, project, PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE='1')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((project / 'pip_packages').is_dir())
+            self.assertEqual(len(events), 1)
+            self.assertNotIn('--check', events[0].split())
+            self.assertIn(str(project / 'pip_packages/security-os-capsule'), events[0])
+
+    def test_security_os_online_prepares_both_caches_before_context_and_signature_even_on_hit(self):
+        source = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text()
+        function = self.security_os_function(source, 'build_release')
+        shell = function + r'''
+record() { printf '%s\n' "$*" >> "$TRACE_FILE"; }
+ensure_frontend_dist() { :; }
+verify_frontend_release_contracts() { :; }
+log() { :; }
+die() { return 98; }
+prepare_pip_packages() { mkdir -p "$2"; }
+python3() {
+    record "cache $*"
+    if [[ "$CACHE_FAILURE" == 17 && "$*" == *pip_packages-amd64/security-os-capsule* ]]; then return 17; fi
+}
+rsync() { record context-copy; local destination="${@: -1}"; [[ "$destination" == "$RELEASE_TMP_DIR/"* ]]; mkdir -p "$destination"; }
+build_image_bundle_signature() { record fingerprint; printf '%s\n' "$SIGNATURE"; }
+iran_release_image_matches() { return 0; }
+ensure_buildx_for_target() { :; }
+docker() {
+    case "$1" in
+        build) record build ;;
+        pull) : ;;
+        save) touch "$LOCAL_IMAGE_BUNDLE" ;;
+        *) return 97 ;;
+    esac
+}
+LOCAL_PROJECT_DIR="$CASE_ROOT/project"
+LOCAL_DIST_DIR="$CASE_ROOT/frontend-dist"
+RELEASE_TMP_DIR="$CASE_ROOT/release"
+LOCAL_IMAGE_BUNDLE="$RELEASE_TMP_DIR/images.tar"
+LOCAL_IMAGE_SIGNATURE_FILE="$RELEASE_TMP_DIR/images.signature"
+LOCAL_HOST_ARCH=amd64
+IRAN_HOST_ARCH=amd64
+IRAN_IMAGE_PLATFORM=linux/amd64
+IRAN_FORCE_RELEASE_REFRESH=0
+RELEASE_SHA=cccccccccccccccccccccccccccccccccccccccc
+PRODUCTION_RELEASE_TREE=dddddddddddddddddddddddddddddddddddddddd
+SIGNATURE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+build_release
+'''
+        for hit, failure in ((False, '0'), (True, '0'), (False, '17')):
+            with self.subTest(hit=hit, failure=failure), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                for name in ('project', 'frontend-dist', 'release'):
+                    (project / name).mkdir()
+                if hit:
+                    (project / 'release/images.tar').write_bytes(b'public test-double bundle')
+                    (project / 'release/images.signature').write_text('a' * 64 + '\n')
+                result, events = self.security_os_shell(shell, project, CACHE_FAILURE=failure)
+                caches = [event for event in events if event.startswith('cache ')]
+                self.assertEqual(len(caches), 2)
+                self.assertIn(str(project / 'project/pip_packages/security-os-capsule'), caches[0])
+                self.assertIn(str(project / 'release/pip_packages-amd64/security-os-capsule'), caches[1])
+                if failure != '0':
+                    self.assertEqual(result.returncode, 17, result.stderr)
+                    self.assertEqual(events, caches)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    self.assertLess(events.index(caches[1]), events.index('context-copy'))
+                    self.assertLess(events.index(caches[1]), events.index('fingerprint'))
+                    self.assertEqual('build' in events, not hit)
+
+    def test_security_os_prebuilt_online_verification_is_check_only(self):
+        source = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text()
+        shell = self.security_os_function(source, 'verify_prepared_wheel_cache') + r'''
+expected_wheel_cache_signature() { printf 'public-hash\n'; }
+die() { return 98; }
+python3() { printf '%s\n' "$*" >> "$TRACE_FILE"; }
+LOCAL_PROJECT_DIR="$CASE_ROOT"
+verify_prepared_wheel_cache amd64 "$CASE_ROOT/cache"
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory); cache = project / 'cache'; cache.mkdir()
+            (cache / '.requirements_hash').write_text('public-hash\n')
+            (cache / 'public-test-double.whl').write_bytes(b'inert')
+            result, events = self.security_os_shell(shell, project)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            os_cache = next(event for event in events if 'prepare_app_security_os_cache.py' in event)
+            self.assertIn('--check', os_cache.split())
+            self.assertIn(str(cache / 'security-os-capsule'), os_cache)
+
+    def test_security_os_cache_and_lock_drift_change_both_real_image_signatures(self):
+        legacy = (REPO_ROOT / 'deploy.sh').read_text()
+        online = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text()
+        shell = ''.join(self.security_os_function(legacy, name) for name in
+            ('hash_file_or_dir', 'hash_release_inputs', 'foreign_image_signature'))
+        shell += ''.join(self.security_os_function(online, name) for name in
+            ('hash_context_entry', 'build_image_bundle_signature'))
+        shell += '''
+PROJECT_DIR="$CASE_ROOT"
+IRAN_IMAGE_PLATFORM=linux/amd64
+IRAN_HOST_ARCH=amd64
+foreign_image_signature
+build_image_bundle_signature "$CASE_ROOT"
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / 'scripts').mkdir()
+            capsule = project / 'pip_packages/security-os-capsule'; capsule.mkdir(parents=True)
+            paths = [capsule / 'manifest.json', capsule / 'public-test-double.deb',
+                project / 'scripts/app_security_os_packages.lock.json',
+                project / 'scripts/prepare_app_security_os_cache.py']
+            for path in paths:
+                path.write_bytes(b'public fingerprint fixture v1')
+            result, _ = self.security_os_shell(shell, project)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            previous = result.stdout.splitlines()
+            self.assertEqual(len(previous), 2)
+            for path in paths:
+                path.write_bytes(b'public fingerprint fixture v2')
+                result, _ = self.security_os_shell(shell, project)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                current = result.stdout.splitlines()
+                self.assertEqual(len(current), 2)
+                self.assertTrue(all(before != after for before, after in zip(previous, current)), path)
+                previous = current
+
+    def test_security_os_staging_build_entries_prepare_before_any_compose_build(self):
+        source = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text()
+        names = ('prepare_app_security_os_cache', 'start_sync_worker', 'build_runtime_image', 'deploy')
+        functions = ''.join(self.security_os_function(source, name) for name in names)
+        up = source.split('    up)\n', 1)[1].split('        ;;', 1)[0]
+        shell = functions + r'''
+record() { printf '%s\n' "$*" >> "$TRACE_FILE"; }
+python3() {
+    test -d "$CASE_ROOT/pip_packages" || return 96
+    record "cache $*"; return "$CACHE_FAILURE"
+}
+compose() { record "compose $*"; }
+for function in check validate_staging_runtime_role ensure_env ensure_runtime_env_values require_prebuilt_image_tag_only build_frontend require_prebuilt_image remove_legacy_compose_stateless_containers assert_telegram_bot_split_topology wait_for_app_health wait_for_foreign_app_health_if_enabled install_nginx health; do
+    eval "$function() { :; }"
+done
+PROJECT_DIR="$CASE_ROOT"
+STAGING_ENABLE_BOT=0
+STAGING_FOREIGN_ONLY=0
+case "$ACTION" in
+    up) set -- up;
+''' + up + r'''
+        ;;
+    *) "$ACTION" ;;
+esac
+'''
+        for action in ('build_runtime_image', 'start_sync_worker', 'deploy', 'up'):
+            for failure in ('0', '17'):
+                with self.subTest(action=action, failure=failure), tempfile.TemporaryDirectory() as directory:
+                    result, events = self.security_os_shell(shell, Path(directory), ACTION=action, CACHE_FAILURE=failure)
+                    self.assertTrue(events[0].startswith('cache '))
+                    if failure != '0':
+                        self.assertEqual(result.returncode, 17, result.stderr)
+                        self.assertEqual(len(events), 1)
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                        self.assertTrue(any(event.startswith('compose ') and 'build' in event for event in events))
+        for name in ('start_prebuilt_producers', 'start_prebuilt_bot'):
+            self.assertNotIn('prepare_app_security_os_cache', self.security_os_function(source, name))
+
     def test_production_application_code_is_image_only(self):
         foreign = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
         iran = (REPO_ROOT / 'docker-compose.iran.yml').read_text(encoding='utf-8')

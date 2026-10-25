@@ -6853,12 +6853,16 @@ build_release() {
     ensure_frontend_dist
     verify_frontend_release_contracts "$LOCAL_DIST_DIR"
     prepare_pip_packages "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages" "$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/security-os-capsule"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
     local iran_context_dir="$RELEASE_TMP_DIR/iran-build-context"
     local iran_pip_dir="$RELEASE_TMP_DIR/pip_packages-${IRAN_HOST_ARCH}"
     local iran_pip_hash="$iran_pip_dir/.requirements_hash"
     prepare_pip_packages "$IRAN_HOST_ARCH" "$iran_pip_dir" "$iran_pip_hash"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$iran_pip_dir/security-os-capsule"
     rm -rf "$iran_context_dir"
     mkdir -p "$iran_context_dir"
     rsync -a --delete \
@@ -6917,7 +6921,7 @@ build_release() {
     if [[ "$LOCAL_HOST_ARCH" == "$IRAN_HOST_ARCH" ]]; then
         docker pull "postgres:15-alpine" >/dev/null
         docker pull "redis:7-alpine" >/dev/null
-        docker build \
+        DOCKER_BUILDKIT=1 docker build \
             --label "org.opencontainers.image.revision=$RELEASE_SHA" \
             --label "io.gold-trade.release.tree=$PRODUCTION_RELEASE_TREE" \
             --label "io.gold-trade.release.input-signature=$image_signature" \
@@ -6963,6 +6967,9 @@ verify_prepared_wheel_cache() {
         || die "Prepared wheel cache does not match release requirements for architecture $target_arch."
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt" \
         || die "Prepared wheel cache failed exact psycopg2 source admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --check --cache-dir "$output_dir/security-os-capsule" \
+        || die "Prepared App OS security cache failed admission for architecture $target_arch."
     find "$output_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -print -quit | grep -q . \
         || die "Prepared wheel cache is empty for architecture $target_arch."
 }

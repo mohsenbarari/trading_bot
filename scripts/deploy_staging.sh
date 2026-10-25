@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export DOCKER_BUILDKIT=1
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/deploy/staging/docker-compose.staging.yml"
@@ -107,6 +108,12 @@ die() {
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+prepare_app_security_os_cache() {
+    mkdir -p -- "$PROJECT_DIR/pip_packages"
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/security-os-capsule"
 }
 
 init_compose_cmd() {
@@ -787,6 +794,7 @@ wait_for_app_health() {
 }
 
 start_sync_worker() {
+    prepare_app_security_os_cache
     if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
         compose --profile staging-bot --profile staging-sync up -d --build sync_worker foreign_sync_worker
         return
@@ -804,6 +812,7 @@ require_prebuilt_image() {
 build_runtime_image() {
     check
     validate_staging_runtime_role
+    prepare_app_security_os_cache
     ensure_env
     ensure_runtime_env_values
     require_prebuilt_image_tag_only
@@ -976,6 +985,7 @@ check() {
 deploy() {
     check
     validate_staging_runtime_role
+    prepare_app_security_os_cache
     ensure_env
     ensure_runtime_env_values
     build_frontend
@@ -1027,6 +1037,7 @@ case "${1:-deploy}" in
         ;;
     up)
         shift
+        prepare_app_security_os_cache
         ensure_runtime_env_values
         compose up -d --build "$@"
         ;;

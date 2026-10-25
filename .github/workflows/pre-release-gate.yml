@@ -186,6 +186,9 @@ jobs:
           python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
 
   frontend-browser-matrix:
+    permissions:
+      contents: read
+      actions: read
     if: '!inputs.market_security_payload'
     name: frontend-browser-matrix (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
@@ -266,6 +269,8 @@ jobs:
         run: npm run build
 
       - name: Bootstrap backend stack
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash ./scripts/bootstrap_ci_backend.sh
 
       - name: Verify browser CI backend surface
