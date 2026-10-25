@@ -20,6 +20,20 @@ existed. The03 namespace preserves the02 staged sources and models that actual
 layout explicitly: temporary-filesystem capacity and conservative host RAM
 headroom are additional requirements, rather than weakening any existing floor.
 
+The03 first requested receive phase then refused during owned-fence construction,
+before any RES file, attempt/intent or Web/image request existed. Its exact
+terminal failure and permanent fence identities remain preserved; the cause is
+not inferred from the old generic error. The04 namespace adds fixed marker/source
+admission/open/flock, reservation-create/flock/write/check and attempt-mkdir/intent
+subphases. Failure output adds only an allowlisted builtin exception class and
+bounded integer OS errno, never exception text, paths, arguments or payload.
+Only EAGAIN/EWOULDBLOCK from nonblocking flock may wait, for at most30 seconds
+within the original operation deadline. Every pulse rechecks capacity, retained
+FD/path identity and previously held fences; all other errors refuse immediately.
+The order remains M then SOURCE then exclusive RES. A failure before RES creation
+leaves no owned guard; any already-created RES stays retained for exact Root
+reconciliation. No requested image operation is automatically retried.
+
 The closed catalog is
 [`market_candidate_images.json`](../../deploy/maintenance/market_candidate_images.json),
 55511 bytes, SHA256
@@ -72,8 +86,8 @@ into the Web daemon.
    0700 and staged regular files0600/single-link. Existing namespaces and files
    must never be replaced to bypass an old attempt.
 2. Native namespace is
-   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-03`;
-   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-03`.
+   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-04`;
+   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-04`.
    Root collects a fresh read-only snapshot at each site with
    `--site bot|web --phase snapshot --source-sha256 <reviewed-worker-sha>`.
    Snapshot reads only explicit public daemon/container/store/unit metadata,
@@ -93,7 +107,7 @@ into the Web daemon.
    LOAD; the receive phase does not consume an admission receipt.
 4. Root invokes Native coordination in a named finite systemd scope, with
    `--site bot --phase <phase> --control <exact-control-path>` and
-   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-03`.
+   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-04`.
    The required unit name is `market-images-bot-<phase>-<nonce>`; set CPUQuota100%,
    MemoryMax2G, MemorySwapMax0, TasksMax64, RuntimeMaxSec900 and TimeoutStopSec5.
    Normal `systemd-run --scope --quiet --collect` supplies the scope. The worker
@@ -173,5 +187,6 @@ Native containers: exit0, no stderr, and8 null Health/Healthcheck pairs. It
 read only the approved public metadata projection; no image/container mutation
 or Env access occurred. This proves the previously failing optional-field
 boundary, not archive admission or LOAD. The original01 staged files remain
-unchanged. Neither01 nor02 had an operation control or attempt;03 uses its own
-new namespace, leaving both prior staged sources and observations intact.
+unchanged. Neither01 nor02 had an operation control or attempt. The03 controls and
+pre-operation failure remain unchanged;04 uses its own new namespace and cannot
+adopt an old attempt or extend an old authority window.

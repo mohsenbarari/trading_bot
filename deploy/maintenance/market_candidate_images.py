@@ -8,6 +8,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
 import argparse
+import errno
 import fcntl
 import gzip
 import io
@@ -24,7 +25,7 @@ import sys
 import time
 import zipfile
 
-OPERATION = 'security-market-candidate-images-20261025-03'
+OPERATION = 'security-market-candidate-images-20261025-04'
 CATALOG_SHA = 'c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 TOOLS = {'bot': Path('/root/trading-bot/trading_bot/.local')/OPERATION,
          'web': Path('/srv/trading-bot')/OPERATION}
@@ -40,7 +41,7 @@ SSH = ['/usr/bin/ssh','-F','/dev/null','-p','37067','-oBatchMode=yes',
        '-oClearAllForwardings=yes','-oConnectTimeout=15','root@65.109.220.59']
 LIMIT = 2*1024**2
 MARGIN = 64*1024**2
-CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-03'
+CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-04'
 PHASES = ('receive-web','load-web','load-native')
 CAPTURE = '6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752'
 SUBPHASE = 'control_admission'
@@ -206,8 +207,12 @@ class Context:
             need(identity(Path(row['path']).lstat())==row['identity'],'daemon_unit_metadata_changed')
 
     def begin(self):
+        global SUBPHASE
+        SUBPHASE='attempt_mkdir'
         need(not self.work.exists(),'previous_attempt_requires_reconciliation')
-        self.work.mkdir(mode=0o700);self.publish('intent.json',{'schema':'market_image_store_intent/1',
+        self.work.mkdir(mode=0o700)
+        SUBPHASE='attempt_intent'
+        self.publish('intent.json',{'schema':'market_image_store_intent/1',
             'profile':self.spec['profile'],'phase':self.op['phase'],'operation_sha256':self.pin,
             'retry_allowed':False,'security_accepted':False})
 
@@ -360,28 +365,58 @@ def remote(ctx, phase):
     return argv
 
 
+def acquire_lock(ctx, fd, check):
+    """Only genuine nonblocking contention may wait; never infer cancellation."""
+    end=min(ctx.end,time.monotonic()+30)
+    while True:
+        need(time.monotonic()<end,'fence_lock_timeout')
+        ctx.capacity();check()
+        need(time.monotonic()<end,'fence_lock_timeout')
+        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except OSError as error:
+            if error.errno not in {errno.EAGAIN,errno.EWOULDBLOCK}:raise
+            remaining=end-time.monotonic()
+            need(remaining>0,'fence_lock_timeout')
+            time.sleep(min(.1,remaining))
+        else:check();return
+
+
 class Guard:
     def __init__(self,ctx):
+        global SUBPHASE
         self.ctx=ctx;self.held=[];self.reservation=None;self.ancestors=[]
         need(not os.path.lexists(PENDING),'pending_release_requires_reconciliation')
-        paths=[(MARKER,ctx.op['fences'][ctx.site]['marker'])]
-        if ctx.site=='bot':paths.append((SOURCE,ctx.op['fences']['bot']['source']))
-        for path,expected in paths:
+        paths=[('marker',MARKER,ctx.op['fences'][ctx.site]['marker'])]
+        if ctx.site=='bot':paths.append(('source',SOURCE,ctx.op['fences']['bot']['source']))
+        for name,path,expected in paths:
+            SUBPHASE='guard_'+name+'_admission'
             need(path.resolve(strict=True)==path,'permanent_fence_path')
             self.ancestors.extend(parents(path))
             need(type(expected) is list and len(expected)==9 and all(type(v) is int for v in expected),'permanent_fence_shape')
+            SUBPHASE='guard_'+name+'_open'
             fd=os.open(path,os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK);ctx.stack.callback(os.close,fd)
             actual=identity(os.fstat(fd))
             need(actual==expected==identity(path.lstat()) and actual[2]==0o100600
                  and actual[3:6]==[0,0,1] and (path!=SOURCE or actual[6]==0),'permanent_fence_identity')
-            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);self.held.append((path,fd,actual))
+            def pending():
+                self.check()
+                need(identity(os.fstat(fd))==actual==identity(path.lstat()),'permanent_fence_changed')
+            SUBPHASE='guard_'+name+'_flock'
+            acquire_lock(ctx,fd,pending);self.held.append((path,fd,actual))
         self.path=RESERVATION if ctx.site=='bot' else ctx.root/'image-store.guard'
+        SUBPHASE='guard_reservation_admission'
         self.ancestors.extend(parents(self.path))
-        out=ctx.D.Output(self.path,LIMIT);ctx.stack.callback(out.close);self.reservation=out
-        fcntl.flock(out.fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        SUBPHASE='guard_reservation_create'
+        out=ctx.D.Output(self.path,LIMIT);ctx.stack.callback(out.close)
+        def pending_reservation():self.check();out.check()
+        SUBPHASE='guard_reservation_flock'
+        acquire_lock(ctx,out.fd,pending_reservation)
         self.payload=encode({'schema':'market_image_store_owner/1','nonce':ctx.op['nonce'],
             'profile':ctx.spec['profile'],'operation_sha256':ctx.pin,'pid':os.getpid()})
-        out.write(self.payload);out.finish();self.check();ctx.checks.append(self.check)
+        SUBPHASE='guard_reservation_write'
+        out.write(self.payload);out.finish();self.reservation=out
+        SUBPHASE='guard_reservation_check'
+        self.check();ctx.checks.append(self.check)
 
     def check(self):
         check_parents(self.ancestors)
@@ -728,6 +763,17 @@ def run(ctx,apply=False):
     guard.finish();return result
 
 
+def exception_metadata(error):
+    """Closed builtin class/errno only; never exception text, args or paths."""
+    allowed=(OSError,BlockingIOError,PermissionError,FileNotFoundError,FileExistsError,
+        NotADirectoryError,IsADirectoryError,TimeoutError,InterruptedError,RuntimeError,
+        ValueError,TypeError,KeyError,AttributeError,AssertionError)
+    known=type(error) in allowed
+    number=error.errno if known and isinstance(error,OSError) else None
+    return {'exception_class':type(error).__name__ if known else 'other',
+        'os_errno':number if type(number) is int and 0<number<=4095 else None}
+
+
 def main(argv=None):
     global SUBPHASE
     SUBPHASE='control_admission'
@@ -752,12 +798,13 @@ def main(argv=None):
         code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in PUBLIC_CODES else 'refused_or_unknown'
         if code=='refused_or_unknown' and ctx is not None:code=ctx.D.error_code(error)
         if args.phase!='stream-web':print(json.dumps({'status':'refused_or_unknown','phase':args.phase,
-            'subphase':SUBPHASE,'code':code,'retry_allowed':False,'security_accepted':False},sort_keys=True))
+            'subphase':SUBPHASE,'code':code,'retry_allowed':False,'security_accepted':False,
+            **exception_metadata(error)},sort_keys=True))
         return 1
     finally:signal.alarm(0)
 
 
-PUBLIC_CODES = frozenset(["admission_path","admitted_source_changed","archive_identity","archive_sha256","artifact_client_unknown","baseline_freshness","baseline_sites","candidate_preexisting","capacity_budget","capacity_floor","capture_singleton","client_cleanup_unproven","client_output_bound","command_bound","command_outcome_unknown","command_output_bound","confirmation","container_inventory","control_fields","control_scope","daemon_config_or_rootfs","daemon_descriptor","daemon_public_file_metadata","daemon_public_policy_changed","daemon_temporary_storage_contract","daemon_unit_metadata_changed","deadline","docker_store_changed","document_bound","duplicate_key","evidence_config_identity","evidence_inventory","evidence_member_bound","evidence_member_pin","evidence_size","export_bound","export_identity","export_pin","fence_unlink_unproven","finite_scope_required","frame_bound","frame_short","gzip_bound","gzip_identity","host_identity","host_identity_changed","host_policy_shape","image_map_changed","image_map_delta","image_zip_identity","image_zip_inventory","load_client_unknown","log_policy_shape","native_runtime_changed","nonfinite_json","output_bound","owned_fence_changed","pending_release_requires_reconciliation","permanent_fence_changed","permanent_fence_identity","permanent_fence_path","permanent_fence_shape","phase_scope","post_load_source_sha256","previous_attempt_requires_reconciliation","private_output","profile_scope","protected_parent","protected_parent_changed","read_bound","remote_result","root_required","runtime_changed","scope_lifetime","scope_limits","site_scope","snapshot_readonly","snapshot_runtime_unstable","source_admission","source_admission_budget","source_admission_sha256","source_changed","source_extra","source_metadata","source_path","source_sha256","source_short","source_stream_changed","store_root","store_root_changed","stream_binding","stream_eof_or_sha256","stream_start","tar_size","target_site","temporary_storage_changed","temporary_memory_floor","temporary_memory_metadata","temporary_storage_metadata","temporary_storage_mode","tools_directory","unknown_daemon_identity","write_short"])
+PUBLIC_CODES = frozenset(["admission_path","admitted_source_changed","archive_identity","archive_sha256","artifact_client_unknown","baseline_freshness","baseline_sites","candidate_preexisting","capacity_budget","capacity_floor","capture_singleton","client_cleanup_unproven","client_output_bound","command_bound","command_outcome_unknown","command_output_bound","confirmation","container_inventory","control_fields","control_scope","daemon_config_or_rootfs","daemon_descriptor","daemon_public_file_metadata","daemon_public_policy_changed","daemon_temporary_storage_contract","daemon_unit_metadata_changed","deadline","docker_store_changed","document_bound","duplicate_key","evidence_config_identity","evidence_inventory","evidence_member_bound","evidence_member_pin","evidence_size","export_bound","export_identity","export_pin","fence_lock_timeout","fence_unlink_unproven","finite_scope_required","frame_bound","frame_short","gzip_bound","gzip_identity","host_identity","host_identity_changed","host_policy_shape","image_map_changed","image_map_delta","image_zip_identity","image_zip_inventory","load_client_unknown","log_policy_shape","native_runtime_changed","nonfinite_json","output_bound","owned_fence_changed","pending_release_requires_reconciliation","permanent_fence_changed","permanent_fence_identity","permanent_fence_path","permanent_fence_shape","phase_scope","post_load_source_sha256","previous_attempt_requires_reconciliation","private_output","profile_scope","protected_parent","protected_parent_changed","read_bound","remote_result","root_required","runtime_changed","scope_lifetime","scope_limits","site_scope","snapshot_readonly","snapshot_runtime_unstable","source_admission","source_admission_budget","source_admission_sha256","source_changed","source_extra","source_metadata","source_path","source_sha256","source_short","source_stream_changed","store_root","store_root_changed","stream_binding","stream_eof_or_sha256","stream_start","tar_size","target_site","temporary_storage_changed","temporary_memory_floor","temporary_memory_metadata","temporary_storage_metadata","temporary_storage_mode","tools_directory","unknown_daemon_identity","write_short"])
 
 
 if __name__=='__main__':raise SystemExit(main())

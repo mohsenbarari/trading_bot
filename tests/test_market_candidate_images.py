@@ -7,6 +7,7 @@ from contextlib import ExitStack, redirect_stdout, redirect_stderr
 from copy import deepcopy
 from hashlib import sha256
 import ast
+import errno
 import gzip
 import importlib.util
 import io
@@ -489,9 +490,90 @@ class MarketCandidateImageTests(unittest.TestCase):
         self.stack.enter_context(patch.object(M, 'MARKER', marker))
         self.stack.enter_context(patch.object(M, 'SOURCE', source))
         self.stack.enter_context(patch.object(M, 'RESERVATION', reservation))
+        self.stack.enter_context(patch.object(M, 'PENDING', self.root / 'owned-absent-release-state.json'))
         ctx.root = self.root; ctx.site = 'bot'; ctx.op['nonce'] = 'a' * 32
         ctx.op['fences'] = {'bot': {'marker': M.identity(marker.lstat()), 'source': M.identity(source.lstat())}}
+        # Guard-only fixtures observe retained files; disk-budget integration
+        # fixtures above exercise the real Context.capacity implementation.
+        if 'capacity' not in ctx.__dict__: ctx.capacity = lambda *args: ctx.check()
         return marker, source, reservation
+
+    def lock_fixture(self):
+        path = self.private('owned-contended-lock', b'EXPLICIT_PUBLIC_LOCK')
+        owner = os.open(path, os.O_RDWR); contender = os.open(path, os.O_RDWR)
+        self.stack.callback(os.close, owner); self.stack.callback(os.close, contender)
+        original = M.identity(path.lstat()); checked = []
+        def check():
+            checked.append(True)
+            M.need(M.identity(os.fstat(contender)) == original == M.identity(path.lstat()), 'permanent_fence_changed')
+        ctx = self.basic(); ctx.capacity = lambda *args: ctx.check()
+        return ctx, path, owner, contender, check, checked
+
+    def test_genuine_owned_flock_contention_rechecks_metadata_and_acquires_only_after_release(self):
+        ctx, path, owner, contender, check, checked = self.lock_fixture()
+        actual_flock = M.fcntl.flock; actual_flock(owner, M.fcntl.LOCK_EX | M.fcntl.LOCK_NB)
+        blocked = []; attempts = []
+        def lock(fd, flags):
+            self.assertEqual(fd, contender); self.assertEqual(flags, M.fcntl.LOCK_EX | M.fcntl.LOCK_NB)
+            attempts.append(fd)
+            try: return actual_flock(fd, flags)
+            except OSError as error: blocked.append(error.errno); raise
+        def capacity(*args):
+            ctx.check()
+            if blocked: actual_flock(owner, M.fcntl.LOCK_UN)
+        ctx.capacity = capacity
+        with patch.object(M.fcntl, 'flock', side_effect=lock), patch.object(M.time, 'sleep'):
+            M.acquire_lock(ctx, contender, check)
+        self.assertTrue(blocked); self.assertGreaterEqual(len(attempts), 2); self.assertGreaterEqual(len(checked), 3)
+        with self.assertRaises(BlockingIOError): actual_flock(owner, M.fcntl.LOCK_EX | M.fcntl.LOCK_NB)
+        self.assertEqual(M.identity(path.lstat()), M.identity(os.fstat(contender)))
+
+    def test_lock_wait_refuses_actual_path_replacement_before_a_second_attempt(self):
+        ctx, path, owner, contender, check, _ = self.lock_fixture()
+        actual_flock = M.fcntl.flock; actual_flock(owner, M.fcntl.LOCK_EX | M.fcntl.LOCK_NB)
+        original = path.read_bytes(); attempts = []
+        def lock(fd, flags):
+            attempts.append(fd); return actual_flock(fd, flags)
+        def replace_on_wait(delay):
+            path.rename(self.root / 'retained-contended-lock'); self.private(path.name, original)
+        with patch.object(M.fcntl, 'flock', side_effect=lock), patch.object(M.time, 'sleep', side_effect=replace_on_wait), \
+             self.assertRaisesRegex(RuntimeError, '^permanent_fence_changed$'):
+            M.acquire_lock(ctx, contender, check)
+        self.assertEqual(attempts, [contender]); self.assertEqual(os.pread(contender, len(original), 0), original)
+
+    def test_lock_noncontention_errors_propagate_once_without_sleep_or_retry(self):
+        ctx, _, _, contender, check, _ = self.lock_fixture()
+        for number in (errno.EACCES, errno.EINTR, errno.EBADF):
+            error = OSError(number, 'EXPLICIT_PRIVATE_LOOKING_MESSAGE', '/EXPLICIT_PRIVATE_LOOKING_PATH')
+            with self.subTest(errno=number), patch.object(M.fcntl, 'flock', side_effect=error) as lock, \
+                 patch.object(M.time, 'sleep') as sleep, self.assertRaises(OSError) as caught:
+                M.acquire_lock(ctx, contender, check)
+            self.assertIs(caught.exception, error); lock.assert_called_once(); sleep.assert_not_called()
+
+    def test_lock_wait_is_bounded_by_30_seconds_and_rechecks_deadline_after_capacity(self):
+        ctx, _, _, contender, check, _ = self.lock_fixture(); ctx.end = 1000
+        clock = [100.0]; sleeps = []
+        def wait(delay): self.assertLessEqual(delay, .1); sleeps.append(delay); clock[0] += 31
+        with patch.object(M.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(M.fcntl, 'flock', side_effect=BlockingIOError(errno.EAGAIN, 'owned contention')) as lock, \
+             patch.object(M.time, 'sleep', side_effect=wait), self.assertRaisesRegex(RuntimeError, '^fence_lock_timeout$'):
+            M.acquire_lock(ctx, contender, check)
+        lock.assert_called_once(); self.assertEqual(sleeps, [.1])
+        clock[0] = 100
+        def expires_inside_flock(*args):
+            clock[0] += 31; raise BlockingIOError(errno.EAGAIN, 'owned contention')
+        with patch.object(M.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(M.fcntl, 'flock', side_effect=expires_inside_flock), patch.object(M.time, 'sleep') as sleep, \
+             self.assertRaisesRegex(RuntimeError, '^fence_lock_timeout$'):
+            M.acquire_lock(ctx, contender, check)
+        sleep.assert_not_called()
+        clock[0] = 100; ctx.end = 100.05
+        def consumes_deadline(*args): clock[0] = ctx.end
+        ctx.capacity = consumes_deadline
+        with patch.object(M.time, 'monotonic', side_effect=lambda: clock[0]), patch.object(M.fcntl, 'flock') as lock, \
+             self.assertRaisesRegex(RuntimeError, '^fence_lock_timeout$'):
+            M.acquire_lock(ctx, contender, check)
+        lock.assert_not_called()
 
     def test_owned_guard_preserves_permanent_inodes_and_only_releases_exact_reservation(self):
         ctx = self.basic(); marker, source, reservation = self.owned_guard(ctx)
@@ -502,6 +584,44 @@ class MarketCandidateImageTests(unittest.TestCase):
         self.assertEqual({path: M.identity(path.lstat()) for path in (marker, source)}, before)
         self.assertEqual(source.stat().st_size, 0)
         self.assertEqual(marker.read_bytes(), b'EXPLICIT_PUBLIC_PERMANENT_MARKER')
+
+    def test_closed_exception_metadata_never_contains_args_paths_or_custom_class_names(self):
+        custom = type('EXPLICIT_PRIVATE_LOOKING_CLASS_NAME', (OSError,), {})
+        for error, kind, number in [(PermissionError(errno.EACCES, 'EXPLICIT_PRIVATE_TEXT', '/EXPLICIT_PRIVATE_PATH'), 'PermissionError', errno.EACCES),
+                                    (FileExistsError(errno.EEXIST, 'EXPLICIT_PRIVATE_TEXT'), 'FileExistsError', errno.EEXIST),
+                                    (OSError(), 'OSError', None),
+                                    (RuntimeError(['EXPLICIT_PRIVATE_TEXT']), 'RuntimeError', None),
+                                    (custom(errno.EACCES, 'EXPLICIT_PRIVATE_TEXT'), 'other', None),
+                                    (Exception('EXPLICIT_PRIVATE_TEXT'), 'other', None)]:
+            with self.subTest(kind=kind):
+                value = M.exception_metadata(error)
+                self.assertEqual(value, {'exception_class': kind, 'os_errno': number})
+                self.assertNotIn('EXPLICIT_PRIVATE', json.dumps(value)); M.public(value)
+        for number in (True, 0, -1, 4096, '13'):
+            error = OSError(); error.errno = number
+            self.assertEqual(M.exception_metadata(error), {'exception_class': 'OSError', 'os_errno': None})
+
+    def test_guard_source_flock_failure_reports_exact_stage_without_reservation_attempt_or_rpc(self):
+        ctx, marker, source, reservation = self.run_fixture()
+        before = {path: M.identity(path.lstat()) for path in (marker, source)}
+        actual_flock = M.fcntl.flock; phases = []
+        failure = PermissionError(errno.EACCES, 'EXPLICIT_PRIVATE_TEXT', '/EXPLICIT_PRIVATE_PATH')
+        def flock(fd, flags):
+            phases.append(M.SUBPHASE)
+            if os.fstat(fd).st_ino == source.lstat().st_ino: raise failure
+            return actual_flock(fd, flags)
+        def context(args, stack): ctx.stack = stack; return ctx
+        out = io.StringIO()
+        with patch.object(M, 'Context', side_effect=context), patch.object(M.fcntl, 'flock', side_effect=flock), \
+             patch.object(M.signal, 'alarm'), patch.object(M, 'load_native') as phase, \
+             patch.object(M, 'coordinate_web') as remote, redirect_stdout(out):
+            self.assertEqual(M.main(['--site', 'bot', '--phase', 'load-native', '--apply', M.CONFIRM]), 1)
+        self.assertEqual(phases, ['guard_marker_flock', 'guard_source_flock'])
+        value = json.loads(out.getvalue()); self.assertEqual(value['subphase'], 'guard_source_flock')
+        self.assertEqual(value['exception_class'], 'PermissionError'); self.assertEqual(value['os_errno'], errno.EACCES)
+        self.assertNotIn('EXPLICIT_PRIVATE', out.getvalue()); self.assertFalse(reservation.exists()); self.assertFalse(ctx.work.exists())
+        phase.assert_not_called(); remote.assert_not_called()
+        self.assertEqual({path: M.identity(path.lstat()) for path in (marker, source)}, before)
 
     def test_guard_parent_policy_drift_refuses_cleanup_and_preserves_owned_fences(self):
         ctx = self.basic(); marker, source, reservation = self.owned_guard(ctx)
