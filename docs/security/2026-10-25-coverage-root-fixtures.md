@@ -25,7 +25,9 @@ Only the copied repository root enters Python's path; no bare tests-directory
 path masks package import mistakes. The root filesystem is read-only; the runner copies this public tree
 into private `/work` tmpfs0700 because fixtures create temporary directories
 beside their source. It changes no production ownership check or synthetic stat.
-The container has UID0, zero capabilities, no-new-privileges, network none,
+The container uses a separate init/reaper (`--init`); Python must have PID>1,
+matching the production coordinator's unchanged owner contract. It has UID0,
+zero capabilities, no-new-privileges, network none,
 2CPUs,4GiB memory with no additional swap,128 PIDs,1GiB private work and128MiB
 temporary tmpfs, both nosuid/nodev/noexec. There are no host mounts, Docker socket,
 runtime Env, sessions or application data. Build networking installs only pinned

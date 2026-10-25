@@ -152,6 +152,12 @@ class FixtureLaneTests(unittest.TestCase):
                         {'interfaces': ('lo', 'eth0')}):
             with self.subTest(changes=changes), self.assertRaises(RuntimeError): check(**changes)
 
+    def test_root_entry_rejects_namespace_init_before_loading_fixtures(self):
+        with patch.object(M.os, 'getpid', return_value=1), \
+             patch.object(M.os, 'geteuid', side_effect=AssertionError('fixture inspection reached')):
+            with self.assertRaisesRegex(RuntimeError, '^root_fixture_separate_init_required$'):
+                M.root_guard()
+
     def root_execution_fixture(self):
         args, _, data = self.fixture()
         reviewed = self.root/'reviewed'; reviewed.mkdir()
@@ -215,7 +221,7 @@ class FixtureLaneTests(unittest.TestCase):
         value = yaml.safe_load((ROOT/'.github/workflows/coverage-report.yml').read_bytes())
         steps = value['jobs']['repository-coverage']['steps']
         root = next(step for step in steps if step.get('id') == 'root_fixtures')['run']
-        for flag in ('--user 0:0', '--network none', '--read-only', '--cap-drop ALL',
+        for flag in ('--init', '--user 0:0', '--network none', '--read-only', '--cap-drop ALL',
                      '--security-opt no-new-privileges', '--cpus 2', '--memory 4g',
                      '--memory-swap 4g', '--pids-limit 128', 'git -c tar.umask=0022 archive "$commit"',
                      '/work:rw,nosuid,nodev,noexec,size=1g,mode=0700'):

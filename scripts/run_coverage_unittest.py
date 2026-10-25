@@ -124,6 +124,10 @@ def hosted(args):
 
 
 def root_guard():
+    # A fixture coordinator must be an ordinary owned child, not namespace init.
+    # Production owner guards deliberately reject PID 1; Docker --init supplies
+    # the separate reaper without weakening that contract in tests.
+    need(os.getpid() > 1, 'root_fixture_separate_init_required')
     need(os.geteuid() == os.getegid() == 0 and Path('/.dockerenv').is_file()
          and not os.path.lexists('/var/run/docker.sock')
          and os.statvfs('/').f_flag & os.ST_RDONLY, 'isolated_root_fixture_container_required')

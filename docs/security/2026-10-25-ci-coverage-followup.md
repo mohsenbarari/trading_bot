@@ -72,3 +72,26 @@ public copied sources. Exact discovered IDs/counts are still required across
 both lanes. Their source implementation tests cover1294/1294lines with124tests;
 branch coverage is96.03%, and is not represented as100%. Real staging, image
 LOAD, legacy parking and datastore activation remain separate unexecuted work.
+
+## Actual c8fe run: isolated coordinator was namespace PID1
+
+Run40167371764 on c8fe662f completed8051 hosted tests with no failures/errors
+(350 existing skips); the frontend and changed-code coverage gates also passed.
+The required root lane ran359 tests with one error and no skips. Its public
+artifact12589381443 is17169791bytes, SHA256
+`a5c4b813f0a4c3a2523cc9b4017389709cd6fd0ece1a8c6c25d741659e7b1184`.
+The job remains failed.
+
+The sole error was the real-flock legacy coordinator fixture. Python was the
+container's namespace init, PID1, while the unchanged production owner contract
+correctly requires an ordinary process with PID greater than1. The workflow now
+uses Docker `--init`; a separate init/reaper owns PID1 and Python remains its
+ordinary child. The fixture runner also checks this prerequisite before loading
+fixtures. A negative regression rejects PID1 before any fixture inspection, and
+the workflow contract requires `--init`. Production PID, ownership and lock
+checks are unchanged; no PID spoofing, skip or acceptance exception was added.
+
+Root's source-only hermetic run passed60 fixture-lane/legacy tests, and the
+independent reviewer passed all15 fixture-lane tests. The next actual CI run
+must verify the isolated integration; these local results are not an official
+CI pass or runtime security acceptance.

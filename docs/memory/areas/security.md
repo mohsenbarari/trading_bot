@@ -36,7 +36,7 @@
   Retain archive FD through the operation's final checkpoint; scoped closure
   detaches only its own checker before final validation/close.
 - No green by waiver/deletion or hostdata fixtures. Required root tests use
-  isolated genuine-root public COPY, tar.umask0022 and complete disjoint IDs;
+  genuine-root public COPY with separate init, tar.umask0022 and disjoint IDs;
   preserve hosted multiplicity. Test guards are import-scoped/per-case; restore
   globals and make fixture modes explicit. No production UID/mode waiver.
 - Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not

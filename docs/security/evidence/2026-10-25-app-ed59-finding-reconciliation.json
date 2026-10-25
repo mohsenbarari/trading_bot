@@ -1,0 +1,654 @@
+{
+  "all_required_conditions_verified": false,
+  "composition_sha256": "cba47eb9acb4c665dd37048a4e128bd9af819183a4d5536f611f7cba9669c0b6",
+  "deployment_eligible": false,
+  "evidence_zip_sha256": "fe98a517b05926ed7772d73a4e01d521c40b0a9eabd845868e399163e5fa7e6a",
+  "existing_app_and_usr_local_files_equal": true,
+  "export_sha256": "9fe39cd695b822e8ccb8697b024d9279bb3608502b2cdb29320e679b77bdef28",
+  "filesystem_parity_sha256": "7aa63e9d8b3adb39e6ce5b1e4b58f731c41774ec5612d3a69d793d38c0ee4e61",
+  "findings": [
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2025-69720",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "fixed",
+      "raw_high_rows": 4,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "908d4880797ace9cd29b18cd2144656b4d3095d8a10d5c2790604735135dbbef",
+          "fixed_version": "",
+          "installed_version": "6.6+20260608-2~trixie+gold1",
+          "package": "libncursesw6",
+          "purl": "pkg:deb/debian/libncursesw6@6.6%2B20260608-2~trixie%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "f83f4b69b7b3f389137f3f8b2c9d19e4b0e01e3fe3fee55b2545be2a81bcebcd",
+          "fixed_version": "",
+          "installed_version": "6.6+20260608-2~trixie+gold1",
+          "package": "libtinfo6",
+          "purl": "pkg:deb/debian/libtinfo6@6.6%2B20260608-2~trixie%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "9ecab8b42e210755f14be495432f9bb6c87476e32000d14304efbb21da621fc1",
+          "fixed_version": "",
+          "installed_version": "6.6+20260608-2~trixie+gold1",
+          "package": "ncurses-base",
+          "purl": "pkg:deb/debian/ncurses-base@6.6%2B20260608-2~trixie%2Bgold1?arch=all&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "bcfb7f669a6c4e9b330229235d89d5ea4afd186ad74d91402e911bc192a6e601",
+          "fixed_version": "",
+          "installed_version": "6.6+20260608-2~trixie+gold1",
+          "package": "ncurses-bin",
+          "purl": "pkg:deb/debian/ncurses-bin@6.6%2B20260608-2~trixie%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-16742",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "not_affected",
+      "raw_high_rows": 2,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "f6cb5429aa28c97fc9bdea859275d8277b88e236c958cc7389f705fcdb3a31a5",
+          "fixed_version": "",
+          "installed_version": "257.13-1~deb13u1",
+          "package": "libsystemd0",
+          "purl": "pkg:deb/debian/libsystemd0@257.13-1~deb13u1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "2cef5efc8e0c07e08784b8e7c41373d20f6ac728ec4420090b948c98051d7897",
+          "fixed_version": "",
+          "installed_version": "257.13-1~deb13u1",
+          "package": "libudev1",
+          "purl": "pkg:deb/debian/libudev1@257.13-1~deb13u1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-54369",
+      "legacy_library_apis_globally_fixed": false,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "under_investigation",
+      "raw_high_rows": 1,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "962a33e937375521ddfe43753da9dd34667f3b6f172d9351016fc832c38b3175",
+          "fixed_version": "",
+          "installed_version": "2.4.0-1~trixie+gold1",
+          "package": "libacl1",
+          "purl": "pkg:deb/debian/libacl1@2.4.0-1~trixie%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-76642",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "fixed",
+      "raw_high_rows": 9,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "9a468d7aa402b1eac963eed180db1ac8949aae9d86ef0709329cf49481379cc2",
+          "fixed_version": "",
+          "installed_version": "1:2.41.6-0+deb13u0+gold1",
+          "package": "bsdutils",
+          "purl": "pkg:deb/debian/bsdutils@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "ca9028137e8822d97c17f2444c67097de1c83b4ce4ba636b7f85cc7ff3d6b7b5",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libblkid1",
+          "purl": "pkg:deb/debian/libblkid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "3a3a5553b8e8caa67e925351c9680b42a1749c527ec3d58744ce812226f38cc1",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "liblastlog2-2",
+          "purl": "pkg:deb/debian/liblastlog2-2@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "f8e0282ff8bcd8a5d760f8fb80eb18bf96d6649b3031c9f1cdfe0e4fefc82f9c",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libmount1",
+          "purl": "pkg:deb/debian/libmount1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "03b61a5372c26b801b90bbd58541d49a36e77514ca90a38346d72f0d67651494",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libsmartcols1",
+          "purl": "pkg:deb/debian/libsmartcols1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "20f32c10f415c85a096407ec514e9b58eb424d777245cf57ff2e78da56a3b328",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libuuid1",
+          "purl": "pkg:deb/debian/libuuid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "fc394853e831adc27c0913fd8fa3f475fbc8185df2fdd03e41fb639423fc3902",
+          "fixed_version": "",
+          "installed_version": "1:4.16.0-2+really2.41.6-0+deb13u0+gold1",
+          "package": "login",
+          "purl": "pkg:deb/debian/login@4.16.0-2%2Breally2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "32a568866baedb7f0024937f5593225232c612f21338a0704431860f5ad02edf",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "mount",
+          "purl": "pkg:deb/debian/mount@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "7e2f2567e49a7fb0389534d27c446fe833e4dc0c05b62183c3b1c941682c16f0",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "util-linux",
+          "purl": "pkg:deb/debian/util-linux@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-78408",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "fixed",
+      "raw_high_rows": 9,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "b9a46764e857428259a68216a21c59d798b710e1500149e0dc94d908ba0bf6a7",
+          "fixed_version": "",
+          "installed_version": "1:2.41.6-0+deb13u0+gold1",
+          "package": "bsdutils",
+          "purl": "pkg:deb/debian/bsdutils@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "b4628c94986e343739c0a08c5e06add612805b376d25cc52c0bca56e66990a27",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libblkid1",
+          "purl": "pkg:deb/debian/libblkid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "b77b0d156f22f468a945889d5979ca70d53b5b2ee29f6ac555a7ed7937316313",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "liblastlog2-2",
+          "purl": "pkg:deb/debian/liblastlog2-2@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "1f071c76c650903c0233b0b0717ddd2d81bb8235f586dc8541a00535be8e6825",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libmount1",
+          "purl": "pkg:deb/debian/libmount1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "1ed932a00f994f29d2549088a76b8006663d4f2a4d48d785bd0311a056a9c413",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libsmartcols1",
+          "purl": "pkg:deb/debian/libsmartcols1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "068ab02c9eaab70e8305b849cd299a885834e368e7d2b0a9afd64bbf2dc6f17b",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libuuid1",
+          "purl": "pkg:deb/debian/libuuid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "e121e4cb10a5b2fe7b00fd4e8d4611b00be2ce02444ae192ff353179298a2eb0",
+          "fixed_version": "",
+          "installed_version": "1:4.16.0-2+really2.41.6-0+deb13u0+gold1",
+          "package": "login",
+          "purl": "pkg:deb/debian/login@4.16.0-2%2Breally2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "d0f70b7f78c00f4dfb9c70ebeeca95ada099ec531ead256fcbd7efbc7c3c3fb7",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "mount",
+          "purl": "pkg:deb/debian/mount@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "2491a9c98281f537472af4b72a17b414165643a7fee2c3ee294a55338ea4a46c",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "util-linux",
+          "purl": "pkg:deb/debian/util-linux@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-78409",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "not_affected",
+      "raw_high_rows": 9,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "f559e5cf95900693e8bfb93ec083a436255acb7b758090d78594186aa83b0df8",
+          "fixed_version": "",
+          "installed_version": "1:2.41.6-0+deb13u0+gold1",
+          "package": "bsdutils",
+          "purl": "pkg:deb/debian/bsdutils@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "1e741b857c7b411c08cb485263d22f809baac6a554321ca14c66e35b6d2bfb2b",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libblkid1",
+          "purl": "pkg:deb/debian/libblkid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "3aa915d12bebe1c5aad8000a4f706c0337c56ba6801c87544366562a81d54b5f",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "liblastlog2-2",
+          "purl": "pkg:deb/debian/liblastlog2-2@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "14365dce16c9aeec1d791a7b87c379b363225203996d1b5cf3847b559de53195",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libmount1",
+          "purl": "pkg:deb/debian/libmount1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "eff95fc4c3a52d15abfa91355eeb99067eb9f9da8311dd9a890cebd3c350cc7f",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libsmartcols1",
+          "purl": "pkg:deb/debian/libsmartcols1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "9ef4563b697a16df9c77978746b8b52ca95917d78d23cf74b5f53aaa4005f256",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libuuid1",
+          "purl": "pkg:deb/debian/libuuid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "f4d57a1cb26b8a076a38c049d58f2331b7de694b930806b2d465db084b827c8b",
+          "fixed_version": "",
+          "installed_version": "1:4.16.0-2+really2.41.6-0+deb13u0+gold1",
+          "package": "login",
+          "purl": "pkg:deb/debian/login@4.16.0-2%2Breally2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "fc0e21685d36d0ce2d1facdda30e86cb628fbea9a7aa7570699e94a7c89dc83b",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "mount",
+          "purl": "pkg:deb/debian/mount@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "5633eb550321679869c7522c76d77b8f14efe12501e91707cbf020fdc2579d5a",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "util-linux",
+          "purl": "pkg:deb/debian/util-linux@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-78410",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "fixed",
+      "raw_high_rows": 9,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "714cd023fb8b2783aa74856f20232d15be4e3ee8bd53a6f7f6e6e6c1e9ad6156",
+          "fixed_version": "",
+          "installed_version": "1:2.41.6-0+deb13u0+gold1",
+          "package": "bsdutils",
+          "purl": "pkg:deb/debian/bsdutils@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "701a08d0d31adea5031bdf283ed8d125352d58d0c60cd1046561b458016942fe",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libblkid1",
+          "purl": "pkg:deb/debian/libblkid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "fc05a1edcaa65580989cdef68f082767630b73766ec6ca5702e0ab0f0f45c13d",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "liblastlog2-2",
+          "purl": "pkg:deb/debian/liblastlog2-2@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "8d7fc6ef7e18777b7a8730e4b85f3ad0586fb613f7efee01b2ce58db98fb4920",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libmount1",
+          "purl": "pkg:deb/debian/libmount1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "69ed3104a3db805db8dc8cf28c789b021169ca05f86303554c64282b5cbacc06",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libsmartcols1",
+          "purl": "pkg:deb/debian/libsmartcols1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "cf7e95dfd09fd72c0dc43a75b96f9c8efff6948ac31b7fe669335be896555890",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "libuuid1",
+          "purl": "pkg:deb/debian/libuuid1@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "174a49e8f35607685ce3abd0f5d8abf0210821127bb7f78ff40abaafd2610d6b",
+          "fixed_version": "",
+          "installed_version": "1:4.16.0-2+really2.41.6-0+deb13u0+gold1",
+          "package": "login",
+          "purl": "pkg:deb/debian/login@4.16.0-2%2Breally2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7&epoch=1",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "ae1ff47b2d9ec97bdb7f2764c7bc89046397fac88fc31212bc4176712dcafdab",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "mount",
+          "purl": "pkg:deb/debian/mount@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        },
+        {
+          "child_raw_row_sha256": "8f8f051c0e62d061e17f91c858eec8dced646cdc68f66f784d56205bd5de33e7",
+          "fixed_version": "",
+          "installed_version": "2.41.6-0+deb13u0+gold1",
+          "package": "util-linux",
+          "purl": "pkg:deb/debian/util-linux@2.41.6-0%2Bdeb13u0%2Bgold1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    },
+    {
+      "child_runtime_conditions_verified": false,
+      "cve": "CVE-2026-9538",
+      "legacy_library_apis_globally_fixed": null,
+      "parent_assessment_remains_conditional": true,
+      "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+      "parent_evidence_assessment": "not_affected",
+      "raw_high_rows": 1,
+      "raw_rows": [
+        {
+          "child_raw_row_sha256": "15ea87e4bf44fbfc7e29a648ab419a4fc190cc77c28dbf39e078c87ccbf6f6e6",
+          "fixed_version": "",
+          "installed_version": "5.40.1-6+deb13u1",
+          "package": "perl-base",
+          "purl": "pkg:deb/debian/perl-base@5.40.1-6%2Bdeb13u1?arch=amd64&distro=debian-13.7",
+          "severity": "HIGH"
+        }
+      ]
+    }
+  ],
+  "fresh_acl_receipt_sha256": "199822ca02993bc58b59911cc3066d7ddee1f2373d4b40b281931e12450e1c9e",
+  "fresh_component_receipt_sha256": "9e1797642fd3dba8fe2647b85c65c9397995faa97acb71e9afee2f380d16af6e",
+  "full_runtime_matrix": "NOT_TESTED",
+  "global_security_eligible": false,
+  "historical_parent_condition_templates": [
+    {
+      "id": "C01",
+      "predicate": "exact_candidate_artifact_and_source",
+      "requirement": "Load/admit the exact8da exported archive and verify immutable image/config/orderedRootFS, source provenance and unchanged App/Python bytes against the pinned composition; old-image namespace facts are not candidate proof.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C02",
+      "predicate": "exact_five_role_launch_contracts",
+      "requirement": "For each target, verify the planned fixed service/project identity, command/entrypoint/workdir/user tuple, private PID namespace and Privileged=false before handoff; verify the actual candidate target immediately after handoff. All five actual8da roles are required only for global completion, not before the first handoff. Configured root is not absent privilege.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C03",
+      "predicate": "no_code_or_library_overlay",
+      "requirement": "Compare the complete actual mount inventory with approved mounts; reject code/library/interpreter overlays, host-root/daemon exposure and unknown mounts. Both inference snapshot mounts remain read-only.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C04",
+      "predicate": "trusted_import_and_loader_configuration",
+      "requirement": "Use the existing trusted RAM-only configuration validator to reject unapproved PYTHONPATH/PYTHONHOME/PYTHONSTARTUP/PYTHONINSPECT/LD_PRELOAD/LD_LIBRARY_PATH or plugin/code-loader overrides. Never output or hash private Env values.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C05",
+      "predicate": "complete_known_writer_inventory",
+      "requirement": "Before and after each target handoff, fresh complete inventories must identify only the declared App/Bot roles as uploads/audit writers, with every peer on its explicitly verified baseline or candidate contract for that phase. Reject unknown shared writers, drift or incomplete observations. All five candidate contracts are required for global completion.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C06",
+      "predicate": "stable_path_and_upload_boundary",
+      "requirement": "Under held operation fences, check retained-FD/named identities for root-owned non-symlink no022 ancestors and uploads: no symlink/hardlink/nonregular entry or untrusted writable directory. Recheck before/after use; names/contents are not diagnostics.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C07",
+      "predicate": "public_runtime_source_and_owned_paths",
+      "requirement": "Verify fresh candidate public source parity/no code-shadowing working-layer changes for the declared closure. No new owned ACL/xattr/process/shell invocation, configurable dynamic module or link-creation route may be introduced.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C08",
+      "predicate": "all_raw_rows_and_static_evidence_still_bound",
+      "requirement": "Reconcile the complete fresh raw report against every per-row digest/package/version/advisory plus the actual static/component/vendor/contract receipts. Any new HIGH/CRITICAL row or changed input requires a new reviewed assessment.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C09",
+      "predicate": "normal_role_and_existing_acceptance_gates",
+      "requirement": "Complete actual API/Bot/browser/import/database/backup compatibility and existing host gates for this exact candidate. The56 focused tests are not the full role matrix.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C10",
+      "predicate": "fresh_independent_operation_authority",
+      "requirement": "Use separately reviewed fresh acceptance/window/fences; old2026-10-24T01:30:00Z consumer authority remains expired and immutable. This dossier creates no operation permission.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C11",
+      "predicate": "root_reviewed_assessment",
+      "requirement": "Root must review the complete per-finding source/component evidence and all actual role conditions before any ACL status promotion. A proof hash, proposed status or successful export never mints acceptance.",
+      "verified_for_actual8da_runtime": false
+    },
+    {
+      "id": "C12",
+      "predicate": "serving_scope_only",
+      "requirement": "Administrative shell/CLI use, applying ACL metadata or processing untrusted trees with cp/mv/install/sed/tar/useradd/usermod is outside this role assessment. Such use needs its own safe-caller review/remediation and cannot reuse this statement.",
+      "verified_for_actual8da_runtime": false
+    }
+  ],
+  "historical_tests": 56,
+  "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+  "image_input_signature": "5351903a71b5bf6a281cf5e95a77ec8b57b2d69e804d519510c142473e544ce5",
+  "legacy_acl_callsite_and_dynamic_closure_proven": false,
+  "new_activation_authority_created": false,
+  "ordered_32_layer_prefix_and_physical_directory_only_delta_verified": true,
+  "parent_dossier_sha256": "dc0da8ce33421795798de342edb8a27080995d2e5fb86072c75981e1694d17d4",
+  "parent_evidence_zip_sha256": "d05da4a9c4d1c82b37e1fc0ac9e861762c88be862872ea767a8b561db2982716",
+  "parent_image_id": "sha256:8da3e404d01cc239606d1c79a30c4701c5a2ef2d103787b68b9ec221ae723672",
+  "parent_limitations_preserved": [
+    "No whole-library ACL repair, legacy-consumer removal or absence of privilege is claimed.",
+    "Known-path/component and owned-source evidence do not prove absence of renamed/obfuscated/static/dlopen code, runtime downloads/plugins or arbitrary operator execution.",
+    "Maintainer signature authentication, privileged kernel regressions and interactive suites retain their original NOT_TESTED/false states; oldOPEN receipts are not rewritten.",
+    "Fresh current-role boundary observations concern old images and remain explicitly unbound to8da; no runtime eligibility follows from them."
+  ],
+  "physical_scope_sha256": "3f2f940657ef83301dc31b1f2a21f470a8b61c47054dace6dc841d45451abd9c",
+  "private_environment_read": false,
+  "production_changed": false,
+  "production_data_read": false,
+  "raw_counts": {
+    "CRITICAL": 0,
+    "HIGH": 44,
+    "LOW": 82,
+    "MEDIUM": 68,
+    "UNKNOWN": 1
+  },
+  "raw_high_rows_reconciled": 44,
+  "raw_report_rewritten": false,
+  "raw_report_sha256": "76ef30614d77191fe84a557f42cee8afa8155bb369c4b8c4ee42e4abbcd27e44",
+  "raw_scanner_gate_passed": false,
+  "raw_scanner_gate_waived": false,
+  "recipe_commit": "9a4bec1e34f831a279388f62461a4d2f54770b49",
+  "required_child_runtime_conditions": [
+    {
+      "id": "C01",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "exact_candidate_artifact_and_source",
+      "requirement": "Load/admit the exact ed59 exported archive and verify immutable image/config/orderedRootFS, source provenance and unchanged App/Python bytes against the pinned composition; old-image namespace facts are not candidate proof.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C02",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "exact_five_role_launch_contracts",
+      "requirement": "For each target, verify the planned fixed service/project identity, command/entrypoint/workdir/user tuple, private PID namespace and Privileged=false before handoff; verify the actual candidate target immediately after handoff. All five actual ed59 roles are required only for global completion, not before the first handoff. Configured root is not absent privilege.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C03",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "no_code_or_library_overlay",
+      "requirement": "Compare the complete actual mount inventory with approved mounts; reject code/library/interpreter overlays, host-root/daemon exposure and unknown mounts. Both inference snapshot mounts remain read-only.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C04",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "trusted_import_and_loader_configuration",
+      "requirement": "Use the existing trusted RAM-only configuration validator to reject unapproved PYTHONPATH/PYTHONHOME/PYTHONSTARTUP/PYTHONINSPECT/LD_PRELOAD/LD_LIBRARY_PATH or plugin/code-loader overrides. Never output or hash private Env values.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C05",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "complete_known_writer_inventory",
+      "requirement": "Before and after each target handoff, fresh complete inventories must identify only the declared App/Bot roles as uploads/audit writers, with every peer on its explicitly verified baseline or candidate contract for that phase. Reject unknown shared writers, drift or incomplete observations. All five candidate contracts are required for global completion.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C06",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "stable_path_and_upload_boundary",
+      "requirement": "Under held operation fences, check retained-FD/named identities for root-owned non-symlink no022 ancestors and uploads: no symlink/hardlink/nonregular entry or untrusted writable directory. Recheck before/after use; names/contents are not diagnostics.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C07",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "public_runtime_source_and_owned_paths",
+      "requirement": "Verify fresh candidate public source parity/no code-shadowing working-layer changes for the declared closure. No new owned ACL/xattr/process/shell invocation, configurable dynamic module or link-creation route may be introduced.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C08",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "all_raw_rows_and_static_evidence_still_bound",
+      "requirement": "Reconcile the complete fresh raw report against every per-row digest/package/version/advisory plus the actual static/component/vendor/contract receipts. Any new HIGH/CRITICAL row or changed input requires a new reviewed assessment.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C09",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "normal_role_and_existing_acceptance_gates",
+      "requirement": "Complete actual API/Bot/browser/import/database/backup compatibility and existing host gates for this exact candidate. The56 focused tests are not the full role matrix.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C10",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "fresh_independent_operation_authority",
+      "requirement": "Use separately reviewed fresh acceptance/window/fences; all earlier consumer activation/recovery windows remain expired and immutable. This dossier creates no operation permission.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C11",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "root_reviewed_assessment",
+      "requirement": "Root must review the complete per-finding source/component evidence and all actual role conditions before any ACL status promotion. A proof hash, proposed status or successful export never mints acceptance.",
+      "verified_for_actual_child_runtime": false
+    },
+    {
+      "id": "C12",
+      "image_id": "sha256:ed59f14519b7329306f334e05d8666f808ac2c37da78afa922ddd21c60f3cedd",
+      "predicate": "serving_scope_only",
+      "requirement": "Administrative shell/CLI use, applying ACL metadata or processing untrusted trees with cp/mv/install/sed/tar/useradd/usermod is outside this role assessment. Such use needs its own safe-caller review/remediation and cannot reuse this statement.",
+      "verified_for_actual_child_runtime": false
+    }
+  ],
+  "run_id": 40165530395,
+  "runtime_binding_verified": false,
+  "same_complete_advisory_package_version_severity_purl_multiset": true,
+  "sbom_sha256": "885e84d78c61b5cf0062d68ea1cd0a65f83f85453453b8b3a9501d0109a78e7c",
+  "schema": "security_app_child_finding_reconciliation/1",
+  "security_accepted": false,
+  "status": "static_image_evidence_reconciled_runtime_pending"
+}
