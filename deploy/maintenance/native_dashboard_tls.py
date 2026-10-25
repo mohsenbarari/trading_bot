@@ -30,7 +30,7 @@ LAUNCHER_SHA='fbeb8309dc2d3cb188c4a6b4b94500f76ecb83a52767100c372e38be90c84be2'
 CERT=Path('/etc/letsencrypt/live/coin.362514.ir/fullchain.pem')
 MARKER=Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
 CONTROL=MARKER.parent.parent/'release-control'
-SOURCE_FENCE=CONTROL.parent/'.production-runtime-source.lock'
+SOURCE_MUTEX=CONTROL.parent/'.production-runtime-source.lock'
 RESERVATION=CONTROL/'private-primary-controller.lock'
 NGINX=Path('/etc/nginx/conf.d/90-security-native-dashboard-tls-20261025.conf')
 DROPIN=Path('/etc/systemd/system')/(UNIT+'.d')/'90-security-dashboard-loopback-20261025.conf'
@@ -216,16 +216,34 @@ def state_write(path,value):
 @contextmanager
 def marker_lock():
     parents(MARKER);fd=os.open(MARKER,os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK)
+    source_fd=None
     try:
         before=os.fstat(fd);require(stat.S_ISREG(before.st_mode) and before.st_uid==0 and before.st_nlink==1
             and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=16384,'marker_metadata')
         try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise Refusal('marker_busy') from None
+        require(not os.path.lexists(RESERVATION),'other_controller_present')
+        # Existing deployment/source tools retain this empty inode as a mutex.
+        # Its presence grants no operation authority and does not mean busy.
+        # Hold the same flock; never overwrite, replace, unlink or read it.
+        parents(SOURCE_MUTEX)
+        source_fd=os.open(SOURCE_MUTEX,os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK)
+        source_before=os.fstat(source_fd)
+        require(stat.S_ISREG(source_before.st_mode) and source_before.st_uid==0
+            and source_before.st_nlink==1 and stat.S_IMODE(source_before.st_mode)==0o600
+            and source_before.st_size==0 and identity(source_before)==identity(SOURCE_MUTEX.lstat()),
+            'source_mutex_metadata')
+        try:fcntl.flock(source_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:raise Refusal('source_mutex_busy') from None
         def recheck():
             require(identity(before)==identity(os.fstat(fd))==identity(MARKER.lstat()),'marker_changed')
-            require(not os.path.lexists(SOURCE_FENCE) and not os.path.lexists(RESERVATION),'other_controller_present')
+            require(identity(source_before)==identity(os.fstat(source_fd))==identity(SOURCE_MUTEX.lstat()),
+                'source_mutex_changed')
+            require(not os.path.lexists(RESERVATION),'other_controller_present')
         recheck();yield recheck;recheck()
-    finally:os.close(fd)
+    finally:
+        if source_fd is not None:os.close(source_fd)
+        os.close(fd)
 
 
 def readiness(end,*,tls=False):
@@ -378,6 +396,7 @@ CODES=frozenset(('deadline_shape','unsafe_parent','public_file_metadata','public
     'command_timeout','command_bound','command_failed','dashboard_service_contract','dashboard_launch_contract','listener_shape',
     'certificate_hostname','certificate_dates','certificate_expired','hostname_address_changed','http_head_status','https_redirect_changed',
     'dashboard_public_source_changed','state_owner','marker_metadata','marker_busy','marker_changed','other_controller_present',
+    'source_mutex_metadata','source_mutex_busy','source_mutex_changed',
     'dashboard_listener_changed','dashboard_listener_pending','backend_port_in_use','tls_front_missing','tls_front_pending',
     'owned_file_changed','rollback_state','root_required',
     'action','machine_identity','preexisting_public_file','fresh_identity_required','fresh_window_required','fresh_operation_required'))

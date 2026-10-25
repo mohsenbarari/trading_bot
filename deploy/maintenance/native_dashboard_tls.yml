@@ -30,7 +30,7 @@
           - >-
             import base64,hashlib,sys;
             raw=base64.b64decode({{ lookup('ansible.builtin.file', playbook_dir + '/native_dashboard_tls.py', rstrip=False) | b64encode | to_json }});
-            assert len(raw)<=65536 and hashlib.sha256(raw).hexdigest()=='5a9d92199c66a6afaa896121334ea1159b930123dcff0f550acbd833417b982e';
+            assert len(raw)<=65536 and hashlib.sha256(raw).hexdigest()=='e01a57d1e76c7bf181893948fb851790ce5809def42ec4aa7ad247de8ddb295c';
             scope={'__name__':'sealed_native_dashboard_tls','__file__':'<sealed-native-dashboard-tls>'};
             exec(compile(raw,'<sealed-native-dashboard-tls>','exec'),scope);
             sys.exit(scope['main'](sys.argv[1:]))

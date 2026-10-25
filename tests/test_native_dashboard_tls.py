@@ -36,8 +36,9 @@ class DashboardTests(unittest.TestCase):
         self.marker=self.root/'marker';self.marker.write_bytes(b'public inert marker');self.marker.chmod(0o600)
         self.bodies={self.dropin:M.DROPIN_BYTES,self.nginx:M.NGINX_BYTES}
         for key,value in (('DROPIN',self.dropin),('NGINX',self.nginx),('BODIES',self.bodies),('CONTROL',self.control),
-            ('MARKER',self.marker),('SOURCE_FENCE',self.root/'source-fence'),('RESERVATION',self.root/'reservation')):
+            ('MARKER',self.marker),('SOURCE_MUTEX',self.root/'source-mutex'),('RESERVATION',self.root/'reservation')):
             self.stack.enter_context(patch.object(M,key,value))
+        self.public(M.SOURCE_MUTEX,b'')
         self.machine='a'*32;self.nonce='b'*32
         self.deadline=(datetime.now(timezone.utc)+timedelta(minutes=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
@@ -127,6 +128,32 @@ class DashboardTests(unittest.TestCase):
         (self.root/'reservation').unlink();self.flow();self.public(self.nginx,b'foreign nginx',0o644)
         with self.assertRaisesRegex(M.Refusal,'fresh_operation_required'):M.execute('apply',self.nonce,self.deadline,self.machine)
         self.assertEqual(self.nginx.read_bytes(),b'foreign nginx')
+
+    def test_persistent_empty_source_mutex_keeps_inode_and_bytes_without_read_or_write(self):
+        before=M.identity(M.SOURCE_MUTEX.lstat())
+        with patch.object(M.os,'read',side_effect=AssertionError('source payload read')),\
+             patch.object(M.os,'write',side_effect=AssertionError('source payload write')):
+            with M.marker_lock() as recheck:recheck()
+        self.assertEqual(M.identity(M.SOURCE_MUTEX.lstat()),before)
+        self.assertEqual(M.SOURCE_MUTEX.read_bytes(),b'')
+
+    def test_busy_nonempty_linked_or_replaced_source_mutex_is_never_adopted(self):
+        import fcntl
+        fd=os.open(M.SOURCE_MUTEX,os.O_RDWR)
+        try:
+            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            with self.assertRaisesRegex(M.Refusal,'source_mutex_busy'):
+                with M.marker_lock():pass
+        finally:os.close(fd)
+        os.link(M.SOURCE_MUTEX,self.root/'source-alias')
+        with self.assertRaisesRegex(M.Refusal,'source_mutex_metadata'):
+            with M.marker_lock():pass
+        (self.root/'source-alias').unlink();M.SOURCE_MUTEX.write_bytes(b'unknown operation')
+        with self.assertRaisesRegex(M.Refusal,'source_mutex_metadata'):
+            with M.marker_lock():pass
+        M.SOURCE_MUTEX.write_bytes(b'')
+        with self.assertRaisesRegex(M.Refusal,'source_mutex_changed'):
+            with M.marker_lock():os.replace(self.public(self.root/'new-mutex',b''),M.SOURCE_MUTEX)
 
     def test_exact_public_launch_projection_and_counterfeit_refusal(self):
         old='{ path=/usr/bin/bash ; argv[]=/usr/bin/bash '+str(M.LAUNCHER)+' ; ignore_errors=no ; pid=101 ; }'

@@ -52,7 +52,10 @@ socket/certificate metadata, validates current DNS and nginx syntax, verifies
 exact machine ID, a fresh32-hex nonce and a new UTC deadline between2 and30
 minutes ahead. It never borrows an expired engine/consumer window. It retains
 and flocks the existing production-release.lock inode without reading or
-changing its payload, and refuses existing common/source-controller fences.
+changing its payload. It also holds the existing empty immutable-source mutex
+on the same inode, without reading/writing its payload or replacing/unlinking
+it. A busy, nonempty, linked or changed mutex refuses; an existing controller
+reservation still refuses. File presence alone is not an active flock.
 Normal commands are bounded; a process alarm also bounds resolver and TLS work.
 
 Apply publishes only the two exact new0644 public config files, recording their
@@ -86,3 +89,15 @@ this transport proof. Recovery is an observed service/configuration state, never
 a daemon-cancellation proof. A killed/interrupted helper leaves its owned receipt
 for root to reconcile before later host maintenance; the permanent lock alone
 does not prove completion. Actual host check/apply still requires root review.
+
+The first actual apply, using the earlier5a9 helper and nonce
+`1613bddf58927dd0f310d3a73e965597`, refused `other_controller_present` before
+publishing any file or restarting a service. Read-only metadata established an
+existing root0600, single-link, zero-byte source mutex (device2064/inode1835555),
+with no flock owner in that observation. This is the persistent protocol used
+by `production_deploy_online.sh` and `ImmutableSourceLock`, not a JSON operation
+token or evidence of cancellation. The corrected helper preserves and flocks
+that inode, rather than deleting it or treating an old file as fresh authority.
+Real-FD regressions cover retained bytes/inode, busy ownership, nonempty data,
+hardlinks and replacement. The failed attempt remains failed; any new attempt
+requires the reviewed corrected source and a new nonce/window.

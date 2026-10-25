@@ -35,3 +35,6 @@
   do not adopt working-layer cache/code changes or expose private Env values.
 - Do not inherit Python collector address-space caps into Go CLI children;
   retain finite CPU/wall and output limits enforced before accumulation.
+- Native immutable-source lock is a persistent empty mutex: preserve its inode
+  and hold flock; presence alone is not an operation. Never replace/delete it
+  or accept nonempty/changed/busy state as fresh authority.
