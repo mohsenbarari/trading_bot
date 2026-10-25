@@ -240,6 +240,9 @@ jobs:
           cat > .env <<'EOF'
           ENVIRONMENT=staging
           SERVER_MODE=iran
+          TELEGRAM_DELIVERY_PRODUCER_MODE=queue-v1
+          TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER=queue-v1
+          TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER=producer-only
           PUBLIC_WEBAPP_URL=https://browser-ci.iran.example
           IRAN_SERVER_DOMAIN=browser-ci.iran.example
           BOT_USERNAME=ci_test_bot
@@ -304,6 +307,49 @@ jobs:
               raise SystemExit(f"unexpected server_mode={server_mode!r}")
           if public_webapp_url_for_links() != "https://browser-ci.iran.example":
               raise SystemExit("unexpected browser CI public WebApp origin")
+
+          from core.telegram_delivery_runtime_policy import (
+              TelegramProviderAuthorityError, assert_queue_v1_non_bot_is_producer_only,
+              assert_telegram_provider_execution_authority, configured_telegram_delivery_producer_mode,
+              configured_telegram_delivery_runtime,
+          )
+          import asyncio
+          import json
+          from sqlalchemy import inspect
+          from core.db import engine
+
+          assert_queue_v1_non_bot_is_producer_only()
+          runtime = configured_telegram_delivery_runtime()
+          if (configured_telegram_delivery_producer_mode().value != "queue-v1"
+                  or settings.trading_bot_service != "api"
+                  or settings.telegram_delivery_expected_execution_owner != "queue-v1"
+                  or runtime.mode.value != "producer-only"
+                  or runtime.legacy_workers_enabled or runtime.queue_worker_enabled
+                  or settings.telegram_delivery_queue_cutover_ready
+                  or settings.telegram_provider_test_authority):
+              raise SystemExit("unexpected browser CI Telegram producer authority")
+          for name in ("bot_token", *(f"telegram_publisher_{i}_bot_token" for i in range(1, 6))):
+              value = getattr(settings, name, None)
+              if (value.get_secret_value() if hasattr(value, "get_secret_value") else value):
+                  raise SystemExit("unexpected browser CI provider credential")
+          try:
+              assert_telegram_provider_execution_authority()
+          except TelegramProviderAuthorityError:
+              pass
+          else:
+              raise SystemExit("browser CI producer gained provider execution")
+          async def check_outbox_schema():
+              try:
+                  async with engine.connect() as connection:
+                      present = await connection.run_sync(lambda db: inspect(db).has_table("offer_publication_states"))
+              finally:
+                  await engine.dispose()
+              if not present:
+                  raise SystemExit("browser CI offer publication schema missing")
+          asyncio.run(check_outbox_schema())
+          print(json.dumps({"schema": "browser_ci_telegram_producer_surface/1", "producer_only": True,
+                            "provider_execution_refused": True, "outbox_schema_present": True,
+                            "security_accepted": False}, sort_keys=True))
           PY
           curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
             -H 'Content-Type: application/json'

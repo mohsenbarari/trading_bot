@@ -5,8 +5,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -133,6 +134,82 @@ class BrowserFixtureTests(unittest.TestCase):
                         if s['name'] == 'Run focused observability gate')
             self.assertIn('tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions', step['run'])
             self.assertNotIn('continue-on-error', step)
+
+    def test_actual_telegram_policy_allows_queue_production_but_never_provider_execution(self):
+        source = ast.parse((ROOT / 'core/telegram_delivery_runtime_policy.py').read_bytes())
+        # Keep every policy definition unchanged; inject only its configuration
+        # and server dependencies, without importing any ambient settings.
+        source.body = [n for n in source.body if not isinstance(n, ast.ImportFrom)
+                       or n.module not in {'core.config', 'core.server_routing'}]
+        module = ModuleType('_owned_browser_telegram_policy')
+        module.settings = SimpleNamespace(
+            trading_bot_service='api', telegram_delivery_producer_mode='queue-v1',
+            telegram_delivery_execution_owner='producer-only', telegram_provider_test_authority=False,
+            telegram_delivery_queue_worker_enabled=False, telegram_delivery_queue_cutover_ready=False,
+        )
+        module.SERVER_FOREIGN = 'foreign'
+        module.current_server = lambda: 'iran'
+        with patch.dict(sys.modules, {module.__name__: module}):
+            exec(compile(source, 'public_telegram_runtime_policy', 'exec'), module.__dict__)
+        self.assertEqual(module.configured_telegram_delivery_producer_mode().value, 'queue-v1')
+        runtime = module.configured_telegram_delivery_runtime()
+        self.assertEqual(runtime.mode.value, 'producer-only')
+        self.assertFalse(runtime.legacy_workers_enabled)
+        self.assertFalse(runtime.queue_worker_enabled)
+        module.assert_queue_v1_non_bot_is_producer_only()
+        with self.assertRaises(module.TelegramProviderAuthorityError):
+            module.assert_telegram_provider_execution_authority()
+        for name in ('telegram_delivery_queue_worker_enabled', 'telegram_delivery_queue_cutover_ready'):
+            setattr(module.settings, name, True)
+            with self.assertRaises(module.TelegramDeliveryRuntimeConfigurationError):
+                module.configured_telegram_delivery_runtime()
+            setattr(module.settings, name, False)
+        module.settings.telegram_delivery_execution_owner = 'legacy'
+        with self.assertRaises(module.TelegramDeliveryRuntimeConfigurationError):
+            module.assert_queue_v1_non_bot_is_producer_only()
+        module.settings.telegram_delivery_producer_mode = 'legacy'
+        with self.assertRaises(module.TelegramProviderAuthorityError):
+            module.assert_telegram_provider_execution_authority()
+
+    def test_all_three_browser_fixtures_bind_nonexecuting_queue_role_and_attest_outbox_schema(self):
+        compose = yaml.safe_load((ROOT / 'docker-compose.yml').read_text())
+        for name in ('merge-gate.yml', 'pre-release-gate.yml', 'browser-ci-diagnostic.yml'):
+            jobs = workflow(name)['jobs']
+            job = jobs['browser-diagnostic' if name == 'browser-ci-diagnostic.yml' else 'frontend-browser-matrix']
+            write = next(s for s in job['steps'] if s['name'] == 'Write CI environment file')['run']
+            for field, expected in (
+                ('TELEGRAM_DELIVERY_PRODUCER_MODE', 'queue-v1'),
+                ('TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER', 'queue-v1'),
+                ('TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER', 'producer-only')):
+                self.assertIn(field + '=' + expected + '\n', write)
+            surface = next(s for s in job['steps'] if s['name'] == 'Verify browser CI backend surface')['run']
+            self.assertIn('assert_queue_v1_non_bot_is_producer_only()', surface)
+            self.assertIn('assert_telegram_provider_execution_authority()', surface)
+            self.assertIn('except TelegramProviderAuthorityError:', surface)
+            self.assertIn('has_table("offer_publication_states")', surface)
+            self.assertIn('runtime.legacy_workers_enabled or runtime.queue_worker_enabled', surface)
+            self.assertIn('settings.telegram_provider_test_authority', surface)
+        for service in ('app', 'sync_worker', 'migration'):
+            environment = compose['services'][service]['environment']
+            self.assertEqual(environment['TELEGRAM_DELIVERY_EXECUTION_OWNER'], '${TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER:-legacy}')
+            self.assertEqual(environment['TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED'], 'false')
+            self.assertEqual(environment['TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY'], 'false')
+            self.assertEqual(environment['BOT_TOKEN'], '${TELEGRAM_NON_BOT_BOT_TOKEN:-}')
+
+    def test_mandatory_registration_fixture_requests_otp_after_visible_context_ready_step(self):
+        source = (ROOT / 'frontend/e2e/mandatory-channel.spec.ts').read_text()
+        helper = source.split('async function createInvitation(', 1)[1].split('async function loginWithSeededSession', 1)[0]
+        self.assertNotIn('SETEX', helper)
+        case = source.split("test('freshly activated web user", 1)[1]
+        self.assertLess(case.index('await expect(requestOtpButton).toBeVisible()'), case.index('SETEX'))
+        self.assertLess(case.index('SETEX'), case.index('await requestOtpButton.click()'))
+        self.assertLess(case.index('expect(requested.ok()).toBeTruthy()'), case.index('autocomplete="one-time-code"'))
+        self.assertIn("name: 'دریافت کد تأیید', exact: true", case)
+        self.assertIn("name: 'تأیید و ادامه', exact: true", case)
+        self.assertIn('requested.request().postDataJSON()).toEqual({})', case)
+        self.assertIn('verified.request().postDataJSON()).toEqual({ code: invitation.otpCode })', case)
+        self.assertIn('expect(page.url()).not.toContain(invitation.token)', case)
+        self.assertIn('page.getByText(invitation.mobileNumber)).toHaveCount(0)', case)
 
     def test_registered_dispatch_defaults_preserve_every_existing_normal_and_security_guard(self):
         value = workflow('pre-release-gate.yml')

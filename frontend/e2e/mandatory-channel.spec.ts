@@ -186,11 +186,6 @@ async function createInvitation(request: APIRequestContext): Promise<InvitationF
   const payload = (await lookupResponse.json()) as { token: string }
   expect(payload.token).toMatch(/^(?:INV|ACCT|CUST)-/)
 
-  execFileSync(
-    'docker',
-    ['exec', 'trading_bot_redis', 'redis-cli', 'SETEX', `reg_otp:${payload.token}`, '300', otpCode],
-    { encoding: 'utf8' },
-  )
   return {
     accountName,
     mobileNumber,
@@ -250,23 +245,34 @@ test.describe('Mandatory channel smoke', () => {
       ),
     ).toBeVisible()
 
+    const requestOtpButton = page.getByRole('button', { name: 'دریافت کد تأیید', exact: true })
+    await expect(requestOtpButton).toBeVisible()
+    execFileSync(
+      'docker',
+      ['exec', 'trading_bot_redis', 'redis-cli', 'SETEX', `reg_otp:${invitation.token}`, '300', invitation.otpCode],
+      { encoding: 'utf8' },
+    )
     const otpResponse = page.waitForResponse(
       (response) =>
-        response.url().includes('/api/auth/registration-context/otp/request') &&
-        response.status() === 200,
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/api/auth/registration-context/otp/request'),
     )
-    await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
-    await otpResponse
-    await expect(page.getByText('کد تأیید ۵ رقمی را وارد کنید')).toBeVisible({ timeout: 10000 })
+    await requestOtpButton.click()
+    const requested = await otpResponse
+    expect(requested.ok()).toBeTruthy()
+    expect(requested.request().postDataJSON()).toEqual({})
+    await expect(page.getByRole('textbox', { name: 'کد تأیید پنج‌رقمی', exact: true })).toBeVisible({ timeout: 10000 })
 
     const verifyResponse = page.waitForResponse(
       (response) =>
-        response.url().includes('/api/auth/registration-context/otp/verify') &&
-        response.status() === 200,
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/api/auth/registration-context/otp/verify'),
     )
     await page.locator('input[autocomplete="one-time-code"]').fill(invitation.otpCode)
-    await page.getByRole('button', { name: 'تأیید کد' }).click()
-    await verifyResponse
+    await page.getByRole('button', { name: 'تأیید و ادامه', exact: true }).click()
+    const verified = await verifyResponse
+    expect(verified.ok()).toBeTruthy()
+    expect(verified.request().postDataJSON()).toEqual({ code: invitation.otpCode })
     await expect(page.locator('textarea[autocomplete="street-address"]')).toBeVisible({
       timeout: 10000,
     })

@@ -141,6 +141,15 @@ class BrowserBackendExceptionFilterTests(unittest.TestCase):
         for token in (b'PRIVATE', b'Authorization', b'Config', b'Env', b'headers', b'stacktrace'):
             self.assertNotIn(token, body)
 
+    def test_source_proven_provider_authority_class_is_a_fixed_enum_without_guard_arguments(self):
+        raw = json_event(HEADER + frame('core/telegram_delivery_runtime_policy.py', 177)
+                         + b'TelegramProviderAuthorityError: PRIVATE_PROVIDER_GUARD_ARGUMENT\n')
+        _, value, body, _ = self.invoke(raw)
+        self.assertEqual(value['reports'][0]['exception_class'], 'TelegramProviderAuthorityError')
+        self.assertEqual(value['reports'][0]['frames'], [
+            {'path': 'core/telegram_delivery_runtime_policy.py', 'line': 177}])
+        self.assertNotIn(b'PRIVATE', body)
+
     def test_json_group_frames_and_unknown_class_still_use_only_closed_projection(self):
         stack = (HEADER + frame('api/PRIVATE.py') + frame('core/db.py', 3)
                  + b'PRIVATE_Exception: PRIVATE_MESSAGE\n' + HEADER
