@@ -274,3 +274,22 @@ capabilities dropped and ambient effects fenced (3.837s, no skips). Independent
 source review found no blocker. Group, cancellation and the24 component cases
 still require a new actual hosted result. This source correction grants no
 serving activation or global security acceptance.
+
+## Ninth actual run: all selected installed-image checks passed
+
+Run40183878216, source2302fc452e9c1896c7ec52511f2ad3c4cf626845,
+completed successfully. Artifact12595665849 is5084bytes, SHA256
+`efa38fb7737d9f3985242b2a9d31e6d014bd09f5d53db0a8308f8771df15cba3`.
+The actual unmasked ed59 image passed all8 runtime cases and24 selected
+component tests, with no errors or skips. Migration completed with return0 and
+headff6c7d8e9f01. Production configuration guards stayed active, no real provider
+was used, and both ordinary runtime cleanup and exact owned-resource cleanup
+completed without causes. Failed historical runs remain preserved.
+
+This closes the defined32-check hosted smoke for that immutable candidate.
+It does not activate a serving role, prove the full architecture matrix,
+authorize Market computation changes or establish current-main release
+provenance. The separate ordinary-main build integration must retain genuine
+SHA/tree/input signatures and the tested vendor packages before production
+activation. Global security acceptance remains false; refactor stays STOP and
+the30-consecutive-clean-unit streak has not started.

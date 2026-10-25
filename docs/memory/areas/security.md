@@ -37,8 +37,9 @@
   genuine-root public COPY with separate init, tar.umask0022 and disjoint IDs;
   preserve hosted multiplicity. Test guards are import-scoped/per-case; restore
   globals and make fixture modes explicit. No production UID/mode waiver.
-- CI40174926884 (df857) passed hosted8093/root366/frontend2037, changed gates
-  and13mutations. Newer source tests are separate. Host-idleness needs
+- CI40178229864 (50e) coverage passed. Apped59 hosted40183878216 (2302)
+  passed8runtime+24components, migration0/cleanup complete; no activation.
+  New ordinary-build integration needs separate evidence. Host-idleness needs
   host-visible processes; shared image sizes never prove reclaim.
   Preserve rollback/history/data.
 - Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not
