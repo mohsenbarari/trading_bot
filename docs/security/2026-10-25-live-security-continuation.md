@@ -375,3 +375,26 @@ fixtures and32 browser-CI contract tests. The initial broad isolated Python
 invocation lacked the explicit public checkout import path and failed one
 bootstrap import; the corrected runner supplies that path and the unit-example
 environment without changing any assertion. Actual selected execution is pending.
+
+Both normal Market/datastore adapters now bind the reviewed Site395c18cd helper.
+Independent reverse-substitution reproduced each previous source SHA exactly;
+only that one dependency pin changed in each file. Root passed all57 existing
+public activation fixtures under genuine Root/CAP_CHOWN/NNP. The already staged
+F79 collector retains its exact historical M24f helper and evidence association;
+it is not silently rebound to the new normal adapter.
+
+Actual read-only F79 preparation nonce df9d09091a694ea882234badc0ae6d09 refused
+at `archive_graph_and_sources` with RuntimeError, before any diagnostic or
+serving change. Refusal SHA256 is
+`108b48fd7a66a83db09cd696a5d943710478baefc28228989e933bcc27ad3bea`.
+Its source, seven passing fixtures and failed actual observation remain intact;
+the first report did not identify a reason code, so the historical cause is open.
+
+The exact E1 candidate's installed external Python source was inspected without
+importing it, in a separate owned nonroot/read-only/network-none container with
+finite resources.3192 files/37658303 bytes contained zero explicit ACL/xattr
+lexical sites and no untraversed symlinks;356 conservative process/native/dynamic
+name matches include ordinary method-name false positives. Public inventory
+SHA256 `9357b7fa71d9160b20dcfeeac4607775b6647b8d107481a74858266e5394a1ed`
+retains every file hash and all matches. This narrows the caller review; it
+does not prove runtime callpaths or change raw findings/global acceptance.
