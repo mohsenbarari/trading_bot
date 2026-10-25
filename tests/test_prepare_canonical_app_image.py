@@ -235,6 +235,7 @@ hash_file_or_dir() {
         for scan in scans:
             self.assertEqual(scan['uses'],'aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25')
             self.assertEqual(scan['with']['version'],'v0.76.1');self.assertEqual(scan['with']['image-ref'],'${{ steps.build.outputs.image_id }}')
+            self.assertEqual(scan['with']['cache-dir'],'${{ steps.prepare.outputs.root }}/trivy-cache')
             self.assertEqual(scan['env']['TRIVY_IGNOREFILE'],'/dev/null')
         self.assertEqual(scans[0]['with']['ignore-unfixed'],'false')
         ids={s['id']:i for i,s in enumerate(steps) if 'id' in s}

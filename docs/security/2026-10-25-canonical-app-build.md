@@ -163,3 +163,16 @@ path separators or whitespace. A regression now consumes the actual Git-bound
 15-name vendor lock and exercises those six names plus traversal/unsafe-name
 negatives. Root and an independent reviewer each passed all15 focused tests.
 The failed run remains failed; a fresh actual build is required.
+
+Second run40190266477 on9e9eeaef passed ordinary Dockerfile build, native checks,
+raw scan and SBOM. Its finalizer refused git_dirty before any export. The pinned
+Trivy action defaults its persistent database cache to the Git workspace:
+[action.yaml](https://github.com/aquasecurity/trivy-action/blob/ed142fd0673e97e23eac54620cfb913e5ce36c25/action.yaml).
+The pinned setup installs its binary outside Git and removes its temporary
+checkout on success; the action also removes its environment file. The cache is
+therefore the source-proven persistent-workspace candidate, not a reconstructed
+listing of the failed runner. Both scans now explicitly use the owned capsule's
+trivy-cache outside Git. The strict clean-checkout/input guards remain intact;
+no ignored-dirt exception or evidence deletion is introduced. Focused workflow
+contracts require this exact external cache path. The previous build/scans are
+real evidence for their exact SHA, not a successful export or new serving role.

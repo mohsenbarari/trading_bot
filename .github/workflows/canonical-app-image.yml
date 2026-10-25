@@ -129,6 +129,7 @@ jobs:
         with:
           version: v0.76.1
           image-ref: ${{ steps.build.outputs.image_id }}
+          cache-dir: ${{ steps.prepare.outputs.root }}/trivy-cache
           scanners: vuln
           vuln-type: os,library
           format: json
@@ -149,6 +150,7 @@ jobs:
         with:
           version: v0.76.1
           image-ref: ${{ steps.build.outputs.image_id }}
+          cache-dir: ${{ steps.prepare.outputs.root }}/trivy-cache
           format: cyclonedx
           output: ${{ steps.prepare.outputs.root }}/reports/sbom.cdx.json
           trivy-config: ${{ steps.prepare.outputs.root }}/empty-trivy.yaml
