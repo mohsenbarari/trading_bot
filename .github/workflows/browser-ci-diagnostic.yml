@@ -246,11 +246,24 @@ jobs:
         printf 'BROWSER_CI_TLS_CA_ANCHOR=%s\nBROWSER_CI_TLS_CA_IDENTITY=%s\n' \
           "$browser_ci_ca_anchor" "$browser_ci_ca_identity" >> "$GITHUB_ENV"
         sudo update-ca-certificates >/dev/null 2>&1
+    - name: Prepare isolated browser CA trust
+      id: browser_trust
+      timeout-minutes: 2
+      run: |
+        node --test scripts/probe_browser_ci_browser_trust.test.mjs
+        sudo apt-get install --no-install-recommends -y libnss3-tools >/dev/null
+        node frontend/scripts/browser-ci-trust.mjs prepare
     - name: Observe secure cookie over trusted selected HTTPS
       id: cookie_https
       timeout-minutes: 2
       working-directory: frontend
       env:
+        HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}
+        XDG_DATA_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.local/share
+        XDG_CONFIG_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.config
+        TMPDIR: ${{ env.BROWSER_CI_BROWSER_HOME }}/tmp
+        PLAYWRIGHT_BROWSERS_PATH: ${{ env.BROWSER_CI_PLAYWRIGHT_BROWSERS_PATH }}
+        PLAYWRIGHT_FIREFOX_POLICIES_JSON: ${{ env.BROWSER_CI_FIREFOX_POLICIES_JSON }}
         DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
       shell: bash
       run: |
@@ -275,6 +288,12 @@ jobs:
     - name: Run selected diagnostic scenarios
       working-directory: frontend
       env:
+        HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}
+        XDG_DATA_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.local/share
+        XDG_CONFIG_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.config
+        TMPDIR: ${{ env.BROWSER_CI_BROWSER_HOME }}/tmp
+        PLAYWRIGHT_BROWSERS_PATH: ${{ env.BROWSER_CI_PLAYWRIGHT_BROWSERS_PATH }}
+        PLAYWRIGHT_FIREFOX_POLICIES_JSON: ${{ env.BROWSER_CI_FIREFOX_POLICIES_JSON }}
         CI: 'true'
         PLAYWRIGHT_HTML_OPEN: never
         E2E_TARGET_ENV: local
@@ -345,6 +364,11 @@ jobs:
         [[ "$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$BROWSER_CI_TLS_CA_ANCHOR")" == "$BROWSER_CI_TLS_CA_IDENTITY" ]]
         sudo rm -- "$BROWSER_CI_TLS_CA_ANCHOR"
         sudo update-ca-certificates >/dev/null 2>&1
+    - name: Remove only the owned browser trust directory
+      id: browser_trust_cleanup
+      if: always() && env.BROWSER_CI_TRUST_ROOT != ''
+      timeout-minutes: 2
+      run: node frontend/scripts/browser-ci-trust.mjs cleanup
     - name: Record diagnostic outcome
       if: always()
       env:
@@ -354,6 +378,8 @@ jobs:
         TLS_PREPARE_OUTCOME: ${{ steps.tls_prepare.outcome }}
         TLS_OUTCOME: ${{ steps.tls.outcome }}
         TLS_CLEANUP_OUTCOME: ${{ steps.tls_cleanup.outcome }}
+        BROWSER_TRUST_OUTCOME: ${{ steps.browser_trust.outcome }}
+        BROWSER_TRUST_CLEANUP_OUTCOME: ${{ steps.browser_trust_cleanup.outcome }}
         BOOTSTRAP_OUTCOME: ${{ steps.bootstrap.outcome }}
         SURFACE_OUTCOME: ${{ steps.surface.outcome }}
         BROWSER_OUTCOME: ${{ steps.browser.outcome }}
@@ -368,7 +394,7 @@ jobs:
             'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
         }
         allowed = {'success', 'failure', 'cancelled', 'skipped', ''}
-        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'cookie_https', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
+        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'cookie_https', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup', 'browser_trust', 'browser_trust_cleanup')}
         if not all(item in allowed for item in outcomes.values()):
             raise SystemExit('unknown diagnostic outcome')
         value['step_outcomes'] = outcomes

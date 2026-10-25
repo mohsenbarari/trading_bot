@@ -535,3 +535,19 @@ Apps and sync workers, while their historical final override declares `no`.
 This is a separate post-creation runtime-policy discrepancy. Do not manufacture
 parity by copying observed values into expected policy or disabling live
 restart. Independent normal operational provenance is still required.
+
+Full pre-release40244594506 at6c04 has seven completed browser shards passing;
+Chromium4 and Firefox4 fail a common synthetic-CA trust cause, while shard1 jobs
+are still running. This is not84 independently demonstrated product defects.
+The CI-only correction creates a disposable owned browser HOME, imports only
+the synthetic CA into Chromium's modern NSS database, and supplies Firefox's
+supported certificate-install policy. The original Playwright browser cache,
+strict TLS, raw-HTTP observation, security behavior and full matrix commands
+remain unchanged. Root independently reviewed the source and passed11 Node
+fixtures plus4 Python wiring tests. These are filesystem/argv fixtures, not a
+claim of actual NSS or browser success; selected Chromium/Firefox CI validation
+must precede another full matrix. Public packet SHA256
+`1b6ef831b11500db593e0b4afad76f4efba6181ebe437591f15dd22abbb73c38`.
+Primary behavior references: [Chromium NSS](https://chromium.googlesource.com/chromium/src/+/main/docs/linux/cert_management.md),
+[Firefox policies](https://firefox-admin-docs.mozilla.org/reference/policies/certificates/),
+[Playwright policy hook](https://github.com/microsoft/playwright/blob/v1.59.1/browser_patches/firefox/preferences/playwright.cfg).

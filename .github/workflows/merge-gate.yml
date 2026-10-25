@@ -192,7 +192,7 @@ jobs:
             make observability-gate
           fi
           python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
-          python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions tests.test_browser_ci_https_contract
+          python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions tests.test_browser_ci_https_contract tests.test_browser_ci_browser_trust_contract
           python3 -m unittest -v \
             tests.test_prepare_market_security_payload.MarketSecurityPayloadTests.test_actual_workflow_opt_in_and_raw_scan_export_gate_contract \
             tests.test_security_consumer_payload.SecurityPayload.test_ci_is_explicit_public_payload_only_no_activation_or_scanner_waiver
@@ -381,9 +381,22 @@ jobs:
             "$browser_ci_ca_anchor" "$browser_ci_ca_identity" >> "$GITHUB_ENV"
           sudo update-ca-certificates >/dev/null 2>&1
 
+      - name: Prepare isolated browser CA trust
+        id: browser_trust
+        timeout-minutes: 2
+        run: |
+          node --test scripts/probe_browser_ci_browser_trust.test.mjs
+          sudo apt-get install --no-install-recommends -y libnss3-tools >/dev/null
+          node frontend/scripts/browser-ci-trust.mjs prepare
       - name: Run Playwright browser gate
         working-directory: frontend
         env:
+          HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}
+          XDG_DATA_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.local/share
+          XDG_CONFIG_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.config
+          TMPDIR: ${{ env.BROWSER_CI_BROWSER_HOME }}/tmp
+          PLAYWRIGHT_BROWSERS_PATH: ${{ env.BROWSER_CI_PLAYWRIGHT_BROWSERS_PATH }}
+          PLAYWRIGHT_FIREFOX_POLICIES_JSON: ${{ env.BROWSER_CI_FIREFOX_POLICIES_JSON }}
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
           # Explicitly authorize only this hosted runner's disposable stack.
@@ -414,6 +427,12 @@ jobs:
         if: matrix.shard == 1
         working-directory: frontend
         env:
+          HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}
+          XDG_DATA_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.local/share
+          XDG_CONFIG_HOME: ${{ env.BROWSER_CI_BROWSER_HOME }}/.config
+          TMPDIR: ${{ env.BROWSER_CI_BROWSER_HOME }}/tmp
+          PLAYWRIGHT_BROWSERS_PATH: ${{ env.BROWSER_CI_PLAYWRIGHT_BROWSERS_PATH }}
+          PLAYWRIGHT_FIREFOX_POLICIES_JSON: ${{ env.BROWSER_CI_FIREFOX_POLICIES_JSON }}
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
         run: >-
@@ -473,3 +492,9 @@ jobs:
           [[ "$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$BROWSER_CI_TLS_CA_ANCHOR")" == "$BROWSER_CI_TLS_CA_IDENTITY" ]]
           sudo rm -- "$BROWSER_CI_TLS_CA_ANCHOR"
           sudo update-ca-certificates >/dev/null 2>&1
+
+      - name: Remove only the owned browser trust directory
+        id: browser_trust_cleanup
+        if: always() && env.BROWSER_CI_TRUST_ROOT != ''
+        timeout-minutes: 2
+        run: node frontend/scripts/browser-ci-trust.mjs cleanup

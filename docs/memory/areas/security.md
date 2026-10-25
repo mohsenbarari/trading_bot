@@ -4,9 +4,8 @@
   After closure require30 consecutive accepted clean units; failures reset streak
   with history. Tests/polls never count. Preserve behavior/capture owner/user dirt;
   Writer/DNS human.
-- Host/TLS complete. Appddc5fe9c backups/PG-candidate/uploads isolated restores
-  passed both; old-image/schema compatibility OPEN. Final accepts ciphertext only;
-  no App provisioning/migration authority.
+- Host/TLS complete. Fresh backup04/PG-candidate restore passed both;
+  old-image/schema compatibility OPEN. Final: ciphertext only, no App provisioning.
 - Ordinary665220a2/e1a727de loaded, not serving. UI53349a19 requires a new artifact;
   never relabel E1. Freeze main; preserve retention dirt and rollback/history.
 - Never retry/reroute App C/S/R fresh-profile/COW adaptation/probe. Use ordinary
@@ -18,13 +17,11 @@
   old-image prefix assumption is false. Actual diagnostic remains OPEN.
 - PG49a8/Redis98c4 not activated; Windows UNKNOWN retains Linux absence proof.
   Both loaded; NativePG02/LOAD0a6f760f passed; failed0bd/closures preserved.
-- All ten Market candidates loaded on intended hosts, none activated.
-  Old batch stays FAILED; distinct proven-no-request E46 authority succeeded.
-  E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
-  memoryfloor failure retired/guards closed under2ddd; no LOAD. Both watchdogs
-  auto-restored normal apply; finite windows only. Keep eight readers.
-  Probes exclude daemon heap. App LOAD receipts Native88b2644f/Weba8d10a5f verified.
-  Keep Native01 unknown/02 wrong-peer-phase failures and history.
+- Ten Market candidates loaded, none activated. Preserve failed batches,
+  unknown outcomes and spent controls. Distinct proven-no-request E46 succeeded.
+  Appdf941 retired without LOAD; E1 LOAD receipts88b2644f/a8d10a5f verified.
+  Watchdogs restored normal apply; finite windows only. Keep eight readers.
+  Probes exclude daemon heap.
 - Expired controls grant no authority; unknown RPC never proves cancel/retry.
   Config/manifest differ; classic branches never query Descriptor. Physical TAR
   members unique; repeated logical layers valid, every ordered DiffID strict.
@@ -42,5 +39,5 @@
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
-- Browser full40226940183 failed3/12; coverage40226942334 stale assertions fixed96a8.
-  HTTPS selected40238901129 passed2; direct HTTPS cookie/full matrix still OPEN.
+- Browser full6c04 has Chromium/Firefox CA failures. Direct HTTPS cookies pass;
+  native browser trust/full acceptance OPEN. Preserve earlier failed evidence.
