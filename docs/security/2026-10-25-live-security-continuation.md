@@ -502,3 +502,36 @@ authorized Web-to-Native protected copy completed. Normal manifest values were
 neither disclosed nor hashed. Backup03's expired age is not rewritten; no live
 data was restored or serving component replaced. Redis persistence compatibility
 and the ordinary same-clone App compatibility remain separate open gates.
+
+Read-only admission02 also refused `compose_labels`; its controls, results and
+used sources remain unchanged. A separate closed-location collector identified
+the exact common predicate: App dependency creation labels, contract line457.
+The fixed public label was present but empty on both hosts. This agrees with
+normal `up --no-deps` creation, which removes selected dependency references
+before writing the label; it does not imply absent runtime dependencies.
+Primary sources: [Compose up](https://github.com/docker/compose/blob/v5.5.0/cmd/compose/up.go#L61-L68),
+[label generation](https://github.com/docker/compose/blob/v5.5.0/pkg/compose/create.go#L254-L258).
+The revised contract admits an exact present empty string only in an explicitly
+classified creation mode, retains the complete model, and rejects partial,
+foreign, malformed, missing-as-no-deps and nonboolean modes. Known rollback
+paths forward the explicit mode through both adapters. Independent review caught
+and closed an adapter keyword incompatibility before any serving action.
+
+Root passed17 admission fixtures and the complete103-test App/Market/datastore
+suite in the genuine separate-init UID0/CAP_CHOWN/NNP readonly network-none lane,
+with no skips, failures or errors. Manifest
+`be1c93ca08d5fd24498e9b8eb0cb50cb64ce82ea2f16819c7ee0bc7a65bc6a60`,
+result `c3ce997e2aca157ade89aa99735792e3791d2174dd7eb872967ac8855a42c3db`.
+Earlier fixture packaging failures remain preserved: tmpfs had its default
+world-writable mode, then the expanded datastore suite lacked its tracked public
+catalog. Explicit0700 tmpfs and the complete catalog dependency corrected the
+fixtures; no ownership guard, production source assertion or test was removed.
+
+Actual fresh admission03 now passes creation labels on both sites and refuses
+`normal_restart`, with no serving mutation. Nonces
+2075966660fa4adcb3838fa8fd468ef8 and e9461e3f59db4312bd502c27dd967512
+are retained. Fixed public restart-policy observation shows `always/0` on both
+Apps and sync workers, while their historical final override declares `no`.
+This is a separate post-creation runtime-policy discrepancy. Do not manufacture
+parity by copying observed values into expected policy or disabling live
+restart. Independent normal operational provenance is still required.

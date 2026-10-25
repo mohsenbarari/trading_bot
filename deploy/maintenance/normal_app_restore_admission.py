@@ -12,8 +12,8 @@ from urllib.parse import urlsplit,parse_qs
 import argparse,json,os,re,stat,tempfile,time
 
 OP='normal-app-isolated-restore-admission-20261025-01'
-PINS={'contract':'dace35e283b08cd332c72cf588a8b903e5bed05952b62280e9c85a873ef617ce',
- 'utilities':'395c18cdd842876a4037c4135a087a34a757e9c10cfdf98036474c8a74c4b5cf',
+PINS={'contract':'2ba1ff0f6896a4e2fef7c0e63eb510e6be306271ffe832917e19e3c62e6d708f',
+ 'utilities':'cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 ROLES={'bot':('app','bot','sync_worker'),'web':('app','sync_worker')}
 DATA_TARGETS={'/app/uploads','/app/audit_trail','/app/certs','/app/runtime/coin-inference','/app/runtime/product-estimator'}
@@ -188,8 +188,11 @@ def collect(value,stack,self_pin,*,capture=None):
   # C still requires its exact value to equal the declared container name;
   # this classification grants no replacement or serving authority.
   recreated='com.docker.compose.replace' in (actual['Config'].get('Labels') or {})
-  C.normal_baseline(model,role,row(actual),image,spec,[b['path'] for b in spec['compose_files']],replacement=recreated)
-  record={**loader_scope(C,role,actual,aliases),'creation_compose_version':spec['compose_version']};scope.append(record)
+  no_dependencies=C.no_dependencies_label(actual['Config'].get('Labels'))
+  C.normal_baseline(model,role,row(actual),image,spec,[b['path'] for b in spec['compose_files']],replacement=recreated,
+   creation_no_dependencies=no_dependencies)
+  record={**loader_scope(C,role,actual,aliases),'creation_compose_version':spec['compose_version'],
+   'creation_dependency_label':'empty' if no_dependencies else 'declared'};scope.append(record)
   private['roles'][role]={'model':model,'actual':actual,'image':image,'scope':spec}
  for identifier,before in stable.items():
   after=inspect_one(command([*docker,'container','inspect',identifier]));need(C.same(before,stable_view(after)),'normal_runtime_changed')

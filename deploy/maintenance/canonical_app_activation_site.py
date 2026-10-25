@@ -267,7 +267,9 @@ class Site:
             C.require(all(C.same(actual[k],binding[key]) for k,key in
                 (('image','image_id'),('started','started'),('pid','pid'),('restarts','restarts'))),'role_baseline')
             self.role_ids[service] = cid; self.images[actual['image']] = self.image(actual['image'])
-            C.normal_baseline(self.old_model,service,actual,self.images[actual['image']],self.scope,self.paths)
+            C.normal_baseline(self.old_model,service,actual,self.images[actual['image']],self.scope,self.paths,
+                replacement='com.docker.compose.replace' in actual['config']['Labels'],
+                creation_no_dependencies=C.no_dependencies_label(actual['config']['Labels']))
             self.functional(service,actual)
         self.new_image = self.image(self.candidate)
         C.require(C.same(self.new_image['RootFS'],C.IMAGE['rootfs']),'candidate_rootfs')
@@ -632,7 +634,8 @@ def rollback(backend,service):
         restored = backend.create(service,candidate=False)
         backend.unchanged(current['id'] if current else old['id'],restored['id'])
         rollback_paths = [*backend.paths,str(backend.rollback_override)]
-        C.normal_baseline(backend.rollback_model,service,restored,backend.images[old['image']],backend.scope,rollback_paths,replacement=True)
+        C.normal_baseline(backend.rollback_model,service,restored,backend.images[old['image']],backend.scope,rollback_paths,replacement=True,
+            creation_no_dependencies=True)
         # Same old image, full business Config/Host/mounts; generated hostname,
         # Compose metadata and endpoint allocation are accounted explicitly.
         check = deepcopy(restored); check['config']['Hostname'] = old['config']['Hostname']
@@ -643,7 +646,8 @@ def rollback(backend,service):
             and C.same(C.unordered_host(restored['host']),C.unordered_host(old['host']))
             and C.same(sorted(restored['mounts'],key=lambda r:r['Destination']),sorted(old['mounts'],key=lambda r:r['Destination'])),'rollback_configuration')
         C.network_parity(backend.old_model,service,old,restored,stopped=True)
-        active = backend.start(service,restored); C.normal_baseline(backend.rollback_model,service,active,backend.images[old['image']],backend.scope,rollback_paths,replacement=True)
+        active = backend.start(service,restored); C.normal_baseline(backend.rollback_model,service,active,backend.images[old['image']],backend.scope,rollback_paths,replacement=True,
+            creation_no_dependencies=True)
         C.require(active['restarts'] == 0 and C.same(restored['config'],active['config'])
             and C.same(restored['host'],active['host']) and C.same(restored['mounts'],active['mounts']),'rollback_configuration')
         backend.unchanged(current['id'] if current else old['id'],active['id'])

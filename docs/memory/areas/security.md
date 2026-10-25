@@ -35,6 +35,8 @@
   Compose parity may consume in RAM; no private value hashes/output. Admit
   leaf/full9 before open, FD/full9 before payload; retain FDs/parents through end.
 - Env/secret aliases require raw-parent and resolved-held-leaf checks; hidden hops refuse.
+- Compose creation labels distinguish exact declared dependencies from present
+  empty `--no-deps` metadata; keep full model and forward mode through rollback.
 - Register Root modules; fixture inputs Git-only. Require UID0/CAP_CHOWN/result2;
   App smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixture; preserve
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never

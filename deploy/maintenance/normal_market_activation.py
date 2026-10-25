@@ -12,8 +12,8 @@ from types import ModuleType,SimpleNamespace
 import gzip,json,os,posixpath,re,stat,tarfile,time
 
 OPERATION='security-normal-market-activation-20261025-01'
-BASE_CONTRACT_SHA='dace35e283b08cd332c72cf588a8b903e5bed05952b62280e9c85a873ef617ce'
-BASE_UTILITIES_SHA='395c18cdd842876a4037c4135a087a34a757e9c10cfdf98036474c8a74c4b5cf'
+BASE_CONTRACT_SHA='2ba1ff0f6896a4e2fef7c0e63eb510e6be306271ffe832917e19e3c62e6d708f'
+BASE_UTILITIES_SHA='cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965'
 CATALOG_SHA='c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 LOAD_WORKER_SHA='5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
 PRODUCER='normal_market_functional_producer.py'
@@ -540,7 +540,7 @@ finally:
     return {'container_id':cid,'image_id':image_id,'runtime_before':before,'files':value['files'],
         'configuration_values_disclosed':False,'security_accepted':False}
 
-def baseline(C,model,role,row,image,scope,files,*,replacement=False):
+def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_dependencies=None):
     require(role in ROLES and type(model) is dict and type(model.get('services')) is dict and role in model['services'],'normal_role')
     spec=model['services'][role];cfg=row['config'];host=row['host'];defaults=image['Config']
     require(set(spec)<=C.SERVICE_FIELDS|{'profiles','secrets','tmpfs','shm_size'} and C.same(spec.get('profiles'),scope['profiles']),'normal_features')
@@ -564,7 +564,8 @@ def baseline(C,model,role,row,image,scope,files,*,replacement=False):
     require(C.same({k:v for k,v in cfg['Labels'].items() if not k.startswith('com.docker.compose.')},
         {**(defaults.get('Labels') or {}),**spec.get('labels',{})}),'normal_labels')
     label_model=deepcopy(model);label_model['services'][role]['container_name']=container_name
-    C.normal_labels(cfg['Labels'],label_model,role,scope,files,image['Id'],replacement=replacement)
+    C.normal_labels(cfg['Labels'],label_model,role,scope,files,image['Id'],replacement=replacement,
+        creation_no_dependencies=C.no_dependencies_label(cfg['Labels']) if creation_no_dependencies is None else creation_no_dependencies)
     expected=expected_mounts(C,model,role,scope);actual=row['mounts'];require(type(actual) is list and len(actual)==len(expected),'normal_mount')
     seen=set()
     for mount in actual:

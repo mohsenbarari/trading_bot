@@ -436,7 +436,12 @@ SERVICE_FIELDS = frozenset(('image','container_name','command','entrypoint','env
     'init','cpus','mem_limit','memswap_limit','pids_limit','pull_policy'))
 
 
-def normal_labels(labels,model,service,scope,files,image,*,replacement=False):
+def no_dependencies_label(labels):
+    """Creation metadata only; never a dependency-readiness assertion."""
+    return type(labels) is dict and labels.get('com.docker.compose.depends_on') == ''
+
+
+def normal_labels(labels,model,service,scope,files,image,*,replacement=False,creation_no_dependencies=False):
     require(type(labels) is dict and all(type(k) is str and type(v) is str for k,v in labels.items()),'labels')
     prefix = 'com.docker.compose.'
     require(all(k[len(prefix):] in COMPOSE_FIELDS for k in labels if k.startswith(prefix)),'compose_labels')
@@ -450,11 +455,18 @@ def normal_labels(labels,model,service,scope,files,image,*,replacement=False):
     # config --hash or independently hash private model/Env to reproduce it.
     require(hex64(labels.get(prefix+'config-hash')),'compose_labels')
     dependencies = model['services'][service].get('depends_on',{})
-    require(type(dependencies) is dict,'compose_labels')
+    require(type(dependencies) is dict and type(creation_no_dependencies) is bool,'compose_labels')
     expected_dependencies = {name+':'+row.get('condition','service_started')+':'+str(row.get('restart',False)).lower()
         for name,row in dependencies.items()}
     actual = labels.get(prefix+'depends_on','').split(',') if labels.get(prefix+'depends_on') else []
-    require(len(actual) == len(set(actual)) and set(actual) == expected_dependencies,'compose_labels')
+    # Compose --no-deps removes the selected service's dependency references
+    # before generating this creation label. Keep the complete normal model;
+    # admit only an explicitly classified, present, exact-empty label here.
+    # Source: docker/compose v5.5.0 cmd/compose/up.go and pkg/compose/create.go.
+    if creation_no_dependencies:
+        require(prefix+'depends_on' in labels and labels[prefix+'depends_on'] == '', 'compose_labels')
+    else:
+        require(len(actual) == len(set(actual)) and set(actual) == expected_dependencies,'compose_labels')
     if prefix+'replace' in labels:
         require(replacement and labels[prefix+'replace'] == model['services'][service]['container_name'],'compose_labels')
 
@@ -463,7 +475,7 @@ def _command(value):
     require(value is None or type(value) is list and all(type(v) is str for v in value),'normal_command'); return value
 
 
-def normal_baseline(model,service,row,image,scope,files,*,replacement=False):
+def normal_baseline(model,service,row,image,scope,files,*,replacement=False,creation_no_dependencies=False):
     """Account for the normal model, then keep the COMPLETE actual operands RAM-only."""
     require(type(model) is dict and type(model.get('services')) is dict and service in model['services'],'normal_render')
     spec = model['services'][service]; cfg = row['config']; host = row['host']; defaults = image['Config']
@@ -492,7 +504,8 @@ def normal_baseline(model,service,row,image,scope,files,*,replacement=False):
     require(same(cfg.get('StopTimeout'),timeout),'normal_execution')
     labels = {**(defaults.get('Labels') or {}),**spec.get('labels',{})}
     require(same({k:v for k,v in cfg['Labels'].items() if not k.startswith('com.docker.compose.')},labels),'normal_labels')
-    normal_labels(cfg['Labels'],model,service,scope,files,image['Id'],replacement=replacement)
+    normal_labels(cfg['Labels'],model,service,scope,files,image['Id'],replacement=replacement,
+        creation_no_dependencies=creation_no_dependencies)
     check_mounts(model,service,row['mounts'])
     require(host.get('Privileged') is spec.get('privileged',False) and host.get('ReadonlyRootfs') is spec.get('read_only',False)
         and host.get('AutoRemove') is False and (host.get('PidMode') or '') == spec.get('pid','')
@@ -560,8 +573,10 @@ def normal_host(spec,host):
 
 def configuration_parity(old_model,new_model,service,before,after,old_image,new_image,scope,old_files,new_files,delta,*,stopped=False):
     """No Config/Env/Host hashing or persistence; every unlisted field is exact."""
-    normal_baseline(old_model,service,before,old_image,scope,old_files,replacement=True)
-    normal_baseline(new_model,service,after,new_image,scope,new_files,replacement=True)
+    normal_baseline(old_model,service,before,old_image,scope,old_files,replacement=True,
+        creation_no_dependencies=no_dependencies_label(before['config'].get('Labels')))
+    normal_baseline(new_model,service,after,new_image,scope,new_files,replacement=True,
+        creation_no_dependencies=no_dependencies_label(after['config'].get('Labels')))
     image_defaults(old_image['Config'],new_image['Config'],scope['public_image_env_delta'])
     a,b = deepcopy(before['config']),deepcopy(after['config'])
     require(set(a) == set(b),'complete_config_fields')

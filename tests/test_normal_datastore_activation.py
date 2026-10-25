@@ -81,6 +81,18 @@ class DatastoreTests(unittest.TestCase):
         value['sites']['bot']['fences']['source']=deepcopy(M.SOURCE_ID)
         value['gates']={name:{'name':M.PRODUCER if name=='functional_producer' else name+'.json','bytes':1,'sha256':'c'*64} for name in value['gates']}
         return value
+    def test_shared_rollback_forwards_explicit_no_dependencies_mode(self):
+        role='native-postgres';f=self.case(role);service=M.SERVICE[role];labels=f.old_row['config']['Labels'];key='com.docker.compose.depends_on'
+        f.old['services'][service]['depends_on']={'redis':{'condition':'service_started'}}
+        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        labels[key]='redis:service_started:false'
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+        labels.pop(key)
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+
     def test_fixed_five_roles_and_unarmed_factory_never_requests_commands(self):
         self.assertEqual(len(M.ROLES),5);self.assertEqual(sum(profile=='postgres' for _,profile in M.ROLES.values()),3)
         with self.assertRaisesRegex(RuntimeError,'unarmed'):M.DatastoreBackend(M.unarmed_control(),self.stack)

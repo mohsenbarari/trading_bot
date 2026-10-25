@@ -157,6 +157,39 @@ class ActivationTests(unittest.TestCase):
         C.configuration_parity(f.old,f.new,'app',f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
         reverse = deepcopy(f.active); reverse['config']['Env'].reverse()
         C.configuration_parity(f.old,f.new,'app',f.old_row,reverse,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+    def test_creation_no_dependencies_is_explicit_exact_empty_and_keeps_complete_model(self):
+        f=fixture(); deps={'migration':{'condition':'service_completed_successfully'},'redis':{'condition':'service_started'}}
+        f.old['services']['app']['depends_on']=deepcopy(deps)
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+        C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        self.assertEqual(f.old['services']['app']['depends_on'],deps)
+        labels=f.old_row['config']['Labels']; key='com.docker.compose.depends_on'
+        exact='migration:service_completed_successfully:false,redis:service_started:false'
+        labels[key]=exact
+        C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+        for value in (exact,'redis:service_started:false','foreign:service_started:false',False,0,None):
+            labels[key]=value
+            with self.subTest(value=value),self.assertRaises(RuntimeError):
+                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        labels.pop(key)
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        for value in (1,'true',None):
+            labels[key]=''
+            with self.subTest(mode=value),self.assertRaisesRegex(RuntimeError,'compose_labels'):
+                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=value)
+
+    def test_complete_configuration_parity_accounts_no_deps_without_changing_dependencies(self):
+        f=fixture(); deps={'redis':{'condition':'service_started'}}
+        for model in (f.old,f.new):model['services']['app']['depends_on']=deepcopy(deps)
+        C.configuration_parity(f.old,f.new,'app',f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+        self.assertEqual(f.old['services']['app']['depends_on'],deps)
+        self.assertEqual(f.new['services']['app']['depends_on'],deps)
+        f.active['config']['Labels']['com.docker.compose.depends_on']='foreign:service_started:false'
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            C.configuration_parity(f.old,f.new,'app',f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+
     def test_normal_pull_policy_never_is_modeled_and_all_other_values_refuse(self):
         f = fixture()
         spec = f.old['services']['app']; spec['pull_policy'] = 'never'

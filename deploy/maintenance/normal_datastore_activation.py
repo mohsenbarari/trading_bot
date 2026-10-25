@@ -13,8 +13,8 @@ from types import ModuleType,SimpleNamespace
 import json,os,re,stat,time
 
 OPERATION='security-normal-datastore-activation-20261025-01'
-BASE_CONTRACT_SHA='dace35e283b08cd332c72cf588a8b903e5bed05952b62280e9c85a873ef617ce'
-BASE_UTILITIES_SHA='395c18cdd842876a4037c4135a087a34a757e9c10cfdf98036474c8a74c4b5cf'
+BASE_CONTRACT_SHA='2ba1ff0f6896a4e2fef7c0e63eb510e6be306271ffe832917e19e3c62e6d708f'
+BASE_UTILITIES_SHA='cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965'
 CATALOG_SHA='fc89cd6e75ee1b2b973b9436e55d05f41879e7f52be9cfe583acdecc5fe42263'
 CONTRACT_SHA='d210020e24fedd4986803a3fe2618a5016ecd99f9e3ca9588af02d77a967e17d'
 LOAD_WORKER_SHA='ff07311e32371832b6c1fef8abf35c22559cca4baaaa0c195a9dcacb82fb4221'
@@ -243,7 +243,7 @@ def expected_mounts(C,model,role,scope):
     require(set(sources)=={target for target in rows if target=='/app' or target.startswith('/app/')},'public_source_scope')
     return rows
 
-def baseline(C,model,role,row,image,scope,files,*,replacement=False):
+def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_dependencies=None):
     require(role in ROLES and type(model) is dict and type(model.get('services')) is dict and SERVICE[role] in model['services'],'normal_role')
     spec=model['services'][SERVICE[role]];cfg=row['config'];host=row['host'];defaults=image['Config']
     require(set(spec)<=C.SERVICE_FIELDS|{'profiles','secrets','tmpfs','shm_size'} and C.same(spec.get('profiles',[]),scope['profiles']),'normal_features')
@@ -267,7 +267,8 @@ def baseline(C,model,role,row,image,scope,files,*,replacement=False):
     require(C.same({k:v for k,v in cfg['Labels'].items() if not k.startswith('com.docker.compose.')},
         {**(defaults.get('Labels') or {}),**spec.get('labels',{})}),'normal_labels')
     label_model=deepcopy(model);label_model['services'][SERVICE[role]]['container_name']=container_name
-    C.normal_labels(cfg['Labels'],label_model,SERVICE[role],scope,files,image['Id'],replacement=replacement)
+    C.normal_labels(cfg['Labels'],label_model,SERVICE[role],scope,files,image['Id'],replacement=replacement,
+        creation_no_dependencies=C.no_dependencies_label(cfg['Labels']) if creation_no_dependencies is None else creation_no_dependencies)
     expected=expected_mounts(C,model,role,scope);actual=row['mounts'];require(type(actual) is list and len(actual)==len(expected),'normal_mount')
     seen=set()
     for mount in actual:

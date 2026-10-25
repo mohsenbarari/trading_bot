@@ -101,6 +101,21 @@ class AdmissionTests(unittest.TestCase):
    with self.subTest(wrong=wrong):
     labels['com.docker.compose.replace']=wrong
     with self.assertRaises(RuntimeError):self.invoke(control,capture)
+ def test_normal_no_deps_creation_keeps_declared_model_and_rejects_partial_or_missing_label(self):
+  c,f,rows,capture,calls=self.case();spec=f['app'].old['services']['app']
+  spec['depends_on']={'migration':{'condition':'service_completed_successfully'},'redis':{'condition':'service_started'}}
+  original=deepcopy(spec['depends_on']);label='com.docker.compose.depends_on';labels=rows[c['roles']['app']['container_id']]['Config']['Labels']
+  public,private=self.invoke(c,capture)
+  self.assertEqual(private['roles']['app']['model']['services']['app']['depends_on'],original)
+  self.assertEqual(next(r for r in public['normal_role_eligibility'] if r['role']=='app')['creation_dependency_label'],'empty')
+  labels[label]='migration:service_completed_successfully:false,redis:service_started:false'
+  public,_=self.invoke(c,capture)
+  self.assertEqual(next(r for r in public['normal_role_eligibility'] if r['role']=='app')['creation_dependency_label'],'declared')
+  for value in ('redis:service_started:false','foreign:service_started:false',False,None):
+   labels[label]=value
+   with self.subTest(value=value),self.assertRaises(RuntimeError):self.invoke(c,capture)
+  labels.pop(label)
+  with self.assertRaisesRegex(RuntimeError,'compose_labels'):self.invoke(c,capture)
  def test_real_Normal_C_rejects_complete_config_env_command_and_host_mismatch(self):
   for field,bad in (('Env',['SECRET=PRIVATE_SENTINEL']),('Cmd',['python','special_probe.py']),('User','10001')):
    c,f,rows,capture,calls=self.case();rows[c['roles']['app']['container_id']]['Config'][field]=bad

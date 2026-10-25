@@ -89,6 +89,18 @@ class NormalMarketTests(unittest.TestCase):
         value['scope']={k:f.scope[k] for k in ('project','workdir','container_name','compose_files','profiles','env_files','secret_files','public_sources','compose_version',
             'docker_version','environment_file_label','release','baseline')};return value,f
 
+    def test_shared_rollback_forwards_explicit_no_dependencies_mode(self):
+        f=self.case();role='market-processor';labels=f.old_row['config']['Labels'];key='com.docker.compose.depends_on'
+        f.old['services'][role]['depends_on']={'redis':{'condition':'service_started'}}
+        self.S.C.normal_baseline(f.old,role,f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        labels[key]='redis:service_started:false'
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            self.S.C.normal_baseline(f.old,role,f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+        labels.pop(key)
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            self.S.C.normal_baseline(f.old,role,f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=True)
+
     def test_factory_missing_measurements_unarmed_before_any_command_or_output(self):
         value=M.unarmed_control();self.assertTrue(all(v is None for v in value['gates'].values()))
         with patch.object(M.MarketBackend,'cmd') as cmd,self.assertRaises(RuntimeError):M.MarketBackend(value,self.stack)
