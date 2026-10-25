@@ -333,6 +333,30 @@ jobs:
               ;;
           esac
 
+      - name: Collect closed browser CI backend exception metadata
+        if: always() && (failure() || cancelled())
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          set +e
+          mkdir -p tmp
+          timeout --signal=TERM --kill-after=2s 15s \
+            docker compose logs --no-color --no-log-prefix --tail 2000 app 2>&1 |
+            timeout --signal=TERM --kill-after=2s 20s \
+              python3 -I -B scripts/extract_browser_ci_backend_exceptions.py \
+              > tmp/browser-ci-backend-exceptions.json 2>/dev/null
+          pipeline_status=("${PIPESTATUS[@]}")
+          python3 -I -B - "${pipeline_status[0]}" "${pipeline_status[1]}" \
+            > tmp/browser-ci-backend-exception-status.json <<'PY'
+          import json, sys
+          producer, projector = (int(value) for value in sys.argv[1:])
+          if not all(0 <= value <= 255 for value in (producer, projector)):
+              raise SystemExit(1)
+          print(json.dumps({"schema": "browser_ci_backend_exception_collection/1",
+                            "producer_exit_code": producer, "filter_exit_code": projector}, sort_keys=True))
+          PY
+          exit 0
+
       - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -341,11 +365,9 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
+            tmp/browser-ci-backend-exceptions.json
+            tmp/browser-ci-backend-exception-status.json
           if-no-files-found: ignore
-
-      - name: Print backend logs on failure
-        if: failure()
-        run: docker compose logs --no-color app migration db redis
 
       - name: Tear down backend stack
         if: always()

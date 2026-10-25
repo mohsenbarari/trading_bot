@@ -4,7 +4,7 @@
   STOP/streak0. After security closure require30 consecutive accepted clean units;
   failures reset streak with history; tests/polls never count. Preserve behavior,
   single capture owner/user changes. No routine permission; Writer/DNS human.
-- Host/backups/TLS complete; infrastructure memory.
+- Host/TLS complete; fresh backups pending; infrastructure memory.
   Final accepts ciphertext backups only, no App provisioning/migration authority.
 - Historical ed59 cannot become main. Ordinary665220a2/e1a727de built/exported;
   actual CI40196208692 passed32/32, physical graph/presence/cleanup. Not serving.
@@ -14,20 +14,19 @@
   or COW guard adaptation/probe. Ordinary main artifact is the legitimate path;
   fresh serving/config/backup/functional proof remains required. Keep rollback
   overrides/images/history.
-- Raw44HIGH retain43 component assessments; ACL caller gap OPEN, no global FIXED.
-  a37 actual
-  Native LOAD ce20b50b passed; consumed316MB public archives removed. f365 c96
-  prearchive failure remains FAILED; c715 actual two-host abort closure proved
-  NativeRES removed. New image-store06 keeps fixed processor health-only
-  observation and bounded capture readiness; never mutating-RPC retry.
+- Raw44HIGH retain43 assessments; ACL caller gap OPEN, no global FIXED.
+  Image-store06 keeps fixed
+  processor health-only observation and bounded capture readiness;
+  never mutating-RPC retry.
   Capture conflicts/F79's two source overrides remain OPEN.
 - PG49a8/Redis98c4 built/scanned, not activated. PG Windows UNKNOWN retains Linux
   absence proof. Datastore03 Redis LOAD passed both; PG Web passed, Native0bd
   failed before header/LOAD request. Abort02 d27c actual two-host durable closure
-  removed its exact RES; preserve failed attempt, no blind retry. Watchdog M-lock
-  restart race proved; finite monitor-only maintenance is being verified before
-  further imports. Market06 a37/f365 Native LOAD passed;
-  remaining8 batch unexecuted. Keep eight production reader units.
+  removed its exact RES; same-inode retirement b651 preserved history, no LOAD.
+  Watchdog M-lock race proved; fresh finite monitor-only maintenance active.
+  Market06 a37/f365 Native LOAD passed; batch STOP after e31 Web admission and
+  Native NOAPPLY refusal. Fresh request approved only after no-LOAD proof/cause
+  fix; never resume old batch. Keep eight production reader units.
 - Expired controls grant no future authority. Unknown RPC never proves cancel
   or retry. Config/manifest differ; classic branches never query Descriptor.
   Physical TAR members stay unique; repeated logical layers are valid with

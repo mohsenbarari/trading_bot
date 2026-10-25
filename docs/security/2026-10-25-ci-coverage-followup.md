@@ -107,3 +107,41 @@ skips; required-root360tests/0failures/0errors/0skips/UID0; frontend171files and
 passed. No production PID, ownership, mode, coverage threshold or test-skip
 exception was introduced. This closes the identified CI failures, not the
 remaining image findings, serving activation or global security acceptance.
+
+## Actual f17 and657 runs: portable evidence fixtures
+
+Run40196003459 onf17cf197 retained a genuine-root512-test result with one
+failure: the unknown-peer diagnostic test read journal filenames without sorting
+them. The production journal correctly retained its unknown outcome. The test
+now orders the numbered records. Seven F79 preparer CLI lines also lacked
+direct coverage; real public-source success/refusal/privacy tests now cover them.
+
+The fresh run40208579672 on657007cc completed8219 hosted tests successfully
+with350 skips whose individual reasons have not been attributed here. Frontend,
+changed-code coverage, runtime/mutation and traceability steps passed. The actual
+required-root result was579 tests,21 errors,0 failures and0 skips; its nonzero
+exit correctly kept the overall job failed despite green collection steps.
+Artifact12605900080 is17305178bytes, SHA256
+`dcdfffb6b3f86507c7bc1a193037fd712097e1ef5239022e8e56948ef781b559`.
+
+All21 errors came from one nonportable fixture dependency: the canonical App
+image-store tests read two ignored operator `.local` ZIPs. The exact same
+authenticated public artifacts now live in `tests/fixtures/canonical_app/` with
+their original size/hash checks and original security flags. No synthetic
+replacement, network download, UID/mode waiver or skip was introduced. Root's
+independent CAP_CHOWN-only pre-import-fenced run passed all21 corrected tests;
+the complete hosted579-test integration still requires a fresh actual CI run.
+
+Browser baseline comparison also established failing assertions before the
+75-minute job caps on both50e and665. Commitd9a9508b fixes proven stale
+locators/navigation, authoritative mock-user fields, an explicit profile-access
+expectation and the synthetic public-URL fixture. Nine TypeScript files parse
+and ten bootstrap contract tests pass; this is not a browser-matrix pass. Eight
+HTTP500 assertions and two observed behavior failures remain intact and open.
+
+The new synthetic-CI exception collector retains only fixed exception classes
+and approved relative frame paths/line numbers, with physical input, line,
+report and output bounds. It replaces raw log dumping and records collection
+exit codes and incomplete/truncated evidence. Nineteen pure-IO tests cover all
+96 executable lines, with no coverage exclusion. It introduces no product,
+validator, timeout or acceptance-gate changes.

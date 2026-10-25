@@ -7,7 +7,12 @@ from types import ModuleType,SimpleNamespace
 from unittest.mock import Mock,patch
 import ast,fcntl,importlib.util,inspect,io,json,os,sys,tempfile,time,unittest
 
-ROOT=Path(__file__).resolve().parents[1];MAIN=ROOT.parents[1]
+ROOT=Path(__file__).resolve().parents[1]
+PUBLIC_EVIDENCE=ROOT/'tests/fixtures/canonical_app'
+PUBLIC_EVIDENCE_PINS={
+ 'canonical-build.zip':('canonical-build-665220a2-run40191605131.zip',336678,'eac66d11595ae9bd7a4478f5b126ac77e4d36b81dab25613f0d951c833d7b653'),
+ 'canonical-smoke.zip':('canonical-smoke-665220a2-run40196208692.zip',392398,'5cd1ab49b517bcd04c7adc1e883ecf351020f96b16ccfec70278037c5c013e99'),
+}
 DENIED=('subprocess.Popen','subprocess.run','os.system','os.popen','os.fork','os.kill','os.killpg',
  'socket.socket','socket.create_connection','socket.getaddrinfo','urllib.request.urlopen','ctypes.CDLL',
  'resource.setrlimit','signal.signal','signal.alarm')
@@ -33,8 +38,9 @@ class CanonicalAppStoreTests(unittest.TestCase):
   for path in A.HELPERS:self.private(root/'source'/Path(path).name,(ROOT/path).read_bytes())
   self.private(root/A.WORKER,(ROOT/'deploy/maintenance'/A.WORKER).read_bytes())
   self.private(root/'canonical_app_candidate_images.json',A.CATALOG_SOURCE)
-  self.private(root/'evidence/canonical-build.zip',(MAIN/'.local/security-canonical-app-665220a2-evidence-01/public-evidence.zip').read_bytes())
-  self.private(root/'evidence/canonical-smoke.zip',(MAIN/'.local/security-canonical-app-smoke-40196208692-evidence-01/public-evidence.zip').read_bytes())
+  for name,(fixture,size,pin) in PUBLIC_EVIDENCE_PINS.items():
+   raw=(PUBLIC_EVIDENCE/fixture).read_bytes();self.assertEqual(len(raw),size);self.assertEqual(sha256(raw).hexdigest(),pin)
+   self.private(root/'evidence'/name,raw)
   self.stack.enter_context(patch.object(A,'ROOTS',{'bot':root,'web':root}));M=A.load_engine(self.stack,'bot')
   ctx=M.Context.__new__(M.Context);ctx.engine=M;ctx.root=root;ctx.stack=self.stack;ctx.checks=list(M.bootstrap_checks)
   ctx.modules={}
