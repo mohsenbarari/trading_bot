@@ -17,6 +17,7 @@
           - security_service in ['', 'app', 'bot', 'sync_worker']
           - security_action not in ['target', 'rollback'] or security_service != ''
           - security_site != 'web' or security_service != 'bot'
+          - security_public_assets | selectattr('name', 'equalto', 'security_consumer_site.py') | list | length == 1
           - ansible_user == 'root'
           - (inventory_hostname == 'security_web' and ansible_host == '65.109.220.59' and ansible_port | int == 37067 and security_site == 'web' and security_workspace == '/srv/trading-bot/security-consumers-20261024-02-' + security_coordinator_nonce) or (inventory_hostname == 'security_bot' and ansible_connection == 'local' and ansible_host == '65.109.216.187' and ansible_port | int == 22 and security_site == 'bot' and security_workspace == '/root/trading-bot/trading_bot/.local/security-consumers-20261024-02-' + security_coordinator_nonce)
       no_log: true
@@ -111,7 +112,29 @@
           - /usr/bin/python3
           - -I
           - -B
+          - -c
+          - |
+            from hashlib import sha256
+            import os,pathlib,re,stat,sys
+            path=pathlib.Path(sys.argv[1]);expected=sys.argv[2];arguments=sys.argv[3:]
+            assert path.is_absolute() and path.name=='security_consumer_site.py' and path.resolve(strict=True)==path
+            assert re.fullmatch('[a-f0-9]{64}',expected)
+            fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            try:
+                def identity(s):return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                before=identity(os.fstat(fd))
+                assert stat.S_ISREG(before[2]) and stat.S_IMODE(before[2])==0o600 and before[3:6]==(0,0,1) and 0<before[6]<=131072
+                def check():assert before==identity(os.fstat(fd))==identity(path.lstat()),'site_entrypoint_changed'
+                check();raw=os.pread(fd,before[6]+1,0);check()
+                assert len(raw)==before[6] and sha256(raw).hexdigest()==expected,'site_entrypoint_digest'
+                code=compile(raw,str(path),'exec');check()
+                sys.argv=[str(path),*arguments]
+                namespace={'__name__':'__main__','__file__':str(path),'__package__':None,'__spec__':None,'__cached__':None,'__builtins__':__builtins__}
+                try:exec(code,namespace)
+                finally:check()
+            finally:os.close(fd)
           - '{{ security_workspace }}/security_consumer_site.py'
+          - '{{ (security_public_assets | selectattr("name", "equalto", "security_consumer_site.py") | list | first).sha256 }}'
           - '{{ security_action }}'
           - --site
           - '{{ security_site }}'
