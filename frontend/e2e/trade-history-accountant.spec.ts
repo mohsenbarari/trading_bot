@@ -789,6 +789,17 @@ async function setHistoryDatePicker(page: Page, triggerTestId: string, gregorian
     const bounds = panel.getBoundingClientRect()
     const days = [...panel.querySelectorAll<HTMLElement>('.jalali-calendar-day:not(.is-empty)')]
       .map((day) => ({ key: day.dataset.dayKey, bounds: day.getBoundingClientRect() }))
+    const insetBody = panel.closest('.ui-inset-group__body')
+    const insetBounds = insetBody?.getBoundingClientRect()
+    const insetStyle = insetBody ? getComputedStyle(insetBody) : null
+    const clippedByHistoryCard = insetBounds && insetStyle
+      ? days.filter(({ bounds }) => (
+        (['hidden', 'clip'].includes(insetStyle.overflowX)
+          && (bounds.left < insetBounds.left || bounds.right > insetBounds.right))
+        || (['hidden', 'clip'].includes(insetStyle.overflowY)
+          && (bounds.top < insetBounds.top || bounds.bottom > insetBounds.bottom))
+      )).map(({ key }) => key)
+      : []
     const overlaps: string[] = []
     for (let i = 0; i < days.length; i += 1) {
       for (let j = i + 1; j < days.length; j += 1) {
@@ -804,12 +815,14 @@ async function setHistoryDatePicker(page: Page, triggerTestId: string, gregorian
       minimumWidth: Math.min(...days.map((day) => day.bounds.width)),
       minimumHeight: Math.min(...days.map((day) => day.bounds.height)),
       insideViewport: bounds.left >= 0 && bounds.right <= window.innerWidth,
+      clippedByHistoryCard,
       overlaps,
     }
   })
   expect(geometry.minimumWidth).toBeGreaterThanOrEqual(40)
   expect(geometry.minimumHeight).toBeGreaterThanOrEqual(40)
   expect(geometry.insideViewport).toBe(true)
+  expect(geometry.clippedByHistoryCard).toEqual([])
   expect(geometry.overlaps).toEqual([])
   await picker
     .locator('.jalali-calendar-day:not(.is-empty)')
