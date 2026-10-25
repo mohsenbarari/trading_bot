@@ -1,5 +1,8 @@
 # Infrastructure
 
+- 2026-10-25 | Native dashboard TLS verified independently from Web on existing
+  coin.362514.ir/30486; backend is loopback30487. No Writer/DNS/auth-code change.
+
 - 2026-10-24 | Final Finland SSH uses existing `id_ed25519_finland_primary` explicitly;
   default identities omit it. Strict pinned-host access passed; root free303.6GB.
   Security maintenance may stage only scoped ciphertext backups there; no App,

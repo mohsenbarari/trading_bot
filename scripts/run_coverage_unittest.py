@@ -18,7 +18,11 @@ from unittest.mock import patch
 ROOT_MODULES = tuple('tests.test_' + name for name in (
     'native_brotli_install', 'native_dashboard_tls', 'native_runtime_vulnerability_audit',
     'security_consumer_bootstrap', 'web_runtime_vulnerability_audit', 'web_market_hot3',
-    'web_market_hot_preflight', 'web_market_managed_config', 'web_engine_current_controller'))
+    'web_market_hot_preflight', 'web_market_managed_config', 'web_engine_current_controller',
+    'coverage_root_fixture_lane',
+    'datastore_candidate_stage', 'datastore_candidate_contract_completion',
+    'datastore_candidate_stage_completion', 'datastore_candidate_stage_entry',
+    'security_legacy_parking', 'security_legacy_parking_completion'))
 AMBIENT = ('subprocess.run', 'subprocess.Popen', 'subprocess.call', 'subprocess.check_call',
     'subprocess.check_output', 'os.system', 'os.popen', 'os.fork', 'os.forkpty',
     'os.posix_spawn', 'os.posix_spawnp', 'os.kill', 'os.killpg', 'socket.socket',

@@ -102,8 +102,24 @@ class PublicCacheMetadataTests(unittest.TestCase):
         with patch.object(M.json,'loads',side_effect=AssertionError('parsed_before_pin')) as parse:
             with self.assertRaisesRegex(M.CacheError,'control_pin'):M.collect(raw,app_root=app,expected_sha256='0'*64)
         parse.assert_not_called()
-        (app/'core/market_intelligence/extra.py').write_bytes(b'# public\n')
+        extra = app/'core/market_intelligence/extra.py'
+        extra.write_bytes(b'# public\n'); extra.chmod(0o644)
         with self.assertRaisesRegex(M.CacheError,'whole_public_inventory_changed'):M.collect(raw,app_root=app,expected_sha256=digest)
+
+    def test_extra_file_mode_and_inventory_guards_do_not_depend_on_process_umask(self):
+        for mask in (0o022, 0o077):
+            previous = os.umask(mask)
+            try:
+                app, raw, digest = self.fixture()
+                extra = app/'core/market_intelligence/extra.py'
+                extra.write_bytes(b'# public\n'); extra.chmod(0o600)
+                with self.assertRaisesRegex(M.CacheError, '^public_file$'):
+                    M.collect(raw, app_root=app, expected_sha256=digest)
+                extra.chmod(0o644)
+                with self.assertRaisesRegex(M.CacheError, '^whole_public_inventory_changed$'):
+                    M.collect(raw, app_root=app, expected_sha256=digest)
+            finally:
+                os.umask(previous)
 
     def test_second_inventory_change_and_expired_deadline_refuse(self):
         app,raw,digest=self.fixture();original=M.scan;calls=[]

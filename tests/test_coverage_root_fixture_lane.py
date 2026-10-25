@@ -28,6 +28,7 @@ with ExitStack() as fence:
 class FixtureLaneTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        old_umask = os.umask(0o077); self.addCleanup(os.umask, old_umask)
         for name in TARGETS: self.stack.enter_context(patch(name, side_effect=AssertionError('ambient_denied')))
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='public-coverage-lane-')))
         old = Path.cwd(); os.chdir(self.root); self.addCleanup(os.chdir, old)
@@ -38,6 +39,16 @@ class FixtureLaneTests(unittest.TestCase):
 
     def required(self):
         return [self.case(name + '.PublicTests.test_required') for name in M.ROOT_MODULES]
+
+    def test_actual_root_owned_file_regressions_never_enter_hosted_lane(self):
+        examples = [
+            self.__class__('test_root_lane_uses_process_entry_collector_and_seals_real_owned_fixture_result'),
+            self.__class__('test_root_lane_installs_finite_wall_callback_that_refuses_expiry'),
+            self.__class__('test_root_lane_refuses_missing_collector_existing_workspace_and_wrong_test_identity'),
+        ]
+        hosted, required = M.partition([*self.required(), *examples])
+        self.assertEqual(hosted, [])
+        self.assertTrue(all(test in required for test in examples))
 
     def test_partition_is_complete_disjoint_and_never_runs_a_root_fixture_in_hosted_lane(self):
         roots = self.required(); ordinary = self.case('tests.test_business.Business.test_behavior')

@@ -46,3 +46,29 @@ Source-focused tests and simulated public coverage path-alias checks are not
 an official CI pass, a runtime activation, or global security acceptance.
 Re-run the official required workflow after independent source review and
 publication. Keep the original failed artifact and its sanitized audit.
+
+## Actual follow-up81 and final ownership placement
+
+Run40164468251 exercised source81d3d183: all221required root fixtures passed
+with no skips, frontend passed, and changed-code coverage passed. The job still
+failed at four hosted cases. Three nested fixture-lane orchestration tests
+require actual root-owned copied sources; their complete module now joins the
+required-root manifest. A regression constructs those three real TestCase
+identities and proves that none enters the hosted lane. Each case also restores
+its original process umask, preventing cross-suite state leakage.
+
+The fourth failure was a distinct fixture-mode defect, confirmed by Root's
+real-UID0 combined run: a new extra public file inherited mode0600 under umask077,
+so the real mode guard refused before the intended inventory-drift assertion.
+The fixture now explicitly uses0644, and a new regression verifies both guards
+under umask022 and077. This module remains in the ordinary hosted lane; its
+source-owner fixture already uses its real UID. No production ownership/mode
+guard changes or UID spoofing are used.
+
+The six new datastore/legacy modules also join the required genuine-root lane
+when their sources are published. The owner-only fixtures remain isolated by
+network-none, no capabilities, no host mounts/socket, read-only root and owned
+public copied sources. Exact discovered IDs/counts are still required across
+both lanes. Their source implementation tests cover1294/1294lines with124tests;
+branch coverage is96.03%, and is not represented as100%. Real staging, image
+LOAD, legacy parking and datastore activation remain separate unexecuted work.

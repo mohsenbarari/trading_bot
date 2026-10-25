@@ -1,0 +1,26 @@
+{
+  "architecture": "amd64",
+  "config_values_included": false,
+  "export_receipt_sha256": "6e68ee177520cd4f1e2a7f1bab2c91ed8f9017d44f3a5e4d477cfc056f208e45",
+  "image_id": "sha256:49a811b28ed9289d4e981c8f6cd36e1cf05259653a858e40df0cb6d6413c9aa1",
+  "os": "linux",
+  "profile": "postgres",
+  "rootfs": {
+    "Layers": [
+      "sha256:34884abbe92863fce933ed7c39c0e045631af0ed86d5cc0dfbdf9fdca426ce3c",
+      "sha256:66b9f7f9f6d3928185e0c7cad648b4b841fdc2bc80eb2cb0029a9bc4bfe6a4de",
+      "sha256:a7e41a59116f2957c93dc08ecef69269070b27f237bd63fc0c0a6db072716237",
+      "sha256:9b19de80e7618a2353a2498eacd0c3aa775b8656d947745a8752ec1c03bd7739",
+      "sha256:9658b7b1393f1afecbea689d5c12ed9701dbbbcfe74c7bb10152e40cd3bd9aa1",
+      "sha256:0cde6740c33cf0ccc77b12e6961dc3c4a4d001117a1db9a96723bfb2895465ec",
+      "sha256:b1cd71796a42a83279af8905bd54a8733f05508355ddd81ad04e2a4e5b59b90f",
+      "sha256:daaf5f9bd329b43986a264faefa8563443b4810d9380ccbcff3f41cce961d683",
+      "sha256:ff7b413583a0d05e5dec20adf8e38685da7c0337fa8bc5fb8af4333323f5df43",
+      "sha256:ea2d2c2012fff2d0532da738c475ee0e9d335d135531275b8e3844ea5f15d385",
+      "sha256:363da9133d416185d21029bc178708bdf472186a612acab540f800233cd01cdb",
+      "sha256:e350ec1404ae4e743ceca8e08674a0cb15a6d798387ca50fe8e85dfea99cdc2f"
+    ],
+    "Type": "layers"
+  },
+  "run_id": 40142076769
+}
