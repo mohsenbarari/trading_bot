@@ -19,18 +19,20 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-DENIALS=ExitStack()
-for module,names in ((subprocess,('Popen','run','call','check_call','check_output')),
-        (socket,('socket','create_connection','getaddrinfo')),(ctypes,('CDLL',)),
-        (os,('system','popen','fork','posix_spawn','posix_spawnp','kill','killpg'))):
-    for name in names:
-        if hasattr(module,name):DENIALS.enter_context(patch.object(module,name,side_effect=AssertionError('ambient_execution_denied')))
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'subprocess.call', 'subprocess.check_call', 'subprocess.check_output', 'socket.socket', 'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL', 'os.system', 'os.popen', 'os.fork', 'os.posix_spawn', 'os.posix_spawnp', 'os.kill', 'os.killpg')
+FENCE_ERROR = 'ambient_execution_denied'
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(patch(target, side_effect=AssertionError(FENCE_ERROR)))
+    return stack
 
-ROOT=Path(__file__).resolve().parents[1]
-SPEC=importlib.util.spec_from_file_location('current_controller_fixture',ROOT/'deploy/maintenance/web_engine_current_controller.py')
-M=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(M)
-PUBLIC_READ=M.read
-from tests import test_web_engine_current_profile as fixtures
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    ROOT=Path(__file__).resolve().parents[1]
+    SPEC=importlib.util.spec_from_file_location('current_controller_fixture',ROOT/'deploy/maintenance/web_engine_current_controller.py')
+    M=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(M)
+    PUBLIC_READ=M.read
+    from tests import test_web_engine_current_profile as fixtures
 
 
 def raw(value):return (json.dumps(value,sort_keys=True)+'\n').encode()
@@ -39,22 +41,41 @@ def raw(value):return (json.dumps(value,sort_keys=True)+'\n').encode()
 class CurrentControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        saved={k:v for k,v in sys.modules.items() if k in ('scripts','deploy','deploy.maintenance') or k.startswith(('scripts.','deploy.maintenance.'))}
-        for key in saved:sys.modules.pop(key)
-        try:
-            def public_source(path,maximum=131072,digest=None):
-                data=Path(path).read_bytes()
-                if digest is not None:assert sha256(data).hexdigest()==digest
-                assert 0<len(data)<=maximum
-                return data
-            with patch.object(M,'read',side_effect=public_source):cls.recipe=M.load_recipe(ROOT)
-        finally:
-            for key in list(sys.modules):
-                if key in ('scripts','deploy','deploy.maintenance') or key.startswith(('scripts.','deploy.maintenance.')):sys.modules.pop(key)
-            sys.modules.update(saved)
+        with ExitStack() as _class_fence:
+            fenced(_class_fence)
+            # Exercise today's public helper fixtures; the production controller
+            # retains its historical deployment pins unchanged. Keep the same
+            # SHA admission in the fixture reader rather than bypassing it.
+            fixture_pins={name:sha256((ROOT/name).read_bytes()).hexdigest() for name in M.PINS}
+            saved={k:v for k,v in sys.modules.items() if k in ('scripts','deploy','deploy.maintenance') or k.startswith(('scripts.','deploy.maintenance.'))}
+            for key in saved:sys.modules.pop(key)
+            try:
+                def public_source(path,maximum=131072,digest=None):
+                    data=Path(path).read_bytes()
+                    if digest is not None:assert sha256(data).hexdigest()==digest
+                    assert 0<len(data)<=maximum
+                    return data
+                with patch.dict(M.PINS,fixture_pins),patch.object(M,'read',side_effect=public_source):cls.recipe=M.load_recipe(ROOT)
+            finally:
+                for key in list(sys.modules):
+                    if key in ('scripts','deploy','deploy.maintenance') or key.startswith(('scripts.','deploy.maintenance.')):sys.modules.pop(key)
+                sys.modules.update(saved)
+
+    def test_public_unit_recipe_fixture_rejects_wrong_digest_without_changing_production_pins(self):
+        original=dict(M.PINS)
+        fixture_pins={name:sha256((ROOT/name).read_bytes()).hexdigest() for name in M.PINS}
+        fixture_pins[next(iter(fixture_pins))]='0'*64
+        def public_source(path,maximum=131072,digest=None):
+            data=Path(path).read_bytes();M.require(0<len(data)<=maximum,'current_public_metadata')
+            M.require(digest is None or sha256(data).hexdigest()==digest,'current_public_digest')
+            return data
+        with patch.dict(M.PINS,fixture_pins),patch.object(M,'read',side_effect=public_source):
+            with self.assertRaisesRegex(M.Refusal,'current_public_digest'):M.load_recipe(ROOT)
+        self.assertEqual(M.PINS,original)
 
     def setUp(self):
         self.stack=ExitStack();self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.recipe=self.__class__.recipe
         self.docs=fixtures.CurrentProfileTests().fixture();old=self.docs['c07_plan']
         old.update(machine_id='public-machine',marker={'path':str(M.MARKER),'device':2049,'inode':648637,'size':9,'sha256':'a'*64},

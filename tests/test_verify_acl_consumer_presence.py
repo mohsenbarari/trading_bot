@@ -14,20 +14,19 @@ import unittest
 from unittest import mock
 
 
-DENIALS = ExitStack()
-for module, names in ((subprocess, ('Popen', 'run', 'call', 'check_call', 'check_output')),
-                      (socket, ('socket', 'create_connection', 'getaddrinfo')),
-                      (ctypes, ('CDLL', 'PyDLL')),
-                      (os, ('system', 'popen', 'fork', 'posix_spawn', 'posix_spawnp',
-                            'execv', 'execve', 'execvp', 'execvpe', 'kill', 'killpg'))):
-    for name in names:
-        if hasattr(module, name):
-            DENIALS.enter_context(mock.patch.object(module, name, side_effect=AssertionError('ambient_execution_denied')))
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'subprocess.call', 'subprocess.check_call', 'subprocess.check_output', 'socket.socket', 'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL', 'ctypes.PyDLL', 'os.system', 'os.popen', 'os.fork', 'os.posix_spawn', 'os.posix_spawnp', 'os.execv', 'os.execve', 'os.execvp', 'os.execvpe', 'os.kill', 'os.killpg')
+FENCE_ERROR = 'ambient_execution_denied'
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(mock.patch(target, side_effect=AssertionError(FENCE_ERROR)))
+    return stack
 
-SPEC = importlib.util.spec_from_file_location('acl_consumer_presence',
-        Path(__file__).resolve().parents[1] / 'scripts/verify_acl_consumer_presence.py')
-M = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(M)
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    SPEC = importlib.util.spec_from_file_location('acl_consumer_presence',
+            Path(__file__).resolve().parents[1] / 'scripts/verify_acl_consumer_presence.py')
+    M = importlib.util.module_from_spec(SPEC)
+    SPEC.loader.exec_module(M)
 IMAGE = 'sha256:0e4f132a9696569af9c138204fea381d3a7b02e43a7f845dc613eba107ef377c'
 
 
@@ -74,6 +73,10 @@ def fixture(*, kind=2, endian='<', symbols=('acl_set_file',), needed=('libacl.so
 
 
 class ElfTests(unittest.TestCase):
+    def setUp(self):
+        self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        fenced(self.stack)
+
     def test_both_classes_and_orders_report_real_undefined_entries(self):
         for kind in (1, 2):
             for endian in ('<', '>'):
@@ -130,6 +133,8 @@ class ElfTests(unittest.TestCase):
 
 class InventoryTests(unittest.TestCase):
     def setUp(self):
+        self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -250,9 +255,6 @@ class InventoryTests(unittest.TestCase):
             M.main()
         self.assertEqual(json.loads(output.getvalue()), expected)
 
-
-def tearDownModule():
-    DENIALS.close()
 
 
 if __name__ == '__main__':

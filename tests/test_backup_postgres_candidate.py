@@ -197,7 +197,7 @@ class CandidateTests(unittest.TestCase):
         ast.parse(A.candidate_program(raw,pin,'foreign'))
 
     def test_candidate_create_binds_control_through_real_dump_journal_receipt_and_retained_fd(self):
-        from test_backup_market_pipeline_archive import _env_values,_write_env,_invariants
+        from tests.test_backup_market_pipeline_archive import _env_values,_write_env,_invariants
         raw=encoded(control('iran'));pin=sha256(raw).hexdigest();self.path.write_bytes(raw);self.path.chmod(0o600)
         values=_env_values(self.temp);env=self.temp/'synthetic.env';_write_env(env,values)
         pg=Path(values['MARKET_WEB_DATA_ROOT'])/'postgres/pgdata';pg.mkdir(mode=0o700,parents=True)

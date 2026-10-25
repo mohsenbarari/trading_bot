@@ -15,22 +15,27 @@ from unittest.mock import patch
 from jinja2 import Environment, StrictUndefined
 import yaml
 
-AMBIENT = ExitStack()
-for target in ('subprocess.Popen', 'subprocess.run', 'subprocess.check_output', 'os.system',
-               'socket.socket.connect', 'socket.create_connection', 'socket.getaddrinfo',
-               'ctypes.CDLL', 'os.kill', 'os.killpg'):
-    AMBIENT.enter_context(patch(target, side_effect=AssertionError('ambient_host_or_network_forbidden')))
-REPO = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('_finite_web_boot_test', REPO / 'deploy/maintenance/web_boot_guard.py')
-M = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(M)
-PLAY = yaml.safe_load((REPO / 'deploy/maintenance/web_boot_guards.yml').read_text())[0]
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'subprocess.check_output', 'os.system', 'socket.socket.connect', 'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL', 'os.kill', 'os.killpg')
+FENCE_ERROR = 'ambient_host_or_network_forbidden'
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(patch(target, side_effect=AssertionError(FENCE_ERROR)))
+    return stack
+
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    REPO = Path(__file__).resolve().parents[1]
+    SPEC = importlib.util.spec_from_file_location('_finite_web_boot_test', REPO / 'deploy/maintenance/web_boot_guard.py')
+    M = importlib.util.module_from_spec(SPEC)
+    SPEC.loader.exec_module(M)
+    PLAY = yaml.safe_load((REPO / 'deploy/maintenance/web_boot_guards.yml').read_text())[0]
 
 
 class WebBootGuards(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
+        fenced(self.stack)
         for target in ('subprocess.Popen', 'subprocess.run', 'socket.socket.connect',
                        'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL'):
             self.stack.enter_context(patch(target, side_effect=AssertionError('no native/network calls')))
@@ -302,7 +307,9 @@ class WebBootGuards(unittest.TestCase):
             info = public_metadata_file.lstat()
             resources['secret_metadata'][str(public_metadata_file)] = [info.st_dev, info.st_ino, info.st_mode,
                 info.st_uid, info.st_gid, info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
-            path = primary/'uploads'; path.rmdir(); path.mkdir(mode=0o755)
+            # Keep the original inode live so immediate inode reuse cannot
+            # make this replacement-negative fixture accidentally identical.
+            path = primary/'uploads'; path.rename(primary/'uploads-retained'); path.mkdir(mode=0o755)
             with self.assertRaisesRegex(RuntimeError, 'parked_backing_changed'):
                 M.parked_storage(plan)
 

@@ -19,19 +19,19 @@ from unittest.mock import Mock, patch
 
 import yaml
 
-DENIALS = ExitStack()
-for module, names in ((subprocess, ('Popen', 'run', 'call', 'check_call', 'check_output')),
-                      (socket, ('socket', 'create_connection', 'getaddrinfo')), (ctypes, ('CDLL',)),
-                      (os, ('system', 'popen', 'fork', 'posix_spawn', 'kill', 'killpg')),
-                      (signal, ('alarm', 'pause')), (resource, ('setrlimit',))):
-    for name in names:
-        if hasattr(module, name):
-            DENIALS.enter_context(patch.object(module, name, side_effect=AssertionError('ambient_execution_denied')))
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'subprocess.call', 'subprocess.check_call', 'subprocess.check_output', 'socket.socket', 'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL', 'os.system', 'os.popen', 'os.fork', 'os.posix_spawn', 'os.kill', 'os.killpg', 'signal.alarm', 'signal.pause', 'resource.setrlimit')
+FENCE_ERROR = 'ambient_execution_denied'
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(patch(target, side_effect=AssertionError(FENCE_ERROR)))
+    return stack
 
-REPO = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location('_web_kernel_fixture', REPO/'deploy/maintenance/web_kernel_reboot_guard.py')
-M = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
-PLAY = yaml.safe_load((REPO/'deploy/maintenance/web_kernel_reboot.yml').read_bytes())[0]
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    REPO = Path(__file__).resolve().parents[1]
+    SPEC = importlib.util.spec_from_file_location('_web_kernel_fixture', REPO/'deploy/maintenance/web_kernel_reboot_guard.py')
+    M = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
+    PLAY = yaml.safe_load((REPO/'deploy/maintenance/web_kernel_reboot.yml').read_bytes())[0]
 
 
 def raw(value):
@@ -41,6 +41,7 @@ def raw(value):
 class WebKernelRebootTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='.web-kernel-test-', dir=REPO)))
         self.root.chmod(0o700)
         control = self.root/'controls'; control.mkdir(mode=0o700)

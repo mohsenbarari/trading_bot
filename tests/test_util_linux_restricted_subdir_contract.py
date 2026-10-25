@@ -15,17 +15,18 @@ import unittest
 from unittest import mock
 import ctypes
 
-DENIALS = ExitStack()
-for module, names in ((subprocess, ('Popen', 'run', 'call', 'check_call', 'check_output')),
-        (socket, ('socket', 'create_connection', 'getaddrinfo')), (ctypes, ('CDLL',)),
-        (os, ('system', 'popen', 'fork', 'posix_spawn', 'posix_spawnp', 'kill', 'killpg')),
-        (resource, ('setrlimit',))):
-    for name in names:
-        if hasattr(module, name):
-            DENIALS.enter_context(mock.patch.object(module, name, side_effect=AssertionError('ambient_execution_denied')))
-SPEC = importlib.util.spec_from_file_location('subdir_contract', Path(__file__).resolve().parents[1]
-        / 'deploy/maintenance/util_linux_build/restricted_subdir_contract.py')
-M = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'subprocess.call', 'subprocess.check_call', 'subprocess.check_output', 'socket.socket', 'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL', 'os.system', 'os.popen', 'os.fork', 'os.posix_spawn', 'os.posix_spawnp', 'os.kill', 'os.killpg', 'resource.setrlimit')
+FENCE_ERROR = 'ambient_execution_denied'
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(mock.patch(target, side_effect=AssertionError(FENCE_ERROR)))
+    return stack
+
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    SPEC = importlib.util.spec_from_file_location('subdir_contract', Path(__file__).resolve().parents[1]
+            / 'deploy/maintenance/util_linux_build/restricted_subdir_contract.py')
+    M = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
 
 # Ordinary source structure only. No kernel/mount operation or executable payload.
 CONTEXT = '''int mnt_context_is_restricted(struct libmnt_context *cxt)
@@ -64,6 +65,7 @@ def archive(entries, prefix):
 class ContractTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        fenced(self.stack)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.functions = {'mnt_context_is_restricted': M.function(CONTEXT, 'mnt_context_is_restricted'),
             'mnt_context_target_fd_required': M.function(CONTEXT, 'mnt_context_target_fd_required'),
@@ -270,8 +272,6 @@ class ContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'contract_command_failed'):
                 M.command(['/named-owned-fixture'], self.root, 'wrong-exit', M.time.monotonic()+1, 10)
 
-
-def tearDownModule(): DENIALS.close()
 
 
 if __name__ == '__main__': unittest.main()

@@ -11,16 +11,18 @@ import sys
 import unittest
 from unittest import mock
 
-DENIALS = ExitStack()
-for module, names in ((subprocess, ('Popen', 'run', 'call', 'check_call', 'check_output')),
-        (socket, ('socket', 'create_connection', 'getaddrinfo')), (ctypes, ('CDLL',)),
-        (os, ('system', 'popen', 'fork', 'posix_spawn', 'posix_spawnp'))):
-    for name in names:
-        if hasattr(module, name):
-            DENIALS.enter_context(mock.patch.object(module, name, side_effect=AssertionError('ambient_execution_denied')))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests import test_backup_market_pipeline_archive as fixtures
-from scripts import backup_market_pipeline_archive as B
+FENCE_TARGETS = ('subprocess.Popen', 'subprocess.run', 'subprocess.call', 'subprocess.check_call', 'subprocess.check_output', 'socket.socket', 'socket.create_connection', 'socket.getaddrinfo', 'ctypes.CDLL', 'os.system', 'os.popen', 'os.fork', 'os.posix_spawn', 'os.posix_spawnp')
+FENCE_ERROR = 'ambient_execution_denied'
+def fenced(stack):
+    for target in FENCE_TARGETS:
+        stack.enter_context(mock.patch(target, side_effect=AssertionError(FENCE_ERROR)))
+    return stack
+
+with ExitStack() as _import_fence:
+    fenced(_import_fence)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tests import test_backup_market_pipeline_archive as fixtures
+    from scripts import backup_market_pipeline_archive as B
 
 
 class QuiescedPrimaryTests(unittest.TestCase):
@@ -28,6 +30,8 @@ class QuiescedPrimaryTests(unittest.TestCase):
     _limits = fixtures.BackupMarketPipelineArchiveTests._limits
 
     def setUp(self):
+        self._ambient_stack = ExitStack(); self.addCleanup(self._ambient_stack.close)
+        fenced(self._ambient_stack)
         fixtures.BackupMarketPipelineArchiveTests.setUp(self)
         self.values.update(MARKET_PIPELINE_PROJECT_NAME='market-private-pipeline-primary',
             MARKET_PIPELINE_FEED_MODE='PRIVATE_PRIMARY', MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY='1',
@@ -243,8 +247,6 @@ class QuiescedPrimaryTests(unittest.TestCase):
                 B.create_backup(**self.common, backup_dir=self.backup_dir,
                                 allow_private_primary_source=True, restore_resource_binding=self.resources)
 
-
-def tearDownModule(): DENIALS.close()
 
 
 if __name__ == '__main__': unittest.main()
