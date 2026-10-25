@@ -483,6 +483,21 @@ def readiness_failure(ctx,containers,profile,error):
     except BaseException:pass
 
 
+def validate_app_mounts(value,proof,comparison):
+    # Moby v28.5.1 daemon/inspect.go + daemon/volumes.go: legacy --tmpfs
+    # belongs to HostConfig.Tmpfs, not the bind/volume Mounts inventory.
+    need(type(value) is dict and set(value)=={'mounts','tmpfs'}
+        and type(value['mounts']) is list and len(value['mounts'])==1
+        and type(value['mounts'][0]) is dict,'installed_app_must_not_be_masked')
+    row=value['mounts'][0]
+    need(row.get('Type')=='bind' and row.get('Destination')=='/proof' and row.get('Source')==str(proof)
+        and type(row.get('RW')) is bool and row['RW'] is False
+        and comparison.same_json_value(value['tmpfs'],{'/tmp':'rw,nosuid,nodev,noexec,size=128m,mode=1777'}),
+        'installed_app_must_not_be_masked')
+    return {'scope':'owned_hosted_mount_metadata_only','bind_mounts':1,'tmpfs_mounts':1,
+        'proof_readonly':True,'proof_source_bound':True,'app_mounts':0,'security_accepted':False}
+
+
 def execute(ctx):
     global PHASE,SUBPHASE
     PHASE='exact_public_image_admission';app=admit_app(ctx)
@@ -520,9 +535,8 @@ def execute(ctx):
     app_cid=create(ctx,'app-ci-api-'+owner(),app,['/usr/local/bin/python3','-I','-B','-c',CAPSULE],
         env={'APP_ENV_FILE':'/proof/runtime.env',**fixture_env(database)},proof=proof,output_limit=True,
         tmpfs=('/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777',))
-    mounts=document(ctx.docker(['container','inspect','--format','{{json .Mounts}}',app_cid],maximum=8192))
-    need(len(mounts)==2 and all(row['Destination'] in {'/proof','/tmp'} for row in mounts)
-         and not any(row['Destination']=='/app' or row['Destination'].startswith('/app/') for row in mounts),'installed_app_must_not_be_masked')
+    mounts=document(ctx.docker(['container','inspect','--format','{"mounts":{{json .Mounts}},"tmpfs":{{json .HostConfig.Tmpfs}}}',app_cid],maximum=8192))
+    ctx.write(ctx.root/'reports/app-mount-admission.json',validate_app_mounts(mounts,proof,ctx.M))
     client_ok=True
     try:ctx.docker(['start','--attach',app_cid],seconds=600,maximum=65536,public_log=ctx.root/'smoke-output.json')
     except RuntimeError:client_ok=False

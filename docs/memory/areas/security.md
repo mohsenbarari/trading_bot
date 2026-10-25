@@ -37,9 +37,10 @@
   genuine-root public COPY with separate init, tar.umask0022 and disjoint IDs;
   preserve hosted multiplicity. Test guards are import-scoped/per-case; restore
   globals and make fixture modes explicit. No production UID/mode waiver.
-- CI40168702739 verified hosted8051/root360/frontend2037 plus changed coverage
-  and13mutations. Host-idleness proof requires host-visible processes;
-  shared image sizes never estimate reclaim. Preserve rollback/history/data.
+- CI40174926884 (df857) passed hosted8093/root366/frontend2037, changed gates
+  and13mutations. Newer source tests are separate. Host-idleness needs
+  host-visible processes; shared image sizes never prove reclaim.
+  Preserve rollback/history/data.
 - Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not
   adopt working-layer cache/code changes. No Go address-space inheritance; bound
   CPU/wall/RAM and output before accumulation.

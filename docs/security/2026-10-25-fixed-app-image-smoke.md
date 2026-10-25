@@ -150,3 +150,29 @@ targets passed. Artifact12593205178 is17208135 bytes, SHA256
 `9841306807a501fb4b515e444ae146e352d41a7c18340729401bb9157dee00c1`.
 This result proves that earlier SHA, not the later socket correction, serving
 activation, full architecture matrix or overall security acceptance.
+
+## Fifth actual run: readiness passed, mount representation refused
+
+Run40176921194 onff5a2e5e passed all three archive/daemon admissions and both
+dependency readiness checks. This verifies the socket correction at its actual
+previously failing boundary. The App container was then created, but refused
+before start with `installed_app_must_not_be_masked`; no capsule or32-case result
+ran. Owned cleanup completed with no causes and retained the primary failure.
+Artifact12592437369 is4476 bytes, SHA256
+`3d7c1a62fad94b7df75b45927e9449e3d32a92fd194b9b980d39fa0aeafdfc2e`.
+
+The hosted smoke had assumed legacy `--tmpfs` appeared as another `.Mounts`
+row. [Moby inspect](https://github.com/moby/moby/blob/v28.5.1/daemon/inspect.go#L48)
+and its [mount registration](https://github.com/moby/moby/blob/v28.5.1/daemon/volumes.go#L70)
+separate that option in `HostConfig.Tmpfs`. The revised hosted check admits
+exactly one readonly `/proof` bind with the actual owned Source, and separately
+the complete typed `/tmp` tmpfs map with its exact original options. Missing,
+extra, writable, foreign-source or `/app` mounts remain refused. This changes
+only metadata interpretation for the same disposable mount policy; no serving
+controller, COW or runtime policy changes. A closed counts/booleans-only receipt
+records actual mount admission without retaining arbitrary paths or values.
+
+Root independently passed52 genuineUID1001 fenced tests (1.305s, no skips).
+Source coverage342/342 statements, zero exclusions,41/42 branches. Actual
+mount admission and the32 selected image checks still require a new hosted
+result; source regressions do not turn the fifth failed run green.

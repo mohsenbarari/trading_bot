@@ -388,15 +388,19 @@ class AppImageCISmokeTests(unittest.TestCase):
             calls.append((args,kw))
             if args[:2]==['exec','pg-fixture'] and remaining[0]:remaining[0]-=1;raise RuntimeError('command_failed')
             if args[:2]==['exec','redis-fixture']:return b'PONG\n'
-            if args[:2]==['container','inspect']:return M.encode(mounts if mounts is not None else [{'Destination':'/proof'},{'Destination':'/tmp'}])
+            if args[:2]==['container','inspect']:return M.encode(mounts if mounts is not None else self.mount_metadata())
             if args[:2]==['start','--attach']:
                 path=kw['public_log'];path.write_bytes(raw);path.chmod(0o600)
                 if not success:raise RuntimeError('command_failed')
                 return raw
             if args[:2]==['inspect','--format']:return b'0\n'
             return b'ordinary fixture acknowledgement\n'
-        ctx=SimpleNamespace(root=self.root,network=None,write=Mock(),docker=Mock(side_effect=docker),C=SimpleNamespace(read=lambda p,n:p.read_bytes()))
+        ctx=SimpleNamespace(root=self.root,network=None,write=Mock(),docker=Mock(side_effect=docker),C=SimpleNamespace(read=lambda p,n:p.read_bytes()),M=self.comparison())
         return ctx,calls
+
+    def mount_metadata(self):
+        return {'mounts':[{'Type':'bind','Destination':'/proof','Source':str(self.root/'proof'),'RW':False}],
+            'tmpfs':{'/tmp':'rw,nosuid,nodev,noexec,size=128m,mode=1777'}}
 
     def execute_patches(self,ctx):
         self.stack.enter_context(patch.object(M,'admit_app',return_value=M.APP['image_config_id']))
@@ -437,6 +441,41 @@ class AppImageCISmokeTests(unittest.TestCase):
         ctx,calls=self.execute_context(mounts=[{'Destination':'/app'},{'Destination':'/tmp'}]);self.execute_patches(ctx)
         with self.assertRaisesRegex(RuntimeError,'installed_app_must_not_be_masked'):M.execute(ctx)
         self.assertFalse(any(a[:2]==['start','--attach'] for a,_ in calls))
+
+    def test_actual_moby_bind_and_legacy_tmpfs_metadata_are_distinct_and_source_is_exact(self):
+        value=self.mount_metadata()
+        proof=M.validate_app_mounts(value,self.root/'proof',self.comparison())
+        self.assertEqual(proof,{'scope':'owned_hosted_mount_metadata_only','bind_mounts':1,'tmpfs_mounts':1,
+            'proof_readonly':True,'proof_source_bound':True,'app_mounts':0,'security_accepted':False})
+        self.assertNotIn(str(self.root),M.encode(proof).decode());M.public(proof)
+        ctx,calls=self.execute_context();self.execute_patches(ctx);M.execute(ctx)
+        self.assertTrue(any('HostConfig.Tmpfs' in args[3] and '.Mounts' in args[3]
+            for args,_ in calls if args[:3]==['container','inspect','--format']))
+        receipts={call.args[0].name:call.args[1] for call in ctx.write.call_args_list}
+        self.assertEqual(receipts['app-mount-admission.json'],proof)
+
+    def test_hosted_mount_admission_refuses_missing_extra_mutable_foreign_or_app_mounts(self):
+        variants=[]
+        for key,bad in [('Type','volume'),('Source',str(self.root/'foreign')),('Destination','/app'),
+                        ('Destination','/app/core'),('Destination','/tmp'),('RW',True),('RW',0),('RW',0.0),('RW',None)]:
+            value=self.mount_metadata();value['mounts'][0][key]=bad;variants.append(value)
+        for bad in ([],[{}],[None],self.mount_metadata()['mounts']+[{'Type':'bind','Destination':'/app/models'}]):
+            value=self.mount_metadata();value['mounts']=bad;variants.append(value)
+        for bad in (None,[],{},True,{'/tmp':True},{'/tmp':0},{'/tmp':128},
+                    {'/tmp':'rw,nosuid,nodev,noexec,size=256m,mode=1777'},
+                    {'/tmp':'rw,nosuid,nodev,noexec,size=128m,mode=1777','/app':'rw'}):
+            value=self.mount_metadata();value['tmpfs']=bad;variants.append(value)
+        variants.extend([[],None,{'mounts':self.mount_metadata()['mounts']},
+            {**self.mount_metadata(),'arbitrary_extra_key':False}])
+        for value in variants:
+            with self.subTest(value=value),self.assertRaisesRegex(RuntimeError,'installed_app_must_not_be_masked'):
+                M.validate_app_mounts(value,self.root/'proof',self.comparison())
+        # An actual extra product mount is refused before capsule start; inspection
+        # success and image identity alone cannot establish an unmasked source tree.
+        value=self.mount_metadata();value['mounts'].append({'Type':'bind','Destination':'/app'})
+        ctx,calls=self.execute_context(mounts=value);self.execute_patches(ctx)
+        with self.assertRaisesRegex(RuntimeError,'installed_app_must_not_be_masked'):M.execute(ctx)
+        self.assertFalse(any(args[:2]==['start','--attach'] for args,_ in calls))
 
     def test_main_success_primary_failure_and_secondary_cleanup_failure_are_distinct(self):
         for primary,cleanup in ((False,[]),(True,[]),(False,['owned_container_cleanup_unproven']),(True,['owned_container_cleanup_unproven'])):
