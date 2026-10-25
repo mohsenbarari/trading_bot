@@ -224,7 +224,7 @@ function activeAttachButton(page: Page) {
 }
 
 function activeComposerTextbox(page: Page) {
-  return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
+  return activeComposerContainer(page).getByRole('textbox', { name: 'متن پیام', exact: true })
 }
 
 async function clickVisibleChatBackButton(page: Page) {
@@ -270,12 +270,14 @@ async function navigateFromMessengerToMarket(page: Page) {
     // Ignore when the sheet was never mounted or has already been removed.
   }
 
-  const fabButton = page.locator('.fab-btn').first()
-  await expect(fabButton).toBeVisible({ timeout: 30000 })
-  await fabButton.evaluate((node: HTMLElement) => node.click())
-  const marketLink = page.locator('.fab-item').filter({ hasText: 'بازار' }).first()
-  await expect(marketLink).toBeVisible({ timeout: 30000 })
-  await marketLink.evaluate((node: HTMLElement) => node.click())
+  const chatBack = page.locator('.chat-header:visible').getByRole('button', { name: 'بازگشت', exact: true })
+  await chatBack.click()
+  await expect(page.locator('.chat-header .header-title')).toContainText('پیام‌ها', { timeout: 30000 })
+  await chatBack.click()
+  await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
+  const marketEntry = page.getByRole('button', { name: /ورود به بازار/ })
+  await expect(marketEntry).toBeVisible({ timeout: 30000 })
+  await marketEntry.click()
   await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 
@@ -655,7 +657,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await page.getByRole('dialog', { name: 'پیوست', exact: true }).getByRole('button', { name: 'فایل', exact: true }).click()
     await injectDocument(page)
 
     await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })
@@ -705,7 +707,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
       await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await senderPage.getByRole('dialog', { name: 'پیوست', exact: true }).getByRole('button', { name: 'فایل', exact: true }).click()
       await injectDocument(senderPage, { sizeBytes: largeDocumentSizeBytes })
 
       await expect(receiverPage.locator('.chat-header:visible').last()).toContainText('در حال ارسال فایل...', { timeout: 30000 })
@@ -776,7 +778,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
       await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await senderPage.getByRole('dialog', { name: 'پیوست', exact: true }).getByRole('button', { name: 'فایل', exact: true }).click()
       await injectDocument(senderPage)
 
       await heldUploadSeen
@@ -849,7 +851,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await page.getByRole('dialog', { name: 'پیوست', exact: true }).getByRole('button', { name: 'فایل', exact: true }).click()
     await injectDocument(page)
 
     await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })

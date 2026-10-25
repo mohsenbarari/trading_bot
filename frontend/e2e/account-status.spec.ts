@@ -240,7 +240,9 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
 async function openAdminUserProfile(page: Page, user: SessionUser) {
   await page.goto(`/admin/users/${user.userId}`)
   await expect(page.getByRole('heading', { name: 'پروفایل کاربر' })).toBeVisible({ timeout: 30000 })
-  await expect(page.getByText(user.accountName)).toBeVisible({ timeout: 30000 })
+  const identityTitle = page.locator('.admin-user-profile [data-test="profile-identity-header"] .profile-identity-title')
+  await expect(identityTitle).toBeVisible({ timeout: 30000 })
+  await expect(identityTitle).toHaveText(user.accountName)
 }
 
 async function toggleAccountStatusFromAdminProfile(page: any) {

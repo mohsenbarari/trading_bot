@@ -1210,7 +1210,7 @@ test.describe('customer owner lifecycle', () => {
     await expect(workspace).toContainText('هنوز مشتری ثبت نشده است')
   })
 
-  test('super-admin nonself public profiles omit customer relations and trade history', async ({
+  test('super-admin nonself owner profiles omit private history and unrelated customer profiles are denied', async ({
     page,
     request,
   }) => {
@@ -1230,13 +1230,17 @@ test.describe('customer owner lifecycle', () => {
     await expect(ownerProfileView.locator('.history-section-card')).toHaveCount(0)
     await expect(ownerProfileView).not.toContainText(fixture.customerManagementName)
 
+    const deniedCustomerProfile = page.waitForResponse((response) =>
+      response.request().method() === 'GET'
+      && new URL(response.url()).pathname === `/api/users-public/${fixture.customerUserId}`,
+    )
     await page.goto(`/users/${fixture.customerUserId}`)
+    expect((await deniedCustomerProfile).status()).toBe(404)
     await expectIdOnlyPublicProfileUrl(page, fixture.customerUserId)
     const customerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(
-      customerProfileView.getByRole('heading', { name: fixture.customerAccountName }),
-    ).toBeVisible({ timeout: 30000 })
+    await expect(customerProfileView.getByRole('heading', { name: 'دریافت پروفایل انجام نشد', exact: true })).toBeVisible({ timeout: 30000 })
+    await expect(customerProfileView.locator('.profile-content')).toHaveCount(0)
+    await expect(customerProfileView).not.toContainText(fixture.customerAccountName)
     await expect(customerProfileView.locator('.customer-relations-section')).toHaveCount(0)
     await expect(customerProfileView.locator('.customer-context-banner')).toHaveCount(0)
     await expect(customerProfileView.locator('.history-section-card')).toHaveCount(0)

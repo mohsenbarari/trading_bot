@@ -234,6 +234,8 @@ jobs:
           cat > .env <<'EOF'
           ENVIRONMENT=staging
           SERVER_MODE=iran
+          PUBLIC_WEBAPP_URL=https://browser-ci.iran.example
+          IRAN_SERVER_DOMAIN=browser-ci.iran.example
           BOT_USERNAME=ci_test_bot
           POSTGRES_DB=trading_bot_db
           POSTGRES_USER=admin
@@ -278,6 +280,7 @@ jobs:
         run: |
           docker compose exec -T app python - <<'PY'
           from core.config import settings
+          from core.public_webapp_url import public_webapp_url_for_links
 
           environment = (settings.environment or "").strip().lower()
           server_mode = (settings.server_mode or "").strip().lower()
@@ -285,6 +288,8 @@ jobs:
               raise SystemExit(f"unexpected environment={environment!r}")
           if server_mode != "iran":
               raise SystemExit(f"unexpected server_mode={server_mode!r}")
+          if public_webapp_url_for_links() != "https://browser-ci.iran.example":
+              raise SystemExit("unexpected browser CI public WebApp origin")
           PY
           curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
             -H 'Content-Type: application/json'

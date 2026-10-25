@@ -21,6 +21,9 @@ async function primeMockAuth(page: Page) {
       id: 77,
       role: 'عادی',
       account_name: 'pw_market_mutation_viewer',
+      account_status: 'active',
+      is_accountant: false,
+      is_customer: false,
       customer_tier: null,
     }))
     localStorage.removeItem('suspended_refresh_token')
@@ -49,7 +52,7 @@ test.describe('Market mutation UX', () => {
       const url = new URL(request.url())
 
       if (url.pathname === '/api/auth/me') {
-        return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
+        return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', account_status: 'active', is_accountant: false, is_customer: false, customer_tier: null })
       }
       if (url.pathname === '/api/auth/refresh' && request.method() === 'POST') {
         return fulfillJson(route, 200, { access_token: fakeJwt(), refresh_token: 'pw-refresh-token' })
@@ -252,7 +255,7 @@ test.describe('Market mutation UX', () => {
       const method = request.method()
 
       if (url.pathname === '/api/auth/me') {
-        return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
+        return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', account_status: 'active', is_accountant: false, is_customer: false, customer_tier: null })
       }
       if (url.pathname === '/api/auth/refresh' && method === 'POST') {
         return fulfillJson(route, 200, { access_token: fakeJwt(), refresh_token: 'pw-refresh-token' })

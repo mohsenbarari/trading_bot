@@ -54,7 +54,7 @@ test.describe('Admin smoke regressions', () => {
     await expect(accountNameInput).toBeVisible()
     await expect(mobileInput).toBeVisible()
     await expect(roleSelect).toBeVisible()
-    await expect(page.getByRole('region', { name: 'دعوت‌نامه‌های pending' }).first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'دعوت‌نامه‌های در انتظار', exact: true })).toBeVisible()
   })
 
   test('admin can open the user management panel', async ({ page, request }) => {
@@ -107,7 +107,7 @@ test.describe('Admin smoke regressions', () => {
     const channelShell = page.locator('.channel-admin-shell:visible').last()
     await expect(channelShell).toBeVisible()
     await expect(
-      channelShell.getByRole('heading', { name: 'ساخت کانال جدید' }).first(),
+      channelShell.locator('.ui-inset-group__title').filter({ hasText: /^ساخت کانال جدید$/ }),
     ).toBeVisible()
     await expect(channelShell.getByRole('button', { name: /کانال جدید/ }).first()).toBeVisible()
   })

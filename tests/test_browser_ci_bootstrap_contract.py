@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
@@ -215,6 +216,26 @@ esac
                 verify = next(step for step in steps if step["name"] == "Verify browser CI backend surface")
                 self.assertIn('environment != "staging"', verify["run"])
                 self.assertLess(steps.index(verify), steps.index(browser))
+
+    def test_browser_invitation_origin_passes_real_staging_validator_without_relaxing_it(self):
+        from core.public_webapp_url import PublicWebAppURLConfigurationError, validate_public_webapp_url
+
+        for name, job in self.workflows():
+            with self.subTest(workflow=name):
+                write = next(step for step in job['steps'] if step['name'] == 'Write CI environment file')
+                backend = write['run'].split("cat > .env <<'EOF'\n", 1)[1].split('\nEOF', 1)[0]
+                values = dict(line.split('=', 1) for line in backend.splitlines())
+                self.assertEqual(values['ENVIRONMENT'], 'staging')
+                self.assertEqual(values['SERVER_MODE'], 'iran')
+                self.assertEqual(values['FRONTEND_URL'], 'http://127.0.0.1:4173')
+                settings = SimpleNamespace(**{key.lower(): value for key, value in values.items()})
+                origin = 'https://browser-ci.iran.example'
+                self.assertEqual(validate_public_webapp_url(values['PUBLIC_WEBAPP_URL'], settings_obj=settings), origin)
+                for invalid in (None, 'http://browser-ci.iran.example', 'https://unrelated.example'):
+                    with self.subTest(invalid=invalid), self.assertRaises(PublicWebAppURLConfigurationError):
+                        validate_public_webapp_url(invalid, settings_obj=settings)
+                verify = next(step for step in job['steps'] if step['name'] == 'Verify browser CI backend surface')
+                self.assertIn('public_webapp_url_for_links() != "https://browser-ci.iran.example"', verify['run'])
 
     def test_notification_login_helper_checks_both_exact_unread_states(self):
         source = (ROOT / "frontend/src/views/DashboardView.vue").read_text()

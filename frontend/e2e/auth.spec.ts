@@ -29,8 +29,8 @@ test.describe('Login/auth regressions', () => {
     await page.goto('/profile')
 
     await expect(page).toHaveURL(/\/login$/)
-    await expect(page.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'دریافت کد تایید' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'ورود به سامانه', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'دریافت کد تأیید', exact: true })).toBeVisible()
   })
 
   test('developer quick login reaches the dashboard and stores tokens', async ({ page }) => {
@@ -60,7 +60,15 @@ test.describe('Login/auth regressions', () => {
 
     await page.goto('/profile')
     await expect(page).toHaveURL(/\/profile$/)
-    await expect(page.getByRole('heading', { name: 'پروفایل' }).first()).toBeVisible()
+    const userResponse = await request.get(`${BACKEND_BASE_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    })
+    expect(userResponse.ok()).toBeTruthy()
+    const user = await userResponse.json() as { account_name: string }
+    expect(user.account_name).toBeTruthy()
+    const identityTitle = page.locator('[data-test="profile-identity-header"] .profile-identity-title')
+    await expect(identityTitle).toBeVisible()
+    await expect(identityTitle).toHaveText(user.account_name)
     await page.goto('/account/security')
     await expect(page).toHaveURL(/\/account\/security$/)
     await expect(page.getByRole('heading', { name: 'امنیت حساب' }).first()).toBeVisible()
