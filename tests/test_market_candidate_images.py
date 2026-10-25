@@ -198,11 +198,11 @@ class MarketCandidateImageTests(unittest.TestCase):
         ctx.budget = 20 * 1024**2; additional = ctx.budget + 5
         root_available = 2 * 1024**3 + M.MARGIN + M.LIMIT + additional
         data_available = 8 * 1024**3 + M.MARGIN + M.LIMIT + additional
-        available = {'/': root_available, str(data): data_available}
+        available = {'/': root_available, '/tmp': root_available, str(data): data_available}
         def observe(path): return SimpleNamespace(f_bavail=available[str(path)], f_frsize=1)
         with patch.object(M.os, 'statvfs', side_effect=observe):
             ctx.capacity(additional)
-            for path in ('/', str(data)):
+            for path in ('/', '/tmp', str(data)):
                 available[path] -= 1
                 with self.subTest(path=path), self.assertRaisesRegex(RuntimeError, '^capacity_floor$'):
                     ctx.capacity(additional)
@@ -215,6 +215,71 @@ class MarketCandidateImageTests(unittest.TestCase):
             temporary.rename(self.root / 'prior-temporary')
             temporary.mkdir(mode=0o700); temporary.chmod(0o1777)
             with self.assertRaisesRegex(RuntimeError, '^temporary_storage_changed$'): ctx.capacity()
+
+    def memory_fixture(self, raw):
+        info = self.private('owned-public-meminfo', raw); path_factory = M.Path
+        self.stack.enter_context(patch.object(M, 'Path', side_effect=lambda value:
+            info if value == '/proc/meminfo' else path_factory(value)))
+        return info
+
+    def test_memory_available_uses_one_bounded_owned_input_and_requires_exact_linux_metadata(self):
+        info = self.memory_fixture(b'MemTotal:       999999 kB\nMemAvailable:\t12345 kB\n')
+        actual_open = Path.open; reads = []
+        class ObservedFile:
+            def __enter__(inner): inner.stream = actual_open(info, 'rb'); return inner
+            def __exit__(inner, *args): inner.stream.close()
+            def read(inner, count): reads.append(count); return inner.stream.read(count)
+        with patch.object(Path, 'open', side_effect=lambda *args, **kwargs: ObservedFile()):
+            self.assertEqual(M.memory_available(), 12345 * 1024)
+        self.assertEqual(reads, [65537])
+        for raw in (b'', b'X' * 65537, b'MemTotal: 123 kB\n',
+                    b'MemAvailable: 12 kB\nMemAvailable: 13 kB\n',
+                    b'MemAvailable: -1 kB\n', b'MemAvailable: 1.5 kB\n',
+                    b'MemAvailable: 1024 bytes\n', b'MemAvailable: 1 KB\n',
+                    b'MemAvailable: 1 kB trailing\n'):
+            with self.subTest(raw=raw[:50]):
+                info.write_bytes(raw)
+                with self.assertRaisesRegex(RuntimeError, '^temporary_memory_metadata$'): M.memory_available()
+
+    def test_distinct_temporary_device_keeps_exact_metadata_and_reserves_memory_budget_every_pulse(self):
+        temporary = self.mapped_temporary_storage(); ctx = self.basic()
+        data = self.root / 'distinct-device-data'; data.mkdir(mode=0o700)
+        real_identity = M.identity; temporary_inode = temporary.lstat().st_ino; device_delta = [1]
+        # Explicit inert filesystem-observation seam: genuine owned UID/mode/
+        # inode metadata, with only st_dev varied to represent a separate tmpfs.
+        def filesystem_identity(metadata):
+            observed = real_identity(metadata)
+            if metadata.st_ino == temporary_inode: observed[0] += device_delta[0]
+            return observed
+        self.stack.enter_context(patch.object(M, 'identity', side_effect=filesystem_identity))
+        observed = M.temp_metadata()
+        self.assertNotEqual(observed[0]['identity'][0], observed[1]['identity'][0])
+        self.assertEqual(observed[1]['identity'], filesystem_identity(temporary.lstat())[:5])
+        ctx.baseline = {'store': {'root': str(data)}, 'temporary_storage': deepcopy(observed)}
+        ctx.budget = 1024**2; additional = 2 * 1024**2
+        floor = 2 * 1024**3 + M.MARGIN + M.LIMIT + additional
+        info = self.memory_fixture(b'MemAvailable: ' + str(floor // 1024).encode() + b' kB\n')
+        with patch.object(M.os, 'statvfs', return_value=SimpleNamespace(f_bavail=16 * 1024**3, f_frsize=1)):
+            ctx.capacity(additional)
+            ctx.budget = additional
+            info.write_bytes(b'MemAvailable: ' + str(floor // 1024 - 1).encode() + b' kB\n')
+            with patch.object(M.subprocess, 'Popen') as launch, self.assertRaisesRegex(RuntimeError, '^temporary_memory_floor$'):
+                M.command(ctx, ['EXPLICIT_INERT_CLIENT'])
+            launch.assert_not_called()
+            info.write_bytes(b'MemAvailable: ' + str(floor // 1024).encode() + b' kB\n')
+            state, launch = self.child(pending=4)
+            def memory_drops_after_client_launch(argv, **kwargs):
+                child = launch(argv, **kwargs)
+                info.write_bytes(b'MemAvailable: ' + str(floor // 1024 - 1).encode() + b' kB\n')
+                return child
+            with patch.object(M.subprocess, 'Popen', side_effect=memory_drops_after_client_launch), \
+                 patch.object(M.time, 'sleep'), self.assertRaisesRegex(RuntimeError, '^temporary_memory_floor$'):
+                M.command(ctx, ['EXPLICIT_INERT_CLIENT'])
+            self.assertTrue(state.killed)
+            with self.assertRaises(OSError): os.fstat(state.fd)
+            info.write_bytes(b'MemAvailable: ' + str(floor // 1024).encode() + b' kB\n')
+            ctx.capacity(additional); device_delta[0] = 2
+            with self.assertRaisesRegex(RuntimeError, '^temporary_storage_changed$'): ctx.capacity(additional)
 
     def test_capacity_rechecks_retained_store_inode_and_public_daemon_unit_metadata(self):
         self.mapped_temporary_storage(); ctx = self.basic()

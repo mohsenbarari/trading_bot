@@ -14,6 +14,12 @@ map access for Health/Healthcheck, preserving null values and F79's mandatory
 healthy predicate. Fixed snapshot-command subphases identify future refusals
 without exposing raw stderr, configuration or exception arguments.
 
+The02 Native read-only snapshot then passed, but Web observation refused a
+distinct `/tmp` tmpfs device. No controls, attempts, guards or image operations
+existed. The03 namespace preserves the02 staged sources and models that actual
+layout explicitly: temporary-filesystem capacity and conservative host RAM
+headroom are additional requirements, rather than weakening any existing floor.
+
 The closed catalog is
 [`market_candidate_images.json`](../../deploy/maintenance/market_candidate_images.json),
 55511 bytes, SHA256
@@ -66,8 +72,8 @@ into the Web daemon.
    0700 and staged regular files0600/single-link. Existing namespaces and files
    must never be replaced to bypass an old attempt.
 2. Native namespace is
-   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-02`;
-   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-02`.
+   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-03`;
+   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-03`.
    Root collects a fresh read-only snapshot at each site with
    `--site bot|web --phase snapshot --source-sha256 <reviewed-worker-sha>`.
    Snapshot reads only explicit public daemon/container/store/unit metadata,
@@ -87,7 +93,7 @@ into the Web daemon.
    LOAD; the receive phase does not consume an admission receipt.
 4. Root invokes Native coordination in a named finite systemd scope, with
    `--site bot --phase <phase> --control <exact-control-path>` and
-   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-02`.
+   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-03`.
    The required unit name is `market-images-bot-<phase>-<nonce>`; set CPUQuota100%,
    MemoryMax2G, MemorySwapMax0, TasksMax64, RuntimeMaxSec900 and TimeoutStopSec5.
    Normal `systemd-run --scope --quiet --collect` supplies the scope. The worker
@@ -111,10 +117,17 @@ into the Web daemon.
 7. Before, during and after transfers/import waits, keep the full conservative
    `2*TAR bytes + 2*expanded layer bytes` budget on both the data store and the
    possible OS-root temporary store, above8GiB data/2GiB root plus64MiB margin
-   and bounded control output. Receive separately accounts for prospective
-   ZIP/gzip/TAR storage. Bind root/tmp and known daemon unit/store metadata;
-   private daemon override absence is explicitly unproven. These checks reserve
-   no capacity and assert no hard allocator quota or shared-layer space saving.
+   and bounded control output. `/tmp` must independently retain its existing
+   physical directory identity and the same2GiB temporary-store floor plus the
+   complete prospective budget, margin and bounded output at every pulse. When
+   `/tmp` is a distinct device, a bounded `/proc/meminfo` observation must also
+   report `MemAvailable` at least2GiB plus that full budget, margin and output;
+   this conservatively accounts for a possible tmpfs without assuming free disk
+   implies available RAM. Missing, duplicate, malformed or oversized memory
+   metadata refuses. Receive separately accounts for prospective ZIP/gzip/TAR
+   storage. Bind root/tmp and known daemon unit/store metadata; private daemon
+   override absence is explicitly unproven. These checks reserve no capacity and
+   assert no hard allocator quota or shared-layer space saving.
 8. Native retains existing M then the same empty SOURCE inode and its flocks;
    Web retains its M and one fresh site guard. Neither permanent payload is
    read or hashed. Source/archive FDs remain open through their final
@@ -153,10 +166,12 @@ bounded I/O, identity drift, full-budget pulses, unknown outcomes and exact
 cleanup without Docker, network, SSH, private data or production effects. Tests
 and source coverage are source-validation evidence, never actual LOAD results.
 
-Root independently passed73 genuine-root fenced tests (1.667s, no skips).
+For the02 source, Root independently passed73 genuine-root fenced tests
+(1.667s, no skips).
 The exact new formatter was separately executed read-only against all15 real
 Native containers: exit0, no stderr, and8 null Health/Healthcheck pairs. It
 read only the approved public metadata projection; no image/container mutation
 or Env access occurred. This proves the previously failing optional-field
 boundary, not archive admission or LOAD. The original01 staged files remain
-unchanged and02 uses a new namespace; no operation control/attempt existed for01.
+unchanged. Neither01 nor02 had an operation control or attempt;03 uses its own
+new namespace, leaving both prior staged sources and observations intact.

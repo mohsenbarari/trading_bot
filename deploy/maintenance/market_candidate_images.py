@@ -24,7 +24,7 @@ import sys
 import time
 import zipfile
 
-OPERATION = 'security-market-candidate-images-20261025-02'
+OPERATION = 'security-market-candidate-images-20261025-03'
 CATALOG_SHA = 'c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 TOOLS = {'bot': Path('/root/trading-bot/trading_bot/.local')/OPERATION,
          'web': Path('/srv/trading-bot')/OPERATION}
@@ -40,7 +40,7 @@ SSH = ['/usr/bin/ssh','-F','/dev/null','-p','37067','-oBatchMode=yes',
        '-oClearAllForwardings=yes','-oConnectTimeout=15','root@65.109.220.59']
 LIMIT = 2*1024**2
 MARGIN = 64*1024**2
-CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-02'
+CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-03'
 PHASES = ('receive-web','load-web','load-native')
 CAPTURE = '6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752'
 SUBPHASE = 'control_admission'
@@ -196,9 +196,12 @@ class Context:
         need(type(budget) is int and budget>=0,'capacity_budget')
         if 'identity' in self.baseline['store']:
             need(identity(Path(self.baseline['store']['root']).lstat())[:5]==self.baseline['store']['identity'],'store_root_changed')
-        for path,floor in ((self.baseline['store']['root'],8*1024**3),('/',2*1024**3)):
+        temporary=temp_metadata()
+        need(temporary==self.baseline['temporary_storage'],'temporary_storage_changed')
+        for path,floor in ((self.baseline['store']['root'],8*1024**3),('/',2*1024**3),('/tmp',2*1024**3)):
             fs=os.statvfs(path);need(fs.f_bavail*fs.f_frsize>=floor+MARGIN+LIMIT+budget,'capacity_floor')
-        need(temp_metadata()==self.baseline['temporary_storage'],'temporary_storage_changed')
+        if temporary[0]['identity'][0]!=temporary[1]['identity'][0]:
+            need(memory_available()>=2*1024**3+MARGIN+LIMIT+budget,'temporary_memory_floor')
         for row in self.baseline.get('daemon',{}).get('files',[]):
             need(identity(Path(row['path']).lstat())==row['identity'],'daemon_unit_metadata_changed')
 
@@ -216,8 +219,18 @@ def temp_metadata():
                          'temporary_storage_metadata')
         need(stat.S_IMODE(s.st_mode)==0o1777 if p==Path('/tmp') else not s.st_mode&0o022,'temporary_storage_mode')
         rows.append({'path':str(p),'identity':identity(s)[:5]})
-    need(rows[0]['identity'][0]==rows[1]['identity'][0],'temporary_storage_device')
     return rows
+
+
+def memory_available():
+    """Conservative host RAM headroom when temporary storage is a distinct device."""
+    with Path('/proc/meminfo').open('rb') as source:raw=source.read(65537)
+    need(0<len(raw)<=65536,'temporary_memory_metadata')
+    rows=[line for line in raw.splitlines() if line.startswith(b'MemAvailable:')]
+    need(len(rows)==1,'temporary_memory_metadata')
+    value=re.fullmatch(rb'MemAvailable:[ \t]+([0-9]{1,20})[ \t]+kB',rows[0])
+    need(value is not None,'temporary_memory_metadata')
+    return int(value[1])*1024
 
 
 def stop(child):
@@ -744,7 +757,7 @@ def main(argv=None):
     finally:signal.alarm(0)
 
 
-PUBLIC_CODES = frozenset(["admission_path","admitted_source_changed","archive_identity","archive_sha256","artifact_client_unknown","baseline_freshness","baseline_sites","candidate_preexisting","capacity_budget","capacity_floor","capture_singleton","client_cleanup_unproven","client_output_bound","command_bound","command_outcome_unknown","command_output_bound","confirmation","container_inventory","control_fields","control_scope","daemon_config_or_rootfs","daemon_descriptor","daemon_public_file_metadata","daemon_public_policy_changed","daemon_temporary_storage_contract","daemon_unit_metadata_changed","deadline","docker_store_changed","document_bound","duplicate_key","evidence_config_identity","evidence_inventory","evidence_member_bound","evidence_member_pin","evidence_size","export_bound","export_identity","export_pin","fence_unlink_unproven","finite_scope_required","frame_bound","frame_short","gzip_bound","gzip_identity","host_identity","host_identity_changed","host_policy_shape","image_map_changed","image_map_delta","image_zip_identity","image_zip_inventory","load_client_unknown","log_policy_shape","native_runtime_changed","nonfinite_json","output_bound","owned_fence_changed","pending_release_requires_reconciliation","permanent_fence_changed","permanent_fence_identity","permanent_fence_path","permanent_fence_shape","phase_scope","post_load_source_sha256","previous_attempt_requires_reconciliation","private_output","profile_scope","protected_parent","protected_parent_changed","read_bound","remote_result","root_required","runtime_changed","scope_lifetime","scope_limits","site_scope","snapshot_readonly","snapshot_runtime_unstable","source_admission","source_admission_budget","source_admission_sha256","source_changed","source_extra","source_metadata","source_path","source_sha256","source_short","source_stream_changed","store_root","store_root_changed","stream_binding","stream_eof_or_sha256","stream_start","tar_size","target_site","temporary_storage_changed","temporary_storage_device","temporary_storage_metadata","temporary_storage_mode","tools_directory","unknown_daemon_identity","write_short"])
+PUBLIC_CODES = frozenset(["admission_path","admitted_source_changed","archive_identity","archive_sha256","artifact_client_unknown","baseline_freshness","baseline_sites","candidate_preexisting","capacity_budget","capacity_floor","capture_singleton","client_cleanup_unproven","client_output_bound","command_bound","command_outcome_unknown","command_output_bound","confirmation","container_inventory","control_fields","control_scope","daemon_config_or_rootfs","daemon_descriptor","daemon_public_file_metadata","daemon_public_policy_changed","daemon_temporary_storage_contract","daemon_unit_metadata_changed","deadline","docker_store_changed","document_bound","duplicate_key","evidence_config_identity","evidence_inventory","evidence_member_bound","evidence_member_pin","evidence_size","export_bound","export_identity","export_pin","fence_unlink_unproven","finite_scope_required","frame_bound","frame_short","gzip_bound","gzip_identity","host_identity","host_identity_changed","host_policy_shape","image_map_changed","image_map_delta","image_zip_identity","image_zip_inventory","load_client_unknown","log_policy_shape","native_runtime_changed","nonfinite_json","output_bound","owned_fence_changed","pending_release_requires_reconciliation","permanent_fence_changed","permanent_fence_identity","permanent_fence_path","permanent_fence_shape","phase_scope","post_load_source_sha256","previous_attempt_requires_reconciliation","private_output","profile_scope","protected_parent","protected_parent_changed","read_bound","remote_result","root_required","runtime_changed","scope_lifetime","scope_limits","site_scope","snapshot_readonly","snapshot_runtime_unstable","source_admission","source_admission_budget","source_admission_sha256","source_changed","source_extra","source_metadata","source_path","source_sha256","source_short","source_stream_changed","store_root","store_root_changed","stream_binding","stream_eof_or_sha256","stream_start","tar_size","target_site","temporary_storage_changed","temporary_memory_floor","temporary_memory_metadata","temporary_storage_metadata","temporary_storage_mode","tools_directory","unknown_daemon_identity","write_short"])
 
 
 if __name__=='__main__':raise SystemExit(main())
