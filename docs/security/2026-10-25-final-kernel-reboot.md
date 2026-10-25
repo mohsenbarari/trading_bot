@@ -31,3 +31,18 @@ metadata comparison does not claim to hold an upload lock across reboot.
 No SSH, reboot or package operation was performed while authoring this packet.
 Actual host preflight, reboot and postboot receipts remain Root's work. Global
 security acceptance remains false.
+
+## Actual completion
+
+Root subsequently executed the published `e417267f` playbook. The read-only
+preflight passed, followed by one successful reboot and postcheck: Final now
+runs `7.0.0-38-generic`, has a new boot ID and no reboot-required flag. All four
+ciphertext-tree metadata entries match the pre-reboot snapshot. No application
+activation, package installation or boot configuration edit occurred.
+
+The durable controller receipt SHA256 is
+`ded28c4c3d916edabd9209570c422dc5d009c79fc6ed23e90c69b304ee084c2c`.
+The curated [completion evidence](evidence/2026-10-25-final-kernel-completion.json)
+records both real observations and reviewed source pins. This closes the
+identified Final installed-kernel/reboot item; it does not grant global security
+acceptance or restart the paused refactor automation.

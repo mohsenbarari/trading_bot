@@ -55,3 +55,9 @@ RUN python -I -B scripts/remove_runtime_pip.py --image-build \
     && python -I -B scripts/verify_psycopg2_runtime.py --final-runtime
 
 COPY mini_app_dist/ /app/mini_app_dist/
+
+# Mount ancestors belong to the immutable image, never its writable runtime layer.
+RUN --network=none test "$(id -u):$(id -g)" = "0:0" \
+    && test ! -e /app/runtime && test ! -L /app/runtime \
+    && install -d -m 0755 -o 0 -g 0 /app/runtime \
+        /app/runtime/coin-inference /app/runtime/product-estimator

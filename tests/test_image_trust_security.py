@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shlex
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -19,6 +20,41 @@ def certificate(name: str) -> dict:
 
 
 class ImageTrustSecurityTests(unittest.TestCase):
+    def docker_instructions(self, relative):
+        result = []; pending = ''
+        for line in (ROOT / relative).read_text().splitlines():
+            if not line.strip() or line.lstrip().startswith('#'): continue
+            pending += line.strip().removesuffix('\\') + ' '
+            if not line.rstrip().endswith('\\'):
+                result.append(pending.strip()); pending = ''
+        self.assertEqual(pending, '')
+        return result
+
+    def test_both_app_recipes_and_child_create_only_the_required_root_mountpoints(self):
+        paths = ['/app/runtime', '/app/runtime/coin-inference', '/app/runtime/product-estimator']
+        for relative in ('Dockerfile', 'Dockerfile.iran', 'deploy/maintenance/app_mountpoint_image/Dockerfile'):
+            with self.subTest(relative=relative):
+                instructions = self.docker_instructions(relative)
+                final = instructions[-1]; self.assertTrue(final.startswith('RUN --network=none '))
+                self.assertIn('test "$(id -u):$(id -g)" = "0:0"', final)
+                self.assertIn('test ! -e /app/runtime && test ! -L /app/runtime', final)
+                argv = shlex.split(final); start = argv.index('install')
+                self.assertEqual(argv[start:], ['install', '-d', '-m', '0755', '-o', '0', '-g', '0', *paths])
+
+    def test_child_recipe_preserves_runtime_configuration_and_marks_its_own_provenance(self):
+        instructions = self.docker_instructions('deploy/maintenance/app_mountpoint_image/Dockerfile')
+        self.assertEqual([line.split()[0] for line in instructions], ['ARG', 'FROM', 'ARG', 'ARG', 'LABEL', 'RUN'])
+        self.assertEqual(instructions[0], 'ARG APP_SECURITY_PARENT')
+        self.assertEqual(instructions[1], 'FROM ${APP_SECURITY_PARENT}')
+        labels = shlex.split(next(line for line in instructions if line.startswith('LABEL ')))[1:]
+        actual = dict(item.split('=', 1) for item in labels)
+        prefix = 'io.gold-trade.security.mountpoints.'
+        self.assertEqual(actual, {prefix + 'parent-config': 'sha256:8da3e404d01cc239606d1c79a30c4701c5a2ef2d103787b68b9ec221ae723672',
+            prefix + 'source-commit': '${SECURITY_MOUNTPOINT_SOURCE_COMMIT}',
+            prefix + 'input-signature': '${SECURITY_MOUNTPOINT_INPUT_SIGNATURE}',
+            prefix + 'status': 'packaging_candidate_not_accepted'})
+        self.assertEqual(sum(line.startswith('RUN ') for line in instructions), 1)
+
     def test_blocked_ca_is_rejected_among_other_roots(self):
         for name in ("emSign ECC Root CA - G3", "emSign ECC Root CA-G3"):
             with self.subTest(name=name):

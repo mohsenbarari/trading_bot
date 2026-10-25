@@ -1,0 +1,59 @@
+{
+  "after": {
+    "application_activation": false,
+    "backup_metadata": {
+      "entries": 4,
+      "file_contents_read": false,
+      "metadata_sha256": "39bf77bc28b3712c68eb3a6f4919d81d79b8a90f1e592aace1e842f741f434ef",
+      "root_device": 2049,
+      "root_inode": 136361
+    },
+    "boot_id": "3662fa49-14e6-4ab3-b9d5-905d5cb206c1",
+    "host": "65.109.214.203",
+    "kernel": "7.0.0-38-generic",
+    "package_or_configuration_changes": false,
+    "reboot_required": false,
+    "schema": "security_final_kernel_observation/1",
+    "security_accepted": false,
+    "target_boot_selected": true,
+    "target_packages": {
+      "linux-image-7.0.0-38-generic": "7.0.0-38.38",
+      "linux-modules-7.0.0-38-generic": "7.0.0-38.38"
+    }
+  },
+  "application_activation": false,
+  "backup_metadata_unchanged": true,
+  "before": {
+    "application_activation": false,
+    "backup_metadata": {
+      "entries": 4,
+      "file_contents_read": false,
+      "metadata_sha256": "39bf77bc28b3712c68eb3a6f4919d81d79b8a90f1e592aace1e842f741f434ef",
+      "root_device": 2049,
+      "root_inode": 136361
+    },
+    "boot_id": "07dce141-ce6b-4b6c-a5f7-7208de69ad26",
+    "host": "65.109.214.203",
+    "kernel": "7.0.0-29-generic",
+    "package_or_configuration_changes": false,
+    "reboot_required": true,
+    "schema": "security_final_kernel_observation/1",
+    "security_accepted": false,
+    "target_boot_selected": true,
+    "target_packages": {
+      "linux-image-7.0.0-38-generic": "7.0.0-38.38",
+      "linux-modules-7.0.0-38-generic": "7.0.0-38.38"
+    }
+  },
+  "completed_at_utc": "2026-10-25T03:27:06.720729+00:00",
+  "global_security_eligible": false,
+  "package_or_configuration_changes": false,
+  "reviewed_sources": {
+    "deploy/maintenance/final_kernel_inventory.yml": "b140476847473feb7736c696f533ce96fa6f6c8c9ba67672b4e4dbe701ec2bb3",
+    "deploy/maintenance/final_kernel_reboot.yml": "c80966cf1ee45e8c52d38395f3c36ecbcf82160ead9d509c24eaf1b8de7abaa0"
+  },
+  "schema": "security_final_kernel_completion/1",
+  "security_accepted": false,
+  "source_commit": "e417267f4349bdec10b0a586a3f31af0fe2e5514",
+  "source_receipt_sha256": "ded28c4c3d916edabd9209570c422dc5d009c79fc6ed23e90c69b304ee084c2c"
+}
