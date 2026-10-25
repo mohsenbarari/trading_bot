@@ -229,7 +229,7 @@ jobs:
           set +e
           timeout --signal=TERM --kill-after=10s 900s docker run \
             --name "$name" --label "coverage.fixture.nonce=$nonce" --pull never \
-            --init --user 0:0 --network none --read-only --cap-drop ALL \
+            --init --user 0:0 --network none --read-only --cap-drop ALL --cap-add CHOWN \
             --security-opt no-new-privileges --cpus 2 --memory 4g --memory-swap 4g --pids-limit 128 \
             --tmpfs /work:rw,nosuid,nodev,noexec,size=1g,mode=0700 \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777 \

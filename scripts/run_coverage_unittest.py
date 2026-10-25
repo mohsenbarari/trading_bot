@@ -21,7 +21,7 @@ ROOT_MODULES = tuple('tests.test_' + name for name in (
     'web_market_hot_preflight', 'web_market_managed_config', 'web_engine_current_controller',
     'coverage_root_fixture_lane',
     'datastore_candidate_stage', 'datastore_candidate_contract_completion',
-    'datastore_candidate_stage_completion', 'datastore_candidate_stage_entry',
+    'datastore_candidate_stage_completion', 'datastore_candidate_stage_entry', 'datastore_candidate_images',
     'security_legacy_parking', 'security_legacy_parking_completion',
     'market_candidate_images'))
 AMBIENT = ('subprocess.run', 'subprocess.Popen', 'subprocess.call', 'subprocess.check_call',
@@ -31,6 +31,7 @@ AMBIENT = ('subprocess.run', 'subprocess.Popen', 'subprocess.call', 'subprocess.
     'ctypes.CDLL', 'ctypes.PyDLL', 'resource.setrlimit', 'signal.signal', 'signal.alarm',
     'signal.setitimer')
 MAX_ENVELOPE = 64 * 1024**2
+ROOT_PRIVILEGES = {'CapEff': 1, 'CapPrm': 1, 'CapBnd': 1, 'CapInh': 0, 'CapAmb': 0, 'NoNewPrivs': 1}
 
 
 def need(ok, code):
@@ -124,6 +125,11 @@ def hosted(args):
     return 0 if complete(result, len(ordinary)) else 1
 
 
+def privileges_ok(value):
+    return type(value) is dict and set(value) == set(ROOT_PRIVILEGES) and all(
+        type(value[name]) is int and value[name] == expected for name, expected in ROOT_PRIVILEGES.items())
+
+
 def root_guard():
     # A fixture coordinator must be an ordinary owned child, not namespace init.
     # Production owner guards deliberately reject PID 1; Docker --init supplies
@@ -133,12 +139,16 @@ def root_guard():
          and not os.path.lexists('/var/run/docker.sock')
          and os.statvfs('/').f_flag & os.ST_RDONLY, 'isolated_root_fixture_container_required')
     status = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
-    need(int(status['CapEff'].strip(), 16) == 0 and status['NoNewPrivs'].strip() == '1', 'root_fixture_privileges')
+    # Real ownership drift fixtures need CAP_CHOWN; every other capability
+    # remains absent, including inherited and ambient capabilities.
+    privileges = {name: int(status[name].strip(), 10 if name == 'NoNewPrivs' else 16) for name in ROOT_PRIVILEGES}
+    need(privileges_ok(privileges), 'root_fixture_privileges')
     need({p.name for p in Path('/sys/class/net').iterdir()} == {'lo'}, 'root_fixture_network')
+    return privileges
 
 
 def root_lane(args):
-    root_guard(); os.umask(0o077)
+    privileges = root_guard(); os.umask(0o077)
     import coverage
     collector = coverage.Coverage.current()
     need(collector is not None and collector.config.data_file == '/work/.coverage.root-fixtures',
@@ -164,8 +174,9 @@ def root_lane(args):
     finally:
         collector.stop(); collector.save()
     data = read(Path('/work/.coverage.root-fixtures'), 32 * 1024**2)
-    report = {'schema': 'coverage_root_fixture_result/1', 'source_commit': args.commit,
+    report = {'schema': 'coverage_root_fixture_result/2', 'source_commit': args.commit,
         'test_ids': expected['test_ids'], 'modules': list(ROOT_MODULES), 'uid': os.geteuid(),
+        'fixture_privileges': privileges,
         'result': summary(result), 'log': log.getvalue(), 'coverage_sha256': sha256(data).hexdigest(),
         'coverage_base64': base64.b64encode(data).decode(), 'production_inputs_present': False}
     raw = encode(report); need(len(raw) <= MAX_ENVELOPE, 'root_fixture_envelope_bound')
@@ -176,11 +187,12 @@ def root_lane(args):
 def ingest(args):
     expected = expected_ok(json.loads(read(args.expectation, 4 * 1024**2)), args.commit)
     report = json.loads(read(args.envelope))
-    need(type(report) is dict and set(report) == {'schema', 'source_commit', 'test_ids', 'modules', 'uid',
+    need(type(report) is dict and set(report) == {'schema', 'source_commit', 'test_ids', 'modules', 'uid', 'fixture_privileges',
         'result', 'log', 'coverage_sha256', 'coverage_base64', 'production_inputs_present'}
-        and report['schema'] == 'coverage_root_fixture_result/1' and report['source_commit'] == args.commit
+        and report['schema'] == 'coverage_root_fixture_result/2' and report['source_commit'] == args.commit
         and report['modules'] == list(ROOT_MODULES) and report['test_ids'] == expected['test_ids']
-        and type(report['uid']) is int and report['uid'] == 0 and report['production_inputs_present'] is False,
+        and type(report['uid']) is int and report['uid'] == 0 and report['production_inputs_present'] is False
+        and privileges_ok(report['fixture_privileges']),
         'root_fixture_result_binding')
     outcome = report['result']
     need(type(outcome) is dict and set(outcome) == {'run', 'failures', 'errors', 'skipped', 'unexpected_successes', 'expected_failures', 'successful'}

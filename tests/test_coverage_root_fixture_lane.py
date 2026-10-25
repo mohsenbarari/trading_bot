@@ -16,6 +16,9 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_PRIVILEGES = {'CapEff': 1, 'CapPrm': 1, 'CapBnd': 1, 'CapInh': 0, 'CapAmb': 0, 'NoNewPrivs': 1}
+FIXTURE_STATUS = ''.join(f'{name}: {value:016x}\n' if name != 'NoNewPrivs' else f'{name}: {value}\n'
+                         for name, value in FIXTURE_PRIVILEGES.items())
 TARGETS = ('subprocess.run', 'subprocess.Popen', 'os.system', 'os.kill', 'os.killpg',
            'socket.socket', 'socket.create_connection', 'socket.getaddrinfo',
            'urllib.request.urlopen', 'ctypes.CDLL', 'resource.setrlimit', 'signal.signal', 'signal.alarm')
@@ -72,6 +75,20 @@ class FixtureLaneTests(unittest.TestCase):
         self.assertEqual(hosted, [first, second]); self.assertEqual(len(required), len(M.ROOT_MODULES))
         self.assertEqual([test.id() for test in hosted], [first.id(), first.id()])
 
+    def test_new_datastore_cases_require_real_root_and_canonical_builder_cases_stay_hosted(self):
+        datastore_module = 'tests.test_datastore_candidate_images'
+        datastore = list(M.flatten(unittest.defaultTestLoader.loadTestsFromName(datastore_module)))
+        canonical = list(M.flatten(unittest.defaultTestLoader.loadTestsFromName('tests.test_prepare_canonical_app_image')))
+        self.assertTrue(datastore)
+        self.assertTrue(canonical)
+        self.assertTrue(all(case.id().startswith(datastore_module + '.') for case in datastore))
+        self.assertTrue(all(case.id().startswith('tests.test_prepare_canonical_app_image.') for case in canonical))
+        required = [case for case in self.required() if not case.id().startswith(datastore_module + '.')]
+        hosted, privileged = M.partition([*required, *datastore, *canonical])
+        self.assertEqual(hosted, canonical)
+        self.assertTrue(all(case in privileged for case in datastore))
+        self.assertFalse({case.id() for case in hosted} & {case.id() for case in privileged})
+
     def test_successful_early_stop_cannot_pass_an_incomplete_hosted_inventory(self):
         class StopsEarly(unittest.TestCase):
             def test_stops(self): self._outcome.result.stop()
@@ -88,8 +105,9 @@ class FixtureLaneTests(unittest.TestCase):
         with sqlite3.connect(database) as connection:
             connection.execute('CREATE TABLE IF NOT EXISTS public_fixture (name TEXT)')
         data = database.read_bytes()
-        report = {'schema': 'coverage_root_fixture_result/1', 'source_commit': self.commit,
+        report = {'schema': 'coverage_root_fixture_result/2', 'source_commit': self.commit,
             'test_ids': expected['test_ids'], 'modules': list(M.ROOT_MODULES), 'uid': 0,
+            'fixture_privileges': dict(FIXTURE_PRIVILEGES),
             'result': {'run': len(expected['test_ids']), 'failures': 0, 'errors': 0, 'skipped': 0,
                        'unexpected_successes': 0, 'expected_failures': 0, 'successful': True},
             'log': 'ordinary root fixture evidence\n', 'coverage_sha256': sha256(data).hexdigest(),
@@ -106,6 +124,20 @@ class FixtureLaneTests(unittest.TestCase):
         proof = json.loads(args.report.read_bytes())
         self.assertNotIn('coverage_base64', proof); self.assertNotIn('log', proof)
         self.assertEqual(proof['test_ids'], report['test_ids'])
+        self.assertEqual(proof['fixture_privileges'], FIXTURE_PRIVILEGES)
+
+    def test_ingest_refuses_missing_or_changed_real_capability_attestation_before_merging(self):
+        mutations = [lambda value: value.pop('fixture_privileges'),
+                     lambda value: value.update(schema='coverage_root_fixture_result/1')]
+        for name, valid in FIXTURE_PRIVILEGES.items():
+            for invalid in [*sorted({0, 1, 2, 3, 8, 0xd9} - {valid}), True, False]:
+                mutations.append(lambda value, name=name, invalid=invalid: value['fixture_privileges'].__setitem__(name, invalid))
+        mutations.extend((lambda value: value['fixture_privileges'].pop('CapBnd'),
+                          lambda value: value['fixture_privileges'].update(Other=1)))
+        for mutate in mutations:
+            args, value, _ = self.fixture(); mutate(value); args.envelope.write_bytes(M.encode(value))
+            with self.subTest(value=value.get('fixture_privileges')), self.assertRaises(RuntimeError): M.ingest(args)
+            self.assertFalse((self.root/'.coverage.root-fixtures').exists())
 
     def test_wrong_identity_digest_boolean_uid_or_count_cannot_be_a_root_pass(self):
         args, base, _ = self.fixture()
@@ -127,7 +159,7 @@ class FixtureLaneTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'log_bound'): log.write('ordinary')
         self.assertEqual(log.getvalue(), '')
 
-    def root_path_fixture(self, *, dockerenv=True, status='CapEff: 0000000000000000\nNoNewPrivs: 1\n', interfaces=('lo',)):
+    def root_path_fixture(self, *, dockerenv=True, status=FIXTURE_STATUS, interfaces=('lo',)):
         class PublicPath:
             def __init__(inner, value): inner.value = value
             def is_file(inner): return dockerenv
@@ -138,7 +170,7 @@ class FixtureLaneTests(unittest.TestCase):
     def test_root_entry_requires_uid_readonly_socket_absence_capabilities_nnp_and_loopback(self):
         def check(**changes):
             options = dict(uid=0, gid=0, socket=False, readonly=os.ST_RDONLY,
-                           dockerenv=True, status='CapEff: 0000000000000000\nNoNewPrivs: 1\n', interfaces=('lo',))
+                           dockerenv=True, status=FIXTURE_STATUS, interfaces=('lo',))
             options.update(changes)
             with patch.object(M.os, 'geteuid', return_value=options['uid']), \
                  patch.object(M.os, 'getegid', return_value=options['gid']), \
@@ -146,11 +178,17 @@ class FixtureLaneTests(unittest.TestCase):
                  patch.object(M.os, 'statvfs', return_value=SimpleNamespace(f_flag=options['readonly'])), \
                  self.root_path_fixture(dockerenv=options['dockerenv'], status=options['status'], interfaces=options['interfaces']):
                 return M.root_guard()
-        check()
+        self.assertEqual(check(), FIXTURE_PRIVILEGES)
         for changes in ({'uid': 1}, {'gid': 1}, {'socket': True}, {'readonly': 0}, {'dockerenv': False},
-                        {'status': 'CapEff: 1\nNoNewPrivs: 1\n'}, {'status': 'CapEff: 0\nNoNewPrivs: 0\n'},
                         {'interfaces': ('lo', 'eth0')}):
             with self.subTest(changes=changes), self.assertRaises(RuntimeError): check(**changes)
+        for name, valid in FIXTURE_PRIVILEGES.items():
+            for invalid in {0, 1, 2, 3, 8, 0xd9} - {valid}:
+                status = FIXTURE_STATUS.replace(
+                    f'{name}: {valid:016x}\n' if name != 'NoNewPrivs' else f'{name}: {valid}\n',
+                    f'{name}: {invalid:016x}\n' if name != 'NoNewPrivs' else f'{name}: {invalid}\n')
+                with self.subTest(name=name, invalid=invalid), self.assertRaisesRegex(RuntimeError, '^root_fixture_privileges$'):
+                    check(status=status)
 
     def test_root_entry_rejects_namespace_init_before_loading_fixtures(self):
         with patch.object(M.os, 'getpid', return_value=1), \
@@ -173,7 +211,7 @@ class FixtureLaneTests(unittest.TestCase):
                                     stop=lambda: None, save=lambda: coverage_path.write_bytes(data))
         paths = {'/reviewed': reviewed, '/work/source': work, '/work/.coverage.root-fixtures': coverage_path}
         self.stack.enter_context(patch.object(M, 'Path', side_effect=lambda path: paths.get(path, Path(path))))
-        self.stack.enter_context(patch.object(M, 'root_guard'))
+        self.stack.enter_context(patch.object(M, 'root_guard', return_value=dict(FIXTURE_PRIVILEGES)))
         self.stack.enter_context(patch.object(M, 'ROOT_MODULES', (module,)))
         self.stack.enter_context(patch.object(M.signal, 'signal'))
         self.stack.enter_context(patch.object(M.signal, 'alarm'))
@@ -191,6 +229,7 @@ class FixtureLaneTests(unittest.TestCase):
         self.assertEqual(value['result']['run'], 1); self.assertTrue(value['result']['successful'])
         self.assertEqual(value['test_ids'], ['fixture_case.PublicTests.test_owned'])
         self.assertFalse(value['production_inputs_present']); self.assertTrue(work.is_dir())
+        self.assertEqual(value['fixture_privileges'], FIXTURE_PRIVILEGES)
         self.assertEqual(sha256(base64.b64decode(value['coverage_base64'])).hexdigest(), value['coverage_sha256'])
         M.root_guard.assert_called_once_with()
 
@@ -221,12 +260,14 @@ class FixtureLaneTests(unittest.TestCase):
         value = yaml.safe_load((ROOT/'.github/workflows/coverage-report.yml').read_bytes())
         steps = value['jobs']['repository-coverage']['steps']
         root = next(step for step in steps if step.get('id') == 'root_fixtures')['run']
-        for flag in ('--init', '--user 0:0', '--network none', '--read-only', '--cap-drop ALL',
+        for flag in ('--init', '--user 0:0', '--network none', '--read-only', '--cap-drop ALL --cap-add CHOWN',
                      '--security-opt no-new-privileges', '--cpus 2', '--memory 4g',
                      '--memory-swap 4g', '--pids-limit 128', 'git -c tar.umask=0022 archive "$commit"',
                      '/work:rw,nosuid,nodev,noexec,size=1g,mode=0700'):
             self.assertIn(flag, root)
         self.assertNotIn('--volume', root); self.assertNotIn('--mount', root); self.assertNotIn('docker.sock', root)
+        self.assertEqual(root.count('--cap-add'), 1)
+        self.assertNotIn('--privileged', root)
         backend = next(step for step in steps if step.get('id') == 'backend_coverage')['run']
         source_filter = "--include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py'"
         for lane in (backend, root):

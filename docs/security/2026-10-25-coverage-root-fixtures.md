@@ -27,7 +27,8 @@ into private `/work` tmpfs0700 because fixtures create temporary directories
 beside their source. It changes no production ownership check or synthetic stat.
 The container uses a separate init/reaper (`--init`); Python must have PID>1,
 matching the production coordinator's unchanged owner contract. It has UID0,
-zero capabilities, no-new-privileges, network none,
+only CAP_CHOWN (effective/permitted/bounding mask1, inherited/ambient0),
+no-new-privileges, network none,
 2CPUs,4GiB memory with no additional swap,128 PIDs,1GiB private work and128MiB
 temporary tmpfs, both nosuid/nodev/noexec. There are no host mounts, Docker socket,
 runtime Env, sessions or application data. Build networking installs only pinned
@@ -51,6 +52,23 @@ not turn it into a valid private directory. The managed-config loader fixture
 seals the current explicit public buffers under test-only pins; historical
 production pins remain intact, including changed-source refusal before staging.
 
-This is source-only validation. The new root image and complete coverage run have
-not yet executed. No production image, service, data, authority or acceptance is
-changed by this packet.
+Actual coverage40187533550 on700c40ead2 passed backend/frontend but failed its
+required root lane:457 tests, one ownership-fixture error. The real chown to
+UID1 was denied by that lane's previous zero-capability contract. The failed
+result and artifact12596522992 (SHA102b2e5c206f0214d65c4f9d677a0585129dc12b46e319f7212c937dc6ec75c9)
+remain failed and retained.
+
+The narrow fixture-only correction grants exactly CAP_CHOWN and attests actual
+effective/permitted/bounding1, inherited/ambient0 and no-new-privileges1. Result
+schema/2 and its ingester reject old, missing, elevated or Boolean-spoofed
+capability attestations before consuming coverage. The actual owner-drift test
+is unchanged, real, required and never skipped. New operation02 datastore tests
+are explicitly assigned to this genuine-root lane. App smoke stays nonroot with
+all capabilities absent; production privileges are untouched.
+
+Root independently ran120 fenced source tests as actual UID0/GID0 with these
+exact capability masks, including the genuine chown/restore case and all12
+new datastore fixtures (7.253s, no skips). This proves those source tests, not
+the full read-only/no-network hosted container lane, which still requires a
+fresh actual CI result. No production image, service, data, authority or
+security acceptance changed.
