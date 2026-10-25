@@ -7,25 +7,27 @@
   Necessary work needs no routine permission; Writer/DNS remain human.
 - Host maintenance/backups/TLS completed; infrastructure memory binds scope.
   Final accepts ciphertext backups only, no App provisioning/migration authority.
-- Apped59 loaded both hosts; hosted40183878216 passed8runtime+24components.
-  Historical provenance cannot become main. Ordinary665220a2 built/scanned/exported as e1a727de; actual ZIP is on Web.
-  Raw44HIGH gate remains failed; fresh32 runtime/presence proof pending. Freeze that
+- Historical ed59 provenance cannot become main. Ordinary665220a2/e1a727de built/exported;
+  actual CI40196208692 passed32/32, physical graph/presence/cleanup. Not serving.
+  Raw44HIGH gate remains failed. Freeze that
   main release while reviewed controllers advance on security branch; merge after
   activation. Preserve dirty coin-market-retention.md; never stage/reset/stash it.
 - Failed App COW restored old Web/API200. No repeat/reroute of C/S/R fresh-profile
   or COW guard adaptation/probe. Ordinary main artifact is the legitimate path;
-  fresh strict serving/config/backup/functional proof remains required. Keep
-  active rollback override, old images, receipts and failure history.
-- Raw44HIGH/eight IDs retain43component assessments plus conditional ACL caller
-  gap; never globally FIXED. E46 and nine Market OS overlays exported. a37 actual
+  fresh serving/config/backup/functional proof remains required. Keep rollback
+  overrides/images/history.
+- Raw44HIGH retain43 component assessments; ACL caller gap OPEN, no global FIXED.
+  a37 actual
   Native LOAD ce20b50b passed; consumed316MB public archives removed. f365 c96
   prearchive failure remains FAILED; c715 actual two-host abort closure proved
   NativeRES removed. New image-store06 keeps fixed processor health-only
   observation and bounded capture readiness; never mutating-RPC retry.
   Capture conflicts/F79's two source overrides remain OPEN.
 - PG49a8/Redis98c4 built/scanned, not activated. PG Windows UNKNOWN retains Linux
-  absence proof. New datastore image-store02 does not require fake App/parking
-  receipts and grants no serving authority. Keep eight production reader units.
+  absence proof. Datastore03 Redis LOAD passed both; PG Web passed, Native0bd
+  failed before header/LOAD request. Retain its exact RES until fresh verified
+  preload abort closure; never blind retry. Market06 a37/f365 Native LOAD passed;
+  remaining8 batch unexecuted. Keep eight production reader units.
 - Expired controls grant no future authority. Unknown RPC never proves cancel
   or retry. Config/manifest differ; classic branches never query Descriptor.
   Physical TAR members stay unique; repeated logical layers are valid with
