@@ -418,3 +418,21 @@ SEC without installed Playwright and failed two dependency imports; using the
 documented MAIN dependency working directory passed all10 without a mock/skip.
 Only a trailing blank line changed after those tests. Source packet44112fd0
 does not establish actual full-browser success or deployment acceptance.
+
+The separately reviewed chat correction bounds the complete menu and gives it
+natural scrolling when next-frame or expanded reactions exceed the estimate.
+Both panels retain their contents; the existing real browser click and database
+assertions remain unchanged. The inactive-account assertion now requires absent
+market entry, matching the existing product template, while retaining lock,
+session-revocation and recovery checks. Packet176b9e38 passed13 focused units
+with the older local dependencies and independent source review. It does not
+claim those were the candidate dependency versions: the selected hosted job now
+runs the exact two existing unit files with npm-ci candidate dependencies before
+the real browser cases. Root passed the three added public workflow contracts.
+This is a new source correction; the already loaded665/E1 image does not contain
+it and cannot acquire its acceptance by relabeling the old artifact.
+
+Both8f6ab0/44c7f6 watchdog windows expired and automatically restored ordinary
+`--apply`. Independent readback05 verified the exact owned restoration receipts,
+active15-second timers, and the original drop-in counts (Native1/Web0). No
+image operation, manual restore or new maintenance window was performed.

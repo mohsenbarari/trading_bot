@@ -358,7 +358,8 @@ test.describe('Account status browser regression', () => {
       const blockedAlert = userPage.locator('.alert-blocked')
       await expect(blockedAlert).toContainText('حساب کاربری غیرفعال شده است')
       await expect(blockedAlert).toContainText(/اگر حساب تا/)
-      await expect(userPage.locator('.hero-btn')).toBeDisabled()
+      // The inactive dashboard omits market entry rather than rendering a disabled button.
+      await expect(userPage.locator('.hero-btn')).toHaveCount(0)
 
       const lockResult = forceGlobalLock(targetUser.userId)
       expect(lockResult.blocked).toBeGreaterThanOrEqual(1)

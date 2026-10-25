@@ -107,4 +107,24 @@ describe('messageContextMenuModel', () => {
     expect(style.top).toBe('552px')
     expect(style.width).toBe('296px')
   })
+
+  it('bounds the whole menu when delayed reactions and CSS action rows exceed its initial estimate', () => {
+    // Observed WebKit geometry before the next-frame reaction panel mounts:
+    // the actions alone are 401.5px and the anchor is 240px in a 720px viewport.
+    const style = getMessengerContextMenuStyle({
+      x: 1100, y: 240, menuWidth: 296, menuHeight: 472,
+      viewportWidth: 1280, viewportHeight: 720,
+    })
+    expect(style.top).toBe('240px')
+    expect(style.maxHeight).toBe('472px')
+    expect(Number.parseFloat(style.top) + Number.parseFloat(style.maxHeight)).toBe(712)
+
+    const shortViewport = getMessengerContextMenuStyle({
+      x: 360, y: 280, menuWidth: 296, menuHeight: 800,
+      viewportWidth: 390, viewportHeight: 320,
+    })
+    expect(shortViewport.top).toBe('8px')
+    expect(shortViewport.maxHeight).toBe('304px')
+    expect(Number.parseFloat(shortViewport.top) + Number.parseFloat(shortViewport.maxHeight)).toBe(312)
+  })
 })

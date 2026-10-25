@@ -148,6 +148,13 @@ jobs:
       if: inputs.scenario == 'chat-menu' || inputs.scenario == 'accounts-and-menu'
       working-directory: frontend
       run: node --experimental-strip-types --test ../scripts/probe_browser_ci_chat_menu_geometry.test.mjs
+    - name: Validate chat-menu layout with candidate dependencies
+      if: inputs.scenario == 'chat-menu' || inputs.scenario == 'accounts-and-menu'
+      timeout-minutes: 2
+      working-directory: frontend
+      run: >-
+        npm run test:unit:run -- src/utils/messageContextMenuModel.test.ts
+        src/components/chat/ChatContextMenu.test.ts --maxWorkers=1
     - name: Bootstrap backend stack
       env:
         GH_TOKEN: ${{ github.token }}

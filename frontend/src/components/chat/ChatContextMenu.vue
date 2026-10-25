@@ -282,7 +282,9 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  overflow: visible;
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
   direction: rtl;
 }
 
@@ -291,6 +293,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 }
 
 .telegram-panel {
+  flex-shrink: 0;
   width: 100%;
   border-radius: var(--messenger-radius-panel, 18px);
   overflow-x: hidden;

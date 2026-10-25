@@ -184,5 +184,8 @@ export function getMessengerContextMenuStyle(input: MessengerContextMenuStyleInp
     top: `${y}px`,
     left: `${x}px`,
     width: `${boundedMenuWidth}px`,
+    // The reaction panel mounts later and CSS touch targets can exceed the
+    // initial estimate. Keep the complete menu within the space below its top.
+    maxHeight: `${Math.max(0, input.viewportHeight - y - edgePadding)}px`,
   }
 }

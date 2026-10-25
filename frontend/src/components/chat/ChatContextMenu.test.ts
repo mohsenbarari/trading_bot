@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { getMessengerContextMenuStyle } from '../../utils/messageContextMenuModel'
+import componentSource from './ChatContextMenu.vue?raw'
 
 vi.mock('../../composables/chat/useChatFileHandler', () => ({
   canShareFiles: () => true,
@@ -14,6 +16,83 @@ async function waitForReactionShell() {
 }
 
 describe('ChatContextMenu.vue', () => {
+  it('keeps both expanded panels reachable inside the bounded scroll container on a short viewport', async () => {
+    const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+    // jsdom does not measure layout. Apply the real component stylesheet to
+    // check the actual overflow/flex contract as well as the expanded DOM.
+    const stylesheet = document.createElement('style')
+    stylesheet.textContent = componentSource.match(/<style scoped>([\s\S]*?)<\/style>/)![1]
+    document.head.append(stylesheet)
+    const wrapper = mount(ChatContextMenu, {
+      attachTo: document.body,
+      props: {
+        menuState: {
+          x: 280, y: 120, visible: true,
+          message: { id: 1, message_type: 'text', is_deleted: false, reactions: [] },
+          messageIds: [1],
+          style: getMessengerContextMenuStyle({
+            x: 280, y: 120, menuWidth: 296, menuHeight: 472,
+            viewportWidth: 390, viewportHeight: 160,
+          }),
+        },
+        isAlbumSelection: false, currentUserId: 7, canEdit: true,
+        canDelete: true, canPin: true, isPinnedMessage: false,
+        availableReactions: ['🔥', '👍', '😂', '❤️', '👏', '🎉', '🎯', '😮'],
+      },
+      global: { directives: { ripple: {} }, stubs: { teleport: true, transition: false } },
+    })
+    try {
+      await waitForReactionShell()
+      await wrapper.get('.reaction-dropdown-toggle').trigger('click')
+      expect(wrapper.find('.reaction-dropdown-list').exists()).toBe(true)
+      const menu = wrapper.get<HTMLElement>('.context-menu').element
+      expect(menu.style.top).toBe('8px')
+      expect(menu.style.maxHeight).toBe('144px')
+      expect(getComputedStyle(menu).overflowY).toBe('auto')
+      expect(getComputedStyle(menu).overflowX).toBe('hidden')
+      for (const panel of wrapper.findAll<HTMLElement>('.telegram-panel')) {
+        expect(getComputedStyle(panel.element).flexShrink).toBe('0')
+      }
+      expect(wrapper.findAll('[role="menuitem"]')).toHaveLength(6)
+      await wrapper.findAll('[role="menuitem"]').find(action => action.text().includes('حذف'))!.trigger('click')
+      expect(wrapper.emitted('delete')).toHaveLength(1)
+    } finally {
+      wrapper.unmount()
+      stylesheet.remove()
+    }
+  })
+
+  it('retains the viewport bound after the reaction row mounts and keeps delete actionable', async () => {
+    const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+    const wrapper = mount(ChatContextMenu, {
+      props: {
+        menuState: {
+          x: 1100, y: 240, visible: true,
+          message: { id: 1, message_type: 'text', is_deleted: false, reactions: [] },
+          messageIds: [1],
+          style: getMessengerContextMenuStyle({
+            x: 1100, y: 240, menuWidth: 296, menuHeight: 472,
+            viewportWidth: 1280, viewportHeight: 720,
+          }),
+        },
+        isAlbumSelection: false, currentUserId: 7, canEdit: true,
+        canDelete: true, canPin: true, isPinnedMessage: false,
+        availableReactions: ['🔥', '👍', '😂', '❤️', '👏', '🎉', '🎯', '😮'],
+      },
+      global: { directives: { ripple: {} }, stubs: { teleport: true, transition: false } },
+    })
+    expect(wrapper.find('.reaction-picker-shell').exists()).toBe(false)
+    expect(wrapper.get<HTMLElement>('.context-menu').element.style.maxHeight).toBe('472px')
+    await waitForReactionShell()
+    expect(wrapper.find('.reaction-picker-shell').exists()).toBe(true)
+    expect(wrapper.get<HTMLElement>('.context-menu').element.style.maxHeight).toBe('472px')
+    const actions = wrapper.findAll('[role="menuitem"]')
+    expect(actions).toHaveLength(6)
+    await actions.find(action => action.text().includes('حذف'))!.trigger('click')
+    expect(wrapper.emitted('delete')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('renders reaction and text actions, then emits reaction and copy events', async () => {
     const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
     const wrapper = mount(ChatContextMenu, {
