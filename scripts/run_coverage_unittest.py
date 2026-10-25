@@ -26,7 +26,7 @@ ROOT_MODULES = tuple('tests.test_' + name for name in (
     'security_legacy_parking', 'security_legacy_parking_completion',
     'market_candidate_images', 'market_candidate_images_v2', 'market_candidate_images_v3',
     'canonical_app_candidate_images', 'image_store_health_entries', 'canonical_app_resource_contract',
-    'canonical_app_activation', 'normal_market_activation', 'normal_datastore_activation',
+    'canonical_app_activation', 'normal_app_restore_admission', 'normal_market_activation', 'normal_datastore_activation',
     'capture_conflict_diagnostic'))
 AMBIENT = ('subprocess.run', 'subprocess.Popen', 'subprocess.call', 'subprocess.check_call',
     'subprocess.check_output', 'os.system', 'os.popen', 'os.fork', 'os.forkpty',

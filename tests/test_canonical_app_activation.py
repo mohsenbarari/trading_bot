@@ -157,6 +157,17 @@ class ActivationTests(unittest.TestCase):
         C.configuration_parity(f.old,f.new,'app',f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
         reverse = deepcopy(f.active); reverse['config']['Env'].reverse()
         C.configuration_parity(f.old,f.new,'app',f.old_row,reverse,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+    def test_normal_pull_policy_never_is_modeled_and_all_other_values_refuse(self):
+        f = fixture()
+        spec = f.old['services']['app']; spec['pull_policy'] = 'never'
+        C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+        self.assertEqual(spec['pull_policy'],'never')
+        for value in ('always','build','missing','unknown',True,False,None,0):
+            with self.subTest(value=value):
+                spec['pull_policy'] = value
+                with self.assertRaisesRegex(RuntimeError,'normal_pull_policy'):
+                    C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+
     def test_stop_timeout_requires_exact_typed_image_default_and_no_unmodeled_compose_feature(self):
         f = fixture()
         for timeout in (None,0,30):

@@ -436,3 +436,38 @@ Both8f6ab0/44c7f6 watchdog windows expired and automatically restored ordinary
 `--apply`. Independent readback05 verified the exact owned restoration receipts,
 active15-second timers, and the original drop-in counts (Native1/Web0). No
 image operation, manual restore or new maintenance window was performed.
+
+Actual rebase preparation34173069e1aa4a37a16cf83b7626150d passed,13884 bytes,
+SHA256 `27d441d503a55f45443de373c1908d39420092d0e2241e360ae18a4a98afb45d`.
+It authenticated the genuine Trixie parent18→candidate19 COPY lineage separately
+from the old eight layers, closed the full physical archive graph, resolved both
+fixed source files, and compared all six retained public file/directory FDs,
+metadata and absent xattrs against the running old image. All27 public container
+identities remained stable during collection. Root passed8 genuine ownership
+fixtures and12 collector fixtures; independent source review passed. This is
+read-only evidence and grants no diagnostic or serving authority.
+
+Normal read-only restore admission now uses each role's actual historical
+Compose prefix/version, separately observes current5.6.1, binds the implicit
+default Env or exact historical CLI references by opaque metadata, checks every
+project service's declared Env input before rendering, and requires the actual
+working directory. Full Config/Env/HostConfig/mount/network and lifecycle
+comparisons remain in trusted process RAM; only closed public booleans/codes
+leave it. Root passed all15 owned fixtures, including genuine missing/foreign
+Env input and post-inspection drift refusals; all peer findings were fixed.
+The public normal153-byte App rollback override legitimately contains only
+image/pull_policy/restart. The shared contract now models only typed
+pull_policy=never, with every other value rejected; no field is filtered away.
+Root passed the complete42-test separate-init Root/CAP_CHOWN/NNP suite, manifest
+`12a8ebfdcee99a13fe4b9b6727ff1afd01db53405972a2b3cb8291c078670254`,
+result SHA256 `f3d086856d9068ad3e6c766cffffae07ec65a7fe8b89faedf099502b6b611728`.
+Both adapter changes are exact source-pin substitutions verified independently.
+Actual normal configuration admission and clone compatibility are still pending.
+
+The admission tests' temporary local capture-source dependency was caught before
+publication: the exact5230-byte a223 capture helper is now a tracked public file,
+the fixture references that Git path, and the required module is registered in
+the genuine Root lane. Independent reverse comparison proves these are only a
+path change and one registry entry; no capture logic, Root guard, assertion,
+UID/stat check or skip changed. Author passed all15 using the tracked helper.
+This prevents a predictable missing-file/ordinary-UID failure in full CI.

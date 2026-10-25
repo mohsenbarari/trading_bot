@@ -7,17 +7,17 @@
 - Host/TLS complete. Appddc5fe9c backups/PG-candidate/uploads isolated restores
   passed both; old-image/schema compatibility OPEN. Final accepts ciphertext only;
   no App provisioning/migration authority.
-- Ordinary665220a2/e1a727de loaded both hosts, not serving. Freeze main; merge after
-  activation. Preserve dirty coin-market-retention.md and rollback/history.
+- Ordinary665220a2/e1a727de loaded, not serving. UI53349a19 requires a new artifact;
+  never relabel E1. Freeze main; preserve retention dirt and rollback/history.
 - Never retry/reroute App C/S/R fresh-profile/COW adaptation/probe. Use ordinary
   main artifact with fresh config/backup/functional evidence.
 - Raw44HIGH retain43 assessments; ACL/capture conflicts OPEN. Image-store success
   grants no serving eligibility or mutating-RPC retry. Preserve F79's two baked
   functional source changes: actual five mounts include no code binds. Reviewed
-  contracts prove both baked files/layers/lifecycle; actual diagnostic remains OPEN.
+  rebase proof27d441 verifies candidate19/parent18 versus old8 and six fixed paths;
+  old-image prefix assumption is false. Actual diagnostic remains OPEN.
 - PG49a8/Redis98c4 not activated; Windows UNKNOWN retains Linux absence proof.
-  Both candidates now loaded both hosts. Native0bd closed d27/b651; preparation
-  failure preserved, distinct PG02 daa94 passed actual Native LOAD0a6f760f.
+  Both loaded; NativePG02/LOAD0a6f760f passed; failed0bd/closures preserved.
 - All ten Market candidates loaded on intended hosts, none activated.
   Old batch stays FAILED; distinct proven-no-request E46 authority succeeded.
   E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
@@ -35,7 +35,7 @@
   Compose parity may consume in RAM; no private value hashes/output. Admit
   leaf/full9 before open, FD/full9 before payload; retain FDs/parents through end.
 - Env/secret aliases require raw-parent and resolved-held-leaf checks; hidden hops refuse.
-- CI40215599492 passed611 Root/0skips. Require genuine UID0/CAP_CHOWN/result2;
+- Register Root modules; fixture inputs Git-only. Require UID0/CAP_CHOWN/result2;
   App smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixture; preserve
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.

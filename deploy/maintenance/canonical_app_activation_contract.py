@@ -433,7 +433,7 @@ COMPOSE_FIELDS = frozenset(('project','service','version','container-number','on
 SERVICE_FIELDS = frozenset(('image','container_name','command','entrypoint','environment','env_file','labels','logging',
     'restart','volumes','ports','expose','ulimits','depends_on','extra_hosts','networks','healthcheck','user','working_dir',
     'hostname','stop_signal','read_only','privileged','pid','userns_mode','cap_add','cap_drop','security_opt','group_add',
-    'init','cpus','mem_limit','memswap_limit','pids_limit'))
+    'init','cpus','mem_limit','memswap_limit','pids_limit','pull_policy'))
 
 
 def normal_labels(labels,model,service,scope,files,image,*,replacement=False):
@@ -468,6 +468,7 @@ def normal_baseline(model,service,row,image,scope,files,*,replacement=False):
     require(type(model) is dict and type(model.get('services')) is dict and service in model['services'],'normal_render')
     spec = model['services'][service]; cfg = row['config']; host = row['host']; defaults = image['Config']
     require(type(spec) is dict and set(spec) <= SERVICE_FIELDS,'normal_feature_scope')
+    require('pull_policy' not in spec or type(spec['pull_policy']) is str and spec['pull_policy'] == 'never','normal_pull_policy')
     require(type(cfg) is dict and set(cfg) <= CONFIG_FIELDS and {'Env','Cmd','Image','Labels','Hostname','User','WorkingDir'} <= set(cfg)
         and type(host) is dict and image_id(image['Id']) and row['image'] == image['Id']
         and cfg['Image'] == spec['image'] and row['name'] == '/'+spec['container_name'],'role_identity')
