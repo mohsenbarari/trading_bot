@@ -372,11 +372,13 @@ class MarketCompositionTests(unittest.TestCase):
         before={'inventory':{**{n:'old' for n in C.PACKAGES},'libc6':'2.41-12+deb13u4'},'libc_sha256':'a'*64,'app_and_python_sha256':'b'*64,'files':100,'bytes':1000}
         after=deepcopy(before);after['inventory'].update({n:r[0] for n,r in C.PACKAGES.items()})
         original={'payload':payload,'build':{'rootfs_layers':layers},'config':{'config':config}}
-        calls=[]
+        calls=[];tagged=[False]
         def docker(root,argv,**kwargs):
             calls.append(argv)
             if argv[:2]==['image','inspect']:return M.encoded([child if argv[-1]==image else parent])
-            if argv[:2]==['image','ls']:return b''
+            if argv[:2]==['image','ls']:return M.IMAGE.encode() if tagged[0] else b''
+            if argv[:2]==['image','tag']:tagged[0]=True
+            if argv[:2]==['image','rm']:tagged[0]=False
             if argv[0]=='build':
                 self.write(root/'candidate.id',image.encode());self.write(root/'reports/build.log',b'ordinary build');return b'ordinary build'
             return b'ordinary'
@@ -421,12 +423,54 @@ class MarketCompositionTests(unittest.TestCase):
             mocks.enter_context(patch.object(M.os,'statvfs',return_value=SimpleNamespace(f_bavail=20*1024**3,f_frsize=1)))
             for obj,name,value in patches:mocks.enter_context(patch.object(obj,name,side_effect=value) if callable(value) else patch.object(obj,name,value))
             M.compose(self.root,ROOT)
+            self.assertTrue(tagged[0]);self.assertFalse(any(a[:2]==['image','rm'] for a in calls))
+            raw_report={'SchemaVersion':2,'ArtifactType':'container_image','Metadata':{'ImageID':image,
+                'ImageConfig':{'config':config,'rootfs':{'diff_ids':child['RootFS']['Layers']}}},
+                'Results':[{'Class':'os-pkgs','Type':'debian','Vulnerabilities':[{'Severity':'UNKNOWN','VulnerabilityID':'CVE-public','PkgName':'ordinary'}]}]}
+            sbom={'bomFormat':'CycloneDX','metadata':{'component':{'type':'container','name':image,
+                'properties':[{'name':'aquasecurity:trivy:ImageID','value':image}]}},
+                'components':[{'name':n,'version':v[0]} for n,v in C.PACKAGES.items()]}
+            previous=os.umask(0o022)
+            try:
+                for name,value in (('vulnerabilities.json',raw_report),('sbom.cdx.json',sbom)):
+                    path=self.root/'reports'/name;before_mode=path.stat()
+                    self.assertEqual(stat.S_IMODE(before_mode.st_mode),0o600);self.assertEqual(before_mode.st_size,0)
+                    self.assertEqual(before_mode.st_nlink,1);self.assertEqual(before_mode.st_uid,os.geteuid())
+                    # Ordinary scanner-style truncation under a separate 022
+                    # process umask must preserve the exclusive 0600 inode.
+                    with path.open('wb') as output:output.write(M.encoded(value))
+                    self.assertEqual(path.stat().st_ino,before_mode.st_ino);self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
+            finally:os.umask(previous)
+            def export(root,target):
+                self.assertEqual(target,image);self.assertTrue(tagged[0]);self.assertFalse(any(a[:2]==['image','rm'] for a in calls))
+                raw=b'ordinary inert export fixture';M.write(root/'candidate-image.tar.gz',raw)
+                return {'name':'candidate-image.tar.gz','format':'docker-archive+gzip','size_bytes':len(raw),
+                    'sha256':sha256(raw).hexdigest(),'uncompressed_bytes':10240}
+            mocks.enter_context(patch.object(C,'export_image',side_effect=export))
+            M.finalize(self.root)
+            exported=json.loads((self.root/'image-export.json').read_bytes())
+            self.assertEqual(exported['image_id'],image);self.assertEqual(exported['raw_counts']['UNKNOWN'],1)
+            self.assertFalse(exported['security_accepted']);self.assertEqual(exported['reports_sha256']['vulnerabilities.json'],sha256(M.encoded(raw_report)).hexdigest())
+            self.assertTrue(tagged[0]);M.cleanup(self.root);self.assertFalse(tagged[0])
         result=json.loads((self.root/'reports/composition.json').read_bytes())
         self.assertEqual(result['historical_tests'],85);self.assertFalse(result['security_accepted'])
         self.assertEqual(result['baseline_config'],config);self.assertEqual(result['candidate_layers'],child['RootFS']['Layers'])
         self.assertEqual(len(result['evidence_sha256']),len(M.REPORTS))
         self.assertEqual(calls[0][:2],['image','load']);self.assertIn(['image','tag',M.IMAGE,M.alias_plan()['name']],calls)
-        self.assertFalse(any(a[:2]==['image','rm'] for a in calls),'alias must survive through finalize/export')
+        self.assertEqual(calls[-1],['image','rm','--no-prune',M.alias_plan()['name']])
+
+    def test_unprepared_scanner_mode_refuses_and_report_precreation_never_adopts_alias(self):
+        (self.root/'reports').mkdir();path=self.root/'reports/vulnerabilities.json'
+        previous=os.umask(0o022)
+        try:
+            with path.open('wb') as target:target.write(b'{"ordinary_public_report":true}\n')
+        finally:os.umask(previous)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o644)
+        with self.assertRaisesRegex(RuntimeError,'input_metadata'):M.read(path)
+        with self.assertRaises(FileExistsError):M.write(path,b'')
+        path.unlink();outside=self.write(self.root/'unrelated',b'unchanged');path.symlink_to(outside)
+        with self.assertRaises(FileExistsError):M.write(path,b'')
+        self.assertEqual(outside.read_bytes(),b'unchanged')
 
     def test_workflow_keeps_three_mutually_exclusive_lanes_and_cleanup_after_export(self):
         import yaml

@@ -635,7 +635,11 @@ def compose(root,repo):
             'full_runtime_matrix_completed':False,'security_accepted':False,'deployment_eligible':False,
             'raw_scanner_gate_waived':False,'production_installed':False,'deployment_performed':False,
             'buildkit_resource_cgroup_asserted':False,'evidence_sha256':evidence_hashes(root)}
-        write(root/'reports/composition.json',encoded(record));write(root/'empty-trivy.yaml',b'{}\n');phase(root,'composition_complete')
+        write(root/'reports/composition.json',encoded(record))
+        # Scanner actions run in later processes with their own umask. Normal
+        # truncating writes preserve these exclusively created private modes.
+        for name in ('vulnerabilities.json','sbom.cdx.json'):write(root/'reports'/name,b'')
+        write(root/'empty-trivy.yaml',b'{}\n');phase(root,'composition_complete')
         with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('image_id='+image+'\n')
 
 

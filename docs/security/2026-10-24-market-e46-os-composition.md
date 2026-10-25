@@ -2,8 +2,9 @@
 
 This default-off `market_e46_os` lane in the existing OS composition workflow
 reuses one tested E46 candidate, without rebuilding its product or Python
-dependencies. The first actual composition run refused before loading an image,
-as recorded below. The correction has not rerun. It grants no deployment,
+dependencies. The first actual composition run refused before loading an image;
+the second built, tested and scanned but refused before export. The latest report
+publication correction has not rerun. This lane grants no deployment,
 scanner exception or acceptance. App and datastore jobs keep their own inputs;
 requesting a datastore profile together with this lane refuses admission.
 
@@ -110,4 +111,31 @@ The admission receipt explicitly reports lossy history projection and whether
 the full metadata was identical. Legacy compatibility JSON is still derived
 from the authenticated actual raw config. No generic time normalization or
 unknown-field omission is added, and no second large ZIP or image layer download
-was made. The corrected source still requires actual CI and independent review.
+was made. That projection passed in the next actual run below.
+
+Actual [run40145037090](https://github.com/mohsenbarari/trading_bot/actions/runs/40145037090)
+at source `ed86e9da46b726b2dd7c0493a172a7b7e1552bdc` admitted all17 actual
+legacy compatibility configs, installed exactly the fifteen DEBs and built
+`sha256:673144af965c8c51d53995bd67cd43ecb64ca17000af2717f666e5d2f90af8dc`.
+The complete Config, protected three-tree fingerprint and libc stayed equal;
+all85 historical cases passed with zero skips, as did native checks and both
+observational probes. Both raw scans finished. Their untouched counts are
+0CRITICAL/44HIGH/69MEDIUM/83LOW/1UNKNOWN, including the same eight HIGH advisory
+IDs. Those rows remain unwaived. The239,874-byte public evidence ZIP12579794692
+has SHA256 `a31821921ff2ac2fb25d4ec9c52bf39d898f650a77dc0efa259f4a18be6def43`.
+All19 composition evidence hashes, package deltas, raw-image/Config/RootFS and
+SBOM package pins independently replayed successfully from that evidence.
+
+Finalization refused `raw_reports/input_metadata` before export. The recipe had
+omitted the existing helper's exclusive0600 precreation of raw/SBOM files. Later
+scanner actions run under separate process umasks and can create new0644 files,
+which the intentionally strict reader refuses. The failure artifact does not
+retain the original inode mode, so it is not presented as a direct mode
+observation. The source integration flaw is reproduced with real077-to-022
+file writes. The correction exclusively creates both empty0600 report files
+before handoff; ordinary scanner truncation then preserves those owned inodes.
+Existing files, symlinks and aliases are never adopted. The strict reader is
+unchanged. An executable controller fixture now covers compose, separate-umask
+report writes, final validation/export and only-then alias cleanup. The candidate
+from this failed run was not exported or made deployable; the publication
+correction still needs independent review and actual CI.
