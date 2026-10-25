@@ -626,7 +626,7 @@ CLOSED_CLASSES=frozenset(('RuntimeError','AssertionError','OSError','FileNotFoun
     'TimeoutExpired','ImportError','ModuleNotFoundError','AttributeError','NameError','TypeError','ValueError','KeyError',
     'ValidationError','OperationalError','ProgrammingError','IntegrityError','InvalidRequestError','ConnectionError',
     'ConnectionRefusedError','InvalidPasswordError','NoReferencedTableError'))
-CLOSED_CODES = frozenset(['actual_migration_head', 'actual_production_fixture_config', 'actual_redis_expiry', 'actual_scratch_migration_failed', 'actual_sms_delivery', 'album_caption_policy', 'album_committed_twice', 'album_idempotent_message_ids', 'album_order', 'album_rows_persisted_without_duplicates', 'authenticated_identity', 'cancel_fixture_exists', 'cancel_removes_temporary_file', 'cancelled_session_state', 'decoded_image_pixels', 'diagnostic_phase', 'fake_sms_exact_count', 'fake_sms_fixture_scope', 'fake_sms_parameter', 'fake_sms_reaped', 'fake_sms_request_bound', 'fake_sms_shape', 'http_delete_200', 'http_delete_201', 'http_delete_400', 'http_delete_401', 'http_delete_403', 'http_delete_404', 'http_delete_409', 'http_get_200', 'http_get_201', 'http_get_400', 'http_get_401', 'http_get_403', 'http_get_404', 'http_get_409', 'http_patch_200', 'http_patch_201', 'http_patch_400', 'http_patch_401', 'http_patch_403', 'http_patch_404', 'http_patch_409', 'http_post_200', 'http_post_201', 'http_post_400', 'http_post_401', 'http_post_403', 'http_post_404', 'http_post_409', 'installed_module_origin', 'invalid_otp_never_creates_session', 'multipart_real_image_processing', 'no_dependency_overrides', 'otp_expiry_fixture_exists', 'public_receipt_bound', 'real_session_tokens', 'runtime_cleanup_failed', 'selected_test_count', 'selected_test_inventory', 'selected_test_pin', 'selected_tests_failed', 'sid_required', 'sms_recipient', 'upload_ready'])
+CLOSED_CODES = frozenset(['actual_migration_head', 'actual_production_fixture_config', 'actual_redis_expiry', 'actual_scratch_migration_failed', 'actual_sms_delivery', 'album_caption_policy', 'album_commit_facts', 'album_committed_twice', 'album_idempotent_message_ids', 'album_order', 'album_rows_persisted_without_duplicates', 'authenticated_identity', 'cancel_fixture_exists', 'cancel_removes_temporary_file', 'cancelled_session_state', 'decoded_image_pixels', 'diagnostic_phase', 'fake_sms_exact_count', 'fake_sms_fixture_scope', 'fake_sms_parameter', 'fake_sms_reaped', 'fake_sms_request_bound', 'fake_sms_shape', 'http_delete_200', 'http_delete_201', 'http_delete_400', 'http_delete_401', 'http_delete_403', 'http_delete_404', 'http_delete_409', 'http_get_200', 'http_get_201', 'http_get_400', 'http_get_401', 'http_get_403', 'http_get_404', 'http_get_409', 'http_patch_200', 'http_patch_201', 'http_patch_400', 'http_patch_401', 'http_patch_403', 'http_patch_404', 'http_patch_409', 'http_post_200', 'http_post_201', 'http_post_400', 'http_post_401', 'http_post_403', 'http_post_404', 'http_post_409', 'installed_module_origin', 'invalid_otp_never_creates_session', 'multipart_real_image_processing', 'no_dependency_overrides', 'otp_expiry_fixture_exists', 'public_receipt_bound', 'real_session_tokens', 'runtime_cleanup_failed', 'selected_test_count', 'selected_test_inventory', 'selected_test_pin', 'selected_tests_failed', 'sid_required', 'sms_recipient', 'upload_ready'])
 def need(ok,code):
     if not ok:raise RuntimeError(code)
 def phase(label):
@@ -648,6 +648,47 @@ def check_origins():
         if name=='main' or name.split('.')[0] in {'api','core','models','bot','src'}:
             path=getattr(module,'__file__',None)
             if path:need(pathlib.Path(path).resolve().is_relative_to('/app'),'installed_module_origin')
+
+def album_message_facts(messages,batch,file_ids):
+    need(type(messages) is list and len(messages)==2 and type(batch) is str
+        and type(file_ids) is list and len(file_ids)==2
+        and all(type(value) is str for value in file_ids) and len(set(file_ids))==2,'album_commit_facts')
+    def unique_object(pairs):
+        value={}
+        for key,item in pairs:
+            need(key not in value,'album_commit_facts');value[key]=item
+        return value
+    facts=[]
+    for row in messages:
+        need(type(row) is dict and type(row.get('id')) is int and row['id']>0
+            and type(row.get('content')) is str,'album_commit_facts')
+        try:
+            content=json.loads(row['content'],object_pairs_hook=unique_object,
+                parse_constant=lambda _:need(False,'album_commit_facts'))
+        except (ValueError,TypeError):need(False,'album_commit_facts')
+        need(type(content) is dict and content.get('album_id')==batch
+            and type(content.get('album_index')) is int and content['album_index'] in (0,1)
+            and content.get('file_id')==file_ids[content['album_index']],'album_commit_facts')
+        # Compare every parsed fact without Python's bool/int or int/float aliases.
+        try:canonical=json.dumps(content,sort_keys=True,separators=(',',':'),allow_nan=False)
+        except (ValueError,TypeError):need(False,'album_commit_facts')
+        facts.append((content['album_index'],row['id'],canonical))
+    need({item[0] for item in facts}=={0,1} and len({item[1] for item in facts})==2,'album_commit_facts')
+    return sorted(facts,key=lambda item:item[0])
+
+def album_commit_facts(value,batch,file_ids,expected=None):
+    need(type(value) is dict and value.get('batch_id')==batch and value.get('status')=='committed'
+        and type(value.get('committed_items')) is int and value['committed_items']==2,'album_commit_facts')
+    facts=album_message_facts(value.get('messages'),batch,file_ids)
+    if expected is not None:
+        need({item[1] for item in facts}=={item[1] for item in expected}
+            and facts==expected,'album_idempotent_message_ids')
+    return facts
+
+def verify_album_persistence(messages,batch,file_ids,expected,count,total,before_count):
+    need(type(count) is int and type(total) is int and type(before_count) is int
+        and count==2 and total==before_count+2,'album_rows_persisted_without_duplicates')
+    need(album_message_facts(messages,batch,file_ids)==expected,'album_rows_persisted_without_duplicates')
 
 class FakeSMS(http.server.BaseHTTPRequestHandler):
     records=[]
@@ -812,12 +853,15 @@ async def runtime():
                     contents=[json.loads(row['content']) for row in result['messages']]
                     need([row['album_index'] for row in contents]==[0,1] and [row['file_id'] for row in contents]==[f for _,f in sorted(files)],'album_order')
                     need(contents[0].get('caption')=='ordinary caption' and not contents[1].get('caption'),'album_caption_policy')
+                    file_ids=[file_id for _,file_id in sorted(files)]
+                    facts=album_commit_facts(result,batch,file_ids)
                     repeated=(await request(client,'POST','/chat/upload-batches/'+batch+'/commit',who='alice')).json()
-                    need([row['id'] for row in repeated['messages']]==ids,'album_idempotent_message_ids')
+                    album_commit_facts(repeated,batch,file_ids,expected=facts)
                     async with AsyncSessionLocal() as db:
                         count=int((await db.execute(select(func.count()).select_from(Message).where(Message.id.in_(ids)))).scalar_one())
                         total=int((await db.execute(select(func.count()).select_from(Message))).scalar_one())
-                        need(count==2 and total==before_count+2,'album_rows_persisted_without_duplicates')
+                        stored=list((await db.execute(select(Message).where(Message.id.in_(ids)))).scalars().all())
+                        verify_album_persistence([{'id':row.id,'content':row.content} for row in stored],batch,file_ids,facts,count,total,before_count)
                     for _,file_id in files:
                         await read_file(client,file_id,'bob');await read_file(client,file_id,'outsider',expected=403)
                 async def cancel():

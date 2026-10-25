@@ -125,6 +125,96 @@ class AppImageCISmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'fake_sms_request_bound'):handler.do_POST()
         handler.rfile.read.assert_not_called()
 
+    def album_contract(self,kind='direct'):
+        names={'album_message_facts','album_commit_facts','verify_album_persistence'}
+        nodes=[node for node in ast.parse(M.CAPSULE).body if isinstance(node,ast.FunctionDef) and node.name in names]
+        self.assertEqual({node.name for node in nodes},names)
+        ns={'json':json,'need':M.need}
+        exec(compile(ast.Module(body=nodes,type_ignores=[]),'<owned-album-contract>','exec'),ns)
+        batch='ci-album-'+kind;files=['public-file-zero','public-file-one']
+        messages=[]
+        for index,message_id in enumerate((101,202)):
+            content={'album_id':batch,'album_index':index,'file_id':files[index],'width':2,'height':2,
+                'additional':{'counter':1,'enabled':False,'labels':['ordinary','metadata']}}
+            if index==0:content['caption']='ordinary caption'
+            messages.append({'id':message_id,'content':json.dumps(content)})
+        payload={'batch_id':batch,'status':'committed','committed_items':2,'messages':messages}
+        return ns,batch,files,payload,ns['album_commit_facts'](payload,batch,files)
+
+    def test_album_contract_accepts_ordered_and_reordered_replay_with_all_persisted_facts(self):
+        for kind in ('direct','group'):
+            with self.subTest(kind=kind):
+                ns,batch,files,payload,facts=self.album_contract(kind)
+                self.assertEqual(ns['album_commit_facts'](payload,batch,files,expected=facts),facts)
+                repeated=deepcopy(payload);repeated['messages'].reverse()
+                for row in repeated['messages']:
+                    content=json.loads(row['content'])
+                    row['content']=json.dumps(dict(reversed(list(content.items()))))
+                self.assertEqual(ns['album_commit_facts'](repeated,batch,files,expected=facts),facts)
+                ns['verify_album_persistence'](repeated['messages'],batch,files,facts,2,9,7)
+
+    def test_album_contract_refuses_replay_envelope_cardinality_and_id_tampering(self):
+        ns,batch,files,payload,facts=self.album_contract();variants=[]
+        for key,values in (('batch_id',(None,'foreign-batch')),('status',(None,'pending')),
+                           ('committed_items',(None,1,True,2.0)),('messages',(None,{},[],payload['messages'][:1],payload['messages']*2))):
+            for value in values:
+                bad=deepcopy(payload);bad[key]=value;variants.append((key,bad,'album_commit_facts'))
+        for key in ('batch_id','status','committed_items','messages'):
+            bad=deepcopy(payload);del bad[key];variants.append(('missing-'+key,bad,'album_commit_facts'))
+        bad=deepcopy(payload);bad['messages']=tuple(bad['messages']);variants.append(('tuple-messages',bad,'album_commit_facts'))
+        bad=deepcopy(payload);bad['messages'][0]=None;variants.append(('non-object-message',bad,'album_commit_facts'))
+        for value in (None,True,101.0,'101',0,-1,202):
+            bad=deepcopy(payload);bad['messages'][0]['id']=value;variants.append(('invalid-or-duplicate-id',bad,'album_commit_facts'))
+        bad=deepcopy(payload);del bad['messages'][0]['id'];variants.append(('missing-id',bad,'album_commit_facts'))
+        bad=deepcopy(payload);bad['messages'][0]['id']=303;variants.append(('changed-id',bad,'album_idempotent_message_ids'))
+        bad=deepcopy(payload);bad['messages'][0]['id'],bad['messages'][1]['id']=bad['messages'][1]['id'],bad['messages'][0]['id']
+        variants.append(('same-id-set-wrong-index-association',bad,'album_idempotent_message_ids'))
+        for label,bad,code in variants:
+            with self.subTest(label=label),self.assertRaisesRegex(RuntimeError,'^'+code+'$'):
+                ns['album_commit_facts'](bad,batch,files,expected=facts)
+
+    def test_album_contract_refuses_metadata_caption_and_complete_content_tampering(self):
+        ns,batch,files,payload,facts=self.album_contract();variants=[]
+        for raw in (None,'not-json','[]','null','1','{"album_index":0,"album_index":1}',
+                    '{"album_id":"'+batch+'","album_index":0,"file_id":"'+files[0]+'","x":{"a":1,"a":2}}',
+                    '{"album_id":"'+batch+'","album_index":0,"file_id":"'+files[0]+'","x":NaN}',
+                    '{"album_id":"'+batch+'","album_index":0,"file_id":"'+files[0]+'","x":1e9999}'):
+            bad=deepcopy(payload);bad['messages'][0]['content']=raw;variants.append(('malformed-content',bad,'album_commit_facts'))
+        for key,values in (('album_id',(None,'foreign-batch')),('album_index',(None,-1,1,2,True,0.0,'0')),
+                           ('file_id',(None,'foreign-file',files[1]))):
+            for value in values:
+                bad=deepcopy(payload);content=json.loads(bad['messages'][0]['content']);content[key]=value
+                bad['messages'][0]['content']=json.dumps(content);variants.append((key,bad,'album_commit_facts'))
+        for key in ('album_id','album_index','file_id'):
+            bad=deepcopy(payload);content=json.loads(bad['messages'][0]['content']);del content[key]
+            bad['messages'][0]['content']=json.dumps(content);variants.append(('missing-'+key,bad,'album_commit_facts'))
+        bad=deepcopy(payload);content=json.loads(bad['messages'][0]['content']);content.update(album_index=1,file_id=files[1])
+        bad['messages'][0]['content']=json.dumps(content);variants.append(('duplicate-index-with-valid-file',bad,'album_commit_facts'))
+        for index,change in ((0,lambda c:c.update(caption='changed')),(0,lambda c:c.pop('caption')),
+                             (1,lambda c:c.update(caption='unexpected')),(0,lambda c:c.update(new_fact='changed')),
+                             (0,lambda c:c.pop('width')),(0,lambda c:c['additional'].update(counter=True)),
+                             (0,lambda c:c['additional'].update(counter=1.0)),(0,lambda c:c['additional'].update(enabled=0)),
+                             (0,lambda c:c['additional']['labels'].reverse())):
+            bad=deepcopy(payload);content=json.loads(bad['messages'][index]['content']);change(content)
+            bad['messages'][index]['content']=json.dumps(content);variants.append(('complete-fact-drift',bad,'album_idempotent_message_ids'))
+        for label,bad,code in variants:
+            with self.subTest(label=label),self.assertRaisesRegex(RuntimeError,'^'+code+'$'):
+                ns['album_commit_facts'](bad,batch,files,expected=facts)
+
+    def test_album_contract_refuses_persisted_id_content_and_count_drift(self):
+        ns,batch,files,payload,facts=self.album_contract()
+        for count,total,before in ((1,9,7),(2,10,7),(2,8,7),(2.0,9,7),(2,9.0,7),(2,9,7.0),(True,9,7)):
+            with self.subTest(count=count,total=total,before=before),self.assertRaisesRegex(RuntimeError,'^album_rows_persisted_without_duplicates$'):
+                ns['verify_album_persistence'](payload['messages'],batch,files,facts,count,total,before)
+        missing=deepcopy(payload['messages'][:1]);duplicate=deepcopy(payload['messages']);duplicate[1]=deepcopy(duplicate[0])
+        changed_id=deepcopy(payload['messages']);changed_id[0]['id']=303
+        swapped_ids=deepcopy(payload['messages']);swapped_ids[0]['id'],swapped_ids[1]['id']=swapped_ids[1]['id'],swapped_ids[0]['id']
+        changed_content=deepcopy(payload['messages']);content=json.loads(changed_content[0]['content']);content['additional']['counter']=9
+        changed_content[0]['content']=json.dumps(content)
+        for rows in (missing,duplicate,changed_id,swapped_ids,changed_content):
+            with self.subTest(rows=rows),self.assertRaisesRegex(RuntimeError,'^album_commit_facts$|^album_rows_persisted_without_duplicates$'):
+                ns['verify_album_persistence'](rows,batch,files,facts,2,9,7)
+
     def test_public_scratch_configuration_has_real_role_and_no_auth_shortcut_or_provider(self):
         env=M.fixture_env('coin_intelligence_ci_0123456789ab')
         self.assertEqual(env['ENVIRONMENT'],'production');self.assertEqual(env['TRADING_BOT_SERVICE'],'api');self.assertEqual(env['SERVER_MODE'],'iran')

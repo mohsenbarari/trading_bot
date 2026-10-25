@@ -241,3 +241,36 @@ validator changed. Root independently verified all219 fields construct with the
 corrected fixture and three negative production guard inputs still refuse.
 All61 genuineUID1001 fenced regressions then passed in3.427s, without skips.
 An actual new hosted result remains required before claiming any32-case success.
+
+## Eighth actual run: five runtime cases passed, canonical album replay check
+
+Run40181756210 on639d9d48 passed migration, production Settings validation and
+the first five actual runtime cases. The sixth case reached direct album commit
+and failed at `album_idempotent_message_ids`; runtime attempted6/passed5,
+components0/24. The original first-commit order, file mapping and first-only
+caption checks had already passed. Owned cleanup completed without causes,
+retaining the primary failure. Artifact12594710546 is5423bytes, SHA256
+`1d69c691282a444573e8f531b84f307cbf95e841a3e68ffebb6f8acc8865f921`.
+
+The original assertion equated replay wire-array order with album identity.
+The frozen service sorts initial commit by album_index but rebuilds replay
+IDs in session creation order. The fixture deliberately creates sessions1,0.
+Existing frontend handling sorts replay by album_index, and its existing
+retry tests deliberately return wire1,0 while requiring visible0,1. This is
+consistent with the documented metadata-based album contract; no replay wire
+order promise was found. No product code is changed to satisfy the smoke.
+
+The revised check retains first-commit wire0,1, file order and first-caption
+assertions. Replay must have the same batch, committed status, typed count2,
+two unique positive IDs and typed indices exactly0,1. Canonical index-to-ID and
+complete strict JSON content must match the original, including file/caption
+and every nested fact. Duplicate keys, nonfinite values and bool/int/float
+aliases cannot pass. Database verification retains both existing count checks
+and additionally compares the full stored ID/content association. Reordered
+wire rows alone are accepted; changed facts or duplicate application are not.
+
+Root independently passed all65 regressions as genuineUID1001 with all
+capabilities dropped and ambient effects fenced (3.837s, no skips). Independent
+source review found no blocker. Group, cancellation and the24 component cases
+still require a new actual hosted result. This source correction grants no
+serving activation or global security acceptance.
