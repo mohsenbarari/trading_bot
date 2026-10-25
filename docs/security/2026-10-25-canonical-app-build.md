@@ -110,9 +110,46 @@ offline exercise admitted the three exact public ZIPs, prepared/check-verified/
 reused the16-file cache, with no network or package commands. Shell syntax and
 focused ordering/prebuilt/cold-parent/capability tests passed.
 
-No ordinary image build or serving activation is claimed by these source tests.
-The next gates are an actual current-main image build, fresh native/ABI/App and
+Actual CI40187533525 on700c40ead2 completed all12 browser backend bootstraps,
+each preparing and installing the15 admitted packages with manifest11f0b906.
+The three former-failing history shard4 jobs each passed48 browser tests.
+These results prove those ordinary builds and scenarios, not a release export
+or serving activation. The next gates are a provenance-bound image export,
+fresh native/ABI/App and
 scan evidence, truthful normal release provenance and verified scoped activation
 with backups/rollback. Historical ed59 evidence cannot substitute for those
 results. Raw findings and conditional assessments remain visible; global
 security acceptance stays false, refactor STOP and its clean-unit streak0.
+
+## Canonical hosted export
+
+The separate manual main-only workflow `canonical-app-image.yml` builds the
+ordinary Dockerfile from its actual dispatched Git commit. Its standalone
+helper verifies the clean checkout, Git blobs and retained public source FDs,
+then prepares the authenticated OS cache before normal frontend npm ci/build.
+Only tracked COPY inputs, the exact15 authenticated DEBs/cache manifest, and
+normal generated frontend output are admitted; unknown ignored input files
+refuse before content read/hash. Source FD capacity is checked before opening.
+
+The build computes the existing foreign-image signature byte format, including
+empty-directory behavior. Actual commit/tree/signature labels are supplied to
+that real build, with source and generated-input checks repeated afterward.
+No guarded deployment wrapper is sourced or changed. This does not turn the
+historical ed59 image into a main release or consume the dirty production tree.
+
+The exact built image receives unfiltered Trivy0.76.1 JSON and CycloneDX SBOM.
+Both report bindings, complete Config comparisons in RAM, archive Config digest,
+whole RootFS association, bounded export/gzip hashes and input manifests enter
+the unsigned public evidence. Native ABI receipts state only the completed
+ordinary Dockerfile checks. Full physical archive admission remains a separate
+receiving gate. No production configuration or host data enters this job.
+
+The image artifact lasts7 days and evidence30 days; both upload before the final
+unchanged strict HIGH/CRITICAL raw gate. A raw finding keeps that gate failed;
+exported_not_accepted, signatures_verified:false and security_accepted:false
+cannot authorize activation. Root and an independent reviewer each passed all
+14 new hermetic tests, including real bounded owned Python children and literal
+ordinary signature comparison; core/cache combined91 tests also passed.
+No actual run/export of this new workflow is claimed yet. A separately reviewed
+App-only immutable-artifact activation contract is still required; existing
+C/S/R/COW guards remain untouched.

@@ -22,6 +22,10 @@
 - PG49a8/Redis98c4 built/scanned, not activated; PG Windows-only UNKNOWN retains
   Linux code-absence proof. E46 2c6 and nine exact Market overlays exported;
   raw44HIGH remain. Preserve F79's two source overrides and failed evidence.
+- Market05 a37 actual Native LOAD ce20b50b passed; exact consumed316MB public
+  archives removed. f365 receive failed at peer capture_singleton before Web
+  attempt; retain failed intent/guards for reconciliation, never blind retry.
+  Canonical App export source tested; actual export/activation still pending.
 - Expired windows/receipts grant no future authority. Unknown RPC never implies
   cancellation or retry. Config and OCI manifest identities are distinct; classic
   Config branches never query Descriptor. Repeated logical OCI layer references
