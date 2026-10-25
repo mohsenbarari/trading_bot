@@ -4,6 +4,7 @@ The same sealed source runs in a finite scope on either site. Native coordinatio
 holds the existing empty SOURCE inode. Unknown RPCs retain durable ownership.
 """
 from contextlib import ExitStack
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
@@ -25,7 +26,7 @@ import sys
 import time
 import zipfile
 
-OPERATION = 'security-market-candidate-images-20261025-04'
+OPERATION = 'security-market-candidate-images-20261025-05'
 CATALOG_SHA = 'c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 TOOLS = {'bot': Path('/root/trading-bot/trading_bot/.local')/OPERATION,
          'web': Path('/srv/trading-bot')/OPERATION}
@@ -41,9 +42,15 @@ SSH = ['/usr/bin/ssh','-F','/dev/null','-p','37067','-oBatchMode=yes',
        '-oClearAllForwardings=yes','-oConnectTimeout=15','root@65.109.220.59']
 LIMIT = 2*1024**2
 MARGIN = 64*1024**2
-CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-04'
+CONFIRM = 'MARKET-IMAGE-STORES-ONLY-20261025-05'
 PHASES = ('receive-web','load-web','load-native')
 CAPTURE = '6a16c8a1b4cdab3b4bcd2a0d4d4998ced7a455cc6c364255e5e0e3dacd9c2752'
+F79_IMAGE = 'sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b'
+F79_NETWORKS = ('market-private-pipeline-primary_market-backend','market-private-pipeline-primary_market-transport')
+LEGACY_A37_RECEIPT = 'c1663097b171be0ac25addd1735f8cafe21d4a512c678d96ef91fd10a30878f9'
+LEGACY_A37_ID = (2049,414908,33152,0,0,1,188969984,1792920206227410856,1792920206227410856)
+LEGACY_A37_SHA = '334b0f56761526be10f4ca45d8c6ef966464f7061e359bbe33075455b4646ed5'
+LEGACY_A37_TAR = Path('/srv/trading-bot/security-market-candidate-images-20261025-04/attempts/a37ec78ec097-receive-web/source.tar')
 SUBPHASE = 'control_admission'
 
 
@@ -243,20 +250,38 @@ def stop(child):
     child.wait(timeout=10)
 
 
-def command(ctx, argv, *, maximum=LIMIT, stdin=subprocess.DEVNULL):
+def command_result(ctx, argv, *, maximum=LIMIT, stdin=subprocess.DEVNULL):
+    """Bounded owned client result; only the sealed peer caller admits nonzero JSON."""
     need(type(maximum) is int and 0<maximum<=LIMIT,'command_bound')
     ctx.capacity();fd=os.memfd_create('market-public-output',os.MFD_CLOEXEC)
-    child=None
+    child=None;primary=False;returncode=None
     try:
         child=subprocess.Popen(argv,stdin=stdin,stdout=fd,stderr=subprocess.DEVNULL,preexec_fn=lambda:bounds(maximum))
         while child.poll() is None:
             ctx.capacity();need(os.fstat(fd).st_size<=maximum,'command_output_bound');time.sleep(.05)
-        need(child.wait(timeout=1)==0 and os.fstat(fd).st_size<=maximum,'command_outcome_unknown')
-        return os.pread(fd,maximum+1,0)
+        returncode=child.wait(timeout=1)
+        need(type(returncode) is int and -255<=returncode<=255,'command_outcome_unknown')
+        need(os.fstat(fd).st_size<=maximum,'command_output_bound')
+        raw=os.pread(fd,maximum+1,0);need(len(raw)<=maximum,'command_output_bound')
+        return returncode,raw
+    except BaseException:primary=True;raise
     finally:
         try:
-            if child is not None:stop(child)
-        finally:os.close(fd)
+            try:
+                if child is not None:stop(child)
+            except BaseException:
+                if not primary and returncode in (None,0):raise
+                ctx.command_cleanup_unproven=True
+        finally:
+            try:os.close(fd)
+            except OSError:
+                if not primary and returncode in (None,0):raise
+                ctx.command_cleanup_unproven=True
+
+
+def command(ctx, argv, *, maximum=LIMIT, stdin=subprocess.DEVNULL):
+    returncode,raw=command_result(ctx,argv,maximum=maximum,stdin=stdin)
+    need(returncode==0,'command_outcome_unknown');return raw
 
 
 def snapshot(ctx):
@@ -289,9 +314,95 @@ def host_projection(value):
     return {**value,'LogConfig':{**{k:v for k,v in log.items() if k!='Config'},'options':log['Config']}}
 
 
+def utc_started(value):
+    if type(value) is not str or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z',value):return None
+    try:return datetime.fromisoformat(value[:-1]+'+00:00').timestamp()
+    except (ValueError,OverflowError):return None
+
+
+def image_store_equivalence(site,before,after,same,observed_at,previous=None):
+    """Pure, operation-baseline-bound exception for one fixed F79 restart only."""
+    if same(before,after):return None if previous is None else False
+    if site!='web' or type(before) is not list or type(after) is not list or len(before)!=27 or len(after)!=27:return False
+    if any(type(r) is not dict or type(r.get('id')) is not str for r in before+after):return False
+    old={r['id']:r for r in before};new={r['id']:r for r in after}
+    if len(old)!=27 or set(old)!=set(new) or CAPTURE not in old:return False
+    if any(not same(old[k],new[k]) for k in old if k!=CAPTURE):return False
+    a,b=old[CAPTURE],new[CAPTURE]
+    if not (a.get('image')==b.get('image')==F79_IMAGE and all(r.get('running') is True
+        and r.get('restarting') is False and r.get('health')=='healthy' for r in (a,b))
+        and type(a.get('restarts')) is int and a['restarts']>=0 and type(b.get('restarts')) is int
+        and b['restarts']==a['restarts']+1 and type(a.get('pid')) is int and a['pid']>0
+        and type(b.get('pid')) is int and b['pid']>0):return False
+    start,end=utc_started(a.get('started')),utc_started(b.get('started'))
+    if start is None or end is None or not start<end<=observed_at:return False
+    if type(a.get('networks')) is not dict or type(b.get('networks')) is not dict:return False
+    if set(a['networks'])!=set(F79_NETWORKS) or set(b['networks'])!=set(F79_NETWORKS) or any(type(n) is not dict for n in a['networks'].values()):return False
+    expected=dict(a);networks={name:dict(net) for name,net in a['networks'].items()}
+    for name in F79_NETWORKS:
+        net=b['networks'][name]
+        if type(net) is not dict or set(net)!=set(networks[name]):return False
+        endpoint,mac=net.get('EndpointID'),net.get('MacAddress')
+        if not (type(endpoint) is str and re.fullmatch('[a-f0-9]{64}',endpoint) and type(mac) is str
+            and re.fullmatch('(?:[a-f0-9]{2}:){5}[a-f0-9]{2}',mac) and int(mac[:2],16)&3==2):return False
+        networks[name].update(EndpointID=endpoint,MacAddress=mac)
+    expected.update(pid=b['pid'],started=b['started'],restarts=b['restarts'],networks=networks)
+    if not same(expected,b) or previous is not None and not same(previous,b):return False
+    return b
+
+
+def restart_observation(ctx,value):
+    fields={'schema','container_id','image_id','operation_sha256','nonce','baseline_restarts','observed_restarts',
+        'baseline_pid','observed_pid','baseline_started','observed_started','observed_at','generated_network_fields',
+        'capture_issue_open','security_accepted'}
+    if type(value) is not dict or set(value)!=fields:return None
+    baseline=ctx.op['baselines']['web']['containers'];rows=[r for r in baseline if r['id']==CAPTURE]
+    if len(rows)!=1:return None
+    a=rows[0];start,end=utc_started(value['baseline_started']),utc_started(value['observed_started'])
+    if not (value['schema']=='market_f79_image_store_restart/1' and value['container_id']==CAPTURE
+        and value['image_id']==a['image']==F79_IMAGE and a.get('running') is True and a.get('restarting') is False
+        and a.get('health')=='healthy' and type(a.get('restarts')) is int and a['restarts']>=0
+        and type(a.get('pid')) is int and a['pid']>0 and type(value['operation_sha256']) is str
+        and re.fullmatch('[a-f0-9]{64}',value['operation_sha256']) and value['operation_sha256']==ctx.pin
+        and type(value['nonce']) is str and re.fullmatch('[a-f0-9]{32}',value['nonce']) and value['nonce']==ctx.op['nonce']
+        and type(value['baseline_restarts']) is int and value['baseline_restarts']==a['restarts']
+        and type(value['observed_restarts']) is int and value['observed_restarts']==a['restarts']+1
+        and type(value['baseline_pid']) is int and value['baseline_pid']==a['pid']
+        and type(value['observed_pid']) is int and value['observed_pid']>0 and value['baseline_started']==a['started']
+        and type(value['observed_at']) is int and ctx.op['not_before']<=value['observed_at']<=ctx.op['deadline']
+        and start is not None and end is not None and start<end<=value['observed_at']
+        and value['capture_issue_open'] is True and value['security_accepted'] is False):return None
+    changes=value['generated_network_fields']
+    if type(changes) is not dict or set(changes)!=set(F79_NETWORKS):return None
+    for names in changes.values():
+        if type(names) is not list or any(type(k) is not str for k in names) or names!=sorted(set(names)) or set(names)-{'EndpointID','MacAddress'}:return None
+    return dict(value)
+
+
+def observation_details(ctx):
+    out={}
+    if ctx is not None:
+        for key in ('f79_restart_observation','peer_f79_restart_observation'):
+            try:value=restart_observation(ctx,getattr(ctx,key,None))
+            except Exception:value=None
+            if value is not None:out[key]=value
+    return out
+
+
 def stable(ctx):
-    now=snapshot(ctx)
-    need(ctx.D.same(now['containers'],ctx.baseline['containers']),'runtime_changed')
+    now=snapshot(ctx);previous=getattr(ctx,'f79_successor',None)
+    successor=image_store_equivalence(ctx.site,ctx.baseline['containers'],now['containers'],ctx.D.same,time.time(),previous)
+    need(successor is not False,'runtime_changed')
+    if successor is not None:
+        if previous is None:
+            a=next(r for r in ctx.baseline['containers'] if r['id']==CAPTURE)
+            changes={name:sorted(k for k in ('EndpointID','MacAddress') if a['networks'][name][k]!=successor['networks'][name][k]) for name in F79_NETWORKS}
+            ctx.f79_successor=document(encode(successor))
+            ctx.f79_restart_observation={'schema':'market_f79_image_store_restart/1','container_id':CAPTURE,'image_id':F79_IMAGE,
+                'operation_sha256':ctx.pin,'nonce':ctx.op['nonce'],'baseline_restarts':a['restarts'],'observed_restarts':successor['restarts'],
+                'baseline_pid':a['pid'],'observed_pid':successor['pid'],'baseline_started':a['started'],'observed_started':successor['started'],
+                'observed_at':min(ctx.op['deadline'],int(time.time())+1),'generated_network_fields':changes,'capture_issue_open':True,'security_accepted':False}
+        need(restart_observation(ctx,getattr(ctx,'f79_restart_observation',None)) is not None,'runtime_changed')
     return now
 
 
@@ -501,12 +612,33 @@ def source_archive(ctx):
          and re.fullmatch('[a-f0-9]{64}',value['archive_sha256'])
          and ctx.spec['candidate_config_id'] in value['source_identities'],'source_admission_budget')
     if ctx.spec.get('tar_sha256'):need(value['archive_sha256']==ctx.spec['tar_sha256'],'source_admission_sha256')
+    legacy_a37(ctx,value)
     return value
 
 
+def legacy_a37(ctx,admitted):
+    """One exact receipt/provenance adapter; no control-selected archive path."""
+    if ctx.op['admission_sha256']!=LEGACY_A37_RECEIPT:return False
+    need(ctx.op.get('operation')==OPERATION and ctx.op['phase']=='load-native' and ctx.spec['profile']=='a37ec78ec097'
+        and ctx.spec['site']=='native' and ctx.spec['candidate_config_id']=='sha256:0ed2df2f78031a5cdf2cfbb365388fd21c674d01849c075fb5e072b4fd874d6c'
+        and admitted['operation_sha256']=='6b5d72d72c8bf711f83d548fb3ec60b5d96fbb98b66392e02d5402f88bd894f6'
+        and admitted['reconciliation_nonce']=='fb41c0f002a84781bb948efcc989fef1'
+        and admitted['original_failed_operation_sha256']=='29f4d4bded8cd75cca2d9afb3685ccce7c14fc144742e5bcc3b96eb61f40014e'
+        and admitted['original_receive_completed'] is False and admitted['archive_receive_requested'] is False
+        and admitted['configuration_values_disclosed'] is False and admitted['archive_sha256']==LEGACY_A37_SHA
+        and ctx.D.same(admitted['tar_identity'],list(LEGACY_A37_ID)) and type(admitted['source_identities']) is dict,
+        'legacy_archive_binding')
+    return True
+
+
 def admitted_tar(ctx):
-    admitted=source_archive(ctx);path=ctx.root/'attempts'/(ctx.spec['profile']+'-receive-web')/'source.tar'
+    admitted=source_archive(ctx);path=ctx.root/'attempts'/(ctx.spec['profile']+'-receive-web')/'source.tar';ancestor=None
+    if legacy_a37(ctx,admitted):
+        need(ctx.site=='web' and ctx.args.phase=='stream-web','legacy_archive_binding');path=LEGACY_A37_TAR
+        ancestor=parents(path)
+        ctx.checks.append(lambda:check_parents(ancestor));check_parents(ancestor)
     fd,size,check=ctx.stack.enter_context(ctx.D.held(path,admitted['archive_bytes']))
+    if ancestor is not None:ctx.stack.callback(check_parents,ancestor)
     ctx.checks.append(check)
     need(identity(os.fstat(fd))==admitted['tar_identity'] and size==admitted['archive_bytes']
          and ctx.D.digest_fd(fd,size,ctx.end)==admitted['archive_sha256'],
@@ -535,6 +667,11 @@ def receive_web(ctx):
     need(proof['physical_graph_closed'] is True and proof['archive_bytes']==ctx.spec['archive']['uncompressed_bytes']
          and proof['rootfs_layers']==ctx.spec['candidate_rootfs'],'archive_identity')
     if ctx.spec.get('tar_sha256'):need(proof['archive_sha256']==ctx.spec['tar_sha256'],'archive_sha256')
+    # Informational RAM checkpoint only. Final capacity/runtime/admission gates follow.
+    ctx.archive_proof_checkpoint={'schema':'market_archive_proof_checkpoint/1','profile':ctx.spec['profile'],
+        'candidate_config_id':ctx.spec['candidate_config_id'],'archive_sha256':proof['archive_sha256'],
+        'archive_bytes':proof['archive_bytes'],'expanded_layer_bytes':proof['expanded_layer_bytes'],
+        'tar_identity':list(tar.before),'physical_graph_closed':True,'proof_only':True,'security_accepted':False}
     budget=2*proof['archive_bytes']+2*proof['expanded_layer_bytes'];ctx.budget=budget;ctx.capacity()
     before=stable(ctx);need(before['image_map']==ctx.baseline['image_map'],'image_map_changed')
     receipt={'schema':'market_candidate_archive/1','profile':ctx.spec['profile'],
@@ -636,6 +773,7 @@ def stream_web(ctx):
     header={'schema':'market_image_stream/1','profile':ctx.spec['profile'],'operation_sha256':ctx.pin,
         'admission_sha256':ctx.op['admission_sha256'],'archive_bytes':admitted['archive_bytes'],
         'archive_sha256':admitted['archive_sha256'],'tar_identity':admitted['tar_identity']}
+    if 'f79_restart_observation' in observation_details(ctx):header['f79_restart_observation']=ctx.f79_restart_observation
     frame(ctx,1,header);start=bytearray()
     while len(start)<6:
         block=read_part(ctx,0,6-len(start));need(block,'stream_start');start.extend(block)
@@ -648,7 +786,9 @@ def stream_web(ctx):
          and ctx.D.digest_fd(fd,offset,ctx.end)==admitted['archive_sha256'],'source_stream_changed')
     SUBPHASE='web_stream_final'
     need(stable(ctx)['image_map']==ctx.baseline['image_map'],'image_map_changed');ctx.check()
-    frame(ctx,1,{**header,'schema':'market_image_stream_complete/1','source_fd_held_and_verified':True})
+    footer={**header,'schema':'market_image_stream_complete/1','source_fd_held_and_verified':True}
+    if 'f79_restart_observation' in observation_details(ctx):footer['f79_restart_observation']=ctx.f79_restart_observation
+    frame(ctx,1,footer)
     return None
 
 
@@ -658,7 +798,14 @@ def header(ctx,value,admitted,*,complete=False):
         'admission_sha256':ctx.op['admission_sha256'],'archive_bytes':admitted['archive_bytes'],
         'archive_sha256':admitted['archive_sha256'],'tar_identity':admitted['tar_identity']}
     if complete:expected['source_fd_held_and_verified']=True
+    observation=None;previous=getattr(ctx,'peer_f79_restart_observation',None)
+    if 'f79_restart_observation' in value:
+        observation=restart_observation(ctx,value['f79_restart_observation'])
+        need(observation is not None and (previous is None or ctx.D.same(previous,observation)),'stream_binding')
+        expected['f79_restart_observation']=observation
+    need(not complete or previous is None or observation is not None,'stream_binding')
     need(ctx.D.same(value,expected),'stream_binding')
+    if observation is not None:ctx.peer_f79_restart_observation=observation
 
 
 def clients_close(ctx,clients,streams):
@@ -731,13 +878,21 @@ def coordinate_web(ctx):
             fetch=subprocess.Popen(['/usr/bin/gh','api','--method','GET',f"repos/mohsenbarari/trading_bot/actions/artifacts/{row['id']}/zip"],
                 stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,preexec_fn=bounds)
             clients.append(fetch);streams.append(fetch.stdout);incoming=fetch.stdout
-        result=command(ctx,remote(ctx,ctx.op['phase']),stdin=incoming)
+        returncode,result=command_result(ctx,remote(ctx,ctx.op['phase']),stdin=incoming)
+        ctx.peer_returncode=returncode
+        if returncode!=0:
+            try:ctx.peer_failure=peer_failure(ctx,document(result),returncode)
+            except Exception:ctx.peer_failure=None  # Never promote malformed or arbitrary client output.
+            need(False,'command_outcome_unknown')
         if clients:
             while clients[0].poll() is None:ctx.capacity();time.sleep(.05)
             need(clients[0].wait(timeout=1)==0,'artifact_client_unknown')
         value=document(result);expected='archive_admitted_not_loaded' if ctx.op['phase']=='receive-web' else 'loaded_measured_not_accepted'
         need(value.get('status')==expected and value.get('security_accepted') is False
              and re.fullmatch('[a-f0-9]{64}',value.get('receipt_sha256','')),'remote_result')
+        if 'f79_restart_observation' in value:
+            observation=restart_observation(ctx,value['f79_restart_observation']);need(observation is not None,'remote_result')
+            ctx.peer_f79_restart_observation=observation
         need(stable(ctx)['image_map']==ctx.baseline['image_map'],'native_runtime_changed')
     except BaseException:primary=True;raise
     finally:
@@ -774,6 +929,82 @@ def exception_metadata(error):
         'os_errno':number if type(number) is int and 0<number<=4095 else None}
 
 
+PEER_CLASSES=frozenset(('OSError','BlockingIOError','PermissionError','FileNotFoundError','FileExistsError',
+    'NotADirectoryError','IsADirectoryError','TimeoutError','InterruptedError','RuntimeError',
+    'ValueError','TypeError','KeyError','AttributeError','AssertionError','other'))
+PEER_SUBPHASES=frozenset(('control_admission','attempt_mkdir','attempt_intent','snapshot_container_inventory',
+    'snapshot_container_contracts','snapshot_image_inventory','snapshot_daemon_unit_metadata','snapshot_store_info',
+    'snapshot_store_mount','snapshot_source_admission','archive_receive','archive_unpack','archive_graph_validation',
+    'web_source_admission','web_load_request','web_daemon_measurement','web_stream_source','web_stream_body',
+    'web_stream_final','native_source_admission','native_source_request','native_header','native_load_request',
+    'native_body','native_footer_eof','native_client_reap','native_daemon_measurement','web_phase_request',
+    'public_preflight','owned_fences','guard_reservation_admission','guard_reservation_create',
+    'guard_reservation_flock','guard_reservation_write','guard_reservation_check'))|frozenset(
+    'guard_'+name+'_'+stage for name in ('marker','source') for stage in ('admission','open','flock'))
+
+
+def proof_checkpoint(ctx,value):
+    fields={'schema','profile','candidate_config_id','archive_sha256','archive_bytes','expanded_layer_bytes',
+        'tar_identity','physical_graph_closed','proof_only','security_accepted'}
+    if type(value) is not dict or set(value)!=fields:return None
+    ident=value['tar_identity'];size=value['archive_bytes'];expanded=value['expanded_layer_bytes']
+    if not (value['schema']=='market_archive_proof_checkpoint/1' and value['profile']==ctx.spec['profile']
+        and type(value['candidate_config_id']) is str and re.fullmatch('sha256:[a-f0-9]{64}',value['candidate_config_id'])
+        and value['candidate_config_id']==ctx.spec['candidate_config_id']
+        and type(value['archive_sha256']) is str and re.fullmatch('[a-f0-9]{64}',value['archive_sha256'])
+        and (not ctx.spec.get('tar_sha256') or value['archive_sha256']==ctx.spec['tar_sha256'])
+        and type(size) is int and 0<size==ctx.spec['archive']['uncompressed_bytes']
+        and type(expanded) is int and 0<expanded<=512*1024**2
+        and type(ident) is list and len(ident)==9 and all(type(v) is int for v in ident)
+        and ident[0]>0 and ident[1]>0 and ident[2:6]==[0o100600,0,0,1] and ident[6]==size
+        and ident[7]>=0 and ident[8]>=0 and value['physical_graph_closed'] is True
+        and value['proof_only'] is True and value['security_accepted'] is False):return None
+    return dict(value)
+
+
+def peer_failure(ctx,value,returncode):
+    """Only the sealed peer's closed failure envelope may leave the owned memfd."""
+    fields={'status','phase','subphase','code','retry_allowed','security_accepted','exception_class','os_errno'}
+    optional={'archive_proof_checkpoint','client_cleanup_unproven','f79_restart_observation'}
+    if type(value) is not dict or not fields<=set(value) or set(value)-fields-optional:return None
+    number=value['os_errno'];codes=PUBLIC_CODES|getattr(ctx.D,'PUBLIC_FAILURE_CODES',frozenset())|{'refused_or_unknown'}
+    if not (type(returncode) is int and -255<=returncode<=255 and returncode!=0
+        and value['status']=='refused_or_unknown' and value['phase']==ctx.op['phase']
+        and type(value['subphase']) is str and value['subphase'] in PEER_SUBPHASES
+        and type(value['code']) is str and value['code'] in codes and value['retry_allowed'] is False
+        and value['security_accepted'] is False and type(value['exception_class']) is str
+        and value['exception_class'] in PEER_CLASSES and (number is None or type(number) is int and 0<number<=4095)
+        and ('client_cleanup_unproven' not in value or value['client_cleanup_unproven'] is True)):return None
+    out={key:value[key] for key in fields};out['returncode']=returncode
+    if 'archive_proof_checkpoint' in value:
+        if ctx.op['phase']!='receive-web':return None
+        checkpoint=proof_checkpoint(ctx,value['archive_proof_checkpoint'])
+        if checkpoint is None:return None
+        out['archive_proof_checkpoint']=checkpoint
+    if 'client_cleanup_unproven' in value:out['client_cleanup_unproven']=True
+    if 'f79_restart_observation' in value:
+        observation=restart_observation(ctx,value['f79_restart_observation'])
+        if observation is None:return None
+        out['f79_restart_observation']=observation
+    return out
+
+
+def failure_details(ctx):
+    if ctx is None:return {}
+    details={};returncode=getattr(ctx,'peer_returncode',None)
+    if type(returncode) is int and -255<=returncode<=255:details['peer_returncode']=returncode
+    if getattr(ctx,'command_cleanup_unproven',None) is True:details['client_cleanup_unproven']=True
+    try:
+        value=getattr(ctx,'peer_failure',None)
+        if type(value) is dict and value.get('returncode')==returncode:
+            value=peer_failure(ctx,{k:v for k,v in value.items() if k!='returncode'},returncode)
+            if value is not None:details['peer_failure']=value
+        checkpoint=proof_checkpoint(ctx,getattr(ctx,'archive_proof_checkpoint',None))
+        if checkpoint is not None:details['archive_proof_checkpoint']=checkpoint
+    except Exception:pass  # Optional diagnostics cannot replace the primary failure.
+    details.update(observation_details(ctx));public(details);need(len(encode(details))<=LIMIT,'output_bound');return details
+
+
 def main(argv=None):
     global SUBPHASE
     SUBPHASE='control_admission'
@@ -792,19 +1023,20 @@ def main(argv=None):
         with ExitStack() as stack:
             ctx=Context(args,stack);signal.alarm(max(1,int(ctx.end-time.monotonic())))
             result=run(ctx,args.apply is not None)
-            if result is not None:public(result);print(json.dumps(result,sort_keys=True))
+            if result is not None:
+                result={**result,**observation_details(ctx)};public(result);print(json.dumps(result,sort_keys=True))
         return 0
     except Exception as error:
         code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in PUBLIC_CODES else 'refused_or_unknown'
         if code=='refused_or_unknown' and ctx is not None:code=ctx.D.error_code(error)
         if args.phase!='stream-web':print(json.dumps({'status':'refused_or_unknown','phase':args.phase,
             'subphase':SUBPHASE,'code':code,'retry_allowed':False,'security_accepted':False,
-            **exception_metadata(error)},sort_keys=True))
+            **exception_metadata(error),**failure_details(ctx)},sort_keys=True))
         return 1
     finally:signal.alarm(0)
 
 
-PUBLIC_CODES = frozenset(["admission_path","admitted_source_changed","archive_identity","archive_sha256","artifact_client_unknown","baseline_freshness","baseline_sites","candidate_preexisting","capacity_budget","capacity_floor","capture_singleton","client_cleanup_unproven","client_output_bound","command_bound","command_outcome_unknown","command_output_bound","confirmation","container_inventory","control_fields","control_scope","daemon_config_or_rootfs","daemon_descriptor","daemon_public_file_metadata","daemon_public_policy_changed","daemon_temporary_storage_contract","daemon_unit_metadata_changed","deadline","docker_store_changed","document_bound","duplicate_key","evidence_config_identity","evidence_inventory","evidence_member_bound","evidence_member_pin","evidence_size","export_bound","export_identity","export_pin","fence_lock_timeout","fence_unlink_unproven","finite_scope_required","frame_bound","frame_short","gzip_bound","gzip_identity","host_identity","host_identity_changed","host_policy_shape","image_map_changed","image_map_delta","image_zip_identity","image_zip_inventory","load_client_unknown","log_policy_shape","native_runtime_changed","nonfinite_json","output_bound","owned_fence_changed","pending_release_requires_reconciliation","permanent_fence_changed","permanent_fence_identity","permanent_fence_path","permanent_fence_shape","phase_scope","post_load_source_sha256","previous_attempt_requires_reconciliation","private_output","profile_scope","protected_parent","protected_parent_changed","read_bound","remote_result","root_required","runtime_changed","scope_lifetime","scope_limits","site_scope","snapshot_readonly","snapshot_runtime_unstable","source_admission","source_admission_budget","source_admission_sha256","source_changed","source_extra","source_metadata","source_path","source_sha256","source_short","source_stream_changed","store_root","store_root_changed","stream_binding","stream_eof_or_sha256","stream_start","tar_size","target_site","temporary_storage_changed","temporary_memory_floor","temporary_memory_metadata","temporary_storage_metadata","temporary_storage_mode","tools_directory","unknown_daemon_identity","write_short"])
+PUBLIC_CODES = frozenset(["admission_path","admitted_source_changed","archive_identity","archive_sha256","artifact_client_unknown","baseline_freshness","baseline_sites","candidate_preexisting","capacity_budget","capacity_floor","capture_singleton","client_cleanup_unproven","client_output_bound","command_bound","command_outcome_unknown","command_output_bound","confirmation","container_inventory","control_fields","control_scope","daemon_config_or_rootfs","daemon_descriptor","daemon_public_file_metadata","daemon_public_policy_changed","daemon_temporary_storage_contract","daemon_unit_metadata_changed","deadline","docker_store_changed","document_bound","duplicate_key","evidence_config_identity","evidence_inventory","evidence_member_bound","evidence_member_pin","evidence_size","export_bound","export_identity","export_pin","fence_lock_timeout","fence_unlink_unproven","finite_scope_required","frame_bound","frame_short","gzip_bound","gzip_identity","host_identity","host_identity_changed","host_policy_shape","image_map_changed","image_map_delta","image_zip_identity","image_zip_inventory","load_client_unknown","legacy_archive_binding","log_policy_shape","native_runtime_changed","nonfinite_json","output_bound","owned_fence_changed","pending_release_requires_reconciliation","permanent_fence_changed","permanent_fence_identity","permanent_fence_path","permanent_fence_shape","phase_scope","post_load_source_sha256","previous_attempt_requires_reconciliation","private_output","profile_scope","protected_parent","protected_parent_changed","read_bound","remote_result","root_required","runtime_changed","scope_lifetime","scope_limits","site_scope","snapshot_readonly","snapshot_runtime_unstable","source_admission","source_admission_budget","source_admission_sha256","source_changed","source_extra","source_metadata","source_path","source_sha256","source_short","source_stream_changed","store_root","store_root_changed","stream_binding","stream_eof_or_sha256","stream_start","tar_size","target_site","temporary_storage_changed","temporary_memory_floor","temporary_memory_metadata","temporary_storage_metadata","temporary_storage_mode","tools_directory","unknown_daemon_identity","write_short"])
 
 
 if __name__=='__main__':raise SystemExit(main())

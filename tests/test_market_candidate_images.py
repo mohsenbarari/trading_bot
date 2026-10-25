@@ -5,6 +5,7 @@ Market image admission. Root fixtures run with genuine UID0, without UID masks.
 """
 from contextlib import ExitStack, redirect_stdout, redirect_stderr
 from copy import deepcopy
+from datetime import datetime, timezone
 from hashlib import sha256
 import ast
 import errno
@@ -952,14 +953,20 @@ class MarketCandidateImageTests(unittest.TestCase):
     def test_native_load_uses_real_pipes_and_only_accepts_both_bound_terminal_frames(self):
         self.native_load_case()
 
-    def native_load_case(self, *, fail_cleanup=False, fail_measurement=False, fail_cleanup_receipt=False):
+    def native_load_case(self, *, fail_cleanup=False, fail_measurement=False, fail_cleanup_receipt=False, restart=False, trailing=False):
         ctx = self.basic(); ctx.site = 'bot'; ctx.spec['site'] = 'native'; ctx.op['nonce'] = 'a' * 32
         ctx.work.mkdir(mode=0o700); _, admission, body = self.admission_fixture(ctx); ctx.baseline = {'image_map': []}
         head = {'schema': 'market_image_stream/1', 'profile': ctx.spec['profile'], 'operation_sha256': ctx.pin,
                 'admission_sha256': ctx.op['admission_sha256'], 'archive_bytes': len(body),
                 'archive_sha256': sha256(body).hexdigest(), 'tar_identity': admission['tar_identity']}
+        if restart:
+            web, before, after = self.f79_fixture()
+            with patch.object(M, 'snapshot', return_value={'containers': after, 'image_map': []}):M.stable(web)
+            ctx.op.update(baselines=web.op['baselines'], not_before=web.op['not_before'], deadline=web.op['deadline'])
+            head['f79_restart_observation'] = web.f79_restart_observation
         start = M.encode(head); finish = M.encode({**head, 'schema': 'market_image_stream_complete/1', 'source_fd_held_and_verified': True})
-        source_read = self.public_pipe(struct.pack('!I', len(start)) + start + body + struct.pack('!I', len(finish)) + finish)
+        source_read = self.public_pipe(struct.pack('!I', len(start)) + start + body + struct.pack('!I', len(finish)) + finish +
+                                      (M.encode({'ordinary_extra_after_eof': True}) if trailing else b''))
         ack_read, ack_write = os.pipe(); load_read, load_write = os.pipe()
         self.stack.callback(os.close, ack_read); self.stack.callback(os.close, load_read)
         source_in = os.fdopen(ack_write, 'wb'); source_out = os.fdopen(os.dup(source_read), 'rb')
@@ -997,8 +1004,8 @@ class MarketCandidateImageTests(unittest.TestCase):
         with patch.object(M.subprocess, 'Popen', side_effect=launch), patch.object(M, 'stable', return_value={'image_map': []}), \
              patch.object(M, 'measured', side_effect=measure), patch.object(M.time, 'sleep'), \
              patch.object(M, 'clients_close', side_effect=cleanup), patch.object(M, 'stop', side_effect=stop):
-            if fail_cleanup or fail_measurement:
-                reason = 'explicit_inert_measurement_refusal' if fail_measurement else 'client_cleanup_unproven'
+            if fail_cleanup or fail_measurement or trailing:
+                reason = 'stream_eof_or_sha256' if trailing else 'explicit_inert_measurement_refusal' if fail_measurement else 'client_cleanup_unproven'
                 with self.assertRaisesRegex(RuntimeError, '^' + reason + '$'): M.load_native(ctx)
             else:
                 self.assertEqual(M.load_native(ctx)['status'], 'loaded_measured_not_accepted')
@@ -1006,6 +1013,7 @@ class MarketCandidateImageTests(unittest.TestCase):
         self.assertEqual(stopped, list(reversed(children)))
         self.assertEqual(os.read(ack_read, 64), b'START\n'); self.assertEqual(os.read(load_read, len(body) + 1), body)
         self.assertTrue(ctx.requested); self.assertTrue(source_in.closed and source_out.closed and loader_in.closed)
+        if restart:self.assertEqual(ctx.peer_f79_restart_observation, head['f79_restart_observation'])
 
     def test_native_completed_rpc_with_unproven_client_cleanup_is_not_success(self):
         self.native_load_case(fail_cleanup=True)
@@ -1073,10 +1081,14 @@ class MarketCandidateImageTests(unittest.TestCase):
                 with self.assertRaisesRegex(D.Refusal, '^archive_config$'):
                     D.validate_archive(stream, size, ctx.end, data, fixtures.T, fixtures.M)
 
-    def coordinator_case(self, phase, *, response=None, fetch_code=0, cleanup_failure=False, drift=False):
+    def coordinator_case(self, phase, *, response=None, fetch_code=0, cleanup_failure=False, drift=False,
+                         remote_code=0, remote_raw=None):
         ctx = self.basic(); ctx.site = 'bot'; ctx.op.update(phase=phase, nonce='a' * 32)
-        ctx.spec['image_artifact'] = {'id': 123}; ctx.baseline = {'image_map': []}
-        ctx.work = self.root / ('coordinator-' + phase); ctx.work.mkdir(mode=0o700)
+        ctx.spec.update(image_artifact={'id': 123}, candidate_config_id='sha256:' + 'c' * 64,
+                        archive={'uncompressed_bytes': 17}, tar_sha256='d' * 64)
+        ctx.baseline = {'image_map': []}; self.last_coordinator = ctx
+        suffix = getattr(self, 'coordinator_count', 0); self.coordinator_count = suffix + 1
+        ctx.work = self.root / ('coordinator-' + phase + '-' + str(suffix)); ctx.work.mkdir(mode=0o700)
         ctx.capacity = lambda *args: ctx.check(); artifact = b'OWNED_PUBLIC_ZIP_TRANSPORT_FIXTURE'
         expected = 'archive_admitted_not_loaded' if phase == 'receive-web' else 'loaded_measured_not_accepted'
         result = response if response is not None else {'status': expected, 'receipt_sha256': 'b' * 64, 'security_accepted': False}
@@ -1098,12 +1110,12 @@ class MarketCandidateImageTests(unittest.TestCase):
             self.assertEqual(argv, M.remote(ctx, phase))
             if phase == 'receive-web': self.assertEqual(kwargs['stdin'].read(), artifact)
             else: self.assertEqual(kwargs['stdin'], M.subprocess.DEVNULL)
-            return M.encode(result)
+            return remote_code, M.encode(result) if remote_raw is None else remote_raw
         close = M.clients_close
         def cleanup(*args):
             clean = close(*args); self.assertTrue(clean)
             return clean and not cleanup_failure
-        with patch.object(M.subprocess, 'Popen', side_effect=launch), patch.object(M, 'command', side_effect=command), \
+        with patch.object(M.subprocess, 'Popen', side_effect=launch), patch.object(M, 'command_result', side_effect=command), \
              patch.object(M, 'stable', return_value={'image_map': [{'foreign': True}] if drift else []}), \
              patch.object(M, 'clients_close', side_effect=cleanup), patch.object(M.time, 'sleep'):
             try: value = M.coordinate_web(ctx)
@@ -1318,3 +1330,388 @@ class MarketCandidateImageTests(unittest.TestCase):
              patch.object(M.signal, 'alarm'), redirect_stdout(out):
             self.assertEqual(M.main(args), 1)
         self.assertEqual(json.loads(out.getvalue())['code'], 'client_cleanup_unproven')
+
+    def closed_peer(self, phase='receive-web'):
+        return {'status': 'refused_or_unknown', 'phase': phase,
+                'subphase': 'archive_graph_validation' if phase == 'receive-web' else 'web_load_request',
+                'code': 'capacity_floor', 'retry_allowed': False, 'security_accepted': False,
+                'exception_class': 'RuntimeError', 'os_errno': None}
+
+    def terminal_failure(self, ctx, phase, code='command_outcome_unknown'):
+        out = io.StringIO()
+        with patch.object(M, 'Context', return_value=ctx), patch.object(M, 'run', side_effect=RuntimeError(code)), \
+             patch.object(M.signal, 'alarm'), redirect_stdout(out):
+            self.assertEqual(M.main(['--site', 'bot', '--phase', phase, '--apply', M.CONFIRM]), 1)
+        value = M.document(out.getvalue().encode()); M.public(value)
+        self.assertNotIn('EXPLICIT_PRIVATE', out.getvalue()); return value
+
+    def test_operation05_uses_new_paths_and_keeps_default_commands_strict(self):
+        self.assertEqual(M.OPERATION, 'security-market-candidate-images-20261025-05')
+        self.assertEqual(M.CONFIRM, 'MARKET-IMAGE-STORES-ONLY-20261025-05')
+        self.assertTrue(all(path.name == M.OPERATION for path in M.TOOLS.values()))
+        for code in (1, 255, -9):
+            with self.subTest(code=code):
+                ctx = SimpleNamespace(capacity=Mock()); state, launch = self.child(b'EXPLICIT_PRIVATE_NOT_PUBLIC', code=code)
+                with patch.object(M.subprocess, 'Popen', side_effect=launch), patch.object(M.time, 'sleep'):
+                    self.assertEqual(M.command_result(ctx, ['EXPLICIT_INERT_CLIENT']), (code, b'EXPLICIT_PRIVATE_NOT_PUBLIC'))
+                with self.assertRaises(OSError): os.fstat(state.fd)
+                state, launch = self.child(b'EXPLICIT_PRIVATE_NOT_PUBLIC', code=code)
+                with patch.object(M.subprocess, 'Popen', side_effect=launch), patch.object(M.time, 'sleep'), \
+                     self.assertRaisesRegex(RuntimeError, '^command_outcome_unknown$'):
+                    M.command(ctx, ['EXPLICIT_INERT_CLIENT'])
+
+    def test_command_cleanup_cannot_replace_primary_capacity_or_nonzero_result(self):
+        for pending, primary in ((5, True), (1, False)):
+            ctx = SimpleNamespace(capacity=Mock(side_effect=[None, RuntimeError('capacity_floor')]) if primary else Mock())
+            state, launch = self.child(b'closed public bytes', code=1, pending=pending)
+            with patch.object(M.subprocess, 'Popen', side_effect=launch), patch.object(M.time, 'sleep'), \
+                 patch.object(M, 'stop', side_effect=OSError(errno.EIO, 'EXPLICIT_PRIVATE_CLEANUP_ARGUMENT')):
+                if primary:
+                    with self.assertRaisesRegex(RuntimeError, '^capacity_floor$'): M.command_result(ctx, ['EXPLICIT_INERT_CLIENT'])
+                else:self.assertEqual(M.command_result(ctx, ['EXPLICIT_INERT_CLIENT']), (1, b'closed public bytes'))
+            self.assertIs(ctx.command_cleanup_unproven, True)
+            with self.assertRaises(OSError): os.fstat(state.fd)
+
+    def test_both_peer_phases_preserve_closed_failure_and_actual_returncode_without_retry(self):
+        for phase, code in (('receive-web', 1), ('load-web', 255), ('receive-web', -9)):
+            with self.subTest(phase=phase, code=code), self.assertRaisesRegex(RuntimeError, '^command_outcome_unknown$'):
+                self.coordinator_case(phase, response=self.closed_peer(phase), remote_code=code, cleanup_failure=True)
+            ctx = self.last_coordinator; terminal = self.terminal_failure(ctx, phase)
+            self.assertEqual(terminal['peer_returncode'], code)
+            self.assertEqual(terminal['peer_failure'], {**self.closed_peer(phase), 'returncode': code})
+            self.assertIs(terminal['retry_allowed'], False); self.assertIs(terminal['security_accepted'], False)
+            self.assertEqual(terminal['code'], 'command_outcome_unknown')
+        peer = self.closed_peer(); peer.update(code='archive_config', exception_class='other')
+        with self.assertRaisesRegex(RuntimeError, '^command_outcome_unknown$'):
+            self.coordinator_case('receive-web', response=peer, remote_code=1)
+        self.assertEqual(self.terminal_failure(self.last_coordinator, 'receive-web')['peer_failure']['code'], 'archive_config')
+
+    def test_peer_output_never_promotes_unknown_fields_or_unclosed_values(self):
+        base = self.closed_peer('load-web'); invalid = []
+        for key, value in [('status', 'passed'), ('phase', 'receive-web'), ('subphase', 'EXPLICIT_PRIVATE_PHASE'),
+                           ('code', 'EXPLICIT_PRIVATE_CODE'), ('exception_class', 'EXPLICIT_PRIVATE_CLASS'),
+                           ('os_errno', True), ('os_errno', 0), ('os_errno', 4096), ('os_errno', 'EXPLICIT_PRIVATE_ERRNO'),
+                           ('retry_allowed', True), ('security_accepted', True), ('client_cleanup_unproven', False),
+                           ('archive_proof_checkpoint', {'Env': 'EXPLICIT_PRIVATE_VALUE'})]:
+            invalid.append(M.encode({**base, key: value}))
+        invalid.extend([M.encode({**base, 'Env': ['EXPLICIT_PRIVATE_VALUE']}),
+                        M.encode({**base, 'peer_failure': base}), M.encode([]), b'', b'EXPLICIT_PRIVATE_RAW_STDOUT',
+                        b'\xff', M.encode(base) + M.encode(base),
+                        M.encode(base).rstrip()[:-1] + b',"code":"capacity_floor"}'])
+        for raw in invalid:
+            with self.subTest(length=len(raw)), self.assertRaisesRegex(RuntimeError, '^command_outcome_unknown$'):
+                self.coordinator_case('load-web', remote_code=255, remote_raw=raw)
+            terminal = self.terminal_failure(self.last_coordinator, 'load-web')
+            self.assertEqual(terminal['peer_returncode'], 255); self.assertNotIn('peer_failure', terminal)
+            self.assertNotIn('archive_proof_checkpoint', terminal)
+
+    def test_peer_checkpoint_requires_exact_typed_archive_binding(self):
+        ctx = self.basic(); ctx.op['phase'] = 'receive-web'
+        ctx.spec.update(candidate_config_id='sha256:' + 'c' * 64, archive={'uncompressed_bytes': 17}, tar_sha256='d' * 64)
+        checkpoint = {'schema': 'market_archive_proof_checkpoint/1', 'profile': ctx.spec['profile'],
+            'candidate_config_id': ctx.spec['candidate_config_id'], 'archive_sha256': 'd' * 64, 'archive_bytes': 17,
+            'expanded_layer_bytes': 31, 'tar_identity': [1, 2, 0o100600, 0, 0, 1, 17, 3, 4],
+            'physical_graph_closed': True, 'proof_only': True, 'security_accepted': False}
+        peer = {**self.closed_peer(), 'archive_proof_checkpoint': checkpoint, 'client_cleanup_unproven': True}
+        self.assertEqual(M.peer_failure(ctx, peer, 1), {**peer, 'returncode': 1})
+        for key, value in [('archive_bytes', True), ('expanded_layer_bytes', 0), ('expanded_layer_bytes', 512 * 1024**2 + 1),
+                           ('candidate_config_id', 'sha256:' + 'e' * 64), ('archive_sha256', 'e' * 64),
+                           ('tar_identity', [1, 2, 0o100600, 0, 0, 1, 18, 3, 4]), ('proof_only', 1),
+                           ('physical_graph_closed', False), ('security_accepted', True), ('Config', {})]:
+            with self.subTest(key=key):
+                self.assertIsNone(M.peer_failure(ctx, {**peer, 'archive_proof_checkpoint': {**checkpoint, key: value}}, 1))
+        ctx.op['phase'] = 'load-web'
+        self.assertIsNone(M.peer_failure(ctx, {**peer, 'phase': 'load-web'}, 1))
+
+    def actual_receive_checkpoint_case(self, failure, *, damaged=False):
+        from tests import test_datastore_candidate_stage as fixtures
+        producer = SimpleNamespace(tar=lambda rows: fixtures.DatastoreCandidateTests.tar(None, rows))
+        body, _, config = fixtures.DatastoreCandidateTests.archive(producer, damage='diffid' if damaged else None)
+        compressed = gzip.compress(body, mtime=0)
+        ctx = self.basic(); ctx.site = 'web'; ctx.root = self.root; ctx.work.mkdir(mode=0o700)
+        ctx.spec.update(candidate_config_id='sha256:' + sha256(D.encode(config)).hexdigest(),
+            candidate_rootfs=config['rootfs']['diff_ids'], tar_sha256=sha256(body).hexdigest(),
+            archive={'format': 'docker-archive+gzip', 'name': 'candidate-image.tar.gz', 'size_bytes': len(compressed),
+                     'sha256': sha256(compressed).hexdigest(), 'uncompressed_bytes': len(body)})
+        exported = M.encode({'image_id': ctx.spec['candidate_config_id'], 'archive': ctx.spec['archive'],
+                             'security_accepted': False, 'deployment_eligible': False})
+        report = M.encode({'Metadata': {'ImageID': ctx.spec['candidate_config_id'], 'ImageConfig': config}})
+        evidence = self.root / 'evidence'; evidence.mkdir(mode=0o700)
+        raw_evidence = self.zipper([('image-export.json', exported), ('reports/vulnerabilities.json', report)])
+        target = evidence / (ctx.spec['profile'] + '.zip'); target.write_bytes(raw_evidence); target.chmod(0o600)
+        image = self.zipper([('image-export.json', exported), ('candidate-image.tar.gz', compressed)])
+        ctx.spec.update(public_export_bytes=len(exported), public_export_sha256=sha256(exported).hexdigest(),
+            public_raw_report_sha256=sha256(report).hexdigest(),
+            evidence_artifact={'size_in_bytes': len(raw_evidence), 'digest': 'sha256:' + sha256(raw_evidence).hexdigest()},
+            image_artifact={'size_in_bytes': len(image), 'digest': 'sha256:' + sha256(image).hexdigest()})
+        ctx.T = fixtures.T; ctx.L = fixtures.M; ctx.baseline = {'containers': [], 'image_map': []}
+        def capacity(*args):
+            ctx.check()
+            if failure == 'capacity_floor' and hasattr(ctx, 'archive_proof_checkpoint'):raise RuntimeError('capacity_floor')
+        ctx.capacity = capacity; incoming = self.public_pipe(image); real_read = M.read_part; out = io.StringIO()
+        with patch.object(M, 'read_part', side_effect=lambda c, fd, size: real_read(c, incoming if fd == 0 else fd, size)), \
+             patch.object(M, 'Context', return_value=ctx), patch.object(M, 'run', side_effect=lambda c, apply: M.receive_web(c)), \
+             patch.object(M, 'snapshot', return_value={'containers': [{'ordinary_changed_runtime': True}], 'image_map': []}), \
+             patch.object(M.signal, 'alarm'), redirect_stdout(out):
+            self.assertEqual(M.main(['--site', 'web', '--phase', 'receive-web', '--apply', M.CONFIRM]), 1)
+        terminal = M.document(out.getvalue().encode()); M.public(terminal)
+        self.assertEqual(terminal['code'], 'archive_diff_id' if damaged else failure)
+        self.assertFalse((ctx.work / 'admission.json').exists()); self.assertFalse((ctx.work / 'archive-proof.json').exists())
+        self.assertNotIn('PUBLIC_FIXTURE', out.getvalue()); self.assertNotIn('Config', out.getvalue()); self.assertNotIn('Env', out.getvalue())
+        self.assertIs(terminal['retry_allowed'], False); self.assertIs(terminal['security_accepted'], False)
+        if damaged:self.assertNotIn('archive_proof_checkpoint', terminal)
+        else:
+            checkpoint = terminal['archive_proof_checkpoint']
+            self.assertEqual(checkpoint['archive_sha256'], sha256(body).hexdigest()); self.assertIs(checkpoint['proof_only'], True)
+            self.assertIs(checkpoint['physical_graph_closed'], True); self.assertEqual(checkpoint['tar_identity'], M.identity((ctx.work / 'source.tar').lstat()))
+            self.assertGreater(checkpoint['expanded_layer_bytes'], 0)
+
+    def test_actual_archive_proof_survives_later_capacity_failure_as_information_only(self):
+        self.actual_receive_checkpoint_case('capacity_floor')
+
+    def test_actual_archive_proof_survives_later_runtime_failure_without_waiving_it(self):
+        self.actual_receive_checkpoint_case('runtime_changed')
+
+    def test_failed_actual_archive_graph_never_creates_a_proof_checkpoint(self):
+        self.actual_receive_checkpoint_case('archive_diff_id', damaged=True)
+
+    def test_closed_peer_subphase_catalog_covers_every_literal_and_guard_expansion(self):
+        tree = ast.parse((ROOT / 'deploy/maintenance/market_candidate_images.py').read_text())
+        labels = {node.value.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == 'SUBPHASE' for target in node.targets)
+            and isinstance(node.value, ast.Constant)}
+        self.assertTrue(labels <= M.PEER_SUBPHASES)
+        for name in ('marker', 'source'):
+            for stage in ('admission', 'open', 'flock'):self.assertIn('guard_' + name + '_' + stage, M.PEER_SUBPHASES)
+
+    def f79_fixture(self):
+        _, rows, _, _, _ = self.snapshot_fixture('web'); before = sorted(deepcopy(rows), key=lambda r:r['id'])
+        now = int(M.time.time()); stamp = lambda t:datetime.fromtimestamp(t, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        row = next(r for r in before if r['id'] == M.CAPTURE)
+        row.update(image=M.F79_IMAGE, pid=1000, restarts=7, started=stamp(now - 120), name='/owned-public-f79',
+            execution={'entry': [], 'cmd': ['ordinary'], 'user': '10001', 'labels': {'fixture': 'public'}},
+            mounts=[{'Source': '/ordinary/public.py', 'Destination': '/app/public.py', 'RW': False}])
+        row['networks'] = {name: {'EndpointID': str(i + 1) * 64, 'MacAddress': '02:00:00:00:00:0' + str(i + 1),
+            'NetworkID': 'a' * 64, 'IPAddress': '172.20.' + str(i) + '.10', 'Gateway': '172.20.' + str(i) + '.1',
+            'IPAMConfig': None, 'Aliases': ['ordinary-public'], 'DriverOpts': None} for i,name in enumerate(M.F79_NETWORKS)}
+        after = deepcopy(before); row = next(r for r in after if r['id'] == M.CAPTURE)
+        row.update(pid=1001, restarts=8, started=stamp(now - 60))
+        for i,net in enumerate(row['networks'].values()):net.update(EndpointID=str(i + 3) * 64, MacAddress='02:00:00:00:00:0' + str(i + 3))
+        ctx = self.basic(); ctx.site = 'web'; ctx.baseline = {'containers': before, 'image_map': []}
+        ctx.op.update(operation=M.OPERATION, phase='load-native', nonce='a' * 32, not_before=now - 10, deadline=now + 60,
+                      baselines={'web': deepcopy(ctx.baseline)})
+        return ctx, before, after
+
+    def test_image_store_equivalence_allows_one_exact_f79_successor_and_never_rebases(self):
+        ctx, before, after = self.f79_fixture(); unchanged = deepcopy(before)
+        self.assertIsNone(M.image_store_equivalence('web', before, before, D.same, M.time.time()))
+        with patch.object(M, 'snapshot', return_value={'containers': after, 'image_map': []}):
+            M.stable(ctx); observation = deepcopy(ctx.f79_restart_observation); M.stable(ctx)
+        self.assertEqual(ctx.f79_restart_observation, observation); self.assertEqual(before, unchanged)
+        self.assertEqual(observation['baseline_restarts'], 7); self.assertEqual(observation['observed_restarts'], 8)
+        self.assertIs(observation['capture_issue_open'], True); self.assertIs(observation['security_accepted'], False)
+        for value in (before, [dict(r, pid=2000) if r['id'] == M.CAPTURE else r for r in after],
+                      [dict(r, restarts=9) if r['id'] == M.CAPTURE else r for r in after]):
+            with self.subTest(value=value[-1]['pid']), patch.object(M, 'snapshot', return_value={'containers': value, 'image_map': []}), \
+                 self.assertRaisesRegex(RuntimeError, '^runtime_changed$'):M.stable(ctx)
+
+    def test_f79_restart_exception_rejects_every_other_role_and_static_or_health_drift(self):
+        _, before, after = self.f79_fixture()
+        changes = [('restarts', 9), ('restarts', 7), ('restarts', True), ('pid', 0), ('pid', True),
+            ('started', '2099-01-01T00:00:00Z'), ('started', '2026-01-01T00:00:00+03:30'),
+            ('image', 'sha256:' + 'e' * 64), ('running', False), ('restarting', True), ('health', None)]
+        for key,value in changes:
+            bad = deepcopy(after); next(r for r in bad if r['id'] == M.CAPTURE)[key] = value
+            with self.subTest(key=key, value=value):self.assertIs(M.image_store_equivalence('web', before, bad, D.same, M.time.time()), False)
+        for kind in ('other_role','host','mounts','cmd','labels','user','ip','gateway','network_id','alias','driver_opts','extra_key','bad_mac','extra_network'):
+            bad = deepcopy(after); row = next(r for r in bad if r['id'] == M.CAPTURE); net = row['networks'][M.F79_NETWORKS[0]]
+            if kind == 'other_role':next(r for r in bad if r['id'] != M.CAPTURE)['pid'] += 1
+            elif kind == 'host':row['host']['extra'] = True
+            elif kind == 'mounts':row['mounts'][0]['RW'] = True
+            elif kind in ('cmd','labels','user'):row['execution'][kind] = 'ordinary-static-drift'
+            elif kind == 'ip':net['IPAddress'] = '172.20.0.99'
+            elif kind == 'gateway':net['Gateway'] = '172.20.0.99'
+            elif kind == 'network_id':net['NetworkID'] = 'b' * 64
+            elif kind == 'alias':net['Aliases'] = ['ordinary-drift']
+            elif kind == 'driver_opts':net['DriverOpts'] = {'ordinary': 'drift'}
+            elif kind == 'extra_key':net['unknown'] = True
+            elif kind == 'bad_mac':net['MacAddress'] = '01:00:00:00:00:01'
+            else:row['networks']['ordinary-extra'] = dict(net)
+            with self.subTest(kind=kind):self.assertIs(M.image_store_equivalence('web', before, bad, D.same, M.time.time()), False)
+        self.assertIs(M.image_store_equivalence('bot', before, after, D.same, M.time.time()), False)
+        _, native, _, _, _ = self.snapshot_fixture('bot'); changed = deepcopy(native); changed[0]['pid'] += 1
+        self.assertIsNone(M.image_store_equivalence('bot', native, native, D.same, M.time.time()))
+        self.assertIs(M.image_store_equivalence('bot', native, changed, D.same, M.time.time()), False)
+
+    def test_f79_observation_is_closed_in_success_failure_and_peer_diagnostics(self):
+        for apply,failure in ((False,False),(True,False),(True,True)):
+            ctx, _, after = self.f79_fixture(); out = io.StringIO()
+            def action(current, requested):
+                self.assertEqual(requested,apply)
+                M.stable(current)
+                if failure:raise RuntimeError('capacity_floor')
+                return {'status': 'explicit_inert_apply' if apply else 'public_preflight_passed_not_requested', 'security_accepted': False}
+            with patch.object(M, 'Context', return_value=ctx), patch.object(M, 'run', side_effect=action), \
+                 patch.object(M, 'snapshot', return_value={'containers': after, 'image_map': []}), patch.object(M.signal, 'alarm'), redirect_stdout(out):
+                self.assertEqual(M.main(['--site','web','--phase','load-native']+(['--apply',M.CONFIRM] if apply else [])), int(failure))
+            result = M.document(out.getvalue().encode()); self.assertEqual(result['f79_restart_observation'], ctx.f79_restart_observation)
+            peer = {**self.closed_peer('load-native'), 'f79_restart_observation': ctx.f79_restart_observation}
+            self.assertEqual(M.peer_failure(ctx, peer, 1)['f79_restart_observation'], ctx.f79_restart_observation)
+            for key,value in [('observed_restarts', 9), ('capture_issue_open', False), ('observed_pid', True), ('Env', [])]:
+                self.assertIsNone(M.restart_observation(ctx, {**ctx.f79_restart_observation, key:value}))
+
+    def test_stream_footer_carries_first_restart_without_trailing_json_and_keeps_tar_fd(self):
+        ctx, before, after = self.f79_fixture(); ctx.spec['site'] = 'native'; _, admitted, body = self.admission_fixture(ctx)
+        ctx.baseline = {'containers': before, 'image_map': []}; incoming = self.public_pipe(b'START\n')
+        outgoing = os.memfd_create('owned-f79-stream'); self.stack.callback(os.close, outgoing)
+        read,write = M.read_part,M.write_all; out = io.StringIO()
+        with patch.object(M,'snapshot',side_effect=[{'containers':before,'image_map':[]},{'containers':after,'image_map':[]}]), \
+             patch.object(M,'read_part',side_effect=lambda c,fd,size:read(c,incoming if fd==0 else fd,size)), \
+             patch.object(M,'write_all',side_effect=lambda c,fd,raw:write(c,outgoing if fd==1 else fd,raw)), \
+             patch.object(M,'Context',return_value=ctx),patch.object(M,'run',side_effect=lambda c,apply:M.stream_web(c)), \
+             patch.object(M.signal,'alarm'),redirect_stdout(out):
+            self.assertEqual(M.main(['--site','web','--phase','stream-web']),0)
+        self.assertEqual(out.getvalue(),''); raw=os.pread(outgoing,os.fstat(outgoing).st_size,0)
+        n=struct.unpack('!I',raw[:4])[0]; first=M.document(raw[4:4+n]); at=4+n
+        self.assertNotIn('f79_restart_observation',first); self.assertEqual(raw[at:at+len(body)],body); at+=len(body)
+        n=struct.unpack('!I',raw[at:at+4])[0]; last=M.document(raw[at+4:at+4+n]);self.assertEqual(at+4+n,len(raw))
+        self.assertEqual(last['f79_restart_observation'],ctx.f79_restart_observation)
+        M.header(ctx,first,admitted);M.header(ctx,last,admitted,complete=True)
+        self.assertEqual(ctx.peer_f79_restart_observation,ctx.f79_restart_observation);ctx.check()
+
+    def test_stream_restart_header_footer_binding_and_eof_remain_exact(self):
+        self.native_load_case(restart=True)
+
+    def test_stream_restart_never_allows_json_after_footer_eof(self):
+        self.native_load_case(restart=True,trailing=True)
+
+    def test_restart_observation_header_cannot_disappear_or_change_at_footer(self):
+        ctx, _, after = self.f79_fixture()
+        with patch.object(M,'snapshot',return_value={'containers':after,'image_map':[]}):M.stable(ctx)
+        admitted={'archive_bytes':17,'archive_sha256':'d'*64,'tar_identity':[1,2,0o100600,0,0,1,17,3,4]}
+        ctx.op['admission_sha256']='c'*64
+        first={'schema':'market_image_stream/1','profile':ctx.spec['profile'],'operation_sha256':ctx.pin,
+            'admission_sha256':ctx.op['admission_sha256'],**admitted,'f79_restart_observation':ctx.f79_restart_observation}
+        M.header(ctx,first,admitted)
+        last={**first,'schema':'market_image_stream_complete/1','source_fd_held_and_verified':True}
+        M.header(ctx,last,admitted,complete=True)
+        for bad in ({k:v for k,v in last.items() if k!='f79_restart_observation'},
+                    {**last,'f79_restart_observation':{**ctx.f79_restart_observation,'observed_pid':1002}},
+                    {**last,'f79_restart_observation':{**ctx.f79_restart_observation,'security_accepted':True}}):
+            with self.assertRaisesRegex(RuntimeError,'^stream_binding$'):M.header(ctx,bad,admitted,complete=True)
+
+    def legacy_fixture(self):
+        ctx=self.basic();ctx.site='web';ctx.root=self.root;ctx.args=SimpleNamespace(phase='stream-web')
+        ctx.op.update(operation=M.OPERATION,phase='load-native',admission_sha256=M.LEGACY_A37_RECEIPT)
+        config='sha256:0ed2df2f78031a5cdf2cfbb365388fd21c674d01849c075fb5e072b4fd874d6c'
+        ctx.spec.update(profile='a37ec78ec097',site='native',candidate_config_id=config)
+        value={'operation_sha256':'6b5d72d72c8bf711f83d548fb3ec60b5d96fbb98b66392e02d5402f88bd894f6',
+            'reconciliation_nonce':'fb41c0f002a84781bb948efcc989fef1',
+            'original_failed_operation_sha256':'29f4d4bded8cd75cca2d9afb3685ccce7c14fc144742e5bcc3b96eb61f40014e',
+            'original_receive_completed':False,'archive_receive_requested':False,'configuration_values_disclosed':False,
+            'archive_sha256':M.LEGACY_A37_SHA,'tar_identity':list(M.LEGACY_A37_ID),'source_identities':{config:{'kind':'Docker_config_identity'}}}
+        ctx.capacity=lambda *a:ctx.check();return ctx,value
+
+    def test_legacy_adapter_is_one_exact_receipt_scope_provenance_and_readonly_path(self):
+        self.assertEqual(M.LEGACY_A37_RECEIPT,'c1663097b171be0ac25addd1735f8cafe21d4a512c678d96ef91fd10a30878f9')
+        self.assertEqual(M.LEGACY_A37_ID,(2049,414908,33152,0,0,1,188969984,1792920206227410856,1792920206227410856))
+        self.assertEqual(str(M.LEGACY_A37_TAR),'/srv/trading-bot/security-market-candidate-images-20261025-04/attempts/a37ec78ec097-receive-web/source.tar')
+        ctx,value=self.legacy_fixture();self.assertTrue(M.legacy_a37(ctx,value))
+        for key,bad in [('operation_sha256','a'*64),('reconciliation_nonce','a'*32),('original_failed_operation_sha256','b'*64),
+                        ('original_receive_completed',True),('archive_receive_requested',True),('archive_sha256','e'*64),
+                        ('tar_identity',[1]*9),('source_identities',[])]:
+            with self.subTest(key=key),self.assertRaisesRegex(RuntimeError,'^legacy_archive_binding$'):M.legacy_a37(ctx,{**value,key:bad})
+        ctx.op['phase']='receive-web'
+        with self.assertRaisesRegex(RuntimeError,'^legacy_archive_binding$'):M.legacy_a37(ctx,value)
+        ctx.op['admission_sha256']='f'*64;self.assertFalse(M.legacy_a37(ctx,value))
+
+    def test_legacy_adapter_holds_genuine_root_public_copy_and_refuses_aba_or_parent_change(self):
+        ctx,value=self.legacy_fixture();folder=self.root/'legacy-public-copy';folder.mkdir(mode=0o700)
+        body=b'EXPLICIT PUBLIC COPY ONLY, NOT PRODUCTION ARCHIVE PROOF';path=folder/'source.tar';path.write_bytes(body);path.chmod(0o600)
+        identity=tuple(M.identity(path.lstat()));digest=sha256(body).hexdigest()
+        value.update(tar_identity=list(identity),archive_sha256=digest,archive_bytes=len(body),prospective_import_bytes=2*len(body)+34)
+        with patch.object(M,'LEGACY_A37_ID',identity),patch.object(M,'LEGACY_A37_SHA',digest),patch.object(M,'LEGACY_A37_TAR',path), \
+             patch.object(M,'source_archive',return_value=value):
+            fd,admitted=M.admitted_tar(ctx);self.assertEqual(admitted,value)
+        self.assertEqual(M.fcntl.fcntl(fd,M.fcntl.F_GETFL)&os.O_ACCMODE,os.O_RDONLY);self.assertEqual(os.pread(fd,len(body),0),body)
+        folder.chmod(0o770)
+        with self.assertRaisesRegex(RuntimeError,'^protected_parent_changed$'):ctx.check()
+        folder.chmod(0o700);ctx.check();path.rename(folder/'retained.tar');path.write_bytes(body);path.chmod(0o600)
+        with self.assertRaisesRegex(RuntimeError,'^input_changed$'):ctx.check()
+        with self.assertRaisesRegex(RuntimeError,'^input_changed$'):self.stack.close()
+        with self.assertRaises(OSError):os.fstat(fd)
+
+    def legacy_parent_final_case(self,change):
+        real_parents,real_need=M.check_parents,D.need
+        ctx,value=self.legacy_fixture();folder=self.root/('final-parent-'+change);folder.mkdir(mode=0o700)
+        body=b'OWNED PUBLIC FINAL-CHECK FIXTURE';path=folder/'source.tar';path.write_bytes(body);path.chmod(0o600)
+        original=tuple(M.identity(path.lstat()));digest=sha256(body).hexdigest()
+        value.update(tar_identity=list(original),archive_sha256=digest,archive_bytes=len(body),prospective_import_bytes=2*len(body)+34)
+        order=[];closing=False
+        def parent_final(rows):
+            if closing:self.assertEqual(os.fstat(fd).st_ino,original[1]);order.append('parents')
+            return real_parents(rows)
+        def file_final(condition,reason):
+            if closing and reason=='input_changed':
+                self.assertEqual(os.fstat(fd).st_ino,original[1]);order.append('file')
+            return real_need(condition,reason)
+        with ExitStack() as held:
+            ctx.stack=held
+            with patch.object(M,'LEGACY_A37_ID',original),patch.object(M,'LEGACY_A37_SHA',digest), \
+                 patch.object(M,'LEGACY_A37_TAR',path),patch.object(M,'source_archive',return_value=value), \
+                 patch.object(M,'check_parents',side_effect=parent_final),patch.object(D,'need',side_effect=file_final):
+                fd,_=M.admitted_tar(ctx)
+                try:
+                    if change=='mode':folder.chmod(0o770)
+                    if change=='owner':os.chown(folder,1,0)
+                    if change=='inode':
+                        retained=folder.with_name(folder.name+'-retained');folder.rename(retained);folder.mkdir(mode=0o700)
+                        (retained/'source.tar').rename(path)
+                    closing=True
+                    if change=='unchanged':held.close()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError,'^protected_parent_changed$'):held.close()
+                    self.assertEqual(order,['parents','file'] if change=='unchanged' else ['parents'])
+                    with self.assertRaises(OSError):os.fstat(fd)
+                finally:
+                    if change=='owner':os.chown(folder,0,0)
+                    held.close()
+
+    def test_legacy_parent_final_check_precedes_held_tar_final_check(self):self.legacy_parent_final_case('unchanged')
+
+    def test_legacy_parent_mode_drift_refuses_direct_stack_close(self):self.legacy_parent_final_case('mode')
+
+    def test_legacy_parent_owner_drift_refuses_direct_stack_close(self):self.legacy_parent_final_case('owner')
+
+    def test_legacy_parent_inode_drift_refuses_direct_stack_close(self):self.legacy_parent_final_case('inode')
+
+    def test_legacy_tar_is_never_opened_on_native_or_nonstream_scope(self):
+        for site,phase in (('bot','load-native'),('web','load-web')):
+            ctx,value=self.legacy_fixture();ctx.site=site;ctx.args.phase=phase
+            with patch.object(M,'source_archive',return_value=value),patch.object(M.os,'open') as opened, \
+                 self.assertRaisesRegex(RuntimeError,'^legacy_archive_binding$'):M.admitted_tar(ctx)
+            opened.assert_not_called()
+
+    def test_other_receipt_pin_uses_normal05_path_without_any_legacy_fallback(self):
+        ctx=self.basic();ctx.site='web';ctx.args=SimpleNamespace(phase='stream-web')
+        path,value,body=self.admission_fixture(ctx)
+        self.assertNotEqual(ctx.op['admission_sha256'],M.LEGACY_A37_RECEIPT)
+        with patch.object(M,'LEGACY_A37_TAR',self.root/'never-created-legacy-file'):
+            fd,actual=M.admitted_tar(ctx)
+        self.assertEqual(actual,value);self.assertEqual(M.identity(os.fstat(fd)),M.identity(path.lstat()))
+        self.assertEqual(os.pread(fd,len(body),0),body)
+
+    def test_legacy_public_copy_still_requires_digest_and_rejects_symlink_or_hardlink(self):
+        for kind in ('digest','symlink','hardlink'):
+            ctx,value=self.legacy_fixture();folder=self.root/('legacy-'+kind);folder.mkdir(mode=0o700)
+            body=b'EXPLICIT_PUBLIC_COPY_ONLY';target=folder/'source.tar';target.write_bytes(body);target.chmod(0o600)
+            original=tuple(M.identity(target.lstat()));digest=sha256(body).hexdigest()
+            if kind=='digest':target.write_bytes(b'X'+body[1:]);target.chmod(0o600);original=tuple(M.identity(target.lstat()))
+            path=target
+            if kind=='symlink':path=folder/'alias.tar';path.symlink_to(target)
+            if kind=='hardlink':os.link(target,folder/'hardlink.tar')
+            value.update(tar_identity=list(original),archive_sha256=digest,archive_bytes=len(body),prospective_import_bytes=2*len(body)+34)
+            reason='admitted_source_changed' if kind=='digest' else 'input_path' if kind=='symlink' else 'input_metadata'
+            with self.subTest(kind=kind),patch.object(M,'LEGACY_A37_ID',original),patch.object(M,'LEGACY_A37_SHA',digest), \
+                 patch.object(M,'LEGACY_A37_TAR',path),patch.object(M,'source_archive',return_value=value), \
+                 self.assertRaisesRegex(RuntimeError,'^'+reason+'$'):M.admitted_tar(ctx)

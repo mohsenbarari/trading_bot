@@ -68,6 +68,47 @@ entry's comment. Market evidence uses that same helper when constructing its
 expected Docker metadata. Config bytes, history, Author, DockerVersion, layers
 and archive identity remain strict; no raw-image field is changed to pass it.
 
+## Operation05: closed diagnostics and existing-source reuse
+
+Operation05 preserves actual peer return codes and admits only an exact closed
+failure envelope before reporting a failed SSH phase. Arbitrary/malformed/private
+output stays unreported. Local commands still require zero status. A bounded
+RAM-only archive-proof checkpoint is available after actual graph/Config/RootFS
+admission but before final capacity/runtime gates; it never implies successful
+admission, LOAD or security acceptance. Cleanup failure cannot replace the
+primary failure. All previous namespaces and failed evidence remain immutable.
+
+For image-store operations only, the fixed F79 capture container may undergo
+one natural restart relative to the immutable operation baseline. It must use
+the same image and remain running/healthy with exactly the same execution,
+host, mount, label, user and network policy. Only positive PID/new UTC start,
+RestartCount+1 and generated endpoint/MAC values may differ. Every other
+Native/Web container field is exact. The full successor is cached, so further
+restart, regression, same-count mutation or other drift refuses. The closed
+observation stays bound to the control SHA/nonce and explicitly keeps capture
+OPEN/security false. Serving/C/S/R/COW controllers and Writer/DNS are unchanged.
+Binary streams bind the observation in their strict header/footer, never as
+extra JSON after EOF.
+
+The actual04 receive for a37 reached Web archive storage but failed its remote
+phase result; it is still a failed receive and is not retried or relabelled.
+Independent read-only validation proved the exact existing TAR. A new authority
+then acquired both original guards, bound fresh stable snapshots, repeated full
+archive/Config/RootFS/755764224-byte-budget checks and durably published the same
+actual archive admission on both sites before exact owned-guard closure.
+[Actual admission evidence](evidence/2026-10-25-market-a37-retained-admission.json)
+records receipt c1663097..., authority6b5d72d7..., and permanent SOURCE identity.
+No LOAD occurred in that reconciliation. Two later04 LOAD preparations refused
+in public preflight before any apply/request; they remain failed observations.
+
+Operation05 may reuse only that exact c166 a37 receipt/provenance and the literal
+04 TAR with full recorded device/inode/mode/owner/link/size/time identity and
+334b... SHA. Protected parents and readonly TAR FD remain checked through stack
+teardown. Every other profile/pin uses its ordinary05 source path; there is no
+arbitrary path, fallback downloader or old receive adoption. Root independently
+passed106 genuine-root fenced tests in2.705s, including the real ownership and
+final-parent-check cases. Source tests are separate from actual daemon LOAD.
+
 ## One profile at a time
 
 For a Native role, the actual scenario is: admit its exact archive on Web, keep
@@ -86,8 +127,8 @@ into the Web daemon.
    0700 and staged regular files0600/single-link. Existing namespaces and files
    must never be replaced to bypass an old attempt.
 2. Native namespace is
-   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-04`;
-   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-04`.
+   `/root/trading-bot/trading_bot/.local/security-market-candidate-images-20261025-05`;
+   Web namespace is `/srv/trading-bot/security-market-candidate-images-20261025-05`.
    Root collects a fresh read-only snapshot at each site with
    `--site bot|web --phase snapshot --source-sha256 <reviewed-worker-sha>`.
    Snapshot reads only explicit public daemon/container/store/unit metadata,
@@ -107,7 +148,7 @@ into the Web daemon.
    LOAD; the receive phase does not consume an admission receipt.
 4. Root invokes Native coordination in a named finite systemd scope, with
    `--site bot --phase <phase> --control <exact-control-path>` and
-   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-04`.
+   `--control-sha256 <sha> --apply MARKET-IMAGE-STORES-ONLY-20261025-05`.
    The required unit name is `market-images-bot-<phase>-<nonce>`; set CPUQuota100%,
    MemoryMax2G, MemorySwapMax0, TasksMax64, RuntimeMaxSec900 and TimeoutStopSec5.
    Normal `systemd-run --scope --quiet --collect` supplies the scope. The worker

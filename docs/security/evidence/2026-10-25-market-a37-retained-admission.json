@@ -1,0 +1,90 @@
+{
+  "actual_terminal_source_sha256": "1a3a49082c8d69621ba57f69e64e4ea654c7046742f12ff7485a53a5fbdefac8",
+  "admission": {
+    "archive_bytes": 188969984,
+    "archive_receive_requested": false,
+    "archive_sha256": "334b0f56761526be10f4ca45d8c6ef966464f7061e359bbe33075455b4646ed5",
+    "candidate_config_id": "sha256:0ed2df2f78031a5cdf2cfbb365388fd21c674d01849c075fb5e072b4fd874d6c",
+    "configuration_values_disclosed": false,
+    "expanded_layer_bytes": 188912128,
+    "operation_sha256": "6b5d72d72c8bf711f83d548fb3ec60b5d96fbb98b66392e02d5402f88bd894f6",
+    "original_failed_operation_sha256": "29f4d4bded8cd75cca2d9afb3685ccce7c14fc144742e5bcc3b96eb61f40014e",
+    "original_receive_completed": false,
+    "profile": "a37ec78ec097",
+    "prospective_import_bytes": 755764224,
+    "reconciliation_nonce": "fb41c0f002a84781bb948efcc989fef1",
+    "rootfs": [
+      "sha256:a70f6272827f64e1427d048ced77491aab5d64ab95725e56920802ff391197d7",
+      "sha256:535a5d38abecfac4fa49da33fa942b53c53c463bd0d39a860967e46eb03faafe",
+      "sha256:6972161a9a77e7c1afb997daac15abc54f5b70c7b40b814601f53e038d8c398c",
+      "sha256:d86e9bd004831a6069b9a02e5caac80b73526315f52719079b4017b099956ed2",
+      "sha256:88c4aec6b3db43a4218d04d8f2834172e861d18b3b3c1fad2b9dad9650e94fc1",
+      "sha256:5d91708491e7adc7fad3a413a65655265f62f70d4d5610bf34a766647ac4949e",
+      "sha256:4b09ceb1287e2fefe37923875eca57feaeadd5b7486e99253f3a92df53301a5d",
+      "sha256:60351807043c9cf88d2e8d3cffac791af843626334ee0515a39bddc26ff14ab3",
+      "sha256:019bbe53f28d911bd9391077e23b5499b4715bed95443014f8a5a6b2494236e2",
+      "sha256:18e18008471722197628586da0bc0252facf3b105e6f2fe74feb56f0e0028f16",
+      "sha256:bed4c36bf62968f2f54d9a9aa6778b6a3ddd67ddbc8b19865b927ffa0217ab8c",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:78bce449c1347da04fa26c047d426488f0c90777fead3f67854dac3c6689542d",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:bcc6e9987ce491687cd4e7fb42e600564fac79dbe3979c9688d3292b3b44234d",
+      "sha256:45ca17a6a34157992570cb0bbbda2b0ebd0dd7b4c37501fabed829a44a7bcfb1",
+      "sha256:8cd666ddf99e99c00b668bbdec2a74ca9e58674878c4f99b41d5e1db99382136"
+    ],
+    "schema": "market_candidate_archive/1",
+    "security_accepted": false,
+    "source_identities": {
+      "sha256:0ed2df2f78031a5cdf2cfbb365388fd21c674d01849c075fb5e072b4fd874d6c": {
+        "kind": "Docker_config_identity"
+      },
+      "sha256:6a6405710d276b14cdcdcbb0b600bf9f1ac169f53a61e795017772864c44dceb": {
+        "kind": "OCI_index_to_manifest_to_config",
+        "media_type": "application/vnd.oci.image.index.v1+json",
+        "size": 241
+      },
+      "sha256:72c001149d6e7ed19bf0dc9dc4a54973f451c44fde99beebb4577ced5f8a192e": {
+        "kind": "OCI_manifest_to_config",
+        "media_type": "application/vnd.oci.image.manifest.v1+json",
+        "size": 3127
+      }
+    },
+    "tar_identity": [
+      2049,
+      414908,
+      33152,
+      0,
+      0,
+      1,
+      188969984,
+      1792920206227410856,
+      1792920206227410856
+    ]
+  },
+  "admission_sha256": "c1663097b171be0ac25addd1735f8cafe21d4a512c678d96ef91fd10a30878f9",
+  "archive_receive_repeated": false,
+  "completed_epoch": 1792923037,
+  "image_load_requested": false,
+  "new_authority_sha256": "6b5d72d72c8bf711f83d548fb3ec60b5d96fbb98b66392e02d5402f88bd894f6",
+  "original_receive_completed": false,
+  "owned_guard_closure": {
+    "native": "362af0d135f3f19c3b2f30fdaa85eee2d23a9a74cce0b483ddcf3beb82006e36",
+    "web": "5cb3582cec54bcdfa7435cc72702f2a1bca8a5c2c8bc665433f73bce23103208"
+  },
+  "permanent_native_source_identity": [
+    2064,
+    1835555,
+    33152,
+    0,
+    0,
+    1,
+    0,
+    1787336928392178187,
+    1788695466612272194
+  ],
+  "schema": "security_market_retained_admission_public_evidence/1",
+  "security_accepted": false,
+  "serving_roles_activated": []
+}
