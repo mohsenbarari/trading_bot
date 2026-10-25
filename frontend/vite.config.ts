@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { previewHttps, trustedHttpsProxy } from './scripts/browser-ci-https.mjs'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
@@ -8,6 +9,8 @@ const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET?.trim()
   || 'http://127.0.0.1:8000'
 
 // https://vite.dev/config/
+const browserCiHttps = previewHttps(process.env)
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -124,11 +127,13 @@ export default defineConfig({
   // Browser CI uses a built preview with relative API URLs. Preserve its Host
   // so the normal registration same-origin and HttpOnly-cookie guards apply.
   preview: {
+    https: browserCiHttps,
     proxy: {
       '/api': {
         target: devProxyTarget,
         changeOrigin: false,
         ws: true,
+        ...(browserCiHttps ? { configure: trustedHttpsProxy } : {}),
       },
     },
   },

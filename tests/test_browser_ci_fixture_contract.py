@@ -331,7 +331,7 @@ class BrowserFixtureTests(unittest.TestCase):
         for browser, cookie in (('success', 'success'), ('failure', 'success'), ('success', 'failure')):
             with tempfile.TemporaryDirectory() as directory:
                 self.binding(directory, 'a' * 40, 'a' * 40)
-                environment = {key.upper() + '_OUTCOME': 'success' for key in ('source', 'cookie', 'bootstrap', 'surface', 'browser', 'cleanup')}
+                environment = {key.upper() + '_OUTCOME': 'success' for key in ('source', 'cookie', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
                 environment['BROWSER_OUTCOME'] = browser
                 environment['COOKIE_OUTCOME'] = cookie
                 with chdir(directory), patch.dict(os.environ, environment, clear=True):

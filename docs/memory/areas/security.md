@@ -7,7 +7,7 @@
 - Host/TLS complete. Appddc5fe9c backups/PG-candidate/uploads isolated restores
   passed both; old-image/schema compatibility OPEN. Final accepts ciphertext only;
   no App provisioning/migration authority.
-- Ordinary665220a2/e1a727de built, not serving. Freeze main; merge security after
+- Ordinary665220a2/e1a727de loaded both hosts, not serving. Freeze main; merge after
   activation. Preserve dirty coin-market-retention.md and rollback/history.
 - Never retry/reroute App C/S/R fresh-profile/COW adaptation/probe. Use ordinary
   main artifact with fresh config/backup/functional evidence.
@@ -23,8 +23,8 @@
   E46 4d3 NOAPPLY refused account1 restart; no request. Appdf941 archive-only
   memoryfloor failure retired/guards closed under2ddd; no LOAD. Both watchdogs
   auto-restored normal apply; finite windows only. Keep eight readers.
-  Probes exclude daemon heap. Appv3 admitted8139/f19;
-  Native prepare failed pre-LOAD, cause UNPROVEN; keep once/history.
+  Probes exclude daemon heap. App LOAD receipts Native88b2644f/Weba8d10a5f verified.
+  Keep Native01 unknown/02 wrong-peer-phase failures and history.
 - Expired controls grant no authority; unknown RPC never proves cancel/retry.
   Config/manifest differ; classic branches never query Descriptor. Physical TAR
   members unique; repeated logical layers valid, every ordered DiffID strict.

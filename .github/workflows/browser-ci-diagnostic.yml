@@ -79,6 +79,7 @@ jobs:
             'workflow_commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
             'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'source_binding_verified': True,
             'scenario': scenario, 'browser': browser,
+            'preview_transport_requested': 'https', 'https_certificate_validation_required': True,
             'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
         }, sort_keys=True) + '\n')
         PYCODE
@@ -106,7 +107,7 @@ jobs:
         DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
         SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
         REDIS_URL=redis://redis:6379/0
-        FRONTEND_URL=http://127.0.0.1:4173
+        FRONTEND_URL=https://127.0.0.1:4173
         DEV_API_KEY=REDACTED_DEV_API_KEY
         JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
         EOF
@@ -215,10 +216,29 @@ jobs:
           -H 'Content-Type: application/json'
         curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
           -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
-          -H 'Origin: http://127.0.0.1:4173' \
+          -H 'Origin: https://127.0.0.1:4173' \
           -H 'Access-Control-Request-Method: POST'
-        grep -qi '^access-control-allow-origin: http://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+        grep -qi '^access-control-allow-origin: https://127.0.0.1:4173' /tmp/browser-ci-cors.headers
       id: surface
+    - name: Prepare selected CI HTTPS fixture
+      id: tls_prepare
+      timeout-minutes: 2
+      run: |
+        node --test scripts/probe_browser_ci_https.test.mjs
+        node frontend/scripts/browser-ci-https.mjs prepare
+    - name: Trust selected synthetic CI CA
+      id: tls
+      timeout-minutes: 2
+      shell: bash
+      run: |
+        [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+        browser_ci_ca_anchor="/usr/local/share/ca-certificates/browser-ci-selected-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.crt"
+        [[ ! -e "$browser_ci_ca_anchor" && ! -L "$browser_ci_ca_anchor" ]]
+        sudo install -m 0644 -- "$BROWSER_CI_TLS_CA" "$browser_ci_ca_anchor"
+        browser_ci_ca_identity="$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$browser_ci_ca_anchor")"
+        printf 'BROWSER_CI_TLS_CA_ANCHOR=%s\nBROWSER_CI_TLS_CA_IDENTITY=%s\n' \
+          "$browser_ci_ca_anchor" "$browser_ci_ca_identity" >> "$GITHUB_ENV"
+        sudo update-ca-certificates >/dev/null 2>&1
     - name: Run selected diagnostic scenarios
       working-directory: frontend
       env:
@@ -236,16 +256,16 @@ jobs:
         case "$DIAGNOSTIC_BROWSER" in chromium|firefox|webkit) ;; *) exit 1 ;; esac
         case "$DIAGNOSTIC_SCENARIO" in
           mandatory)
-            npx playwright test e2e/mandatory-channel.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger'
+            npx playwright test e2e/mandatory-channel.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger'
             ;;
           offers)
-            npx playwright test e2e/market-offers.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'text offer submission parses and persists a new sell offer'
+            npx playwright test e2e/market-offers.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'text offer submission parses and persists a new sell offer'
             ;;
           both)
-            npx playwright test e2e/mandatory-channel.spec.ts e2e/market-offers.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger|text offer submission parses and persists a new sell offer'
+            npx playwright test e2e/mandatory-channel.spec.ts e2e/market-offers.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger|text offer submission parses and persists a new sell offer'
             ;;
           chat-menu)
-            CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct chat supports reacting to an incoming message and deleting an own message'
+            CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct chat supports reacting to an incoming message and deleting an own message'
             ;;
           *) exit 1 ;;
         esac
@@ -277,11 +297,26 @@ jobs:
       if: always()
       run: docker compose down --volumes --remove-orphans
       id: cleanup
+    - name: Remove only the owned synthetic CI CA anchor
+      if: always() && env.BROWSER_CI_TLS_CA_ANCHOR != ''
+      id: tls_cleanup
+      timeout-minutes: 2
+      shell: bash
+      run: |
+        [[ "$BROWSER_CI_TLS_CA_ANCHOR" == "/usr/local/share/ca-certificates/browser-ci-selected-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.crt" ]]
+        [[ "$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$BROWSER_CI_TLS_CA_ANCHOR")" == "$BROWSER_CI_TLS_CA_IDENTITY" ]]
+        sudo cmp -s -- "$BROWSER_CI_TLS_CA" "$BROWSER_CI_TLS_CA_ANCHOR"
+        [[ "$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$BROWSER_CI_TLS_CA_ANCHOR")" == "$BROWSER_CI_TLS_CA_IDENTITY" ]]
+        sudo rm -- "$BROWSER_CI_TLS_CA_ANCHOR"
+        sudo update-ca-certificates >/dev/null 2>&1
     - name: Record diagnostic outcome
       if: always()
       env:
         SOURCE_OUTCOME: ${{ steps.source.outcome }}
         COOKIE_OUTCOME: ${{ steps.cookie.outcome }}
+        TLS_PREPARE_OUTCOME: ${{ steps.tls_prepare.outcome }}
+        TLS_OUTCOME: ${{ steps.tls.outcome }}
+        TLS_CLEANUP_OUTCOME: ${{ steps.tls_cleanup.outcome }}
         BOOTSTRAP_OUTCOME: ${{ steps.bootstrap.outcome }}
         SURFACE_OUTCOME: ${{ steps.surface.outcome }}
         BROWSER_OUTCOME: ${{ steps.browser.outcome }}
@@ -296,7 +331,7 @@ jobs:
             'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
         }
         allowed = {'success', 'failure', 'cancelled', 'skipped', ''}
-        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'bootstrap', 'surface', 'browser', 'cleanup')}
+        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
         if not all(item in allowed for item in outcomes.values()):
             raise SystemExit('unknown diagnostic outcome')
         value['step_outcomes'] = outcomes

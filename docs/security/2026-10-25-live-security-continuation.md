@@ -305,3 +305,36 @@ was corrected before publication. Root11 owned HTTP/child fixtures and13 workflo
 contracts passed; this is not an actual browser result. No product cookie/CSRF
 policy, ordinary workflow gate, timeout or retry was relaxed. The hosted cookie
 observation and current selected scenarios remain pending.
+
+The actual77294dc2 selected Webkit run40235319430 failed one mandatory-registration
+case and passed its offer case. Authenticated artifact12614961775 has210053 bytes,
+SHA256c6725b643184a0b6cc1b65d92c0f29f5fe0ce950104901979ed888654b671722.
+The synthetic cookie observation actually returned accepted=false and
+retransmitted=false. The selected environment's HTTP preview is therefore
+incompatible with this browser's staging Secure-cookie flow. A selected-only
+strict HTTPS fixture is reviewed separately; cookie/CSRF safeguards stay intact.
+
+Native02 preparation minted control dfb5b36db0b14d0e8c25e8489a538692 and passed
+Native NoApply, but Web NoApply refused app_resource_contract/control_admission.
+Its exact caller used Web phase load-native, while the immutable worker/resource
+contract requires stream-web for that peer preflight. No apply/LOAD request or
+attempt followed. Every control, preflight, once and failure remains unchanged.
+A small coexisting caller maps only that peer NoApply to stream-web, preserving
+the two checks and unchanged worker-owned START/stream protocol. Fifteen Root
+and fifteen independent fixtures passed, including actual context/NoApply and
+the complete caller/worker/resource phase matrix. A separate fresh eight-fixture
+proof collector authenticated the failed control and both inactive original scopes.
+
+Both real App LOADs subsequently completed and their exact receipts also passed
+the strict normal-activation parser:
+
+| Site | Control nonce | Actual LOAD receipt SHA256 |
+| --- | --- | --- |
+| Native | f58bb935185542c9ac367bdce28b0c69 | 88b2644ff17e40cf0b309d422e6e1e52f5b5ad7a7034b80fe707d6ddcca249e7 |
+| Web | e361e621be0a47d293f380ae6c0aba7b | a8d10a5f211caca63769d39a4740afdce5cd82239088adaf8d5bed3d11eb9829 |
+
+Native measures Docker confige1a727de; Web measures OCI manifest2f609ac5 with its
+verified association to that same config. Full ordered layers and typed Config
+were verified. Neither LOAD activates a serving role or closes backup/schema,
+functional, F79, ACL or full-matrix gates. Global acceptance remains false and
+refactor automation/30-unit witness remain stopped/not started.
