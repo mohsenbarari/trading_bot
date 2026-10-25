@@ -4,8 +4,8 @@
   After closure require30 consecutive accepted clean units; failures reset streak
   with history. Tests/polls never count. Preserve behavior/capture owner/user dirt;
   Writer/DNS human.
-- Host/TLS complete. Appddc5fe9c backups/PG-candidate restores passed both;
-  old-image/uploads compatibility OPEN. Final accepts ciphertext backups only;
+- Host/TLS complete. Appddc5fe9c backups/PG-candidate/uploads isolated restores
+  passed both; old-image/schema compatibility OPEN. Final accepts ciphertext only;
   no App provisioning/migration authority.
 - Ordinary665220a2/e1a727de built, not serving. Freeze main; merge security after
   activation. Preserve dirty coin-market-retention.md and rollback/history.
@@ -39,6 +39,6 @@
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
-- Browser40215795297 failed three shard1s. CI origin/parser/producer/OTP fixes64580e68
-  passed49 tests/review and actual selected40226247190 passed2. Full browser40226940183
-  and coverage40226942334 pending. Full browser acceptance OPEN.
+- Browser64580e68 selected40226247190 passed2; full40226940183 failed three
+  shard1s (nine passed). Coverage40226942334 failed two stale guard assertions;
+  reviewed96a8b2c6 corrects these and checks them before browsers. Acceptance OPEN.

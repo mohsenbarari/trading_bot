@@ -51,17 +51,22 @@ class CaptureConflictTests(unittest.TestCase):
 
     def control(self):
         now = int(time.time()); metadata = [1, 2, 0o100600, 0, 0, 1, 0, 3, 4]
-        return {'schema': 'capture_conflict_control/1', 'operation': H.OP, 'nonce': self.nonce,
+        evidence=lambda name,pin='1'*64:{'path':str(H.ROOTS['web']/self.nonce/name),'sha256':pin,'bytes':10}
+        return {'schema': 'capture_conflict_control/2', 'operation': H.OP, 'nonce': self.nonce,
                 'source_commit': 'c'*40, 'worker_sha256': self.pin, 'issued_at': now, 'deadline': now+900,
                 'native_machine_id': 'd'*32, 'web_machine_id': 'e'*32, 'public_profile_sha256': 'f'*64,
                 'fences': {'native': {'marker': list(metadata), 'source': list(metadata)}, 'web': {'marker': list(metadata)}},
                 'compose': {'directory': '/root/.local/security-capture2-compose-parity-20261024-04',
                             'files': [{'path': path, 'sha256': str(index+1)*64} for index, path in enumerate(self.files)],
                             'env_reference': self.env_reference},
-                'old_source': {'path': self.oldpath, 'sha256': H.OLD_SHA, 'bytes': 111954},
-                'new_source': {'path': self.newpath, 'sha256': H.NEW_SHA, 'bytes': H.NEW_BYTES},
-                'foundation_source': {'path': '/root/.local/public-capture-source/private_pipeline_foundation.py',
-                                      'sha256': H.FOUNDATION_SHA, 'bytes': 37187}}
+                'old_source': {'kind':'image-baked','target':H.DEST,'sha256': H.OLD_SHA, 'bytes': 111954},
+                'new_source': {'kind':'bind','target':H.DEST,'path': self.newpath, 'sha256': H.NEW_SHA, 'bytes': H.NEW_BYTES},
+                'foundation_source': {'kind':'image-baked','target':H.FOUNDATION_DEST,'sha256': H.FOUNDATION_SHA, 'bytes': 37187},
+                'baked_source_worker':evidence('normal_market_activation.py'),
+                'baked_source_proof':evidence('baked-sources.json'),
+                'source_evidence':{'catalog':evidence('market_candidate_images.json',H.CATALOG_SHA),
+                    'load_receipt':evidence('load-receipt.json'),'load_control':evidence('load-control.json'),
+                    'archive_admission':evidence('archive-admission.json')}}
 
     def fixture(self):
         service = {'image': H.IMAGE, 'user': '10001:10001', 'read_only': True, 'init': True,
@@ -71,14 +76,16 @@ class CaptureConflictTests(unittest.TestCase):
                    'environment': {'SYNTHETIC_PRIVATE_TOKEN': 'PUBLIC_VALUE_NEVER_SERIALIZE'},
                    'command': ['python3', 'capture_fixture.py'], 'entrypoint': None,
                    'healthcheck': {'test': ['CMD', 'true'], 'interval': '30s', 'timeout': '5s', 'start_period': '10s', 'retries': 3},
-                   'volumes': [{'type': 'bind', 'source': self.oldpath, 'target': H.DEST, 'read_only': True},
-                               {'type': 'bind', 'source': '/root/.local/public-capture-source/private_pipeline_foundation.py', 'target': H.FOUNDATION_DEST, 'read_only': True},
-                               {'type': 'bind', 'source': H.SESSION, 'target': '/sessions', 'read_only': True}],
+                   'volumes': [{'type':'bind','source':'/public/capture','target':'/var/lib/market-data/capture','read_only':False},
+                               {'type':'bind','source':H.SESSION,'target':'/var/lib/market-data/session','read_only':False},
+                               {'type':'bind','source':'/public/state','target':'/var/lib/market-data/state','read_only':False}],
+                   'secrets':[{'source':'public_db','target':'public_db'},{'source':'public_redis','target':'public_redis'}],
                    'networks': {'market-backend': {}}}
         image = {'Id': H.IMAGE, 'Config': {'Env': ['PATH=/usr/bin'], 'Cmd': ['python3'], 'Entrypoint': None,
                                         'User': '10001:10001', 'WorkingDir': '/app', 'Volumes': None, 'Labels': {'public.fixture': 'true'}}}
         rendered = {'services': {H.SERVICE: service, 'other-fixture-service': {'image': 'public-inert'}},
-                    'networks': {'market-backend': {'name': 'public-market-backend'}}}
+                    'networks': {'market-backend': {'name': 'public-market-backend'}},
+                    'secrets':{name:{'file':'/public/'+name} for name in ('public_db','public_redis')}}
         cfg = {'AttachStdin': False, 'AttachStdout': True, 'AttachStderr': True, 'OpenStdin': False,
                'StdinOnce': False, 'Tty': False, 'Domainname': '', 'Hostname': H.OLD_CID[:12],
                'Cmd': service['command'], 'Entrypoint': None, 'Env': ['PATH=/usr/bin', 'SYNTHETIC_PRIVATE_TOKEN=PUBLIC_VALUE_NEVER_SERIALIZE'],
@@ -101,7 +108,9 @@ class CaptureConflictTests(unittest.TestCase):
                      'PidsLimit': 64, 'Memory': 1073741824, 'NanoCpus': 1000000000,
                      'RestartPolicy': {'Name': 'unless-stopped', 'MaximumRetryCount': 0},
                      'LogConfig': service['logging'] | {}, 'Tmpfs': {'/tmp': 'rw,noexec,size=16m'},
-                     'Binds': [row['source']+':'+row['target']+':ro' for row in service['volumes']], 'Mounts': [],
+                     'Binds': [row['source']+':'+row['target']+':rw' for row in service['volumes']],
+                     'Mounts': [{'Type':'bind','Source':'/public/'+name,'Target':'/run/secrets/'+name,'ReadOnly':True,'BindOptions':{}}
+                                for name in ('public_db','public_redis')],
                      'AutoRemove': False, 'CgroupnsMode': 'private', 'ConsoleSize': [0, 0], 'IpcMode': 'private',
                      'MemorySwappiness': None, 'Privileged': False, 'PublishAllPorts': False, 'Runtime': 'runc',
                      'ShmSize': 67108864, 'MemorySwap': 2147483648, 'NetworkMode': 'public-market-backend', 'OomKillDisable': False,
@@ -110,7 +119,9 @@ class CaptureConflictTests(unittest.TestCase):
                      'ReadonlyPaths': ['/proc/bus', '/proc/fs', '/proc/irq', '/proc/sys', '/proc/sysrq-trigger']})
         host['LogConfig'] = {'Type': 'json-file', 'Config': {'max-size': '1m', 'max-file': '2'}}
         row = {'id': H.OLD_CID, 'image': H.IMAGE, 'name': '/'+H.PROJECT+'-'+H.SERVICE+'-1', 'config': cfg, 'host': host,
-               'mounts': [{'Type': 'bind', 'Source': r['source'], 'Destination': r['target'], 'RW': False, 'Propagation': 'rprivate'} for r in service['volumes']],
+               'mounts': [{'Type':'bind','Source':r['source'],'Destination':r['target'],'Mode':'rw','RW':True,'Propagation':'rprivate'}
+                          for r in service['volumes']]+[{'Type':'bind','Source':'/public/'+name,'Destination':'/run/secrets/'+name,
+                            'Mode':'','RW':False,'Propagation':'rprivate'} for name in ('public_db','public_redis')],
                'networks': {'public-market-backend': {'NetworkID': '1'*64, 'IPAMConfig': None, 'DriverOpts': None, 'Links': None,
                    'Aliases': [H.PROJECT+'-'+H.SERVICE+'-1', H.SERVICE], 'EndpointID': '2'*64,
                    'IPAddress': '192.0.2.7', 'MacAddress': '02:00:00:00:00:07'}},
@@ -129,7 +140,7 @@ class CaptureConflictTests(unittest.TestCase):
         return rows
 
     def changed(self, row, cid='c'*64, running=False, *, restore=False, override='/public/diagnostic-source.yml'):
-        value = deepcopy(row) if restore else H.replace_mount_source(row, self.oldpath, self.newpath)
+        value = deepcopy(row) if restore else H.add_source_bind(row,self.newpath)
         value.update(id=cid, pid=54321 if running else 0, running=running, restarting=False)
         value['config']['Hostname'] = cid[:12]
         value['config']['Labels']['com.docker.compose.config-hash'] = 'b'*64
@@ -191,17 +202,69 @@ class CaptureConflictTests(unittest.TestCase):
 
     def test_source_and_render_changes_allow_exactly_one_public_source_bind(self):
         rendered, row, _ = self.fixture(); original = deepcopy(row)
-        new = self.changed(row); H.expected_source_change(row, new, self.oldpath, self.newpath, stopped=True)
-        changed = deepcopy(rendered); changed['services'][H.SERVICE]['volumes'][0]['source'] = self.newpath
-        H.rendered_delta(rendered, changed, self.oldpath, self.newpath); self.assertEqual(row, original)
+        new = self.changed(row); H.expected_source_change(row, new, self.newpath, stopped=True)
+        changed = deepcopy(rendered); changed['services'][H.SERVICE]['volumes'].append(
+            {'type':'bind','source':self.newpath,'target':H.DEST,'read_only':True,'bind':{'create_host_path':False}})
+        H.rendered_delta(rendered, changed, self.newpath); self.assertEqual(row, original)
         for alter in (lambda v: v['config']['Env'].append('PRIVATE_DIFFERENT=1'),
                       lambda v: v['host'].update(Memory=123), lambda v: v['config'].update(User='0:0'),
                       lambda v: v['mounts'][1].update(Source='/public/WRONG'),
                       lambda v: v['networks']['public-market-backend'].update(IPAMConfig={'IPv4Address': '192.0.2.99'})):
             bad = deepcopy(new); alter(bad)
-            with self.assertRaises(RuntimeError): H.expected_source_change(row, bad, self.oldpath, self.newpath, stopped=True)
+            with self.assertRaises(RuntimeError): H.expected_source_change(row, bad, self.newpath, stopped=True)
         bad = deepcopy(changed); bad['services']['other-fixture-service']['image'] = 'WRONG'
-        with self.assertRaisesRegex(RuntimeError, '^source_delta$'): H.rendered_delta(rendered, bad, self.oldpath, self.newpath)
+        with self.assertRaisesRegex(RuntimeError, '^source_delta$'): H.rendered_delta(rendered, bad, self.newpath)
+
+    def test_baked_baseline_five_mounts_and_add_remove_only_one_ro_source_bind_in_both_api_forms(self):
+        rendered,old,image=self.fixture();self.assertEqual(len(old['mounts']),5)
+        self.assertFalse(any(m['Destination'] in {H.DEST,H.FOUNDATION_DEST} for m in old['mounts']))
+        model=deepcopy(rendered);model['services'][H.SERVICE]['volumes'].append(
+            {'type':'bind','source':self.newpath,'target':H.DEST,'read_only':True,'bind':{'create_host_path':False}})
+        for typed in (False,True):
+            new=self.changed(old)
+            if typed:
+                new['host']['Binds'].remove(self.newpath+':'+H.DEST+':ro')
+                new['host']['Mounts'].append({'Type':'bind','Source':self.newpath,'Target':H.DEST,'ReadOnly':True,'BindOptions':{}})
+                next(m for m in new['mounts'] if m['Destination']==H.DEST)['Mode']=''
+            H.expected_source_change(old,new,self.newpath,stopped=True)
+            self.assertTrue(H.full_parity(model,new,image));self.assertEqual(len(new['mounts']),6)
+            stripped=H.remove_source_bind(new,self.newpath)
+            self.assertEqual(H.canonical_host(stripped['host']),H.canonical_host(old['host']))
+            self.assertEqual(H.mounts(stripped['mounts']),H.mounts(old['mounts']))
+            restored=self.changed(old,cid='d'*64,restore=True)
+            H.expected_source_change(new,restored,self.newpath,stopped=True,removing=True)
+            bad=deepcopy(new);next(m for m in bad['mounts'] if m['Destination']==H.DEST)['RW']=True
+            with self.assertRaisesRegex(RuntimeError,'source_delta'):H.remove_source_bind(bad,self.newpath)
+        bad=deepcopy(model);bad['services'][H.SERVICE]['volumes'][-1]['bind']['create_host_path']=True
+        with self.assertRaisesRegex(RuntimeError,'source_delta'):H.full_parity(bad,self.changed(old),image)
+
+    def test_baked_sources_cannot_be_fabricated_as_host_binds_or_use_old_control_schema(self):
+        value=self.control();H.validate_control(value,value['issued_at'])
+        for mutate in (lambda v:v.update(schema='capture_conflict_control/1'),
+                lambda v:v['old_source'].update(kind='bind',path=self.oldpath),
+                lambda v:v['foundation_source'].update(path='/public/fake-foundation.py'),
+                lambda v:v['source_evidence']['catalog'].update(sha256='0'*64),
+                lambda v:v['baked_source_worker'].update(bytes=True)):
+            wrong=deepcopy(value);mutate(wrong)
+            with self.assertRaisesRegex(RuntimeError,'control'):H.validate_control(wrong,value['issued_at'])
+
+    def test_missing_real_baked_proof_refuses_before_guard_and_before_stopping_capture(self):
+        baseline=self.baseline();backend=self.backend([baseline]);control=backend.op
+        control['public_profile_sha256']=H.public_profile(baseline)
+        control['baked_source_worker']['path']=str(self.root/'missing-public-worker.py')
+        with ExitStack() as held,patch.object(H,'WEB_OWNER',self.root/'web.guard'),patch.object(H,'Web',return_value=backend):
+            with self.assertRaises(FileNotFoundError):H.web_run(control,self.pin,self.root,held,[],True)
+        self.assertFalse(backend.requested);self.assertFalse((self.root/'web.guard').exists())
+        self.assertFalse(any(event[0] in {'stop','create','start'} for event in backend.events))
+
+    def test_preexisting_app_code_shadow_mount_refuses_before_proof_or_owned_guard(self):
+        baseline=self.baseline();old=baseline[H.OLD_CID]
+        old['mounts'][0].update(Destination='/app/core',RW=False)
+        backend=self.backend([baseline]);backend.op['public_profile_sha256']=H.public_profile(baseline)
+        with ExitStack() as held,patch.object(H,'WEB_OWNER',self.root/'web.guard'),patch.object(H,'Web',return_value=backend), \
+                patch.object(H,'verify_baked_baseline') as proof:
+            with self.assertRaisesRegex(RuntimeError,'source_delta'):H.web_run(backend.op,self.pin,self.root,held,[],True)
+        proof.assert_not_called();self.assertFalse(backend.requested);self.assertFalse((self.root/'web.guard').exists())
 
     def test_full_normal_compose_private_config_and_host_parity_rejects_every_unapproved_dimension(self):
         rendered, row, image = self.fixture(); self.assertTrue(H.full_parity(rendered, row, image))
@@ -266,7 +329,8 @@ class CaptureConflictTests(unittest.TestCase):
                 for check in self.checks: check()
             def render(self, new=False, public_override=None):
                 value = deepcopy(rendered)
-                if new: value['services'][H.SERVICE]['volumes'][0]['source'] = case.newpath
+                if new:value['services'][H.SERVICE]['volumes'].append(
+                    {'type':'bind','source':case.newpath,'target':H.DEST,'read_only':True,'bind':{'create_host_path':False}})
                 return value
             def command(self, argv, **kwargs):
                 return b'2.40.3\n' if argv[-3:] == ['compose', 'version', '--short'] else H.encode(image)
@@ -345,7 +409,7 @@ class CaptureConflictTests(unittest.TestCase):
         baseline = self.baseline(); backend = self.backend([baseline]); control = backend.op
         control['public_profile_sha256'] = H.public_profile(baseline)
         with ExitStack() as held, patch.object(H, 'WEB_OWNER', self.root/'web.guard'), \
-             patch.object(H, 'Web', return_value=backend):
+             patch.object(H, 'Web', return_value=backend),patch.object(H,'verify_baked_baseline'):
             value = H.web_run(control, self.pin, self.root, held, [], False)
         self.assertEqual(value['status'], 'preflight_passed_not_applied')
         self.assertFalse((self.root/'web.guard').exists()); self.assertFalse(backend.override.exists())
@@ -356,7 +420,7 @@ class CaptureConflictTests(unittest.TestCase):
         control['public_profile_sha256'] = H.public_profile(baseline)
         def uncertain(*_): backend.requested = True; raise H.Unknown()
         with ExitStack() as held, patch.object(H, 'WEB_OWNER', self.root/'web.guard'), \
-             patch.object(H, 'Web', return_value=backend), patch.object(H, 'replacement', side_effect=uncertain) as replace, \
+             patch.object(H, 'Web', return_value=backend),patch.object(H,'verify_baked_baseline'),patch.object(H, 'replacement', side_effect=uncertain) as replace, \
              patch.object(H, 'rollback', side_effect=AssertionError('unknown outcome cannot retry')) as rollback:
             with self.assertRaises(H.Unknown): H.web_run(control, self.pin, self.root, held, [], True)
         self.assertEqual(replace.call_count, 1); rollback.assert_not_called()
@@ -372,7 +436,7 @@ class CaptureConflictTests(unittest.TestCase):
             if kwargs.get('new'): value['services']['other-fixture-service']['image'] = 'WRONG'
             return value
         with ExitStack() as held, patch.object(H, 'WEB_OWNER', self.root/'web.guard'), \
-             patch.object(H, 'Web', return_value=backend), patch.object(backend, 'render', side_effect=wrong):
+             patch.object(H, 'Web', return_value=backend),patch.object(H,'verify_baked_baseline'),patch.object(backend, 'render', side_effect=wrong):
             with self.assertRaisesRegex(RuntimeError, '^source_delta$'): H.web_run(control, self.pin, self.root, held, [], True)
         self.assertFalse((self.root/'web.guard').exists()); self.assertFalse(backend.requested)
 
@@ -391,7 +455,7 @@ class CaptureConflictTests(unittest.TestCase):
         control['public_profile_sha256'] = H.public_profile(baseline)
         def accepted(*_): backend.requested = True; return started['c'*64]
         with ExitStack() as held, patch.object(H, 'WEB_OWNER', self.root/'web.guard'), \
-             patch.object(H, 'Web', return_value=backend), patch.object(H, 'replacement', side_effect=accepted), \
+             patch.object(H, 'Web', return_value=backend),patch.object(H,'verify_baked_baseline'),patch.object(H, 'replacement', side_effect=accepted), \
              patch.object(backend, 'observe', side_effect=RuntimeError('PUBLIC_PRIVATE_LOG_FAILURE')), \
              patch.object(H, 'rollback', side_effect=AssertionError('log visibility is not a config failure')) as rollback:
             value = H.web_run(control, self.pin, self.root, held, [], True)

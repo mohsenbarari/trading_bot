@@ -651,6 +651,9 @@ LOAD_CATALOG = 'bebdd67daf4ef7950b2c4278cd338ec0d11130ea84df0a7fd8c41d4a9ddc13d0
 LOAD_ENGINE = '1041cc2d04100e2f6aebb95dca30c2339de41342b350ef44522c05277e9c146e'
 LOAD_HEALTH_POLICY = '2e520dcb1ac3ab9b0da96959caad3035170d792284bf3df531f128f43a3f9c86'
 LOAD_HEALTH_ADAPTER = '5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
+LOAD_V3_CONTROLLER = 'fdbdb4901f05844e4a5ec7b3b11413e0be139f3b4708ecba14cdc1f92a110eab'
+LOAD_RESOURCE_CONTRACT = 'b99ecf8c8d6618cde38580eba197c509da8ae900cf99d6f81ef7b11b47fadaeb'
+LOAD_RESOURCE_SOURCE = '1e27f45bf3e629a774a84e99979ceae2bd30b89db8f98144bdf02772459a68e0'
 
 
 def load_observation_history(value,site):
@@ -682,12 +685,29 @@ def load_observation_history(value,site):
 
 
 def host_load(value,site,scope):
-    """Actual new App receipt, never a historical Market receipt or future ID."""
-    fixed = {'schema':'canonical_app_preloaded_image/2',
+    """Exact historical /2 or resource-bound /3 App LOAD; no activation authority."""
+    versions = {('canonical_app_preloaded_image/2',LOAD_CONTROLLER),
+        ('canonical_app_preloaded_image/3',LOAD_V3_CONTROLLER)}
+    require(type(value) is dict and type(site) is str and site in SITES
+        and type(value.get('schema')) is str and type(value.get('controller_sha256')) is str
+        and (value['schema'],value['controller_sha256']) in versions,'host_load_gate')
+    if value['schema'] == 'canonical_app_preloaded_image/3':
+        resource = {'resource_contract_sha256':LOAD_RESOURCE_CONTRACT}
+        web = {'resource_ram_floor_bytes':3021996032,'aggregate_client_memory_max_bytes':536870912,
+            'metadata_stream_allowance_bytes':268435456,'actual_tmpfs_payload_write_bytes':0,
+            'daemon_heap_quota_claimed':False,'resource_contract_accepted':False}
+        if site == 'bot':
+            resource['native_resource_policy_unchanged'] = True
+            require(not set(web).intersection(value),'host_load_gate')
+        else:
+            resource.update(web)
+            require('native_resource_policy_unchanged' not in value,'host_load_gate')
+        require(all(same(value.get(k),v) for k,v in resource.items()),'host_load_gate')
+    fixed = {'schema':value['schema'],
         'operation':'security-canonical-app-candidate-images-20261025-01',
         'site':'native' if site == 'bot' else 'web','host_machine_id':scope['machine_id'],
         'host':'65.109.216.187' if site == 'bot' else '65.109.220.59',
-        'catalog_sha256':LOAD_CATALOG,'controller_sha256':LOAD_CONTROLLER,'engine_sha256':LOAD_ENGINE,
+        'catalog_sha256':LOAD_CATALOG,'controller_sha256':value['controller_sha256'],'engine_sha256':LOAD_ENGINE,
         'health_policy_sha256':LOAD_HEALTH_POLICY,'health_adapter_sha256':LOAD_HEALTH_ADAPTER,
         'ci_run_id':IMAGE['run_id'],'image_artifact_sha256':IMAGE['image_zip_sha256'],
         'actual_ci_run_id':SMOKE['run_id'],'actual_ci_artifact_sha256':SMOKE['zip_sha256'],

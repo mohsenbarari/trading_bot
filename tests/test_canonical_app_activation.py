@@ -368,6 +368,64 @@ class ActivationTests(unittest.TestCase):
                 {'controller_sha256':'0'*64},{'candidate_local_image_id':'sha256:'+'0'*64},
                 {'rootfs':list(reversed(value['rootfs']))},{'security_accepted':True},{'site':'other'}):
                 with self.subTest(site=site,change=change),self.assertRaises(RuntimeError):C.host_load({**value,**change},site,{'machine_id':'a'*32})
+    def resource_load_receipt(self,site):
+        value = self.public_load_receipt(site)
+        value.update(schema='canonical_app_preloaded_image/3',controller_sha256=C.LOAD_V3_CONTROLLER,
+            resource_contract_sha256=C.LOAD_RESOURCE_CONTRACT)
+        if site == 'bot':value['native_resource_policy_unchanged'] = True
+        else:value.update(resource_ram_floor_bytes=3021996032,aggregate_client_memory_max_bytes=536870912,
+            metadata_stream_allowance_bytes=268435456,actual_tmpfs_payload_write_bytes=0,
+            daemon_heap_quota_claimed=False,resource_contract_accepted=False)
+        return value
+    def test_v3_load_resource_tuple_preserves_exact_v2_and_both_site_policies(self):
+        for name,pin in (('canonical_app_candidate_images_v3.py',C.LOAD_V3_CONTROLLER),
+            ('canonical_app_resource_contract.py',C.LOAD_RESOURCE_SOURCE)):
+            self.assertEqual(sha256((ROOT/'deploy/maintenance'/name).read_bytes()).hexdigest(),pin)
+        spec = importlib.util.spec_from_file_location('_public_resource_contract',ROOT/'deploy/maintenance/canonical_app_resource_contract.py')
+        resource = importlib.util.module_from_spec(spec); spec.loader.exec_module(resource)
+        self.assertEqual(resource.CONTRACT_SHA,C.LOAD_RESOURCE_CONTRACT)
+        for site in C.SITES:
+            old = self.public_load_receipt(site); new = self.resource_load_receipt(site); before = deepcopy(new)
+            for value in (old,new):self.assertEqual(C.host_load(value,site,{'machine_id':'a'*32}),C.IMAGE['image_id'])
+            self.assertEqual(new,before)
+            for change in ({'schema':'canonical_app_preloaded_image/2'},{'controller_sha256':C.LOAD_CONTROLLER},
+                {'schema':'canonical_app_preloaded_image/4'},{'resource_contract_sha256':'0'*64},
+                {'source_archive_sha256':'0'*64},{'source_archive_bytes':True},{'whole_typed_config_compared_in_ram':False},
+                {'source_identities':{}},{'actual_ci_artifact_sha256':'0'*64},{'rootfs':list(reversed(new['rootfs']))},
+                {'candidate_local_image_id':'sha256:'+'0'*64},{'security_accepted':True}):
+                with self.subTest(site=site,change=change),self.assertRaises(RuntimeError):C.host_load({**new,**change},site,{'machine_id':'a'*32})
+            missing = deepcopy(new); missing.pop('resource_contract_sha256')
+            with self.assertRaises(RuntimeError):C.host_load(missing,site,{'machine_id':'a'*32})
+    def test_v3_resource_scalars_are_typed_and_cannot_claim_native_or_web_waivers(self):
+        web = self.resource_load_receipt('web')
+        for key,bad in (('resource_ram_floor_bytes',True),('aggregate_client_memory_max_bytes',536870911),
+            ('metadata_stream_allowance_bytes',False),('actual_tmpfs_payload_write_bytes',False),
+            ('actual_tmpfs_payload_write_bytes',1),('daemon_heap_quota_claimed',True),('resource_contract_accepted',True),
+            ('native_resource_policy_unchanged',True)):
+            with self.subTest(key=key),self.assertRaises(RuntimeError):C.host_load({**web,key:bad},'web',{'machine_id':'a'*32})
+        for key in ('resource_ram_floor_bytes','aggregate_client_memory_max_bytes','metadata_stream_allowance_bytes',
+            'actual_tmpfs_payload_write_bytes','daemon_heap_quota_claimed','resource_contract_accepted'):
+            missing = deepcopy(web); missing.pop(key)
+            with self.subTest(missing=key),self.assertRaises(RuntimeError):C.host_load(missing,'web',{'machine_id':'a'*32})
+        native = self.resource_load_receipt('bot')
+        for change in ({'native_resource_policy_unchanged':False},{'native_resource_policy_unchanged':1},
+            {'resource_ram_floor_bytes':3021996032},{'daemon_heap_quota_claimed':False}):
+            with self.subTest(change=change),self.assertRaises(RuntimeError):C.host_load({**native,**change},'bot',{'machine_id':'a'*32})
+        missing = deepcopy(native); missing.pop('native_resource_policy_unchanged')
+        with self.assertRaises(RuntimeError):C.host_load(missing,'bot',{'machine_id':'a'*32})
+    def test_v3_health_observations_remain_exact_current_load_history(self):
+        value = self.resource_load_receipt('bot')
+        row = {'schema':'runtime_image_store_health_observation/1','operation':value['operation'],
+            'operation_sha256':value['operation_sha256'],'health_policy_sha256':C.LOAD_HEALTH_POLICY,'nonce':value['nonce'],
+            'site':'bot','container_id':'1'*64,'image_id':'sha256:'+'2'*64,'pid':123,'started':'2026-10-25T12:00:00Z',
+            'restarts':0,'baseline_health':'healthy','observed_health':'unhealthy','observed_at':100,
+            'runtime_health_issues_open':True,'security_accepted':False}
+        value['runtime_health_observations'] = [row]
+        self.assertEqual(C.host_load(value,'bot',{'machine_id':'a'*32}),C.IMAGE['image_id'])
+        for change in ({'nonce':'e'*32},{'operation_sha256':'f'*64},{'pid':True},{'observed_health':'starting'},
+            {'site':'web'},{'security_accepted':True}):
+            changed = deepcopy(value); changed['runtime_health_observations'][0].update(change)
+            with self.subTest(change=change),self.assertRaises(RuntimeError):C.host_load(changed,'bot',{'machine_id':'a'*32})
     def test_image_store_observations_remain_bound_history_with_no_serving_health_waiver(self):
         value = self.public_load_receipt('bot')
         row = {'schema':'runtime_image_store_health_observation/1','operation':value['operation'],

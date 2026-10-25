@@ -9,10 +9,10 @@ from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType,SimpleNamespace
-import json,os,re,stat,time
+import gzip,json,os,posixpath,re,stat,tarfile,time
 
 OPERATION='security-normal-market-activation-20261025-01'
-BASE_CONTRACT_SHA='fe42967c574f7a2f5caba0fd18195bfcf885e224842cf98ae3be89441e9d887b'
+BASE_CONTRACT_SHA='114a8ba37f45f4111632c63b4796ce4f2b663fd303f579a27f6e3e5404606894'
 BASE_UTILITIES_SHA='adca06e4f8d35be732e65dd9fbb026d3cb28e3509b437750bf83230c4fa22c04'
 CATALOG_SHA='c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 LOAD_WORKER_SHA='5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
@@ -26,6 +26,8 @@ ROLES={
 F79_SOURCES={
  '/app/core/market_intelligence/private_capture.py':(111954,'1b9c611692978edec4c37de217e77abf00f5a0e456006060c936d40c53978929'),
  '/app/core/market_intelligence/private_pipeline_foundation.py':(37187,'f9d2b55921431e069b06e7de463d8b1d36ecbc01a94d5d0d98cd59f1dc9260da')}
+F79_IMAGE='sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b'
+SOURCE_PROOF='normal_market_baked_public_sources/1'
 ROOTS={'bot':Path('/root/trading-bot/trading_bot/.local')/OPERATION,'web':Path('/srv/trading-bot')/OPERATION}
 MARKER=Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
 SOURCE=Path('/root/secure-envs/trading-bot/.production-runtime-source.lock')
@@ -35,8 +37,14 @@ RESERVATION=Path('/root/secure-envs/trading-bot/release-control/private-primary-
 def require(ok,code):
     if not ok:raise RuntimeError(code)
 
+def same(a,b):
+    if type(a) is not type(b):return False
+    if type(a) is dict:return set(a)==set(b) and all(same(a[k],b[k]) for k in a)
+    if type(a) is list:return len(a)==len(b) and all(same(x,y) for x,y in zip(a,b))
+    return a==b
+
 def unarmed_control():
-    return {'schema':'normal_market_activation/1','operation':OPERATION,'nonce':None,'controller_commit':None,
+    return {'schema':'normal_market_activation/2','operation':OPERATION,'nonce':None,'controller_commit':None,
         'role':None,'issued_at':None,'forward_deadline':None,'recovery_deadline':None,'scope':None,'adapter_source':None,
         'sites':{'bot':None,'web':None},'gates':{'load_receipt':None,'load_control':None,'backup_restore':None,
             'archive_admission':None,'image_security_only':None,'normal_prefix':None,'functional_producer':None},
@@ -48,7 +56,7 @@ def file_binding(C,value,name=None):
     if name is not None:require(value['name']==name,'producer_source')
 
 def validate_control(C,value,now):
-    require(type(value) is dict and set(value)==set(unarmed_control()) and value['schema']=='normal_market_activation/1'
+    require(type(value) is dict and set(value)==set(unarmed_control()) and value['schema']=='normal_market_activation/2'
         and value['operation']==OPERATION and value['role'] in ROLES,'unarmed')
     require(type(value['nonce']) is str and re.fullmatch('[a-f0-9]{32}',value['nonce'])
         and type(value['controller_commit']) is str and re.fullmatch('[a-f0-9]{40}',value['controller_commit']),'unarmed')
@@ -105,13 +113,25 @@ def validate_control(C,value,now):
                     and ident[2]==0o120777 and ident[3]==0 and ident[4] in ({0} if name=='env_files' else {0,10001})
                     and ident[5]==1 and 0<ident[6]<=4096,'opaque_references')
     require(type(scope['public_sources']) is list and len(scope['public_sources'])<=32,'public_source_scope')
-    require(len({r['target'] for r in scope['public_sources']})==len(scope['public_sources'])
-        and len({r['path'] for r in scope['public_sources']})==len(scope['public_sources']),'public_source_scope')
+    require(all(type(r) is dict and type(r.get('target')) is str for r in scope['public_sources']),'public_source_scope')
+    require(len({r['target'] for r in scope['public_sources']})==len(scope['public_sources']),'public_source_scope')
+    binds=[]
     for row in scope['public_sources']:
-        require(type(row) is dict and set(row)=={'path','target','bytes','sha256'} and C.hex64(row['sha256'])
-            and type(row['bytes']) is int and 0<row['bytes']<=131072,'public_source_scope');C.absolute(row['path']);C.absolute(row['target'])
+        require(type(row) is dict and row.get('kind') in {'bind','image-baked'} and C.hex64(row.get('sha256'))
+            and type(row.get('bytes')) is int and 0<row['bytes']<=131072,'public_source_scope');C.absolute(row['target'])
+        if row['kind']=='bind':
+            require(set(row)=={'kind','path','target','bytes','sha256'},'public_source_scope')
+            C.absolute(row['path']);binds.append(row['path'])
+        else:
+            require(set(row)=={'kind','target','bytes','sha256','proof'}
+                and value['role']=='market-capture-account2','public_source_scope')
+            C.file_binding(row['proof'])
+    require(len(set(binds))==len(binds),'public_source_scope')
     if value['role']=='market-capture-account2':
-        require({r['target']:(r['bytes'],r['sha256']) for r in scope['public_sources']}==F79_SOURCES,'f79_public_sources')
+        require({r['target']:(r['bytes'],r['sha256']) for r in scope['public_sources']}==F79_SOURCES
+            and all(r['kind']=='image-baked' for r in scope['public_sources'])
+            and C.same(scope['public_sources'][0]['proof'],scope['public_sources'][1]['proof']),
+            'f79_public_sources')
     require(type(scope['compose_version']) is str and re.fullmatch(r'2\.[0-9]+\.[0-9]+(?:[+a-zA-Z0-9.-]*)?',scope['compose_version'])
         and type(scope['docker_version']) is str and re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',scope['docker_version']),'normal_version')
     require(scope['environment_file_label'] is None or type(scope['environment_file_label']) is str,'normal_prefix')
@@ -194,7 +214,7 @@ def tmpfs(spec):
 
 def expected_mounts(C,model,role,scope):
     spec=model['services'][role];rows={};refs={p for r in scope['secret_files'] for p in (r['path'],r['target'])}
-    sources={r['target']:r for r in scope['public_sources']}
+    sources={r['target']:r for r in scope['public_sources'] if r['kind']=='bind'}
     for item in spec.get('volumes',[]):
         require(type(item) is dict and item.get('type') in {'bind','volume'} and type(item.get('target')) is str,'normal_mount')
         target=C.absolute(item['target']);require(target not in rows,'normal_mount')
@@ -214,6 +234,311 @@ def expected_mounts(C,model,role,scope):
         rows[target]={'type':'bind','source':definition['file'],'readonly':True,'propagation':'rprivate'}
     require(set(sources)=={target for target in rows if target=='/app' or target.startswith('/app/')},'public_source_scope')
     return rows
+
+def source_layer(stream,previous,targets,end,maximum=512*1024**2):
+    """Resolve only fixed public files; never extract or retain other payloads.
+
+    OCI whiteouts affect the lower layer regardless of their order in this
+    layer. Relevant symlinks/hardlinks/sparse or non-directory ancestors refuse
+    instead of guessing an effective path through them.
+    """
+    require(type(maximum) is int and 1024<=maximum<=512*1024**2,'source_layer_bound')
+    wanted={p.lstrip('/') for p in targets};ancestors={''}|{p[:i] for p in wanted
+        for i,c in enumerate(p) if c=='/'}
+    state=deepcopy(previous);changes={};removed=set();global_pax={};local_pax={};long={}
+    digest=sha256();count=entries=0
+    def read(n):
+        nonlocal count
+        require(type(n) is int and 0<=n<=65536 and time.monotonic()<end,'source_layer_bound')
+        raw=stream.read(n);require(type(raw) is bytes and len(raw)<=n,'source_layer_bound')
+        count+=len(raw);require(count<=maximum,'source_layer_bound');digest.update(raw);return raw
+    def exact(n):
+        require(type(n) is int and 0<=n<=1024**2,'source_metadata_bound');out=[]
+        while n:
+            raw=read(min(65536,n));require(raw,'source_layer_short');out.append(raw);n-=len(raw)
+        return b''.join(out)
+    def skip(n,hashed=None):
+        require(type(n) is int and 0<=n<=maximum-count,'source_layer_bound')
+        while n:
+            raw=read(min(65536,n));require(raw,'source_layer_short');n-=len(raw)
+            if hashed is not None:hashed.update(raw)
+    def pax(raw):
+        result={};offset=records=0
+        while offset<len(raw):
+            space=raw.find(b' ',offset,min(len(raw),offset+16));require(space>offset,'source_pax')
+            token=raw[offset:space];require(token.isdigit() and len(token)<=10,'source_pax');size=int(token)
+            require(space-offset+3<=size<=len(raw)-offset,'source_pax');item=raw[space+1:offset+size]
+            require(item.endswith(b'\n') and b'=' in item,'source_pax');key,value=item[:-1].split(b'=',1)
+            require(key and b'\x00' not in key and b'\n' not in key and not key.startswith(b'GNU.sparse')
+                and key!=b'SCHILY.realsize' and not (key==b'SCHILY.filetype' and value==b'sparse'),'source_pax')
+            records+=1;require(records<=4096,'source_pax');result[key]=value;offset+=size
+        require(offset==len(raw),'source_pax');return result
+    def bounded_pax(value):
+        require(len(value)<=4096 and sum(len(k)+len(v) for k,v in value.items())<=1024**2,'source_pax')
+    def metadata(item,effective):
+        ids={}
+        for key,default in ((b'uid',item.uid),(b'gid',item.gid)):
+            number=effective.get(key)
+            require(type(default) is int and 0<=default<=2**32-1
+                and (number is None or number.isdigit() and len(number)<=10 and int(number)<=2**32-1),'source_pax')
+            ids[key]=default if number is None else int(number)
+        return [item.mode,ids[b'uid'],ids[b'gid'],sorted((k,v) for k,v in effective.items()
+            if k not in {b'path',b'linkpath',b'size',b'mtime',b'atime',b'ctime',b'uid',b'gid',b'uname',b'gname'})]
+    def path(raw):
+        require(type(raw) is bytes and len(raw)<=4096 and b'\x00' not in raw,'source_path')
+        name=raw.decode('utf-8','surrogateescape')
+        require(not name.startswith('/'),'source_path')
+        while name.startswith('./'):name=name[2:]
+        name=name.rstrip('/')
+        if name=='.':name=''
+        require(not name.startswith('/') and all(p not in {'','..','.'} for p in name.split('/'))
+            if name else True,'source_path')
+        return name
+    while True:
+        header=exact(512)
+        if header==bytes(512):
+            require(exact(512)==bytes(512) and not local_pax and not long,'source_layer_tail')
+            while raw:=read(min(65536,maximum-count+1)):require(not any(raw),'source_layer_tail')
+            for name,children_only in removed:
+                for target in list(state):
+                    if (not children_only and target==name) or (target!=name and
+                            (not name or target.startswith(name+'/'))):state[target]=None
+            state.update(changes);return state,count,digest.hexdigest()
+        try:item=tarfile.TarInfo.frombuf(header,'utf-8','surrogateescape')
+        except (tarfile.TarError,ValueError,UnicodeError,OverflowError):raise RuntimeError('source_layer_header') from None
+        require(type(item.size) is int and 0<=item.size<=maximum-count,'source_layer_bound')
+        if item.type in (tarfile.XHDTYPE,tarfile.XGLTYPE,tarfile.GNUTYPE_LONGNAME,tarfile.GNUTYPE_LONGLINK):
+            require(item.size<=1024**2,'source_metadata_bound');raw=exact(item.size);skip((-item.size)%512)
+            if item.type in (tarfile.XHDTYPE,tarfile.XGLTYPE):
+                values=pax(raw);target=global_pax if item.type==tarfile.XGLTYPE else local_pax
+                if item.type==tarfile.XGLTYPE:
+                    for key,value in values.items():
+                        if value:target[key]=value
+                        else:target.pop(key,None)
+                else:target.update(values)
+                bounded_pax(target)
+            else:
+                raw=raw.rstrip(b'\x00');require(0<len(raw)<=4096,'source_path')
+                long[b'path' if item.type==tarfile.GNUTYPE_LONGNAME else b'linkpath']=raw
+            continue
+        entries+=1;require(entries<=1000000 and item.type in (tarfile.REGTYPE,tarfile.AREGTYPE,tarfile.DIRTYPE,
+            tarfile.SYMTYPE,tarfile.LNKTYPE,tarfile.CHRTYPE,tarfile.BLKTYPE,tarfile.FIFOTYPE),'source_layer_type')
+        effective=dict(global_pax)
+        for key,value in local_pax.items():
+            if value:effective[key]=value
+            else:effective.pop(key,None)
+        bounded_pax(effective)
+        name=path(effective.get(b'path',long.get(b'path',item.name.encode('utf-8','surrogateescape'))))
+        require(name or item.isdir(),'source_path')
+        require(not any(name.startswith(target+'/') for target in wanted),'source_file_type')
+        size=item.size
+        if b'size' in effective:
+            require(effective[b'size'].isdigit() and len(effective[b'size'])<=12,'source_pax');size=int(effective[b'size'])
+        require(0<=size<=maximum-count,'source_layer_bound')
+        # Go archive/tar treats ordinary nonregular types as header-only even
+        # if their raw/PAX size claims a payload. Never skip hidden headers.
+        require(item.isreg() or size==0,'source_layer_type')
+        leaf=name.rsplit('/',1)[-1];parent=name.rsplit('/',1)[0] if '/' in name else ''
+        if item.type in (tarfile.LNKTYPE,tarfile.SYMTYPE):
+            raw_link=effective.get(b'linkpath',long.get(b'linkpath',item.linkname.encode('utf-8','surrogateescape')))
+            require(type(raw_link) is bytes and 0<len(raw_link)<=4096 and b'\x00' not in raw_link,'source_path')
+            link=raw_link.decode('utf-8','surrogateescape')
+            resolved=posixpath.normpath(link.lstrip('/') if link.startswith('/') or item.islnk() else posixpath.join(parent,link))
+            require(resolved!='..' and not resolved.startswith('../'),'source_path')
+            require(resolved not in {'','.'} and not any(resolved==target or target.startswith(resolved.rstrip('/')+'/')
+                or resolved.startswith(target+'/') for target in wanted),'source_alias')
+        if leaf.startswith('.wh.'):
+            require(item.isreg() and size==0,'source_whiteout')
+            require(leaf=='.wh..wh..opq' or leaf[4:] not in {'','.','..'},'source_whiteout')
+            victim=parent if leaf=='.wh..wh..opq' else (parent+'/' if parent else '')+leaf[4:]
+            require(victim or leaf=='.wh..wh..opq','source_whiteout')
+            if victim in wanted or victim in ancestors:
+                removed.add((victim,leaf=='.wh..wh..opq'))
+        elif name in ancestors:
+            require(item.isdir() and not any(b'overlay.opaque' in k for k in effective),'source_ancestor')
+            changes[name]={'directory':True,'metadata':metadata(item,effective)}
+        elif name in wanted:
+            require(item.isreg() and size<=131072,'source_file_type')
+            value=sha256();skip(size,value)
+            changes[name]={'bytes':size,'sha256':value.hexdigest(),'metadata':metadata(item,effective)};size=0
+        skip(size);skip((-(int(effective.get(b'size',item.size))))%512)
+        local_pax={};long={}
+
+def baked_archive_sources(fd,size,end,data,D,T,moby,baseline_layers,expected_identity,association,check):
+    """Actual closed D graph followed by two-file ordered-layer resolution.
+
+    The normal source-admitted producer supplies the authenticated evidence
+    data and held-FD/path checker. This API grants no LOAD/activation authority.
+    """
+    source_association(association)
+    check();require(D.same(D.identity(os.fstat(fd)),expected_identity) and size==expected_identity[6],
+        'source_archive_identity')
+    require(data['spec']['profile']=='f79cdda21c19' and type(baseline_layers) is list
+        and 0<len(baseline_layers)<len(data['spec']['layers'])
+        and D.same(data['spec']['layers'][:len(baseline_layers)],baseline_layers),'source_archive_prefix')
+    with os.fdopen(os.dup(fd),'rb') as stream:
+        physical=D.validate_archive(stream,size,end,data,T,moby);check()
+        require(physical['archive_sha256']==association['archive_sha256']
+            and physical['config_id'][7:]==association['candidate_config_sha256'],'baked_source_association')
+        reader=T.ArchiveReader(stream,size,end);members,_=T.inventory(reader)
+        offset,length=members['blobs/sha256/'+physical['manifest_id'][7:]]
+        require(0<length<=D.MAX_JSON,'source_metadata_bound');check()
+        manifest=D.document(os.pread(fd,length,offset));state={};baseline=None;expanded=0
+        class Slice:
+            def __init__(self,start,length):self.start,self.length,self.offset=start,length,0
+            def read(self,n):
+                require(type(n) is int and n>=0 and time.monotonic()<end,'source_layer_bound')
+                raw=os.pread(fd,min(n,65536,self.length-self.offset),self.start+self.offset)
+                self.offset+=len(raw);return raw
+        for index,(diff,descriptor) in enumerate(zip(data['spec']['layers'],manifest['layers'])):
+            offset,length=members['blobs/sha256/'+descriptor['digest'][7:]];source=Slice(offset,length)
+            if D.MEDIA[descriptor['mediaType']]:
+                with gzip.GzipFile(fileobj=source) as decoded:state,count,digest=source_layer(decoded,state,F79_SOURCES,end)
+            else:state,count,digest=source_layer(source,state,F79_SOURCES,end)
+            expanded+=count;require(expanded<=512*1024**2 and 'sha256:'+digest==diff,'source_diff_id');check()
+            if index+1==len(baseline_layers):baseline=deepcopy(state)
+        require(expanded==physical['expanded_layer_bytes'] and baseline is not None,'source_archive_expansion')
+        files={}
+        for target,(length,pin) in F79_SOURCES.items():
+            old=baseline.get(target[1:]);new=state.get(target[1:])
+            require(type(old) is dict and type(new) is dict and old['bytes']==new['bytes']==length
+                and old['sha256']==new['sha256']==pin and D.same(old['metadata'],new['metadata']),
+                'f79_baked_source_changed')
+            files[target]={'bytes':length,'sha256':pin,'metadata_unchanged_in_ram':True}
+            for ancestor in Path(target[1:]).parents:
+                name='' if str(ancestor)=='.' else str(ancestor)
+                require(D.same(baseline.get(name),state.get(name)),'f79_baked_ancestor_changed')
+        require(D.digest_fd(fd,size,end)==physical['archive_sha256']
+            and D.same(D.identity(os.fstat(fd)),expected_identity),'source_archive_identity');check()
+    return {'schema':SOURCE_PROOF,'baseline_image_id':F79_IMAGE,'baseline_rootfs':baseline_layers,
+        'candidate_config_id':data['spec']['config_id'],'candidate_rootfs':data['spec']['layers'],
+        'archive_bytes':size,'archive_sha256':physical['archive_sha256'],'tar_identity':expected_identity,
+        'source_identities':physical['source_identities'],'association':association,'physical_graph_closed':True,'files':files,
+        'ancestor_metadata_unchanged_in_ram':True,
+        'configuration_values_disclosed':False,'security_accepted':False,'activation_authority':False}
+
+def source_association(value):
+    require(type(value) is dict and set(value)=={'catalog_sha256','load_receipt_sha256','load_control_sha256',
+        'source_admission_sha256','producer_sha256','archive_sha256','candidate_config_sha256'} and value['catalog_sha256']==CATALOG_SHA
+        and all(type(v) is str and re.fullmatch('[a-f0-9]{64}',v) for v in value.values()),'baked_source_association')
+    return value
+
+def baked_load_evidence(decode,spec,receipt_raw,control_raw,admitted_raw,producer_sha,machine_id):
+    """Authenticate F79's original public LOAD records; never relabel them."""
+    receipt,control,admitted=map(decode,(receipt_raw,control_raw,admitted_raw))
+    allowed={('security-market-candidate-images-20261025-05','market_image_store_control/1',
+              'cd8b11fbc8abc5f3f09db023e72613bf68f77ec622d647f50dbcf0103d56eb3e'),
+        ('security-market-candidate-images-20261025-06','market_image_store_control/1',
+         '1041cc2d04100e2f6aebb95dca30c2339de41342b350ef44522c05277e9c146e'),
+        ('security-market-candidate-images-20261025-06','market_image_store_control/2',LOAD_WORKER_SHA)}
+    require(spec['profile']=='f79cdda21c19' and spec['role']=='market-capture-account2'
+        and (control['operation'],control['schema'],control['worker_sha256']) in allowed
+        and control['profile']==spec['profile'] and control['phase']=='load-web'
+        and type(control['nonce']) is str and re.fullmatch('[a-f0-9]{32}',control['nonce']),
+        'baked_source_load')
+    require(receipt['schema']=='market_preloaded_image/1' and receipt['profile']==spec['profile']
+        and receipt['role']==spec['role'] and receipt['site']=='web' and receipt['host_machine_id']==machine_id
+        and receipt['catalog_sha256']==CATALOG_SHA and receipt['candidate_config_id']==spec['candidate_config_id']
+        and same(receipt['rootfs'],spec['candidate_rootfs']) and receipt['ci_run_id']==spec['ci_run_id']
+        and type(receipt['ci_run_id']) is int and receipt['image_artifact_sha256']==spec['image_artifact']['digest'][7:]
+        and receipt['operation_sha256']==sha256(control_raw).hexdigest()
+        and receipt['source_admission_sha256']==control['admission_sha256']==sha256(admitted_raw).hexdigest()
+        and receipt['archive_and_config_association_verified'] is True
+        and receipt['whole_typed_config_compared_in_ram'] is True
+        and receipt['configuration_values_disclosed'] is False and receipt['security_accepted'] is False
+        and same(receipt['serving_roles_activated'],[]),'baked_source_load')
+    require(admitted['schema']=='market_candidate_archive/1' and admitted['profile']==spec['profile']
+        and admitted['candidate_config_id']==spec['candidate_config_id'] and same(admitted['rootfs'],spec['candidate_rootfs'])
+        and admitted['archive_sha256']==receipt['source_archive_sha256']==spec['tar_sha256']
+        and admitted['archive_bytes']==spec['archive']['uncompressed_bytes'] and type(admitted['archive_bytes']) is int
+        and receipt['candidate_local_image_id'] in admitted['source_identities']
+        and admitted['security_accepted'] is False and admitted['configuration_values_disclosed'] is False,
+        'baked_source_admission')
+    association={'catalog_sha256':CATALOG_SHA,'load_receipt_sha256':sha256(receipt_raw).hexdigest(),
+        'load_control_sha256':sha256(control_raw).hexdigest(),'source_admission_sha256':sha256(admitted_raw).hexdigest(),
+        'producer_sha256':producer_sha,'archive_sha256':spec['tar_sha256'],
+        'candidate_config_sha256':spec['candidate_config_id'][7:]}
+    source_association(association);return receipt,admitted,association
+
+def baked_proof(proof,baseline_layers,candidate_config,layers,archive_sha,archive_identity,association):
+    source_association(association)
+    require(association['archive_sha256']==archive_sha and association['candidate_config_sha256']==candidate_config[7:],
+        'baked_source_association')
+    require(type(proof) is dict and set(proof)=={'schema','baseline_image_id','baseline_rootfs','candidate_config_id',
+        'candidate_rootfs','archive_bytes','archive_sha256','tar_identity','source_identities','physical_graph_closed',
+        'files','association','ancestor_metadata_unchanged_in_ram','configuration_values_disclosed','security_accepted','activation_authority'}
+        and proof['schema']==SOURCE_PROOF and proof['baseline_image_id']==F79_IMAGE
+        and same(proof['baseline_rootfs'],baseline_layers) and type(baseline_layers) is list
+        and 0<len(baseline_layers)<len(layers) and same(layers[:len(baseline_layers)],baseline_layers)
+        and proof['candidate_config_id']==candidate_config and same(proof['candidate_rootfs'],layers)
+        and proof['archive_sha256']==archive_sha and same(proof['tar_identity'],archive_identity)
+        and same(proof['association'],association)
+        and type(proof['archive_bytes']) is int and proof['archive_bytes']==archive_identity[6]
+        and proof['physical_graph_closed'] is True and proof['ancestor_metadata_unchanged_in_ram'] is True
+        and proof['configuration_values_disclosed'] is False
+        and proof['security_accepted'] is False and proof['activation_authority'] is False,'baked_source_proof')
+    require(same(proof['files'],{p:{'bytes':n,'sha256':h,'metadata_unchanged_in_ram':True}
+        for p,(n,h) in F79_SOURCES.items()}),'f79_baked_source_changed')
+    return proof
+
+def public_source_observation(query,cid,image_id):
+    """Retain both fixed public file FDs; bind the exact CID/image/lifecycle."""
+    require(type(cid) is str and re.fullmatch('[a-f0-9]{64}',cid)
+        and type(image_id) is str and re.fullmatch('sha256:[a-f0-9]{64}',image_id),'source_container')
+    def decode(raw):
+        require(type(raw) is bytes and 0<len(raw)<=4096,'public_source_observation')
+        def pairs(items):
+            value={}
+            for key,item in items:require(key not in value,'public_source_observation');value[key]=item
+            return value
+        try:return json.loads(raw,object_pairs_hook=pairs,parse_constant=lambda _:require(False,'public_source_observation'))
+        except (ValueError,UnicodeError):raise RuntimeError('public_source_observation') from None
+    template='{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"pid":{{json .State.Pid}},"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}}}'
+    def runtime():
+        row=decode(query(['container','inspect','--format',template,cid]))
+        require(type(row) is dict and set(row)=={'id','image','running','restarting','pid','started','restarts'}
+            and row['id']==cid and row['image']==image_id and row['running'] is True and row['restarting'] is False
+            and type(row['pid']) is int and row['pid']>0 and type(row['started']) is str
+            and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z',row['started'])
+            and type(row['restarts']) is int and row['restarts']>=0,'source_container')
+        return row
+    before=runtime()
+    program='''import os,stat,json
+from hashlib import sha256
+expected=EXPECTED
+def identity(s):return [s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+held=[];files={}
+try:
+ for path,(size,pin) in expected:
+  assert os.path.realpath(path)==path,'public_source_refused'
+  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK);held.append((path,fd,None))
+  before=identity(os.fstat(fd));held[-1]=(path,fd,before)
+  assert stat.S_ISREG(before[2]) and before[2:6]==[0o100644,10001,10001,1] and before[6]==size,'public_source_refused'
+  raw=os.pread(fd,size+1,0)
+  assert len(raw)==size and sha256(raw).hexdigest()==pin,'public_source_refused'
+  assert before==identity(os.fstat(fd))==identity(os.lstat(path)),'public_source_refused'
+  files[path]={'bytes':size,'sha256':pin,'identity':before}
+ for path,fd,before in held:
+  assert before==identity(os.fstat(fd))==identity(os.lstat(path)),'public_source_refused'
+ print(json.dumps({'schema':'f79_public_baked_code/1','files':files,'configuration_values_disclosed':False},sort_keys=True))
+finally:
+ for path,fd,before in reversed(held):os.close(fd)
+'''.replace('EXPECTED',repr(sorted(F79_SOURCES.items())),1)
+    value=decode(query(['exec',cid,'/usr/local/bin/python','-I','-B','-c',program]))
+    require(type(value) is dict and set(value)=={'schema','files','configuration_values_disclosed'}
+        and value['schema']=='f79_public_baked_code/1' and value['configuration_values_disclosed'] is False
+        and type(value['files']) is dict and set(value['files'])==set(F79_SOURCES),'public_source_observation')
+    for target,(length,pin) in F79_SOURCES.items():
+        row=value['files'][target]
+        require(type(row) is dict and set(row)=={'bytes','sha256','identity'} and type(row['bytes']) is int
+            and row['bytes']==length and row['sha256']==pin,'f79_baked_source_changed')
+        ident=row['identity']
+        require(type(ident) is list and len(ident)==9 and all(type(v) is int for v in ident)
+            and ident[0]>0 and ident[1]>0 and ident[2:7]==[0o100644,10001,10001,1,length],
+            'f79_baked_source_changed')
+    require(same(before,runtime()),'source_container')
+    return {'container_id':cid,'image_id':image_id,'runtime_before':before,'files':value['files'],
+        'configuration_values_disclosed':False,'security_accepted':False}
 
 def baseline(C,model,role,row,image,scope,files,*,replacement=False):
     require(role in ROLES and type(model) is dict and type(model.get('services')) is dict and role in model['services'],'normal_role')
@@ -384,7 +709,7 @@ class MarketBackend:
             held=S.Held(path,stack,expected=control['sites'][self.site]['fences'][name],opaque=True,lock=True);self.checks.append(held.check)
         require(not os.path.lexists(RESERVATION if self.site=='bot' else self.root/'activation.guard'),'guard_busy')
         self.paths=[r['path'] for r in self.scope['compose_files']]
-        for proof in self.scope['compose_files']+self.scope['public_sources']:
+        for proof in self.scope['compose_files']+[r for r in self.scope['public_sources'] if r['kind']=='bind']:
             held=S.Held(proof['path'],stack,pin=proof['sha256'],maximum=C.MAX_CONTROL,public_source=True)
             require(len(held.raw)==proof['bytes'],'public_source_size');self.checks.append(held.check)
         for proof in self.scope['env_files']:
@@ -406,6 +731,7 @@ class MarketBackend:
         env_refs={p for r in self.scope['env_files'] for p in (r['path'],r['target'])}
         require(all((r['path'] if type(r) is dict else r) in env_refs for r in references['services'][self.role].get('env_file',[])),'unbound_env_reference')
         baseline(C,self.old_model,self.role,old,self.images[old['image']],self.scope,self.paths)
+        self.verify_baked_sources(old)
         self.override=self.root/'attempts'/control['nonce']/'image-only.yml';self.rollback_override=self.override.with_name('old-image.yml')
         self.new_model=self.render(override=self.override_bytes(),virtual=True);expected=deepcopy(self.old_model);expected['services'][self.role]['image']=self.candidate
         require(C.same(expected,self.new_model),'normal_render_delta');self.rollback_model=self.render(override=self.override_bytes(False),virtual=True)
@@ -429,6 +755,21 @@ class MarketBackend:
     def evidence(self,binding):
         held=self.S.Held(self.root/'evidence'/binding['name'],self.stack,pin=binding['sha256'],maximum=self.C.MAX_JSON)
         require(len(held.raw)==binding['bytes'],'evidence_size');self.checks.append(held.check);return held.raw
+    def verify_baked_sources(self,old):
+        rows=[r for r in self.scope['public_sources'] if r['kind']=='image-baked']
+        if not rows:return
+        require(self.role=='market-capture-account2' and old['image']==F79_IMAGE,'baked_source_image')
+        proof=self.C.document(self.evidence(rows[0]['proof']))
+        association={'catalog_sha256':CATALOG_SHA,'load_receipt_sha256':self.control['gates']['load_receipt']['sha256'],
+            'load_control_sha256':self.control['gates']['load_control']['sha256'],
+            'source_admission_sha256':self.control['gates']['archive_admission']['sha256'],
+            'producer_sha256':self.control['adapter_source']['sha256'],'archive_sha256':self.spec['tar_sha256'],
+            'candidate_config_sha256':self.spec['candidate_config_id'][7:]}
+        baked_proof(proof,self.images[old['image']]['RootFS']['Layers'],self.spec['candidate_config_id'],
+            self.spec['candidate_rootfs'],self.spec['tar_sha256'],self.archive_admission['tar_identity'],association)
+        require(self.C.same(proof['source_identities'],self.archive_admission['source_identities'])
+            and self.candidate in proof['source_identities'],'baked_source_association')
+        public_source_observation(lambda args:self.docker(*args,maximum=4096),old['id'],old['image'])
     def cmd(self,args,**kw):
         self.check();result=self.S.command(args,self.deadline,**kw);self.check();return result
     def docker(self,*args,**kw):return self.cmd(['/usr/bin/docker',*args],**kw)
@@ -509,6 +850,7 @@ class MarketBackend:
                 and type(proof.get('completed_at')) is int and 0<=now-proof['completed_at']<=14400 and proof.get('security_accepted') is False,'normal_producer_evidence')
             # The source-admitted normal producer must authenticate the actual
             # underlying restore, prefix and profile-stack evidence, not flags.
+        self.archive_admission=admitted
         return receipt['candidate_local_image_id'],spec
     def units_check(self):
         binding=self.control['sites'][self.site]
@@ -535,6 +877,8 @@ class MarketBackend:
     def functional(self,service,value):
         require(service==self.role,'role_scope');self.check();measured=self.inspect(value['id']);self.S.stable_running(measured)
         require(all(self.C.same(measured[k],value[k]) for k in ('id','image','pid','started','restarts')),'normal_functional_identity')
+        if service=='market-capture-account2':
+            public_source_observation(lambda args:self.docker(*args,maximum=4096),measured['id'],measured['image'])
         health=self.C.normalize_health(value['config'].get('Healthcheck'))
         require(type(health) is dict and health.get('Test') not in (None,[],['NONE']),'normal_role_unready')
         # The admitted normal producer may wait for the existing health/progress

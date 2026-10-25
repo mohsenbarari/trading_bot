@@ -212,3 +212,85 @@ is registered separately from those children. Native policy and all disk floors
 are unchanged; Web's source-backed engineering RAM floor is3021996032 bytes plus
 actual tmpfs writes, with a hard512MiB client cgroup. Old workers/catalogs and
 df941/2ddd history remain immutable. No v3 admission/LOAD has yet occurred.
+
+## Continuation: isolated restores, corrective staging and capacity
+
+Backup03 `security-canonical-app-20261025-ddc5fe9c72794154` also passed actual
+isolated uploads restores on both hosts under nonce
+`ccb28035d8a140b0a0c8ab8b6170c711`. Native verified36 files/20389048 bytes;
+Web verified2 files/1089457 bytes. Both complete streams and every restored
+file's bytes were checked in operational RAM. Exact owned volumes were removed,
+held inode unlink was proved and all other container mounts stayed unchanged.
+The protected receipt/descriptors/hashes were not disclosed. Root23 fixtures
+and independent23 fixtures passed before execution. This closes uploads restore
+only; old-image/candidate-written persistence and App schema gates remain open.
+
+The original public Web stage returned1 with empty stdout before image work.
+Its Ansible environment used `LC_ALL=C`; an actual owned version-only regression
+reproduced the startup UTF-8 refusal and succeeded with `C.UTF-8`. Original source,
+intent and terminal remain immutable. The coexisting reviewed producer67a23bb2
+uses one UTF-8 environment for public staging and later control mirroring.
+Root29 fixtures and independent29 fixtures passed. After a fresh observation
+proved all six destinations absent, distinct stage02
+`bf7d5134788d42a3988c198a34486d4c`, authority
+`c71af214204ccbb8e9b522d74b8ea764e5f0dceb60d021beb4b3df01962a955c`,
+completed successfully. Native publicationf8921df5 remains unchanged. No old
+stage request was resumed and this public staging grants no serving approval.
+
+Five duplicate regenerable Web Trivy caches were cleared only after exact
+inode/owner/entry checks, no active Trivy/open process reference and no relevant
+container mount. Ten cache files were removed; empty cache roots, every report,
+all tools and the newest cache remain. Available Web space increased from
+13704982528 to21870014464 bytes. Native's journal archives older than10 days
+and apt download cache were cleared, increasing available root space from
+4930822144 to5065682944 bytes. Paths named historical archives were not deleted:
+metadata showed active backup/model storage still uses them.
+
+Both previous watchdog windows auto-restored and independent readback proved
+normal apply/timers. A subsequent Root wrapper expected the wrong success label
+after Native apply had genuinely succeeded. Its known-success terminal was
+preserved and Native apply was not repeated; a separate first Web request then
+succeeded. Both fresh windows retain independent60-minute expiry/restore.
+
+Full browser40226940183 at64580e68 genuinely failed three shard1 jobs; nine
+browser shards passed. The authenticated Webkit artifact12613560012 is15908862
+bytes, SHA256e826c4493ac9b01dbf600236b631df84c70019acb735fab5c3b228a03459fec1.
+Remaining failures are under analysis. Coverage40226942334 had exactly two stale
+workflow-condition assertions; backend8268 tests ran, Root/frontend lanes
+succeeded, but the overall result remains failed. Reviewed96a8b2c6 preserves the
+actual guards, corrects both expectations and checks these two contracts before
+the expensive browser matrix. Root74 tests and independent review passed.
+
+The v3 archive admission subsequently completed under8139e70fd5654908a6cccb9c7779f759,
+receiptf19e4174f8989908e9ba068000225acafed86fc9798781f9da1ff68aece950b7.
+Both alias copies were verified durable and byte-identical. No LOAD follows
+from admission alone. The first Native LOAD preparer later refused before any
+new phase control/attempt/request; its spent once marker remains. Its original
+cause was not recorded by the caller and is not classified retrospectively.
+Fresh read-only snapshots passed on both hosts, and a writes/RPC-denied replay
+with those observations reached the control-write barrier. This proves current
+preconditions, not a successful original request or a permission to resume it.
+
+Exact upstream Engine source shows the classic outer archive defaults to
+DockerRoot/tmp, so capacity planning must include it on the data filesystem.
+Native's actual referenced candidate prefix was only4 layers;29 missing layer
+streams total322996224 bytes, in addition to452719104 outer TAR bytes. Reference
+metadata is no physical allocation guarantee. To recover headroom without losing
+data, four inactive69-day-old staging-repair backup files (1299247104 bytes)
+were losslessly compressed to214145545 bytes. Every decompressed byte was
+compared to retained original FDs twice before original unlink; the compressed
+copy, protected metadata/integrity receipt and restore pointer remain. Native
+data space then measured12068765696 bytes. All resource floors stay unchanged.
+
+Normal activation source now accepts the exact historical /2 tuple or the
+explicit resource-bound /3 tuple, preserving shared host/CI/RootFS/Config/history
+checks. F79 source provenance distinguishes baked files from bind mounts;
+actual two-file lifecycle observations and full ordered layer proofs preserve
+root directory metadata, whiteout effects and source alias semantics. Ordinary
+nonregular TAR headers with nonzero effective payload refuse, matching Go's
+header-only interpretation. No source fixture supplies production evidence.
+Independent63 genuine Root fixtures passed. Root's combined101-test suite then
+passed with no errors/failures/skips in an actual readonly, networkless container,
+separate init and genuine UID0/CAP_CHOWN-only/NNP. Packet0ce5e9bb binds the final
+sources. Earlier04/05 fixture attempts retain their startup/missing-public-input
+failures; neither was represented as passing.

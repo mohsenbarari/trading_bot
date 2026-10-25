@@ -1,4 +1,4 @@
-"""One capture2 public source-bind replacement; CHECK is the default.
+"""One capture2 diagnostic read-only bind over baked code; CHECK is the default.
 
 No image build, schema change, session read, writer/DNS change, or acceptance.
 Only a new Root-reviewed public control can authorize the stopped-first path.
@@ -10,6 +10,7 @@ from datetime import datetime,timezone
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
+from types import ModuleType
 import argparse
 import errno
 import fcntl
@@ -25,7 +26,7 @@ import sys
 import time
 
 OP='capture-conflict-diagnostic-20261025-01'
-CONFIRM='REPLACE-ONLY-CAPTURE2-PUBLIC-DIAGNOSTIC-SOURCE-20261025-01'
+CONFIRM='ADD-ONLY-CAPTURE2-PUBLIC-DIAGNOSTIC-SOURCE-20261025-02'
 ROOTS={'native':Path('/root/trading-bot/trading_bot/.local')/OP,'web':Path('/root/.local')/OP}
 MARKER=Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
 SOURCE=Path('/root/secure-envs/trading-bot/.production-runtime-source.lock')
@@ -43,6 +44,7 @@ LEGACY_BODY=b'[Unit]\nConditionPathExists=/run/trading-bot/market-capture-legacy
 LEGACY_HEADER=b'# Owned Web boot guards 2026-10-24; exact-content cleanup only.\n'
 OLD_SHA='1b9c611692978edec4c37de217e77abf00f5a0e456006060c936d40c53978929'
 FOUNDATION_SHA='f9d2b55921431e069b06e7de463d8b1d36ecbc01a94d5d0d98cd59f1dc9260da'
+CATALOG_SHA='c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 # Set only to an actually generated/reviewed diagnostic packet, never a guess.
 NEW_SHA='2227443411d2d2b9ffcf56259b6750b5517025387f83dee024125c2abeb912c8'
 NEW_BYTES=132537
@@ -56,7 +58,9 @@ INSPECT='{"id":{{json .Id}},"image":{{json .Image}},"name":{{json .Name}},"confi
 CODES=frozenset(('control','window','root','path','metadata','source_changed','source_pin','fence_changed','fence_busy',
     'owner_exists','owner_changed','command','command_timeout','command_bound','cleanup','inventory','target','profile',
     'environment','compose','config','host','mounts','networks','source_delta','session_owner','cgroup','old_owner',
-    'candidate_started','unknown','peer','journal','diagnostic','rollback_failed'))
+    'candidate_started','unknown','peer','journal','diagnostic','rollback_failed','baked_source_proof',
+    'baked_source_association','baked_source_load','baked_source_admission','f79_baked_source_changed','f79_baked_ancestor_changed',
+    'public_source_observation','source_container'))
 PHASE='entry'
 
 def need(ok,code):
@@ -114,8 +118,9 @@ def private_metadata(stack,path):
 
 def validate_control(value,now):
     fields={'schema','operation','nonce','source_commit','worker_sha256','issued_at','deadline','fences',
-        'native_machine_id','web_machine_id','compose','old_source','new_source','foundation_source','public_profile_sha256'}
-    need(type(value) is dict and set(value)==fields and value['schema']=='capture_conflict_control/1'
+        'native_machine_id','web_machine_id','compose','old_source','new_source','foundation_source','public_profile_sha256',
+        'baked_source_worker','baked_source_proof','source_evidence'}
+    need(type(value) is dict and set(value)==fields and value['schema']=='capture_conflict_control/2'
         and value['operation']==OP and type(value['nonce']) is str and re.fullmatch('[a-f0-9]{32}',value['nonce'])
         and type(value['source_commit']) is str and re.fullmatch('[a-f0-9]{40}',value['source_commit'])
         and all(type(value[k]) is str and re.fullmatch('[a-f0-9]{64}',value[k]) for k in ('worker_sha256','public_profile_sha256')),'control')
@@ -136,12 +141,26 @@ def validate_control(value,now):
         need(type(row) is dict and set(row)=={'path','sha256'} and type(row['path']) is str
             and row['path'].startswith('/root/.local/') and row['path'].endswith('.yml')
             and type(row['sha256']) is str and re.fullmatch('[a-f0-9]{64}',row['sha256']),'control')
-    for name,pin,size in (('old_source',OLD_SHA,111954),('new_source',NEW_SHA,NEW_BYTES),('foundation_source',FOUNDATION_SHA,37187)):
-        row=value[name];need(type(row) is dict and set(row)=={'path','sha256','bytes'} and type(row['path']) is str
-            and row['path'].startswith('/root/.local/') and row['sha256']==pin and type(row['bytes']) is int and row['bytes']==size,'control')
+    for name,pin,size,target in (('old_source',OLD_SHA,111954,DEST),('foundation_source',FOUNDATION_SHA,37187,FOUNDATION_DEST)):
+        row=value[name];need(type(row) is dict and set(row)=={'kind','target','sha256','bytes'}
+            and row['kind']=='image-baked' and row['target']==target and row['sha256']==pin
+            and type(row['bytes']) is int and row['bytes']==size,'control')
+    row=value['new_source'];need(type(row) is dict and set(row)=={'kind','path','target','sha256','bytes'}
+        and row['kind']=='bind' and row['target']==DEST and row['sha256']==NEW_SHA
+        and type(row['bytes']) is int and row['bytes']==NEW_BYTES,'control')
     need(re.fullmatch('[a-f0-9]{64}',NEW_SHA) and NEW_BYTES>0
-        and value['new_source']['path']==str(ROOTS['web']/value['nonce']/'private_capture.py')
-        and value['old_source']['path']!=value['new_source']['path'],'control')
+        and row['path']==str(ROOTS['web']/value['nonce']/'private_capture.py'),'control')
+    need(type(value['source_evidence']) is dict and set(value['source_evidence'])==
+        {'catalog','load_receipt','load_control','archive_admission'},'control')
+    for name,filename in (('baked_source_worker','normal_market_activation.py'),('baked_source_proof','baked-sources.json'),
+        ('catalog','market_candidate_images.json'),('load_receipt','load-receipt.json'),
+        ('load_control','load-control.json'),('archive_admission','archive-admission.json')):
+        row=value[name] if name.startswith('baked_') else value['source_evidence'][name]
+        need(type(row) is dict and set(row)=={'path','sha256','bytes'} and row['path']==str(ROOTS['web']/value['nonce']/filename)
+            and type(row['sha256']) is str and re.fullmatch('[a-f0-9]{64}',row['sha256'])
+            and type(row['bytes']) is int and 0<row['bytes']<=LIMIT,'control')
+        if name=='catalog':need(row['sha256']==CATALOG_SHA,'control')
+        if name=='baked_source_worker':need(row['bytes']<=131072,'control')
     return value
 
 class MetadataFence:
@@ -272,25 +291,38 @@ def source_row(rows,destination):
     selected=[r for r in rows if r.get('Destination')==destination];need(len(selected)==1 and selected[0].get('Type')=='bind'
         and selected[0].get('RW') is False,'source_delta');return selected[0]
 
-def replace_mount_source(row,old,new):
-    value=deepcopy(row);bound=source_row(value['mounts'],DEST);need(bound['Source']==old,'source_delta');bound['Source']=new
-    host=value['host'];count=0
-    for i,bind in enumerate(host.get('Binds') or []):
+def remove_source_bind(row,path):
+    value=deepcopy(row);bound=source_row(value['mounts'],DEST)
+    need(set(bound)=={'Type','Source','Destination','Mode','RW','Propagation'} and bound['Source']==path
+        and bound['Mode'] in {'','ro'} and bound['Propagation']=='rprivate','source_delta')
+    value['mounts'].remove(bound);host=value['host'];count=0
+    for bind in list(host.get('Binds') or []):
         source,destination,mode=bind.rsplit(':',2)
-        if destination==DEST:need(source==old and mode=='ro','source_delta');host['Binds'][i]=new+':'+destination+':'+mode;count+=1
-    for mount in host.get('Mounts') or []:
-        if mount.get('Target')==DEST:need(mount['Source']==old and mount.get('ReadOnly') is True,'source_delta');mount['Source']=new;count+=1
+        if destination==DEST:
+            need(source==path and mode=='ro','source_delta');host['Binds'].remove(bind);count+=1
+    for mount in list(host.get('Mounts') or []):
+        if mount.get('Target')==DEST:
+            need(same(mount,{'Type':'bind','Source':path,'Target':DEST,'ReadOnly':True,'BindOptions':{}}),'source_delta')
+            host['Mounts'].remove(mount);count+=1
     need(count==1,'source_delta');return value
 
-def rendered_delta(old,new,oldpath,newpath):
-    expected=deepcopy(old);service=expected['services'][SERVICE];rows=[r for r in service.get('volumes',[]) if r.get('target')==DEST]
-    need(len(rows)==1 and rows[0].get('type')=='bind' and rows[0].get('read_only') is True and rows[0].get('source')==oldpath,'source_delta')
-    rows[0]['source']=newpath;need(same(expected,new),'source_delta')
+def add_source_bind(row,path):
+    value=deepcopy(row);need(not any(r.get('Destination') in {DEST,FOUNDATION_DEST} for r in value['mounts']),'source_delta')
+    value['mounts'].append({'Type':'bind','Source':path,'Destination':DEST,'Mode':'ro','RW':False,'Propagation':'rprivate'})
+    value['host']['Binds']=[*(value['host'].get('Binds') or []),path+':'+DEST+':ro'];return value
 
-def expected_source_change(old,new,oldpath,newpath,*,stopped=False):
-    expected=replace_mount_source(old,oldpath,newpath)
+def rendered_delta(old,new,newpath):
+    expected=deepcopy(old);service=expected['services'][SERVICE];rows=[r for r in service.get('volumes',[]) if r.get('target')==DEST]
+    need(not rows and not any(r.get('target')==FOUNDATION_DEST for r in service.get('volumes',[])),'source_delta')
+    service['volumes']=[*service.get('volumes',[]),{'type':'bind','source':newpath,'target':DEST,
+        'read_only':True,'bind':{'create_host_path':False}}]
+    need(same(expected,new),'source_delta')
+
+def expected_source_change(old,new,path,*,stopped=False,removing=False):
+    expected=remove_source_bind(old,path) if removing else old
+    actual=new if removing else remove_source_bind(new,path)
     need(old['image']==new['image']==IMAGE and new['id']!=old['id'],'target')
-    a,b=expected['config'],new['config'];need(set(a)==set(b),'config')
+    a,b=expected['config'],actual['config'];need(set(a)==set(b),'config')
     need(environment(a['Env'])==environment(b['Env']),'environment')
     omitted={'Env','Hostname','Labels'};need(same({k:v for k,v in a.items() if k not in omitted},{k:v for k,v in b.items() if k not in omitted}),'config')
     need(b['Hostname']==new['id'][:12],'config')
@@ -299,7 +331,7 @@ def expected_source_change(old,new,oldpath,newpath,*,stopped=False):
     need(type(b['Labels'].get('com.docker.compose.config-hash')) is str
         and re.fullmatch('[a-f0-9]{64}',b['Labels']['com.docker.compose.config-hash'])
         and b['Labels'].get('com.docker.compose.replace') in {None,SERVICE+'-1'},'config')
-    need(same(canonical_host(expected['host']),canonical_host(new['host'])) and same(mounts(expected['mounts']),mounts(new['mounts'])),'host')
+    need(same(canonical_host(expected['host']),canonical_host(actual['host'])) and same(mounts(expected['mounts']),mounts(actual['mounts'])),'host')
     left,right=static_networks(old['networks']),static_networks(new['networks']);need(set(left)==set(right),'networks')
     for name in left:
         if stopped and right[name].get('NetworkID')=='':right[name]['NetworkID']=left[name]['NetworkID']
@@ -331,6 +363,13 @@ def duration(value):
 
 def full_parity(rendered,row,image):
     """Full normal-Compose model vs actual Config/HostConfig, only in RAM."""
+    diagnostic_bind=[r for r in rendered['services'][SERVICE].get('volumes',[]) if r.get('target')==DEST]
+    if diagnostic_bind:
+        need(len(diagnostic_bind)==1,'source_delta');bound=diagnostic_bind[0]
+        need(same(bound,{'type':'bind','source':bound.get('source'),'target':DEST,'read_only':True,
+            'bind':{'create_host_path':False}}) and type(bound['source']) is str,'source_delta')
+        base=deepcopy(rendered);base['services'][SERVICE]['volumes'].remove(diagnostic_bind[0])
+        return full_parity(base,remove_source_bind(row,bound['source']),image)
     service=rendered['services'][SERVICE];cfg=row['config'];host=row['host'];defaults=image['Config'];mounts(row['mounts'])
     need(type(cfg.get('Image')) is str and row['image']==image['Id']==service['image']==cfg['Image']==IMAGE,'target')
     expected_env=environment(defaults.get('Env') or []);expected_env.update(service.get('environment',{}))
@@ -514,7 +553,7 @@ def provenance(row,files,env_reference):
         and labels.get('com.docker.compose.project.environment_file')==env_reference,'compose')
 
 def replacement(backend,baseline,old_render,new_render):
-    old=backend.target(baseline);oldpath=backend.op['old_source']['path'];newpath=backend.op['new_source']['path']
+    old=backend.target(baseline);newpath=backend.op['new_source']['path']
     backend.legacy_owners();empty=backend.bind_cgroup(old);backend.old_empty_proof=empty;backend.journal.add('stop_requested');backend.stop()
     stopped=backend.snapshot();target=backend.target(stopped)
     need(target['id']==old['id'] and target['pid']==0 and target['running'] is False and target['restarting'] is False,'old_owner')
@@ -523,12 +562,12 @@ def replacement(backend,baseline,old_render,new_render):
     created=backend.snapshot();new=backend.target(created);need(new['pid']==0 and new['running'] is False and new['restarting'] is False,'candidate_started')
     backend.created_stopped_id=new['id']
     other_static(baseline,created,old['id'],new['id']);session_owners(created);empty();backend.legacy_owners()
-    expected_source_change(old,new,oldpath,newpath,stopped=True);backend.full_parity(new_render,new)
+    expected_source_change(old,new,newpath,stopped=True);backend.full_parity(new_render,new)
     provenance(new,[r['path'] for r in backend.op['compose']['files']]+[str(backend.override)],backend.op['compose']['env_reference'])
     backend.journal.add('candidate_stopped_verified',container_id=new['id'],full_config_parity=True,source_bind_parity=True)
     backend.journal.add('start_requested',container_id=new['id']);backend.start_requested_id=new['id'];backend.start(new['id'])
     after=backend.snapshot();started=backend.target(after);need(started['id']==new['id'],'target')
-    other_static(baseline,after,old['id'],new['id']);session_owners(after,new['id']);expected_source_change(old,started,oldpath,newpath)
+    other_static(baseline,after,old['id'],new['id']);session_owners(after,new['id']);expected_source_change(old,started,newpath)
     backend.full_parity(new_render,started);backend.check();return started
 
 def rollback(backend,baseline,old_render):
@@ -551,9 +590,9 @@ def rollback(backend,baseline,old_render):
     else:need(set(current)==set(baseline)-{before['id']},'inventory');session_owners(current)
     backend.legacy_owners();backend.journal.add('rollback_requested');backend.create()
     created=backend.snapshot();restored=backend.target(created);need(restored['pid']==0 and restored['running'] is False and restored['restarting'] is False,'candidate_started')
-    # Swap the old/new arguments to compare the exact original bind contract.
-    expected_source_change(replace_mount_source(before,backend.op['old_source']['path'],backend.op['new_source']['path']),
-        restored,backend.op['new_source']['path'],backend.op['old_source']['path'],stopped=True)
+    # Return to the baked baseline, without inventing an old-source host bind.
+    expected_source_change(add_source_bind(before,backend.op['new_source']['path']),
+        restored,backend.op['new_source']['path'],stopped=True,removing=True)
     backend.full_parity(old_render,restored);other_static(baseline,created,before['id'],restored['id']);session_owners(created);backend.legacy_owners()
     backend.start(restored['id']);after=backend.snapshot();final=backend.target(after)
     need(final['id']==restored['id'],'target');backend.full_parity(old_render,final)
@@ -567,12 +606,34 @@ def result(control,pin,status,*,cid=None,record=None):
     if record is not None:value['diagnostic']=record
     return value
 
+def verify_baked_baseline(backend,old,image,stack,checks):
+    """Cold public archive/LOAD association and current two-file observation."""
+    control=backend.op;inputs={}
+    for name,row in [('worker',control['baked_source_worker']),('proof',control['baked_source_proof']),
+                     *control['source_evidence'].items()]:
+        raw,check=public_file(stack,Path(row['path']),row['sha256'],maximum=LIMIT)
+        need(len(raw)==row['bytes'],'metadata');checks.append(check);inputs[name]=raw
+    worker=ModuleType('_sealed_f79_baked_source_contract');worker.__file__=control['baked_source_worker']['path']
+    exec(compile(inputs['worker'],worker.__file__,'exec'),worker.__dict__)
+    need(worker.F79_IMAGE==IMAGE and worker.CATALOG_SHA==CATALOG_SHA
+        and worker.F79_SOURCES=={DEST:(111954,OLD_SHA),FOUNDATION_DEST:(37187,FOUNDATION_SHA)},'baked_source_proof')
+    catalog=document(inputs['catalog']);selected=[p for p in catalog['profiles'] if p['profile']=='f79cdda21c19']
+    need(len(selected)==1,'baked_source_proof');spec=selected[0]
+    receipt,admitted,association=worker.baked_load_evidence(document,spec,inputs['load_receipt'],
+        inputs['load_control'],inputs['archive_admission'],control['baked_source_worker']['sha256'],control['web_machine_id'])
+    proof=worker.baked_proof(document(inputs['proof']),image['RootFS']['Layers'],spec['candidate_config_id'],
+        spec['candidate_rootfs'],spec['tar_sha256'],admitted['tar_identity'],association)
+    need(same(proof['source_identities'],admitted['source_identities'])
+        and receipt['candidate_local_image_id'] in proof['source_identities']
+        and image['Id']==IMAGE and old['host']['ReadonlyRootfs'] is True,'baked_source_association')
+    worker.public_source_observation(lambda args:backend.command([*DOCKER,*args]),old['id'],IMAGE);backend.check()
+
 def web_run(control,pin,root,stack,checks,apply=False):
     need(not os.path.lexists(WEB_OWNER),'owner_exists')
     backend=Web(control,pin,root,stack,checks);baseline=backend.snapshot();old=backend.target(baseline)
     need(old['id']==OLD_CID and public_profile(baseline)==control['public_profile_sha256'],'profile')
-    source=source_row(old['mounts'],DEST);foundation=source_row(old['mounts'],FOUNDATION_DEST)
-    need(source['Source']==control['old_source']['path'] and foundation['Source']==control['foundation_source']['path'],'source_delta')
+    need(len(old['mounts'])==5 and not any(m['Destination']==p or p.startswith(m['Destination'].rstrip('/')+'/')
+        or m['Destination'].startswith(p+'/') for m in old['mounts'] for p in (DEST,FOUNDATION_DEST)),'source_delta')
     provenance(old,[r['path'] for r in control['compose']['files']],control['compose']['env_reference']);session_owners(baseline,old['id'])
     backend.legacy_owners()
     version=backend.command([*DOCKER,'compose','version','--short']).decode().strip()
@@ -580,12 +641,13 @@ def web_run(control,pin,root,stack,checks,apply=False):
     image=document(backend.command([*DOCKER,'image','inspect','--format','{{json .}}',IMAGE]))
     backend.full_parity=lambda render,row:full_parity(render,row,image)
     old_render=backend.render();backend.full_parity(old_render,old)
-    volume=next(r for r in old_render['services'][SERVICE]['volumes'] if r.get('target')==DEST)
-    new_volume={**volume,'source':control['new_source']['path']}
+    verify_baked_baseline(backend,old,image,stack,checks)
+    new_volume={'type':'bind','source':control['new_source']['path'],'target':DEST,
+        'read_only':True,'bind':{'create_host_path':False}}
     # Public code path/mount declaration only, never rendered environment.
     override={'services':{SERVICE:{'volumes':[new_volume]}}}
     new_render=backend.render(new=True,public_override=override)
-    rendered_delta(old_render,new_render,control['old_source']['path'],control['new_source']['path']);backend.check()
+    rendered_delta(old_render,new_render,control['new_source']['path']);backend.check()
     if not apply:return result(control,pin,'preflight_passed_not_applied')
     need(backend.clock.end-time.monotonic()>360,'window')
     guard=OwnedGuard(WEB_OWNER,control['nonce'],pin,stack);backend.checks.append(guard.check)
@@ -637,8 +699,9 @@ def load(args,stack):
     for name,path in (('marker',MARKER),*([('source',SOURCE)] if args.site=='native' else [])):
         fence=MetadataFence(path,control['fences'][args.site][name],stack);checks.append(fence.check)
     if args.site=='web':
-        for row in [*control['compose']['files'],control['old_source'],control['new_source'],control['foundation_source']]:
-            _,check=public_file(stack,Path(row['path']),row['sha256'],maximum=256*1024,mode=0o644 if row in [control['old_source'],control['new_source'],control['foundation_source']] else None);checks.append(check)
+        for row in [*control['compose']['files'],control['new_source']]:
+            _,check=public_file(stack,Path(row['path']),row['sha256'],maximum=256*1024,
+                mode=0o644 if row is control['new_source'] else None);checks.append(check)
         checks.append(private_metadata(stack,Path(control['compose']['env_reference'])))
     return root,control,checks
 
