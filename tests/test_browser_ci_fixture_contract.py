@@ -104,7 +104,7 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertTrue(events['workflow_call']['inputs']['git_ref']['required'])
         self.assertEqual(events['workflow_call']['inputs']['browser']['type'], 'string')
         inputs = events['workflow_dispatch']['inputs']
-        self.assertEqual(inputs['scenario']['options'], ['mandatory', 'offers', 'both'])
+        self.assertEqual(inputs['scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu'])
         self.assertTrue(inputs['git_ref']['required'])
         self.assertEqual(set(value['jobs']), {'browser-diagnostic'})
         job = value['jobs']['browser-diagnostic']
@@ -115,7 +115,7 @@ class BrowserFixtureTests(unittest.TestCase):
         steps = job['steps']
         selected = next(s for s in steps if s.get('id') == 'browser')
         self.assertNotIn('continue-on-error', selected)
-        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 3)
+        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 4)
         self.assertIn('mandatory-channel.spec.ts', selected['run'])
         self.assertIn('market-offers.spec.ts', selected['run'])
         self.assertNotIn('--shard', selected['run'])
@@ -152,6 +152,37 @@ class BrowserFixtureTests(unittest.TestCase):
         for name in ('merge-gate.yml', 'pre-release-gate.yml'):
             normal = workflow(name)['jobs']['frontend-browser-matrix']
             self.assertFalse(any('probe_browser_ci_secure_cookie' in s.get('run', '') for s in normal['steps']))
+
+    def test_chat_menu_geometry_is_explicit_selected_only_before_unchanged_real_delete(self):
+        job = workflow('browser-ci-diagnostic.yml')['jobs']['browser-diagnostic']
+        selected = next(s for s in job['steps'] if s.get('id') == 'browser')['run']
+        case = selected.split('chat-menu)', 1)[1].split(';;', 1)[0]
+        self.assertIn('CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts', case)
+        self.assertIn('--retries=0 --workers=1', case)
+        self.assertIn("--grep 'direct chat supports reacting to an incoming message and deleting an own message'", case)
+        self.assertNotIn('--shard', case)
+        guard = next(s for s in job['steps'] if s['name'] == 'Validate chat-menu geometry projection')
+        self.assertEqual(guard['if'], "inputs.scenario == 'chat-menu'")
+        self.assertNotIn('continue-on-error', guard)
+        source = (ROOT / 'frontend/e2e/direct-chat.spec.ts').read_text()
+        self.assertIn("if (process.env.CI_CHAT_MENU_GEOMETRY === '1') await attachChatMenuGeometry(page, testInfo)", source)
+        case = source.split("test('direct chat supports reacting", 1)[1]
+        opened = case.index('await deleteBubble.click()')
+        observation = case.index('await attachChatMenuGeometry(page, testInfo)')
+        click = case.index("await page.locator('.context-menu [role=\"menuitem\"]').filter({ hasText: 'حذف' }).click()")
+        self.assertLess(opened, observation)
+        self.assertLess(observation, click)
+        self.assertIn('return messages.some((message) => message.id === deleteMessageId)', case)
+        self.assertIn('.toBeFalsy()', case)
+        self.assertNotIn('force:', case)
+        self.assertNotIn('scrollIntoView', case)
+        registered = workflow('pre-release-gate.yml')
+        inputs = registered.get('on', registered.get(True))['workflow_dispatch']['inputs']
+        self.assertEqual(inputs['browser_diagnostic_scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu'])
+        self.assertEqual(inputs['browser_diagnostic_scenario']['default'], 'both')
+        for name in ('merge-gate.yml', 'pre-release-gate.yml'):
+            job = workflow(name)['jobs']['frontend-browser-matrix']
+            self.assertFalse(any('CI_CHAT_MENU_GEOMETRY' in str(s) for s in job['steps']))
 
     def test_actual_telegram_policy_allows_queue_production_but_never_provider_execution(self):
         source = ast.parse((ROOT / 'core/telegram_delivery_runtime_policy.py').read_bytes())

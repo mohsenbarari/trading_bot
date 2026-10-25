@@ -25,7 +25,7 @@ on:
         required: true
         default: both
         type: choice
-        options: [mandatory, offers, both]
+        options: [mandatory, offers, both, chat-menu]
       browser:
         required: true
         default: chromium
@@ -68,7 +68,7 @@ jobs:
         browser = os.environ['REQUESTED_BROWSER']
         if not re.fullmatch('[0-9a-f]{40}', requested):
             raise SystemExit('exact commit SHA required')
-        if scenario not in {'mandatory', 'offers', 'both'} or browser not in {'chromium', 'firefox', 'webkit'}:
+        if scenario not in {'mandatory', 'offers', 'both', 'chat-menu'} or browser not in {'chromium', 'firefox', 'webkit'}:
             raise SystemExit('unknown diagnostic selection')
         head = subprocess.run(['git', 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if head != requested:
@@ -143,6 +143,10 @@ jobs:
     - name: Build frontend
       working-directory: frontend
       run: npm run build
+    - name: Validate chat-menu geometry projection
+      if: inputs.scenario == 'chat-menu'
+      working-directory: frontend
+      run: node --experimental-strip-types --test ../scripts/probe_browser_ci_chat_menu_geometry.test.mjs
     - name: Bootstrap backend stack
       env:
         GH_TOKEN: ${{ github.token }}
@@ -239,6 +243,9 @@ jobs:
             ;;
           both)
             npx playwright test e2e/mandatory-channel.spec.ts e2e/market-offers.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger|text offer submission parses and persists a new sell offer'
+            ;;
+          chat-menu)
+            CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct chat supports reacting to an incoming message and deleting an own message'
             ;;
           *) exit 1 ;;
         esac

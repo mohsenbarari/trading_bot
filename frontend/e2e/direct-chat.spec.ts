@@ -3,6 +3,7 @@
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { primeAuthSession } from './helpers/auth'
+import { attachChatMenuGeometry } from './helpers/chatMenuGeometry'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -277,7 +278,7 @@ test.describe('Direct chat regressions', () => {
       .not.toBeNull()
   })
 
-  test('direct chat supports reacting to an incoming message and deleting an own message', async ({ page, request }) => {
+  test('direct chat supports reacting to an incoming message and deleting an own message', async ({ page, request }, testInfo) => {
     const actor = seedPrimarySession('direct_actor_mutations')
     const peer = seedPrimarySession('direct_peer_mutations')
     const incomingContent = `PW DIRECT INCOMING ${Date.now()}`
@@ -325,6 +326,7 @@ test.describe('Direct chat regressions', () => {
     })
 
     await deleteBubble.click()
+    if (process.env.CI_CHAT_MENU_GEOMETRY === '1') await attachChatMenuGeometry(page, testInfo)
     await page.locator('.context-menu [role="menuitem"]').filter({ hasText: 'حذف' }).click()
     await expect(page.getByText(deleteContent)).toHaveCount(0)
 
