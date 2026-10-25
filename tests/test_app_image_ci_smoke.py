@@ -481,5 +481,35 @@ class AppImageCISmokeTests(unittest.TestCase):
             self.assertEqual(M.main(['--root',str(self.root)]),1)
         self.assertEqual(json.loads(output.getvalue())['status'],'fixed_image_smoke_failed')
 
+    def test_failure_subphase_is_closed_and_unknown_values_cannot_be_persisted(self):
+        M.subphase('postgres','metadata');self.assertEqual(M.SUBPHASE,'postgres_metadata')
+        for profile,stage in [('private-profile','metadata'),('postgres','private-stage')]:
+            with self.assertRaisesRegex(RuntimeError,'diagnostic_subphase'):M.subphase(profile,stage)
+        self.assertEqual(M.SUBPHASE,'postgres_metadata')
+
+    def test_closed_failure_diagnostic_uses_only_catalogues_and_whitelisted_class_names(self):
+        ctx=SimpleNamespace(modules={'sealed_helper':SimpleNamespace(PUBLIC_FAILURE_CODES=('command_timeout',),PUBLIC_CODES=('archive_identity',))})
+        M.subphase('postgres','evidence_admission')
+        self.assertEqual(M.failure_diagnostic(RuntimeError('command_timeout'),ctx),{'closed_code':'command_timeout',
+            'exception_class':'RuntimeError','subphase':'postgres_evidence_admission'})
+        self.assertEqual(M.failure_diagnostic(RuntimeError('capacity_floor'),None)['closed_code'],'unexpected_failure')
+        for error in (ValueError('ordinary-private-fixture'),RuntimeError({'Env':'ordinary-private-fixture'}),KeyError('ordinary-private-fixture')):
+            value=M.failure_diagnostic(error,ctx);self.assertNotIn('ordinary-private-fixture',M.encode(value).decode());self.assertEqual(value['closed_code'],'unexpected_failure')
+        class PrivateFailure(Exception):pass
+        self.assertEqual(M.failure_diagnostic(PrivateFailure('ordinary-private-fixture'),ctx)['exception_class'],'unclassified_exception')
+        self.assertEqual(M.failure_diagnostic(RuntimeError('source_changed'),None)['closed_code'],'source_changed')
+
+    def test_failed_metadata_request_retains_exact_subphase_without_any_download_retry(self):
+        ctx=SimpleNamespace(root=self.root,D=SimpleNamespace(PROFILES={'postgres':{'run_id':40142076769}}),
+            command=Mock(side_effect=RuntimeError('command_timeout')),download=Mock())
+        with self.assertRaisesRegex(RuntimeError,'command_timeout'):M.admit_dependency(ctx,'postgres')
+        self.assertEqual(M.SUBPHASE,'postgres_metadata');ctx.download.assert_not_called();self.assertEqual(ctx.command.call_count,1)
+
+    def test_every_literal_controller_refusal_has_a_closed_diagnostic_label(self):
+        tree=ast.parse((ROOT/'scripts/run_app_image_ci_smoke.py').read_bytes())
+        literals={n.args[1].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='need'
+                  and len(n.args)==2 and isinstance(n.args[1],ast.Constant) and isinstance(n.args[1].value,str)}
+        self.assertTrue(literals<=M.FAILURE_CODES)
+
 
 if __name__=='__main__':unittest.main()

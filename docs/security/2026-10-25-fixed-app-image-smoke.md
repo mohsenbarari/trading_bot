@@ -45,3 +45,26 @@ polling, two-host sync/outages, backups/restores, real SMS/Telegram, TLS or
 background scheduler continuity. `full_matrix_accepted` and `security_accepted`
 remain false even after smoke success. Raw vulnerability reports, ACL caller
 assessment and actual serving/configuration gates remain separate obligations.
+
+## First actual run and bounded failure diagnostics
+
+Run40173368466 on08bc9849 failed before dependency admission completed and
+before creating the disposable network/containers. Its actual App archive and
+daemon admission passed, with the expected33 layers and full typed Config.
+Cleanup completed without reported causes. Artifact12591620054 is1998bytes,
+SHA256 `631c7f749458ad5b553a2d5cd6bf8bdc56b528ae62d055874d752bf4fc9e1c32`.
+No runtime/component scenario ran; the failed artifact remains retained.
+
+Local genuineUID1001/fenced reproduction passed selection of actual PostgreSQL
+metadata/artifact12579072479 and its pinned529854byte evidence ZIP through the
+unchanged evidence validator. This proves those public inputs parse; the first
+run's actual archive/import cause remains unknown because its report omitted
+the reason.
+
+The follow-up records only catalogued enum reasons, whitelisted exception class
+and a fixed per-image subphase. Unknown/private/unhashable exception arguments
+never become output. This distinguishes metadata, evidence, download, archive,
+LOAD and daemon comparison failures without publishing response bodies, Config,
+tokens or raw HTTP logs. Root passed42 independent genuineUID1001 fenced tests;
+focused controller coverage is298/298 statements, zero exclusions, branches35/36.
+These tests validate diagnostics, not the still-unexecuted32 image scenarios.

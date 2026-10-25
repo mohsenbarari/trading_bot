@@ -37,6 +37,10 @@ SELECTORS = {
     'test_telegram_otp_ephemeral_queue_redis.py': ('TelegramOTPEphemeralQueueRedisTests',3,'cbe02df0618239e4affa1f8e51b2e69cdfe13f332a44d46e8b4626b21d80e22e'),
 }
 PHASE = 'hosted_source_admission'
+SUBPHASE = 'none'
+FAILURE_CODES = frozenset(['app_archive_identity', 'app_export_scope', 'candidate_preexisting', 'ci_capacity', 'ci_identity', 'ci_root', 'container_identity', 'container_name', 'deadline', 'dependency_evidence_identity', 'dependency_readiness', 'diagnostic_subphase', 'duplicate_json_key', 'export_bound', 'export_pin', 'gzip_bound', 'gzip_pin', 'hosted_ci_only', 'image_import_delta', 'image_inventory', 'image_zip_inventory', 'image_zip_pin', 'installed_app_must_not_be_masked', 'json_bound', 'json_constant', 'loaded_descriptor', 'loaded_identity_unknown', 'loaded_image_identity', 'manifest_metadata', 'output_bound', 'owned_cleanup_identity', 'owned_cleanup_inventory', 'owned_network_cleanup_identity', 'owned_network_cleanup_inventory', 'private_output', 'redis_readiness', 'scratch_database_name', 'smoke_container_exit', 'smoke_counter_types', 'smoke_receipt', 'source_changed', 'source_metadata', 'source_path', 'source_pin', 'tar_size'])
+EXCEPTION_CLASSES = frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError',
+    'PermissionError','TimeoutError','KeyError','TypeError','ValueError','JSONDecodeError'))
 APP = {'activation_allowed': False,
  'added_provenance_labels': {'io.gold-trade.security.mountpoints.input-signature': '5351903a71b5bf6a281cf5e95a77ec8b57b2d69e804d519510c142473e544ce5',
                              'io.gold-trade.security.mountpoints.parent-config': 'sha256:8da3e404d01cc239606d1c79a30c4701c5a2ef2d103787b68b9ec221ae723672',
@@ -102,6 +106,24 @@ APP = {'activation_allowed': False,
 
 def need(ok, code):
     if not ok:raise RuntimeError(code)
+
+
+def subphase(profile,stage):
+    global SUBPHASE
+    need(profile in ('app','postgres','redis') and stage in ('metadata','evidence_download','evidence_admission',
+        'image_download','archive_unpack','archive_admission','image_load','daemon_config'),'diagnostic_subphase')
+    SUBPHASE=profile+'_'+stage
+
+
+def failure_diagnostic(error,ctx):
+    allowed=set(FAILURE_CODES)
+    for module in (() if ctx is None else getattr(ctx,'modules',{}).values()):
+        allowed.update(getattr(module,'PUBLIC_FAILURE_CODES',()))
+        allowed.update(getattr(module,'PUBLIC_CODES',()))
+    label=type(error).__name__
+    code=error.args[0] if isinstance(error,RuntimeError) and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in allowed else 'unexpected_failure'
+    return {'closed_code':code,'exception_class':label if label in EXCEPTION_CLASSES else 'unclassified_exception',
+        'subphase':SUBPHASE}
 
 
 def encode(value):
@@ -243,23 +265,28 @@ def inspect_image(ctx,image,expected_config,layers,*,config_id=None,identifiers=
         'whole_config_compared_in_ram':True,'configuration_values_disclosed':False,'security_accepted':False}
 
 
-def load_exact(ctx,source,config_id,expected_config,layers,identifiers):
+def load_exact(ctx,source,config_id,expected_config,layers,identifiers,*,profile='app'):
     def inventory():
         rows=ctx.docker(['image','ls','--all','--no-trunc','--quiet'],maximum=65536).decode().splitlines()
         need(len(rows)<=512 and all(re.fullmatch('sha256:[a-f0-9]{64}',row) for row in rows),'image_inventory')
         return set(rows)
     before=inventory();need(not before&set(identifiers),'candidate_preexisting')
+    subphase(profile,'image_load')
     source.seek(0);ctx.docker(['image','load','--quiet'],input_stream=source,seconds=300)
     after=inventory();added=after-before
     need(before<=after and len(added)==1 and added<=set(identifiers),'image_import_delta')
     image=next(iter(added))
+    subphase(profile,'daemon_config')
     return image,inspect_image(ctx,image,expected_config,layers,config_id=config_id,identifiers=identifiers)
 
 
 def admit_app(ctx):
     folder=ctx.root/'app-image';folder.mkdir(mode=0o700);path=folder/'image.zip'
+    subphase('app','image_download')
     ctx.download(APP['image_artifact_id'],path,APP['image_zip_bytes'],APP['image_zip_sha256'])
+    subphase('app','archive_unpack')
     tar=unpack(ctx,APP,path,folder)
+    subphase('app','archive_admission')
     with ctx.C.pinned(tar,APP['gzip']['uncompressed_bytes']) as (source,size):
         need(size==APP['gzip']['uncompressed_bytes'],'tar_size')
         proof=ctx.P.validate_archive(source,size,APP['image_config_id'],last_layer=APP['app_root'])
@@ -281,17 +308,23 @@ def admit_app(ctx):
 
 def admit_dependency(ctx,name):
     spec=ctx.D.PROFILES[name];folder=ctx.root/name;folder.mkdir(mode=0o700)
+    subphase(name,'metadata')
     listing=document(ctx.command(['/usr/bin/gh','api',f"repos/mohsenbarari/trading_bot/actions/runs/{spec['run_id']}/artifacts"],auth=True,maximum=131072))
     rows=[r for r in listing['artifacts'] if r['size_in_bytes']==spec['evidence_bytes']
           and r.get('digest')=='sha256:'+spec['evidence_sha256'] and not r['expired']]
     need(len(rows)==1 and type(rows[0]['id']) is int,'dependency_evidence_identity')
+    subphase(name,'evidence_download')
     evidence=folder/'evidence.zip';ctx.download(rows[0]['id'],evidence,spec['evidence_bytes'],spec['evidence_sha256'])
+    subphase(name,'evidence_admission')
     data=ctx.D.evidence(ctx.C.read(evidence,spec['evidence_bytes']),spec)
+    subphase(name,'image_download')
     image_zip=folder/'image.zip';ctx.download(spec['image_artifact_id'],image_zip,spec['image_zip_bytes'],spec['image_zip_sha256'])
+    subphase(name,'archive_unpack')
     tar=unpack(ctx,spec,image_zip,folder)
+    subphase(name,'archive_admission')
     with ctx.C.pinned(tar,spec['archive']['uncompressed_bytes']) as (source,size):
         proof=ctx.D.validate_archive(source,size,ctx.end,data,ctx.T,ctx.L)
-        image,binding=load_exact(ctx,source,spec['config_id'],data['image']['Config'],spec['layers'],proof['source_identities'])
+        image,binding=load_exact(ctx,source,spec['config_id'],data['image']['Config'],spec['layers'],proof['source_identities'],profile=name)
     ctx.write(ctx.root/'reports'/(name+'-admission.json'),{'archive':proof,'daemon':binding,'scope':'disposable_public_ci_dependency','security_accepted':False})
     return image
 
@@ -374,9 +407,10 @@ def cleanup(ctx):
 
 
 def execute(ctx):
-    global PHASE
+    global PHASE,SUBPHASE
     PHASE='exact_public_image_admission';app=admit_app(ctx)
     postgres=admit_dependency(ctx,'postgres');redis=admit_dependency(ctx,'redis')
+    SUBPHASE='none'
     database='coin_intelligence_ci_'+sha256(owner().encode()).hexdigest()[:12]
     proof=prepare_proof(ctx,database);ctx.network='app-ci-net-'+owner()
     PHASE='disposable_internal_network'
@@ -428,6 +462,8 @@ def validate_result(value):
 
 
 def main(argv=None):
+    global PHASE,SUBPHASE
+    PHASE,SUBPHASE='hosted_source_admission','none'
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--root',type=Path,required=True)
     args=parser.parse_args(argv);ctx=None;primary=False;errors=[]
     try:
@@ -442,12 +478,13 @@ def main(argv=None):
                 if errors and not primary:raise RuntimeError('owned_cleanup_unproven')
             ctx.check();print(json.dumps({'status':'fixed_image_smoke_passed','tests':32,'security_accepted':False,'full_matrix_accepted':False},sort_keys=True))
         return 0
-    except BaseException:
+    except BaseException as error:
+        diagnostic=failure_diagnostic(error,ctx)
         if ctx is not None:
-            try:ctx.write(ctx.root/'reports/failure.json',{'status':'failed','phase':PHASE,'cleanup_causes':errors,
+            try:ctx.write(ctx.root/'reports/failure.json',{'status':'failed','phase':PHASE,'cleanup_causes':errors,**diagnostic,
                 'security_accepted':False,'full_matrix_accepted':False})
             except BaseException:pass
-        print(json.dumps({'status':'fixed_image_smoke_failed','phase':PHASE,'security_accepted':False},sort_keys=True));return 1
+        print(json.dumps({'status':'fixed_image_smoke_failed','phase':PHASE,**diagnostic,'security_accepted':False},sort_keys=True));return 1
 
 
 CAPSULE = r'''
