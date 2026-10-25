@@ -3,6 +3,8 @@ from contextlib import ExitStack,redirect_stdout
 from copy import deepcopy
 from hashlib import sha256
 import ast
+import builtins
+import errno
 import importlib.util
 import io
 import json
@@ -264,7 +266,7 @@ class AppImageCISmokeTests(unittest.TestCase):
         self.assertIn('main.app.router.lifespan_context',calls);self.assertIn('httpx.ASGITransport',calls);self.assertIn('subprocess.run',calls)
         self.assertFalse(any(c.startswith(('patch','Mock','AsyncMock')) for c in calls))
         self.assertNotIn('dependency_overrides[',M.CAPSULE);self.assertNotIn('create_access_token(',M.CAPSULE)
-        self.assertIn('server.shutdown()',M.CAPSULE);self.assertIn('thread.join(timeout=5)',M.CAPSULE)
+        self.assertIn('server.shutdown',M.CAPSULE);self.assertIn('thread.join(timeout=5)',M.CAPSULE)
         self.assertIn("'upgrade','head'",M.CAPSULE);self.assertNotIn("'stamp'",M.CAPSULE)
         self.assertIn("select(func.count()).select_from(Message)",M.CAPSULE)
         self.assertIn('total==before_count+2',M.CAPSULE)
@@ -275,6 +277,276 @@ class AppImageCISmokeTests(unittest.TestCase):
         literals={n.args[1].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='need' and len(n.args)==2 and isinstance(n.args[1],ast.Constant)}
         self.assertTrue(literals<=set(codes));self.assertIn('resource.RLIMIT_FSIZE',M.CAPSULE)
         self.assertNotIn('capture_output=True',M.CAPSULE);self.assertNotIn('stream=io.StringIO()',M.CAPSULE)
+
+    def capsule_namespace(self):
+        # Execute the actual diagnostic helpers/handler, never the FD redirection,
+        # resource changes, installed app, migration process or private capture.
+        tree=ast.parse(M.CAPSULE);body=[]
+        for node in tree.body:
+            if isinstance(node,ast.Assign) and any(
+                isinstance(t,ast.Name) and t.id in {'RESULT','CURRENT','CLOSED_CODES','CLOSED_PHASES','CLOSED_CLASSES'}
+                or isinstance(t,ast.Subscript) and isinstance(t.value,ast.Name) and t.value.id=='RESULT' for t in node.targets):
+                body.append(node)
+            elif isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)) and node.name in {'need','phase','capsule_failure','runtime'}:
+                body.append(node)
+        def immediate(coroutine):
+            # All fixture awaits complete inline; creating an event loop would
+            # open its self-pipe and violate this module's ambient socket fence.
+            try:
+                coroutine.send(None)
+            except StopIteration as result:return result.value
+            finally:coroutine.close()
+            raise AssertionError('capsule diagnostic fixture suspended')
+        ns={'errno':errno,'asyncio':SimpleNamespace(run=immediate),'io':io,'sys':__import__('sys'),
+            '__builtins__':dict(vars(builtins))}
+        exec(compile(ast.Module(body=body,type_ignores=[]),'<owned-capsule-diagnostics>','exec'),ns)
+        return ns,next(n for n in tree.body if isinstance(n,ast.Try))
+
+    def run_capsule_diagnostic(self,migration=0,imports=None,runtime=None,namespace=None):
+        ns,handler=self.capsule_namespace() if namespace is None else namespace
+        receipts=[]
+        runner=Mock(side_effect=migration if isinstance(migration,BaseException) else None,
+            return_value=SimpleNamespace(returncode=migration))
+        ns.update(os=SimpleNamespace(close=Mock()),subprocess=SimpleNamespace(run=runner,DEVNULL=-3),
+            PRIVATE=101,PUBLIC=102,reply=lambda value:receipts.append(deepcopy(value)),components=Mock())
+        if imports is not None:
+            def controlled_import(name,*args,**kwargs):
+                value=imports[name]
+                if isinstance(value,BaseException):raise value
+                return value
+            ns['__builtins__']['__import__']=controlled_import
+        if runtime is not None:ns['runtime']=runtime
+        exec(compile(ast.Module(body=[handler],type_ignores=[]),'<owned-capsule-handler>','exec'),ns)
+        self.assertEqual(len(receipts),1);M.public(receipts[0])
+        self.assertNotIn('ordinary-private',M.encode(receipts[0]).decode())
+        return receipts[0],ns,runner
+
+    def runtime_imports(self,ns,failure=None,cleanup_errors=None):
+        error=OSError(errno.EACCES,'ordinary-private-error','ordinary-private-path')
+        cleanup_errors={} if cleanup_errors is None else cleanup_errors
+        ns['cleanup_calls']=[]
+        def cleanup(step):
+            ns['cleanup_calls'].append(step)
+            if step in cleanup_errors:raise cleanup_errors[step]
+            if (failure,step) in {('provider_shutdown','shutdown'),('dispose','dispose')}:raise error
+        async def nothing():pass
+        def context(value=None,fail=False,exit_fail=False):
+            class Context:
+                async def __aenter__(self):
+                    if fail:raise error
+                    return value
+                async def __aexit__(self,*args):
+                    if exit_fail:raise error
+                    return False
+            return Context()
+        class Settings(SimpleNamespace):
+            def __getattribute__(self,name):
+                if failure=='settings' and name=='environment':raise error
+                return super().__getattribute__(name)
+        settings=Settings(environment='production',trading_bot_service='api',server_mode='iran',
+            background_jobs_enabled=False,telegram_provider_test_authority=False,staging_log_otp_codes=False,
+            telegram_login_otp_enabled=False,smsir_base_url='http://127.0.0.1:9080')
+        database_calls=[]
+        def database():
+            database_calls.append(None)
+            return context(SimpleNamespace(add=Mock(),flush=nothing,commit=nothing),
+                failure=='seed' or failure=='head' and len(database_calls)==2)
+        async def request(method,path,**kwargs):
+            if failure=='case':raise error
+            if failure=='case_status':return SimpleNamespace(status_code=200)
+            return SimpleNamespace(status_code=401 if path.endswith('/auth/me') else 404)
+        app=SimpleNamespace(dependency_overrides={},router=SimpleNamespace(lifespan_context=lambda app:
+            context(fail=failure=='lifespan',exit_fail=failure=='lifespan_exit')))
+        def provider(*args):
+            if failure=='provider':raise error
+            return SimpleNamespace(serve_forever=Mock(),shutdown=lambda:cleanup('shutdown'),server_close=lambda:cleanup('close'))
+        async def dispose():cleanup('dispose')
+        image=SimpleNamespace(save=lambda buffer,**kwargs:buffer.write(b'ordinary image fixture'),close=Mock())
+        ns.update(http=SimpleNamespace(server=SimpleNamespace(ThreadingHTTPServer=provider)),
+            FakeSMS=SimpleNamespace(records=[]),check_origins=Mock(),
+            threading=SimpleNamespace(Thread=lambda **kwargs:SimpleNamespace(start=Mock(),
+                join=lambda timeout:cleanup('join'),is_alive=lambda:cleanup('reap') or False)))
+        model=lambda **kwargs:SimpleNamespace(id=1,**kwargs)
+        return {'httpx':SimpleNamespace(ASGITransport=lambda **kwargs:None,
+                    AsyncClient=lambda **kwargs:context(SimpleNamespace(request=request),failure=='client',failure=='client_exit')),
+            'sqlalchemy':SimpleNamespace(select=Mock(),func=Mock()),'PIL':SimpleNamespace(Image=SimpleNamespace(new=lambda *args:image)),
+            'core.config':SimpleNamespace(settings=settings),'core.db':SimpleNamespace(AsyncSessionLocal=database,engine=SimpleNamespace(dispose=dispose)),
+            'core.redis':SimpleNamespace(get_redis_client=Mock()),
+            'core.enums':SimpleNamespace(UserAccountStatus=SimpleNamespace(ACTIVE='active'),ChatType=SimpleNamespace(GROUP='group'),
+                ChatMemberRole=SimpleNamespace(ADMIN='admin',MEMBER='member'),ChatMembershipStatus=SimpleNamespace(ACTIVE='active')),
+            'models.user':SimpleNamespace(User=model,UserRole=SimpleNamespace(STANDARD='standard')),
+            'models.chat':SimpleNamespace(Chat=model),'models.chat_member':SimpleNamespace(ChatMember=model),
+            'models.session':SimpleNamespace(UserSession=Mock()),'models.message':SimpleNamespace(Message=Mock()),
+            'models.upload_session':SimpleNamespace(UploadSession=Mock()),'core.jwt_codec':SimpleNamespace(jwt=Mock()),
+            'main':SimpleNamespace(app=app)}
+
+    def test_capsule_phase_and_exception_diagnostics_are_closed_and_never_stringify_private_errors(self):
+        ns,_=self.capsule_namespace();ns['phase']('installed_runtime_seed_database')
+        for bad in ('ordinary-private-phase',None,1,True,{}):
+            with self.assertRaisesRegex(RuntimeError,'diagnostic_phase'):ns['phase'](bad)
+            self.assertEqual(ns['CURRENT'],'installed_runtime_seed_database')
+        class PrivateFailure(Exception):
+            def __str__(self):raise AssertionError('must never stringify exception')
+        examples=[(RuntimeError('actual_migration_head'),'RuntimeError',None,'actual_migration_head'),
+            (RuntimeError('ordinary-private-error'),'RuntimeError',None,'unexpected_smoke_failure'),
+            (PrivateFailure({'Env':'ordinary-private-value'}),'unclassified_exception',None,'unexpected_smoke_failure'),
+            (ModuleNotFoundError('ordinary-private-error',name='ordinary-private-module'),'ModuleNotFoundError',None,'unexpected_smoke_failure'),
+            (PermissionError(errno.EACCES,'ordinary-private-error','ordinary-private-path'),'PermissionError','EACCES','unexpected_smoke_failure'),
+            (OSError(10**8,'ordinary-private-error'),'OSError','unclassified_errno','unexpected_smoke_failure')]
+        for error,label,number,code in examples:
+            with self.subTest(label=label,number=number):
+                value=ns['capsule_failure'](error)
+                self.assertEqual(value,{'closed_failure_code':code,'exception_class':label,'exception_errno':number})
+                self.assertNotIn('ordinary-private',M.encode(value).decode());M.public(value)
+        error=OSError('ordinary-private-error');error.errno=True
+        self.assertIsNone(ns['capsule_failure'](error)['exception_errno'])
+
+    def test_capsule_migration_spawn_and_result_are_distinct_and_never_copy_child_output(self):
+        import subprocess
+        error=subprocess.TimeoutExpired(['ordinary-private-command'],180,output=b'ordinary-private-stdout',stderr=b'ordinary-private-stderr')
+        value,ns,runner=self.run_capsule_diagnostic(migration=error)
+        self.assertEqual(value['first_failure_scope'],'installed_guarded_scratch_migration_spawn')
+        self.assertEqual(value['exception_class'],'TimeoutExpired')
+        self.assertEqual(value['migration'],{'invocation_attempted':True,'child_completed':False,'return_code':None})
+        self.assertEqual(runner.call_args.kwargs,{'cwd':'/app','stdin':-3,'stdout':101,'stderr':101,'timeout':180,'check':False})
+        for code in (-255,-9,1,255,True,256,'ordinary-private-return-code'):
+            with self.subTest(code=code):
+                value,ns,_=self.run_capsule_diagnostic(migration=code)
+                self.assertEqual(value['first_failure_scope'],'installed_guarded_scratch_migration_result')
+                self.assertEqual(value['closed_failure_code'],'actual_scratch_migration_failed')
+                self.assertEqual(value['migration'],{'invocation_attempted':True,'child_completed':True,
+                    'return_code':code if type(code) is int and -255<=code<=255 else None})
+                ns['components'].assert_not_called();self.assertEqual(value['runtime']['run'],0)
+
+    def test_capsule_after_successful_migration_reports_each_actual_runtime_import_boundary(self):
+        modules={'httpx':'httpx','sqlalchemy':'sqlalchemy','PIL':'pillow','core.config':'config','core.db':'db',
+            'core.redis':'redis','core.enums':'enums','models.user':'models','models.chat':'models',
+            'models.chat_member':'models','models.session':'models','models.message':'models','models.upload_session':'models',
+            'core.jwt_codec':'jwt','main':'main'}
+        for module,label in modules.items():
+            with self.subTest(module=module):
+                ns,handler=self.capsule_namespace();imports=self.runtime_imports(ns)
+                imports[module]=ModuleNotFoundError('ordinary-private-import',name='ordinary-private-module')
+                value,ns,_=self.run_capsule_diagnostic(imports=imports,namespace=(ns,handler))
+                self.assertEqual(value['first_failure_scope'],'installed_runtime_imports_'+label)
+                self.assertEqual(value['migration'],{'invocation_attempted':True,'child_completed':True,'return_code':0})
+                self.assertEqual(value['exception_class'],'ModuleNotFoundError');self.assertEqual(value['runtime']['run'],0)
+                ns['components'].assert_not_called()
+
+    def test_capsule_runtime_settings_provider_lifespan_seed_and_head_failures_keep_primary_scope(self):
+        scopes={'settings':'installed_runtime_fixture_settings','provider':'installed_runtime_fake_provider_start',
+            'lifespan':'installed_runtime_lifespan_entry','seed':'installed_runtime_seed_database',
+            'client':'installed_runtime_client_bootstrap','head':'installed_runtime_alembic_head','case':'A_startup_auth_guards'}
+        for failure,scope in scopes.items():
+            with self.subTest(failure=failure):
+                ns,handler=self.capsule_namespace();imports=self.runtime_imports(ns,failure)
+                value,ns,_=self.run_capsule_diagnostic(imports=imports,namespace=(ns,handler))
+                self.assertEqual(value['first_failure_scope'],scope)
+                self.assertEqual(value['runtime']['failures'],[scope])
+                self.assertEqual(value['runtime']['run'],1 if failure in {'head','case'} else 0)
+                self.assertEqual(value['exception_class'],'PermissionError');self.assertEqual(value['exception_errno'],'EACCES')
+                self.assertEqual(value['migration']['return_code'],0);ns['components'].assert_not_called()
+
+    def test_capsule_each_real_case_label_tracks_attempted_and_completed_counts(self):
+        runtime=next(n for n in ast.parse(M.CAPSULE).body if isinstance(n,ast.AsyncFunctionDef) and n.name=='runtime')
+        cases=next(n for n in ast.walk(runtime) if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='cases' for t in n.targets))
+        loop=next(n for n in ast.walk(runtime) if isinstance(n,ast.For) and isinstance(n.iter,ast.Name) and n.iter.id=='cases')
+        names=[row.elts[0].value for row in cases.value.elts]
+        for index,name in enumerate(names):
+            with self.subTest(case=name):
+                ns,handler=self.capsule_namespace()
+                async def case():
+                    if ns['CURRENT']==name:raise ValueError('ordinary-private-case-detail')
+                for function in ('startup','otp_negative','auth_lifecycle','multipart','resumable','cancel'):ns[function]=case
+                ns['album']=lambda kind:case()
+                only_cases=ast.AsyncFunctionDef(name='runtime',args=runtime.args,body=[cases,loop],decorator_list=[])
+                exec(compile(ast.fix_missing_locations(ast.Module(body=[only_cases],type_ignores=[])),'<owned-capsule-cases>','exec'),ns)
+                value,_,_=self.run_capsule_diagnostic(namespace=(ns,handler))
+                self.assertEqual(value['first_failure_scope'],name)
+                self.assertEqual(value['runtime'],{'expected':8,'run':index+1,'passed':index,'failures':[name]})
+                self.assertEqual(value['exception_class'],'ValueError')
+
+    def test_capsule_runtime_exit_and_cleanup_failures_have_closed_scopes_after_completed_cases(self):
+        original=next(n for n in ast.parse(M.CAPSULE).body if isinstance(n,ast.AsyncFunctionDef) and n.name=='runtime')
+        runtime=deepcopy(original)
+        assignment=next(n for n in ast.walk(runtime) if isinstance(n,ast.Assign)
+            and any(isinstance(t,ast.Name) and t.id=='cases' for t in n.targets))
+        for row in assignment.value.elts:row.elts[1]=ast.Name(id='nothing',ctx=ast.Load())
+        scopes={'final_checks':'installed_runtime_final_checks','client_exit':'installed_runtime_client_exit',
+            'lifespan_exit':'installed_runtime_lifespan_exit','provider_shutdown':'installed_runtime_fake_provider_shutdown',
+            'dispose':'installed_runtime_database_dispose'}
+        for failure,scope in scopes.items():
+            with self.subTest(failure=failure):
+                ns,handler=self.capsule_namespace();imports=self.runtime_imports(ns,failure)
+                async def nothing():pass
+                ns['nothing']=nothing
+                if failure!='final_checks':ns['FakeSMS'].records=[None]*5
+                exec(compile(ast.fix_missing_locations(ast.Module(body=[runtime],type_ignores=[])),'<owned-capsule-cleanup>','exec'),ns)
+                value,_,_=self.run_capsule_diagnostic(imports=imports,namespace=(ns,handler))
+                self.assertEqual(value['first_failure_scope'],scope)
+                self.assertEqual(value['runtime'],{'expected':8,'run':8,'passed':8,'failures':[scope]})
+                self.assertEqual(value['closed_failure_code'],'fake_sms_exact_count' if failure=='final_checks'
+                    else 'runtime_cleanup_failed' if failure in {'provider_shutdown','dispose'} else 'unexpected_smoke_failure')
+
+    def test_capsule_dual_runtime_and_cleanup_faults_preserve_primary_and_attempt_every_release(self):
+        examples=[('seed',{'shutdown':RuntimeError('ordinary-private-shutdown')}),
+            ('seed',{'close':OSError(errno.EIO,'ordinary-private-close','ordinary-private-path')}),
+            ('seed',{'join':ValueError('ordinary-private-join'),'reap':RuntimeError('fake_sms_reaped'),
+                     'dispose':PermissionError(errno.EACCES,'ordinary-private-dispose')}),
+            ('case_status',{step:RuntimeError('ordinary-private-cleanup') for step in ('shutdown','close','join','reap','dispose')})]
+        for failure,errors in examples:
+            with self.subTest(failure=failure,cleanup=list(errors)):
+                ns,handler=self.capsule_namespace();imports=self.runtime_imports(ns,failure,errors)
+                value,ns,_=self.run_capsule_diagnostic(imports=imports,namespace=(ns,handler))
+                self.assertEqual(ns['cleanup_calls'],['shutdown','close','join','reap','dispose'])
+                self.assertEqual(value['status'],'failed');self.assertEqual(ns['code'],1)
+                scope='installed_runtime_seed_database' if failure=='seed' else 'A_startup_auth_guards'
+                self.assertEqual(value['first_failure_scope'],scope);self.assertEqual(value['runtime']['failures'],[scope])
+                self.assertEqual(value['exception_class'],'PermissionError' if failure=='seed' else 'RuntimeError')
+                self.assertEqual(value['exception_errno'],'EACCES' if failure=='seed' else None)
+                self.assertEqual(value['closed_failure_code'],'unexpected_smoke_failure' if failure=='seed' else 'http_get_401')
+                prefix='installed_runtime_fake_provider_'
+                self.assertEqual(value['runtime_cleanup_failures'],[
+                    {'phase':prefix+step if step!='dispose' else 'installed_runtime_database_dispose',**ns['capsule_failure'](error)}
+                    for step,error in errors.items()])
+                self.assertLessEqual(len(value['runtime_cleanup_failures']),5);ns['components'].assert_not_called()
+
+    def test_capsule_cleanup_only_faults_fail_after_attempting_every_release(self):
+        runtime=next(n for n in ast.parse(M.CAPSULE).body if isinstance(n,ast.AsyncFunctionDef) and n.name=='runtime')
+        assignment=next(n for n in ast.walk(runtime) if isinstance(n,ast.Assign)
+            and any(isinstance(t,ast.Name) and t.id=='cases' for t in n.targets))
+        for row in assignment.value.elts:row.elts[1]=ast.Name(id='nothing',ctx=ast.Load())
+        steps=['shutdown','close','join','reap','dispose']
+        for failed in steps+['all']:
+            with self.subTest(failed=failed):
+                errors={step:PermissionError(errno.EACCES,'ordinary-private-cleanup','ordinary-private-path')
+                    for step in steps if failed=='all' or step==failed}
+                ns,handler=self.capsule_namespace();imports=self.runtime_imports(ns,cleanup_errors=errors)
+                async def nothing():pass
+                ns['nothing']=nothing;ns['FakeSMS'].records=[None]*5
+                exec(compile(ast.fix_missing_locations(ast.Module(body=[runtime],type_ignores=[])),'<owned-capsule-cleanup-faults>','exec'),ns)
+                value,ns,_=self.run_capsule_diagnostic(imports=imports,namespace=(ns,handler))
+                self.assertEqual(ns['cleanup_calls'],steps);self.assertEqual(ns['code'],1)
+                first=steps[0] if failed=='all' else failed
+                scope='installed_runtime_database_dispose' if first=='dispose' else 'installed_runtime_fake_provider_'+first
+                self.assertEqual(value['status'],'failed');self.assertEqual(value['first_failure_scope'],scope)
+                self.assertEqual(value['closed_failure_code'],'runtime_cleanup_failed')
+                self.assertEqual(value['runtime'],{'expected':8,'run':8,'passed':8,'failures':[scope]})
+                self.assertEqual(len(value['runtime_cleanup_failures']),5 if failed=='all' else 1)
+                self.assertTrue(all(row['exception_class']=='PermissionError' and row['exception_errno']=='EACCES'
+                    for row in value['runtime_cleanup_failures']))
+                ns['components'].assert_not_called()
+
+    def test_capsule_phase_catalogue_covers_all_markers_and_private_capture_stays_bounded(self):
+        ns,_=self.capsule_namespace();tree=ast.parse(M.CAPSULE)
+        labels={n.args[0].value for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
+            and n.func.id=='phase' and isinstance(n.args[0],ast.Constant)}
+        self.assertTrue(labels<=ns['CLOSED_PHASES'])
+        writes=[n for n in ast.walk(tree) if isinstance(n,ast.Call) and ast.unparse(n.func)=='os.write']
+        self.assertEqual(len(writes),1);self.assertEqual(ast.unparse(writes[0].args[0]),'PUBLIC')
+        self.assertIn('resource.RLIMIT_FSIZE,(2097153,2097153)',M.CAPSULE)
+        self.assertIn("need(len(raw)<=65536,'public_receipt_bound')",M.CAPSULE)
+        self.assertNotIn('os.read(PRIVATE',M.CAPSULE);self.assertNotIn('os.lseek(PRIVATE',M.CAPSULE)
 
     def test_three_exact_selected_modules_match_real_public_sources_and_exclude_historical_56(self):
         self.assertEqual(sum(row[1] for row in M.SELECTORS.values()),24)
@@ -378,7 +650,11 @@ class AppImageCISmokeTests(unittest.TestCase):
         writes=[]
         def write(path,raw,mode=0o600):path.write_bytes(raw);path.chmod(mode);writes.append(path)
         ctx=SimpleNamespace(root=self.root,stack=self.stack,checks=[],C=SimpleNamespace(write=write))
-        proof=M.prepare_proof(ctx,'coin_intelligence_ci_0123456789ab')
+        prior=os.umask(0o077)
+        try:proof=M.prepare_proof(ctx,'coin_intelligence_ci_0123456789ab')
+        finally:os.umask(prior)
+        self.assertEqual(stat.S_IMODE(proof.stat().st_mode),0o755)
+        self.assertEqual(proof.stat().st_uid,os.geteuid())
         self.assertEqual(set(p.name for p in proof.iterdir()),set(M.SELECTORS)|{'selectors.json','runtime.env'})
         self.assertTrue(all(stat.S_IMODE(p.stat().st_mode)==0o444 for p in writes));self.assertEqual(len(ctx.checks),3)
 

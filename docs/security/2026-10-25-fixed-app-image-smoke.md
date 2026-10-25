@@ -176,3 +176,40 @@ Root independently passed52 genuineUID1001 fenced tests (1.305s, no skips).
 Source coverage342/342 statements, zero exclusions,41/42 branches. Actual
 mount admission and the32 selected image checks still require a new hosted
 result; source regressions do not turn the fifth failed run green.
+
+## Sixth actual run and bounded capsule diagnosis
+
+Run40178071589 on599ee919 passed all three archive/daemon admissions,
+both dependency readiness checks and the exact unmasked App mount admission.
+The App capsule started, then failed before any of the8 runtime or24 selected
+component checks passed. Artifact12592744561 is5330 bytes, SHA256
+`f2b6fea7debd466ee327a5429745f1c29f6843f100229dd6880b83ceb373d5e4`.
+Owned cleanup completed with no causes and retained the primary failure.
+The reported `installed_guarded_scratch_migration` scope was stale: the capsule
+did not update that label during subsequent imports, settings, lifespan or seed
+work. This receipt therefore does not prove migration was the failing boundary.
+
+The capsule now records migration invocation/completion and a typed bounded
+return code, then fixed import/settings/provider/lifespan/seed/head/case phases.
+Only allowlisted exception classes, fixed codes and errno names escape; private
+output remains bounded and undisclosed. Its five explicit provider/database
+cleanup steps run independently, record closed cleanup causes and preserve an
+exception already entering that cleanup. Cleanup-only failures still fail.
+A third-party client/lifespan context manager can independently replace a body
+exception during its own exit; this packet does not rewrite that behavior.
+Outer exact owned-container cleanup remains required.
+
+Source review also proved a disposable-fixture permission defect: the hosted
+controller's umask077 masked `proof.mkdir(mode=0755)` to0700, owned by UID1001.
+The admitted root App with all capabilities dropped cannot traverse that foreign
+private directory. The fixture now explicitly sets only its public proof
+directory to0755; public files remain0444 and the bind stays readonly. No App
+user/capability waiver, runtime/COW policy change or production file is involved.
+This corrects a proven fixture defect; the sixth receipt alone does not establish
+that it caused its historical failure. A new actual hosted result is required.
+
+Root independently ran all61 tests as genuine UID1001 with all capabilities
+dropped, only12 copied public files and ambient effects fenced:61 passed in3.489s,
+without skips. The capsule's private output limit and readonly mount contract
+remain intact. Source tests do not imply successful hosted32-case execution,
+serving activation or overall security acceptance.

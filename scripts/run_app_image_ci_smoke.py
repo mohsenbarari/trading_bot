@@ -350,6 +350,8 @@ def fixture_env(database):
 
 def prepare_proof(ctx,database):
     proof=ctx.root/'proof';proof.mkdir(mode=0o755)
+    # CI uses umask077; the separate image user still needs public traversal.
+    proof.chmod(0o755)
     identity={}
     for name,(_,count,pin) in SELECTORS.items():
         raw,check=sealed(ctx.stack,ctx.root/'source'/name,pin,131072);ctx.checks.append(check)
@@ -589,7 +591,7 @@ def main(argv=None):
 
 
 CAPSULE = r'''
-import asyncio,hashlib,http.server,io,json,os,pathlib,resource,subprocess,sys,threading,types,unittest
+import asyncio,errno,hashlib,http.server,io,json,os,pathlib,resource,subprocess,sys,threading,types,unittest
 from contextlib import ExitStack
 PUBLIC=os.dup(1);PRIVATE=os.memfd_create('synthetic-smoke-private-output')
 os.dup2(PRIVATE,1);os.dup2(PRIVATE,2)
@@ -604,10 +606,40 @@ RESULT={'schema':'app_image_ci_smoke/1','image_config_id':'sha256:ed59f14519b732
 RESULT['runtime_scope']='installed_API_lifespan_auth_OTP_upload_album_A_D'
 RESULT['component_scope']='6_parser_and_18_Redis_regressions_with_existing_component_test_doubles'
 RESULT['not_tested']=['browser','Bot_delivery','sync','backup_restore','production_network_TLS','background_scheduler_continuity']
+RESULT['migration']={'invocation_attempted':False,'child_completed':False,'return_code':None}
+RESULT['runtime_cleanup_failures']=[]
 CURRENT='bootstrap'
-CLOSED_CODES = frozenset(['actual_migration_head', 'actual_production_fixture_config', 'actual_redis_expiry', 'actual_scratch_migration_failed', 'actual_sms_delivery', 'album_caption_policy', 'album_committed_twice', 'album_idempotent_message_ids', 'album_order', 'album_rows_persisted_without_duplicates', 'authenticated_identity', 'cancel_fixture_exists', 'cancel_removes_temporary_file', 'cancelled_session_state', 'decoded_image_pixels', 'fake_sms_exact_count', 'fake_sms_fixture_scope', 'fake_sms_parameter', 'fake_sms_reaped', 'fake_sms_request_bound', 'fake_sms_shape', 'http_delete_200', 'http_delete_201', 'http_delete_400', 'http_delete_401', 'http_delete_403', 'http_delete_404', 'http_delete_409', 'http_get_200', 'http_get_201', 'http_get_400', 'http_get_401', 'http_get_403', 'http_get_404', 'http_get_409', 'http_patch_200', 'http_patch_201', 'http_patch_400', 'http_patch_401', 'http_patch_403', 'http_patch_404', 'http_patch_409', 'http_post_200', 'http_post_201', 'http_post_400', 'http_post_401', 'http_post_403', 'http_post_404', 'http_post_409', 'installed_module_origin', 'invalid_otp_never_creates_session', 'multipart_real_image_processing', 'no_dependency_overrides', 'otp_expiry_fixture_exists', 'public_receipt_bound', 'real_session_tokens', 'selected_test_count', 'selected_test_inventory', 'selected_test_pin', 'selected_tests_failed', 'sid_required', 'sms_recipient', 'upload_ready'])
+CLOSED_PHASES=frozenset(('bootstrap','installed_guarded_scratch_migration_spawn','installed_guarded_scratch_migration_result',
+    'installed_runtime_bootstrap','installed_runtime_imports_httpx','installed_runtime_imports_sqlalchemy',
+    'installed_runtime_imports_pillow','installed_runtime_imports_config','installed_runtime_imports_db',
+    'installed_runtime_imports_redis','installed_runtime_imports_enums','installed_runtime_imports_models',
+    'installed_runtime_imports_jwt','installed_runtime_imports_main','installed_runtime_fixture_settings',
+    'installed_runtime_fake_provider_start','installed_runtime_fixture_image','installed_runtime_lifespan_entry',
+    'installed_runtime_seed_database','installed_runtime_client_bootstrap','installed_runtime_alembic_head',
+    'A_startup_auth_guards','B_invalid_and_expired_otp','B_auth_session_lifecycle','C_multipart_image_access',
+    'C_resumable_guards','D_direct_album_idempotency','D_group_album_idempotency','D_cancel_cleanup',
+    'installed_runtime_final_checks','installed_runtime_client_exit','installed_runtime_lifespan_exit',
+    'installed_runtime_fake_provider_shutdown','installed_runtime_fake_provider_close',
+    'installed_runtime_fake_provider_join','installed_runtime_fake_provider_reap',
+    'installed_runtime_database_dispose','components'))
+CLOSED_CLASSES=frozenset(('RuntimeError','AssertionError','OSError','FileNotFoundError','PermissionError','TimeoutError',
+    'TimeoutExpired','ImportError','ModuleNotFoundError','AttributeError','NameError','TypeError','ValueError','KeyError',
+    'ValidationError','OperationalError','ProgrammingError','IntegrityError','InvalidRequestError','ConnectionError',
+    'ConnectionRefusedError','InvalidPasswordError','NoReferencedTableError'))
+CLOSED_CODES = frozenset(['actual_migration_head', 'actual_production_fixture_config', 'actual_redis_expiry', 'actual_scratch_migration_failed', 'actual_sms_delivery', 'album_caption_policy', 'album_committed_twice', 'album_idempotent_message_ids', 'album_order', 'album_rows_persisted_without_duplicates', 'authenticated_identity', 'cancel_fixture_exists', 'cancel_removes_temporary_file', 'cancelled_session_state', 'decoded_image_pixels', 'diagnostic_phase', 'fake_sms_exact_count', 'fake_sms_fixture_scope', 'fake_sms_parameter', 'fake_sms_reaped', 'fake_sms_request_bound', 'fake_sms_shape', 'http_delete_200', 'http_delete_201', 'http_delete_400', 'http_delete_401', 'http_delete_403', 'http_delete_404', 'http_delete_409', 'http_get_200', 'http_get_201', 'http_get_400', 'http_get_401', 'http_get_403', 'http_get_404', 'http_get_409', 'http_patch_200', 'http_patch_201', 'http_patch_400', 'http_patch_401', 'http_patch_403', 'http_patch_404', 'http_patch_409', 'http_post_200', 'http_post_201', 'http_post_400', 'http_post_401', 'http_post_403', 'http_post_404', 'http_post_409', 'installed_module_origin', 'invalid_otp_never_creates_session', 'multipart_real_image_processing', 'no_dependency_overrides', 'otp_expiry_fixture_exists', 'public_receipt_bound', 'real_session_tokens', 'runtime_cleanup_failed', 'selected_test_count', 'selected_test_inventory', 'selected_test_pin', 'selected_tests_failed', 'sid_required', 'sms_recipient', 'upload_ready'])
 def need(ok,code):
     if not ok:raise RuntimeError(code)
+def phase(label):
+    global CURRENT
+    need(type(label) is str and label in CLOSED_PHASES,'diagnostic_phase')
+    CURRENT=label
+def capsule_failure(error):
+    label=type(error).__name__
+    return {'closed_failure_code':error.args[0] if type(error) is RuntimeError and len(error.args)==1
+        and type(error.args[0]) is str and error.args[0] in CLOSED_CODES else 'unexpected_smoke_failure',
+        'exception_class':label if label in CLOSED_CLASSES else 'unclassified_exception',
+        'exception_errno':errno.errorcode.get(error.errno,'unclassified_errno') if isinstance(error,OSError)
+            and type(error.errno) is int else None}
 def reply(value):
     raw=(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
     need(len(raw)<=65536,'public_receipt_bound');os.write(PUBLIC,raw)
@@ -633,28 +665,39 @@ class FakeSMS(http.server.BaseHTTPRequestHandler):
         self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
 
 async def runtime():
-    global CURRENT
+    phase('installed_runtime_imports_httpx')
     import httpx
+    phase('installed_runtime_imports_sqlalchemy')
     from sqlalchemy import select,func
+    phase('installed_runtime_imports_pillow')
     from PIL import Image
+    phase('installed_runtime_imports_config')
     from core.config import settings
+    phase('installed_runtime_imports_db')
     from core.db import AsyncSessionLocal,engine
+    phase('installed_runtime_imports_redis')
     from core.redis import get_redis_client
+    phase('installed_runtime_imports_enums')
     from core.enums import UserAccountStatus,ChatType,ChatMemberRole,ChatMembershipStatus
+    phase('installed_runtime_imports_models')
     from models.user import User,UserRole
     from models.chat import Chat
     from models.chat_member import ChatMember
     from models.session import UserSession
     from models.message import Message
     from models.upload_session import UploadSession
+    phase('installed_runtime_imports_jwt')
     from core.jwt_codec import jwt
+    phase('installed_runtime_imports_main')
     import main
+    phase('installed_runtime_fixture_settings')
     need(settings.environment=='production' and settings.trading_bot_service=='api' and settings.server_mode=='iran'
          and settings.background_jobs_enabled is False and settings.telegram_provider_test_authority is False
          and settings.staging_log_otp_codes is False and settings.telegram_login_otp_enabled is False
          and settings.smsir_base_url=='http://127.0.0.1:9080','actual_production_fixture_config')
     need(not main.app.dependency_overrides,'no_dependency_overrides')
     RESULT['production_config_guards_active']=True
+    phase('installed_runtime_fake_provider_start')
     server=http.server.ThreadingHTTPServer(('127.0.0.1',9080),FakeSMS)
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     users={};tokens={};group=None
@@ -691,9 +734,12 @@ async def runtime():
         if expected==200:
             with Image.open(io.BytesIO(response.content)) as image:need(image.size==(2,2) and image.convert('RGB').getpixel((0,0))==(20,40,60),'decoded_image_pixels')
         return response
+    phase('installed_runtime_fixture_image')
     image=Image.new('RGB',(2,2),(20,40,60));buffer=io.BytesIO();image.save(buffer,format='PNG');image.close();png=buffer.getvalue()
     try:
+        phase('installed_runtime_lifespan_entry')
         async with main.app.router.lifespan_context(main.app):
+            phase('installed_runtime_seed_database')
             async with AsyncSessionLocal() as db:
                 for index,label in enumerate(('alice','bob','outsider','login')):
                     user=User(account_name='ci_'+label,mobile_number='0912000000'+str(index),full_name='CI '+label,address='Public CI fixture',
@@ -707,17 +753,20 @@ async def runtime():
                 for label,role in [('alice',ChatMemberRole.ADMIN),('bob',ChatMemberRole.MEMBER)]:
                     db.add(ChatMember(chat_id=group,user_id=users[label].id,role=role,membership_status=ChatMembershipStatus.ACTIVE))
                 await db.commit()
+            phase('installed_runtime_client_bootstrap')
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='http://127.0.0.1',timeout=15) as client:
                 async def startup():
                     await request(client,'GET','/auth/me',expected=401)
                     await request(client,'POST','/auth/dev-login',expected=404)
                     need(not main.app.dependency_overrides,'no_dependency_overrides')
+                    phase('installed_runtime_alembic_head')
                     async with AsyncSessionLocal() as db:
                         version=(await db.execute(__import__('sqlalchemy').text('SELECT version_num FROM alembic_version'))).scalar_one()
                         from alembic.config import Config
                         from alembic.script import ScriptDirectory
                         need(type(version) is str and ScriptDirectory.from_config(Config('/app/alembic.ini')).get_heads()==[version],'actual_migration_head')
                         RESULT['migration_head']=version
+                    phase('A_startup_auth_guards')
                 async def otp_negative():
                     user=users['login'];before=await count_sessions(user)
                     await request(client,'POST','/auth/request-otp',json={'mobile_number':user.mobile_number})
@@ -786,16 +835,36 @@ async def runtime():
                        ('C_multipart_image_access',multipart),('C_resumable_guards',resumable),('D_direct_album_idempotency',lambda:album('direct')),
                        ('D_group_album_idempotency',lambda:album('group')),('D_cancel_cleanup',cancel)]
                 for name,case in cases:
-                    CURRENT=name;RESULT['runtime']['run']+=1;await case();RESULT['runtime']['passed']+=1
+                    phase(name);RESULT['runtime']['run']+=1;await case();RESULT['runtime']['passed']+=1
+                phase('installed_runtime_final_checks')
                 need(len(FakeSMS.records)==5,'fake_sms_exact_count')
                 check_origins()
+                phase('installed_runtime_client_exit')
+            phase('installed_runtime_lifespan_exit')
     finally:
-        server.shutdown();server.server_close();thread.join(timeout=5);need(not thread.is_alive(),'fake_sms_reaped')
-        await engine.dispose()
+        # Cleanup cannot replace the first failure or prevent the other releases.
+        primary=sys.exc_info()[0] is not None;first_cleanup=None
+        for label,action in (
+            ('installed_runtime_fake_provider_shutdown',server.shutdown),
+            ('installed_runtime_fake_provider_close',server.server_close),
+            ('installed_runtime_fake_provider_join',lambda:thread.join(timeout=5)),
+            ('installed_runtime_fake_provider_reap',lambda:need(not thread.is_alive(),'fake_sms_reaped'))):
+            if not primary and first_cleanup is None:phase(label)
+            try:action()
+            except BaseException as error:
+                if first_cleanup is None:first_cleanup=label
+                RESULT['runtime_cleanup_failures'].append({'phase':label,**capsule_failure(error)})
+        label='installed_runtime_database_dispose'
+        if not primary and first_cleanup is None:phase(label)
+        try:await engine.dispose()
+        except BaseException as error:
+            if first_cleanup is None:first_cleanup=label
+            RESULT['runtime_cleanup_failures'].append({'phase':label,**capsule_failure(error)})
+        if not primary and first_cleanup is not None:
+            phase(first_cleanup);need(False,'runtime_cleanup_failed')
 
 def components():
-    global CURRENT
-    CURRENT='components'
+    phase('components')
     manifest=json.loads(pathlib.Path('/proof/selectors.json').read_bytes());suite=unittest.TestSuite()
     names={'test_security_form_parser.py':('FormParserSecurityTests',6),
         'test_stage6_otp_delivery_redis.py':('Stage6OTPDeliveryRedisTests',15),
@@ -814,15 +883,21 @@ def components():
     check_origins()
 
 try:
-    CURRENT='installed_guarded_scratch_migration'
+    phase('installed_guarded_scratch_migration_spawn')
+    RESULT['migration']['invocation_attempted']=True
     result=subprocess.run(['/usr/local/bin/python3','-I','-B','/app/scripts/run_guarded_scratch_alembic.py','upgrade','head'],
         cwd='/app',stdin=subprocess.DEVNULL,stdout=PRIVATE,stderr=PRIVATE,timeout=180,check=False)
+    phase('installed_guarded_scratch_migration_result')
+    RESULT['migration']['child_completed']=True
+    need(type(result.returncode) is int and -255<=result.returncode<=255,'actual_scratch_migration_failed')
+    RESULT['migration']['return_code']=result.returncode
     need(result.returncode==0,'actual_scratch_migration_failed')
+    phase('installed_runtime_bootstrap')
     asyncio.run(runtime());components();RESULT['status']='passed';reply(RESULT);code=0
 except BaseException as error:
     if CURRENT!='components':RESULT['runtime']['failures'].append(CURRENT)
     RESULT['status']='failed';RESULT['first_failure_scope']=CURRENT
-    RESULT['closed_failure_code']=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CLOSED_CODES else 'unexpected_smoke_failure'
+    RESULT.update(capsule_failure(error))
     reply(RESULT);code=1
 finally:
     os.close(PRIVATE);os.close(PUBLIC)
