@@ -239,13 +239,17 @@ class ManagedConfigurationTests(unittest.TestCase):
         arguments = ['--deadline-utc', (datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat().replace('+00:00', 'Z')]
         for name in M.PINS: arguments += ['--'+name.removesuffix('.py').replace('_', '-'), 'public-fixture']
         output = io.StringIO()
-        with mock.patch.object(M, 'load_sources', side_effect=OSError('/private/secret')), mock.patch.object(M.sys, 'stdout', output):
+        with mock.patch.object(M, 'load_sources', side_effect=OSError('/private/secret')), mock.patch.object(M.sys, 'stdout', output), \
+             mock.patch.object(M.signal, 'signal'), mock.patch.object(M.signal, 'alarm'):
             self.assertEqual(M.main(arguments), 1)
         self.assertNotIn('/private', output.getvalue()); self.assertFalse(json.loads(output.getvalue())['runtime_changed'])
 
     def test_public_sources_are_pinned_fresh_only_and_execute_verified_buffers(self):
         sources = {name: (ROOT / ('deploy/maintenance/' if name == 'web_engine_preflight.py' else 'scripts/') / name).read_bytes()
                    for name in M.PINS}
+        # The historical operation pins remain immutable. This loader fixture
+        # seals today's explicit public buffers, including additive backup APIs.
+        self.stack.enter_context(mock.patch.object(M, 'PINS', {name: sha256(raw).hexdigest() for name, raw in sources.items()}))
         stage = self.folder/'public-stage'
         with mock.patch.object(M, 'STAGE', stage), mock.patch.dict(M.sys.modules):
             for name in list(M.sys.modules):

@@ -52,9 +52,10 @@ class AclTarVendorTests(unittest.TestCase):
         self.assertEqual({p.name for p in RECIPE.iterdir() if p.is_file()},B.RECIPE)
 
     def test_host_entrypoints_refuse_before_any_native_action(self):
-        with self.assertRaisesRegex(RuntimeError,'nonroot_immutable_container_required'):B.run('mutable','acl')
-        with self.assertRaisesRegex(RuntimeError,'ci_controller_only'):B.ci_build(self.root)
-        with self.assertRaisesRegex(RuntimeError,'nonroot_ci_container_required'):V.run(Path('/work/baseline'),Path('/work/candidate'),'tar')
+        with patch.dict(os.environ, {'GITHUB_ACTIONS': '', 'GITHUB_REPOSITORY': ''}):
+            with self.assertRaisesRegex(RuntimeError,'nonroot_immutable_container_required'):B.run('mutable','acl')
+            with self.assertRaisesRegex(RuntimeError,'ci_controller_only'):B.ci_build(self.root)
+            with self.assertRaisesRegex(RuntimeError,'nonroot_ci_container_required'):V.run(Path('/work/baseline'),Path('/work/candidate'),'tar')
 
     def test_vendor_input_inventory_size_and_content(self):
         folder=self.root/'inputs';folder.mkdir();raw=b'ordinary public descriptor';(folder/'source.dsc').write_bytes(raw)

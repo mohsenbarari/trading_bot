@@ -1,6 +1,7 @@
 """Finite C07 closure fixtures: no host/network/native or private-input access."""
 import copy
 from contextlib import ExitStack, nullcontext
+from datetime import datetime, timezone
 from hashlib import sha256
 import importlib.util
 import json
@@ -17,9 +18,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('c07_closure', ROOT/'deploy/maintenance/web_c07_terminal_closure.py')
 M = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(M)
 
+class HistoricalClosureClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = cls(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+        return value if tz is None else value.astimezone(tz)
+
 class C07ClosureTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch.object(M, 'datetime', HistoricalClosureClock))
         for name in ('subprocess.Popen','subprocess.run','os.system','socket.socket','socket.create_connection','ctypes.CDLL'):
             self.stack.enter_context(patch(name, side_effect=AssertionError('native_forbidden')))
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='.closure-test-',dir=ROOT)))
@@ -79,6 +87,17 @@ class C07ClosureTests(unittest.TestCase):
     def run_it(self,fixture,action='check'):
         C,P,R,H,V,*_=fixture
         return M.execute(P,R,H,A,V,action)
+
+    def test_historical_fixture_does_not_extend_production_day_authority(self):
+        class ExpiredClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 10, 25, 0, 0, tzinfo=timezone.utc)
+        fixture = self.fixture(); original = {p: p.read_bytes() for p in fixture[7]}
+        with patch.object(M, 'datetime', ExpiredClock), self.assertRaisesRegex(RuntimeError, 'closure_scope_day_expired'):
+            self.run_it(fixture, 'close')
+        self.assertEqual({p: p.read_bytes() for p in fixture[7]}, original)
+        self.assertEqual(fixture[6], [])
 
     def test_exact_reviewed_sources_load_without_running_old_main(self):
         files={'capture':'web_capture2_observability.py','parking':'web_qa_parking.py','qa':'web_qa_retirement.py',

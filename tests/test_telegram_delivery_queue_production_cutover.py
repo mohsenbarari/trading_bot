@@ -2284,6 +2284,7 @@ verify_queue_cutover_deploy_authority
             root = Path(tmpdir)
             permissive = root / "permissive"
             permissive.mkdir(mode=0o755)
+            permissive.chmod(0o755)
             with self.assertRaisesRegex(
                 cutover.ProductionCutoverError, "BLOCKED_SECURE_ARTIFACT_DIRECTORY"
             ):

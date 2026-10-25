@@ -128,7 +128,10 @@ jobs:
           mkdir -p tmp
           python3 -m coverage erase
           APP_ENV_FILE=config/unit-test.env.example \
-          python3 -m coverage run --branch -m unittest discover -s tests -t . -p 'test_*.py' 2>&1 | tee tmp/backend-coverage.log
+          python3 -m coverage run --branch scripts/run_coverage_unittest.py \
+            --lane hosted --commit "$(git rev-parse HEAD)" \
+            --expectation tmp/root-fixture-expectation.json \
+            --report tmp/backend-hosted-unittest.json 2>&1 | tee tmp/backend-coverage.log
           command_status=${PIPESTATUS[0]}
           if [[ "$command_status" -ne 0 ]]; then
             status=$command_status
@@ -192,6 +195,62 @@ jobs:
           printf '%s\n' "$status" > tmp/backend-coverage.exitcode
           exit "$status"
 
+      - name: Run required isolated root-owned maintenance fixtures
+        id: root_fixtures
+        continue-on-error: true
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          printf '1\n' > tmp/backend-root-fixtures.exitcode
+          commit="$(git rev-parse HEAD)"
+          context="$(mktemp -d "$RUNNER_TEMP/coverage-root-public.XXXXXXXX")"
+          mkdir "$context/source"
+          # Only committed public files enter the image. The hosted CI .env,
+          # credentials, .git directory and unrelated worktree files stay out.
+          git -c tar.umask=0022 archive "$commit" | tar -x -C "$context/source"
+          cp tmp/root-fixture-expectation.json "$context/expectation.json"
+          image="coverage-root-fixtures:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --file "$context/source/deploy/maintenance/coverage_root_fixtures/Dockerfile" \
+            --tag "$image" "$context" > tmp/backend-root-fixtures-build.log 2>&1
+          image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+          nonce="$(python3 -c 'import uuid;print(uuid.uuid4().hex)')"
+          name="coverage-root-$nonce"
+          cleanup() {
+            # A failed client is not cancellation proof. Remove only our exact
+            # named, labelled fixture container; a missing/foreign one is kept.
+            actual="$(timeout 20s docker inspect --format '{{.Image}} {{index .Config.Labels "coverage.fixture.nonce"}}' "$name" 2>/dev/null || true)"
+            if [[ "$actual" == "$image_id $nonce" ]]; then
+              timeout 20s docker rm --force "$name" > /dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+          set +e
+          timeout --signal=TERM --kill-after=10s 900s docker run \
+            --name "$name" --label "coverage.fixture.nonce=$nonce" --pull never \
+            --user 0:0 --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --cpus 2 --memory 4g --memory-swap 4g --pids-limit 128 \
+            --tmpfs /work:rw,nosuid,nodev,noexec,size=1g,mode=0700 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777 \
+            --env APP_ENV_FILE=config/unit-test.env.example \
+            "$image_id" --commit "$commit" > tmp/backend-root-fixtures-envelope.json
+          client_status=$?
+          python3 scripts/run_coverage_unittest.py --lane ingest --commit "$commit" \
+            --expectation tmp/root-fixture-expectation.json --envelope tmp/backend-root-fixtures-envelope.json \
+            --report tmp/backend-root-fixtures.json
+          report_status=$?
+          status=0
+          if [[ "$client_status" -ne 0 || "$report_status" -ne 0 ]]; then status=1; fi
+          python3 -m coverage combine --append || status=1
+          python3 -m coverage json -o tmp/backend-coverage.json || status=1
+          python3 -m coverage xml \
+            --include='api/*,bot/*,core/*,models/*,scripts/*,main.py,manage.py,run_bot.py,schemas.py' \
+            -o tmp/backend-coverage.xml || status=1
+          python3 -m coverage html -d tmp/backend-coverage-html || status=1
+          printf '%s\n' "$status" > tmp/backend-root-fixtures.exitcode
+          exit "$status"
+
       - name: Run frontend unit coverage suite
         id: frontend_coverage
         continue-on-error: true
@@ -215,6 +274,7 @@ jobs:
         shell: bash
         run: |
           backend_suite_exit_code="$(cat tmp/backend-coverage.exitcode 2>/dev/null || echo 1)"
+          root_fixture_exit_code="$(cat tmp/backend-root-fixtures.exitcode 2>/dev/null || echo 1)"
           frontend_suite_exit_code="$(cat tmp/frontend-unit-coverage.exitcode 2>/dev/null || echo 1)"
           python3 ./scripts/build_repo_coverage_summary.py \
             --backend-json tmp/backend-coverage.json \
@@ -222,6 +282,7 @@ jobs:
             --markdown-out tmp/repo-coverage-summary.md \
             --json-out tmp/repo-coverage-summary.json
           cat tmp/repo-coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "Required root-owned fixture lane exit: $root_fixture_exit_code" >> "$GITHUB_STEP_SUMMARY"
           {
             echo
             echo '## GitHub Navigation'
@@ -302,6 +363,12 @@ jobs:
             tmp/backend-coverage-html
             tmp/backend-coverage.exitcode
             tmp/backend-coverage.log
+            tmp/backend-hosted-unittest.json
+            tmp/root-fixture-expectation.json
+            tmp/backend-root-fixtures.exitcode
+            tmp/backend-root-fixtures.json
+            tmp/backend-root-fixtures.log
+            tmp/backend-root-fixtures-build.log
             tmp/backend-postgres-opt-in.log
             tmp/backend-redis-opt-in.log
             tmp/backend-coverage.json
@@ -327,10 +394,12 @@ jobs:
         shell: bash
         run: |
           backend_suite_exit_code="$(cat tmp/backend-coverage.exitcode 2>/dev/null || echo 1)"
+          root_fixture_exit_code="$(cat tmp/backend-root-fixtures.exitcode 2>/dev/null || echo 1)"
           frontend_suite_exit_code="$(cat tmp/frontend-unit-coverage.exitcode 2>/dev/null || echo 1)"
           echo "Backend coverage exit code: $backend_suite_exit_code"
+          echo "Required root fixtures exit code: $root_fixture_exit_code"
           echo "Frontend coverage exit code: $frontend_suite_exit_code"
-          if [[ "$backend_suite_exit_code" == '0' && "$frontend_suite_exit_code" == '0' ]]; then
+          if [[ "$backend_suite_exit_code" == '0' && "$root_fixture_exit_code" == '0' && "$frontend_suite_exit_code" == '0' ]]; then
             exit 0
           fi
           echo 'At least one covered suite failed.' >&2
