@@ -23,6 +23,15 @@ def frame(path='api/routers/offers.py', line=1660):
     return f'  File "/app/{path}", line {line}, in PRIVATE_FUNCTION_NAME\n'.encode()
 
 
+def json_event(stack, **extra):
+    # core.logging_config.JsonLogFormatter's actual public exception envelope.
+    value = {'ts': '2026-10-25T00:00:00Z', 'level': 'ERROR', 'service': 'api',
+             'logger': 'uvicorn.error', 'message': 'PRIVATE_MESSAGE',
+             'exception': {'type': 'RuntimeError', 'message': 'PRIVATE_SQL',
+                           'stacktrace': stack.decode('utf-8')}, **extra}
+    return (json.dumps(value, separators=(',', ':')) + '\n').encode()
+
+
 class BoundedInput(io.BytesIO):
     def __init__(self, data):
         super().__init__(data)
@@ -119,6 +128,80 @@ class BrowserBackendExceptionFilterTests(unittest.TestCase):
         _, value, body, _ = self.invoke(HEADER + frame() + b'ValueError: \xff\xfePRIVATE\n')
         self.assertEqual(value['reports'][0]['exception_class'], 'ValueError')
         self.assertNotIn(b'PRIVATE', body)
+
+    def test_actual_json_formatter_shape_has_same_closed_report_as_plain_traceback(self):
+        stack = HEADER + frame() + b'RuntimeError: PRIVATE_SQL PRIVATE_JWT\n'
+        _, plain, _, _ = self.invoke(stack)
+        _, value, body, _ = self.invoke(json_event(stack, headers={'Authorization': 'PRIVATE_JWT'},
+                                                  body='PRIVATE_BODY', Config={'Env': ['PRIVATE_ENV']}))
+        self.assertEqual(value['reports'], plain['reports'])
+        self.assertEqual(value['structured_records_refused'], 0)
+        self.assertEqual(value['input_lines'], 1)
+        self.assertTrue(value['input_complete'])
+        for token in (b'PRIVATE', b'Authorization', b'Config', b'Env', b'headers', b'stacktrace'):
+            self.assertNotIn(token, body)
+
+    def test_json_group_frames_and_unknown_class_still_use_only_closed_projection(self):
+        stack = (HEADER + frame('api/PRIVATE.py') + frame('core/db.py', 3)
+                 + b'PRIVATE_Exception: PRIVATE_MESSAGE\n' + HEADER
+                 + frame('api/routers/offers.py', 7) + b'IntegrityError: PRIVATE_SQL\n')
+        _, value, body, _ = self.invoke(json_event(stack))
+        self.assertEqual([r['exception_class'] for r in value['reports']], ['other', 'IntegrityError'])
+        self.assertEqual(value['reports'][0]['frames'], [{'path': 'core/db.py', 'line': 3}])
+        self.assertEqual(value['reports'][0]['frames_omitted'], 1)
+        self.assertNotIn(b'PRIVATE', body)
+
+    def test_json_records_cannot_complete_each_others_or_surrounding_partial_tracebacks(self):
+        raw = HEADER + frame() + json_event(HEADER + frame()) + json_event(b'ValueError: PRIVATE\n')
+        _, value, body, _ = self.invoke(raw + b'RuntimeError: PRIVATE\n')
+        self.assertEqual(value['reports'], [])
+        self.assertEqual(value['incomplete_tracebacks'], 2)
+        self.assertNotIn(b'PRIVATE', body)
+
+    def test_malformed_duplicate_nonfinite_or_wrong_json_exception_records_are_closed(self):
+        examples = [b'{PRIVATE\n', b'{"exception":null,"exception":{}}\n',
+                    b'{"private":NaN}\n', b'{"exception":true}\n',
+                    b'{"exception":{"type":"RuntimeError","message":"PRIVATE","stacktrace":false}}\n',
+                    b'{"exception":{"type":"RuntimeError","message":"PRIVATE","stacktrace":"\\ud800"}}\n',
+                    json_event(HEADER, exception={'type': '', 'message': 'PRIVATE', 'stacktrace': ''}),
+                    json_event(HEADER, exception={'type': 'PRIVATE', 'message': 'PRIVATE', 'stacktrace': '', 'body': 'PRIVATE'})]
+        for raw in examples:
+            with self.subTest(length=len(raw)):
+                rc, value, body, _ = self.invoke(raw)
+                self.assertEqual(rc, 0)
+                self.assertEqual(value['reports'], [])
+                self.assertEqual(value['structured_records_refused'], 1)
+                self.assertTrue(value['input_complete'])
+                self.assertNotIn(b'PRIVATE', body)
+        for raw in (b'{"message":"PRIVATE"}\n', b'{"exception":null}\n'):
+            _, value, body, _ = self.invoke(raw)
+            self.assertEqual(value['structured_records_refused'], 0)
+            self.assertEqual(value['reports'], [])
+            self.assertNotIn(b'PRIVATE', body)
+
+    def test_json_line_overflow_is_detected_before_json_decoder_or_tail_accumulation(self):
+        raw = json_event(HEADER + b'X' * M.MAX_LINE_BYTES)
+        with patch.object(M, 'structured_traceback', side_effect=AssertionError('must not decode')):
+            _, value, _, stream = self.invoke(raw)
+        self.assertEqual(value['truncation'], ['line_bytes'])
+        self.assertEqual(stream.observed, M.MAX_LINE_BYTES + 1)
+
+    def test_json_report_and_frame_caps_remain_global_with_bounded_unread_tail(self):
+        one = HEADER + frame(line=1) * (M.MAX_FRAMES + 2) + b'RuntimeError: PRIVATE\n'
+        raw = json_event(one) * (M.MAX_REPORTS + 2)
+        _, value, body, stream = self.invoke(raw)
+        self.assertEqual(len(value['reports']), M.MAX_REPORTS)
+        self.assertEqual(len(value['reports'][0]['frames']), M.MAX_FRAMES)
+        self.assertEqual(value['reports'][0]['frames_omitted'], 2)
+        self.assertEqual(value['truncation'], ['report_count'])
+        self.assertLess(stream.observed, len(raw))
+        self.assertNotIn(b'PRIVATE', body)
+
+    def test_json_decoding_and_decoded_stack_cannot_exceed_the_same_physical_bound(self):
+        with self.assertRaises(ValueError):
+            M.structured_traceback(b'[]')
+        with patch.object(M, 'MAX_LINE_BYTES', 32), self.assertRaises(ValueError):
+            M.structured_traceback(json_event(b'X' * 33))
 
     def test_line_overflow_stops_before_reading_or_accumulating_the_rest(self):
         payload = HEADER + b'X' * (M.MAX_LINE_BYTES + 100000)

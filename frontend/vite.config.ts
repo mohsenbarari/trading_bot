@@ -121,4 +121,15 @@ export default defineConfig({
       },
     },
   },
+  // Browser CI uses a built preview with relative API URLs. Preserve its Host
+  // so the normal registration same-origin and HttpOnly-cookie guards apply.
+  preview: {
+    proxy: {
+      '/api': {
+        target: devProxyTarget,
+        changeOrigin: false,
+        ws: true,
+      },
+    },
+  },
 })

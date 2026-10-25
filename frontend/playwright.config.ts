@@ -36,6 +36,9 @@ export default defineConfig({
   workers: process.env.CI || process.env.NATIVE_APP_V2_PREVIEW === '1' ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
+  // This exact case runs against the separately built production-login fixture
+  // in playwright.production-login.config.ts, once per required browser.
+  grepInvert: /login stays keyboard-usable and hides developer shortcut/,
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */

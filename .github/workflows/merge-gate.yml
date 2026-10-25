@@ -192,6 +192,7 @@ jobs:
             make observability-gate
           fi
           python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
+          python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions
 
   frontend-browser-matrix:
     permissions:
@@ -253,7 +254,7 @@ jobs:
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
           cat > frontend/.env.local <<'EOF'
-          VITE_API_BASE_URL=http://127.0.0.1:8000
+          VITE_API_BASE_URL=
           VITE_STAGING_DEV_LOGIN=true
           EOF
 
@@ -273,6 +274,14 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        run: npm run build
+
+      - name: Build production login browser fixture
+        if: matrix.shard == 1
+        working-directory: frontend
+        env:
+          FRONTEND_BUILD_OUT_DIR: dist/production-login
+          VITE_STAGING_DEV_LOGIN: 'false'
         run: npm run build
 
       - name: Bootstrap backend stack
@@ -333,6 +342,16 @@ jobs:
               ;;
           esac
 
+      - name: Run production login browser gate
+        if: matrix.shard == 1
+        working-directory: frontend
+        env:
+          CI: 'true'
+          PLAYWRIGHT_HTML_OPEN: never
+        run: >-
+          npx playwright test --config=playwright.production-login.config.ts
+          --project=${{ matrix.browser }}
+
       - name: Collect closed browser CI backend exception metadata
         if: always() && (failure() || cancelled())
         timeout-minutes: 1
@@ -365,6 +384,8 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
+            frontend/playwright-report-production-login
+            frontend/test-results-production-login
             tmp/browser-ci-backend-exceptions.json
             tmp/browser-ci-backend-exception-status.json
           if-no-files-found: ignore

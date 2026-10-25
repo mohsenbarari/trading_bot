@@ -24,9 +24,15 @@ The verified Root result reports611 tests,0 errors/failures/skips and genuineUID
 CapEff/Prm/Bnd1, Inh/Amb0, NNP1. The ZIP has1262 public report members; an initial
 metadata probe refused its assumed256-member bound. No tests were rerun or results
 changed: the exact official ZIP identity was verified and only bounded selected
-JSON members were read afterward. The browser run40215795297 is still incomplete;
-its first nine of12 browser shards and the other mandatory gates have passed.
-Neither CI result grants serving or global security acceptance.
+JSON members were read afterward. Browser run40215795297 has now terminated:
+nine of12 browser shards and the other mandatory gates passed; all three
+shard1 jobs failed rather than timing out. Their closed exception collection
+completed, but the old parser missed escaped JSON stacktraces; zero parsed
+exceptions was not proof of zero backend exceptions. Bounded synthetic trace
+metadata also proves registration exchange403 from the CI preview/API origin
+mismatch. CI-only fixture corrections and JSON-parser regressions are under
+review; production origin/cookie controls remain unchanged. Neither CI result
+grants serving or global security acceptance.
 
 ## Actual image-store receipts
 
@@ -39,6 +45,8 @@ Each was one fresh independently gated request; none resumes the failed old batc
 | 2c / Native LOAD |a7934352f5cc4bfb9ba8d7ba2f3b356c|6169e7ac490987d7b81371b4ceaaa94a99f213f2979e51b7428a9b89caf91a3d|
 | 414 / Web receive |847ee8950df04ac7957848ff61b33cfc|e38cfe6e7f2c1bafdbbeaeac86909649c937d8f0d3377ebd932803dfcd93b887|
 | 414 / Web LOAD |b19d9ac9581f49c991f4fdd5efdf74c1|4e59472a0cdc212b6bb84e477e3e29616a20d2e3d92a16a58cb2a19318baaf24|
+| F79 / Web receive |449234a2bcb944c9a1527b2295ed0178|849156c70937a96162c4473b438fdece3046aa2933d933dad98ef9ddca36004f|
+| PostgreSQL / Native LOAD |daa94b3c98804a5ba5b508010e65222f|0a6f760f297fdda7bf81519103823e42c43122dfd2e1e0fa43934e4b071d8bf1|
 
 E46 receive4d3f3913d6b14976b69a73d9ff6a2628 failed its Web NOAPPLY with
 runtime_changed. No issuing-request file or image operation followed. Later
@@ -93,15 +101,17 @@ precheck incorrectly demands three outputs that the sealed original d27/b651
 source writes only on Native. No old operation or once marker was resumed.
 A new narrowly corrected remote module leaves all Native history checks intact
 and requires the actual shared Web d27 proof. Eight owned Root fixtures and an
-independent source review passed. No fresh corrected request has yet occurred.
+independent source review passed. A distinct reviewed PG02 caller subsequently
+passed both NOAPPLYs and completed its single Native LOAD. Its actual receipt is
+listed above; candidate49a811 is now loaded on both hosts. The original failed
+preparation/once record remains unchanged. No serving datastore was replaced.
 
 Later Root read-only metadata confirms: PGalias/source admission66261, producer
 control021529 and shared Web proof1c83 all retain their exact hashes/full9; no
 same-phase Web attempts, pending release or any of five guard files are present.
 All three wrongly required Native-only Web paths are absent. This confirms the
-source-contract mismatch without inventing a failure-time observation. Fresh
-caller integration still requires the actual failed preparation and spent once
-record to stay sealed, no new original request/control, and distinct authority.
+source-contract mismatch without inventing a failure-time observation. The fresh
+PG02 authority preserved those failed records and all shared/Native-only proofs.
 
 The normal role adapters have no executable CLI or automatic cross-site guard
 closure. App/Market symlink references now inspect raw parent components before
@@ -121,3 +131,11 @@ waits synchronously for a departing worker; bounded restoration and effective
 startup-code continuity were not proved. A newly spawned worker also runs App
 startup. No API capacity or process configuration was changed to make a memory
 gate appear successful. Resource-dimension/source analysis remains open.
+
+The separately reviewed public-only archive probe passed11 Root fixtures and
+actually validated the retained452719104-byte,71-member App TAR in2880ms.
+Its Python-only512MiB hard address-space/cgroup limit remained active; measured
+peak self RSS was35815424 bytes. It launched no children or Docker operation and
+changed no resource contract. Docker client/daemon/containerd memory was not
+measured. Public Docker metadata identifies Web Engine29.9.2/0367cbe and the
+containerd overlayfs import backend; a lower Python RSS is not LOAD acceptance.

@@ -10,6 +10,21 @@ on:
         description: Optional git ref to validate as a release candidate
         required: false
         type: string
+      browser_diagnostic_only:
+        description: Run only selected synthetic browser diagnostics; never release acceptance
+        required: false
+        default: false
+        type: boolean
+      browser_diagnostic_scenario:
+        required: false
+        default: both
+        type: choice
+        options: [mandatory, offers, both]
+      browser_diagnostic_browser:
+        required: false
+        default: chromium
+        type: choice
+        options: [chromium, firefox, webkit]
       security_payload:
         description: Build and scan ONLY the sealed baseline plus reviewed security overlay (never deploy)
         required: false
@@ -33,9 +48,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  selected-browser-diagnostic:
+    name: Browser diagnostic only (not release acceptance)
+    if: github.event_name == 'workflow_dispatch' && inputs.browser_diagnostic_only
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/browser-ci-diagnostic.yml
+    with:
+      git_ref: ${{ inputs.git_ref || github.sha }}
+      scenario: ${{ inputs.browser_diagnostic_scenario }}
+      browser: ${{ inputs.browser_diagnostic_browser }}
+
   repository-governance:
     name: repository-governance
-    if: '!inputs.market_security_payload'
+    if: "!inputs.browser_diagnostic_only && (!inputs.market_security_payload)"
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -56,7 +83,7 @@ jobs:
 
   market-postgres-gate:
     name: market-postgres-gate
-    if: '!inputs.market_security_payload'
+    if: "!inputs.browser_diagnostic_only && (!inputs.market_security_payload)"
     runs-on: ubuntu-latest
     needs: repository-governance
     timeout-minutes: 35
@@ -141,7 +168,7 @@ jobs:
 
   observability-gate:
     name: observability-gate
-    if: '!inputs.market_security_payload'
+    if: "!inputs.browser_diagnostic_only && (!inputs.market_security_payload)"
     runs-on: ubuntu-latest
     needs: repository-governance
     timeout-minutes: 20
@@ -184,12 +211,13 @@ jobs:
         run: |
           make observability-gate
           python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
+          python3 -m unittest -v tests.test_browser_ci_fixture_contract tests.test_extract_browser_ci_backend_exceptions
 
   frontend-browser-matrix:
     permissions:
       contents: read
       actions: read
-    if: '!inputs.market_security_payload'
+    if: "!inputs.browser_diagnostic_only && (!inputs.market_security_payload)"
     name: frontend-browser-matrix (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     needs:
@@ -248,7 +276,7 @@ jobs:
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
           cat > frontend/.env.local <<'EOF'
-          VITE_API_BASE_URL=http://127.0.0.1:8000
+          VITE_API_BASE_URL=
           VITE_STAGING_DEV_LOGIN=true
           EOF
 
@@ -268,6 +296,14 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
+        run: npm run build
+
+      - name: Build production login browser fixture
+        if: matrix.shard == 1
+        working-directory: frontend
+        env:
+          FRONTEND_BUILD_OUT_DIR: dist/production-login
+          VITE_STAGING_DEV_LOGIN: 'false'
         run: npm run build
 
       - name: Bootstrap backend stack
@@ -328,6 +364,16 @@ jobs:
               ;;
           esac
 
+      - name: Run production login browser gate
+        if: matrix.shard == 1
+        working-directory: frontend
+        env:
+          CI: 'true'
+          PLAYWRIGHT_HTML_OPEN: never
+        run: >-
+          npx playwright test --config=playwright.production-login.config.ts
+          --project=${{ matrix.browser }}
+
       - name: Collect closed browser CI backend exception metadata
         if: always() && (failure() || cancelled())
         timeout-minutes: 1
@@ -360,6 +406,8 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
+            frontend/playwright-report-production-login
+            frontend/test-results-production-login
             tmp/browser-ci-backend-exceptions.json
             tmp/browser-ci-backend-exception-status.json
           if-no-files-found: ignore
@@ -370,7 +418,7 @@ jobs:
 
   security-consumer-payload:
     name: security-consumer-payload
-    if: github.event_name == 'workflow_dispatch' && inputs.security_payload && !inputs.market_security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha)
+    if: "!inputs.browser_diagnostic_only && (github.event_name == 'workflow_dispatch' && inputs.security_payload && !inputs.market_security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha))"
     runs-on: ubuntu-latest
     timeout-minutes: 75
     permissions:
@@ -741,7 +789,7 @@ jobs:
 
   market-security-payload:
     name: E46 Market security candidate evidence only
-    if: github.event_name == 'workflow_dispatch' && inputs.market_security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha)
+    if: "!inputs.browser_diagnostic_only && (github.event_name == 'workflow_dispatch' && inputs.market_security_payload && github.ref == 'refs/heads/main' && (inputs.git_ref == '' || inputs.git_ref == 'main' || inputs.git_ref == github.sha))"
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:

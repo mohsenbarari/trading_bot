@@ -1,0 +1,255 @@
+name: Selected browser CI diagnostic
+
+on:
+  workflow_call:
+    inputs:
+      git_ref:
+        required: true
+        type: string
+      scenario:
+        required: false
+        default: both
+        type: string
+      browser:
+        required: false
+        default: chromium
+        type: string
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Exact reviewed 40-character source commit SHA
+        required: true
+        type: string
+      scenario:
+        description: Synthetic failing scenarios only; never release acceptance
+        required: true
+        default: both
+        type: choice
+        options: [mandatory, offers, both]
+      browser:
+        required: true
+        default: chromium
+        type: choice
+        options: [chromium, firefox, webkit]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  browser-diagnostic:
+    permissions:
+      contents: read
+      actions: read
+    name: Selected synthetic browser diagnostic (not release acceptance)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CERTS_HOST_PATH: /tmp/trading-bot-ci-certs
+      PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR: /tmp/trading-bot-ci-coin-inference
+      PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR: /tmp/trading-bot-ci-product-estimator
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.git_ref }}
+    - name: Bind exact diagnostic source
+      id: source
+      env:
+        REQUESTED_REF: ${{ inputs.git_ref }}
+        REQUESTED_SCENARIO: ${{ inputs.scenario }}
+        REQUESTED_BROWSER: ${{ inputs.browser }}
+      run: |-
+        python3 -I -B - <<'PYCODE'
+        import json, os, re, subprocess
+        from pathlib import Path
+        requested = os.environ['REQUESTED_REF']
+        scenario = os.environ['REQUESTED_SCENARIO']
+        browser = os.environ['REQUESTED_BROWSER']
+        if not re.fullmatch('[0-9a-f]{40}', requested):
+            raise SystemExit('exact commit SHA required')
+        if scenario not in {'mandatory', 'offers', 'both'} or browser not in {'chromium', 'firefox', 'webkit'}:
+            raise SystemExit('unknown diagnostic selection')
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        if head != requested:
+            raise SystemExit('checked source differs')
+        Path('tmp').mkdir(exist_ok=True)
+        Path('tmp/browser-ci-diagnostic.json').write_text(json.dumps({
+            'schema': 'browser_ci_selected_diagnostic/1', 'source_commit': head,
+            'workflow_commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
+            'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'source_binding_verified': True,
+            'scenario': scenario, 'browser': browser,
+            'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
+        }, sort_keys=True) + '\n')
+        PYCODE
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24.22.1
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - name: Write CI environment file
+      shell: bash
+      run: |
+        cat > .env <<'EOF'
+        ENVIRONMENT=staging
+        SERVER_MODE=iran
+        PUBLIC_WEBAPP_URL=https://browser-ci.iran.example
+        IRAN_SERVER_DOMAIN=browser-ci.iran.example
+        BOT_USERNAME=ci_test_bot
+        POSTGRES_DB=trading_bot_db
+        POSTGRES_USER=admin
+        POSTGRES_PASSWORD=strongpassword
+        DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
+        SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
+        REDIS_URL=redis://redis:6379/0
+        FRONTEND_URL=http://127.0.0.1:4173
+        DEV_API_KEY=REDACTED_DEV_API_KEY
+        JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+        EOF
+        cat > frontend/.env.local <<'EOF'
+        VITE_API_BASE_URL=
+        VITE_STAGING_DEV_LOGIN=true
+        EOF
+    - name: Prepare CI host paths
+      run: |
+        mkdir -p -- "$CERTS_HOST_PATH" \
+          "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" \
+          "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
+    - name: Install frontend dependencies
+      working-directory: frontend
+      run: npm ci
+    - name: Install Playwright browser
+      env:
+        DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
+      working-directory: frontend
+      run: npx playwright install --with-deps "$DIAGNOSTIC_BROWSER"
+    - name: Build frontend
+      working-directory: frontend
+      run: npm run build
+    - name: Bootstrap backend stack
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: bash ./scripts/bootstrap_ci_backend.sh
+      id: bootstrap
+    - name: Verify browser CI backend surface
+      shell: bash
+      run: |
+        docker compose exec -T app python - <<'PY'
+        from core.config import settings
+        from core.public_webapp_url import public_webapp_url_for_links
+
+        environment = (settings.environment or "").strip().lower()
+        server_mode = (settings.server_mode or "").strip().lower()
+        if environment != "staging":
+            raise SystemExit(f"unexpected environment={environment!r}")
+        if server_mode != "iran":
+            raise SystemExit(f"unexpected server_mode={server_mode!r}")
+        if public_webapp_url_for_links() != "https://browser-ci.iran.example":
+            raise SystemExit("unexpected browser CI public WebApp origin")
+        PY
+        curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
+          -H 'Content-Type: application/json'
+        curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
+          -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
+          -H 'Origin: http://127.0.0.1:4173' \
+          -H 'Access-Control-Request-Method: POST'
+        grep -qi '^access-control-allow-origin: http://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+      id: surface
+    - name: Run selected diagnostic scenarios
+      working-directory: frontend
+      env:
+        CI: 'true'
+        PLAYWRIGHT_HTML_OPEN: never
+        E2E_TARGET_ENV: local
+        E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+        E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+        E2E_APP_CONTAINER_NAME: trading_bot_app
+        E2E_REDIS_CONTAINER_NAME: trading_bot_redis
+        DIAGNOSTIC_SCENARIO: ${{ inputs.scenario }}
+        DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
+      shell: bash
+      run: |-
+        case "$DIAGNOSTIC_BROWSER" in chromium|firefox|webkit) ;; *) exit 1 ;; esac
+        case "$DIAGNOSTIC_SCENARIO" in
+          mandatory)
+            npx playwright test e2e/mandatory-channel.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger'
+            ;;
+          offers)
+            npx playwright test e2e/market-offers.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'text offer submission parses and persists a new sell offer'
+            ;;
+          both)
+            npx playwright test e2e/mandatory-channel.spec.ts e2e/market-offers.spec.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'freshly activated web user immediately sees the mandatory room in messenger|text offer submission parses and persists a new sell offer'
+            ;;
+          *) exit 1 ;;
+        esac
+      id: browser
+    - name: Collect closed browser CI backend exception metadata
+      if: always() && (failure() || cancelled())
+      timeout-minutes: 1
+      shell: bash
+      run: |
+        set +e
+        mkdir -p tmp
+        timeout --signal=TERM --kill-after=2s 15s \
+          docker compose logs --no-color --no-log-prefix --tail 2000 app 2>&1 |
+          timeout --signal=TERM --kill-after=2s 20s \
+            python3 -I -B scripts/extract_browser_ci_backend_exceptions.py \
+            > tmp/browser-ci-backend-exceptions.json 2>/dev/null
+        pipeline_status=("${PIPESTATUS[@]}")
+        python3 -I -B - "${pipeline_status[0]}" "${pipeline_status[1]}" \
+          > tmp/browser-ci-backend-exception-status.json <<'PY'
+        import json, sys
+        producer, projector = (int(value) for value in sys.argv[1:])
+        if not all(0 <= value <= 255 for value in (producer, projector)):
+            raise SystemExit(1)
+        print(json.dumps({"schema": "browser_ci_backend_exception_collection/1",
+                          "producer_exit_code": producer, "filter_exit_code": projector}, sort_keys=True))
+        PY
+        exit 0
+    - name: Tear down backend stack
+      if: always()
+      run: docker compose down --volumes --remove-orphans
+      id: cleanup
+    - name: Record diagnostic outcome
+      if: always()
+      env:
+        SOURCE_OUTCOME: ${{ steps.source.outcome }}
+        BOOTSTRAP_OUTCOME: ${{ steps.bootstrap.outcome }}
+        SURFACE_OUTCOME: ${{ steps.surface.outcome }}
+        BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+        CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+      run: |-
+        python3 -I -B - <<'PYCODE'
+        import json, os
+        from pathlib import Path
+        path = Path('tmp/browser-ci-diagnostic.json')
+        value = json.loads(path.read_text()) if path.exists() else {
+            'schema': 'browser_ci_selected_diagnostic/1', 'source_binding_verified': False,
+            'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
+        }
+        allowed = {'success', 'failure', 'cancelled', 'skipped', ''}
+        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'bootstrap', 'surface', 'browser', 'cleanup')}
+        if not all(item in allowed for item in outcomes.values()):
+            raise SystemExit('unknown diagnostic outcome')
+        value['step_outcomes'] = outcomes
+        value['diagnostic_complete'] = all(item == 'success' for item in outcomes.values())
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(value, sort_keys=True) + '\n')
+        PYCODE
+    - name: Upload diagnostic evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: browser-ci-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |-
+          frontend/playwright-report
+          frontend/test-results
+          frontend/playwright-report-production-login
+          frontend/test-results-production-login
+          tmp/browser-ci-backend-exceptions.json
+          tmp/browser-ci-backend-exception-status.json
+
+          tmp/browser-ci-diagnostic.json
+        if-no-files-found: ignore
+    if: github.repository == 'mohsenbarari/trading_bot'
