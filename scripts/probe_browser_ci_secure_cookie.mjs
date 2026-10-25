@@ -1,8 +1,10 @@
 // Synthetic loopback observation only. It neither reads App state nor relaxes
 // the staging cookie policy, and a valid observation need not accept the cookie.
 import http from 'node:http'
+import https from 'node:https'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { previewHttps } from '../frontend/scripts/browser-ci-https.mjs'
 
 const BROWSERS = new Set(['chromium', 'firefox', 'webkit'])
 const CONTROL = 'ci_cookie_control'
@@ -22,9 +24,9 @@ export async function bounded(promise, milliseconds = 5000) {
   }
 }
 
-export async function loopback() {
+export async function loopback(tls) {
   let requests = 0
-  const server = http.createServer({ maxHeaderSize: 8192 }, (request, response) => {
+  const handler = (request, response) => {
     response.setHeader('Connection', 'close')
     response.setHeader('Cache-Control', 'no-store')
     if (++requests > 16 || request.method !== 'GET' || !['/set', '/check', '/favicon.ico'].includes(request.url)) {
@@ -44,7 +46,9 @@ export async function loopback() {
         secure: cookies.has(`${SECURE}=${VALUE}`),
       }))
     } else response.writeHead(204).end()
-  })
+  }
+  const server = tls ? https.createServer({ maxHeaderSize: 8192, ...tls }, handler)
+    : http.createServer({ maxHeaderSize: 8192 }, handler)
   server.maxConnections = 4
   server.requestTimeout = 5000
   server.headersTimeout = 5000
@@ -54,7 +58,7 @@ export async function loopback() {
       server.listen(0, '127.0.0.1', resolve)
     }))
     return {
-      origin: `http://127.0.0.1:${server.address().port}`,
+      origin: `${tls ? 'https' : 'http'}://127.0.0.1:${server.address().port}`,
       async close() {
         server.closeAllConnections()
         await bounded(new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())))
@@ -67,12 +71,12 @@ export async function loopback() {
   }
 }
 
-export async function observe(browserLabel, browserType) {
+export async function observe(browserLabel, browserType, tls) {
   if (!BROWSERS.has(browserLabel)) throw new Error(FAILURE)
   let site, ownedServer, browser, context, result
   let failed = false
   try {
-    site = await loopback()
+    site = await loopback(tls)
     // launchServer owns its timeout; once it returns, its process is retained
     // even if connecting or creating the context fails.
     ownedServer = await browserType.launchServer({ host: '127.0.0.1', headless: true, timeout: 10000 })
@@ -133,11 +137,15 @@ export async function observe(browserLabel, browserType) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.length !== 3 || !BROWSERS.has(process.argv[2])) throw new Error(FAILURE)
+    const mode = process.argv[3] || 'http'
+    if (![3, 4].includes(process.argv.length) || !BROWSERS.has(process.argv[2])
+        || !['http', 'https'].includes(mode)) throw new Error(FAILURE)
+    const tls = mode === 'https' ? previewHttps(process.env) : undefined
+    if (mode === 'https' && !tls) throw new Error(FAILURE)
     const require = createRequire(new URL('../frontend/package.json', import.meta.url))
     const browserLabel = process.argv[2]
     const playwright = require('playwright')
-    process.stdout.write(`${JSON.stringify(await observe(browserLabel, playwright[browserLabel]))}\n`)
+    process.stdout.write(`${JSON.stringify(await observe(browserLabel, playwright[browserLabel], tls))}\n`)
   } catch {
     process.stderr.write(`${FAILURE}\n`)
     process.exitCode = 1

@@ -2,7 +2,12 @@
 import ast
 from pathlib import Path
 from types import SimpleNamespace
+from contextlib import chdir
+import json
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import yaml
@@ -107,8 +112,8 @@ class BrowserHttpsContractTests(unittest.TestCase):
         self.assertIn('[[ ! -e "$browser_ci_ca_anchor" && ! -L "$browser_ci_ca_anchor" ]]', trust['run'])
         self.assertIn('sudo install -m 0644 -- "$BROWSER_CI_TLS_CA" "$browser_ci_ca_anchor"', trust['run'])
         self.assertIn('sudo update-ca-certificates', trust['run'])
-        self.assertEqual(selected['run'].count('--config=playwright.https-diagnostic.config.ts'), 4)
-        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 4)
+        self.assertEqual(selected['run'].count('--config=playwright.https-diagnostic.config.ts'), 5)
+        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 5)
         self.assertEqual(cleanup['if'], "always() && env.BROWSER_CI_TLS_CA_ANCHOR != ''")
         self.assertEqual(cleanup['run'].count('== "$BROWSER_CI_TLS_CA_IDENTITY"'), 2)
         self.assertIn('sudo cmp -s -- "$BROWSER_CI_TLS_CA" "$BROWSER_CI_TLS_CA_ANCHOR"', cleanup['run'])
@@ -131,6 +136,37 @@ class BrowserHttpsContractTests(unittest.TestCase):
             self.assertNotIn('BROWSER_CI_PREVIEW_TLS', str(normal))
             environment = next(step for step in normal['steps'] if step['name'] == 'Write CI environment file')['run']
             self.assertIn('FRONTEND_URL=http://127.0.0.1:4173\n', environment)
+
+    def test_https_cookie_evidence_is_separate_bounded_and_requires_true_typed_values(self):
+        job = yaml.safe_load((ROOT / '.github/workflows/browser-ci-diagnostic.yml').read_text())['jobs']['browser-diagnostic']
+        steps = job['steps']
+        probe = next(step for step in steps if step.get('id') == 'cookie_https')
+        self.assertLess(next(i for i, step in enumerate(steps) if step.get('id') == 'tls'), steps.index(probe))
+        self.assertIn('node ../scripts/probe_browser_ci_secure_cookie.mjs "$DIAGNOSTIC_BROWSER" https', probe['run'])
+        self.assertNotIn('continue-on-error', probe)
+        source = probe['run'].split("<<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
+        good = {'browser': 'webkit', 'accepted': True, 'retransmitted': True}
+        values = [good, {**good, 'accepted': 1}, {**good, 'retransmitted': False},
+                  {**good, 'browser': 'foreign'}, {**good, 'private': 'PRIVATE_SENTINEL'},
+                  {'browser': 'webkit'}, None, b'x' * 4097, b'PRIVATE_SENTINEL']
+        for index, value in enumerate(values):
+            with tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                (base / 'frontend').mkdir(); (base / 'tmp').mkdir()
+                raw = value if isinstance(value, bytes) else json.dumps(value).encode()
+                (base / 'tmp/browser-ci-secure-cookie-https.json').write_bytes(raw)
+                with chdir(base / 'frontend'), patch.object(sys, 'argv', ['owned_public_verifier', 'webkit']):
+                    if index == 0:
+                        exec(compile(source, 'owned_https_cookie_verifier', 'exec'), {})
+                    else:
+                        with self.assertRaises(SystemExit) as closed:
+                            exec(compile(source, 'owned_https_cookie_verifier', 'exec'), {})
+                        self.assertIn(str(closed.exception), {'https_cookie_report_bound', 'https_cookie_report_invalid',
+                                                            'https_cookie_not_accepted_and_retransmitted'})
+                        self.assertNotIn('PRIVATE', str(closed.exception))
+        upload = next(step for step in steps if step['name'] == 'Upload diagnostic evidence')['with']['path']
+        self.assertIn('tmp/browser-ci-secure-cookie.json', upload.splitlines())
+        self.assertIn('tmp/browser-ci-secure-cookie-https.json', upload.splitlines())
 
 
 if __name__ == '__main__':

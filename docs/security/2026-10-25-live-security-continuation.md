@@ -364,3 +364,14 @@ and its bounded closed diagnostic. Its cookie JSON was still the earlier HTTP
 probe and truthfully retains accepted=false/retransmitted=false; it is not
 relabeled as a direct HTTPS measurement. Full browser acceptance, serving
 activation, ACL/capture closure and global security acceptance remain open.
+
+The next selected-CI packet preserves that raw HTTP observation and adds a
+separate HTTPS cookie result after CA trust. Its verifier requires exactly the
+three public fields and actual boolean true/true. `accounts-and-menu` runs the
+two corrected account cases and the unchanged real chat-delete action with the
+bounded numeric geometry attachment; no retries, skips or force clicks were
+added. Independent source review passed. Root passed12 owned HTTP/HTTPS/child
+fixtures and32 browser-CI contract tests. The initial broad isolated Python
+invocation lacked the explicit public checkout import path and failed one
+bootstrap import; the corrected runner supplies that path and the unit-example
+environment without changing any assertion. Actual selected execution is pending.

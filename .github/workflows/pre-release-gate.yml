@@ -19,7 +19,7 @@ on:
         required: false
         default: both
         type: choice
-        options: [mandatory, offers, both, chat-menu]
+        options: [mandatory, offers, both, chat-menu, accounts-and-menu]
       browser_diagnostic_browser:
         required: false
         default: chromium

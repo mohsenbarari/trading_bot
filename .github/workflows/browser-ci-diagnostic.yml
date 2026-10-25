@@ -25,7 +25,7 @@ on:
         required: true
         default: both
         type: choice
-        options: [mandatory, offers, both, chat-menu]
+        options: [mandatory, offers, both, chat-menu, accounts-and-menu]
       browser:
         required: true
         default: chromium
@@ -68,7 +68,7 @@ jobs:
         browser = os.environ['REQUESTED_BROWSER']
         if not re.fullmatch('[0-9a-f]{40}', requested):
             raise SystemExit('exact commit SHA required')
-        if scenario not in {'mandatory', 'offers', 'both', 'chat-menu'} or browser not in {'chromium', 'firefox', 'webkit'}:
+        if scenario not in {'mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu'} or browser not in {'chromium', 'firefox', 'webkit'}:
             raise SystemExit('unknown diagnostic selection')
         head = subprocess.run(['git', 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if head != requested:
@@ -145,7 +145,7 @@ jobs:
       working-directory: frontend
       run: npm run build
     - name: Validate chat-menu geometry projection
-      if: inputs.scenario == 'chat-menu'
+      if: inputs.scenario == 'chat-menu' || inputs.scenario == 'accounts-and-menu'
       working-directory: frontend
       run: node --experimental-strip-types --test ../scripts/probe_browser_ci_chat_menu_geometry.test.mjs
     - name: Bootstrap backend stack
@@ -239,6 +239,32 @@ jobs:
         printf 'BROWSER_CI_TLS_CA_ANCHOR=%s\nBROWSER_CI_TLS_CA_IDENTITY=%s\n' \
           "$browser_ci_ca_anchor" "$browser_ci_ca_identity" >> "$GITHUB_ENV"
         sudo update-ca-certificates >/dev/null 2>&1
+    - name: Observe secure cookie over trusted selected HTTPS
+      id: cookie_https
+      timeout-minutes: 2
+      working-directory: frontend
+      env:
+        DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
+      shell: bash
+      run: |
+        timeout --signal=TERM --kill-after=2s 75s \
+          node ../scripts/probe_browser_ci_secure_cookie.mjs "$DIAGNOSTIC_BROWSER" https \
+          > ../tmp/browser-ci-secure-cookie-https.json
+        python3 -I -B - "$DIAGNOSTIC_BROWSER" <<'PYCODE'
+        import json, sys
+        with open('../tmp/browser-ci-secure-cookie-https.json', 'rb') as source:
+            raw = source.read(4097)
+        if len(raw) > 4096:
+            raise SystemExit('https_cookie_report_bound')
+        try:
+            value = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise SystemExit('https_cookie_report_invalid') from None
+        if (not isinstance(value, dict) or set(value) != {'browser', 'accepted', 'retransmitted'}
+                or value['browser'] != sys.argv[1] or value['accepted'] is not True
+                or value['retransmitted'] is not True):
+            raise SystemExit('https_cookie_not_accepted_and_retransmitted')
+        PYCODE
     - name: Run selected diagnostic scenarios
       working-directory: frontend
       env:
@@ -266,6 +292,9 @@ jobs:
             ;;
           chat-menu)
             CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct chat supports reacting to an incoming message and deleting an own message'
+            ;;
+          accounts-and-menu)
+            CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/account-status.spec.ts e2e/accountant-owner-flow.spec.ts e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery|owner can create pending accountant, observe activation, view it, and delete its active account|direct chat supports reacting to an incoming message and deleting an own message'
             ;;
           *) exit 1 ;;
         esac
@@ -314,6 +343,7 @@ jobs:
       env:
         SOURCE_OUTCOME: ${{ steps.source.outcome }}
         COOKIE_OUTCOME: ${{ steps.cookie.outcome }}
+        COOKIE_HTTPS_OUTCOME: ${{ steps.cookie_https.outcome }}
         TLS_PREPARE_OUTCOME: ${{ steps.tls_prepare.outcome }}
         TLS_OUTCOME: ${{ steps.tls.outcome }}
         TLS_CLEANUP_OUTCOME: ${{ steps.tls_cleanup.outcome }}
@@ -331,7 +361,7 @@ jobs:
             'diagnostic_only': True, 'full_matrix_accepted': False, 'security_accepted': False,
         }
         allowed = {'success', 'failure', 'cancelled', 'skipped', ''}
-        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
+        outcomes = {key: os.environ[key.upper() + '_OUTCOME'] for key in ('source', 'cookie', 'cookie_https', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
         if not all(item in allowed for item in outcomes.values()):
             raise SystemExit('unknown diagnostic outcome')
         value['step_outcomes'] = outcomes
@@ -352,6 +382,7 @@ jobs:
           tmp/browser-ci-backend-exceptions.json
           tmp/browser-ci-backend-exception-status.json
           tmp/browser-ci-secure-cookie.json
+          tmp/browser-ci-secure-cookie-https.json
 
           tmp/browser-ci-diagnostic.json
         if-no-files-found: ignore

@@ -104,7 +104,7 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertTrue(events['workflow_call']['inputs']['git_ref']['required'])
         self.assertEqual(events['workflow_call']['inputs']['browser']['type'], 'string')
         inputs = events['workflow_dispatch']['inputs']
-        self.assertEqual(inputs['scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu'])
+        self.assertEqual(inputs['scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu'])
         self.assertTrue(inputs['git_ref']['required'])
         self.assertEqual(set(value['jobs']), {'browser-diagnostic'})
         job = value['jobs']['browser-diagnostic']
@@ -115,7 +115,7 @@ class BrowserFixtureTests(unittest.TestCase):
         steps = job['steps']
         selected = next(s for s in steps if s.get('id') == 'browser')
         self.assertNotIn('continue-on-error', selected)
-        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 4)
+        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 5)
         self.assertIn('mandatory-channel.spec.ts', selected['run'])
         self.assertIn('market-offers.spec.ts', selected['run'])
         self.assertNotIn('--shard', selected['run'])
@@ -162,7 +162,7 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertIn("--grep 'direct chat supports reacting to an incoming message and deleting an own message'", case)
         self.assertNotIn('--shard', case)
         guard = next(s for s in job['steps'] if s['name'] == 'Validate chat-menu geometry projection')
-        self.assertEqual(guard['if'], "inputs.scenario == 'chat-menu'")
+        self.assertEqual(guard['if'], "inputs.scenario == 'chat-menu' || inputs.scenario == 'accounts-and-menu'")
         self.assertNotIn('continue-on-error', guard)
         source = (ROOT / 'frontend/e2e/direct-chat.spec.ts').read_text()
         self.assertIn("if (process.env.CI_CHAT_MENU_GEOMETRY === '1') await attachChatMenuGeometry(page, testInfo)", source)
@@ -178,11 +178,27 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertNotIn('scrollIntoView', case)
         registered = workflow('pre-release-gate.yml')
         inputs = registered.get('on', registered.get(True))['workflow_dispatch']['inputs']
-        self.assertEqual(inputs['browser_diagnostic_scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu'])
+        self.assertEqual(inputs['browser_diagnostic_scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu'])
         self.assertEqual(inputs['browser_diagnostic_scenario']['default'], 'both')
         for name in ('merge-gate.yml', 'pre-release-gate.yml'):
             job = workflow(name)['jobs']['frontend-browser-matrix']
             self.assertFalse(any('CI_CHAT_MENU_GEOMETRY' in str(s) for s in job['steps']))
+
+    def test_accounts_and_menu_runs_exact_corrected_cases_and_keeps_real_geometry_action(self):
+        steps = workflow('browser-ci-diagnostic.yml')['jobs']['browser-diagnostic']['steps']
+        selected = next(step for step in steps if step.get('id') == 'browser')['run']
+        case = selected.split('accounts-and-menu)', 1)[1].split(';;', 1)[0]
+        for filename in ('account-status.spec.ts', 'accountant-owner-flow.spec.ts', 'direct-chat.spec.ts'):
+            self.assertIn('e2e/' + filename, case)
+        for name in ('admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery',
+                     'owner can create pending accountant, observe activation, view it, and delete its active account',
+                     'direct chat supports reacting to an incoming message and deleting an own message'):
+            self.assertIn(name, case)
+        self.assertIn('CI_CHAT_MENU_GEOMETRY=1', case)
+        self.assertIn('--config=playwright.https-diagnostic.config.ts', case)
+        self.assertIn('--retries=0 --workers=1', case)
+        self.assertNotIn('--shard', case)
+        self.assertEqual(case.count('npx playwright test'), 1)
 
     def test_actual_telegram_policy_allows_queue_production_but_never_provider_execution(self):
         source = ast.parse((ROOT / 'core/telegram_delivery_runtime_policy.py').read_bytes())
@@ -331,7 +347,7 @@ class BrowserFixtureTests(unittest.TestCase):
         for browser, cookie in (('success', 'success'), ('failure', 'success'), ('success', 'failure')):
             with tempfile.TemporaryDirectory() as directory:
                 self.binding(directory, 'a' * 40, 'a' * 40)
-                environment = {key.upper() + '_OUTCOME': 'success' for key in ('source', 'cookie', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
+                environment = {key.upper() + '_OUTCOME': 'success' for key in ('source', 'cookie', 'cookie_https', 'bootstrap', 'surface', 'tls_prepare', 'tls', 'browser', 'cleanup', 'tls_cleanup')}
                 environment['BROWSER_OUTCOME'] = browser
                 environment['COOKIE_OUTCOME'] = cookie
                 with chdir(directory), patch.dict(os.environ, environment, clear=True):

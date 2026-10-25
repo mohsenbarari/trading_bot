@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { spawn, spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import https from 'node:https'
 import test from 'node:test'
 import { bounded, loopback, observe } from './probe_browser_ci_secure_cookie.mjs'
+import { prepareHttps, previewHttps } from '../frontend/scripts/browser-ci-https.mjs'
 
 const VALUE = 'public-synthetic-cookie'
 const CONTROL = 'ci_cookie_control'
@@ -116,6 +121,33 @@ test('owned HTTP endpoint has the exact secure attributes and bounded fixed proj
   await assert.rejects(fetch(`${site.origin}/check`))
 })
 
+test('HTTPS endpoint uses only the owned synthetic certificate and requires its CA', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'owned-cookie-https-'))
+  let site
+  try {
+    const temporary = path.join(base, 'runner-temp'), workspace = path.join(base, 'workspace')
+    fs.mkdirSync(temporary, { mode: 0o700 }); fs.mkdirSync(workspace, { mode: 0o700 })
+    const env = { CI: 'true', GITHUB_REPOSITORY: 'mohsenbarari/trading_bot', RUNNER_TEMP: temporary,
+      GITHUB_WORKSPACE: workspace, BROWSER_CI_PREVIEW_TLS: '1' }
+    env.BROWSER_CI_TLS_ROOT = prepareHttps(env)
+    site = await loopback(previewHttps(env))
+    assert.ok(site.origin.startsWith('https://127.0.0.1:'))
+    const request = ca => new Promise((resolve, reject) => {
+      const child = https.get(`${site.origin}/set`, { ca, rejectUnauthorized: true, timeout: 3000 }, response => {
+        response.resume(); response.once('end', () => resolve(response.statusCode === 200))
+      })
+      child.once('error', reject)
+      child.once('timeout', () => child.destroy(new Error('owned_timeout')))
+    })
+    const ca = fs.readFileSync(path.join(env.BROWSER_CI_TLS_ROOT, 'ca.crt'))
+    assert.equal(await request(ca).then(value => value, () => false), true)
+    assert.equal(await request(undefined).then(() => false, () => true), true)
+  } finally {
+    await site?.close()
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+})
+
 for (const [accepted, retransmitted] of [[false, false], [true, false], [true, true]]) {
   const label = accepted && !retransmitted ? 'stored Secure cookie can be accepted but unsent'
     : `observation faithfully reports ${accepted}/${retransmitted}`
@@ -164,9 +196,11 @@ test('bounded pending action rejects promptly', async () => {
 })
 
 test('invalid CLI input prints only one fixed refusal without browser import', () => {
-  const result = spawnSync(process.execPath, [new URL('./probe_browser_ci_secure_cookie.mjs', import.meta.url).pathname,
-    'private-input-sentinel'], { env: { PATH: '/usr/bin:/bin' }, timeout: 5000, encoding: 'utf8' })
-  assert.equal(result.status, 1)
-  assert.equal(result.stdout, '')
-  assert.equal(result.stderr, 'browser_cookie_probe_failed\n')
+  for (const args of [['private-input-sentinel'], ['webkit', 'unsupported'], ['webkit', 'https']]) {
+    const result = spawnSync(process.execPath, [new URL('./probe_browser_ci_secure_cookie.mjs', import.meta.url).pathname,
+      ...args], { env: { PATH: '/usr/bin:/bin' }, timeout: 5000, encoding: 'utf8' })
+    assert.equal(result.status, 1)
+    assert.equal(result.stdout === '', true)
+    assert.equal(result.stderr === 'browser_cookie_probe_failed\n', true)
+  }
 })
