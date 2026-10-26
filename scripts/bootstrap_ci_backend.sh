@@ -71,6 +71,8 @@ echo '== prepare authenticated App OS security cache =='
 mkdir -p -- "$repo_root/pip_packages"
 python3 -I -B "$repo_root/scripts/prepare_app_security_os_cache.py" \
   --cache-dir "$repo_root/pip_packages/security-os-capsule"
+python3 -I -B "$repo_root/scripts/prepare_sqlite_wal_os_cache.py" \
+  --cache-dir "$repo_root/pip_packages/sqlite-wal-capsule"
 
 echo '== build shared base image =='
 docker build -t trading_bot_base .
