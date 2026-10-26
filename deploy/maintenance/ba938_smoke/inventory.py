@@ -178,15 +178,19 @@ def read_at(parent,name,maximum,*,prefix_only=False,expected=None):
 def installed_packages(raw):
  require(type(raw)is bytes and 0<len(raw)<=MAX_META,'package_status_bound');result={}
  for paragraph in raw.decode('utf-8').split('\n\n'):
-  fields={}
+  fields={};previous=None
   for line in paragraph.splitlines():
-   if not line or line[0].isspace():continue
-   name,sep,value=line.partition(': ');require(sep and name not in fields,'package_status_shape');fields[name]=value
-  if fields.get('Status')!='install ok installed':continue
-  name,version,arch=(fields.get(k,'')for k in ('Package','Version','Architecture'))
+   if not line:continue
+   if line[0]in ' \t':
+    require(previous is not None and previous not in {'package','status','version','architecture','source'},'package_status_shape');continue
+   name,sep,value=line.partition(':');key=name.lower()
+   require(sep and re.fullmatch('[!-9;-~]+',name)and name[0]not in '#-'and key not in fields,'package_status_shape')
+   fields[key]=value.strip(' \t');previous=key
+  if fields.get('status')!='install ok installed':continue
+  name,version,arch=(fields.get(k,'')for k in ('package','version','architecture'))
   require(re.fullmatch('[a-z0-9][a-z0-9+.-]{0,127}',name)and re.fullmatch('[A-Za-z0-9.+:~_-]{1,256}',version)
    and arch in {'amd64','all'},'package_identity')
-  source=fields.get('Source',name)
+  source=fields.get('source',name)
   match=re.fullmatch(r'([a-z0-9][a-z0-9+.-]{0,127})(?: \(([A-Za-z0-9.+:~_-]{1,256})\))?',source)
   require(match is not None,'package_source');key=name+':'+arch;require(key not in result,'package_duplicate')
   result[key]={'package':name,'installed_version':version,'architecture':arch,
@@ -205,8 +209,12 @@ def sbom_packages(raw):
   parsed=urlsplit(purl);path=parsed.path[len('deb/debian/'):];name,sep,version=path.partition('@')
   require(sep and not parsed.fragment and not parsed.netloc,'sbom_purl')
   name,version=unquote(name),unquote(version);pairs=parse_qsl(parsed.query,keep_blank_values=True,strict_parsing=True)
-  require(len(pairs)==len({k for k,_ in pairs})and {k for k,_ in pairs}=={'arch','distro'},'sbom_purl')
-  qualifiers=dict(pairs);arch=qualifiers['arch'];require(arch in {'amd64','all'}and qualifiers['distro']=='debian-13.7'
+  require(len(pairs)==len({k for k,_ in pairs})and {'arch','distro'}<={k for k,_ in pairs}<={'arch','distro','epoch'},'sbom_purl')
+  qualifiers=dict(pairs);epoch=qualifiers.get('epoch')
+  require(epoch is None or re.fullmatch('(?:0|[1-9][0-9]*)',epoch),'sbom_purl')
+  if epoch is not None:
+   require(':'not in version,'sbom_purl');version=epoch+':'+version
+  arch=qualifiers['arch'];require(arch in {'amd64','all'}and qualifiers['distro']=='debian-13.7'
    and component.get('name')==name and component.get('version')==version,'sbom_purl')
   properties=component.get('properties');require(type(properties)is list and len(properties)<=256,'sbom_properties');props={}
   for item in properties:
@@ -214,12 +222,14 @@ def sbom_packages(raw):
     and item['name']not in props,'sbom_properties');props[item['name']]=item['value']
   require(props.get('aquasecurity:trivy:PkgType')=='debian','sbom_package_type')
   source,upstream,release=(props.get('aquasecurity:trivy:'+k,'')for k in ('SrcName','SrcVersion','SrcRelease'))
+  source_epoch=props.get('aquasecurity:trivy:SrcEpoch')
   require(re.fullmatch('[a-z0-9][a-z0-9+.-]{0,127}',source)and re.fullmatch('[A-Za-z0-9.+:~_-]{1,256}',upstream)
-   and re.fullmatch('[A-Za-z0-9.+:~_-]{0,256}',release),'sbom_source')
+   and re.fullmatch('[A-Za-z0-9.+:~_-]{0,256}',release)
+   and(source_epoch is None or re.fullmatch('(?:0|[1-9][0-9]*)',source_epoch)and ':'not in upstream+release),'sbom_source')
   layer=props.get('aquasecurity:trivy:LayerDiffID');require(type(layer)is str and re.fullmatch('sha256:[a-f0-9]{64}',layer),'sbom_layer')
   key=name+':'+arch;require(key not in result,'sbom_duplicate')
   result[key]={'package':name,'installed_version':version,'architecture':arch,'source_package':source,
-   'source_version':upstream+('-'+release if release else''),'purl':purl,'layer_diffid':layer}
+   'source_version':(source_epoch+':'if source_epoch is not None else'')+upstream+('-'+release if release else''),'purl':purl,'layer_diffid':layer}
  return result
 
 
@@ -394,8 +404,28 @@ def main(argv=None):
  sys.stdout.buffer.write(raw);return 0
 
 
+PUBLIC_FAILURE_CODES=frozenset(('alias_cycle','alias_depth','directory_changed','directory_closed_changed','directory_component','directory_type',
+ 'elf_dynamic_after_null','elf_dynamic_bound','elf_dynamic_inventory','elf_dynamic_section_required','elf_dynamic_shape','elf_dynamic_string_binding',
+ 'elf_dynamic_symbol_binding','elf_dynamic_symbols_required','elf_encoding','elf_header','elf_header_bound','elf_identity','elf_inventory_count',
+ 'elf_needed_name','elf_null_section','elf_program_bound','elf_section_bound','elf_section_inventory','elf_static_string_bound','elf_static_symbol_bound',
+ 'elf_string_bound','elf_string_encoding','elf_symbol_bound','elf_symbol_inventory','image_root','image_root_changed','image_root_closed_changed',
+ 'inventory_byte_bound','inventory_changed','inventory_closed_changed','inventory_count_bound','inventory_depth','inventory_name_bound','inventory_timeout',
+ 'isolated_container_root_required','metadata_bound','metadata_changed','metadata_closed_changed','metadata_duplicate','metadata_file','metadata_grew',
+ 'metadata_nonfinite','metadata_open_changed','metadata_path','metadata_short','package_count','package_duplicate','package_identity','package_list_count',
+ 'package_list_inventory','package_list_missing_or_ambiguous','package_list_total','package_path_total','package_source','package_status_bound',
+ 'package_status_shape','report_bound','sbom_component','sbom_duplicate','sbom_layer','sbom_package_type','sbom_properties','sbom_purl','sbom_shape',
+ 'sbom_source','sealed_proof','sealed_proof_changed','sealed_proof_closed_changed','sealed_source_path','source_identity','special_file_count','symlink_bound'))
+PUBLIC_PHASES=frozenset(('unarmed','package_metadata','elf_inventory','complete'))
+
+
+def failure(error):
+ code=error.args[0]if type(error)is RuntimeError and len(error.args)==1 and type(error.args[0])is str and error.args[0]in PUBLIC_FAILURE_CODES else'acl_image_inventory_refused'
+ phase=PHASE if type(PHASE)is str and PHASE in PUBLIC_PHASES else'unarmed'
+ return{'status':'REFUSED','phase':phase,'code':code,'security_accepted':False}
+
+
 if __name__=='__main__':
  try:raise SystemExit(main())
- except Exception:
-  print(json.dumps({'status':'REFUSED','phase':PHASE,'code':'acl_image_inventory_refused','security_accepted':False},sort_keys=True));raise SystemExit(1)from None
+ except Exception as error:
+  print(json.dumps(failure(error),sort_keys=True));raise SystemExit(1)from None
 

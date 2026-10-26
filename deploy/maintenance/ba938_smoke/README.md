@@ -1,6 +1,6 @@
 # Hosted ba938 public inventory and unchanged App smoke candidate
 
-This immutable source-only03 cohort targets exactly ordinary App image
+This immutable source-only04 cohort targets exactly ordinary App image
 `sha256:ba938a7dd1ab1a0d9ebacdae768861a45276ba7caacead40ed319fa8e1bef218`
 from genuine CI40368532303. It preserves source cohort01 and the historical
 19d/665 controls. This author has not executed Git, GitHub, Docker, image LOAD,
@@ -152,3 +152,38 @@ The original16 tests still pass. This is source QA only; genuine hosted proof
 and independent Root review remain mandatory. The32 runtime assertions, image
 admission/capsule/dependencies, native expectation, probes, raw44 and every
 security/full-matrix acceptance boundary are unchanged.
+
+## Immutable04 public metadata format correction and refusal visibility
+
+Actual hosted03 run40404202231 failed at the whole-image inventory with a
+nonzero command result and completed owned cleanup. Its history remains failed;
+no runtime, native or later component assertion ran. The inventory stdout was
+not retained. This04 uses the existing bounded public_log path to retain that
+public output even when the command refuses, and emits only a finite allowlist
+of fixed error codes and phases. It never emits exception messages, paths or
+configuration values, and it preserves every nonzero failure outcome.
+
+Root extracted the final public dpkg status from the authenticated original
+ba938 archive without image execution. Its87976 bytes/hashbc24b795... contain
+22 genuine empty Conffiles: field headers. The old colon-space-only parser
+refuses those bytes. The exact295871-byte same-image SBOM/hash5e6a6930... also
+proves optional Debian purl epoch qualifiers and separate SrcEpoch properties.
+The old parser rejects those purls and omits the separate source epoch.
+
+The strict deb822 parser now accepts an empty first value and horizontal
+whitespace, validates field-name syntax, rejects case-insensitive duplicates,
+orphan continuations and multiline identity fields. Purl parsing permits only
+arch/distro and an optional canonical decimal epoch, reconstructs the complete
+installed version and requires exact component-version equality. Source epochs
+come only from the explicit canonical SrcEpoch property. No binary epoch is
+inferred for source versions; duplicate and redundant representations refuse.
+The two unchanged public fixtures are hash-bound source regressions: all99
+package, installed-version, architecture, source-package and source-version
+identities match exactly. They are not installed-payload or ACL safety proof.
+
+The five added tests cover those authentic public inputs, malformed/duplicate
+formats, finite refusal diagnostics and a genuinely nonzero inert child's
+retained public log. The original32 assertions, genuine19 native expectation,
+image/graph/hosted/container admissions, first-use keeper/finalizers and all
+security/full-matrix false flags remain unchanged. Genuine fresh hosted04
+execution and independent Root review remain required.
