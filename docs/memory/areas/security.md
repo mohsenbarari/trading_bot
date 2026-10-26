@@ -1,6 +1,6 @@
 # Security remediation
 
-- Resumed26Oct05:31Z at user request. Acceptance false: App/Market/datastores old; refactor STOP/streak0.
+- Resumed26Oct05:31Z. Acceptance false: App/Market/datastores old; refactor STOP/streak0.
   After closure require30 accepted clean units; failures reset, history retained.
   Tests/polls never count. Preserve behavior/capture owner/user dirt; Writer/DNS human.
 - Host/TLS/backup05/PG-restore passed; compatibility OPEN.
@@ -37,8 +37,9 @@
   multiplicity. No Go RLIMIT_AS; bound output before accumulation; no payload
   FSIZE inheritance. Retain failed4194305B backup; shared size never proves reclaim.
 - Native6c9 failed; expiry stopped owned3 (PID0/noOOM/restarts). Fresh normal
-  Config17 equal; Host/HTTP unproven. F79 null-inheritance fixed:Root321PASS.
-  Retain failed resources/refusals; no diagnostic applied.
+  Config17 equal; HostOOM startnull proven from exactMoby/cgroup2; scoped fix
+  Root326+final111PASS. F79 labels OPEN after Entry fix/Root321PASS.
+  Retain failed resources; no diagnostic applied.
 - Removed cgroup directories may retain nlink2. Use retained directory/events
   identities, named absence, relative events ENOENT and retained events ENODEV;
   never relax regular-file unlink guards or accept poll alone.

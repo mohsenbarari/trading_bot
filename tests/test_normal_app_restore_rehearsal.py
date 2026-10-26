@@ -311,6 +311,41 @@ def cleanup_owned(control,lease):
    with self.assertRaises(M.Refused):M.runtime_parity(normal,changed,c['candidate_image_id'],l,c)
   before=deepcopy(normal);before['HostConfig'].pop('OomKillDisable')
   with self.assertRaises(M.Refused):M.runtime_parity(before,row,c['candidate_image_id'],l,c)
+ def started_backend(self,c):
+  return {'schema':'normal_restore_started_oom_backend/1','engine_version':'29.9.2',
+   'source_git_commit':'0367cbeb49b9d98cb0b4f51e95f7b54b4803e76c','engine_git_commit':'0367cbe',
+   'support_docker_git_commit':'0367cbe','cgroup_version':'2','oom_kill_disable_supported':False,
+   'kernel_release':'6.1.0-public-fixture','machine_id':c['machine_id']}
+ def test_started_cgroup2_null_has_only_the_typed_running_lifecycle_exception(self):
+  c,l,p,s,n=self.case();normal=p['normal']['candidate'];normal['HostConfig']['OomKillDisable']=None
+  row=self.measured(normal,l,c['candidate_image_id']);row['HostConfig']['OomKillDisable']=False;support=self.started_backend(c)
+  M.runtime_parity(normal,row,c['candidate_image_id'],l,c,engine_support=support)
+  row.update(running=True,pid=1234);row['HostConfig']['OomKillDisable']=None;anchor=deepcopy((normal,row,support))
+  self.assertEqual(M.runtime_parity(normal,row,c['candidate_image_id'],l,c,stopped_required=False,engine_support=support),row['id'])
+  self.assertEqual((normal,row,support),anchor)
+  row.update(running=False,pid=0)
+  M.stopped({'id':row['id'],'running':False,'pid':0,'cgroup_populated':0,'descendants':0},row['id'])
+  with self.assertRaises(M.Refused):M.runtime_parity(normal,row,c['candidate_image_id'],l,c,engine_support=support)
+ def test_missing_wrong_backend_version_or_boolean_normal_never_grants_started_null(self):
+  c,l,p,s,n=self.case();normal=p['normal']['candidate'];normal['HostConfig']['OomKillDisable']=None
+  row=self.measured(normal,l,c['candidate_image_id']);row.update(running=True,pid=1234);support=self.started_backend(c)
+  bad=[None,{},False,{**support,'extra':'PRIVATE_SENTINEL'},{**support,'cgroup_version':'1'},
+   {**support,'cgroup_version':2},{**support,'oom_kill_disable_supported':True},
+   {**support,'oom_kill_disable_supported':0},{**support,'engine_version':'29.9.1'},
+   {**support,'source_git_commit':'0'*40},{**support,'engine_git_commit':'0367'},
+   {**support,'support_docker_git_commit':'0'*7},{**support,'kernel_release':False},
+   {**support,'machine_id':'0'*32}]
+  for witness in bad:
+   with self.subTest(witness=witness),self.assertRaises(M.Refused):
+    M.runtime_parity(normal,row,c['candidate_image_id'],l,c,stopped_required=False,engine_support=witness)
+  for value in (False,True):
+   before=deepcopy(normal);before['HostConfig']['OomKillDisable']=value
+   with self.subTest(normal=value),self.assertRaises(M.Refused):
+    M.runtime_parity(before,row,c['candidate_image_id'],l,c,stopped_required=False,engine_support=support)
+  for key,value in (('Env',['PRIVATE_SENTINEL=DRIFT']),('Cmd',['wrong']),('Entrypoint',['wrong'])):
+   changed=deepcopy(row);changed['Config'][key]=value
+   with self.subTest(field=key),self.assertRaises(M.Refused):
+    M.runtime_parity(normal,changed,c['candidate_image_id'],l,c,stopped_required=False,engine_support=support)
  def test_source_or_production_mounts_and_dropped_normal_mounts_refuse(self):
   c,l,p,s,n=self.case();normal=p['normal']['candidate'];row=self.measured(normal,l,c['candidate_image_id'])
   changed=deepcopy(row);changed['Mounts'][0].update(Type='bind',Name='/srv/production/uploads')
@@ -357,12 +392,14 @@ def cleanup_owned(control,lease):
   for fault,code in (('head_drift','schema'),('residual_tasks','not_stopped')):
    c,l,p,s,n=self.case();P,state=self.provider(c,l,p,n,fault);result=M.run_sequence(c,P,s)
    self.assertEqual(result['code'],code);self.assertNotIn('old_create',state['calls']);self.assertNotIn('cleanup',state['calls'])
+   self.assertEqual(result['stage'],'candidate_data' if fault=='head_drift' else 'candidate_stop')
  def test_cleanup_unproved_never_claims_compatibility(self):
   c,l,p,s,n=self.case();P,state=self.provider(c,l,p,n,'cleanup_unknown');result=M.run_sequence(c,P,s)
   self.assertEqual(result['schema'],'normal_app_restore_failure/2');self.assertEqual(result['code'],'cleanup');self.assertEqual(state['calls'].count('cleanup'),1)
  def test_untyped_readiness_prevents_data_or_old_image_claim(self):
   c,l,p,s,n=self.case();P,state=self.provider(c,l,p,n,'ready_pid_bool');result=M.run_sequence(c,P,s)
   self.assertEqual(result['code'],'normal_runtime');self.assertNotIn('candidate_data',state['calls']);self.assertNotIn('old_create',state['calls'])
+  self.assertEqual(result['stage'],'candidate_ready')
  def test_late_source_check_after_cleanup_prevents_green_without_any_retry(self):
   c,l,p,s,n=self.case();P,state=self.provider(c,l,p,n)
   def check():

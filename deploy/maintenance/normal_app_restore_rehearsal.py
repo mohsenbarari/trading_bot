@@ -302,16 +302,42 @@ def host_mounts(rows):
    and ('ReadOnly' not in row or type(row['ReadOnly']) is bool),'mounts')
   result.append({**row,'ReadOnly':row.get('ReadOnly',False)})
  need(len({r['Target'] for r in result})==len(result),'mounts');return sorted(result,key=lambda r:r['Target'])
-def runtime_parity(normal,measured,image_id,lease,control,*,stopped_required=True):
+def runtime_parity(normal,measured,image_id,lease,control,*,stopped_required=True,engine_support=None):
  """Whole normal Config remains private; isolation changes only infrastructure."""
  need(type(normal) is dict and set(normal)=={'Config','HostConfig','Mounts'} and type(measured) is dict
   and set(measured)=={'id','image','Config','HostConfig','Mounts','network_id','running','pid'},'normal_runtime')
  need(cid(measured['id']) and measured['image']==image_id and same(normal['Config'],measured['Config']),'normal_runtime')
  host=measured['HostConfig'];expected=deepcopy(normal['HostConfig'])
  need(type(host) is dict and type(expected) is dict,'normal_runtime')
+ if engine_support is not None:
+  # Only the trusted producer's fresh /version + /info measurements supply
+  # this private in-process operand; no control flag grants the exception.
+  fields={'schema','engine_version','source_git_commit','engine_git_commit','support_docker_git_commit',
+   'cgroup_version','oom_kill_disable_supported','kernel_release','machine_id'}
+  need(type(engine_support) is dict and set(engine_support)==fields
+   and engine_support['schema']=='normal_restore_started_oom_backend/1'
+   and engine_support['engine_version']=='29.9.2'
+   and engine_support['source_git_commit']=='0367cbeb49b9d98cb0b4f51e95f7b54b4803e76c'
+   and type(engine_support['engine_git_commit']) is str and 7<=len(engine_support['engine_git_commit'])<=40
+   and engine_support['source_git_commit'].startswith(engine_support['engine_git_commit'])
+   and engine_support['support_docker_git_commit']==engine_support['engine_git_commit']
+   and type(engine_support['cgroup_version']) is str and engine_support['cgroup_version'] in ('1','2')
+   and type(engine_support['oom_kill_disable_supported']) is bool
+   and type(engine_support['kernel_release']) is str
+   and re.fullmatch('[0-9][A-Za-z0-9_.+-]{2,99}',engine_support['kernel_release'])
+   and engine_support['machine_id']==control['machine_id'],'normal_runtime')
  if 'OomKillDisable' in expected:
   need(expected['OomKillDisable'] is None or type(expected['OomKillDisable']) is bool,'normal_runtime')
-  if expected['OomKillDisable'] is None:expected['OomKillDisable']=False
+  if expected['OomKillDisable'] is None:
+   expected['OomKillDisable']=False
+   # Moby0367 adapts nil->false at CREATE, then START revalidates the
+   # actual stored Resources and clears this unsupported pointer on v2.
+   # Keep the created/stopped check strict; only a running clone with the
+   # measured backend may retain the original normal null after START.
+   if (stopped_required is False and measured['running'] is True
+    and type(measured['pid']) is int and measured['pid']>0 and engine_support is not None
+    and engine_support['cgroup_version']=='2' and engine_support['oom_kill_disable_supported'] is False
+    and 'OomKillDisable' in host and host['OomKillDisable'] is None):expected['OomKillDisable']=None
  isolation_fields={'NetworkMode','PortBindings','PublishAllPorts','Dns','DnsSearch','ExtraHosts','Binds','Mounts','RestartPolicy','Memory','MemorySwap','NanoCpus','PidsLimit','LogConfig'}
  need(same({k:v for k,v in expected.items() if k not in isolation_fields},{k:v for k,v in host.items() if k not in isolation_fields}),'normal_runtime')
  need(host.get('NetworkMode')==lease['network_id'] and host.get('PortBindings') in ({},None)
@@ -395,7 +421,7 @@ def run_sequence(control,P,support,check=lambda:None):
    # Re-measure containment after Docker creation and immediately before start.
    isolation(P.isolation(control,lease),lease,control,support);checkpoints();stage=label+'_start';requested=True
    P.start_api(control,lease,created);stage=label+'_ready';ready(P.ready_api(control,lease,created),created,image_id)
-   data_state(P.measure_data(control,lease,created),private['head'],persisted=label=='old');stage=label+'_stop'
+   stage=label+'_data';data_state(P.measure_data(control,lease,created),private['head'],persisted=label=='old');stage=label+'_stop'
    stopped(P.stop_api(control,lease,created),created);requested=False;checkpoints()
    if label=='candidate':
     stage='persistence';P.restart_owned_stores(control,lease);checkpoints()

@@ -347,7 +347,7 @@ class ProducerTests(unittest.TestCase):
    {'Running':False,'Pid':0,'StartedAt':'2026-10-25T00:00:00Z'}):
    changed=deepcopy(row);changed['State']=state
    with self.assertRaises(C.Refused):runtime.endpoint(changed,stopped=True)
- def ready_runtime(self,health='absent',status='absent',execute=None):
+ def ready_runtime(self,health='absent',status='absent',execute=None,metadata=None):
   from tests.test_normal_app_restore_rehearsal import NormalRestoreTests
   operands=NormalRestoreTests();operands.root=self.root
   control,lease,private,_,_=operands.case();normal=private['normal']['candidate']
@@ -361,10 +361,16 @@ class ProducerTests(unittest.TestCase):
    'Mounts':deepcopy(measured['Mounts']),'State':state,'RestartCount':0,'NetworkSettings':{'Networks':{'owned':{'NetworkID':lease['network_id']}}}}
   runtime=self.runtime();runtime.control=control;runtime.lease=lease;runtime.normal=private['normal'];runtime.current=('candidate',measured['id'])
   runtime.images={'app_candidate':measured['image']};runtime.end=3;calls=[]
+  runtime.support={'docker_git_commit':M.DNS_ENGINE_GIT[:7]}
   runtime.isolation=lambda:calls.append('isolation')
   def executed(cid,argv):
    calls.append(('HTTP',cid,argv));return execute(row) if execute else (0,b'')
-  runtime.engine=SimpleNamespace(inspect=lambda cid:deepcopy(row),execute=executed)
+  def request(method,path):
+   self.assertEqual(method,'GET');calls.append('metadata:'+path)
+   value=({'Version':'29.9.2','GitCommit':M.DNS_ENGINE_GIT[:7],'Os':'linux'} if path=='/version' else
+    {'ServerVersion':'29.9.2','OSType':'linux','KernelVersion':M.os.uname().release,'CgroupVersion':'2','OomKillDisable':False})
+   return metadata(path,deepcopy(value)) if metadata else value
+  runtime.engine=SimpleNamespace(inspect=lambda cid:deepcopy(row),execute=executed,request=request)
   clock=[0]
   def now():clock[0]+=1;return clock[0]
   self.stack.enter_context(patch.object(M.time,'time',side_effect=now));self.stack.enter_context(patch.object(M.time,'sleep'))
@@ -405,6 +411,58 @@ class ProducerTests(unittest.TestCase):
     runtime,row,_=self.ready_runtime(health,'starting' if type(health) is dict and execute else 'absent',execute)
     with self.subTest(health=health),self.assertRaisesRegex(C.Refused,'normal_runtime'):runtime.ready_api(row['Id'])
    finally:self.root=original
+ def test_real_shaped_created_false_started_null_then_stopped_null_keeps_raw_HostConfig(self):
+  runtime,row,calls=self.ready_runtime();normal=runtime.normal['candidate'];normal['HostConfig']['OomKillDisable']=None
+  row['HostConfig']['OomKillDisable']=None;before=deepcopy(normal)
+  result=runtime.ready_api(row['Id']);self.assertEqual(result['normal_api_config_returncode'],0)
+  self.assertEqual(runtime.normal['candidate'],before);self.assertIsNone(row['HostConfig']['OomKillDisable'])
+  self.assertEqual(calls.count('metadata:/version'),2);self.assertEqual(calls.count('metadata:/info'),2)
+  self.assertNotIn('OomKillDisable',result);self.assertNotIn('engine_support',result)
+  runtime.container_roles[row['Id']]='app_candidate';closed=[]
+  runtime.S=SimpleNamespace(Site=SimpleNamespace(cgroup=lambda owner,value:lambda:closed.append(True)),row=lambda value:value)
+  request=runtime.engine.request
+  def stop(method,path):
+   if method=='POST':
+    self.assertEqual(path,'/containers/'+row['Id']+'/stop?t=30');row['State'].update(Running=False,Pid=0);return None
+   return request(method,path)
+  runtime.engine.request=stop;stopped=runtime.stop(row['Id'])
+  self.assertEqual(closed,[True]);self.assertFalse(stopped['State']['Running']);self.assertEqual(stopped['State']['Pid'],0)
+  self.assertIsNone(stopped['HostConfig']['OomKillDisable']);self.assertEqual(runtime.normal['candidate'],before)
+ def test_running_null_requires_fresh_real_metadata_and_rejects_explicit_boolean_drift(self):
+  mutations=[lambda path,v:(v.pop('CgroupVersion'),v)[1] if path=='/info' else v,
+   lambda path,v:{**v,'CgroupVersion':2} if path=='/info' else v,
+   lambda path,v:{**v,'CgroupVersion':'1','OomKillDisable':True} if path=='/info' else v,
+   lambda path,v:{**v,'OomKillDisable':0} if path=='/info' else v,
+   lambda path,v:{**v,'OomKillDisable':True} if path=='/info' else v,
+   lambda path,v:{**v,'Version':'29.9.1'} if path=='/version' else v,
+   lambda path,v:{**v,'GitCommit':'0'*40} if path=='/version' else v,
+   lambda path,v:{**v,'KernelVersion':'6.1.0-different'} if path=='/info' else v]
+  for i,mutate in enumerate(mutations):
+   directory=self.root/str(i);directory.mkdir(mode=0o700);original=self.root;self.root=directory
+   try:
+    runtime,row,_=self.ready_runtime(metadata=mutate);runtime.normal['candidate']['HostConfig']['OomKillDisable']=None
+    row['HostConfig']['OomKillDisable']=None
+    with self.subTest(case=i),self.assertRaises(C.Refused):runtime.ready_api(row['Id'])
+   finally:self.root=original
+  for i,expected in enumerate((False,True)):
+   directory=self.root/('boolean-'+str(i));directory.mkdir(mode=0o700);original=self.root;self.root=directory
+   try:
+    runtime,row,_=self.ready_runtime();runtime.normal['candidate']['HostConfig']['OomKillDisable']=expected
+    row['HostConfig']['OomKillDisable']=None
+    with self.subTest(expected=expected),self.assertRaises(C.Refused):runtime.ready_api(row['Id'])
+   finally:self.root=original
+ def test_started_backend_is_rechecked_after_final_parity_and_never_taken_from_control(self):
+  count=[0]
+  def metadata(path,value):
+   if path=='/info':
+    count[0]+=1
+    if count[0]==2:value['CgroupVersion']='1'
+   return value
+  runtime,row,calls=self.ready_runtime(metadata=metadata)
+  runtime.control['engine_support']={'CgroupVersion':'2','OomKillDisable':False}
+  runtime.normal['candidate']['HostConfig']['OomKillDisable']=None;row['HostConfig']['OomKillDisable']=None
+  with self.assertRaises(C.Refused):runtime.ready_api(row['Id'])
+  self.assertEqual(count,[2]);self.assertEqual(runtime.started,[])
  def test_runtime_container_caps_include_real_swap_pids_cpu_log_bounds(self):
   cap=M.cap_host(self.runtime().control['limits']['api']);self.assertEqual(cap['Memory'],cap['MemorySwap']);self.assertGreater(cap['PidsLimit'],0)
   self.assertEqual(cap['NanoCpus'],1000000000);self.assertEqual(cap['LogConfig'],{'Type':'json-file','Config':{'max-size':'1048576','max-file':'2'}})

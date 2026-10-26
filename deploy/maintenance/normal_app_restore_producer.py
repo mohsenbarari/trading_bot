@@ -780,6 +780,21 @@ class Runtime:
   return {'id':identifier,'image':row['Image'],'Config':row['Config'],'HostConfig':row['HostConfig'],
    'network_id':endpoint['NetworkID'],'running':row['State']['Running'],'pid':row['State']['Pid'],
    'Mounts':[{k:r[k] for k in ('Type','Destination','RW',('Name' if r['Type']=='volume' else 'Source'))} for r in row['Mounts']]}
+ def oom_backend_support(self):
+  """Fresh public Engine feature metadata; never serialize /info or Config."""
+  self.check();version=self.engine.request('GET','/version');info=self.engine.request('GET','/info')
+  self.C.need(type(version) is dict and type(info) is dict,'normal_runtime')
+  commit=version.get('GitCommit');kernel=os.uname().release
+  self.C.need(version.get('Version')=='29.9.2' and version.get('Os')=='linux'
+   and type(commit) is str and 7<=len(commit)<=40 and DNS_ENGINE_GIT.startswith(commit)
+   and self.support['docker_git_commit']==commit and info.get('ServerVersion')=='29.9.2'
+   and info.get('OSType')=='linux' and info.get('KernelVersion')==kernel
+   and type(info.get('CgroupVersion')) is str and info['CgroupVersion'] in ('1','2')
+   and type(info.get('OomKillDisable')) is bool,'normal_runtime')
+  return {'schema':'normal_restore_started_oom_backend/1','engine_version':'29.9.2','source_git_commit':DNS_ENGINE_GIT,
+   'engine_git_commit':commit,'support_docker_git_commit':self.support['docker_git_commit'],
+   'cgroup_version':info['CgroupVersion'],'oom_kill_disable_supported':info['OomKillDisable'],
+   'kernel_release':kernel,'machine_id':self.control['machine_id']}
  def ready_api(self,identifier):
   health=self.normal[self.current[0]]['Config'].get('Healthcheck')
   if health is None:enabled=False
@@ -805,8 +820,11 @@ class Runtime:
    else:self.C.need('Health' not in state,'normal_runtime');healthy=True
    if type(rc) is int and rc==0 and healthy:break
    self.C.need(time.time()<end,'normal_runtime');time.sleep(.5)
+  support=self.oom_backend_support()
   measured=self.inspect_api(identifier);self.C.need(measured['pid']==initial[0],'normal_runtime')
-  self.C.runtime_parity(self.normal[self.current[0]],measured,row['Image'],self.lease,self.control,stopped_required=False)
+  self.C.runtime_parity(self.normal[self.current[0]],measured,row['Image'],self.lease,self.control,
+   stopped_required=False,engine_support=support)
+  self.C.need(self.C.same(support,self.oom_backend_support()),'normal_runtime')
   return {'id':identifier,'image':row['Image'],'running':True,'pid':state['Pid'],'started':state['StartedAt'],
    'restarts':row['RestartCount'],'normal_api_config_returncode':0}
  def synthetic_count(self):
