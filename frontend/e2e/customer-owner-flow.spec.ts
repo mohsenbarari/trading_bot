@@ -1094,6 +1094,7 @@ test.describe('customer owner lifecycle', () => {
     )
     const activatedCustomerUserId = confirmedActivatedCustomer.customer_user_id
     expect(confirmedActivatedCustomer.customer_tier).toBe('tier2')
+    expect(confirmedActivatedCustomer.customer_account_name).toBe(customerAccountName)
 
     await page.reload()
     await expect(workspace).toBeVisible({ timeout: 30000 })
@@ -1164,7 +1165,7 @@ test.describe('customer owner lifecycle', () => {
       page
         .locator('.public-profile-view:visible')
         .last()
-        .getByRole('heading', { name: new RegExp(managementName) }),
+        .getByRole('heading', { name: new RegExp(customerAccountName) }),
     ).toBeVisible({ timeout: 30000 })
 
     await setAuthTokens(page, superAdmin)

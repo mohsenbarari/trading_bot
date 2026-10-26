@@ -25,7 +25,7 @@ on:
         required: true
         default: both
         type: choice
-        options: [mandatory, offers, both, chat-menu, accounts-and-menu]
+        options: [mandatory, offers, both, chat-menu, accounts-and-menu, messenger-regressions]
       browser:
         required: true
         default: chromium
@@ -68,7 +68,7 @@ jobs:
         browser = os.environ['REQUESTED_BROWSER']
         if not re.fullmatch('[0-9a-f]{40}', requested):
             raise SystemExit('exact commit SHA required')
-        if scenario not in {'mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu'} or browser not in {'chromium', 'firefox', 'webkit'}:
+        if scenario not in {'mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu', 'messenger-regressions'} or browser not in {'chromium', 'firefox', 'webkit'}:
             raise SystemExit('unknown diagnostic selection')
         head = subprocess.run(['git', 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         if head != requested:
@@ -323,6 +323,9 @@ jobs:
             ;;
           chat-menu)
             CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct chat supports reacting to an incoming message and deleting an own message'
+            ;;
+          messenger-regressions)
+            npx playwright test e2e/messenger-direct-room-ux.spec.ts e2e/messenger-room-manager-profile.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct typing and upload activity stay visible and document upload finishes after sender leaves messenger for market|document download stays attached across room switches and clears its busy state when the background queue finishes|channel manager supports messenger-header create, member add, and header-open settings save|channel manager supports member-row profiles, admin mutations, member removal, and creator delete|public profiles support self avatar edits, other-user open from chat header, and return to chat'
             ;;
           accounts-and-menu)
             CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/account-status.spec.ts e2e/accountant-owner-flow.spec.ts e2e/customer-owner-flow.spec.ts e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery|owner can create pending accountant, observe activation, view it, and delete its active account|owner can create update and delete an active customer account, and super-admin can follow the customer handoff|direct chat supports reacting to an incoming message and deleting an own message'

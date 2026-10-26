@@ -104,7 +104,7 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertTrue(events['workflow_call']['inputs']['git_ref']['required'])
         self.assertEqual(events['workflow_call']['inputs']['browser']['type'], 'string')
         inputs = events['workflow_dispatch']['inputs']
-        self.assertEqual(inputs['scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu'])
+        self.assertEqual(inputs['scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu', 'messenger-regressions'])
         self.assertTrue(inputs['git_ref']['required'])
         self.assertEqual(set(value['jobs']), {'browser-diagnostic'})
         job = value['jobs']['browser-diagnostic']
@@ -115,7 +115,7 @@ class BrowserFixtureTests(unittest.TestCase):
         steps = job['steps']
         selected = next(s for s in steps if s.get('id') == 'browser')
         self.assertNotIn('continue-on-error', selected)
-        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 5)
+        self.assertEqual(selected['run'].count('--retries=0 --workers=1'), 6)
         self.assertIn('mandatory-channel.spec.ts', selected['run'])
         self.assertIn('market-offers.spec.ts', selected['run'])
         self.assertNotIn('--shard', selected['run'])
@@ -179,7 +179,7 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertNotIn('scrollIntoView', case)
         registered = workflow('pre-release-gate.yml')
         inputs = registered.get('on', registered.get(True))['workflow_dispatch']['inputs']
-        self.assertEqual(inputs['browser_diagnostic_scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu'])
+        self.assertEqual(inputs['browser_diagnostic_scenario']['options'], ['mandatory', 'offers', 'both', 'chat-menu', 'accounts-and-menu', 'messenger-regressions'])
         self.assertEqual(inputs['browser_diagnostic_scenario']['default'], 'both')
         for name in ('merge-gate.yml', 'pre-release-gate.yml'):
             job = workflow(name)['jobs']['frontend-browser-matrix']
@@ -201,6 +201,34 @@ class BrowserFixtureTests(unittest.TestCase):
         self.assertIn('--retries=0 --workers=1', case)
         self.assertNotIn('--shard', case)
         self.assertEqual(case.count('npx playwright test'), 1)
+
+    def test_messenger_diagnostic_selects_only_the_five_existing_failures_without_changing_full_matrix(self):
+        steps = workflow('browser-ci-diagnostic.yml')['jobs']['browser-diagnostic']['steps']
+        selected = next(step for step in steps if step.get('id') == 'browser')['run']
+        case = selected.split('messenger-regressions)', 1)[1].split(';;', 1)[0]
+        import shlex
+        command = shlex.split(case)
+        self.assertEqual(command[:5], ['npx', 'playwright', 'test',
+            'e2e/messenger-direct-room-ux.spec.ts', 'e2e/messenger-room-manager-profile.spec.ts'])
+        self.assertEqual(command[5:10], ['--config=playwright.https-diagnostic.config.ts',
+            '--project=$DIAGNOSTIC_BROWSER', '--retries=0', '--workers=1', '--grep'])
+        names = command[10].split('|')
+        self.assertEqual(names, [
+            'direct typing and upload activity stay visible and document upload finishes after sender leaves messenger for market',
+            'document download stays attached across room switches and clears its busy state when the background queue finishes',
+            'channel manager supports messenger-header create, member add, and header-open settings save',
+            'channel manager supports member-row profiles, admin mutations, member removal, and creator delete',
+            'public profiles support self avatar edits, other-user open from chat header, and return to chat',
+        ])
+        self.assertEqual(len(command), 11)
+        source = '\n'.join((ROOT / 'frontend' / name).read_text() for name in command[3:5])
+        for name in names:
+            self.assertEqual(source.count("test('" + name + "'"), 1)
+        for filename in ('merge-gate.yml', 'pre-release-gate.yml'):
+            matrix = workflow(filename)['jobs']['frontend-browser-matrix']
+            self.assertEqual(matrix['strategy']['matrix'], {'browser': ['chromium', 'firefox', 'webkit'], 'shard': [1, 2, 3, 4]})
+            self.assertEqual(matrix['timeout-minutes'], 75)
+            self.assertNotIn('messenger-regressions', '\n'.join(s.get('run', '') for s in matrix['steps']))
 
     def test_actual_telegram_policy_allows_queue_production_but_never_provider_execution(self):
         source = ast.parse((ROOT / 'core/telegram_delivery_runtime_policy.py').read_bytes())
