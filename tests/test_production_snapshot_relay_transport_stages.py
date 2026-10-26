@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parents[1]
 os.environ['APP_ENV_FILE']=str(ROOT/'config/unit-test.env.example')
 from scripts import relay_production_coin_inference_snapshot as R
 EXPECTED={'snapshot_query':'remote_snapshot_query_failed','runtime_prepare':'remote_runtime_prepare_failed','snapshot_transfer':'remote_snapshot_transfer_failed','snapshot_install':'remote_snapshot_install_failed'}
-BASE_FINGERPRINTS={'_run_bounded': '7ac92708fbd3497f4126bdb9cfd5ab1afa9cc7548a8e2b9bb4bfa4a9488e445d', '_validated_snapshot': '1c32524b9d732505be9111704c7b23ea0617d60043e1eb21ab9be9c6f9c8f186', '_single_writer_lock': 'd2f8f92303dd9dc1ac6c91abaf01a2c555435461d27056d0a663b84ef68d0ddf', '_restore_local_transaction': 'feef5b056ab8e318ee92904b90ff9a8a516b5dfedb6c6b962d8a9627b60572ff', '_remote_snapshot_digest': '1abe371fd4380f3357bd40e5e993952f43ce1e84845ceb9531c1d3d097cccec2', '_relay_remote': 'd14d586f7024244ba69b7b0f2db5ad2c98427b437febb18489085b1afc747b6e', '_publish_and_relay': '5cf05a536d0dca9ed8351a1de886b7929b1144b027003e880b939071a9d18d6e', '_install_relayed': 'b23431e3dbc2b4a7632d4720658c8e13b98097338103932964d384d2d7b2d041', 'build_parser': 'bf78e59022289a83b550ade253f0274f46184dfbed173051824dcaa8d1874377'}
+BASE_FINGERPRINTS={'_run_bounded': '7ac92708fbd3497f4126bdb9cfd5ab1afa9cc7548a8e2b9bb4bfa4a9488e445d', '_validated_snapshot': '1c32524b9d732505be9111704c7b23ea0617d60043e1eb21ab9be9c6f9c8f186', '_single_writer_lock': 'd2f8f92303dd9dc1ac6c91abaf01a2c555435461d27056d0a663b84ef68d0ddf', '_restore_local_transaction': 'feef5b056ab8e318ee92904b90ff9a8a516b5dfedb6c6b962d8a9627b60572ff', '_remote_snapshot_digest': '1cfd75853f933852a0788dd2125d749d93ac26be303a1a4ae64c44a491b57f1b', '_relay_remote': 'a5af52b78dc2f251234688b1c130444274c3e13add391df95b9eb2732fcef117', '_publish_and_relay': '5cf05a536d0dca9ed8351a1de886b7929b1144b027003e880b939071a9d18d6e', '_install_relayed': 'b23431e3dbc2b4a7632d4720658c8e13b98097338103932964d384d2d7b2d041', 'build_parser': 'bf78e59022289a83b550ade253f0274f46184dfbed173051824dcaa8d1874377'}
 
 class NormalizeCalls(ast.NodeTransformer):
  def visit_Call(self,node):
@@ -72,5 +72,39 @@ class TransportStageTests(unittest.TestCase):
      R._relay_remote(Path('/owned/public-snapshot.json'),maximum_age_seconds=120,digest='f'*64,**options)
     self.assertEqual(caught.exception.reason_code,EXPECTED[stage]);self.assertEqual(len(calls),1 if failure==1 else failure+1)
     if failure>1:self.assertFalse(calls[-1][1]['check'])
+
+ def test_stateless_options_are_fixed_and_keep_default_configuration(self):
+  self.assertEqual(R.REMOTE_STATELESS_SSH_OPTIONS,('-o','ControlMaster=no','-o','ControlPath=none','-o','ControlPersist=no'))
+  self.assertIsInstance(R.REMOTE_STATELESS_SSH_OPTIONS,tuple)
+ def test_query_prepare_scp_and_install_all_disable_multiplexing(self):
+  options=dict(remote_host='root@192.0.2.10',remote_port=2200,remote_runtime_root='/owned/production-runtime',remote_snapshot='/owned/production-runtime/snapshot.json',remote_project_dir='/owned/public-project',remote_identity_file='/owned/public-test-identity')
+  calls=[]
+  def runner(command,**kwargs):
+   calls.append((command,kwargs));return subprocess.CompletedProcess(command,0,stdout='absent\n')
+  with patch.object(R,'_validate_remote_identity_file',return_value=Path('/owned/public-test-identity')),patch.object(R,'_run_bounded',side_effect=runner):
+   self.assertIsNone(R._remote_snapshot_digest(**options))
+   R._relay_remote(Path('/owned/public-snapshot.json'),maximum_age_seconds=120,digest='f'*64,**options)
+  self.assertEqual([c[0][0] for c in calls],['ssh','ssh','scp','ssh'])
+  expected=['ControlMaster=no','ControlPath=none','ControlPersist=no','StrictHostKeyChecking=accept-new','BatchMode=yes','IdentitiesOnly=yes','PasswordAuthentication=no','KbdInteractiveAuthentication=no','ConnectTimeout=10']
+  for command,kwargs in calls:
+   with self.subTest(program=command[0]):
+    self.assertEqual([command[i+1] for i,x in enumerate(command[:-1]) if x=='-o'],expected)
+    self.assertNotIn('-F',command);self.assertEqual(command[command.index('-i')+1],'/owned/public-test-identity')
+    self.assertEqual(kwargs['timeout'],30);self.assertTrue(kwargs['check'])
+  self.assertEqual(calls[0][1],{'check':True,'text':True,'capture_output':True,'timeout':30})
+  for command,kwargs in calls[1:]:self.assertEqual(kwargs,{'check':True,'stdout':subprocess.DEVNULL,'stderr':subprocess.DEVNULL,'timeout':30})
+ def test_failed_transfer_cleanup_uses_the_same_stateless_ssh(self):
+  options=dict(remote_host='root@192.0.2.10',remote_port=2200,remote_runtime_root='/owned/production-runtime',remote_snapshot='/owned/production-runtime/snapshot.json',remote_project_dir='/owned/public-project',remote_identity_file='/owned/public-test-identity')
+  for failure in (2,3):
+   calls=[]
+   def runner(command,**kwargs):
+    calls.append((command,kwargs))
+    if len(calls)==failure:raise subprocess.CalledProcessError(23,command)
+    return subprocess.CompletedProcess(command,0)
+   with self.subTest(failure=failure),patch.object(R,'_validate_remote_identity_file',return_value=Path('/owned/public-test-identity')),patch.object(R,'_run_bounded',side_effect=runner),self.assertRaises(R.ProductionSnapshotTransportError):
+    R._relay_remote(Path('/owned/public-snapshot.json'),maximum_age_seconds=120,digest='f'*64,**options)
+   command,kwargs=calls[-1];self.assertEqual(command[0],'ssh');self.assertIn('rm -f --',command[-1])
+   self.assertEqual(command[3:9],list(R.REMOTE_STATELESS_SSH_OPTIONS))
+   self.assertEqual(kwargs,{'check':False,'stdout':subprocess.DEVNULL,'stderr':subprocess.DEVNULL,'timeout':10})
 
 if __name__=='__main__':unittest.main()

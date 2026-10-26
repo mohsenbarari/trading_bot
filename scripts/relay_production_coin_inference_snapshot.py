@@ -59,6 +59,13 @@ REMOTE_TRANSPORT_TIMEOUT_SECONDS = 30
 REMOTE_CLEANUP_TIMEOUT_SECONDS = 10
 REMOTE_PROCESS_TERMINATION_GRACE_SECONDS = 2
 REMOTE_PROCESS_GROUP_POLL_INTERVAL_SECONDS = 0.05
+# Each scheduled transport is independent: no control socket needs a writable
+# home directory, and default SSH configuration/authentication remains in use.
+REMOTE_STATELESS_SSH_OPTIONS = (
+    "-o", "ControlMaster=no",
+    "-o", "ControlPath=none",
+    "-o", "ControlPersist=no",
+)
 _REMOTE_HOST_PATTERN = re.compile(
     r"^(?:[A-Za-z_][A-Za-z0-9_-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*$"
 )
@@ -711,6 +718,7 @@ def _remote_snapshot_digest(
     )
     ssh = [
         "ssh", "-p", str(remote_port),
+        *REMOTE_STATELESS_SSH_OPTIONS,
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "BatchMode=yes",
         "-o", "IdentitiesOnly=yes",
@@ -763,6 +771,7 @@ def _relay_remote(
         "ssh",
         "-p",
         str(remote_port),
+        *REMOTE_STATELESS_SSH_OPTIONS,
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-o",
@@ -793,6 +802,7 @@ def _relay_remote(
                 "scp",
                 "-P",
                 str(remote_port),
+                *REMOTE_STATELESS_SSH_OPTIONS,
                 "-o",
                 "StrictHostKeyChecking=accept-new",
                 "-o",
