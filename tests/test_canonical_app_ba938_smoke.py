@@ -47,6 +47,14 @@ class IntegrationTests(unittest.TestCase):
         actual=function_fingerprints('controller.py')
         self.assertEqual({name:actual[name]for name in BASE_CONTROLLER_FUNCTIONS},BASE_CONTROLLER_FUNCTIONS)
         self.assertEqual(set(actual),set(BASE_CONTROLLER_NAMES)|{'inventory_document','inventory_args','inventory_container','whole_image_inventory'})
+        tree=ast.parse((HERE/'controller.py').read_bytes())
+        inventory=deepcopy(next(node for node in tree.body if isinstance(node,ast.FunctionDef)and node.name=='whole_image_inventory'));added=[]
+        for node in ast.walk(inventory):
+            if isinstance(node,ast.Call):
+                added.extend(ast.dump(keyword.value)for keyword in node.keywords if keyword.arg=='public_log')
+                node.keywords=[keyword for keyword in node.keywords if keyword.arg!='public_log']
+        self.assertEqual(added,[ast.dump(ast.parse("ctx.root/'reports/fresh-whole-image-acl-output.json'",mode='eval').body)])
+        self.assertEqual(sha256(ast.dump(inventory).encode()).hexdigest(),'7472b844daa9128ea36c816b4168ec2b7350ecb982d386441571fd2ad0ccb128')
         self.assertEqual(sum(value[1]for value in O.SELECTORS.values()),24)
         self.assertEqual(C.CONTROL['image_id'],'sha256:ba938a7dd1ab1a0d9ebacdae768861a45276ba7caacead40ed319fa8e1bef218')
         C.validate_control(C.CONTROL)
@@ -115,7 +123,7 @@ class IntegrationTests(unittest.TestCase):
             B.fetch_artifact(123,self.root/'timeout-artifact',16,sha256(b'PUBLIC-ARTIFACT').hexdigest())
         self.assertEqual(signals,[children[0].pid]);self.assertIsNotNone(children[0].returncode)
     def test_whole_inventory_exact_source_and_isolation_argv(self):
-        raw=(HERE/'inventory.py').read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),(24518,C.INVENTORY_SHA256))
+        raw=(HERE/'inventory.py').read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),(27258,C.INVENTORY_SHA256))
         args=C.inventory_args(O,'OWNED-NAME',C.CONTROL['image_id'],Path('/OWNED-PROOF'),os.getegid(),C.CONTROL)
         self.assertIn('--network=none',args);self.assertIn('--read-only',args);self.assertIn('--cap-drop=ALL',args);self.assertIn('--user=0:0',args)
         self.assertEqual(args[args.index('/proof/inventory.py')-3:args.index('/proof/inventory.py')],['-I','-S','-B'])

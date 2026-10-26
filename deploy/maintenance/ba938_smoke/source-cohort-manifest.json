@@ -4,8 +4,8 @@
   "execution_requires_reviewed_hosted_workflow": true,
   "files": {
     "README.md": {
-      "bytes": 9958,
-      "sha256": "68acf49bfe3a6db20a4e16c62850d13f9bcf0b13056eca5dcc84c66a0e11e5b0"
+      "bytes": 12236,
+      "sha256": "6ad3261aada534b2edfabdef3b04aa55351a9cbdd1af2a8657b22d122015f18f"
     },
     "admit_security_component_image_reuse.py": {
       "bytes": 27518,
@@ -24,20 +24,28 @@
       "sha256": "4156ad042885bc7104c5a9ce537193adf2211ade8447e77676ad29d520e7633d"
     },
     "control.genuine-metadata.json": {
-      "bytes": 5137,
-      "sha256": "f0d685ac7555e16b0239282522ee7ba34bfc6c7f4cb34d52b465fafd2094f677"
+      "bytes": 5371,
+      "sha256": "2e8dbf39d7d32ea26984722bc8733cc259caab5fd9445491cd6bc082020a6ee4"
     },
     "controller.py": {
-      "bytes": 45766,
-      "sha256": "b24eea974189eeb2e83bec500085c7559a4ad31b78dd16177ec771dfcdf1af8e"
+      "bytes": 45839,
+      "sha256": "b7172d9b32e12a83a31f802f436b273104cedaef233beb1826209e82f11f4544"
     },
     "datastore_candidate_contract.py": {
       "bytes": 38382,
       "sha256": "d210020e24fedd4986803a3fe2618a5016ecd99f9e3ca9588af02d77a967e17d"
     },
+    "fixtures/dpkg-status.actual-ba938.txt": {
+      "bytes": 87976,
+      "sha256": "bc24b79515de50f3b39b2438651f325e494a930fce94094170814c46df7a1b52"
+    },
+    "fixtures/sbom.actual-ba938.cdx.json": {
+      "bytes": 295871,
+      "sha256": "5e6a6930bad65191881b6c8366ef58a67c414318c14c0ca28f8dc0570952867c"
+    },
     "inventory.py": {
-      "bytes": 24518,
-      "sha256": "1ec1e29c2a673eb14f1e8734014ea49a2b04a78ffce928b60aa447b5bd8c5469"
+      "bytes": 27258,
+      "sha256": "8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc"
     },
     "native-expectation.json": {
       "bytes": 34993,
@@ -65,11 +73,15 @@
     },
     "seal_and_run.py": {
       "bytes": 12528,
-      "sha256": "3eb7556f1c4b8f1af15afd6bbe5c063f888268b09fcdff004d5d4886307cf114"
+      "sha256": "2c22d3c47cca11f9415037671b9cb1a9f4d53d493e06578d675dc83bbbca94c4"
     },
     "test_integration.py": {
-      "bytes": 13913,
-      "sha256": "ab490af549222027c01d42ad5deb7be7c0367377b5ebe7a8a003f70264c32eb3"
+      "bytes": 14445,
+      "sha256": "d5211cab1bf7d1725815dd097396a0e0573200bb860e69dda807014a2aee2fab"
+    },
+    "test_inventory_format.py": {
+      "bytes": 6024,
+      "sha256": "32d386e282ac42d5d11234e1d3dc327803713bb6408e687b66aad0ec028aaa54"
     },
     "test_keeper.py": {
       "bytes": 10234,
@@ -97,24 +109,48 @@
     },
     "workflow.yml": {
       "bytes": 2039,
-      "sha256": "650a6f7f8e63f29ec257d70150715b1fc374fb2bef614f97e438eba34528e783"
+      "sha256": "f8cf7c1d3f83491f4bb4de593784b97f6c4d198dcea84892a920ff8756643f52"
     }
   },
   "first_use_archives_and_creation_time_proofs_retained": true,
   "full_matrix_accepted": false,
   "mutable_progress_exclusion": "exact root/reports/phase.json and .phase-PID-monotonic.json only",
+  "new_workflow_execution_performed": false,
   "original32_runtime_assertions_unchanged": true,
-  "owned_fixture_count": 28,
-  "owned_fixture_passes": 27,
+  "owned_fixture_count": 33,
+  "owned_fixture_passes": 32,
   "owned_fixture_skips": [
     {
       "case": "actual_wrong_gid_refuses_before_any_input_payload_read",
       "reason": "alternate genuine GID unmapped in author namespace; no identity masking"
     }
   ],
-  "previous_source_cohort_issued": false,
-  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-02",
-  "schema": "ba938_hosted_smoke_source_candidate/3",
+  "previous_failed_hosted_run_id": 40404202231,
+  "previous_source_cohort_issued": true,
+  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-03",
+  "previous_source_manifest_sha256": "396be0f4dce0aab94d8258d3bbd4ea3654cd6dee4793353b4cce56cd9cff1e32",
+  "public_inventory_refusal_output_retained": true,
+  "public_metadata_fixtures": {
+    "dpkg_status": {
+      "bytes": 87976,
+      "root_archive_extraction_without_image_execution": true,
+      "sha256": "bc24b79515de50f3b39b2438651f325e494a930fce94094170814c46df7a1b52"
+    },
+    "image_id": "sha256:ba938a7dd1ab1a0d9ebacdae768861a45276ba7caacead40ed319fa8e1bef218",
+    "sbom": {
+      "bytes": 295871,
+      "original_build_run_id": 40368532303,
+      "sha256": "5e6a6930bad65191881b6c8366ef58a67c414318c14c0ca28f8dc0570952867c"
+    }
+  },
+  "public_metadata_format_corrections": {
+    "actual_package_full_identity_and_source_matches": 99,
+    "canonical_optional_purl_epoch": true,
+    "deb822_empty_first_value": true,
+    "explicit_source_epoch_only": true,
+    "malformed_duplicate_redundant_formats_refuse": true
+  },
+  "schema": "ba938_hosted_smoke_source_candidate/4",
   "security_accepted": false,
   "source_only": true,
   "whole_image_acl_closed": false

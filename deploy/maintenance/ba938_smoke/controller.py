@@ -19,7 +19,7 @@ import zipfile
 MAX_JSON = 2*1024**2
 MAX_NATIVE_REPORT = 2*1024**2
 MAX_ACL_REPORT = 4*1024**2
-INVENTORY_SHA256 = '1ec1e29c2a673eb14f1e8734014ea49a2b04a78ffce928b60aa447b5bd8c5469'
+INVENTORY_SHA256 = '8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc'
 SBOM_SHA256 = '5e6a6930bad65191881b6c8366ef58a67c414318c14c0ca28f8dc0570952867c'
 CONFIRM = 'RUN-ONLY-BA938-ISOLATED-SMOKE-AND-PUBLIC-INVENTORY-20261026-03'
 MAX_ARCHIVE = 512*1024**2
@@ -443,7 +443,8 @@ def whole_image_inventory(ctx, old, image, control, evidence_zip):
     need(re.fullmatch('[a-f0-9]{64}',cid),'presence_identity')
     template='{"name":{{json .Name}},"image":{{json .Image}},"owner":{{json (index .Config.Labels "'+old.LABEL+'")}},"user":{{json .Config.User}},"readonly":{{json .HostConfig.ReadonlyRootfs}},"privileged":{{json .HostConfig.Privileged}},"network":{{json .HostConfig.NetworkMode}},"networks":{{json .NetworkSettings.Networks}},"caps_add":{{json .HostConfig.CapAdd}},"caps_drop":{{json .HostConfig.CapDrop}},"security":{{json .HostConfig.SecurityOpt}},"memory":{{json .HostConfig.Memory}},"memory_swap":{{json .HostConfig.MemorySwap}},"nano_cpus":{{json .HostConfig.NanoCpus}},"pids":{{json .HostConfig.PidsLimit}},"tmpfs":{{json .HostConfig.Tmpfs}},"mounts":{{json .Mounts}},"running":{{json .State.Running}},"paused":{{json .State.Paused}},"pid":{{json .State.Pid}}}'
     def admit(): return inventory_container(document(ctx.docker(['container','inspect','--format',template,cid],maximum=16384)),old,name,image,proof)
-    admit();raw=ctx.docker(['start','--attach',cid],seconds=150,maximum=MAX_ACL_REPORT)
+    admit();raw=ctx.docker(['start','--attach',cid],seconds=150,maximum=MAX_ACL_REPORT,
+        public_log=ctx.root/'reports/fresh-whole-image-acl-output.json')
     need(ctx.docker(['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip() == b'0','presence_exit');admit()
     value=inventory_document(raw);old.public(value)
     need(value.get('schema') == 'image_acl_import_inventory/1' and value.get('image_id') == control['image_id']

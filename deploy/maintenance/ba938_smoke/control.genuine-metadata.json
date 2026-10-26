@@ -73,7 +73,7 @@
     "source_tree": "5f8b6fe5dfec9195890362965c462db9342c772e"
   },
   "controller_commit": "actual_future_GITHUB_SHA_must_differ_from_image_release_identity",
-  "earlier_source_cohort_issued": false,
+  "earlier_source_cohort_issued": true,
   "first_use_archives_and_creation_time_proofs_retained": true,
   "full_matrix_accepted": false,
   "image_acceptance": false,
@@ -81,8 +81,11 @@
     "bytes": 34994,
     "sha256": "2cf0e5410381cd0e0303611e72949daed67e4fd12d7913de2912775f53df51cb"
   },
+  "previous_failed_hosted_run_id": 40404202231,
+  "previous_inventory_sha256": "1ec1e29c2a673eb14f1e8734014ea49a2b04a78ffce928b60aa447b5bd8c5469",
+  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-03",
   "runtime_proof_performed": false,
-  "schema": "ba938_hosted_smoke_candidate_control/3",
+  "schema": "ba938_hosted_smoke_candidate_control/4",
   "security_accepted": false,
-  "whole_image_inventory_sha256": "1ec1e29c2a673eb14f1e8734014ea49a2b04a78ffce928b60aa447b5bd8c5469"
+  "whole_image_inventory_sha256": "8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc"
 }
