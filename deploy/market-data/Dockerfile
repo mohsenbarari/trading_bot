@@ -10,6 +10,7 @@ RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/prepare_app_security_os_cache.py scripts/app_security_os_packages.lock.json scripts/compose_security_os_candidate.py /usr/local/libexec/
 COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json /usr/local/libexec/
+COPY scripts/prepare_tar_acl_os_cache.py scripts/tar_acl_package.lock.json /usr/local/libexec/
 RUN --network=none \
     --mount=type=bind,source=pip_packages/security-os-capsule,target=/capsule,ro \
     --mount=type=tmpfs,target=/tmp \
@@ -18,6 +19,10 @@ RUN --network=none \
     --mount=type=bind,source=pip_packages/sqlite-wal-capsule,target=/sqlite-capsule,ro \
     --mount=type=tmpfs,target=/tmp \
     ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_sqlite_wal_os_cache.py", "--install-image-cache", "--cache-dir", "/sqlite-capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/tar-acl-capsule,target=/tar-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_tar_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/tar-capsule"]
 COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py
 COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py
 COPY scripts/verify_sqlite_runtime.py /usr/local/libexec/verify_sqlite_runtime.py

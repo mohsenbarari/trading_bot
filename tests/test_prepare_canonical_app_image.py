@@ -206,7 +206,11 @@ hash_file_or_dir() {
         sqlite_raw=(ROOT/sqlite_relative).read_bytes();sqlite_path=self.file(sqlite_relative,sqlite_raw)
         _,sqlite_metadata=M.read_file(sqlite_path,65536)
         sqlite_row={'path':sqlite_relative,'identity':sqlite_metadata,'sha256':sha256(sqlite_raw).hexdigest()}
-        source={'files':[{'path':relative,'identity':metadata,'sha256':sha256(raw).hexdigest()},sqlite_row]}
+        tar_relative='scripts/tar_acl_package.lock.json'
+        tar_raw=(ROOT/tar_relative).read_bytes();tar_path=self.file(tar_relative,tar_raw)
+        _,tar_metadata=M.read_file(tar_path,65536)
+        tar_row={'path':tar_relative,'identity':tar_metadata,'sha256':sha256(tar_raw).hexdigest()}
+        source={'files':[{'path':relative,'identity':metadata,'sha256':sha256(raw).hexdigest()},sqlite_row,tar_row]}
         lock=json.loads(raw)
         allowed=M.public_input_names(self.repo,source)
         expected={'pip_packages/security-os-capsule/'+r['path'] for r in lock['packages']}
@@ -215,14 +219,16 @@ hash_file_or_dir() {
         self.assertTrue(expected<=allowed)
         sqlite_name='pip_packages/sqlite-wal-capsule/'+json.loads(sqlite_raw)['package']['path']
         self.assertIn(sqlite_name,allowed);self.file(sqlite_name,b'owned public SQLite package-name fixture')
+        tar_name='pip_packages/tar-acl-capsule/'+json.loads(tar_raw)['package']['path']
+        self.assertIn(tar_name,allowed);self.file(tar_name,b'owned public Tar package-name fixture')
         for name in expected:self.file(name,b'owned public package-name fixture')
         observed={r['path'] for r in M.input_files(self.repo,allowed)}
-        self.assertEqual(observed,expected|{relative,sqlite_relative,sqlite_name})
+        self.assertEqual(observed,expected|{relative,sqlite_relative,sqlite_name,tar_relative,tar_name})
         for bad in ('../foreign.deb','nested/package.deb','foreign\\package.deb','package\n.deb'):
             changed=json.loads(raw);changed['packages'][0]['path']=bad
             payload=M.encode(changed);self.file(relative,payload)
             _,changed_metadata=M.read_file(path,65536)
-            changed_source={'files':[{'path':relative,'identity':changed_metadata,'sha256':sha256(payload).hexdigest()},sqlite_row]}
+            changed_source={'files':[{'path':relative,'identity':changed_metadata,'sha256':sha256(payload).hexdigest()},sqlite_row,tar_row]}
             with self.assertRaisesRegex(RuntimeError,'^input_inventory$'):
                 M.public_input_names(self.repo,changed_source)
 
