@@ -54,6 +54,39 @@ def new_model(f):
   'target':H.DEST,'read_only':True,'bind':{'create_host_path':False}});return model
 
 class NormalTests(unittest.TestCase):
+ def test_actual_capture_inspect_template_supplies_measured_shared_lifecycle_flags(self):
+  actual=load('capture_conflict_diagnostic.py');N.install_structure(actual)
+  self.assertIn('"paused":{{json .State.Paused}}',actual.INSPECT);self.assertIn('"dead":{{json .State.Dead}}',actual.INSPECT)
+  f=fixture();docker={'Id':f.row['id'],'Image':f.row['image'],'Name':f.row['name'],'Config':f.row['config'],
+   'HostConfig':f.row['host'],'Mounts':f.row['mounts'],'NetworkSettings':{'Networks':f.row['networks']},'RestartCount':f.row['restarts'],
+   'State':{'Running':True,'Restarting':False,'Pid':f.row['pid'],'StartedAt':f.row['started'],'Paused':False,'Dead':False}}
+  def measured():
+   def field(match):
+    value=docker
+    for key in match.group(1).lstrip('.').split('.'):value=value[key]
+    return json.dumps(value)
+   return json.loads(N.re.sub(r'\{\{json ([.A-Za-z]+)\}\}',field,actual.INSPECT))
+  shared=load('canonical_app_activation_site.py');shared.C=C;shared.stable_running(measured())
+  for flag in ('Paused','Dead'):
+   docker['State'][flag]=True
+   with self.assertRaisesRegex(RuntimeError,'role_not_running'):shared.stable_running(measured())
+   docker['State'][flag]=False
+  del docker['State']['Dead']
+  with self.assertRaises(KeyError):measured()
+ def test_capture_uses_shared_cgroup_proof_and_retains_owner_and_source_checks(self):
+  calls=[];row={'id':'a'*64,'pid':123};current=dict(row)
+  def shared(stack,value):
+   self.assertIs(stack,self.stack);self.assertIs(value,row);calls.append('bind');return lambda:calls.append('empty')
+  cls=N.normal_backend(SimpleNamespace(Web=object),None,SimpleNamespace(bind_cgroup=shared),None)
+  value=object.__new__(cls);value.stack=self.stack;value.check=lambda:calls.append('check')
+  value.snapshot=lambda:'public owned snapshot';value.target=lambda observed:current
+  empty=value.bind_cgroup(row);self.assertEqual(calls,['check','bind']);empty();self.assertEqual(calls,['check','bind','check','empty'])
+  current['pid']=124
+  with self.assertRaisesRegex(RuntimeError,'old_owner'):value.bind_cgroup(row)
+  current['pid']=123;empty=value.bind_cgroup(row);count=calls.count('empty')
+  value.check=lambda:(_ for _ in ()).throw(RuntimeError('source_changed'))
+  with self.assertRaisesRegex(RuntimeError,'source_changed'):empty()
+  self.assertEqual(calls.count('empty'),count)
  def setUp(self):
   self.stack=ExitStack();self.addCleanup(self.stack.close)
   for name in ('subprocess.Popen','subprocess.run','os.system','os.popen','socket.socket','socket.create_connection','urllib.request.urlopen'):

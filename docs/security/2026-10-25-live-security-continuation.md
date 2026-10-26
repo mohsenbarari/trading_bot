@@ -649,3 +649,46 @@ result `b630cc0a0065921bdb74fd4c4981bdd72b58a002948e341317a9ef6d01d1dbf0`.
 No Market serving replacement occurred. Main remains665220a2 with the user's
 retention change preserved. Global security acceptance is false; refactor
 automation remains stopped and the required clean-unit streak remains0.
+
+## 2026-10-26: ordinary restore and shared cgroup proof
+
+Runtime03 source passed Root99 public fixtures after the normal Redis parser
+admitted the actual public Compose maxmemory/maxmemory-policy arguments without
+rewriting Cmd. Manifest `a4d7c077e474bb6297a3e9cc37a8da3c47d1cb6453e7b62460e56fb539377153`,
+result `7d9adbef7da453f3e298485a36a934273b1e7144dc59dfbcce6407dc49242df5`.
+Both hosts passed public resource metadata. Native check
+ba62bc3c30e647a6a177398a6eba7a64 authenticated the actual backup and all three
+normal roles before any clone/network creation.
+
+Native isolated apply c6a4b70482254d5cbe9b316211dfd31a retains its original
+failure/2 receipt, stage restore, unknown_outcome, no App start. Readonly
+observation proved its sole Redis-RDB container stopped with exit0, PID0,
+OOMfalse and no restart at02:06:18Z. Owned resources, expiry and failure history
+remain separate from serving production. The request is never resumed/retried.
+
+Root independently reproduced a deterministic cgroup guard defect using only
+fresh owned sleep units: removed cgroup directory descriptors retain nlink2,
+while the old shared/lifted proof required0. The retained initial events file
+is kernel0444/root:root/nlink1/size0. After stop, its retained descriptor returns
+ENODEV, a relative new events open returns ENOENT, the named cgroup is absent,
+and both held identities remain unchanged. Poll notification alone is not
+deletion proof. [Linux kernfs](https://raw.githubusercontent.com/torvalds/linux/v6.8/fs/kernfs/file.c)
+and [cgroup removal](https://raw.githubusercontent.com/torvalds/linux/v6.8/kernel/cgroup/cgroup.c)
+provide the source basis for the jointly required deactivation proof.
+
+The single shared S helper now holds the directory and initial events FD.
+Site, Market, datastore and the normal F79 adapter delegate to it; the sealed
+historical H remains unchanged. Regular-file unlink/source/Env guards are not
+relaxed. Only bounded readonly remeasurement of the same identities handles a
+removal transition; arbitrary IO errors, changed identity, a live nonempty
+cgroup or insufficient removed-state proof refuse.
+
+Root executed the actual final helper SHA256
+`d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29`
+successfully on fresh owned sleep units on BOTH Native6.8 and Web7.0, with real
+events0444 and the retained-FD deactivation proof. No App/private input was used.
+Root then passed all274 affected public cases, zero skips/failures/errors:
+manifest `c723a6a2c7ef81c8ebd4c02f0492d43ea058d2ac3acf636907f749f577f7da44`,
+result `273d6c81c4cc118b5d6001f4c0cb2ca5c08781dd12e33e7e0d84dee6ff474eef`.
+These are fixture/kernel results, not completed logical refactor units or
+serving activation. Global acceptance remains false and clean-unit streak0.

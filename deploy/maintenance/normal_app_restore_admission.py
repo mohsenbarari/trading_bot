@@ -13,7 +13,7 @@ import argparse,json,os,re,stat,tempfile,time
 
 OP='normal-app-isolated-restore-admission-20261025-01'
 PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
- 'utilities':'cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965',
+ 'utilities':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 ROLES={'bot':('app','bot','sync_worker'),'web':('app','sync_worker')}
 RESTART_WITNESSES={

@@ -11,8 +11,8 @@ import argparse,ast,json,os,re,resource,stat,sys,tempfile,time
 
 OP='security-normal-market-admission-20261025-01'
 PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
- 'utilities':'cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965',
- 'market':'66ad8bf26323c12c95a44bee49abdd42aafa807bc1afad837e65d43f18a4fcfa',
+ 'utilities':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
+ 'market':'f6e4e59f5cacd057392be0e9fb5e79dfc933e717a473de460598fad5b790c32d',
  'archive':'d210020e24fedd4986803a3fe2618a5016ecd99f9e3ca9588af02d77a967e17d',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0',
  'delta':'326215cc640078afbdcb774e7ecb03cd1e7a5a91afe69175fc83780eebeebaf1',

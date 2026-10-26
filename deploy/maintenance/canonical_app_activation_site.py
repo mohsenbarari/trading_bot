@@ -8,6 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 from hashlib import sha256
 import fcntl
+import errno
 import json
 import os
 import re
@@ -220,6 +221,74 @@ def stable_running(value):
         and value['restarts'] >= 0 and type(value['started']) is str and value['started'],'role_not_running')
 
 
+def cgroup_population(raw):
+    C.require(type(raw) is bytes and 0 < len(raw) <= 4096,'cgroup_bound')
+    rows = [line.split(b' ') for line in raw.splitlines()]
+    C.require(all(len(row) == 2 and re.fullmatch(b'[a-z_]+',row[0]) and row[1] in (b'0',b'1') for row in rows)
+        and len({row[0] for row in rows}) == len(rows),'cgroup_unproven')
+    values = dict(rows); C.require(b'populated' in values,'cgroup_unproven')
+    return values[b'populated']
+
+
+def cgroup_empty(path,fd,before,events,event_before):
+    """Prove emptiness/deactivation; only same-object readonly races remeasure."""
+    def held():
+        C.require(identity(os.fstat(fd))[:5] == before and identity(os.fstat(events))[:5] == event_before[:5],'cgroup_changed')
+    def measure():
+        held()
+        try:named = path.lstat()
+        except FileNotFoundError as error:
+            C.require(error.errno == errno.ENOENT,'cgroup_unproven')
+            try:current = os.open('cgroup.events',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
+            except FileNotFoundError as missing:C.require(missing.errno == errno.ENOENT,'cgroup_unproven')
+            else:
+                os.close(current); C.require(False,'cgroup_unproven')
+            try:os.pread(events,4097,0)
+            except OSError as removed:C.require(removed.errno == errno.ENODEV,'cgroup_unproven')
+            else:C.require(False,'cgroup_unproven')
+            # kernfs deactivation, not a POSIX directory link-count assumption.
+            try:path.lstat()
+            except FileNotFoundError as missing:C.require(missing.errno == errno.ENOENT,'cgroup_unproven')
+            else:C.require(False,'cgroup_unproven')
+        else:
+            C.require(identity(named)[:5] == before,'cgroup_changed')
+            C.require(cgroup_population(os.pread(events,4097,0)) == b'0','cgroup_not_empty')
+            C.require(identity(path.lstat())[:5] == before,'cgroup_changed')
+        held()
+    end = time.monotonic()+1.0
+    while True:
+        try:measure();return
+        except OSError as error:
+            if error.errno not in (errno.ENOENT,errno.ENODEV) or time.monotonic() >= end:raise
+            held();time.sleep(min(0.02,max(0,end-time.monotonic())))
+
+
+def hold_cgroup_events(stack,fd,device):
+    before = identity(os.stat('cgroup.events',dir_fd=fd,follow_symlinks=False))
+    C.require(before[0] == device and before[2:6] == [0o100444,0,0,1] and 0 <= before[6] <= 4096,'cgroup_identity')
+    events = os.open('cgroup.events',os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
+    stack.callback(os.close,events)
+    C.require(identity(os.fstat(events)) == before,'cgroup_changed')
+    return events,before
+
+
+def bind_cgroup(stack,value):
+    stable_running(value); pid = value['pid']
+    with open('/proc/'+str(pid)+'/cgroup','rb') as source:raw = source.read(8193)
+    C.require(len(raw) <= 8192,'cgroup_bound')
+    lines = raw.decode().splitlines(); paths = [line[3:] for line in lines if line.startswith('0::')]
+    C.require(len(paths) == 1 and paths[0].startswith('/') and value['id'] in paths[0]
+        and '..' not in paths[0].split('/'),'cgroup_identity')
+    path = Path('/sys/fs/cgroup'+paths[0]); fd = os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    stack.callback(os.close,fd); before = identity(os.fstat(fd))[:5]
+    C.require(identity(path.lstat())[:5] == before,'cgroup_changed')
+    events,event_before = hold_cgroup_events(stack,fd,before[0])
+    C.require(cgroup_population(os.pread(events,4097,0)) == b'1','cgroup_unproven')
+    C.require(identity(os.fstat(events)) == event_before and identity(os.stat('cgroup.events',dir_fd=fd,follow_symlinks=False)) == event_before
+        and identity(path.lstat())[:5] == before,'cgroup_changed')
+    return lambda:cgroup_empty(path,fd,before,events,event_before)
+
+
 def comparable_inventory(rows):
     # Keep the complete private Config (including Env) only in these RAM maps.
     # Dynamic health is observed separately; it is never a new all-container gate.
@@ -380,22 +449,7 @@ class Site:
         C.require(C.same(self.render(override=self.rollback_override),self.rollback_model),'normal_render_changed')
 
     def cgroup(self,value):
-        stable_running(value); pid = value['pid']
-        with open('/proc/'+str(pid)+'/cgroup','rb') as source:raw = source.read(8193)
-        C.require(len(raw) <= 8192,'cgroup_bound')
-        lines = raw.decode().splitlines(); paths = [line[3:] for line in lines if line.startswith('0::')]
-        C.require(len(paths) == 1 and value['id'] in paths[0] and '..' not in paths[0].split('/'),'cgroup_identity')
-        path = Path('/sys/fs/cgroup'+paths[0]); fd = os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
-        self.stack.callback(os.close,fd); before = identity(os.fstat(fd))[:5]
-        def empty():
-            C.require(identity(os.fstat(fd))[:5] == before,'cgroup_changed')
-            try:events = os.open('cgroup.events',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
-            except FileNotFoundError:
-                C.require(not os.path.lexists(path) and os.fstat(fd).st_nlink == 0,'cgroup_unproven'); return
-            try:raw = os.read(events,4097)
-            finally:os.close(events)
-            C.require(len(raw) <= 4096 and b'populated 0\n' in raw,'cgroup_not_empty')
-        return empty
+        return bind_cgroup(self.stack,value)
 
     def singleton(self,service,excluding=None):
         rows = self.inventory(); expected = self.old_model['services'][service]

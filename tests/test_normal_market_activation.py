@@ -599,22 +599,13 @@ class NormalMarketTests(unittest.TestCase):
             b.producer.fences=lambda *a,change=change:{**proof,**change}
             with self.subTest(change=change),self.assertRaisesRegex(RuntimeError,'normal_live_fences_unproved'):b.begin()
             self.assertEqual(b.calls,[]);self.assertIsNone(b.guard);self.assertFalse((b.root/'activation.guard').exists())
-    def test_lifted_cgroup_proof_has_same_ast_body_as_published_generic_proof(self):
-        before=ast.parse((ROOT/'deploy/maintenance/canonical_app_activation_site.py').read_bytes())
-        site=next(n for n in before.body if isinstance(n,ast.ClassDef) and n.name=='Site')
-        source=next(n for n in site.body if isinstance(n,ast.FunctionDef) and n.name=='cgroup')
-        current=next(n for n in ast.parse(Path(M.__file__).read_bytes()).body if isinstance(n,ast.FunctionDef) and n.name=='bind_cgroup')
-        class Renamed(ast.NodeTransformer):
-            def visit_Name(self,node):
-                if node.id=='self':return ast.Name(id='backend',ctx=node.ctx)
-                if node.id in {'identity','stable_running'}:return ast.parse('backend.S.'+node.id,mode='eval').body
-                return node
-            def visit_Attribute(self,node):
-                if isinstance(node.value,ast.Name) and node.value.id=='C' and node.attr=='require':return ast.Name(id='require',ctx=ast.Load())
-                return self.generic_visit(node)
-        expected=Renamed().visit(source)
-        body=current.body[1:] # provenance docstring only; kernel proof is exact
-        self.assertEqual([ast.dump(n) for n in expected.body],[ast.dump(n) for n in body])
+    def test_lifecycle_delegates_to_the_one_shared_retained_cgroup_proof(self):
+        row={"public":"owned lifecycle operand"};returned=lambda:None;backend=SimpleNamespace(S=self.S,stack=self.stack)
+        with patch.object(self.S,"bind_cgroup",return_value=returned) as shared:
+            self.assertIs(M.bind_cgroup(backend,row),returned);shared.assert_called_once_with(self.stack,row)
+        site=SimpleNamespace(stack=self.stack)
+        with patch.object(self.S,"bind_cgroup",return_value=returned) as shared:
+            self.assertIs(self.S.Site.cgroup(site,row),returned);shared.assert_called_once_with(self.stack,row)
     def test_actual_cold_public_utility_copy_drift_preserves_primary_and_refuses_late_success(self):
         directory=self.root/'sealed';directory.mkdir(mode=0o700)
         own=self.private(directory/'normal_market_activation.py',Path(M.__file__).read_bytes(),0o644)

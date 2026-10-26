@@ -138,6 +138,97 @@ class ActivationTests(unittest.TestCase):
     def file(self,name,raw=b'PUBLIC FIXTURE'):
         path = self.root/name; path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         path.write_bytes(raw); path.chmod(0o600); return path
+    def cgroup_objects(self,name,raw=b'populated 0\nfrozen 0\n'):
+        path=self.root/name;path.mkdir(mode=0o700);event=self.file(name+'/cgroup.events',raw)
+        fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC);self.stack.callback(os.close,fd)
+        events=os.open(event,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC);self.stack.callback(os.close,events)
+        return path,fd,S.identity(os.fstat(fd))[:5],events,S.identity(os.fstat(events))
+    def test_cgroup_population_requires_bounded_unique_typed_kernel_fields(self):
+        self.assertEqual(S.cgroup_population(b'populated 0\nfrozen 0\n'),b'0')
+        for raw in (b'',b'populated 0\npopulated 1\n',b'not_populated 0\n',b'populated 00\n',
+                b'populated 0 extra\n',b'populated 0\n'+b'x'*4096):
+            with self.subTest(raw=raw[:32]),self.assertRaises(RuntimeError):S.cgroup_population(raw)
+    def test_existing_cgroup_requires_exact_named_and_retained_identities_and_empty_events(self):
+        args=self.cgroup_objects('empty');S.cgroup_empty(*args)
+        with patch.object(S.os,'pread',side_effect=OSError(S.errno.ENODEV,'synthetic kernel deactivation')):
+            with self.assertRaises(OSError):S.cgroup_empty(*args)
+        populated=self.cgroup_objects('populated',b'populated 1\nfrozen 0\n')
+        with self.assertRaisesRegex(RuntimeError,'cgroup_not_empty'):S.cgroup_empty(*populated)
+        path,fd,before,events,event_before=args;path.rename(self.root/'old-empty');path.mkdir(mode=0o700)
+        with self.assertRaisesRegex(RuntimeError,'cgroup_changed'):S.cgroup_empty(*args)
+        changed=self.cgroup_objects('changed');(changed[0]/'cgroup.events').chmod(0o644)
+        with self.assertRaisesRegex(RuntimeError,'cgroup_changed'):S.cgroup_empty(*changed)
+    def test_regular_directory_removal_never_uses_link_count_as_cgroup_deactivation(self):
+        args=self.cgroup_objects('ordinary');path,fd,_,events,_=args
+        (path/'cgroup.events').unlink();path.rmdir()
+        self.assertEqual(os.fstat(fd).st_nlink,0)
+        self.assertEqual(os.pread(events,4097,0),b'populated 0\nfrozen 0\n')
+        with self.assertRaisesRegex(RuntimeError,'cgroup_unproven'):S.cgroup_empty(*args)
+    def test_removed_cgroup_requires_both_missing_paths_and_exact_retained_ENODEV(self):
+        # Real owned descriptors/metadata; only the measured kernfs read result
+        # is injected. No UID/stat/namespace or link-count values are mocked.
+        args=self.cgroup_objects('removed');path,fd,_,events,_=args
+        (path/'cgroup.events').unlink();path.rename(self.root/'retained-directory')
+        self.assertEqual(os.fstat(fd).st_nlink,2)
+        real=os.pread
+        def deactivated(which,*a):
+            if which==events:raise OSError(S.errno.ENODEV,'synthetic kernel deactivation')
+            return real(which,*a)
+        with patch.object(S.os,'pread',side_effect=deactivated):S.cgroup_empty(*args)
+        for code in (S.errno.EIO,S.errno.ENOENT,S.errno.EBADF):
+            with self.subTest(errno=code),patch.object(S.os,'pread',side_effect=OSError(code,'closed synthetic fault')):
+                with self.assertRaisesRegex(RuntimeError,'cgroup_unproven'):S.cgroup_empty(*args)
+        path.mkdir(mode=0o700)
+        with patch.object(S.os,'pread',side_effect=deactivated):
+            with self.assertRaisesRegex(RuntimeError,'cgroup_changed'):S.cgroup_empty(*args)
+        other=self.cgroup_objects('events-present');other[0].rename(self.root/'events-retained')
+        with patch.object(S.os,'pread',side_effect=OSError(S.errno.ENODEV,'synthetic kernel deactivation')):
+            with self.assertRaisesRegex(RuntimeError,'cgroup_unproven'):S.cgroup_empty(*other)
+    def test_cgroup_reappearance_or_event_descriptor_drift_prevents_empty_proof(self):
+        args=self.cgroup_objects('late');path,fd,_,events,_=args
+        (path/'cgroup.events').unlink();path.rename(self.root/'late-retained')
+        def reappear(*a):
+            path.mkdir(mode=0o700);raise OSError(S.errno.ENODEV,'synthetic kernel deactivation')
+        with patch.object(S.os,'pread',side_effect=reappear):
+            with self.assertRaisesRegex(RuntimeError,'cgroup_unproven'):S.cgroup_empty(*args)
+        other=self.cgroup_objects('other');changed=(*args[:3],other[3],args[4])
+        with self.assertRaisesRegex(RuntimeError,'cgroup_changed'):S.cgroup_empty(*changed)
+    def test_readonly_cgroup_deactivation_race_remeasures_same_fds_with_finite_bound(self):
+        args=self.cgroup_objects('race');path,fd,_,events,_=args;seen=[]
+        def transition(which,*unused):
+            self.assertEqual(which,events);seen.append(which)
+            if len(seen)==1:
+                (path/'cgroup.events').unlink();path.rename(self.root/'race-retained')
+            raise OSError(S.errno.ENODEV,'synthetic kernel deactivation')
+        before=time.monotonic()
+        with patch.object(S.os,'pread',side_effect=transition):S.cgroup_empty(*args)
+        self.assertEqual(seen,[events,events]);self.assertLess(time.monotonic()-before,1.25)
+        self.assertEqual(S.identity(os.fstat(fd))[:5],args[2])
+    def test_initial_kernel_events_admission_precedes_open_and_binds_fd_before_read(self):
+        path=self.file('kernel/cgroup.events',b'');path.chmod(0o444)
+        fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC);self.stack.callback(os.close,fd)
+        events,before=S.hold_cgroup_events(self.stack,fd,os.fstat(fd).st_dev)
+        self.assertEqual(before,S.identity(path.lstat()));self.assertEqual(before,S.identity(os.fstat(events)))
+        self.assertEqual(before[2:7],[0o100444,0,0,1,0])
+        for kind in ('mode600','mode644','owner','link','alias','fifo','bound'):
+            item=self.file(kind+'/cgroup.events',b'');item.chmod(0o444)
+            group=os.open(item.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC);self.stack.callback(os.close,group)
+            if kind=='mode600':item.chmod(0o600)
+            elif kind=='mode644':item.chmod(0o644)
+            elif kind=='owner':os.chown(item,1,1)
+            elif kind=='link':os.link(item,item.with_name('extra'))
+            elif kind=='alias':item.rename(item.with_name('target'));item.symlink_to('target')
+            elif kind=='fifo':item.unlink();os.mkfifo(item,0o600)
+            elif kind=='bound':item.chmod(0o600);item.write_bytes(b'x'*4097);item.chmod(0o444)
+            with self.subTest(kind=kind),patch.object(S.os,'open',side_effect=AssertionError('inadmissible events must not open')):
+                with self.assertRaisesRegex(RuntimeError,'cgroup_identity'):S.hold_cgroup_events(self.stack,group,os.fstat(group).st_dev)
+        item=self.file('swap/cgroup.events',b'');item.chmod(0o444)
+        group=os.open(item.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC);self.stack.callback(os.close,group)
+        old=os.open(item,os.O_RDONLY|os.O_CLOEXEC);self.stack.callback(os.close,old);real=os.open
+        def swapped(name,*a,**kw):
+            item.rename(item.with_name('retained'));item.write_bytes(b'');item.chmod(0o444);return real(name,*a,**kw)
+        with patch.object(S.os,'open',side_effect=swapped),patch.object(S.os,'pread',side_effect=AssertionError('replacement must not be read')):
+            with self.assertRaisesRegex(RuntimeError,'cgroup_changed'):S.hold_cgroup_events(self.stack,group,os.fstat(group).st_dev)
     def test_factory_is_unarmed_and_actual_fixed_ci_intake_is_preserved(self):
         control = C.unarmed_control()
         with self.assertRaisesRegex(RuntimeError,'unarmed'):C.validate_control(control,100)

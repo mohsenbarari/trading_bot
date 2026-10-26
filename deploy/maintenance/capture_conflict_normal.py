@@ -18,8 +18,8 @@ WIRE_SHA='ff32988c1b524abd145daac4f34d2b189900245ebeae033992dcfce44c4d82be'
 # Exact shared normal validators frozen by Root; historical proof pins above
 # remain independent and are never relabeled as these current validators.
 PRIMITIVE_PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
- 'site':'cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965',
- 'market':'66ad8bf26323c12c95a44bee49abdd42aafa807bc1afad837e65d43f18a4fcfa',
+ 'site':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
+ 'market':'f6e4e59f5cacd057392be0e9fb5e79dfc933e717a473de460598fad5b790c32d',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 PRIMITIVE_NAMES={'contract':'canonical_app_activation_contract.py','site':'canonical_app_activation_site.py',
  'market':'normal_market_activation_current.py','capture':'bounded_operational_capture.py'}
@@ -236,7 +236,7 @@ def install_structure(H,*,fence_stack=None):
      if not primary:raise
    outer.callback(final)
  H.validate_control=validate;H.public_file=public_file;H.CONFIRM=CONFIRM;H.MetadataFence=Fence
- H.INSPECT=H.INSPECT[:-1]+',"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}}}'
+ H.INSPECT=H.INSPECT[:-1]+',"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}},"paused":{{json .State.Paused}},"dead":{{json .State.Dead}}}'
  H.NORMAL_FENCE_STACK=fence_stack
  return H
 
@@ -271,6 +271,11 @@ def normal_backend(H,C,S,M):
    # All client state belongs to this operation; no personal Docker config.
    return super().command(['/usr/bin/env','-i','PATH=/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL=C.UTF-8',
     'DOCKER_HOST=unix:///var/run/docker.sock','DOCKER_CONFIG='+str(self.client),*argv],**kwargs)
+  def bind_cgroup(self,row):
+   self.check();empty=S.bind_cgroup(self.stack,row)
+   current=self.target(self.snapshot());need(current['id']==row['id'] and current['pid']==row['pid'],'old_owner')
+   def verified_empty():self.check();empty()
+   return verified_empty
   def legacy_owners(self):
    # Runtime drop-ins disappear after reboot. The sealed persistent inhibitor
    # is the same authority; never recreate a runtime file to satisfy admission.

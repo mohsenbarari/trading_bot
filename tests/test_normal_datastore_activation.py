@@ -22,6 +22,11 @@ with ExitStack() as importing:
     M=module()
 
 class DatastoreTests(unittest.TestCase):
+    def test_datastore_stop_uses_the_one_shared_retained_cgroup_proof(self):
+        row={'public':'owned datastore operand'};returned=lambda:None
+        with patch.object(self.S,'bind_cgroup',return_value=returned) as shared:
+            self.assertIs(M.bind_cgroup(SimpleNamespace(S=self.S,stack=self.stack),row),returned)
+            shared.assert_called_once_with(self.stack,row)
     def setUp(self):
         self.assertEqual((os.geteuid(),os.getegid()),(0,0))
         self.stack=ExitStack();self.addCleanup(self.stack.close)

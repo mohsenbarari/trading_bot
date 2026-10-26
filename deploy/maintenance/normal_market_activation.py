@@ -13,7 +13,7 @@ import gzip,json,os,posixpath,re,stat,tarfile,time
 
 OPERATION='security-normal-market-activation-20261025-01'
 BASE_CONTRACT_SHA='c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05'
-BASE_UTILITIES_SHA='cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965'
+BASE_UTILITIES_SHA='d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29'
 CATALOG_SHA='c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 LOAD_WORKER_SHA='5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
 PRODUCER='normal_market_functional_producer.py'
@@ -647,22 +647,8 @@ def primitives(stack):
     return C,S,[cc,sc]
 
 def bind_cgroup(backend,value):
-    """Exact generic cgroup proof; no App.Site instance or PID kill."""
-    backend.S.stable_running(value);pid=value['pid']
-    with open('/proc/'+str(pid)+'/cgroup','rb') as source:raw=source.read(8193)
-    require(len(raw)<=8192,'cgroup_bound');lines=raw.decode().splitlines();paths=[line[3:] for line in lines if line.startswith('0::')]
-    require(len(paths)==1 and value['id'] in paths[0] and '..' not in paths[0].split('/'),'cgroup_identity')
-    path=Path('/sys/fs/cgroup'+paths[0]);fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
-    backend.stack.callback(os.close,fd);before=backend.S.identity(os.fstat(fd))[:5]
-    def empty():
-        require(backend.S.identity(os.fstat(fd))[:5]==before,'cgroup_changed')
-        try:events=os.open('cgroup.events',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
-        except FileNotFoundError:
-            require(not os.path.lexists(path) and os.fstat(fd).st_nlink==0,'cgroup_unproven');return
-        try:raw=os.read(events,4097)
-        finally:os.close(events)
-        require(len(raw)<=4096 and b'populated 0\n' in raw,'cgroup_not_empty')
-    return empty
+    """One shared retained-kernfs proof for every normal lifecycle."""
+    return backend.S.bind_cgroup(backend.stack,value)
 
 def normal_producer(raw,path):
     """Required normal producer code, not boolean readiness or callback inputs.
