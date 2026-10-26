@@ -180,16 +180,23 @@ def expanded_count(artifact,maximum,check):
 
 def redis_persistence(config):
  """Accept only the normal packaged Redis command; private auth remains in RAM."""
- command=config.get('Cmd');env={r.split('=',1)[0]:r.split('=',1)[1] for r in config.get('Env',[]) if '=' in r}
- if type(command) is not list or command[:1]!=['redis-server'] or (len(command)-1)%2:raise RuntimeError('normal_redis_persistence')
+ command=config.get('Cmd')
+ if type(command) is not list or not all(type(v) is str for v in command) or command[:1]!=['redis-server'] or (len(command)-1)%2:raise RuntimeError('normal_redis_persistence')
  options={}
  for name,value in zip(command[1::2],command[2::2]):
-  if name not in {'--appendonly','--appendfsync','--save','--dir','--dbfilename','--appenddirname','--requirepass'} or name in options:
+  if name not in {'--appendonly','--appendfsync','--save','--dir','--dbfilename','--appenddirname','--requirepass','--maxmemory','--maxmemory-policy'} or name in options:
    raise RuntimeError('normal_redis_persistence')
   options[name]=value
  if options.get('--appendonly')!='yes' or options.get('--dir','/data')!='/data' or options.get('--dbfilename','dump.rdb')!='dump.rdb':
   raise RuntimeError('normal_redis_persistence')
  if options.get('--appenddirname','appendonlydir')!='appendonlydir':raise RuntimeError('normal_redis_persistence')
+ if options.get('--appendfsync','everysec').lower() not in {'always','everysec','no'}:raise RuntimeError('normal_redis_persistence')
+ if '--maxmemory' in options:
+  value=re.fullmatch(r'([0-9]{1,19})(k|kb|m|mb|g|gb)?',options['--maxmemory'],re.IGNORECASE|re.ASCII)
+  scale={'':1,'k':1000,'kb':1024,'m':1000000,'mb':1024**2,'g':1000000000,'gb':1024**3}
+  if value is None or int(value[1])*scale[(value[2] or '').lower()]>2**63-1:raise RuntimeError('normal_redis_persistence')
+ if not options.get('--maxmemory-policy','noeviction').isascii() or options.get('--maxmemory-policy','noeviction').lower() not in {'volatile-lru','allkeys-lru','volatile-lfu','allkeys-lfu',
+  'volatile-random','allkeys-random','volatile-ttl','noeviction'}:raise RuntimeError('normal_redis_persistence')
  return options
 
 def archive_components(original,kind):
