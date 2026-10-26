@@ -44,7 +44,7 @@ class BrowserCIBootstrapContractTests(unittest.TestCase):
 
     def test_security_os_bootstrap_prepares_before_build_and_refuses_without_cache(self):
         source = (ROOT / 'scripts/bootstrap_ci_backend.sh').read_bytes()
-        for failure in ('0', '17'):
+        for failure in ('0', '17', '19', '23'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory(prefix='owned-ci-bootstrap-') as directory:
                 project = Path(directory)
                 scripts = project / 'scripts'; scripts.mkdir()
@@ -54,12 +54,18 @@ class BrowserCIBootstrapContractTests(unittest.TestCase):
                 python.write_text('''#!/bin/sh
 set -eu
 [ "$1" = -I ] && [ "$2" = -B ]
-[ "${3##*/}" = prepare_app_security_os_cache.py ]
 [ "$4" = --cache-dir ]
-[ "$5" = "$CASE_ROOT/pip_packages/security-os-capsule" ]
+case "${3##*/}" in
+  prepare_app_security_os_cache.py) kind=os; directory=security-os-capsule; failure=17 ;;
+  prepare_sqlite_wal_os_cache.py) kind=sqlite; directory=sqlite-wal-capsule; failure=19 ;;
+  prepare_tar_acl_os_cache.py) kind=tar; directory=tar-acl-capsule; failure=23 ;;
+  *) exit 97 ;;
+esac
+[ "$5" = "$CASE_ROOT/pip_packages/$directory" ]
 [ -d "${5%/*}" ]
-printf 'cache\\n' >> "$TRACE_FILE"
-exit "$CACHE_FAILURE"
+printf 'cache-%s\\n' "$kind" >> "$TRACE_FILE"
+if [ "$CACHE_FAILURE" = "$failure" ]; then exit "$failure"; fi
+exit 0
 ''')
                 docker = binary / 'docker'
                 docker.write_text('''#!/bin/sh
@@ -89,14 +95,16 @@ esac
                         cwd=project, env=environment, capture_output=True, text=True, timeout=10,
                     )
                 events = (project / 'trace').read_text().splitlines()
-                self.assertEqual(events[:2], ['version', 'cache'])
+                caches=['cache-os','cache-sqlite','cache-tar']
+                length={'0':3,'17':1,'19':2,'23':3}[failure]
+                self.assertEqual(events[:1+length], ['version', *caches[:length]])
                 if failure == '0':
                     self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-                    self.assertLess(events.index('cache'), events.index('build'))
+                    self.assertLess(events.index('cache-tar'), events.index('build'))
                     self.assertLess(events.index('build'), events.index('up'))
                     self.assertIn('ready', events)
                 else:
-                    self.assertEqual(result.returncode, 17, result.stderr + result.stdout)
+                    self.assertEqual(result.returncode, int(failure), result.stderr + result.stdout)
                     self.assertNotIn('build', events)
                     self.assertNotIn('up', events)
 

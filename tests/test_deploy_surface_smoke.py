@@ -162,6 +162,10 @@ deploy_foreign
                     self.assertEqual(len(events), 1)
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    caches=[event for event in events if event.startswith('cache ')]
+                    self.assertEqual(len(caches),3)
+                    self.assertTrue(all(('--check' in event.split())==(prebuilt=='1')for event in caches))
+                    self.assertTrue(all(events.index(event)<events.index('fingerprint')for event in caches))
                     self.assertLess(0, events.index('fingerprint'))
                     self.assertEqual('build' in events, not hit)
 
@@ -188,7 +192,8 @@ prepare_app_security_os_cache iran
             result, events = self.security_os_shell(shell, project, PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE='1')
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((project / 'pip_packages').is_dir())
-            self.assertEqual(len(events), 1)
+            self.assertEqual(len(events), 3)
+            self.assertTrue(all('--check'not in event.split()for event in events))
             self.assertNotIn('--check', events[0].split())
             self.assertIn(str(project / 'pip_packages/security-os-capsule'), events[0])
 
@@ -242,16 +247,20 @@ build_release
                     (project / 'release/images.signature').write_text('a' * 64 + '\n')
                 result, events = self.security_os_shell(shell, project, CACHE_FAILURE=failure)
                 caches = [event for event in events if event.startswith('cache ')]
-                self.assertEqual(len(caches), 2)
+                self.assertEqual(len(caches), 4 if failure != '0' else 6)
                 self.assertIn(str(project / 'project/pip_packages/security-os-capsule'), caches[0])
-                self.assertIn(str(project / 'release/pip_packages-amd64/security-os-capsule'), caches[1])
+                self.assertIn(str(project / 'project/pip_packages/sqlite-wal-capsule'), caches[1])
+                self.assertIn(str(project / 'project/pip_packages/tar-acl-capsule'), caches[2])
+                self.assertIn(str(project / 'release/pip_packages-amd64/security-os-capsule'), caches[3])
                 if failure != '0':
                     self.assertEqual(result.returncode, 17, result.stderr)
                     self.assertEqual(events, caches)
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-                    self.assertLess(events.index(caches[1]), events.index('context-copy'))
-                    self.assertLess(events.index(caches[1]), events.index('fingerprint'))
+                    self.assertIn(str(project / 'release/pip_packages-amd64/sqlite-wal-capsule'), caches[4])
+                    self.assertIn(str(project / 'release/pip_packages-amd64/tar-acl-capsule'), caches[5])
+                    self.assertLess(events.index(caches[-1]), events.index('context-copy'))
+                    self.assertLess(events.index(caches[-1]), events.index('fingerprint'))
                     self.assertEqual('build' in events, not hit)
 
     def test_security_os_prebuilt_online_verification_is_check_only(self):
@@ -272,6 +281,9 @@ verify_prepared_wheel_cache amd64 "$CASE_ROOT/cache"
             os_cache = next(event for event in events if 'prepare_app_security_os_cache.py' in event)
             self.assertIn('--check', os_cache.split())
             self.assertIn(str(cache / 'security-os-capsule'), os_cache)
+            for helper,directory in(('prepare_sqlite_wal_os_cache.py','sqlite-wal-capsule'),('prepare_tar_acl_os_cache.py','tar-acl-capsule')):
+                event=next(event for event in events if helper in event)
+                self.assertIn('--check',event.split());self.assertIn(str(cache/directory),event)
 
     def test_security_os_cache_and_lock_drift_change_both_real_image_signatures(self):
         legacy = (REPO_ROOT / 'deploy.sh').read_text()

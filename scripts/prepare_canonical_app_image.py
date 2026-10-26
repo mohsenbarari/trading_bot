@@ -191,6 +191,15 @@ def public_input_names(repo,source):
         and sqlite['package'].get('path')=='libsqlite3-0_3.46.1-7+deb13u2+gold1_amd64.deb','input_inventory')
     names|={'pip_packages/.sqlite-wal-capsule.lock','pip_packages/sqlite-wal-capsule/manifest.json',
         'pip_packages/sqlite-wal-capsule/'+sqlite['package']['path']}
+    tar_expected=next(row for row in source['files'] if row['path']=='scripts/tar_acl_package.lock.json')
+    tar_raw,tar_metadata=read_file(repo/tar_expected['path'],65536)
+    need(tar_metadata==tar_expected['identity'] and sha256(tar_raw).hexdigest()==tar_expected['sha256'],'source_changed')
+    tar=document(tar_raw)
+    need(type(tar)is dict and tar.get('schema')=='tar_acl_image_package_lock/1' and tar.get('armed')is True
+        and tar.get('package',{}).get('name')=='tar' and tar['package'].get('version')=='1.35+dfsg-5~trixie+gold2'
+        and tar['package'].get('path')=='tar_1.35+dfsg-5~trixie+gold2_amd64.deb','input_inventory')
+    names|={'pip_packages/.tar-acl-capsule.lock','pip_packages/tar-acl-capsule/manifest.json',
+        'pip_packages/tar-acl-capsule/'+tar['package']['path']}
     return names
 
 def input_files(repo,allowed=None):
@@ -273,6 +282,9 @@ def prepare(root,repo):
         SUBPHASE='sqlite_cache_prepare'
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_sqlite_wal_os_cache.py'),
             '--cache-dir',str(repo/'pip_packages/sqlite-wal-capsule')],seconds=600,environment=child_env)
+        SUBPHASE='tar_cache_prepare'
+        command([sys.executable,'-I','-B',str(repo/'scripts/prepare_tar_acl_os_cache.py'),
+            '--cache-dir',str(repo/'pip_packages/tar-acl-capsule')],seconds=600,environment=child_env)
         unchanged(root,repo,value,held)
     write_new(root/'prepare.json',{'schema':'canonical_app_prepare/1','status':'prepared','security_accepted':False})
     emit('root',str(root));return {'status':'prepared','security_accepted':False}
@@ -302,6 +314,9 @@ def build(root):
         SUBPHASE='sqlite_cache_check'
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_sqlite_wal_os_cache.py'),
             '--check','--cache-dir',str(repo/'pip_packages/sqlite-wal-capsule')],environment=env(root),seconds=120)
+        SUBPHASE='tar_cache_check'
+        command([sys.executable,'-I','-B',str(repo/'scripts/prepare_tar_acl_os_cache.py'),
+            '--check','--cache-dir',str(repo/'pip_packages/tar-acl-capsule')],environment=env(root),seconds=120)
         allowed=public_input_names(repo,value);rows=input_files(repo,allowed);known={r['path'] for r in value['files']}
         need(all(r['path'] in known or r['path'].split('/')[0] in GENERATED for r in rows)
             and any(r['path']=='mini_app_dist/index.html' for r in rows),'input_inventory')

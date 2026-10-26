@@ -116,6 +116,8 @@ prepare_app_security_os_cache() {
         --cache-dir "$PROJECT_DIR/pip_packages/security-os-capsule"
     python3 -I -B "$PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
         --cache-dir "$PROJECT_DIR/pip_packages/sqlite-wal-capsule"
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/tar-acl-capsule"
 }
 
 init_compose_cmd() {
