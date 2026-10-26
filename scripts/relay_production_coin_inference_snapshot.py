@@ -69,6 +69,34 @@ _LOCAL_TRANSACTION_MARKER_NAME = ".production-snapshot-relay-transaction.json"
 class ProductionSnapshotRelayError(RuntimeError):
     """A production Snapshot safety, freshness, or transport gate failed."""
 
+TRANSPORT_FAILURE_CODES = {
+    "snapshot_query": "remote_snapshot_query_failed",
+    "runtime_prepare": "remote_runtime_prepare_failed",
+    "snapshot_transfer": "remote_snapshot_transfer_failed",
+    "snapshot_install": "remote_snapshot_install_failed",
+}
+
+
+class ProductionSnapshotTransportError(subprocess.CalledProcessError):
+    """One normal transport failed; retain compatibility without logging argv."""
+
+    def __init__(self, stage: str, original: subprocess.CalledProcessError) -> None:
+        self.reason_code = TRANSPORT_FAILURE_CODES[stage]
+        super().__init__(original.returncode, original.cmd,
+                         output=original.output, stderr=original.stderr)
+
+    def __str__(self) -> str:
+        return self.reason_code
+
+
+def _run_transport(stage: str, command: Sequence[str], **options: object) -> subprocess.CompletedProcess[object]:
+    if stage not in TRANSPORT_FAILURE_CODES:
+        raise ProductionSnapshotRelayError("remote_transport_stage_invalid")
+    try:
+        return _run_bounded(command, **options)
+    except subprocess.CalledProcessError as exc:
+        raise ProductionSnapshotTransportError(stage, exc) from exc
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -692,7 +720,8 @@ def _remote_snapshot_digest(
         "-i", str(identity_file), remote_host,
     ]
     path = shlex.quote(str(remote_path))
-    result = _run_bounded(
+    result = _run_transport(
+        "snapshot_query",
         [
             *ssh,
             f"if test -f {path} && test ! -L {path}; then sha256sum {path} | awk '{{print $1}}'; "
@@ -749,7 +778,8 @@ def _relay_remote(
     ]
     ssh.extend(("-i", str(identity_file)))
     ssh.append(remote_host)
-    _run_bounded(
+    _run_transport(
+        "runtime_prepare",
         [*ssh, f"install -d -m 0755 -- {shlex.quote(str(remote_root))}"],
         check=True,
         stdout=subprocess.DEVNULL,
@@ -757,7 +787,8 @@ def _relay_remote(
         timeout=REMOTE_TRANSPORT_TIMEOUT_SECONDS,
     )
     try:
-        _run_bounded(
+        _run_transport(
+            "snapshot_transfer",
             [
                 "scp",
                 "-P",
@@ -805,7 +836,8 @@ def _relay_remote(
                 str(maximum_age_seconds),
             ]
         )
-        _run_bounded(
+        _run_transport(
+            "snapshot_install",
             [*ssh, remote_command],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -1138,7 +1170,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The reason is a bounded internal token, never the raw exception or a
         # command/path that might contain deployment details.
         reason = str(exc)
-        if not isinstance(exc, ProductionSnapshotRelayError):
+        if isinstance(exc, ProductionSnapshotTransportError):
+            reason = exc.reason_code
+        elif not isinstance(exc, ProductionSnapshotRelayError):
             reason = type(exc).__name__
         _emit(status="FAILED", reason=reason)
         return 2
