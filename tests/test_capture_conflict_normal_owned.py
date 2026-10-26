@@ -204,7 +204,7 @@ class OwnedTests(unittest.TestCase):
   H,root,control,args=self.native_case()
   with ExitStack() as stack,self.assertRaises(H.Unknown):N.native_run(H,args,root,control,[],stack,capture=lambda *a,**kw:(125,H.encode({'status':'client_cleanup_unproved'})))
   self.assertTrue((root/'native-observe-request.json').exists());self.assertFalse(H.RESERVATION.exists())
- def test_actual_wrapper_main_cold_holds_base_then_real_load_admits_wrapper_self_and_opaque_fences(self):
+ def main_case(self,failure=None):
   folder=self.temp/'main';folder.mkdir(mode=0o700);native=folder/'native';web=folder/'web';nonce='a'*32;root=native/nonce;root.mkdir(parents=True,mode=0o700)
   wrapper=folder/'capture_conflict_diagnostic.py';raw=(ROOT/'deploy/maintenance/capture_conflict_normal.py').read_bytes();wrapper.write_bytes(raw);wrapper.chmod(0o600);worker=sha256(raw).hexdigest()
   base=folder/'capture_conflict_diagnostic_base.py';base.write_bytes((ROOT/'deploy/maintenance/capture_conflict_diagnostic.py').read_bytes());base.chmod(0o600)
@@ -239,13 +239,27 @@ class OwnedTests(unittest.TestCase):
    self.assertNotIn(os.fstat(fd).st_ino,{marker.stat().st_ino,source.stat().st_ino});return pread(fd,*a)
   def endpoint(H,args,root,control,checks,stack):
    called.append(Path(H.__file__));self.assertEqual(Path(H.__file__),wrapper)
+   if failure=='unknown':
+    N.phase('native_peer');raise H.Unknown()
+   if failure=='private':
+    N.phase('native_peer');raise RuntimeError('PRIVATE_RAM_SENTINEL')
+   if failure=='finalization':stack.callback(base.chmod,0o644)
    return H.result(control,pin,'preflight_passed_not_applied')
   with (patch.object(N,'__file__',str(wrapper)),patch.object(N,'module',side_effect=modules),patch.object(N,'native_run',side_effect=endpoint),
    patch.object(N,'MACHINE_ID',machine),
    patch.object(os,'pread',side_effect=reading),redirect_stdout(io.StringIO()) as output):
    rc=N.main(['--site','native','--nonce',nonce,'--control-sha256',pin,'--observe'])
-  self.assertEqual(rc,0,output.getvalue());self.assertEqual(called,[wrapper]);self.assertEqual(json.loads(output.getvalue())['status'],'preflight_passed_not_applied')
- def worker(self,*,apply=False,foreign_env=False,reject_candidate=False):
+  value=json.loads(output.getvalue());self.assertEqual(called,[wrapper]);self.assertNotIn('PRIVATE_RAM_SENTINEL',output.getvalue())
+  if failure:
+   self.assertEqual(rc,1);self.assertEqual(N.peer_refusal(value),value)
+   expected=('unknown','Unknown','native_peer') if failure=='unknown' else ('unknown','RuntimeError','native_peer') if failure=='private' else ('normal_source_changed','RuntimeError','native_finalization')
+   self.assertEqual((value['code'],value['exception_class'],value['phase']),expected)
+  else:self.assertEqual(rc,0,output.getvalue());self.assertEqual(value['status'],'preflight_passed_not_applied')
+ def test_actual_wrapper_main_cold_holds_base_then_real_load_admits_wrapper_self_and_opaque_fences(self):self.main_case()
+ def test_actual_entry_sealed_unknown_preserves_closed_class_and_phase(self):self.main_case('unknown')
+ def test_actual_entry_private_arguments_never_enter_refusal(self):self.main_case('private')
+ def test_actual_entry_late_source_finalizer_has_closed_finalization_phase(self):self.main_case('finalization')
+ def worker(self,*,apply=False,foreign_env=False,reject_candidate=False,web_fault=None):
   H=P.load('capture_conflict_diagnostic.py');N.install_structure(H);f=P.fixture();root=self.temp/('a'*32);root.mkdir(mode=0o700)
   self.stack.enter_context(patch.dict(H.ROOTS,{'web':self.temp,'native':self.temp/'native'}));self.stack.enter_context(patch.object(H,'WEB_OWNER',self.temp/'owned.guard'))
   env=self.public('normal/normal.env',b'OPAQUE_ENV_SENTINEL');secrets=[self.public('normal/'+k,b'OPAQUE_SECRET_SENTINEL') for k in ('first','second')]
@@ -275,8 +289,14 @@ class OwnedTests(unittest.TestCase):
    labels=row['config']['Labels'];self.assertEqual(labels['com.docker.compose.project.working_dir'],control['compose']['directory'])
    self.assertEqual(labels['com.docker.compose.project.config_files'],','.join(paths));self.assertEqual(labels['com.docker.compose.project.environment_file'],envref)
   self.stack.enter_context(patch.object(H,'provenance',side_effect=provenance))
+  class PrivateFailure(Exception):pass
+  def fault(selected):
+   if web_fault==selected:raise PrivateFailure('PRIVATE_RAM_SENTINEL')
   def bounded(argv,clock,*,stdin=None,mutating=False,**kwargs):
    args=argv[argv.index('/usr/bin/docker')+2:];calls.append(args)
+   if args==['ps','-aq','--no-trunc']:fault('snapshot')
+   if args==['compose','version','--short']:fault('prefix')
+   if args[:2]==['image','inspect']:fault('image')
    if args==['ps','-aq','--no-trunc']:return ('\n'.join(rows)+'\n').encode()
    if args[:2]==['inspect','--format']:return H.encode(rows[args[-1]])
    if args==['compose','version','--short']:return b'5.6.1\n'
@@ -300,9 +320,12 @@ class OwnedTests(unittest.TestCase):
    raise AssertionError('unexpected public fixture command')
   self.stack.enter_context(patch.object(H,'bounded',side_effect=bounded));factory=N.normal_backend
   def backend(*a):
-   cls=factory(*a);cls.legacy_owners=lambda self:external.append('legacy')
+   cls=factory(*a);cls.legacy_owners=lambda self:(fault('legacy'),external.append('legacy'))
+   parity=cls.full_parity
+   def full_parity(self,*a):fault('parity');return parity(self,*a)
+   cls.full_parity=full_parity
    cls.bind_cgroup=lambda self,row:lambda:None;cls.observe=lambda self,cid:None;return cls
-  self.stack.enter_context(patch.object(N,'normal_backend',side_effect=backend));self.stack.enter_context(patch.object(N,'verify_rebase',side_effect=lambda *a:external.append('rebase')))
+  self.stack.enter_context(patch.object(N,'normal_backend',side_effect=backend));self.stack.enter_context(patch.object(N,'verify_rebase',side_effect=lambda *a:(fault('rebase'),external.append('rebase'))))
   original=Path.cwd();os.chdir(env.parent)
   try:
    with ExitStack() as stack:
@@ -324,6 +347,19 @@ class OwnedTests(unittest.TestCase):
   self.assertNotIn('PRIVATE_RAM_SENTINEL',json.dumps(proof));self.assertFalse((self.temp/'owned.guard').exists())
  def test_foreign_service_env_stops_before_full_render_or_any_mutation(self):
   with self.assertRaisesRegex(RuntimeError,'normal_unbound_env'):self.worker(foreign_env=True)
+ def test_real_web_readonly_stages_project_only_closed_phase_for_other_exceptions(self):
+  # Each iteration owns its complete public normal tree and all actual source
+  # FDs; only the already-fenced client/legacy/rebase endpoints are synthetic.
+  for selected in ('snapshot','legacy','prefix','image','parity','rebase'):
+   with self.subTest(selected=selected):
+    folder=self.temp/selected;folder.mkdir(mode=0o700)
+    with ExitStack() as iteration,patch.object(self,'stack',iteration),patch.object(self,'temp',folder):
+     try:self.worker(web_fault=selected)
+     except Exception as error:
+      value=N.refusal(error);self.assertEqual(N.peer_refusal(value),value)
+      self.assertEqual((value['code'],value['exception_class'],value['phase']),('unknown','other','web_'+selected))
+      self.assertNotIn('PRIVATE_RAM_SENTINEL',json.dumps(value))
+     else:self.fail('the owned endpoint must refuse')
  def test_complete_sealed_lifecycle_closes_owned_guard_then_all_final_checkers_still_pass(self):
   proof,mutations,_,_=self.worker(apply=True);self.assertEqual(proof['status'],'diagnostic_active_incident_open')
   self.assertEqual(mutations,['stop','create','start']);self.assertTrue(proof['web_guard_closed']);self.assertFalse((self.temp/'owned.guard').exists())

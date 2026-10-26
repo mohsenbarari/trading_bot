@@ -140,10 +140,33 @@ class NormalTests(unittest.TestCase):
   self.assertEqual(N.HISTORICAL_SHA,'24f0f2e49f2052c1425e60cbb72bfd24bc5d14af44a9646751effb0c4d019236')
   self.assertEqual(N.BASE_SHA,'9d2b9f2850e9ac129418c33777f863777e6ce5d3d27ccc0ec3fedaa852501860')
  def test_closed_refusal_never_copies_private_exception_arguments(self):
-  N.CODES.add('normal_source');good=N.refusal(RuntimeError('normal_source'));self.assertEqual(N.peer_refusal(good),good)
+  N.literal_codes((ROOT/'deploy/maintenance/capture_conflict_normal.py').read_bytes());good=N.refusal(RuntimeError('normal_source'));self.assertEqual(N.peer_refusal(good),good)
   for error in (RuntimeError('PRIVATE_RAM_SENTINEL'),RuntimeError('normal_source','PRIVATE_RAM_SENTINEL'),KeyError('PRIVATE_RAM_SENTINEL')):
    value=N.refusal(error);self.assertEqual(value['code'],'unknown');self.assertNotIn('PRIVATE_RAM_SENTINEL',json.dumps(value))
   for key,bad in (('os_errno',True),('code','PRIVATE_RAM_SENTINEL'),('security_accepted',True)):
    value=deepcopy(good);value[key]=bad
    with self.assertRaises(RuntimeError):N.peer_refusal(value)
+ def test_only_exact_cold_base_unknown_type_and_static_codes_are_admitted(self):
+  path=ROOT/'deploy/maintenance/capture_conflict_diagnostic.py';raw=path.read_bytes();sealed=N.base_module(raw,path)
+  self.assertFalse(hasattr(sealed,'Refused'));N.phase('web_legacy');error=sealed.Unknown()
+  value=N.refusal(error);self.assertEqual((value['code'],value['exception_class'],value['phase']),('unknown','Unknown','web_legacy'))
+  self.assertEqual(N.peer_refusal(value),value)
+  class Unknown(RuntimeError):pass
+  class Child(sealed.Unknown):pass
+  for error in (Unknown('normal_source'),Child()):
+   value=N.refusal(error);self.assertEqual((value['code'],value['exception_class']),('unknown','other'))
+  error=sealed.Unknown();error.args=('PRIVATE_RAM_SENTINEL',)
+  self.assertNotIn('PRIVATE_RAM_SENTINEL',json.dumps(N.refusal(error)))
+  with patch.object(N,'CODES',set(N.CODES)):
+   N.CODES.add('not_a_source_literal');self.assertEqual(N.refusal(RuntimeError('not_a_source_literal'))['code'],'unknown')
+  with self.assertRaisesRegex(RuntimeError,'normal_source'):N.base_module(raw+b'\n',path)
+ def test_peer_requires_exact_closed_phase_class_and_new_schema(self):
+  N.phase('web_parity');good=N.refusal(RuntimeError('normal_source'));self.assertEqual(N.peer_refusal(good),good)
+  for key,bad in (('phase','PRIVATE_RAM_SENTINEL'),('phase',True),('exception_class','Refused'),('schema','capture_conflict_normal_refusal/1')):
+   value=deepcopy(good);value[key]=bad
+   with self.assertRaises(RuntimeError):N.peer_refusal(value)
+  value=deepcopy(good);value.pop('phase')
+  with self.assertRaises(RuntimeError):N.peer_refusal(value)
+  with self.assertRaisesRegex(RuntimeError,'normal_phase'):N.phase('PRIVATE_RAM_SENTINEL')
+  self.assertEqual(N.PHASE,'web_parity')
 if __name__=='__main__':unittest.main()

@@ -149,3 +149,6 @@ The ignored coexisting prepare_normal_control_v2.py and
 one_normal_observation_v2.py bind the new worker; fresh controls/nonces are
 required. Old control/preparer/caller files remain unchanged. No previous
 request grants retry or apply authority.
+
+
+The retained05b620e40f224c629d4c7d4d8b8b83a4 observation ended in a closed peer refusal; its original cause is still unproven. Worker c0f0656a536ca83c9784ad3220520c12ba59a3867d436f8d79660fa6843cf81a adds finite static phase labels and admits only the exact cold-held sealed base Unknown class for static refusal codes. No private exception argument, path or traceback is emitted; no guessed Refused class, exception-name matching or broad subclass admission is used. The refusal/2 peer decoder and public helper pins match. Existing lifecycle/ownership/normal-parity guards stay intact. Author38 genuine Root/CAP_CHOWN/NNP fixtures,19 public orchestration and7 compact-stage fixtures passed; independent source and8 focused fixtures passed with all11 source pins exact. This is diagnostic source readiness only, not a new successful live observation or capture fix.

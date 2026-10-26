@@ -40,7 +40,17 @@ def utc_started(value,*,zero=False):
  except ValueError:return False
  return zero or value!='0001-01-01T00:00:00Z'
 CODES=set(('unknown','peer','normal_peer','normal_observation'))
+STATIC_CODES=frozenset(CODES)
+PHASES=frozenset(('entry','bootstrap','control','web_bootstrap','web_refs','web_snapshot','web_legacy',
+ 'web_prefix','web_image','web_parity','web_rebase','web_lifecycle','web_finalization',
+ 'native_bootstrap','native_peer','native_finalization'))
+PHASE='entry'
+COLD_ERRORS={}
+def phase(value):
+ global PHASE
+ need(type(value) is str and value in PHASES,'normal_phase');PHASE=value
 def literal_codes(raw):
+ global STATIC_CODES
  for node in ast.walk(ast.parse(raw)):
   if not isinstance(node,ast.Call):continue
   name=node.func.id if isinstance(node.func,ast.Name) else node.func.attr if isinstance(node.func,ast.Attribute) else ''
@@ -48,6 +58,7 @@ def literal_codes(raw):
   if index is not None and len(node.args)>index and isinstance(node.args[index],ast.Constant):
    value=node.args[index].value
    if type(value) is str and re.fullmatch('[a-z][a-z0-9_]{2,80}',value):CODES.add(value)
+ STATIC_CODES=frozenset(CODES)
 def identity(s):return [s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
 @contextmanager
 def cold(path,pin,maximum=131072,mode=0o600):
@@ -74,6 +85,11 @@ def cold(path,pin,maximum=131072,mode=0o600):
  finally:os.close(fd)
 def module(raw,path):
  literal_codes(raw);value=ModuleType('_normal_capture_'+Path(path).stem);value.__file__=str(path);exec(compile(raw,str(path),'exec'),value.__dict__);return value
+def base_module(raw,path):
+ # Exact type identity from this cold-held source, never an exception name or
+ # an arbitrary RuntimeError subclass. Sealed H has Unknown, not Refused.
+ need(type(raw) is bytes and sha256(raw).hexdigest()==BASE_SHA,'normal_source')
+ value=module(raw,path);COLD_ERRORS.clear();COLD_ERRORS[value.Unknown]='Unknown';return value
 def public_file(stack,path,pin,maximum=2*1024**2,mode=None):
  # Admit the exact named leaf before open, then bind that same full9 to FD
  # before any pread. Existing H callbacks retain the source until final exit.
@@ -256,6 +272,7 @@ def normal_backend(H,C,S,M):
     except BaseException:
      if not primary:raise
    stack.callback(final_cwd)
+   phase('web_refs')
    selected=control['normal']['scope']
    self.refs={
     'env_files':[discovered_reference(control['compose']['env_reference'])],
@@ -425,14 +442,17 @@ def normal_load(H,args,stack):
  return root,control,checks
 
 def web_run(H,control,pin,root,stack,checks,apply=False,*,observe=False,pins=None):
+ phase('web_bootstrap')
  need(not os.path.lexists(H.WEB_OWNER),'owner_exists')
  need((control['normal']['scope'] is None)==observe and not(observe and apply),'normal_control')
  C,S,M,T=source_modules(H,control,stack,checks,pins=pins);Web=normal_backend(H,C,S,M)
- backend=Web(control,pin,root,stack,checks);baseline=backend.snapshot();old=backend.target(baseline);lifecycle(H,old)
+ backend=Web(control,pin,root,stack,checks);phase('web_snapshot');baseline=backend.snapshot();old=backend.target(baseline);lifecycle(H,old)
  need(old['id']==H.OLD_CID and H.public_profile(baseline)==control['public_profile_sha256'],'profile')
  need(len(old['mounts'])==5 and not any(m['Destination']==p or p.startswith(m['Destination'].rstrip('/')+'/')
   or m['Destination'].startswith(p+'/') for m in old['mounts'] for p in (H.DEST,H.FOUNDATION_DEST)),'source_delta')
- H.provenance(old,[r['path'] for r in control['compose']['files']],control['compose']['env_reference']);H.session_owners(baseline,old['id']);backend.legacy_owners()
+ phase('web_prefix');H.provenance(old,[r['path'] for r in control['compose']['files']],control['compose']['env_reference'])
+ phase('web_legacy');H.session_owners(baseline,old['id']);backend.legacy_owners()
+ phase('web_prefix')
  current=backend.command([*H.DOCKER,'compose','version','--short']).decode().strip().removeprefix('v')
  need(current==control['normal']['current_compose_version'] and re.fullmatch(SEMVER,current),'normal_compose_version')
  docker_version=backend.command([*H.DOCKER,'version','--format','{{.Server.Version}}']).decode().strip();need(re.fullmatch(SEMVER,docker_version),'normal_docker_version')
@@ -440,11 +460,12 @@ def web_run(H,control,pin,root,stack,checks,apply=False,*,observe=False,pins=Non
   'pid':old['pid'],'started':old['started'],'restarts':old['restarts']}}
  if not observe:need(C.same(scope,control['normal']['scope']),'normal_baseline_changed')
  fmt='{"Id":{{json .Id}},"Config":{{json .Config}},"RootFS":{{json .RootFS}},"Os":{{json .Os}},"Architecture":{{json .Architecture}}}'
- backend.image=H.document(backend.command([*H.DOCKER,'image','inspect','--format',fmt,H.IMAGE]))
+ phase('web_image');backend.image=H.document(backend.command([*H.DOCKER,'image','inspect','--format',fmt,H.IMAGE]))
  need(set(backend.image)=={'Id','Config','RootFS','Os','Architecture'} and backend.image['Os']=='linux' and backend.image['Architecture']=='amd64','normal_image')
- backend.old_render=backend.render();backend.full_parity(backend.old_render,old);verify_rebase(H,backend,old,backend.image,stack,checks)
+ phase('web_parity');backend.old_render=backend.render();backend.full_parity(backend.old_render,old)
+ phase('web_rebase');verify_rebase(H,backend,old,backend.image,stack,checks)
  volume={'type':'bind','source':control['new_source']['path'],'target':H.DEST,'read_only':True,'bind':{'create_host_path':False}}
- override={'services':{H.SERVICE:{'volumes':[volume]}}};backend.new_render=backend.render(new=True,public_override=override)
+ phase('web_parity');override={'services':{H.SERVICE:{'volumes':[volume]}}};backend.new_render=backend.render(new=True,public_override=override)
  H.rendered_delta(backend.old_render,backend.new_render,control['new_source']['path']);backend.check()
  need(H.same(baseline,backend.snapshot()),'normal_runtime_changed');backend.admitted_snapshot=deepcopy(baseline)
  if observe:
@@ -454,6 +475,7 @@ def web_run(H,control,pin,root,stack,checks,apply=False,*,observe=False,pins=Non
    'diagnostic_applied':False,'activation_authority':False,'capture_issue_open':True,'security_accepted':False}
   C.public(value);return value
  if not apply:return H.result(control,pin,'preflight_passed_not_applied')
+ phase('web_lifecycle')
  need(backend.clock.end-time.monotonic()>360,'window');guard=H.OwnedGuard(H.WEB_OWNER,control['nonce'],pin,stack);checks.append(guard.check)
  backend.journal=H.Journal(root,control['nonce'],pin);backend.journal.add('prepared',full_config_parity=True)
  H.write_new(backend.override,override);need(H.same(backend.render(new=True),backend.new_render),'compose');backend.check()
@@ -506,15 +528,17 @@ finally:os.close(fd)
 
 def refusal(error):
  classes=(RuntimeError,OSError,PermissionError,FileNotFoundError,NotADirectoryError,KeyError,ValueError,TypeError,AssertionError)
- code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CODES else 'unknown'
+ admitted=type(error) is RuntimeError or type(error) in COLD_ERRORS
+ code=error.args[0] if admitted and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in STATIC_CODES else 'unknown'
  number=error.errno if isinstance(error,OSError) and type(error.errno) is int and 0<error.errno<=4095 else None
- return {'schema':'capture_conflict_normal_refusal/1','status':'unknown_or_refused','code':code,
-  'exception_class':type(error).__name__ if type(error) in classes else 'other','os_errno':number,
+ return {'schema':'capture_conflict_normal_refusal/2','status':'unknown_or_refused','code':code,'phase':PHASE,
+  'exception_class':type(error).__name__ if type(error) in classes else COLD_ERRORS.get(type(error),'other'),'os_errno':number,
   'retry_allowed':False,'capture_issue_open':True,'security_accepted':False,'functional_fix_claimed':False}
 def peer_refusal(value):
- need(type(value) is dict and set(value)=={'schema','status','code','exception_class','os_errno','retry_allowed','capture_issue_open','security_accepted','functional_fix_claimed'}
-  and value['schema']=='capture_conflict_normal_refusal/1' and value['status']=='unknown_or_refused' and type(value['code']) is str
-  and value['code'] in CODES and value['exception_class'] in {'RuntimeError','OSError','PermissionError','FileNotFoundError','NotADirectoryError','KeyError','ValueError','TypeError','AssertionError','other'}
+ need(type(value) is dict and set(value)=={'schema','status','code','phase','exception_class','os_errno','retry_allowed','capture_issue_open','security_accepted','functional_fix_claimed'}
+  and value['schema']=='capture_conflict_normal_refusal/2' and value['status']=='unknown_or_refused' and type(value['code']) is str
+  and value['code'] in STATIC_CODES and type(value['phase']) is str and value['phase'] in PHASES
+  and value['exception_class'] in {'RuntimeError','Unknown','OSError','PermissionError','FileNotFoundError','NotADirectoryError','KeyError','ValueError','TypeError','AssertionError','other'}
   and (value['os_errno'] is None or type(value['os_errno']) is int and 0<value['os_errno']<=4095)
   and value['retry_allowed'] is False and value['capture_issue_open'] is True and value['security_accepted'] is value['functional_fix_claimed'] is False,'normal_peer')
  return value
@@ -530,6 +554,7 @@ def observation(H,value,control,pin):
  copy=deepcopy(control);copy['normal']['scope']=value['normal_scope'];validate_normal(H,copy);return value
 
 def native_run(H,args,root,control,checks,stack,*,capture=None):
+ phase('native_bootstrap')
  apply=args.apply==CONFIRM;observe=args.observe;need(not os.path.lexists(H.RESERVATION),'owner_exists')
  need(not(observe and apply) and (control['normal']['scope'] is None)==observe,'normal_control');clock=H.Clock(control)
  guard=journal=None;mode='observe' if observe else 'apply' if apply else 'check'
@@ -557,6 +582,7 @@ def native_run(H,args,root,control,checks,stack,*,capture=None):
   '--property=MemoryMax=1G','--property=MemorySwapMax=0','--property=TasksMax=64','--property=CPUQuota=100%',
   '/usr/bin/env','--chdir='+control['compose']['directory'],*argv]
  if journal:journal.add('peer_requested')
+ phase('native_peer')
  try:
   rc,raw=(capture or T.capture)([*H.SSH,shlex.join(scope)],min(900,max(.1,clock.end-time.monotonic())),
    environment={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C.UTF-8'})
@@ -582,16 +608,18 @@ def native_run(H,args,root,control,checks,stack,*,capture=None):
 
 def main(argv=None):
  try:
+  phase('bootstrap')
   with ExitStack() as fences,ExitStack() as stack:
-   path=Path(__file__).parent/'capture_conflict_diagnostic_base.py';raw,check=stack.enter_context(cold(path,BASE_SHA));H=module(raw,path);install_structure(H,fence_stack=fences)
+   path=Path(__file__).parent/'capture_conflict_diagnostic_base.py';raw,check=stack.enter_context(cold(path,BASE_SHA));H=base_module(raw,path);install_structure(H,fence_stack=fences)
    H.__file__=__file__  # H.load must seal the actual wrapper, not the held base.
    parser=argparse.ArgumentParser(add_help=False);parser.error=lambda _:need(False,'control')
    parser.add_argument('--site',choices=('native','web'),required=True);parser.add_argument('--nonce',required=True)
    parser.add_argument('--control-sha256',required=True);parser.add_argument('--apply');parser.add_argument('--coordinator-request');parser.add_argument('--observe',action='store_true')
    args=parser.parse_args(argv);need(args.apply in {None,CONFIRM} and not(args.observe and args.apply),'control')
    need(args.site!='web' or args.coordinator_request==args.control_sha256,'peer')
-   root,control,checks=normal_load(H,args,stack);checks.append(check)
+   phase('control');root,control,checks=normal_load(H,args,stack);checks.append(check)
    value=native_run(H,args,root,control,checks,stack) if args.site=='native' else web_run(H,control,args.control_sha256,root,stack,checks,args.apply==CONFIRM,observe=args.observe)
+   phase('native_finalization' if args.site=='native' else 'web_finalization')
    for final in checks:final()
   print(json.dumps(value,sort_keys=True));return 1 if value['status']=='peer_refused_or_unknown' else 3 if args.apply else 0
  except BaseException as error:
