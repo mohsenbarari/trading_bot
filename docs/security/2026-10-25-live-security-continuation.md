@@ -692,3 +692,10 @@ manifest `c723a6a2c7ef81c8ebd4c02f0492d43ea058d2ac3acf636907f749f577f7da44`,
 result `273d6c81c4cc118b5d6001f4c0cb2ca5c08781dd12e33e7e0d84dee6ff474eef`.
 These are fixture/kernel results, not completed logical refactor units or
 serving activation. Global acceptance remains false and clean-unit streak0.
+
+
+## 2026-10-26 normal restore: typed Engine string defaults
+
+Fresh normal backup05 completed at02:48:38Z on both existing hosts: DB, Redis, uploads and audit, independent PG49 restore/cleanup and approved protected Web-to-Native transfer. Receipt12553dce2dd7c8e4c813c288271d06a1f7c476cc5cb995df7d7338bf632edf1a remains private; this does not prove App schema compatibility. Native fresh attempt4c450cbb74c14a608707a56ad6b7b754 passed real Redis stop/removal using the reviewed shared cgroup proof, then refused normal_runtime after creating—but never starting—the owned PostgreSQL container. No App was created or serving service replaced. All old controls/resources/failures are retained.
+
+Root's trusted in-RAM exact comparison found Env including order, Cmd, Entrypoint and WorkingDir equal; image Config omitted User while Docker's created container Config used an empty string. Producer56124eb262be3d96e854710b12c09377e8722b8de29ea6b920e66b7984dfdcf9 changes only Runtime.create: absent User/WorkingDir expect the API string zero value; explicit null/wrong types/nonempty drift refuse. No submitted Config is rewritten. Independent review passed. Root then ran the actual disposable Root/CAP_CHOWN-only/NNP, read-only/network-none COPY fixture packet:101 passed, zero failures/errors/skips, actual peer exit0; manifestfd7ed21e693c3ed7327ba46d25dc4f63cde3b0f424422197b9c2d14469134315, result116a41bf0f3db967cd9b8ff8fa20de8813ae804d7b92d19c48c9008a89bfbfd1. Fresh OP5 source9ae6717a0fab051fa369d0de8b114e668a2a65ab87179abe2971447ee3b1259c is reviewed, not yet an actual restore success. Global acceptance remains false; refactor stays stopped/streak0.

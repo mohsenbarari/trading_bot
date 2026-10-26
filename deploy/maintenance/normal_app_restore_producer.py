@@ -417,7 +417,11 @@ class Runtime:
     and Path(row['Mounts'][0]['Source'])==self.volume_paths[store][1],'mounts')
    self.C.need(not row['HostConfig'].get('Binds') and self.C.same(self.C.host_mounts(row['HostConfig'].get('Mounts')),self.C.host_mounts(host['Mounts'])),'mounts')
    for key in ('Env','Cmd','Entrypoint','User','WorkingDir'):
-    self.C.need(self.C.same(row['Config'].get(key),body.get(key)),'normal_runtime')
+    expected=body.get(key)
+    if key in ('User','WorkingDir'):
+     expected=body[key] if key in body else ''
+     self.C.need(type(expected) is str,'normal_runtime')
+    self.C.need(self.C.same(row['Config'].get(key),expected),'normal_runtime')
   self.event('create_'+role+'_complete');return identifier
  def start(self,identifier):
   role=self.container_roles[identifier];self.owned(self.engine.inspect(identifier),role)

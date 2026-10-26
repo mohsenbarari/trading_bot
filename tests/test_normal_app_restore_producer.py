@@ -285,6 +285,49 @@ class ProducerTests(unittest.TestCase):
    NetworkSettings={'Networks':{'owned':{'NetworkID':'b'*64}}},Mounts=[{'Type':'volume','Name':'production_db','Source':'/NOT_READ_OR_MOUNTED','Destination':'/var/lib/postgresql/data','RW':True}])
   with self.assertRaises(C.Refused):runtime.create('db',image,config,host)
   self.assertEqual(len(sent),1);self.assertEqual(runtime.started,[]);self.assertNotIn('create_db_complete',runtime.events)
+ def merged_store(self,config,change=None):
+  runtime=self.runtime();runtime.lease['volumes']={'db':'owned_db'};runtime.volume_paths={'db':('owned_db',self.root,0,[])}
+  image='sha256:'+'d'*64;sent=[];row={}
+  host={'NetworkMode':'b'*64,'Binds':None,'Mounts':[{'Type':'volume','Source':'owned_db','Target':'/var/lib/postgresql/data','ReadOnly':False}]}
+  def request(method,path,body):
+   sent.append(deepcopy(body));actual=deepcopy(body)
+   # Real Engine API container.Config has Go string User/WorkingDir even
+   # when image DockerOCIImageConfig omitted their empty default fields.
+   for key in ('User','WorkingDir'):
+    if key not in actual or actual[key] is None:actual[key]=''
+   if change:change(actual)
+   row.update(Id='e'*64,Image=image,Config=actual,HostConfig=deepcopy(host),State={'Running':False,'Pid':0},
+    NetworkSettings={'Networks':{'owned':{'NetworkID':'b'*64}}},Mounts=[{'Type':'volume','Name':'owned_db',
+     'Source':str(self.root),'Destination':'/var/lib/postgresql/data','RW':True}])
+   return {'Id':'e'*64}
+  runtime.engine=SimpleNamespace(request=request,inspect=lambda cid:row)
+  return runtime,image,host,sent
+ def test_real_engine_string_defaults_admit_omitted_image_User_without_command_or_Env_rewrite(self):
+  config={'Env':['POSTGRES_PASSWORD=PRIVATE_SENTINEL','PATH=/usr/local/bin:/usr/bin'],
+   'Cmd':['postgres'],'Entrypoint':['docker-entrypoint.sh'],'WorkingDir':'/','Labels':{}}
+  for wanted in (config,{k:v for k,v in config.items() if k!='WorkingDir'},{**config,'User':'70'}):
+   before=deepcopy(wanted);runtime,image,host,sent=self.merged_store(wanted)
+   self.assertEqual(runtime.create('db',image,wanted,host),'e'*64);self.assertEqual(wanted,before)
+   self.assertEqual(sent[0]['Env'],wanted['Env']);self.assertEqual(sent[0]['Cmd'],wanted['Cmd'])
+   self.assertEqual(sent[0]['Entrypoint'],wanted['Entrypoint']);self.assertEqual(runtime.started,[])
+   self.assertIn('create_db_complete',runtime.events)
+ def test_string_defaults_refuse_explicit_null_types_nonempty_privilege_or_other_Config_drift(self):
+  base={'Env':['POSTGRES_PASSWORD=PRIVATE_SENTINEL'],'Cmd':['postgres'],'Entrypoint':['docker-entrypoint.sh'],'Labels':{}}
+  for key in ('User','WorkingDir'):
+   for malformed in (None,False,0,[],{}):
+    config={**base,key:malformed};runtime,image,host,_=self.merged_store(config)
+    with self.subTest(body_key=key,bad=malformed),self.assertRaisesRegex(C.Refused,'normal_runtime'):
+     runtime.create('db',image,config,host)
+    self.assertNotIn('create_db_complete',runtime.events);self.assertEqual(runtime.started,[])
+   for actual in (None,False,0,'root' if key=='User' else '/'):
+    runtime,image,host,_=self.merged_store(base,lambda row,k=key,v=actual:row.update({k:v}))
+    with self.subTest(actual_key=key,bad=actual),self.assertRaisesRegex(C.Refused,'normal_runtime'):
+     runtime.create('db',image,base,host)
+    self.assertEqual(runtime.started,[])
+  for key,actual in (('Env',base['Env']+['UNBOUND=VALUE']),('Cmd',['postgres','UNBOUND']),('Entrypoint',['UNBOUND'])):
+   runtime,image,host,_=self.merged_store(base,lambda row,k=key,v=actual:row.update({k:v}))
+   with self.subTest(field=key),self.assertRaisesRegex(C.Refused,'normal_runtime'):runtime.create('db',image,base,host)
+   self.assertEqual(runtime.started,[])
  def test_network_key_is_not_confused_with_actual_network_ID(self):
   runtime=self.runtime();self.assertEqual(runtime.endpoint({'NetworkSettings':{'Networks':{'owned_normal_name':{'NetworkID':'b'*64}}}})['NetworkID'],'b'*64)
   for networks in ({},{'name':{'NetworkID':'c'*64}},{'one':{'NetworkID':'b'*64},'two':{'NetworkID':'b'*64}}):
@@ -424,7 +467,7 @@ class ProducerTests(unittest.TestCase):
   with self.assertRaises(OSError):runtime.delete_firewall()
   self.assertEqual(len(calls),1);self.assertNotIn('firewall_delete_complete',runtime.events)
  def test_approved72_sensitive_bodies_remain_exact_with_no_ignored_fixture_dependency(self):
-  expected={'normal_app_restore_rehearsal.py:held_source': 'c633f611e9561436b7030375f4ff3e3df2ec878cd227cc1efea94ef8696cdb43', 'normal_app_restore_rehearsal.py:candidate_association': '53212173c4ea995e5910a35dba010811ae1bc053e20ba32bbc960c5257c37c7c', 'normal_app_restore_rehearsal.py:clone_targets': 'e70dc5b67d55ef417df117adf5a6f6c03ab3fe73872dc0691808df3699c84ded', 'normal_app_restore_rehearsal.py:normal_role_scope': '3a11822f75c83f4816661aaff564ccef6de7532dfa570c68389abf355052537f', 'normal_app_restore_rehearsal.py:opaque_check': 'e6936976fa60ade14f2266daac5caef3ea262ca7a09b8eadef66ad6dea93721e', 'normal_app_restore_rehearsal.py:host_mounts': '6154d84a04b4b82256cb68639b097555e71273c0e5f02087e5020fd522a908fe', 'normal_app_restore_rehearsal.py:runtime_parity': '598190aacff0bb55fbe53252a370dc8df864165d13a3dae36b7bca2beb0db95e', 'normal_app_restore_producer.py:Docker.request': '18dc6505a9f1eed042e578a63b3ce1874a5d9221f5bd1cd749067110f4dd38b4', 'normal_app_restore_producer.py:Docker.execute': 'a8b7873968fb1fbee1695f65e59a0ce59e1ba27a08264eedcdb77cae0598ba9e', 'normal_app_restore_producer.py:normal_api': 'c5e6c7a268201125b1d5fea5958a021c302af1a91c99cf55bf75cf1a32369c81', 'normal_app_restore_producer.py:archive_components': '948c04e2942b5ba2db65176b4f18b70b377804f479b796d6e4433e8b5179157e', 'normal_app_restore_producer.py:Runtime.create': '4f7b504d808a2d17b285b6587d10939172bebe143baee987cd96d0b532860eeb', 'normal_app_restore_producer.py:Runtime.start': 'a149298baa7e2e0327ca77075270b8c98fb7ae424eec1fd073a6dc2a077938bf', 'normal_app_restore_producer.py:Runtime.stop': '21650e01d383250719cb0d295a28f4d5c67d9d720c1413e26a64cc858582ec58', 'normal_app_restore_producer.py:Runtime.remove': 'aa3856c0fe00656f40b7723d8574e3823a039fe710db98760aebda7bb414c462', 'normal_app_restore_producer.py:Runtime.restore_tar': '4b6ac9053d5c1861abc109f0a6bce6fb736749e540b1d634482637f1ca58ac27', 'normal_app_restore_producer.py:Runtime.restore_redis_rdb': '474fbaee7aac0b7461d5cd46a3c5731c51312c4f6e302d601be4946720f50458', 'normal_app_restore_producer.py:Runtime.namespace_probe': 'aba4f4c30615d581600e0a7e7744c42e267e261810eca0787a2e2bd1559a712b', 'normal_app_restore_producer.py:Runtime.ready_api': '0ab81cf95316ca23bd7ce85dc2355ca3b1634570540bbf10fe2176849a7a12dc', 'normal_app_restore_producer.py:Runtime.measure_data': '4d904d93c678a76c0265a1e6d1000f9868a9756798ff4ee1c50e4ab9647d7e38', 'normal_app_restore_producer.py:Runtime.restart_stores': '599c788b8fb83d89d721bcbb9540a0173ca889368715a0b8f2049e2ad5765509'}
+  expected={'normal_app_restore_rehearsal.py:held_source': 'c633f611e9561436b7030375f4ff3e3df2ec878cd227cc1efea94ef8696cdb43', 'normal_app_restore_rehearsal.py:candidate_association': '53212173c4ea995e5910a35dba010811ae1bc053e20ba32bbc960c5257c37c7c', 'normal_app_restore_rehearsal.py:clone_targets': 'e70dc5b67d55ef417df117adf5a6f6c03ab3fe73872dc0691808df3699c84ded', 'normal_app_restore_rehearsal.py:normal_role_scope': '3a11822f75c83f4816661aaff564ccef6de7532dfa570c68389abf355052537f', 'normal_app_restore_rehearsal.py:opaque_check': 'e6936976fa60ade14f2266daac5caef3ea262ca7a09b8eadef66ad6dea93721e', 'normal_app_restore_rehearsal.py:host_mounts': '6154d84a04b4b82256cb68639b097555e71273c0e5f02087e5020fd522a908fe', 'normal_app_restore_rehearsal.py:runtime_parity': '598190aacff0bb55fbe53252a370dc8df864165d13a3dae36b7bca2beb0db95e', 'normal_app_restore_producer.py:Docker.request': '18dc6505a9f1eed042e578a63b3ce1874a5d9221f5bd1cd749067110f4dd38b4', 'normal_app_restore_producer.py:Docker.execute': 'a8b7873968fb1fbee1695f65e59a0ce59e1ba27a08264eedcdb77cae0598ba9e', 'normal_app_restore_producer.py:normal_api': 'c5e6c7a268201125b1d5fea5958a021c302af1a91c99cf55bf75cf1a32369c81', 'normal_app_restore_producer.py:archive_components': '948c04e2942b5ba2db65176b4f18b70b377804f479b796d6e4433e8b5179157e', 'normal_app_restore_producer.py:Runtime.start': 'a149298baa7e2e0327ca77075270b8c98fb7ae424eec1fd073a6dc2a077938bf', 'normal_app_restore_producer.py:Runtime.stop': '21650e01d383250719cb0d295a28f4d5c67d9d720c1413e26a64cc858582ec58', 'normal_app_restore_producer.py:Runtime.remove': 'aa3856c0fe00656f40b7723d8574e3823a039fe710db98760aebda7bb414c462', 'normal_app_restore_producer.py:Runtime.restore_tar': '4b6ac9053d5c1861abc109f0a6bce6fb736749e540b1d634482637f1ca58ac27', 'normal_app_restore_producer.py:Runtime.restore_redis_rdb': '474fbaee7aac0b7461d5cd46a3c5731c51312c4f6e302d601be4946720f50458', 'normal_app_restore_producer.py:Runtime.namespace_probe': 'aba4f4c30615d581600e0a7e7744c42e267e261810eca0787a2e2bd1559a712b', 'normal_app_restore_producer.py:Runtime.ready_api': '0ab81cf95316ca23bd7ce85dc2355ca3b1634570540bbf10fe2176849a7a12dc', 'normal_app_restore_producer.py:Runtime.measure_data': '4d904d93c678a76c0265a1e6d1000f9868a9756798ff4ee1c50e4ab9647d7e38', 'normal_app_restore_producer.py:Runtime.restart_stores': '599c788b8fb83d89d721bcbb9540a0173ca889368715a0b8f2049e2ad5765509'}
   for name in ('normal_app_restore_rehearsal.py','normal_app_restore_producer.py'):
    source=(ROOT/'deploy/maintenance'/name).read_text();tree=ast.parse(source);found={}
    def visit(nodes,prefix=''):
