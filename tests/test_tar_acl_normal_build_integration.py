@@ -8,6 +8,15 @@ P=ROOT/'scripts/prepare_canonical_app_image.py';C=ModuleType('_owned_canonical')
 
 
 def fingerprint(node):
+ if isinstance(node,ast.FunctionDef)and node.name=='command':
+  assert node.args.kwonlyargs[-1].arg=='combine_stderr'and isinstance(node.args.kw_defaults[-1],ast.Constant)and node.args.kw_defaults[-1].value is False
+  node.args.kwonlyargs.pop();node.args.kw_defaults.pop();matches=[]
+  for item in ast.walk(node):
+   if isinstance(item,ast.keyword)and item.arg=='stderr'and isinstance(item.value,ast.IfExp):
+    expected=ast.parse('subprocess.STDOUT if combine_stderr else subprocess.DEVNULL',mode='eval').body
+    assert ast.dump(item.value,include_attributes=False)==ast.dump(expected,include_attributes=False)
+    item.value=item.value.orelse;matches.append(item)
+  assert len(matches)==1
  for item in ast.walk(node):
   if hasattr(item,'type_params'):
    if item.type_params:raise AssertionError('unexpected type parameters')
@@ -28,7 +37,7 @@ class BuildIntegrationTests(unittest.TestCase):
  def test_only_selected_three_canonical_methods_change(self):
   record=json.loads((FIXTURES/'canonical-baseline-functions.json').read_bytes());nodes={n.name:fingerprint(n)for n in ast.parse(P.read_bytes()).body if isinstance(n,(ast.FunctionDef,ast.ClassDef))}
   self.assertEqual({name:nodes[name]for name in record['unchanged_functions']},record['unchanged_functions'])
-  self.assertEqual(set(nodes)-set(record['unchanged_functions']),{'public_input_names','prepare','build'})
+  self.assertEqual(set(nodes)-set(record['unchanged_functions']),{'public_input_names','prepare','build','build_output'})
  def inputs(self,root):
   values={'scripts/app_security_os_packages.lock.json':(FIXTURES/'baseline-app-security-lock.json').read_bytes(),
    'scripts/sqlite_wal_package.lock.json':(FIXTURES/'baseline-sqlite-lock.json').read_bytes(),
@@ -44,6 +53,14 @@ class BuildIntegrationTests(unittest.TestCase):
    self.assertEqual(tar,{'pip_packages/.tar-acl-capsule.lock','pip_packages/tar-acl-capsule/manifest.json','pip_packages/tar-acl-capsule/tar_1.35+dfsg-5~trixie+gold2_amd64.deb'})
    (root/'scripts/tar_acl_package.lock.json').write_bytes(b'CHANGED')
    with self.assertRaisesRegex(RuntimeError,'source_changed'):C.public_input_names(root,source)
+ def test_build_body_only_adds_the_reviewed_bounded_diagnostic_wrapper(self):
+  node=next(n for n in ast.parse(P.read_bytes()).body if isinstance(n,ast.FunctionDef)and n.name=='build');matches=[]
+  for parent in ast.walk(node):
+   if isinstance(parent,ast.Call)and isinstance(parent.func,ast.Name)and parent.func.id=='build_output':
+    self.assertEqual(len(parent.args),2);self.assertEqual(ast.dump(parent.args[0]),ast.dump(ast.Name(id='root',ctx=ast.Load())));self.assertEqual(parent.keywords,[])
+    parent.func=ast.Name(id='command',ctx=ast.Load());parent.args=parent.args[1:]
+    parent.keywords=[ast.keyword(arg='environment',value=ast.Call(func=ast.Name(id='env',ctx=ast.Load()),args=[ast.Name(id='root',ctx=ast.Load())],keywords=[])),ast.keyword(arg='seconds',value=ast.Constant(value=1800))];matches.append(parent)
+  self.assertEqual(len(matches),1);self.assertEqual(fingerprint(node),'bce2c3215ede886a0a1e3888fbb6c69bbefdce574d20aa72b62294cdd66a1be8')
  def test_all_normal_shell_cache_callers_prepare_or_check_tar(self):
   expected={'deploy.sh':1,'scripts/bootstrap_ci_backend.sh':1,'scripts/deploy_staging.sh':1,'scripts/production_deploy_online.sh':6}
   for name,count in expected.items():
