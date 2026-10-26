@@ -347,6 +347,64 @@ class ProducerTests(unittest.TestCase):
    {'Running':False,'Pid':0,'StartedAt':'2026-10-25T00:00:00Z'}):
    changed=deepcopy(row);changed['State']=state
    with self.assertRaises(C.Refused):runtime.endpoint(changed,stopped=True)
+ def ready_runtime(self,health='absent',status='absent',execute=None):
+  from tests.test_normal_app_restore_rehearsal import NormalRestoreTests
+  operands=NormalRestoreTests();operands.root=self.root
+  control,lease,private,_,_=operands.case();normal=private['normal']['candidate']
+  if health=='absent':normal['Config'].pop('Healthcheck')
+  else:normal['Config']['Healthcheck']=deepcopy(health)
+  normal['Config']['Labels'].update(M.labels(control['nonce'],'app_candidate'))
+  measured=operands.measured(normal,lease,control['candidate_image_id']);measured.update(running=True,pid=1234)
+  state={'Running':True,'Restarting':False,'Paused':False,'Dead':False,'Pid':1234,'StartedAt':'2026-10-26T00:00:00Z'}
+  if status!='absent':state['Health']={'Status':status}
+  row={'Id':measured['id'],'Image':measured['image'],'Config':deepcopy(measured['Config']),'HostConfig':deepcopy(measured['HostConfig']),
+   'Mounts':deepcopy(measured['Mounts']),'State':state,'RestartCount':0,'NetworkSettings':{'Networks':{'owned':{'NetworkID':lease['network_id']}}}}
+  runtime=self.runtime();runtime.control=control;runtime.lease=lease;runtime.normal=private['normal'];runtime.current=('candidate',measured['id'])
+  runtime.images={'app_candidate':measured['image']};runtime.end=3;calls=[]
+  runtime.isolation=lambda:calls.append('isolation')
+  def executed(cid,argv):
+   calls.append(('HTTP',cid,argv));return execute(row) if execute else (0,b'')
+  runtime.engine=SimpleNamespace(inspect=lambda cid:deepcopy(row),execute=executed)
+  clock=[0]
+  def now():clock[0]+=1;return clock[0]
+  self.stack.enter_context(patch.object(M.time,'time',side_effect=now));self.stack.enter_context(patch.object(M.time,'sleep'))
+  return runtime,row,calls
+ def test_readiness_absent_null_or_disabled_normal_health_requires_HTTP_and_keeps_raw_Config(self):
+  for health in ('absent',None,{'Test':['NONE']}):
+   directory=self.root/str(len(list(self.root.iterdir())));directory.mkdir(mode=0o700);original=self.root;self.root=directory
+   try:
+    runtime,row,calls=self.ready_runtime(health);before=deepcopy(runtime.normal)
+    ready=runtime.ready_api(row['Id']);self.assertEqual(ready['normal_api_config_returncode'],0);self.assertEqual(ready['pid'],1234)
+    self.assertEqual(runtime.normal,before);self.assertTrue(any(type(x) is tuple and x[0]=='HTTP' for x in calls));self.assertEqual(runtime.started,[])
+   finally:self.root=original
+ def test_readiness_enabled_normal_check_waits_starting_then_requires_real_healthy(self):
+  def ready(row):row['State']['Health']['Status']='healthy';return 0,b''
+  runtime,row,calls=self.ready_runtime({'Test':['CMD-SHELL','normal public API check']},'starting',ready)
+  self.assertEqual(runtime.ready_api(row['Id'])['pid'],1234);self.assertEqual(sum(type(x) is tuple for x in calls),2)
+ def test_readiness_mode_does_not_waive_HTTP_health_type_status_or_lifecycle(self):
+  cases=[('absent','healthy',None),('absent',None,None),('absent','absent',lambda row:(1,b'')),
+   ({'Test':['CMD','normal']},'absent',None),({'Test':['CMD','normal']},'unhealthy',None),
+   ({'Test':['CMD','normal']},'unknown',None),({'Test':['CMD','normal']},True,None)]
+  for i,(health,status,execute) in enumerate(cases):
+   directory=self.root/str(i);directory.mkdir(mode=0o700);original=self.root;self.root=directory
+   try:
+    runtime,row,_=self.ready_runtime(health,status,execute)
+    with self.subTest(health=health,status=status),self.assertRaisesRegex(C.Refused,'normal_runtime'):runtime.ready_api(row['Id'])
+    self.assertEqual(runtime.started,[])
+   finally:self.root=original
+ def test_readiness_bad_admitted_check_or_late_Config_and_PID_drift_refuse(self):
+  malformed=({},False,[],{'Test':None},{'Test':[]},{'Test':['NONE','extra']},{'Test':['CMD']},
+   {'Test':['OTHER','normal']},{'Test':['CMD',False]},{'Test':['CMD','normal'],'Interval':True})
+  cases=[(health,None) for health in malformed]
+  cases += [('absent',lambda row:(row['Config']['Env'].append('UNBOUND=PUBLIC'),(0,b''))[1]),
+   ('absent',lambda row:(row['State'].update(Pid=2345),(0,b''))[1]),
+   ({'Test':['CMD','normal']},lambda row:(row['State'].update(Pid=2345),(0,b''))[1])]
+  for i,(health,execute) in enumerate(cases):
+   directory=self.root/str(i);directory.mkdir(mode=0o700);original=self.root;self.root=directory
+   try:
+    runtime,row,_=self.ready_runtime(health,'starting' if type(health) is dict and execute else 'absent',execute)
+    with self.subTest(health=health),self.assertRaisesRegex(C.Refused,'normal_runtime'):runtime.ready_api(row['Id'])
+   finally:self.root=original
  def test_runtime_container_caps_include_real_swap_pids_cpu_log_bounds(self):
   cap=M.cap_host(self.runtime().control['limits']['api']);self.assertEqual(cap['Memory'],cap['MemorySwap']);self.assertGreater(cap['PidsLimit'],0)
   self.assertEqual(cap['NanoCpus'],1000000000);self.assertEqual(cap['LogConfig'],{'Type':'json-file','Config':{'max-size':'1048576','max-file':'2'}})
@@ -467,7 +525,7 @@ class ProducerTests(unittest.TestCase):
   with self.assertRaises(OSError):runtime.delete_firewall()
   self.assertEqual(len(calls),1);self.assertNotIn('firewall_delete_complete',runtime.events)
  def test_approved72_sensitive_bodies_remain_exact_with_no_ignored_fixture_dependency(self):
-  expected={'normal_app_restore_rehearsal.py:held_source': 'c633f611e9561436b7030375f4ff3e3df2ec878cd227cc1efea94ef8696cdb43', 'normal_app_restore_rehearsal.py:candidate_association': '53212173c4ea995e5910a35dba010811ae1bc053e20ba32bbc960c5257c37c7c', 'normal_app_restore_rehearsal.py:clone_targets': 'e70dc5b67d55ef417df117adf5a6f6c03ab3fe73872dc0691808df3699c84ded', 'normal_app_restore_rehearsal.py:normal_role_scope': '3a11822f75c83f4816661aaff564ccef6de7532dfa570c68389abf355052537f', 'normal_app_restore_rehearsal.py:opaque_check': 'e6936976fa60ade14f2266daac5caef3ea262ca7a09b8eadef66ad6dea93721e', 'normal_app_restore_rehearsal.py:host_mounts': '6154d84a04b4b82256cb68639b097555e71273c0e5f02087e5020fd522a908fe', 'normal_app_restore_producer.py:Docker.request': '18dc6505a9f1eed042e578a63b3ce1874a5d9221f5bd1cd749067110f4dd38b4', 'normal_app_restore_producer.py:Docker.execute': 'a8b7873968fb1fbee1695f65e59a0ce59e1ba27a08264eedcdb77cae0598ba9e', 'normal_app_restore_producer.py:normal_api': 'c5e6c7a268201125b1d5fea5958a021c302af1a91c99cf55bf75cf1a32369c81', 'normal_app_restore_producer.py:archive_components': '948c04e2942b5ba2db65176b4f18b70b377804f479b796d6e4433e8b5179157e', 'normal_app_restore_producer.py:Runtime.start': 'a149298baa7e2e0327ca77075270b8c98fb7ae424eec1fd073a6dc2a077938bf', 'normal_app_restore_producer.py:Runtime.stop': '21650e01d383250719cb0d295a28f4d5c67d9d720c1413e26a64cc858582ec58', 'normal_app_restore_producer.py:Runtime.remove': 'aa3856c0fe00656f40b7723d8574e3823a039fe710db98760aebda7bb414c462', 'normal_app_restore_producer.py:Runtime.restore_tar': '4b6ac9053d5c1861abc109f0a6bce6fb736749e540b1d634482637f1ca58ac27', 'normal_app_restore_producer.py:Runtime.restore_redis_rdb': '474fbaee7aac0b7461d5cd46a3c5731c51312c4f6e302d601be4946720f50458', 'normal_app_restore_producer.py:Runtime.namespace_probe': 'aba4f4c30615d581600e0a7e7744c42e267e261810eca0787a2e2bd1559a712b', 'normal_app_restore_producer.py:Runtime.ready_api': '0ab81cf95316ca23bd7ce85dc2355ca3b1634570540bbf10fe2176849a7a12dc', 'normal_app_restore_producer.py:Runtime.measure_data': '4d904d93c678a76c0265a1e6d1000f9868a9756798ff4ee1c50e4ab9647d7e38', 'normal_app_restore_producer.py:Runtime.restart_stores': '599c788b8fb83d89d721bcbb9540a0173ca889368715a0b8f2049e2ad5765509'}
+  expected={'normal_app_restore_rehearsal.py:held_source': 'c633f611e9561436b7030375f4ff3e3df2ec878cd227cc1efea94ef8696cdb43', 'normal_app_restore_rehearsal.py:candidate_association': '53212173c4ea995e5910a35dba010811ae1bc053e20ba32bbc960c5257c37c7c', 'normal_app_restore_rehearsal.py:clone_targets': 'e70dc5b67d55ef417df117adf5a6f6c03ab3fe73872dc0691808df3699c84ded', 'normal_app_restore_rehearsal.py:normal_role_scope': '3a11822f75c83f4816661aaff564ccef6de7532dfa570c68389abf355052537f', 'normal_app_restore_rehearsal.py:opaque_check': 'e6936976fa60ade14f2266daac5caef3ea262ca7a09b8eadef66ad6dea93721e', 'normal_app_restore_rehearsal.py:host_mounts': '6154d84a04b4b82256cb68639b097555e71273c0e5f02087e5020fd522a908fe', 'normal_app_restore_producer.py:Docker.request': '18dc6505a9f1eed042e578a63b3ce1874a5d9221f5bd1cd749067110f4dd38b4', 'normal_app_restore_producer.py:Docker.execute': 'a8b7873968fb1fbee1695f65e59a0ce59e1ba27a08264eedcdb77cae0598ba9e', 'normal_app_restore_producer.py:normal_api': 'c5e6c7a268201125b1d5fea5958a021c302af1a91c99cf55bf75cf1a32369c81', 'normal_app_restore_producer.py:archive_components': '948c04e2942b5ba2db65176b4f18b70b377804f479b796d6e4433e8b5179157e', 'normal_app_restore_producer.py:Runtime.start': 'a149298baa7e2e0327ca77075270b8c98fb7ae424eec1fd073a6dc2a077938bf', 'normal_app_restore_producer.py:Runtime.stop': '21650e01d383250719cb0d295a28f4d5c67d9d720c1413e26a64cc858582ec58', 'normal_app_restore_producer.py:Runtime.remove': 'aa3856c0fe00656f40b7723d8574e3823a039fe710db98760aebda7bb414c462', 'normal_app_restore_producer.py:Runtime.restore_tar': '4b6ac9053d5c1861abc109f0a6bce6fb736749e540b1d634482637f1ca58ac27', 'normal_app_restore_producer.py:Runtime.restore_redis_rdb': '474fbaee7aac0b7461d5cd46a3c5731c51312c4f6e302d601be4946720f50458', 'normal_app_restore_producer.py:Runtime.namespace_probe': 'aba4f4c30615d581600e0a7e7744c42e267e261810eca0787a2e2bd1559a712b', 'normal_app_restore_producer.py:Runtime.measure_data': '4d904d93c678a76c0265a1e6d1000f9868a9756798ff4ee1c50e4ab9647d7e38', 'normal_app_restore_producer.py:Runtime.restart_stores': '599c788b8fb83d89d721bcbb9540a0173ca889368715a0b8f2049e2ad5765509'}
   for name in ('normal_app_restore_rehearsal.py','normal_app_restore_producer.py'):
    source=(ROOT/'deploy/maintenance'/name).read_text();tree=ast.parse(source);found={}
    def visit(nodes,prefix=''):

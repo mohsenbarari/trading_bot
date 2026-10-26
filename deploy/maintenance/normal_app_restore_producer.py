@@ -781,6 +781,14 @@ class Runtime:
    'network_id':endpoint['NetworkID'],'running':row['State']['Running'],'pid':row['State']['Pid'],
    'Mounts':[{k:r[k] for k in ('Type','Destination','RW',('Name' if r['Type']=='volume' else 'Source'))} for r in row['Mounts']]}
  def ready_api(self,identifier):
+  health=self.normal[self.current[0]]['Config'].get('Healthcheck')
+  if health is None:enabled=False
+  else:
+   self.C.need(type(health) is dict and set(health)<={'Test','Interval','Timeout','StartPeriod','StartInterval','Retries'},'normal_runtime')
+   test=health.get('Test')
+   self.C.need(type(test) is list and all(type(v) is str and v for v in test)
+    and (test==['NONE'] or len(test)>=2 and test[0] in ('CMD','CMD-SHELL')),'normal_runtime')
+   self.C.need(all(type(health[k]) is int and health[k]>=0 for k in set(health)-{'Test'}),'normal_runtime');enabled=test!=['NONE']
   end=min(self.end,time.time()+120);initial=None
   while True:
    self.check();self.isolation();row=self.owned(self.engine.inspect(identifier),'app_'+self.current[0]);state=row['State']
@@ -790,9 +798,14 @@ class Runtime:
    if initial is None:initial=lifecycle
    self.C.need(lifecycle==initial,'normal_runtime')
    rc,raw=self.engine.execute(identifier,['python','-c',"import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/config',timeout=3); assert r.status==200"])
-   if rc==0 and state.get('Health',{}).get('Status')=='healthy':break
+   if enabled:
+    self.C.need(type(state.get('Health')) is dict and type(state['Health'].get('Status')) is str
+     and state['Health']['Status'] in ('starting','healthy','unhealthy'),'normal_runtime')
+    healthy=state['Health']['Status']=='healthy'
+   else:self.C.need('Health' not in state,'normal_runtime');healthy=True
+   if type(rc) is int and rc==0 and healthy:break
    self.C.need(time.time()<end,'normal_runtime');time.sleep(.5)
-  measured=self.inspect_api(identifier)
+  measured=self.inspect_api(identifier);self.C.need(measured['pid']==initial[0],'normal_runtime')
   self.C.runtime_parity(self.normal[self.current[0]],measured,row['Image'],self.lease,self.control,stopped_required=False)
   return {'id':identifier,'image':row['Image'],'running':True,'pid':state['Pid'],'started':state['StartedAt'],
    'restarts':row['RestartCount'],'normal_api_config_returncode':0}
