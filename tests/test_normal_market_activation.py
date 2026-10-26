@@ -540,6 +540,31 @@ class NormalMarketTests(unittest.TestCase):
         for row,stopped in ((f.stopped,True),(f.active,False)):
             self.assertTrue(M.parity(self.C,f.old,f.new,'market-processor',f.old_row,row,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{},stopped=stopped))
         self.assertEqual(f.__dict__,saved.__dict__)
+    def test_normal_compose_memory_byte_strings_and_default_swap_keep_raw_operands_and_complete_parity(self):
+        for memory,swap in (('384m','768m'),('402653184','805306368'),('0.375g',None)):
+            f=self.case();role='market-processor'
+            for model in (f.old,f.new):
+                spec=model['services'][role];spec['mem_limit']=memory
+                if swap is None:spec.pop('memswap_limit')
+                else:spec['memswap_limit']=swap
+            saved=deepcopy(f)
+            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+            for row,stopped in ((f.stopped,True),(f.active,False)):
+                self.assertTrue(M.parity(self.C,f.old,f.new,role,f.old_row,row,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{},stopped=stopped))
+            self.assertEqual(f.__dict__,saved.__dict__)
+    def test_memory_normalization_refuses_malformed_unbounded_and_wrong_actual_resources_or_deploy(self):
+        for key in ('mem_limit','memswap_limit'):
+            for bad in (True,False,1.0,float('nan'),None,-1,'-1','','1mb',' 1m','1e9','0.1b',2**63,'9'*65):
+                f=self.case();f.old['services']['market-processor'][key]=bad
+                with self.subTest(key=key,bad=bad),self.assertRaises(RuntimeError):
+                    M.baseline(self.C,f.old,'market-processor',f.old_row,f.old_image,f.scope,f.paths)
+        with self.assertRaisesRegex(RuntimeError,'normal_resource'):M.normal_memory_spec({'mem_limit':2**62})
+        for field in ('Memory','MemorySwap'):
+            f=self.case();f.old['services']['market-processor'].update(mem_limit='384m',memswap_limit='768m');f.old_row['host'][field]+=1
+            with self.subTest(field=field),self.assertRaisesRegex(RuntimeError,'normal_resource'):
+                M.baseline(self.C,f.old,'market-processor',f.old_row,f.old_image,f.scope,f.paths)
+        f=self.case();f.old['services']['market-processor']['deploy']={'resources':{'limits':{'memory':'1g'}}}
+        with self.assertRaisesRegex(RuntimeError,'normal_features'):M.baseline(self.C,f.old,'market-processor',f.old_row,f.old_image,f.scope,f.paths)
     def test_each_business_config_host_secret_tmpfs_resource_or_network_drift_refuses(self):
         for change in (lambda r:r['config']['Env'].append('BUSINESS=CHANGED'),lambda r:r['config'].update(ArgsEscaped=False),
                 lambda r:r['config'].update(StopTimeout=30),lambda r:r['host'].update(ShmSize=64*1024**2),

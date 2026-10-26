@@ -139,6 +139,17 @@ def size_bytes(value):
     match=re.fullmatch(r'([0-9]+(?:\.[0-9]+)?)([bkmg]?)',value.lower());result=Decimal(match[1])*{'':1,'b':1,'k':1024,'m':1024**2,'g':1024**3}[match[2]]
     require(result==int(result),'normal_size');return int(result)
 
+def normal_memory_spec(spec):
+    """Parse normal Compose byte strings on a validation-only service copy."""
+    value=deepcopy(spec)
+    for key in ('mem_limit','memswap_limit'):
+        if key not in value:continue
+        item=value[key]
+        require(type(item) is int or type(item) is str and len(item)<=64,'normal_resource')
+        value[key]=size_bytes(item);require(value[key]<=2**63-1,'normal_resource')
+    require(value.get('memswap_limit',2*value.get('mem_limit',0))<=2**63-1,'normal_resource')
+    return value
+
 def secret_metadata(value,*,empty=False):
     # Normal file-backed Compose secrets may be root:10001 group-readable.
     # A measured full9 reference is still mandatory and held without a read.
@@ -284,7 +295,7 @@ def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_
     require(C.same(host.get('Tmpfs') or {},tmpfs(spec)) and host.get('ShmSize')==size_bytes(spec.get('shm_size',67108864)),'normal_tmpfs')
     # New features are accounted explicitly above, then existing complete host
     # validation applies to a validation-only clone. Actual operands stay raw.
-    host_check=deepcopy(host);host_check.pop('Tmpfs',None);host_check['ShmSize']=67108864;C.normal_host(spec,host_check)
+    host_check=deepcopy(host);host_check.pop('Tmpfs',None);host_check['ShmSize']=67108864;C.normal_host(normal_memory_spec(spec),host_check)
     require(host.get('Privileged') is spec.get('privileged',False) and host.get('ReadonlyRootfs') is spec.get('read_only',False)
         and host.get('AutoRemove') is False and (host.get('PidMode') or '')==spec.get('pid','')
         and (host.get('UsernsMode') or '')==spec.get('userns_mode',''),'normal_host')

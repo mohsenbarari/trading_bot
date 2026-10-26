@@ -167,6 +167,29 @@ class DatastoreTests(unittest.TestCase):
         for role in M.ROLES:
             f=self.case(role);M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
             M.parity(self.C,f.old,f.new,role,f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+    def test_all_five_datastore_memory_byte_strings_and_default_swap_preserve_raw_complete_parity(self):
+        for role in M.ROLES:
+            for explicit_swap in (True,False):
+                f=self.case(role);service=M.SERVICE[role]
+                for model in (f.old,f.new):
+                    spec=model['services'][service];spec['mem_limit']='96m'
+                    if explicit_swap:spec['memswap_limit']='192m'
+                    else:spec.pop('memswap_limit',None)
+                for row in (f.old_row,f.stopped,f.active):row['host'].update(Memory=96*1024**2,MemorySwap=192*1024**2)
+                saved=deepcopy(f);M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+                M.parity(self.C,f.old,f.new,role,f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+                self.assertEqual(f.__dict__,saved.__dict__)
+    def test_datastore_memory_refuses_malformed_overflow_actual_drift_and_unsupported_deploy(self):
+        for key in ('mem_limit','memswap_limit'):
+            for bad in (True,False,1.0,float('inf'),None,-1,'-1','','1mb',' 1m','1e9','0.1b',2**63,'9'*65):
+                f=self.case();f.old['services']['db'][key]=bad
+                with self.subTest(key=key,bad=bad),self.assertRaises(RuntimeError):M.baseline(self.C,f.old,'native-postgres',f.old_row,f.old_image,f.scope,f.paths)
+        with self.assertRaisesRegex(RuntimeError,'normal_resource'):M.normal_memory_spec({'mem_limit':2**62})
+        for field in ('Memory','MemorySwap'):
+            f=self.case();f.old['services']['db'].update(mem_limit='96m',memswap_limit='192m');f.old_row['host'].update(Memory=96*1024**2,MemorySwap=192*1024**2);f.old_row['host'][field]+=1
+            with self.subTest(field=field),self.assertRaisesRegex(RuntimeError,'normal_resource'):M.baseline(self.C,f.old,'native-postgres',f.old_row,f.old_image,f.scope,f.paths)
+        f=self.case();f.old['services']['db']['deploy']={'resources':{'limits':{'memory':'1g'}}}
+        with self.assertRaisesRegex(RuntimeError,'normal_features'):M.baseline(self.C,f.old,'native-postgres',f.old_row,f.old_image,f.scope,f.paths)
     def test_public_market_postgres_inherited_profiles_keep_only_web_CLI_and_exact_rendered_pair(self):
         base=(ROOT/'deploy/market-data/compose.yml').read_text()
         web=(ROOT/'deploy/market-data/compose.web.yml').read_text()
