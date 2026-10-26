@@ -27,6 +27,10 @@ CONFIRM='ADD-ONLY-CAPTURE2-CURRENT-NORMAL-DIAGNOSTIC-SOURCE-20261026-04'
 SEMVER=r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?'
 SECRET_PATHS=('/srv/trading-bot/secure/market-data/account2-config.json',
  '/srv/trading-bot/secure/market-data/account2-peer-hmac')
+LEGACY_RUNTIME_ROOT=Path('/run/systemd/system')
+LEGACY_PERSISTENT_ROOT=Path('/etc/systemd/system')
+LEGACY_CGROUP_ROOT=Path('/sys/fs/cgroup')
+MACHINE_ID=Path('/etc/machine-id')
 
 def need(ok,code):
  if not ok:raise RuntimeError(code)
@@ -267,6 +271,51 @@ def normal_backend(H,C,S,M):
    # All client state belongs to this operation; no personal Docker config.
    return super().command(['/usr/bin/env','-i','PATH=/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL=C.UTF-8',
     'DOCKER_HOST=unix:///var/run/docker.sock','DOCKER_CONFIG='+str(self.client),*argv],**kwargs)
+  def legacy_owners(self):
+   # Runtime drop-ins disappear after reboot. The sealed persistent inhibitor
+   # is the same authority; never recreate a runtime file to satisfy admission.
+   import dbus
+   need(not os.path.lexists(H.LEGACY_TOKEN),'session_owner');self.check()
+   bus=dbus.SystemBus(private=True);held=[]
+   try:
+    manager=dbus.Interface(bus.get_object('org.freedesktop.systemd1','/org/freedesktop/systemd1'),'org.freedesktop.systemd1.Manager')
+    for name in H.LEGACY_UNITS:
+     manager.RefUnit(name,timeout=5);held.append(name);obj=manager.GetUnit(name,timeout=5)
+     props=dbus.Interface(bus.get_object('org.freedesktop.systemd1',obj),'org.freedesktop.DBus.Properties')
+     unit=lambda key:props.Get('org.freedesktop.systemd1.Unit',key,timeout=5)
+     service=lambda key:props.Get('org.freedesktop.systemd1.Service',key,timeout=5)
+     need(str(unit('LoadState'))=='loaded' and str(unit('UnitFileState'))=='disabled'
+      and str(unit('ActiveState')) in {'inactive','failed'} and bool(unit('RefuseManualStart'))
+      and not bool(unit('NeedDaemonReload')) and int(service('MainPID'))==int(service('ControlPID'))==0,'session_owner')
+     need(any(list(row[:4])==['ConditionPathExists',False,False,str(H.LEGACY_TOKEN)] for row in unit('Conditions')),'session_owner')
+     runtime=LEGACY_RUNTIME_ROOT/(name+'.d')/'market-container-authority.conf'
+     persistent=LEGACY_PERSISTENT_ROOT/(name+'.d')/'90-security-20261024-web-boot.conf'
+     files=set()
+     for path,body in ((runtime,H.LEGACY_BODY),(persistent,H.LEGACY_HEADER+H.LEGACY_BODY)):
+      if os.path.lexists(path):
+       _,check=public_file(self.stack,path,sha256(body).hexdigest(),8192);self.checks.append(check);files.add(str(path))
+      else:
+       def absent(path=path):need(not os.path.lexists(path),'session_owner')
+       def final(absent=absent):
+        primary=sys.exc_info()[0] is not None
+        try:absent()
+        except BaseException:
+         if not primary:raise
+       absent();self.checks.append(absent);self.stack.callback(final)
+     actual=list(map(str,unit('DropInPaths')))
+     need(files and len(actual)==len(set(actual)) and set(actual)==files,'session_owner')
+     group=str(unit('ControlGroup'))
+     if group:
+      need(group.startswith('/') and '..' not in Path(group).parts,'cgroup');folder=LEGACY_CGROUP_ROOT/group.lstrip('/')
+      if folder.exists():
+       with (H.canonical(folder)/'cgroup.events').open('rb') as source:raw=source.read(4097)
+       need(len(raw)<=4096 and dict(line.split() for line in raw.splitlines()).get(b'populated')==b'0','session_owner')
+   finally:
+    for name in reversed(held):
+     try:manager.UnrefUnit(name,timeout=5)
+     except Exception:pass
+    bus.close()
+   need(not os.path.lexists(H.LEGACY_TOKEN),'session_owner');self.check()
   def raw_render(self,new=False,public_override=None,*,references=False):
    tail=['config','--format','json']+(['--no-env-resolution'] if references else [])
    if public_override is None:return H.document(self.command(self.compose(*tail,new=new)))
@@ -317,6 +366,58 @@ def detach_closed_guard(H,guard,checks,stack):
   except BaseException:
    if not primary:raise
  outer.callback(final)
+
+def machine_file(stack,expected):
+ path=MACHINE_ID;parents=[]
+ for parent in path.parents:
+  s=parent.lstat();need(parent.resolve(strict=True)==parent and stat.S_ISDIR(s.st_mode)
+   and s.st_uid==s.st_gid==0 and not s.st_mode&0o022,'normal_machine')
+  parents.append((parent,identity(s)[:5]))
+ before=identity(path.lstat());need(path.resolve(strict=True)==path and before[2] in {0o100444,0o100644}
+  and before[3:7]==[0,0,1,33],'normal_machine')
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC);stack.callback(os.close,fd)
+ need(identity(os.fstat(fd))==before,'normal_machine');raw=os.pread(fd,34,0)
+ need(type(expected) is str and re.fullmatch('[a-f0-9]{32}',expected) and raw==expected.encode()+b'\n','normal_machine')
+ def check():
+  need(before==identity(os.fstat(fd))==identity(path.lstat()) and path.resolve(strict=True)==path
+   and all(p.resolve(strict=True)==p and identity(p.lstat())[:5]==v for p,v in parents),'normal_machine')
+  need(os.pread(fd,34,0)==raw,'normal_machine')
+ def final():
+  primary=sys.exc_info()[0] is not None
+  try:check()
+  except BaseException:
+   if not primary:raise
+ stack.callback(final);check();return check
+
+def normal_load(H,args,stack):
+ # Preserve sealed H.load admission, replacing only its unadmitted machine read.
+ need(os.geteuid()==0,'root')
+ need(type(args.nonce) is str and re.fullmatch('[a-f0-9]{32}',args.nonce)
+  and type(args.control_sha256) is str and re.fullmatch('[a-f0-9]{64}',args.control_sha256),'control')
+ root=H.ROOTS[args.site]/args.nonce;H.canonical(root)
+ need(root.lstat().st_uid==0 and stat.S_IMODE(root.lstat().st_mode)==0o700 and re.fullmatch('[a-f0-9]{32}',args.nonce),'root')
+ need(not any(os.path.lexists(root/name) for name in ('01-prepared.json','terminal.json','ack.json')),'owner_exists')
+ raw,check=H.public_file(stack,root/'control.json',args.control_sha256,mode=0o600)
+ control=H.validate_control(H.document(raw),time.time());need(control['nonce']==args.nonce,'control');checks=[check]
+ raw,check=H.public_file(stack,Path(__file__).resolve(),control['worker_sha256']);checks.append(check);literal_codes(raw)
+ checks.append(machine_file(stack,control[args.site+'_machine_id']))
+ if args.site=='web':
+  unit='capture-conflict-web-'+control['nonce']+'.scope'
+  with Path('/proc/self/cgroup').open('rb') as source:group=source.read(65537)
+  need(0<len(group)<=65536 and group.startswith(b'0::/') and group.decode().strip().endswith('/'+unit),'root')
+  raw=H.bounded(['/usr/bin/systemctl','show',unit,'--property=RuntimeMaxUSec,TimeoutStopUSec,KillMode,SendSIGKILL'],H.Clock(control),maximum=4096)
+  fields=dict(line.split('=',1) for line in raw.decode().splitlines())
+  need(set(fields)=={'RuntimeMaxUSec','TimeoutStopUSec','KillMode','SendSIGKILL'}
+   and fields['RuntimeMaxUSec'] in {'15min','15min 0s','900s'} and fields['TimeoutStopUSec']=='5s'
+   and fields['KillMode']=='control-group' and fields['SendSIGKILL']=='yes','root')
+ for name,path in (('marker',H.MARKER),*([('source',H.SOURCE)] if args.site=='native' else [])):
+  fence=H.MetadataFence(path,control['fences'][args.site][name],stack);checks.append(fence.check)
+ if args.site=='web':
+  for row in [*control['compose']['files'],control['new_source']]:
+   _,check=H.public_file(stack,Path(row['path']),row['sha256'],maximum=256*1024,
+    mode=0o644 if row is control['new_source'] else None);checks.append(check)
+  checks.append(H.private_metadata(stack,Path(control['compose']['env_reference'])))
+ return root,control,checks
 
 def web_run(H,control,pin,root,stack,checks,apply=False,*,observe=False,pins=None):
  need(not os.path.lexists(H.WEB_OWNER),'owner_exists')
@@ -484,7 +585,7 @@ def main(argv=None):
    parser.add_argument('--control-sha256',required=True);parser.add_argument('--apply');parser.add_argument('--coordinator-request');parser.add_argument('--observe',action='store_true')
    args=parser.parse_args(argv);need(args.apply in {None,CONFIRM} and not(args.observe and args.apply),'control')
    need(args.site!='web' or args.coordinator_request==args.control_sha256,'peer')
-   root,control,checks=H.load(args,stack);checks.append(check)
+   root,control,checks=normal_load(H,args,stack);checks.append(check)
    value=native_run(H,args,root,control,checks,stack) if args.site=='native' else web_run(H,control,args.control_sha256,root,stack,checks,args.apply==CONFIRM,observe=args.observe)
    for final in checks:final()
   print(json.dumps(value,sort_keys=True));return 1 if value['status']=='peer_refused_or_unknown' else 3 if args.apply else 0

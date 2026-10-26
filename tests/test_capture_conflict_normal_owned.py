@@ -5,7 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType,SimpleNamespace
 from unittest.mock import patch
-import io,json,os,tempfile,time,unittest
+import io,json,os,sys,tempfile,time,unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 def load(path):
@@ -20,6 +20,96 @@ class OwnedTests(unittest.TestCase):
   self.temp=Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='.capture-normal-',dir=ROOT)));self.temp.chmod(0o700)
  def public(self,name,raw=b'PUBLIC FIXTURE',mode=0o600):
   p=self.temp/name;p.parent.mkdir(parents=True,exist_ok=True,mode=0o700);p.write_bytes(raw);p.chmod(mode);return p
+ def legacy_case(self,stack,*,runtime=False,persistent=True):
+  H=P.load('capture_conflict_diagnostic.py');folder=self.temp/('legacy-'+str(getattr(self,'legacy_index',0)));self.legacy_index=getattr(self,'legacy_index',0)+1
+  folder.mkdir(mode=0o700);roots={k:folder/k for k in ('runtime','persistent','cgroup')}
+  for path in roots.values():path.mkdir(mode=0o700)
+  for key,value in (('LEGACY_RUNTIME_ROOT',roots['runtime']),('LEGACY_PERSISTENT_ROOT',roots['persistent']),('LEGACY_CGROUP_ROOT',roots['cgroup'])):
+   stack.enter_context(patch.object(N,key,value))
+  H.LEGACY_TOKEN=folder/'absent-token';units={};paths={};calls=[]
+  for name in H.LEGACY_UNITS:
+   selected=[];paths[name]={}
+   for kind,enabled,body,leaf in (('runtime',runtime,H.LEGACY_BODY,'market-container-authority.conf'),
+    ('persistent',persistent,H.LEGACY_HEADER+H.LEGACY_BODY,'90-security-20261024-web-boot.conf')):
+    path=roots[kind]/(name+'.d')/leaf;paths[name][kind]=path
+    if enabled:path.parent.mkdir(mode=0o700);path.write_bytes(body);path.chmod(0o644);selected.append(str(path))
+   units[name]={'LoadState':'loaded','UnitFileState':'disabled','ActiveState':'inactive','RefuseManualStart':True,
+    'NeedDaemonReload':False,'MainPID':0,'ControlPID':0,'ControlGroup':'','DropInPaths':selected,
+    'Conditions':[['ConditionPathExists',False,False,str(H.LEGACY_TOKEN)]]}
+  manager=SimpleNamespace(RefUnit=lambda name,timeout:calls.append(('ref',name)),GetUnit=lambda name,timeout:name,
+   UnrefUnit=lambda name,timeout:calls.append(('unref',name)))
+  def obj(bus,path):
+   if path=='/org/freedesktop/systemd1':return manager
+   return SimpleNamespace(Get=lambda interface,key,timeout:units[path][key])
+  bus=SimpleNamespace(get_object=obj,close=lambda:calls.append(('close',)))
+  stack.enter_context(patch.dict(sys.modules,{'dbus':SimpleNamespace(SystemBus=lambda private:bus,Interface=lambda value,interface:value)}))
+  backend=object.__new__(N.normal_backend(H,None,None,None));backend.stack=stack;backend.checks=[]
+  backend.check=lambda:[check() for check in backend.checks]
+  return H,backend,units,paths,roots,calls
+ def test_legacy_persistent_only_after_reboot_and_both_present_are_exact_authorities(self):
+  for runtime in (False,True):
+   with ExitStack() as stack:
+    H,backend,units,paths,roots,calls=self.legacy_case(stack,runtime=runtime)
+    before={str(p):p.read_bytes() for row in paths.values() for p in row.values() if p.exists()}
+    backend.legacy_owners();self.assertEqual([x for x in calls if x[0]=='ref'],[('ref',n) for n in H.LEGACY_UNITS])
+    self.assertEqual([x for x in calls if x[0]=='unref'],[('unref',n) for n in reversed(H.LEGACY_UNITS)])
+    self.assertEqual(calls[-1],('close',));self.assertEqual(before,{str(p):p.read_bytes() for row in paths.values() for p in row.values() if p.exists()})
+    self.assertTrue(all(p['runtime'].exists() is runtime for p in paths.values()))
+ def test_legacy_missing_tampered_writable_or_foreign_dropins_never_pass(self):
+  for fault in ('missing','persistent_body','runtime_body','writable','foreign','unlisted','missing_runtime_listed'):
+   with self.subTest(fault=fault),self.assertRaises(RuntimeError),ExitStack() as stack:
+    H,backend,units,paths,roots,calls=self.legacy_case(stack,runtime=fault=='runtime_body',persistent=fault!='missing');name=H.LEGACY_UNITS[0]
+    if fault=='persistent_body':paths[name]['persistent'].write_bytes(b'CONFLICTING PUBLIC POLICY')
+    elif fault=='runtime_body':paths[name]['runtime'].write_bytes(b'CONFLICTING PUBLIC POLICY')
+    elif fault=='writable':paths[name]['persistent'].chmod(0o666)
+    elif fault=='foreign':units[name]['DropInPaths'].append(str(roots['persistent']/'foreign.conf'))
+    elif fault=='unlisted':units[name]['DropInPaths']=[]
+    elif fault=='missing_runtime_listed':units[name]['DropInPaths'].append(str(paths[name]['runtime']))
+    backend.legacy_owners()
+ def test_legacy_original_unit_owner_condition_token_and_cgroup_gates_remain(self):
+  for fault in ('MainPID','ControlPID','ActiveState','RefuseManualStart','NeedDaemonReload','Conditions','token','cgroup'):
+   with self.subTest(fault=fault),self.assertRaises(RuntimeError),ExitStack() as stack:
+    H,backend,units,paths,roots,calls=self.legacy_case(stack);unit=units[H.LEGACY_UNITS[0]]
+    if fault in ('MainPID','ControlPID'):unit[fault]=1
+    elif fault=='ActiveState':unit[fault]='active'
+    elif fault=='RefuseManualStart':unit[fault]=False
+    elif fault=='NeedDaemonReload':unit[fault]=True
+    elif fault=='Conditions':unit[fault]=[]
+    elif fault=='token':H.LEGACY_TOKEN.write_bytes(b'PRESENT')
+    else:
+     group=roots['cgroup']/'owned-fixture';group.mkdir();(group/'cgroup.events').write_bytes(b'populated 1\n');unit['ControlGroup']='/owned-fixture'
+    backend.legacy_owners()
+ def test_legacy_held_file_and_absent_runtime_remain_bound_through_finalization(self):
+  for fault in ('persistent','runtime_appears'):
+   with self.subTest(fault=fault),self.assertRaises(RuntimeError),ExitStack() as stack:
+    H,backend,units,paths,roots,calls=self.legacy_case(stack);name=H.LEGACY_UNITS[0];backend.legacy_owners()
+    if fault=='persistent':stack.callback(paths[name]['persistent'].chmod,0o600)
+    else:
+     def introduced(path=paths[name]['runtime']):path.parent.mkdir(mode=0o700);path.write_bytes(H.LEGACY_BODY);path.chmod(0o644)
+     stack.callback(introduced)
+ def test_normal_machine_fixed_public_leaf_modes_links_type_size_before_open(self):
+  expected='c'*32;valid=self.public('machine-valid',expected.encode()+b'\n',0o444)
+  for mode in (0o444,0o644):
+   valid.chmod(mode)
+   with ExitStack() as stack,patch.object(N,'MACHINE_ID',valid):N.machine_file(stack,expected)()
+  bad=[self.public('machine-mode',expected.encode()+b'\n',0o600),self.public('machine-size',expected.encode(),0o444)]
+  alias=self.temp/'machine-symlink';alias.symlink_to(valid);bad.append(alias)
+  hard=self.temp/'machine-hardlink';os.link(valid,hard);bad.append(hard)
+  fifo=self.temp/'machine-fifo';os.mkfifo(fifo,0o444);bad.append(fifo)
+  for path in bad:
+   with patch.object(N,'MACHINE_ID',path),patch.object(N.os,'open',side_effect=AssertionError('invalid leaf never opens')),ExitStack() as stack:
+    with self.assertRaisesRegex(RuntimeError,'normal_machine'):N.machine_file(stack,expected)
+ def test_normal_machine_fd_before_pread_and_late_parent_source_checks(self):
+  expected='c'*32;path=self.public('machine-race',expected.encode()+b'\n',0o444);original=os.open
+  def opening(p,*a,**k):
+   path.rename(self.temp/'old-machine');self.public('machine-race',expected.encode()+b'\n',0o444);return original(p,*a,**k)
+  with patch.object(N,'MACHINE_ID',path),ExitStack() as stack,patch.object(N.os,'open',side_effect=opening),patch.object(N.os,'pread',side_effect=AssertionError('replacement must not read')):
+   with self.assertRaisesRegex(RuntimeError,'normal_machine'):N.machine_file(stack,expected)
+  for target,mode in ((path,0o600),(self.temp,0o755)):
+   try:
+    with patch.object(N,'MACHINE_ID',path),self.assertRaisesRegex(RuntimeError,'normal_machine'),ExitStack() as stack:
+     N.machine_file(stack,expected);target.chmod(mode)
+   finally:target.chmod(0o444 if target==path else 0o700)
  def test_preopen_metadata_rejects_wrong_mode_hardlink_and_foreign_owner_without_payload_access(self):
   p=self.public('source.py',b'PUBLIC PYTHON');pin=sha256(p.read_bytes()).hexdigest()
   p.chmod(0o644)
@@ -144,14 +234,14 @@ class OwnedTests(unittest.TestCase):
    if Path(path).name=='capture_conflict_diagnostic_base.py':
     value.ROOTS={'native':native,'web':web};value.MARKER=marker;value.SOURCE=source;value.RESERVATION=folder/'absent-reservation'
    return value
-  opening=io.open;pread=os.pread
+  machine=self.public('main-machine',b'c'*32+b'\n',0o444);pread=os.pread
   def reading(fd,*a):
    self.assertNotIn(os.fstat(fd).st_ino,{marker.stat().st_ino,source.stat().st_ino});return pread(fd,*a)
   def endpoint(H,args,root,control,checks,stack):
    called.append(Path(H.__file__));self.assertEqual(Path(H.__file__),wrapper)
    return H.result(control,pin,'preflight_passed_not_applied')
   with (patch.object(N,'__file__',str(wrapper)),patch.object(N,'module',side_effect=modules),patch.object(N,'native_run',side_effect=endpoint),
-   patch.object(io,'open',side_effect=lambda p,*a,**k:io.BytesIO(b'c'*32+b'\n') if str(p)=='/etc/machine-id' else opening(p,*a,**k)),
+   patch.object(N,'MACHINE_ID',machine),
    patch.object(os,'pread',side_effect=reading),redirect_stdout(io.StringIO()) as output):
    rc=N.main(['--site','native','--nonce',nonce,'--control-sha256',pin,'--observe'])
   self.assertEqual(rc,0,output.getvalue());self.assertEqual(called,[wrapper]);self.assertEqual(json.loads(output.getvalue())['status'],'preflight_passed_not_applied')

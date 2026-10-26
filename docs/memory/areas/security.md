@@ -41,4 +41,4 @@
   Shared image size never proves reclaim.
 - Chromium/Firefox trust passed selected CI; UI acceptance OPEN. Five normal App
   roles and both hosts' empty-namespace bridge capability passed; no clone/activation.
-  F79 current-normal24 fixtures passed.
+  F79 current-normal30 fixtures passed; readonly reboot-inhibitor refusal retained.

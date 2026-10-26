@@ -119,3 +119,33 @@ The apply invocation performs all admission again under held fences; a prior
 NoApply result grants no substitute runtime authority. Each mode permits one
 request per nonce, with no automatic retry. Capture, functional-fix, security
 and full-matrix acceptance remain open/false throughout.
+
+## Current reboot-safe admission
+
+The first actual readonly observation b83fed1f9caa4a11b21fa9d03b0259a9
+refused with FileNotFoundError before any diagnostic apply. Root verified by
+metadata that both runtime legacy inhibitors were absent after reboot, while
+both persistent inhibitors existed as root-owned0644/nlink1/170-byte files.
+The original consumer required the runtime file unconditionally. Its source,
+staged request and closed refusal remain immutable.
+
+The current canonical worker accepts persistent-only ownership authority after
+reboot, or both files when present, only after exact sealed-body and full9/FD
+admission. Each legacy unit must have at least one authoritative file and its
+actual DropInPaths must equal those admitted files. Disabled/inactive state,
+RefuseManualStart, exact token condition, zero service PIDs, empty cgroup and
+absent token remain mandatory. Initially absent runtime files and every held
+file are rechecked through closure; foreign, conflicting, missing or changed
+authority refuses. The worker does not recreate a runtime file to satisfy a
+guard. Its normal loader also admits the fixed public machine-id leaf before
+opening/reading it, with exact0444/0644 modes, root ownership, one link,33 bytes
+and held final checks.
+
+Root passed all30 current public fixtures in the genuine Root/CAP_CHOWN-only,
+NNP, separate-init/network-none/readonly own-COPY lane. Manifest
+`a09c5619146fe7266f1229fd3a5c876603fda8093b4b9f5c43cba82fee6f1571`,
+result `ce1fb1fb78e57506df5a392ccad87fabdebb5708f1756cdd3e8b61ab4cb8470b`.
+The ignored coexisting prepare_normal_control_v2.py and
+one_normal_observation_v2.py bind the new worker; fresh controls/nonces are
+required. Old control/preparer/caller files remain unchanged. No previous
+request grants retry or apply authority.
