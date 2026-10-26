@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { DOMWrapper, enableAutoUnmount, flushPromises, mount as mountVue } from '@vue/test-utils'
 import type { Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import type {
   AccountantRelation,
   AccountantSessionSummary,
@@ -107,19 +108,23 @@ const accountantWorkspaceMocks = vi.hoisted(() => ({
   deleteOwnerAccountantRelationMock: vi.fn(),
   terminateOwnerAccountantSessionMock: vi.fn(),
   routeState: {
+    name: undefined as string | symbol | null | undefined,
     params: {} as Record<string, unknown>,
     query: {} as Record<string, unknown>,
   },
   routeProxy: null as null | {
+    name?: string | symbol | null
     params: Record<string, unknown>
     query: Record<string, unknown>
   },
 }))
 
-vi.mock('vue-router', async () => {
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
   const { reactive } = await import('vue')
   accountantWorkspaceMocks.routeProxy = reactive(accountantWorkspaceMocks.routeState)
   return {
+    ...actual,
     useRoute: () => accountantWorkspaceMocks.routeProxy,
     useRouter: () => ({
       push: accountantWorkspaceMocks.routerPushMock,
@@ -259,8 +264,146 @@ describe('AccountantWorkspaceView.vue', () => {
         created_at: '2026-01-01T10:00:00Z',
       }),
     )
+    accountantWorkspaceMocks.routeState.name = undefined
     accountantWorkspaceMocks.routeState.params = {}
     accountantWorkspaceMocks.routeState.query = {}
+  })
+
+  async function realNavigation() {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/operations/accountants', name: 'operations-accountants', component: {} },
+        { path: '/operations/accountants/:relationId', name: 'operations-accountants-detail', component: {} },
+        { path: '/operations', name: 'operations', component: {} },
+      ],
+    })
+    router.afterEach((to, _from, failure) => {
+      if (failure) return
+      const route = accountantWorkspaceMocks.routeProxy!
+      route.name = to.name
+      route.params = { ...to.params }
+      route.query = { ...to.query }
+    })
+    accountantWorkspaceMocks.routerPushMock.mockImplementation((location) => router.push(location))
+    accountantWorkspaceMocks.routerReplaceMock.mockImplementation((location) => router.replace(location))
+    await router.push({ name: 'operations-accountants', query: { q: 'حسابدار', filter: 'active' } })
+    return router
+  }
+
+  it('keeps a real pending detail navigation ahead of captured scroll query writes and restores list context on back', async () => {
+    const router = await realNavigation()
+    const scrollRegion = document.createElement('main')
+    scrollRegion.className = 'app-route-scroll'
+    document.body.append(scrollRegion)
+    const gate = deferred<void>()
+    const entered = vi.fn()
+    const removeGuard = router.beforeEach(async (to) => {
+      if (to.name === 'operations-accountants-detail') {
+        entered()
+        await gate.promise
+      }
+    })
+    try {
+      const wrapper = mount(AccountantWorkspaceView)
+      await flushPromises()
+      accountantWorkspaceMocks.routerReplaceMock.mockClear()
+      scrollRegion.scrollTop = 328
+      expect(wrapper.findAll('button.ui-list-item')).toHaveLength(1)
+      await wrapper.get('button.ui-list-item').trigger('click')
+      await flushPromises()
+      expect(entered).toHaveBeenCalledTimes(1)
+      // Real Vue flushes the scroll watcher while Vue Router is awaiting this
+      // guard. An old-list replace here cancels the user's detail navigation.
+      expect(accountantWorkspaceMocks.routerReplaceMock).not.toHaveBeenCalled()
+      gate.resolve()
+      await flushPromises()
+      expect(router.currentRoute.value.path).toBe('/operations/accountants/11')
+      expect(router.currentRoute.value.query).toEqual({ q: 'حسابدار', filter: 'active', scroll: '328' })
+      await wrapper.get('button[aria-label="بازگشت"]').trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.path).toBe('/operations/accountants')
+      expect(router.currentRoute.value.query).toEqual({ q: 'حسابدار', filter: 'active', scroll: '328' })
+      expect(scrollRegion.scrollTop).toBe(328)
+    } finally {
+      gate.resolve()
+      removeGuard()
+      scrollRegion.remove()
+      await flushPromises()
+    }
+  })
+
+  it('releases query synchronization after a real aborted detail navigation', async () => {
+    const router = await realNavigation()
+    const scrollRegion = document.createElement('main')
+    scrollRegion.className = 'app-route-scroll'
+    document.body.append(scrollRegion)
+    const removeGuard = router.beforeEach((to) => to.name === 'operations-accountants-detail' ? false : undefined)
+    try {
+      const wrapper = mount(AccountantWorkspaceView)
+      await flushPromises()
+      scrollRegion.scrollTop = 141
+      await wrapper.get('button.ui-list-item').trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.path).toBe('/operations/accountants')
+      await wrapper.get('input[aria-label="جستجوی حسابدار"]').setValue('حسابدار تست')
+      await flushPromises()
+      expect(router.currentRoute.value.query).toEqual({ q: 'حسابدار تست', filter: 'active', scroll: '141' })
+    } finally {
+      removeGuard()
+      scrollRegion.remove()
+    }
+  })
+
+  it('does not send the user back after another real route supersedes pending detail navigation', async () => {
+    const router = await realNavigation()
+    const gate = deferred<void>()
+    const removeGuard = router.beforeEach(async (to) => {
+      if (to.name === 'operations-accountants-detail') await gate.promise
+    })
+    try {
+      const wrapper = mount(AccountantWorkspaceView)
+      await flushPromises()
+      await wrapper.get('button.ui-list-item').trigger('click')
+      await flushPromises()
+      await router.push({ name: 'operations' })
+      gate.resolve()
+      await flushPromises()
+      expect(router.currentRoute.value.path).toBe('/operations')
+    } finally {
+      gate.resolve()
+      removeGuard()
+      await flushPromises()
+    }
+  })
+
+  it('does not let an unmounted workspace overwrite a later visit when its old navigation settles', async () => {
+    const router = await realNavigation()
+    const gate = deferred<void>()
+    const removeGuard = router.beforeEach(async (to) => {
+      if (to.name === 'operations-accountants-detail') await gate.promise
+    })
+    try {
+      const wrapper = mount(AccountantWorkspaceView)
+      await flushPromises()
+      await wrapper.get('button.ui-list-item').trigger('click')
+      await flushPromises()
+      wrapper.unmount()
+      await router.push({ name: 'operations' })
+      const freshQuery = { q: 'بازدید تازه', filter: 'inactive', scroll: '77' }
+      await router.push({ name: 'operations-accountants', query: freshQuery })
+      mount(AccountantWorkspaceView)
+      await flushPromises()
+      accountantWorkspaceMocks.routerReplaceMock.mockClear()
+      gate.resolve()
+      await flushPromises()
+      expect(router.currentRoute.value.query).toEqual(freshQuery)
+      expect(accountantWorkspaceMocks.routerReplaceMock).not.toHaveBeenCalled()
+    } finally {
+      gate.resolve()
+      removeGuard()
+      await flushPromises()
+    }
   })
 
   it('renders the route-native accountant workspace without mounting the compatibility manager by default', async () => {

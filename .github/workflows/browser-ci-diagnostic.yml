@@ -128,6 +128,11 @@ jobs:
         DIAGNOSTIC_BROWSER: ${{ inputs.browser }}
       working-directory: frontend
       run: npx playwright install --with-deps "$DIAGNOSTIC_BROWSER"
+    - name: Validate accountant navigation with candidate dependencies
+      if: inputs.scenario == 'accounts-and-menu'
+      timeout-minutes: 2
+      working-directory: frontend
+      run: npm run test:unit:run -- src/views/AccountantWorkspaceView.test.ts --maxWorkers=1
     - name: Observe selected browser secure-cookie loopback policy
       id: cookie
       timeout-minutes: 2
@@ -320,7 +325,7 @@ jobs:
             CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'direct chat supports reacting to an incoming message and deleting an own message'
             ;;
           accounts-and-menu)
-            CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/account-status.spec.ts e2e/accountant-owner-flow.spec.ts e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery|owner can create pending accountant, observe activation, view it, and delete its active account|direct chat supports reacting to an incoming message and deleting an own message'
+            CI_CHAT_MENU_GEOMETRY=1 npx playwright test e2e/account-status.spec.ts e2e/accountant-owner-flow.spec.ts e2e/customer-owner-flow.spec.ts e2e/direct-chat.spec.ts --config=playwright.https-diagnostic.config.ts --project="$DIAGNOSTIC_BROWSER" --retries=0 --workers=1 --grep 'admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery|owner can create pending accountant, observe activation, view it, and delete its active account|owner can create update and delete an active customer account, and super-admin can follow the customer handoff|direct chat supports reacting to an incoming message and deleting an own message'
             ;;
           *) exit 1 ;;
         esac

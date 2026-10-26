@@ -12,6 +12,25 @@ STEP = 'Validate chat-menu layout with candidate dependencies'
 
 
 class BrowserMenuLayoutContractTests(unittest.TestCase):
+    def test_selected_account_flow_runs_real_router_component_regressions_before_backend_and_e2e(self):
+        steps = yaml.safe_load((ROOT / '.github/workflows/browser-ci-diagnostic.yml').read_text())['jobs']['browser-diagnostic']['steps']
+        unit = next(step for step in steps if step['name'] == 'Validate accountant navigation with candidate dependencies')
+        self.assertEqual(unit['if'], "inputs.scenario == 'accounts-and-menu'")
+        self.assertEqual(unit['working-directory'], 'frontend')
+        self.assertEqual(unit['timeout-minutes'], 2)
+        self.assertNotIn('continue-on-error', unit)
+        self.assertEqual(shlex.split(unit['run']), ['npm', 'run', 'test:unit:run', '--',
+            'src/views/AccountantWorkspaceView.test.ts', '--maxWorkers=1'])
+        self.assertLess(next(i for i, step in enumerate(steps) if step['name'] == 'Install frontend dependencies'), steps.index(unit))
+        for name in ('Bootstrap backend stack', 'Run selected diagnostic scenarios'):
+            self.assertLess(steps.index(unit), next(i for i, step in enumerate(steps) if step['name'] == name))
+        spec = (ROOT / 'frontend/e2e/accountant-owner-flow.spec.ts').read_text()
+        self.assertIn('new RegExp(`/operations/accountants/${pendingRelation?.id}(?:\\\\?.*)?$`)', spec)
+        customer = (ROOT / 'frontend/e2e/customer-owner-flow.spec.ts').read_text()
+        self.assertIn("expect(confirmedActivatedCustomer.customer_tier).toBe('tier2')", customer)
+        self.assertIn("await expect(workspace.locator('.customer-detail-badges')).toContainText('سطح ۲')", customer)
+        self.assertNotIn("await expect(activeCard).toContainText('سطح ۲')", customer)
+
     def test_selected_menu_jobs_run_both_real_unit_files_after_npm_ci_before_any_backend_or_e2e(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/browser-ci-diagnostic.yml').read_text())
         steps = workflow['jobs']['browser-diagnostic']['steps']

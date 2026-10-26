@@ -189,10 +189,11 @@ class BrowserFixtureTests(unittest.TestCase):
         steps = workflow('browser-ci-diagnostic.yml')['jobs']['browser-diagnostic']['steps']
         selected = next(step for step in steps if step.get('id') == 'browser')['run']
         case = selected.split('accounts-and-menu)', 1)[1].split(';;', 1)[0]
-        for filename in ('account-status.spec.ts', 'accountant-owner-flow.spec.ts', 'direct-chat.spec.ts'):
+        for filename in ('account-status.spec.ts', 'accountant-owner-flow.spec.ts', 'customer-owner-flow.spec.ts', 'direct-chat.spec.ts'):
             self.assertIn('e2e/' + filename, case)
         for name in ('admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery',
                      'owner can create pending accountant, observe activation, view it, and delete its active account',
+                     'owner can create update and delete an active customer account, and super-admin can follow the customer handoff',
                      'direct chat supports reacting to an incoming message and deleting an own message'):
             self.assertIn(name, case)
         self.assertIn('CI_CHAT_MENU_GEOMETRY=1', case)

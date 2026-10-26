@@ -364,7 +364,17 @@ test.describe('Account status browser regression', () => {
       const lockResult = forceGlobalLock(targetUser.userId)
       expect(lockResult.blocked).toBeGreaterThanOrEqual(1)
 
-      await userPage.reload({ waitUntil: 'domcontentloaded' })
+      await userPage.reload({ waitUntil: 'domcontentloaded' }).catch((error: unknown) => {
+        // Session revocation can replace Firefox's reload with the application's
+        // hard /login navigation. The exact login URL and page remain required.
+        if (
+          browser.browserType().name() !== 'firefox'
+          || !(error instanceof Error)
+          || !error.message.startsWith('page.reload: NS_BINDING_ABORTED')
+        ) {
+          throw error
+        }
+      })
       await userPage.waitForURL(/\/login$/)
       await expect(userPage.getByRole('heading', { name: 'ورود به سامانه', exact: true })).toBeVisible()
 

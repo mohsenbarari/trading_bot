@@ -101,6 +101,8 @@ let confirmRouteGeneration = 0
 let isApplyingRouteContext = false
 let routeScrollTarget: HTMLElement | Window | null = null
 let isDeleteNavigationPending = false
+let relationNavigationsPending = 0
+let hasUnmounted = false
 
 const relationFilterOptions = [
   { key: 'all', label: 'همه' },
@@ -367,7 +369,7 @@ function currentQueryIsCanonical(query: Record<string, string>) {
 }
 
 function replaceCanonicalRouteQuery() {
-  if (isDeleteNavigationPending) return
+  if (hasUnmounted || isDeleteNavigationPending || relationNavigationsPending > 0) return
   const query = buildCanonicalQuery()
   if (currentQueryIsCanonical(query)) return
   const name = hasDetailRoute.value ? 'operations-accountants-detail' : 'operations-accountants'
@@ -426,13 +428,26 @@ function resolveRouteScrollTarget() {
   return document.querySelector<HTMLElement>('.app-route-scroll') || window
 }
 
-function openRelation(relationId: number) {
-  capturePageScroll()
-  router.push({
-    name: 'operations-accountants-detail',
-    params: { relationId: String(relationId) },
-    query: buildCanonicalQuery({ includeTab: false }),
-  })
+async function openRelation(relationId: number) {
+  // Capturing scroll queues a query watcher before the route has changed.
+  // Keep that old-list replacement behind the user's detail navigation.
+  relationNavigationsPending += 1
+  try {
+    capturePageScroll()
+    await router.push({
+      name: 'operations-accountants-detail',
+      params: { relationId: String(relationId) },
+      query: buildCanonicalQuery({ includeTab: false }),
+    })
+  } finally {
+    relationNavigationsPending -= 1
+    if (
+      relationNavigationsPending === 0 &&
+      ['operations-accountants', 'operations-accountants-detail'].includes(String(route.name))
+    ) {
+      replaceCanonicalRouteQuery()
+    }
+  }
 }
 
 async function backToList() {
@@ -1160,6 +1175,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  hasUnmounted = true
   abortRelationsRequest()
   abortDetailSessionsRequest()
   createRequestGeneration += 1

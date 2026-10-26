@@ -1093,6 +1093,7 @@ test.describe('customer owner lifecycle', () => {
       pendingRelationId,
     )
     const activatedCustomerUserId = confirmedActivatedCustomer.customer_user_id
+    expect(confirmedActivatedCustomer.customer_tier).toBe('tier2')
 
     await page.reload()
     await expect(workspace).toBeVisible({ timeout: 30000 })
@@ -1101,10 +1102,10 @@ test.describe('customer owner lifecycle', () => {
       .filter({ hasText: managementName })
       .first()
     await expect(activeCard).toContainText('فعال')
-    await expect(activeCard).toContainText('سطح ۲')
 
     await activeCard.click()
     await page.waitForURL(new RegExp(`/operations/customers/${pendingRelationId}(?:\\?.*)?$`))
+    await expect(workspace.locator('.customer-detail-badges')).toContainText('سطح ۲')
     await workspace.getByRole('tab', { name: 'محدودیت‌ها' }).click()
     await workspace
       .locator('.customer-detail-shell input[aria-label="درصد کمیسیون مشتری"]')
