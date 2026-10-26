@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import signal
+import sys
 import tarfile
 import tempfile
 import types
@@ -24,6 +26,8 @@ SCRIPT=ROOT/'scripts/compose_security_os_candidate.py'
 WORKFLOW=ROOT/'.github/workflows/security-os-candidate-compose.yml'
 spec=importlib.util.spec_from_file_location('os_composition',SCRIPT)
 M=importlib.util.module_from_spec(spec);spec.loader.exec_module(M)
+REAL_POPEN=subprocess.Popen
+REAL_KILLPG=os.killpg
 
 
 class CompositionTests(unittest.TestCase):
@@ -534,14 +538,22 @@ class CompositionTests(unittest.TestCase):
         self.assertEqual(receipt['daemon_outcome'],'UNKNOWN');self.assertEqual(receipt['best_effort_cleanup'],'not_confirmed')
 
     def test_actual_pipe_output_bound_and_clean_child_environment(self):
-        reader,writer=os.pipe();os.write(writer,b'abcdef');os.close(writer)
-        stdout=os.fdopen(reader,'rb',buffering=0);self.addCleanup(stdout.close)
-        child=Mock(stdout=stdout,pid=12345,wait=Mock(return_value=0),poll=Mock(return_value=None))
-        with patch.object(M.subprocess,'Popen',return_value=child) as start,patch.object(M.os,'killpg') as kill, \
+        children=[];signals=[];starts=[]
+        def start(argv,**kwargs):
+            starts.append(kwargs)
+            child=REAL_POPEN([sys.executable,'-I','-S','-B','-c',
+                "import sys,time;sys.stdout.write('abcdef');sys.stdout.flush();time.sleep(2)"],**kwargs)
+            children.append(child);return child
+        def kill(pid,sig):
+            self.assertEqual((pid,sig),(children[0].pid,signal.SIGKILL))
+            self.assertIsNone(children[0].returncode)
+            os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+            signals.append(pid);return REAL_KILLPG(pid,sig)
+        with patch.object(M.subprocess,'Popen',side_effect=start),patch.object(M.os,'killpg',side_effect=kill), \
                 patch.dict(os.environ,{'GH_TOKEN':'public-fixture-token'}):
             with self.assertRaisesRegex(RuntimeError,'command_output_bound'):M.command(['owned-fixture'],maximum=4)
-        self.assertNotIn('GH_TOKEN',start.call_args.kwargs['env']);kill.assert_called_once()
-        self.assertEqual(child.wait.call_args.kwargs['timeout'],10);self.assertTrue(stdout.closed)
+        self.assertNotIn('GH_TOKEN',starts[0]['env']);self.assertEqual(signals,[children[0].pid])
+        self.assertIsNotNone(children[0].returncode);self.assertTrue(children[0].stdout.closed)
 
     def test_public_failure_log_survives_nonzero_command(self):
         reader,writer=os.pipe();os.write(writer,b'ordinary public build failure\n');os.close(writer)
@@ -569,13 +581,19 @@ class CompositionTests(unittest.TestCase):
         self.assertTrue(stdout.closed)
 
     def test_export_timeout_never_returns_archive_proof(self):
-        reader,writer=os.pipe();self.addCleanup(os.close,writer)
-        stdout=os.fdopen(reader,'rb',buffering=0);self.addCleanup(stdout.close)
-        child=Mock(stdout=stdout,pid=12345,wait=Mock(return_value=0),poll=Mock(return_value=None))
-        with patch.object(M.subprocess,'Popen',return_value=child),patch.object(M.os,'killpg') as kill, \
+        child=REAL_POPEN([sys.executable,'-I','-S','-B','-c','import time;time.sleep(2)'],
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
+        signals=[]
+        def kill(pid,sig):
+            self.assertEqual((pid,sig),(child.pid,signal.SIGKILL));self.assertIsNone(child.returncode)
+            os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+            signals.append(pid);return REAL_KILLPG(pid,sig)
+        with patch.object(M.subprocess,'Popen',return_value=child),patch.object(M.os,'killpg',side_effect=kill), \
                 patch.object(M.time,'monotonic',side_effect=[0,301]),self.assertRaisesRegex(RuntimeError,'export_timeout'):
             M.export_image(self.root,M.IMAGE)
-        kill.assert_called_once();self.assertTrue(stdout.closed)
+        self.assertEqual(signals,[child.pid]);self.assertTrue(child.stdout.closed)
+        self.assertIsNotNone(child.returncode)
+        self.assertFalse((self.root/'image-export.json').exists())
 
     def report_fixture(self):
         image='sha256:'+'a'*64;layers=['sha256:'+'1'*64];config={'Cmd':['python3']}

@@ -27,7 +27,7 @@ from types import ModuleType,SimpleNamespace
 
 ROOT=Path(__file__).resolve().parent
 LOCK_NAME='app_security_os_packages.lock.json'
-LOCK_SHA='86d3fc5098a24320dfd7aad67a1df7d671e2bf1bdec2e5c0a66a308eb638f9f9'
+LOCK_SHA='14eefb6a4d40e02f2407b676c6c4c418b69968227a2059a67ddf58fdf99b1a82'
 GROUPS=('util','ncurses','acl-tar')
 CAPSULE=Path('/capsule')
 MAX_SOURCE=131072
