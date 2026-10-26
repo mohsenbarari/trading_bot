@@ -77,7 +77,7 @@ def write_new(path,value):
 
 def env(root):return {'PATH':'/usr/local/bin:/usr/bin:/bin','DOCKER_CONFIG':str(root/'docker-config'),'DOCKER_BUILDKIT':'1','PYTHONDONTWRITEBYTECODE':'1'}
 
-def command(argv,*,maximum=MAX_COMMAND,seconds=120,environment=None,target=None):
+def command(argv,*,maximum=MAX_COMMAND,seconds=120,environment=None,target=None,combine_stderr=False):
     """Finite regular output before spawn; no PIPE accumulation and no Go AS cap."""
     global COMMAND_RETURN_CODE
     COMMAND_RETURN_CODE=None
@@ -88,7 +88,7 @@ def command(argv,*,maximum=MAX_COMMAND,seconds=120,environment=None,target=None)
         resource.setrlimit(resource.RLIMIT_FSIZE,(maximum+1,maximum+1))
         resource.setrlimit(resource.RLIMIT_CPU,(max(1,int(seconds)),)*2)
     try:
-        child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=private,stderr=subprocess.DEVNULL,
+        child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=private,stderr=subprocess.STDOUT if combine_stderr else subprocess.DEVNULL,
             env=environment,start_new_session=True,close_fds=True,preexec_fn=limits)
         end=time.monotonic()+seconds
         while child.poll() is None:
@@ -302,6 +302,31 @@ def inspect(root,image,source,signature):
     need(type(config.get('Labels')) is dict and all(config['Labels'].get(k)==v for k,v in labels.items()),'image_labels')
     return value
 
+def build_output(root,argv,*,seconds=1800,maximum=MAX_COMMAND):
+    """Retain only a bounded public prefix from the clean normal Docker build."""
+    target=os.memfd_create('canonical-app-build-output',os.MFD_CLOEXEC);primary=False
+    try:
+        try:command(argv,environment=env(root),seconds=seconds,maximum=maximum,target=target,combine_stderr=True)
+        except BaseException:primary=True;raise
+        finally:
+            try:
+                size=os.fstat(target).st_size;budget=min(maximum,256*1024);prefix_limit=min(budget,128*1024);tail_limit=budget-prefix_limit
+                prefix_count=min(size,prefix_limit);tail_count=min(max(0,size-prefix_count),tail_limit);tail_offset=size-tail_count
+                prefix=os.pread(target,prefix_count,0);tail=os.pread(target,tail_count,tail_offset)
+                need(len(prefix)==prefix_count and len(tail)==tail_count,'command_output_bound');count=prefix_count+tail_count
+                value={'schema':'canonical_app_docker_build_output/2','combined_stdout_stderr':True,
+                    'output_prefix':prefix.decode('utf-8','replace'),'prefix_offset':0,'prefix_bytes':prefix_count,'prefix_limit':prefix_limit,
+                    'output_tail':tail.decode('utf-8','replace'),'tail_offset':tail_offset,'tail_bytes':tail_count,'tail_limit':tail_limit,
+                    'observed_bytes':size,'captured_bytes':count,'output_truncated':size>count,
+                    'complete_output':size==count and type(COMMAND_RETURN_CODE)is int,
+                    'actual_command_exit':COMMAND_RETURN_CODE if type(COMMAND_RETURN_CODE)is int else 'UNKNOWN',
+                    'build_accepted':False,'security_accepted':False}
+                write_new(root/'reports/docker-build-output.json',value)
+            except BaseException:
+                if not primary:raise
+    finally:os.close(target)
+
+
 def build(root):
     global SUBPHASE
     SUBPHASE='build_source_admission'
@@ -328,7 +353,7 @@ def build(root):
         for key,item in {'org.opencontainers.image.revision':value['source_commit'],'io.gold-trade.release.tree':value['source_tree'],
                 'io.gold-trade.release.input-signature':signature}.items():argv+=['--label',key+'='+item]
         SUBPHASE='docker_build'
-        command([*argv,'-f',str(repo/'Dockerfile'),str(repo)],environment=env(root),seconds=1800)
+        build_output(root,[*argv,'-f',str(repo/'Dockerfile'),str(repo)])
         SUBPHASE='build_identity_and_inputs'
         raw,_=read_file(root/'candidate-image.id',128);image=raw.decode().strip();need(re.fullmatch('sha256:[a-f0-9]{64}',image),'image_identity')
         first=inspect(root,image,value,signature);unchanged(root,repo,value,held)

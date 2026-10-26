@@ -99,7 +99,7 @@ hash_file_or_dir() {
 
     def test_build_uses_true_labels_double_inputs_and_never_publishes_config(self):
         self.file('Dockerfile',b'FROM public\n');self.file('mini_app_dist/index.html',b'public frontend')
-        output=self.root/'out';output.mkdir(mode=0o700);rows=[r for r in M.input_files(self.repo) if r['path']=='Dockerfile']
+        output=self.root/'out';output.mkdir(mode=0o700);(output/'reports').mkdir(mode=0o700);rows=[r for r in M.input_files(self.repo) if r['path']=='Dockerfile']
         source={'source_commit':'a'*40,'source_tree':'b'*40,'run_id':'123','run_attempt':'1','files':rows}
         commands=[];image='sha256:'+'c'*64
         config={'WorkingDir':'/app','User':'','Entrypoint':None,'Cmd':['python3'],'Labels':{'ordinary':'public'},'Env':['PRIVATE_TEST_VALUE=never-publish']}
@@ -123,7 +123,7 @@ hash_file_or_dir() {
 
     def test_build_rejects_generated_input_change_after_build_without_success_receipt(self):
         self.file('Dockerfile');self.file('mini_app_dist/index.html',b'original')
-        output=self.root/'out';output.mkdir(mode=0o700)
+        output=self.root/'out';output.mkdir(mode=0o700);(output/'reports').mkdir(mode=0o700)
         source={'source_commit':'a'*40,'source_tree':'b'*40,'run_id':'123','run_attempt':'1',
             'files':[r for r in M.input_files(self.repo) if r['path']=='Dockerfile']}
         def command(argv,**kwargs):
