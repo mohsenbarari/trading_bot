@@ -1,0 +1,73 @@
+name: Proper SQLite WAL security package evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqlite-wal-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out the exact reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, node24
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build only the authenticated proper SQLite package
+        id: build
+        shell: bash
+        run: |
+          /usr/bin/env -i \
+            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            HOME="$HOME" LC_ALL=C.UTF-8 \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            /usr/bin/python3 -I -B scripts/prepare_sqlite_wal_ci_context.py \
+            --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
+            --root "$RUNNER_TEMP/sqlite-wal-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --execute-hosted-build
+
+      - name: Retain only the seven complete package outputs
+        if: success() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, node24
+        with:
+          name: sqlite-wal-package-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          # Necessary active dependency; refresh via this same workflow before day 80.
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/libsqlite3-0_3.46.1-7+deb13u2+gold1_amd64.deb
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/sqlite3_3.46.1-7+deb13u2+gold1_amd64.changes
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/sqlite3_3.46.1-7+deb13u2+gold1_amd64.buildinfo
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/provenance.json
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/positive-baseline.json
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/positive-candidate.json
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/package-output/abi-contract.json
+
+      - name: Retain bounded public evidence, including failures
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, node24
+        with:
+          name: sqlite-wal-package-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/source-identity.json
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.json
+            ${{ runner.temp }}/sqlite-wal-${{ github.run_id }}-${{ github.run_attempt }}/*.log
