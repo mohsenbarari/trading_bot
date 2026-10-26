@@ -39,7 +39,6 @@
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
-- Native browser trust passed actual Chromium/Firefox selected CI; UI acceptance
-  OPEN. Normal App Config/loader admission passed five roles; no clone/activation.
-  Native bridge hooks/conntrack passed in new empty namespaces on both hosts;
-  this grants no clone/data/serving acceptance. F79 current-normal24 fixtures passed.
+- Chromium/Firefox trust passed selected CI; UI acceptance OPEN. Five normal App
+  roles and both hosts' empty-namespace bridge capability passed; no clone/activation.
+  F79 current-normal24 fixtures passed.

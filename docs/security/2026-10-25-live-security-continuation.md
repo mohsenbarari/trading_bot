@@ -610,3 +610,42 @@ ordering gaps. No actual NoApply or apply request was issued. A coexisting
 current-normal consumer is being reviewed coherently; frozen historical proof,
 controls and lifecycle evidence remain intact. This avoids a predictable failed
 operational request rather than treating fixture success as readiness.
+
+## 2026-10-26: native bridge prerequisites and current-normal consumers
+
+Root measured exclusive native bridge tables in new, empty network namespaces
+on both hosts: Native kernel6.8.0-147/nft1.0.9 and Web kernel7.0.0-38/nft1.1.6.
+All three hooks, ten exact rules, native conntrack, foreign-sentinel preservation,
+owned table deletion, child reaping and owned handle closure passed. No host
+firewall, global sysctl, App image/profile or private input was used. Initial
+closed failures are retained: an empty route file has no header on Native, and
+installed nft serializes two implicit IPv4 dependencies and a conntrack set
+differently from the initial synthetic expectation. The final strict parser
+matches the measured representation; written policy is unchanged.
+Native receipt SHA256 `9de8d6ffd7269374517ed2f9675376679830b0a736170869b22bda1617429f13`;
+Web receipt SHA256 `30a6590def64123050d6d1724e31a1d2d05a0b26a3b7f00c7b887a37b53f6a52`.
+These finite capability receipts do not prove actual clone isolation or restore.
+
+Root's final normal-restore fixture packet passed all97 cases with genuine
+UID0/CAP_CHOWN-only, separate init, network none, readonly root and copied public
+inputs. Manifest SHA256
+`84bb2ad48a0b17cb846141b5c8ca48396c0297c9fe0cc3abee9e1312ca662a6d`;
+result SHA256 `1ea1881616b8df8f5bd0408a7db1300cf35e11ae2538102fb5995a3bfc763bd3`.
+The prior two failures remain in result `3b8d0606…`: compiler bytecode-layout
+comparison and an overly broad fixture-path substring assertion. Only those
+test checks changed, to actual compiler-input AST identity and exact expiry
+argv/calendar/producer validation. No production guard was weakened.
+
+Current-normal F79 source passed Root24 genuine fixtures, and its final control
+producer/caller passed Root17 owned fixtures. The first actual readonly request
+`b83fed1f9caa4a11b21fa9d03b0259a9` completed with a strict Web
+FileNotFoundError/errno2 refusal. No diagnostic was applied. Its completion and
+once-only request remain immutable; fixed public prefix/Env/secret references
+were checked by metadata only and exist. Investigation remains open.
+
+Readonly Market admission passed all14 Root fixtures; manifest
+`61a861a02d22caddf8489484766f1517a510ad8bf7f39720d37072edbfa790b9`,
+result `b630cc0a0065921bdb74fd4c4981bdd72b58a002948e341317a9ef6d01d1dbf0`.
+No Market serving replacement occurred. Main remains665220a2 with the user's
+retention change preserved. Global security acceptance is false; refactor
+automation remains stopped and the required clean-unit streak remains0.
