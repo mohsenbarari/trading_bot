@@ -12,10 +12,15 @@ from urllib.parse import urlsplit,parse_qs
 import argparse,json,os,re,stat,tempfile,time
 
 OP='normal-app-isolated-restore-admission-20261025-01'
-PINS={'contract':'2ba1ff0f6896a4e2fef7c0e63eb510e6be306271ffe832917e19e3c62e6d708f',
+PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
  'utilities':'cb4c0530dc81830b4ff3ae5b60989b88301dc49d0a6f520783b87b54d35c1965',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 ROLES={'bot':('app','bot','sync_worker'),'web':('app','sync_worker')}
+RESTART_WITNESSES={
+ 'bot':{'schema':'security_runtime_snapshot/1.0','bytes':19997,'sha256':'94c1fd6c93d16c0cceaff59475db9ed683381634732258e6a8fbfbcec1d513e2',
+  'machine_id':'08457037af994cf4b39feab45b49ea34'},
+ 'web':{'schema':'web_engine_current_plan/1','bytes':75546,'sha256':'7d55ccacd99a0f6fd0a4d93ee493a7193a9dde027b4e47bc73b2ef0af63e6216',
+  'machine_id':'16adbf3a35e24e5a93b3b76b117a5a1e'}}
 DATA_TARGETS={'/app/uploads','/app/audit_trail','/app/certs','/app/runtime/coin-inference','/app/runtime/product-estimator'}
 C_CODES=frozenset(('apply_not_authorized', 'attempt_spent', 'authority_scope', 'authority_window', 'backup_restore_gate', 'business_environment', 'business_labels', 'candidate_identity', 'candidate_restarted', 'candidate_rootfs', 'cgroup_bound', 'cgroup_changed', 'cgroup_identity', 'cgroup_not_empty', 'cgroup_unproven', 'command_bound', 'command_output_changed', 'command_shape', 'complete_config_fields', 'complete_configuration', 'complete_mounts', 'compose_labels', 'compose_prefix', 'compose_size', 'compose_version', 'container_id', 'container_identity', 'container_shape', 'control_scope', 'created_state_unproven', 'deadline', 'default_env_reference', 'docker_version', 'duplicate_json_key', 'duplicate_role', 'engine_version', 'env_alias_changed', 'env_alias_inventory', 'env_alias_parent_changed', 'env_references', 'environment_shape', 'evidence_size', 'fence_binding', 'file_binding', 'finite_scope', 'forward_after_recovery', 'fresh_gate', 'gate_inventory', 'guard_binding', 'guard_busy', 'guard_cleanup', 'healthcheck', 'held_bound', 'held_changed', 'held_content', 'held_identity', 'host_load_gate', 'host_namespace', 'image_default_delta', 'image_defaults', 'image_id', 'image_identity', 'image_labels', 'inventory_shape', 'journal_container', 'journal_service', 'journal_state', 'json_bound', 'labels', 'legacy_owner_policy', 'legacy_units', 'load_gate_missing', 'machine_id', 'metadata_binding', 'mount_model', 'mounts', 'network_policy', 'nonfinite_json', 'normal_api_unready', 'normal_bot_owner', 'normal_command', 'normal_environment', 'normal_execution', 'normal_feature_scope', 'normal_health_unready', 'normal_healthcheck', 'normal_host', 'normal_host_feature', 'normal_hosts', 'normal_labels', 'normal_logging', 'normal_network', 'normal_ports', 'normal_proc_policy', 'normal_pull_policy', 'normal_render', 'normal_render_changed', 'normal_render_delta', 'normal_resource', 'normal_restart', 'normal_sync_unready', 'normal_ulimits', 'original_source_identity', 'other_containers', 'other_inventory', 'output_bound', 'output_type', 'override_write', 'owned_state_unproven', 'parent_admission', 'parent_changed', 'path_binding', 'private_output', 'private_unit_property', 'public_host_identity', 'public_source_identity', 'reader_unit_policy', 'reader_units', 'readiness_runtime_changed', 'recovery_not_admitted', 'recovery_without_guard', 'role_baseline', 'role_identity', 'role_missing', 'role_not_running', 'role_order', 'role_policy', 'role_scope', 'rollback_configuration', 'rollback_environment', 'rollback_state_unproven', 'root_mode', 'root_site_required', 'runtime_changed', 'runtime_delta', 'schema_gate', 'scope_bound', 'site_scope', 'smoke_archive', 'smoke_artifact', 'smoke_binding', 'smoke_cleanup', 'smoke_daemon', 'smoke_inventory', 'smoke_member', 'smoke_presence', 'smoke_result', 'source_alias', 'source_binding', 'source_inventory', 'source_mount', 'stdin_bound', 'stdin_write', 'stopped_candidate', 'stopped_network', 'terminal_not_prepared', 'terminal_state', 'unarmed', 'unarmed_site', 'unbound_env_reference', 'unit_binding', 'unit_policy_changed', 'write_incomplete'))
 def need(ok,code):
@@ -54,7 +59,8 @@ def document(raw):
  return json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:need(False,'json'))
 def controls(v,now):
  fields={'schema','operation','nonce','site','machine_id','issued_at','deadline','helpers','roles','datastores'}
- need(type(v) is dict and set(v)==fields and v['schema']=='normal_app_restore_admission/1' and v['operation']==OP,'control')
+ need(type(v) is dict and set(v) in (fields,fields|{'runtime_restart_evidence'})
+  and v['schema']=='normal_app_restore_admission/1' and v['operation']==OP,'control')
  need(type(v['nonce']) is str and re.fullmatch('[a-f0-9]{32}',v['nonce']) and v['site'] in ROLES
   and type(v['machine_id']) is str and re.fullmatch('[a-f0-9]{32}',v['machine_id']),'control')
  need(type(v['issued_at']) is type(v['deadline']) is int and v['issued_at']<=now<v['deadline']<=v['issued_at']+300,'deadline')
@@ -64,7 +70,39 @@ def controls(v,now):
  need(type(v['roles']) is dict and set(v['roles'])==set(ROLES[v['site']]),'role_inventory')
  need(type(v['datastores']) is dict and set(v['datastores'])=={'db','redis'}
   and all(type(i) is str and re.fullmatch('[a-f0-9]{64}',i) for i in v['datastores'].values()),'datastore_inventory')
+ if 'runtime_restart_evidence' in v:
+  ref=v['runtime_restart_evidence'];need(type(ref) is dict and set(ref)=={'path','bytes','sha256'} and type(ref['path']) is str
+   and Path(ref['path']).is_absolute() and '..' not in Path(ref['path']).parts and type(ref['bytes']) is int
+   and 0<ref['bytes']<=131072 and type(ref['sha256']) is str and re.fullmatch('[a-f0-9]{64}',ref['sha256']),'runtime_restart_evidence')
  return v
+def load_restart_witness(value,stack,checks):
+ known=RESTART_WITNESSES[value['site']];ref=value['runtime_restart_evidence']
+ need(ref['bytes']==known['bytes'] and ref['sha256']==known['sha256'],'runtime_restart_source')
+ raw,check=stack.enter_context(cold(ref['path'],known['sha256'],known['bytes']));checks.append(check)
+ need(len(raw)==known['bytes'],'runtime_restart_source');return document(raw)
+def restart_document(witness,site,machine):
+ known=RESTART_WITNESSES[site]
+ need(machine==known['machine_id'] and type(witness) is dict and witness.get('schema')==known['schema'],'runtime_restart_source')
+ if site=='web':need(witness.get('machine_id')==machine,'runtime_restart_source')
+ rows=witness.get('containers');need(type(rows) is list and 0<len(rows)<=64,'runtime_restart_evidence')
+ result=[]
+ for row in rows:
+  need(type(row) is dict,'runtime_restart_evidence')
+  if row.get('name') not in {'/trading_bot_'+role for role in ROLES[site]}:continue
+  need(all(type(row.get(k)) is str for k in ('id','name','image','project'))
+   and re.fullmatch('[a-f0-9]{64}',row['id']) and re.fullmatch('sha256:[a-f0-9]{64}',row['image'])
+   and type(row.get('restart_policy')) is dict and set(row['restart_policy'])=={'Name','MaximumRetryCount'}
+   and type(row['restart_policy']['Name']) is str and type(row['restart_policy']['MaximumRetryCount']) is int,'runtime_restart_evidence')
+  result.append({k:row[k] for k in ('id','name','image','project','restart_policy')})
+ need(len(result)==len(ROLES[site]) and len({r['name'] for r in result})==len(result),'runtime_restart_evidence');return result
+def restart_expectation(C,rows,role,site,spec,actual,base_spec,recreated):
+ need(type(base_spec) is dict and type(base_spec.get('restart')) is str and base_spec['restart']=='always','runtime_restart_base')
+ policy={'Name':'always','MaximumRetryCount':0};matches=[r for r in rows if r['name']==actual['Name'] and r['project']==spec['project']
+  and r['image']==actual['Image'] and C.same(r['restart_policy'],policy)]
+ need(len(matches)==1,'runtime_restart_identity');prior=matches[0]
+ same_instance=prior['id']==actual['Id']
+ need(same_instance or site=='web' and role=='app' and recreated is True,'runtime_restart_identity')
+ return policy,'same_instance' if same_instance else 'earlier_normal_app_recreation'
 def inspect_one(raw):
  values=document(raw);need(type(values) is list and len(values)==1 and type(values[0]) is dict,'normal_inspect');return values[0]
 def public_compose_source(binding,raw):
@@ -161,6 +199,10 @@ def collect(value,stack,self_pin,*,capture=None):
  need(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?',current),'compose_version')
  with open('/etc/machine-id','rb') as source:machine=source.read(65).strip().decode()
  need(machine==value['machine_id'],'machine_identity')
+ restart_rows=None
+ if 'runtime_restart_evidence' in value:
+  need(machine==RESTART_WITNESSES[value['site']]['machine_id'],'runtime_restart_source')
+  restart_rows=restart_document(load_restart_witness(value,stack,checks),value['site'],machine)
  stores={kind:inspect_one(command([*docker,'container','inspect',cid])) for kind,cid in value['datastores'].items()}
  stable={store['Id']:stable_view(store) for store in stores.values()}
  aliases={kind:set() for kind in stores}
@@ -170,8 +212,7 @@ def collect(value,stack,self_pin,*,capture=None):
    aliases[kind].update(x for x in network.get('Aliases') or [] if type(x) is str)
   need(aliases[kind] and len(aliases[kind])<=16,'normal_datastore')
  private={'roles':{},'datastores':stores,'aliases':aliases};scope=[]
- for role,spec in value['roles'].items():
-  argv=prefixes[role]
+ def render(argv,spec):
   references=document(command([*argv,'config','--format','json','--no-env-resolution']))
   allowed={r[k] for r in spec['env_files'] for k in ('path','target')}
   need(type(references.get('services')) is dict and 0<len(references['services'])<=64,'normal_prefix')
@@ -179,7 +220,9 @@ def collect(value,stack,self_pin,*,capture=None):
    need(type(service) is dict and type(service.get('env_file',[])) is list,'normal_prefix')
    for ref in service.get('env_file',[]):
     path=ref['path'] if type(ref) is dict else ref;need(type(path) is str and path in allowed,'unbound_env_reference')
-  model=document(command([*argv,'config','--format','json']))
+  return document(command([*argv,'config','--format','json']))
+ for role,spec in value['roles'].items():
+  argv=prefixes[role];model=render(argv,spec)
   actual=inspect_one(command([*docker,'container','inspect',spec['container_id']]))
   need(actual['Id']==spec['container_id'] and actual['State']['Running'] is True,'normal_runtime')
   image=inspect_one(command([*docker,'image','inspect',actual['Image']]))
@@ -189,11 +232,24 @@ def collect(value,stack,self_pin,*,capture=None):
   # this classification grants no replacement or serving authority.
   recreated='com.docker.compose.replace' in (actual['Config'].get('Labels') or {})
   no_dependencies=C.no_dependencies_label(actual['Config'].get('Labels'))
+  runtime_policy=None;instance=None
+  if restart_rows is not None:
+   # Preserve the complete historical model. The independent first normal
+   # base supplies only its literal restart policy, never image/Env/commands.
+   base=render(argv[:argv.index('--file')+2],spec)
+   need(type(base.get('services')) is dict and type(base['services'].get(role)) is dict,'runtime_restart_base')
+   runtime_policy,instance=restart_expectation(C,restart_rows,role,value['site'],spec,actual,base['services'][role],recreated)
   C.normal_baseline(model,role,row(actual),image,spec,[b['path'] for b in spec['compose_files']],replacement=recreated,
-   creation_no_dependencies=no_dependencies)
+   creation_no_dependencies=no_dependencies,runtime_restart_policy=runtime_policy)
   record={**loader_scope(C,role,actual,aliases),'creation_compose_version':spec['compose_version'],
    'creation_dependency_label':'empty' if no_dependencies else 'declared'};scope.append(record)
+  if runtime_policy is not None:
+   record.update(runtime_restart_policy=runtime_policy,restart_witness_instance=instance,
+    runtime_restart_evidence_sha256=value['runtime_restart_evidence']['sha256'],
+    runtime_restart_normal_base_sha256=spec['compose_files'][0]['sha256'],
+    runtime_restart_scope='policy_only_historical_model_preserved')
   private['roles'][role]={'model':model,'actual':actual,'image':image,'scope':spec}
+  if runtime_policy is not None:private['roles'][role]['runtime_restart_policy']=runtime_policy
  for identifier,before in stable.items():
   after=inspect_one(command([*docker,'container','inspect',identifier]));need(C.same(before,stable_view(after)),'normal_runtime_changed')
  for check in checks:check()
@@ -215,7 +271,8 @@ def main(argv=None):
   codes={'public_source','source_changed','json','control','deadline','role_inventory','datastore_inventory','normal_inspect',
    'fixed_command','loader_environment','endpoint_eligibility','driver_plugins','source_mounts','root_required','normal_command_refused',
    'machine_identity','normal_datastore','normal_prefix','normal_runtime','normal_runtime_changed','compose_version','client_configuration','normal_cwd',
-   'env_references','default_env_reference','env_cli_binding','unbound_env_reference'}|C_CODES
+   'env_references','default_env_reference','env_cli_binding','unbound_env_reference','runtime_restart_evidence',
+   'runtime_restart_source','runtime_restart_base','runtime_restart_identity'}|C_CODES
   code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in codes else 'normal_admission_refused'
   known=type(error) in (RuntimeError,ValueError,TypeError,KeyError,AssertionError,OSError,PermissionError,FileNotFoundError,NotADirectoryError)
   errno=error.errno if known and isinstance(error,OSError) and type(error.errno) is int and 0<error.errno<=4095 else None

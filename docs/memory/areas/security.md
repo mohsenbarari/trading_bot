@@ -39,5 +39,5 @@
   multiplicity/guards. No Go RLIMIT_AS. Bound output before accumulation; never
   inherit RLIMIT_FSIZE into payload writers. Failed4194305B backup retained.
   Shared image size never proves reclaim.
-- Browser full6c04 has Chromium/Firefox CA failures. Direct HTTPS cookies pass;
-  native browser trust/full acceptance OPEN. Preserve earlier failed evidence.
+- Native browser trust passed actual Chromium/Firefox selected CI; UI acceptance
+  OPEN. Normal App Config/loader admission passed five roles; no clone/activation.

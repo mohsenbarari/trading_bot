@@ -551,3 +551,62 @@ must precede another full matrix. Public packet SHA256
 Primary behavior references: [Chromium NSS](https://chromium.googlesource.com/chromium/src/+/main/docs/linux/cert_management.md),
 [Firefox policies](https://firefox-admin-docs.mozilla.org/reference/policies/certificates/),
 [Playwright policy hook](https://github.com/microsoft/playwright/blob/v1.59.1/browser_patches/firefox/preferences/playwright.cfg).
+
+Both native browser trust checks are now demonstrated by actual selected CI at
+6f23a9a6: Chromium40247318290 and Firefox40247778422 passed trust preparation,
+strict HTTPS cookie acceptance/retransmission and exact owned cleanup. Both
+passed two of three selected scenarios; neither run is globally green. Chromium
+failed accountant detail navigation, while Firefox's global-lock reload reported
+NS_BINDING_ABORTED before the subsequent login assertions. Their artifacts are
+222773/ac9f1142fa4e5f50fb8cccb664e64f30ea912989fc87af9464d2a585ef794774
+and219347/1c99fa10ef8af60fa5848557c1a0703ca7fd7d105bc3aa75889229346147db05.
+Browser-specific raw HTTP observations remain separate from strict HTTPS.
+
+Fresh read-only admission05 passed all five normal roles on both hosts:
+Native e7e33d706b674e4c84e9dd3bb90d61ca and
+Web097f6ce73c0842e8806dafd34c8b068f. Full normal Config/Env/Host/mount/network,
+fixed commands, loader restrictions, clone-endpoint eligibility and final live
+identity checks passed. No App clone, network change or serving replacement was
+requested. Restart always/0 was independently bound to the original public
+Native94c1/Web7d55 evidence and first normal base render; the historical complete
+model stayed untouched. Compose5.6.1 emits extra_hosts as host=address list
+entries, while Docker retains host:address. The narrow parser accounts for both
+documented map/list forms and preserves exact endpoints. Independent review
+caught an ambiguous IPv6 hostname in the map branch before execution; one
+shared validator and a real-C regression close it for both forms.
+
+The final105-test App/Market/datastore separate-init Root/CAP_CHOWN/NNP suite
+passed without errors/skips, manifest
+`a9a0175be66be8340a90e0b330e0eeb1e5825eb4c2adfa4e9111f9cd824c1bf6`,
+result `b37bedfcc2eb995208c05819c7fc3eaa38e0fa766f29bd849a3e9f5151443c82`.
+The author passed all25 final admission fixtures; Root independently passed the
+prior24 and final new Native host-map case, including a byte reversal proving
+the final admission production change is only its C pin. This is normal-runtime
+admission evidence, not compatibility or security acceptance.
+
+The accountant failure is a reproduced Vue/Router race: captured list scroll
+queues a query replacement which can cancel a pending detail navigation.
+The focused fix preserves that navigation, back/scroll/filter context and
+aborted-navigation recovery. Root review identified a second stale-instance
+case after unmount/return; the real-router regression failed before the added
+instance-liveness guard. The final42 component tests passed on the documented
+existing local dependency versions. The selected CI now runs the same file
+against actual candidate npm-ci dependencies and adds the existing customer
+lifecycle as a fourth scenario. Its tier2 assertion was moved to the actual
+detail badge, with an additional authenticated API tier assertion; active-card,
+navigation and limits checks remain. Firefox's test accepts only the specific
+Firefox reload-abort while still requiring exact login URL, heading, revocation
+and reactivation results. No new browser success is inferred from these edits.
+UI packet SHA256
+`5690bcad19fbdf37a1cc3ba6a7b176e58850c21fde31a582ef083e986f1ffac1`.
+Root's separate local-unit attempt ended with the bounded client-descendant
+guard refusing the lane; its result is retained and is not called42 passing
+tests. Only the exact owned temporary dependency links were removed afterward.
+
+Root independently passed all10 frozen F79 consumer/preparer fixtures, but
+pre-operation source review found the old consumer still assumes current
+Compose2.40.3 and old generated-label/config shapes, and has pre-open/finalizer
+ordering gaps. No actual NoApply or apply request was issued. A coexisting
+current-normal consumer is being reviewed coherently; frozen historical proof,
+controls and lifecycle evidence remain intact. This avoids a predictable failed
+operational request rather than treating fixture success as readiness.

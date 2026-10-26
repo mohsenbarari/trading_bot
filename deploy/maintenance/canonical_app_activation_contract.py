@@ -475,7 +475,7 @@ def _command(value):
     require(value is None or type(value) is list and all(type(v) is str for v in value),'normal_command'); return value
 
 
-def normal_baseline(model,service,row,image,scope,files,*,replacement=False,creation_no_dependencies=False):
+def normal_baseline(model,service,row,image,scope,files,*,replacement=False,creation_no_dependencies=False,runtime_restart_policy=None):
     """Account for the normal model, then keep the COMPLETE actual operands RAM-only."""
     require(type(model) is dict and type(model.get('services')) is dict and service in model['services'],'normal_render')
     spec = model['services'][service]; cfg = row['config']; host = row['host']; defaults = image['Config']
@@ -513,7 +513,17 @@ def normal_baseline(model,service,row,image,scope,files,*,replacement=False,crea
     for name,key in (('CapAdd','cap_add'),('CapDrop','cap_drop'),('SecurityOpt','security_opt'),('GroupAdd','group_add')):
         require(same(host.get(name) or [],spec.get(key) or []),'normal_host')
     restart = spec.get('restart','no').split(':')
-    require(same(host.get('RestartPolicy'),{'Name':restart[0],'MaximumRetryCount':int(restart[1]) if len(restart) == 2 else 0}),'normal_restart')
+    expected_restart = {'Name':restart[0],'MaximumRetryCount':int(restart[1]) if len(restart) == 2 else 0}
+    if runtime_restart_policy is not None:
+        # Only the independently admitted normal always/0 policy may account
+        # for a historical temporary no-restart creation override. Callers must
+        # authenticate that policy separately; the full model stays untouched.
+        require(type(runtime_restart_policy) is dict and set(runtime_restart_policy)=={'Name','MaximumRetryCount'}
+            and type(runtime_restart_policy['Name']) is str and runtime_restart_policy['Name']=='always'
+            and type(runtime_restart_policy['MaximumRetryCount']) is int and runtime_restart_policy['MaximumRetryCount']==0
+            and expected_restart in ({'Name':'no','MaximumRetryCount':0},{'Name':'always','MaximumRetryCount':0}),'normal_restart')
+        expected_restart = runtime_restart_policy
+    require(same(host.get('RestartPolicy'),expected_restart),'normal_restart')
     logging = spec.get('logging',{})
     require(same(host.get('LogConfig'),{'Type':logging.get('driver','json-file'),'Config':logging.get('options',{})}),'normal_logging')
     ports = {}
@@ -546,11 +556,26 @@ def normal_host(spec,host):
     require(expected['Init'] is None or type(expected['Init']) is bool,'normal_resource')
     require(expected['PidsLimit'] is None or type(expected['PidsLimit']) is int,'normal_resource')
     for key,value in expected.items():require(same(host.get(key),value),'normal_resource')
-    extras = spec.get('extra_hosts',{}); require(type(extras) is dict,'normal_hosts'); expected_hosts = []
-    for name,addresses in extras.items():
-        addresses = [addresses] if type(addresses) is str else addresses
-        require(type(name) is str and type(addresses) is list and all(type(a) is str for a in addresses),'normal_hosts')
-        expected_hosts.extend(name+':'+address for address in addresses)
+    def host_pair(name,address):
+        require(type(name) is str and type(address) is str and name and address
+            and not any(c in name for c in ':=\r\n') and not any(c in address for c in '=\r\n'),'normal_hosts')
+        return name+':'+address
+    extras = spec.get('extra_hosts',{}); require(type(extras) in (dict,list),'normal_hosts'); expected_hosts = []
+    if type(extras) is dict:
+        for name,addresses in extras.items():
+            addresses = [addresses] if type(addresses) is str else addresses
+            require(type(name) is str and name and type(addresses) is list and addresses
+                and all(type(a) is str and a for a in addresses),'normal_hosts')
+            expected_hosts.extend(host_pair(name,address) for address in addresses)
+    else:
+        # Current Compose emits its documented short form (host=address);
+        # earlier normal renders used a mapping. Docker retains host:address.
+        # Only serialization changes here; preserve exact names/addresses.
+        for item in extras:
+            require(type(item) is str and ('=' in item or ':' in item),'normal_hosts')
+            name,address = item.split('=' if '=' in item else ':',1)
+            expected_hosts.append(host_pair(name,address))
+    require(len(expected_hosts)==len(set(expected_hosts)),'normal_hosts')
     actual_hosts = host.get('ExtraHosts') or []
     require(type(actual_hosts) is list and len(set(actual_hosts)) == len(actual_hosts)
         and sorted(actual_hosts) == sorted(expected_hosts),'normal_hosts')

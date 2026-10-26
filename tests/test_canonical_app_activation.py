@@ -190,6 +190,45 @@ class ActivationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'compose_labels'):
             C.configuration_parity(f.old,f.new,'app',f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
 
+    def test_independently_admitted_runtime_restart_preserves_historical_model_and_other_guards(self):
+        f=fixture(); f.old['services']['app']['restart']='no';original=deepcopy(f.old)
+        policy={'Name':'always','MaximumRetryCount':0}
+        with self.assertRaisesRegex(RuntimeError,'normal_restart'):
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+        C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,runtime_restart_policy=policy)
+        self.assertEqual(f.old,original);self.assertEqual(policy,{'Name':'always','MaximumRetryCount':0})
+        for bad in ({'Name':'always','MaximumRetryCount':False},{'Name':'always','MaximumRetryCount':1},
+                {'Name':'no','MaximumRetryCount':0},{'Name':'always','MaximumRetryCount':0,'extra':0},'always',True):
+            with self.subTest(policy=bad),self.assertRaisesRegex(RuntimeError,'normal_restart'):
+                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,runtime_restart_policy=bad)
+        for field,value in (('Cmd',['python','changed.py']),('Env',['PUBLIC_UNEXPECTED=1'])):
+            changed=deepcopy(f.old_row);changed['config'][field]=value
+            with self.subTest(field=field),self.assertRaises(RuntimeError):
+                C.normal_baseline(f.old,'app',changed,f.old_image,f.scope,f.paths,runtime_restart_policy=policy)
+        f.old['services']['app']['restart']='on-failure:3'
+        with self.assertRaisesRegex(RuntimeError,'normal_restart'):
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,runtime_restart_policy=policy)
+
+    def test_extra_hosts_normal_map_and_short_forms_preserve_exact_endpoint_and_reject_drift(self):
+        f=fixture();spec=f.old['services']['app'];f.old_row['host']['ExtraHosts']=['coin.example:192.0.2.8']
+        for form in ({'coin.example':'192.0.2.8'},{'coin.example':['192.0.2.8']},['coin.example=192.0.2.8'],['coin.example:192.0.2.8']):
+            spec['extra_hosts']=deepcopy(form);before=deepcopy(spec)
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+            self.assertEqual(spec,before)
+        for bad in (['coin.example=192.0.2.9'],['other.example=192.0.2.8'],['coin.example=192.0.2.8']*2,
+                ['coin.example'],['=192.0.2.8'],['coin.example='],['coin.example=192.0.2.8=extra'],[True],True,
+                {'coin.example':False},{'coin.example':[]},['coin.example=192.0.2.8\n']):
+            spec['extra_hosts']=bad
+            with self.subTest(form=bad),self.assertRaises(RuntimeError):
+                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+        f.old_row['host']['ExtraHosts']=['coin.example:2001:db8::1']
+        for form in ({'coin.example':'2001:db8::1'},['coin.example=2001:db8::1'],['coin.example:2001:db8::1']):
+            spec['extra_hosts']=form;C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+        # The same flattened Docker string must not hide a different hostname.
+        spec['extra_hosts']={'coin.example:2001':'db8::1'}
+        with self.assertRaisesRegex(RuntimeError,'normal_hosts'):
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+
     def test_normal_pull_policy_never_is_modeled_and_all_other_values_refuse(self):
         f = fixture()
         spec = f.old['services']['app']; spec['pull_policy'] = 'never'

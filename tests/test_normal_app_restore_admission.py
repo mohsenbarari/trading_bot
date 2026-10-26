@@ -76,7 +76,7 @@ class AdmissionTests(unittest.TestCase):
   return control,fixtures,inspections,capture,calls
  def invoke(self,control,capture):
   real=open
-  def opened(path,*a,**k):return io.BytesIO(b'b'*32+b'\n') if str(path)=='/etc/machine-id' else real(path,*a,**k)
+  def opened(path,*a,**k):return io.BytesIO((control['machine_id']+'\n').encode()) if str(path)=='/etc/machine-id' else real(path,*a,**k)
   pin=sha256(Path(A.__file__).read_bytes()).hexdigest()
   previous=Path.cwd()
   try:
@@ -247,5 +247,106 @@ class AdmissionTests(unittest.TestCase):
   self.assertNotEqual(Path.cwd().resolve(),self.root.resolve())
   with ExitStack() as stack,self.assertRaisesRegex(RuntimeError,'normal_cwd'):A.collect(c,stack,pin,capture=capture)
   self.assertEqual(calls,[])
+ def restart_case(self,site='web'):
+  # Explicitly synthetic portable rows. Positive integration injects only this
+  # public witness read boundary; no operational host receipt is copied/read.
+  c,fixtures,rows,capture,calls=self.case(site);c['machine_id']=A.RESTART_WITNESSES[site]['machine_id']
+  path=self.public_file('synthetic-restart.json',b'SYNTHETIC PUBLIC FIXTURE ONLY')
+  c['runtime_restart_evidence']={'path':str(path),'bytes':path.stat().st_size,'sha256':sha256(path.read_bytes()).hexdigest()}
+  document={'schema':A.RESTART_WITNESSES[site]['schema'],'containers':[]}
+  if site=='web':document['machine_id']=c['machine_id']
+  for role,f in fixtures.items():
+   f.old['services'][role]['restart']='no';f.old['services'][role]['container_name']='trading_bot_'+role;actual=rows[c['roles'][role]['container_id']];actual['Name']='/trading_bot_'+role
+   actual['HostConfig']['RestartPolicy']={'Name':'always','MaximumRetryCount':0}
+   document['containers'].append({'id':actual['Id'],'image':actual['Image'],'name':actual['Name'],'project':c['roles'][role]['project'],
+    'restart_policy':{'Name':'always','MaximumRetryCount':0}})
+  def base_render(argv,*args,**kw):
+   rc,raw=capture(argv,*args,**kw)
+   if argv[2]=='compose' and '--file' in argv and argv.count('--file')==1 and argv[-3:]==['config','--format','json']:
+    model=json.loads(raw)
+    for r in set(fixtures)&set(model['services']):model['services'][r]['restart']='always'
+    return rc,json.dumps(model).encode()
+   return rc,raw
+  return c,fixtures,rows,base_render,calls,document
+ def test_restart_uses_independent_synthetic_witness_and_base_only_without_mutating_historical_model(self):
+  for site in ('bot','web'):
+   c,fixtures,rows,capture,calls,witness=self.restart_case(site);before={r:deepcopy(f.old) for r,f in fixtures.items()}
+   with patch.object(A,'load_restart_witness',return_value=witness):public,private=self.invoke(c,capture)
+   self.assertTrue(all(r['runtime_restart_policy']=={'Name':'always','MaximumRetryCount':0} and r['restart_witness_instance']=='same_instance'
+    for r in public['normal_role_eligibility']))
+   self.assertEqual({r:f.old for r,f in fixtures.items()},before)
+   self.assertTrue(all(private['roles'][r]['model']['services'][r]['restart']=='no' for r in fixtures))
+   base=[a for a in calls if a[2]=='compose' and '--file' in a and a.count('--file')==1]
+   self.assertEqual(len(base),2*len(fixtures));self.assertNotIn('PRIVATE_SENTINEL',json.dumps(public))
+ def test_only_web_app_may_use_earlier_normal_recreation_witness(self):
+  for site,role,allowed in (('web','app',True),('web','sync_worker',False),('bot','app',False)):
+   c,fixtures,rows,capture,calls,witness=self.restart_case(site);actual=rows[c['roles'][role]['container_id']]
+   prior=next(r for r in witness['containers'] if r['name']==actual['Name']);prior['id']='f'*64
+   actual['Config']['Labels']['com.docker.compose.replace']=fixtures[role].old['services'][role]['container_name']
+   with patch.object(A,'load_restart_witness',return_value=witness):
+    if allowed:
+     public,_=self.invoke(c,capture);self.assertEqual(next(r for r in public['normal_role_eligibility'] if r['role']==role)['restart_witness_instance'],'earlier_normal_app_recreation')
+    else:
+     with self.assertRaisesRegex(RuntimeError,'runtime_restart_identity'):self.invoke(c,capture)
+ def test_base_business_fields_are_not_adopted_and_historical_image_override_remains(self):
+  c,fixtures,rows,capture,calls,witness=self.restart_case();before=deepcopy(fixtures['app'].old)
+  def distinct_base(argv,*args,**kw):
+   rc,raw=capture(argv,*args,**kw)
+   if '--file' in argv and argv.count('--file')==1 and argv[-3:]==['config','--format','json']:
+    v=json.loads(raw)
+    for spec in v['services'].values():spec.update(image='ordinary-base-image-reference',environment={'BASE_ONLY':'NOT_ADOPTED'},
+     command=['base-command-not-adopted'],volumes=[],depends_on={})
+    return rc,json.dumps(v).encode()
+   return rc,raw
+  with patch.object(A,'load_restart_witness',return_value=witness):public,private=self.invoke(c,distinct_base)
+  self.assertEqual(private['roles']['app']['model'],before);self.assertNotIn('NOT_ADOPTED',json.dumps(public))
+ def test_earlier_web_witness_does_not_grant_replacement_classification(self):
+  for label in (None,'wrong-container-name'):
+   c,fixtures,rows,capture,calls,witness=self.restart_case();actual=rows[c['roles']['app']['container_id']]
+   witness['containers'][0]['id']='f'*64
+   if label is not None:actual['Config']['Labels']['com.docker.compose.replace']=label
+   with patch.object(A,'load_restart_witness',return_value=witness),self.assertRaises(RuntimeError):self.invoke(c,capture)
+ def test_native_real_normal_C_accepts_same_list_equals_vs_runtime_colon_host_mapping(self):
+  c,fixtures,rows,capture,calls=self.case('bot');actual=rows[c['roles']['app']['container_id']]
+  fixtures['app'].old['services']['app']['extra_hosts']=['coin.gold-trade.ir=65.109.220.59']
+  actual['HostConfig']['ExtraHosts']=['coin.gold-trade.ir:65.109.220.59']
+  public,private=self.invoke(c,capture)
+  self.assertEqual(len(public['normal_role_eligibility']),3)
+  self.assertEqual(private['roles']['app']['model']['services']['app']['extra_hosts'],['coin.gold-trade.ir=65.109.220.59'])
+  self.assertEqual(private['roles']['app']['actual']['HostConfig']['ExtraHosts'],['coin.gold-trade.ir:65.109.220.59'])
+ def test_restart_witness_wrong_source_and_machine_refuse_before_payload_or_clients(self):
+  c,*_=self.case();path=self.public_file('not-a-host-receipt',b'SYNTHETIC PUBLIC')
+  c['runtime_restart_evidence']={'path':str(path),'bytes':path.stat().st_size,'sha256':sha256(path.read_bytes()).hexdigest()}
+  with patch.object(A.os,'pread',side_effect=AssertionError('no witness payload read')),ExitStack() as stack,self.assertRaisesRegex(RuntimeError,'runtime_restart_source'):
+   A.load_restart_witness(c,stack,[])
+  for site in ('bot','web'):
+   v={'schema':A.RESTART_WITNESSES[site]['schema'],'machine_id':'f'*32,'containers':[]}
+   with self.assertRaisesRegex(RuntimeError,'runtime_restart_source'):A.restart_document(v,site,'b'*32)
+   if site=='web':
+    with self.assertRaisesRegex(RuntimeError,'runtime_restart_source'):A.restart_document(v,site,A.RESTART_WITNESSES[site]['machine_id'])
+ def test_restart_witness_identity_base_policy_and_nonrestart_drift_still_refuse(self):
+  for bad in ('image','project','name','count_bool','base','Env','Cmd'):
+   c,fixtures,rows,capture,calls,witness=self.restart_case();actual=rows[c['roles']['app']['container_id']];prior=witness['containers'][0]
+   if bad in ('image','project','name'):prior[bad]=('sha256:'+'f'*64) if bad=='image' else 'wrong'
+   elif bad=='count_bool':prior['restart_policy']['MaximumRetryCount']=False
+   elif bad in ('Env','Cmd'):actual['Config'][bad]=['PRIVATE_SENTINEL']
+   original=capture
+   def wrong_base(argv,*args,**kw):
+    rc,raw=original(argv,*args,**kw)
+    if bad=='base' and '--file' in argv and argv.count('--file')==1 and argv[-3:]==['config','--format','json']:
+     v=json.loads(raw);v['services']['app']['restart']='on-failure';return rc,json.dumps(v).encode()
+    return rc,raw
+   with patch.object(A,'load_restart_witness',return_value=witness),self.assertRaises(RuntimeError):self.invoke(c,wrong_base)
+ def test_first_base_all_service_env_coverage_still_precedes_full_base_render(self):
+  c,fixtures,rows,capture,calls,witness=self.restart_case();full=[]
+  def foreign(argv,*args,**kw):
+   rc,raw=capture(argv,*args,**kw)
+   if '--file' in argv and argv.count('--file')==1:
+    if argv[-1]=='--no-env-resolution':
+     v=json.loads(raw);v['services']['base_foreign']={'env_file':[{'path':str(self.root/'UNBOUND.env')}]};return rc,json.dumps(v).encode()
+    if argv[-3:]==['config','--format','json']:full.append(argv)
+   return rc,raw
+  with patch.object(A,'load_restart_witness',return_value=witness),self.assertRaisesRegex(RuntimeError,'unbound_env_reference'):self.invoke(c,foreign)
+  self.assertEqual(full,[])
 
 if __name__=='__main__':unittest.main()
