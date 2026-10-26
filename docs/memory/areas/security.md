@@ -1,18 +1,18 @@
 # Security remediation
 
-- Resumed26Oct05:31Z. Acceptance false: App/Market/datastores old; refactor STOP/streak0.
+- Acceptance false: App/Market/datastores old; refactor STOP/streak0.
   After closure require30 accepted clean units; failures reset, history retained.
   Tests/polls never count. Preserve behavior/capture owner/user dirt; Writer/DNS human.
-- Host/TLS/backup05/PG-restore passed; compatibility OPEN.
+- Host/TLS/backup06/PG-restore passed. O10 backup05 both-site write/old-read/
+  persistence/cleanup passed; serving pending. Gate assembly remains unarmed.
   Final: ciphertext only; no App provisioning.
 - Ordinary665220a2/E1 preloaded, not serving. UI needs new artifact; never relabel
-  E1. Main frozen; preserve user dirt/rollback/history.
+  E1. Main frozen; retain rollback.
 - Never retry/reroute App C/S/R fresh-profile/COW adaptation/probe. Use ordinary
   main artifact with fresh config/backup/functional evidence.
-- Raw44HIGH retain43 assessments; ACL/capture conflicts OPEN. LOAD grants no
-  serving eligibility/retry. Preserve F79's two baked changes/five mounts/no code
-  binds. Proof27d441: candidate19/parent18 versus old8; old-prefix invalid.
-  Diagnostic OPEN.
+- Raw44HIGH/43 assessments; ACL/capture OPEN. LOAD is not serving/retry.
+  F79 two baked/five mounts/no code binds;27d441:new19/parent18 versus old8;
+  old-prefix invalid.
 - PG49a8/Redis98c4 loaded, not activated; Windows UNKNOWN retains Linux absence
   proof.
 - Ten Market candidates preloaded/inactive. Retain failures/unknowns/spent
@@ -35,7 +35,7 @@
 - Register Root modules; Git-only fixtures, UID0/CAP_CHOWN/result2;
   smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixtures; preserve guards/
   multiplicity. No Go RLIMIT_AS; bound output before accumulation; no payload
-  FSIZE inheritance. Retain failed4194305B backup; shared size never proves reclaim.
+  FSIZE inheritance; preserve open-incident evidence.
 - Native6c9 failed; expiry stopped owned3 (PID0/noOOM/restarts). Fresh normal
   Config17 equal; HostOOM startnull proven from exactMoby/cgroup2; scoped fix
   Root326+final111PASS. F79 labels OPEN after Entry fix/Root321PASS.

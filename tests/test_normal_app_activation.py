@@ -87,6 +87,51 @@ class NormalActivationTests(unittest.TestCase):
   b.docker=lambda *a,**k:b'v5.6.1\n' if a[:2]==('compose','version') else b'32.0.0\n';b.version_check();self.assertEqual(b.scope,old)
   b.docker=lambda *a,**k:b'5.6.2\n'
   with self.assertRaisesRegex(RuntimeError,'compose_version'):b.version_check()
+ def absent_legacy_control(self):
+  now=int(time.time());control=self.N.unarmed();control.update(nonce='a'*32,controller_commit='b'*40,
+   issued_at=now,forward_deadline=now+300,recovery_deadline=now+600,image=deepcopy(self.C.IMAGE),
+   source_files={name:{'bytes':1,'sha256':pin} for name,pin in self.N.PINS.items()})
+  control['source_files'][self.N.ENTRY]={'bytes':1,'sha256':'c'*64}
+  absent={'LoadState':'not-found','UnitFileState':'','FragmentPath':'','DropInPaths':'',
+   'ActiveState':'inactive','SubState':'dead','MainPID':'0','ControlPID':'0','NeedDaemonReload':'no'}
+  for site,declared in self.C.SITES.items():
+   admission={'schema':'normal_app_restore_admission/1','operation':self.A.OP,'nonce':control['nonce'],
+    'site':site,'machine_id':'b'*32,'issued_at':now,'deadline':now+300,
+    'roles':{role:{'project':declared['project'],'workdir':declared['workdir'],'compose_files':[
+     {'path':declared['workdir']+('/docker-compose.yml' if site=='bot' else '/docker-compose.iran.yml'),'bytes':1,'sha256':'c'*64}]}
+     for role in declared['roles']},'datastores':{'db':'d'*64,'redis':'e'*64},
+    'helpers':{key:{'path':str(self.N.ROOTS[site]/leaf),'sha256':self.N.PINS[leaf]} for key,leaf in
+     (('contract','canonical_app_activation_contract.py'),('utilities','canonical_app_activation_site.py'),('capture','bounded_operational_capture.py'))}}
+   control['sites'][site]={'machine_id':'b'*32,'normal_admission':admission,
+    'fences':{'marker':[1,2,0o100600,0,0,1,350,100,100],**({'source':deepcopy(self.C.SOURCE_ID)} if site=='bot' else {})},
+    'reader_units':{name:{'LoadState':'loaded','UnitFileState':'enabled','NeedDaemonReload':'no'}
+     for name in (self.C.READER_UNITS if site=='bot' else ())},'legacy_units':{'coin-capture.service':deepcopy(absent)},
+    'public_image_env_delta':{},'current_compose_version':'5.6.1','docker_version':'29.9.2'}
+  binding=lambda name:{'name':name,'bytes':1,'sha256':'c'*64}
+  control['gates']={'canonical_smoke':binding('smoke.zip'),'host_loads':{site:binding(site+'.json') for site in self.C.SITES},
+   'backup_restore':binding('backup.json'),'schema_compatibility':binding('schema.json')}
+  return control,now,absent
+ def test_genuine_absent_legacy_units_keep_complete_empty_enablement_metadata_without_empty_inventory(self):
+  control,now,absent=self.absent_legacy_control();self.N.validate(self.C,self.A,control,now)
+  self.assertEqual(control['sites']['bot']['legacy_units']['coin-capture.service'],absent)
+  changes=({'LoadState':'loaded'},{'LoadState':''},{'UnitFileState':'disabled'},{'FragmentPath':'/public/appeared.service'},
+   {'DropInPaths':'/public/override.conf'},{'ActiveState':'active'},{'SubState':'running'},{'MainPID':'1'},
+   {'MainPID':False},{'ControlPID':'1'},{'NeedDaemonReload':'yes'})
+  for change in changes:
+   wrong=deepcopy(control);wrong['sites']['bot']['legacy_units']['coin-capture.service'].update(change)
+   with self.subTest(change=change),self.assertRaises(RuntimeError):self.N.validate(self.C,self.A,wrong,now)
+  wrong=deepcopy(control);wrong['sites']['bot']['legacy_units']={}
+  with self.assertRaisesRegex(RuntimeError,'legacy_units'):self.N.validate(self.C,self.A,wrong,now)
+ def test_real_shaped_absent_legacy_units_remain_exact_through_unchanged_S_unit_barriers(self):
+  _,_,absent=self.absent_legacy_control();b=self.backend();b.scope={'reader_units':{},'legacy_units':{'coin-capture.service':absent}}
+  actual=deepcopy(absent);calls=[]
+  def command(argv,**kwargs):
+   calls.append(argv);self.assertEqual(argv[:3],['/usr/bin/systemctl','show','coin-capture.service'])
+   return ''.join(key+'='+value+'\n' for key,value in actual.items()).encode()
+  b.cmd=command;b.units_check();self.assertEqual(len(calls),1)
+  for change in ({'LoadState':'loaded'},{'UnitFileState':'disabled'},{'MainPID':'1'},{'LoadState':''}):
+   actual.clear();actual.update(absent);actual.update(change)
+   with self.subTest(change=change),self.assertRaisesRegex(RuntimeError,'unit_policy_changed'):b.units_check()
  def test_pre_stop_full_normal_runtime_barrier_refuses_business_drift_before_command(self):
   b=self.backend();role=b.selected;cid=b.role_ids[role];b.inspect=lambda _:deepcopy(b.current[cid]);b.current[cid]['config']['Env'].append('CHANGED=PUBLIC')
   with self.assertRaisesRegex(RuntimeError,'normal_environment'):b.stop(role,cid)

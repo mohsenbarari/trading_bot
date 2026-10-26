@@ -90,7 +90,15 @@ def validate(C,A,value,now,*,recovery=False):
   for policy in scope['reader_units'].values():
    need(set(policy)<=C.READER_POLICY_FIELDS and {'LoadState','UnitFileState','NeedDaemonReload'}<=set(policy) and policy['LoadState']=='loaded' and policy['UnitFileState'] and policy['NeedDaemonReload']=='no','reader_unit_policy')
   for policy in scope['legacy_units'].values():
-   need(policy.get('ActiveState') in {'inactive','failed'} and policy.get('MainPID')==policy.get('ControlPID')=='0' and policy.get('UnitFileState') in {'disabled','masked','not-found'} and policy.get('NeedDaemonReload')=='no','legacy_owner_policy')
+   parked=(policy.get('LoadState')!='not-found' and policy.get('ActiveState') in {'inactive','failed'}
+    and policy.get('MainPID')==policy.get('ControlPID')=='0'
+    and policy.get('UnitFileState') in {'disabled','masked','not-found'} and policy.get('NeedDaemonReload')=='no')
+   # Real absent units expose an empty UnitFileState, not a fictional
+   # "not-found" enablement state. Keep the full measured absence tuple
+   # in the control; unchanged S.units_check compares every field at runtime.
+   absent={'LoadState':'not-found','UnitFileState':'','FragmentPath':'','DropInPaths':'',
+    'ActiveState':'inactive','SubState':'dead','MainPID':'0','ControlPID':'0','NeedDaemonReload':'no'}
+   need(parked or all(policy.get(key)==value for key,value in absent.items()),'legacy_owner_policy')
   delta=scope['public_image_env_delta'];need(type(delta) is dict and set(delta)<=C.PUBLIC_ENV_DEFAULT_KEYS,'image_default_delta')
   for pair in delta.values():need(type(pair) is dict and set(pair)=={'old','new'} and all(type(v) is str and v and '\n' not in v for v in pair.values()),'image_default_delta')
  gates=value['gates'];need(type(gates) is dict and set(gates)=={'canonical_smoke','host_loads','backup_restore','schema_compatibility'},'gate_inventory')
