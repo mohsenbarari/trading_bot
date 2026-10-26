@@ -117,6 +117,30 @@ class DatastoreTests(unittest.TestCase):
             lambda v:v['scope'].update(project='shadow'),lambda v:v['scope'].update(workdir='/other-release')):
             changed=deepcopy(value);mutate(changed)
             with self.assertRaises(RuntimeError):M.validate_control(self.C,changed,self.now)
+    def test_datastore_null_and_missing_commands_inherit_without_empty_or_runtime_drift_waivers(self):
+        for role in M.ROLES:
+            for key,field in (('command','Cmd'),('entrypoint','Entrypoint')):
+                for setting in ('missing','null','empty','explicit'):
+                    f=self.case(role);spec=f.old['services'][M.SERVICE[role]];defaults=f.old_image['Config']
+                    defaults[field]=['public-image-default',field]
+                    if setting=='missing':spec.pop(key,None)
+                    else:spec[key]={'null':None,'empty':[],'explicit':['public-override',field]}[setting]
+                    expected=defaults[field] if setting in ('missing','null') else spec[key]
+                    f.old_row['config'][field]=deepcopy(expected);before=deepcopy((spec,defaults,f.old_row))
+                    with self.subTest(role=role,key=key,setting=setting):
+                        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+                        self.assertEqual((spec,defaults,f.old_row),before)
+                        for changed in (None,[],['public-runtime-drift']):
+                            if changed==expected:continue
+                            f.old_row['config'][field]=changed
+                            with self.assertRaisesRegex(RuntimeError,'normal_execution'):
+                                M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+        for key in ('command','entrypoint'):
+            for bad in (False,0,'',{},[False],['public',1]):
+                f=self.case();f.old['services']['db'][key]=bad
+                with self.subTest(key=key,bad=bad),self.assertRaisesRegex(RuntimeError,'normal_command'):
+                    M.baseline(self.C,f.old,'native-postgres',f.old_row,f.old_image,f.scope,f.paths)
+
     def test_all_five_normal_model_baselines_and_complete_parity(self):
         for role in M.ROLES:
             f=self.case(role);M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)

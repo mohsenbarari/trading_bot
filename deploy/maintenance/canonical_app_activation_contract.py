@@ -475,6 +475,25 @@ def _command(value):
     require(value is None or type(value) is list and all(type(v) is str for v in value),'normal_command'); return value
 
 
+def image_command(spec,defaults,key):
+    """Resolve normalized Compose null/missing inheritance, keeping [] exact.
+
+    A rendered null is inheritance, not an empty runtime operand. Only normalized
+    lists are admitted here; shell-form strings must have been rendered first.
+    """
+    require(type(spec) is dict and type(defaults) is dict and type(key) is str and key in ('command','entrypoint'),'normal_command')
+    value=_command(spec.get(key))
+    if key=='command' and value is None:
+        entrypoint=_command(spec.get('entrypoint'))
+        # Compose forwards a nonempty explicit entrypoint with a nil Cmd.
+        # Moby docker-v29.9.2 merge preserves that nil instead of image CMD.
+        # Empty entrypoint + inherited Cmd differs between documented intent
+        # and Engine len/nil merging; it needs a separately measured contract.
+        require(entrypoint!=[],'normal_command_coupling')
+        if entrypoint is not None:return None
+    return _command(defaults.get('Cmd' if key=='command' else 'Entrypoint')) if value is None else value
+
+
 def normal_baseline(model,service,row,image,scope,files,*,replacement=False,creation_no_dependencies=False,runtime_restart_policy=None):
     """Account for the normal model, then keep the COMPLETE actual operands RAM-only."""
     require(type(model) is dict and type(model.get('services')) is dict and service in model['services'],'normal_render')
@@ -488,8 +507,8 @@ def normal_baseline(model,service,row,image,scope,files,*,replacement=False,crea
     require(type(explicit) is dict and all(type(k) is str and type(v) is str for k,v in explicit.items()),'normal_environment')
     env.update(explicit); require(same(environment(cfg['Env']),env),'normal_environment')
     require(explicit.get('TRADING_BOT_SERVICE') == ('api' if service == 'app' else service),'role_policy')
-    require(same(cfg.get('Cmd'),_command(spec.get('command',defaults.get('Cmd'))))
-        and same(cfg.get('Entrypoint'),_command(spec.get('entrypoint',defaults.get('Entrypoint'))))
+    require(same(cfg.get('Cmd'),image_command(spec,defaults,'command'))
+        and same(cfg.get('Entrypoint'),image_command(spec,defaults,'entrypoint'))
         and cfg['User'] == spec.get('user',defaults.get('User') or '')
         and cfg['WorkingDir'] == spec.get('working_dir',defaults.get('WorkingDir') or '')
         and cfg['Hostname'] == spec.get('hostname',row['id'][:12]),'normal_execution')

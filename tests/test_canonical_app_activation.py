@@ -286,6 +286,62 @@ class ActivationTests(unittest.TestCase):
             with self.subTest(mode=value),self.assertRaisesRegex(RuntimeError,'compose_labels'):
                 C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths,creation_no_dependencies=value)
 
+    def test_null_and_missing_execution_operands_inherit_image_but_empty_and_explicit_lists_stay_exact(self):
+        for key,field in (('command','Cmd'),('entrypoint','Entrypoint')):
+            for setting in ('missing','null','empty','explicit'):
+                f=fixture();spec=f.old['services']['app'];defaults=f.old_image['Config']
+                defaults[field]=['public-image-default',field]
+                if setting=='missing':spec.pop(key,None)
+                else:spec[key]={'null':None,'empty':[],'explicit':['public-override',field]}[setting]
+                expected=defaults[field] if setting in ('missing','null') else spec[key]
+                f.old_row['config'][field]=deepcopy(expected);before=deepcopy((spec,defaults,f.old_row))
+                with self.subTest(key=key,setting=setting):
+                    C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+                    self.assertEqual((spec,defaults,f.old_row),before)
+                    for changed in (None,[],['public-runtime-drift']):
+                        if changed==expected:continue
+                        f.old_row['config'][field]=changed
+                        with self.assertRaisesRegex(RuntimeError,'normal_execution'):
+                            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+
+    def test_entrypoint_command_cross_product_preserves_suppression_and_refuses_unsupported_empty_coupling(self):
+        for entrypoint in ('missing',None,[],['public-explicit-entrypoint']):
+            for command in ('missing',None,[],['public-explicit-command']):
+                for inherited in (None,[],['public-image-command']):
+                    f=fixture();spec=f.old['services']['app'];defaults=f.old_image['Config']
+                    defaults.update(Cmd=deepcopy(inherited),Entrypoint=['public-image-entrypoint'])
+                    for key,value in (('entrypoint',entrypoint),('command',command)):
+                        if value=='missing':spec.pop(key,None)
+                        else:spec[key]=deepcopy(value)
+                    cfg=f.old_row['config'];cfg['Entrypoint']=(defaults['Entrypoint'] if entrypoint in ('missing',None) else entrypoint)
+                    coupled=command in ('missing',None)
+                    cfg['Cmd']=(None if coupled and entrypoint not in ('missing',None,[]) else inherited) if coupled else command
+                    with self.subTest(entrypoint=entrypoint,command=command,inherited=inherited):
+                        if coupled and entrypoint==[]:
+                            with self.assertRaisesRegex(RuntimeError,'normal_command_coupling'):
+                                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+                        else:
+                            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+                            cfg['Cmd']=['public-unexpected-runtime-command']
+                            with self.assertRaisesRegex(RuntimeError,'normal_execution'):
+                                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+
+    def test_execution_inheritance_rejects_unrendered_or_untyped_operands_and_keeps_image_null(self):
+        for key,field in (('command','Cmd'),('entrypoint','Entrypoint')):
+            for bad in (False,0,1,'','echo public',{},[False],['public',0],('public',)):
+                for where in ('model','inherited_image'):
+                    f=fixture();spec=f.old['services']['app'];spec[key]=None
+                    if where=='model':spec[key]=bad
+                    else:f.old_image['Config'][field]=bad
+                    with self.subTest(key=key,where=where,bad=bad),self.assertRaisesRegex(RuntimeError,'normal_command'):
+                        C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+            f=fixture();spec=f.old['services']['app'];spec[key]=None
+            f.old_image['Config'][field]=None;f.old_row['config'][field]=None
+            C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+            f.old_row['config'][field]=[]
+            with self.assertRaisesRegex(RuntimeError,'normal_execution'):
+                C.normal_baseline(f.old,'app',f.old_row,f.old_image,f.scope,f.paths)
+
     def test_complete_configuration_parity_accounts_no_deps_without_changing_dependencies(self):
         f=fixture(); deps={'redis':{'condition':'service_started'}}
         for model in (f.old,f.new):model['services']['app']['depends_on']=deepcopy(deps)

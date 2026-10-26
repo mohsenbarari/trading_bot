@@ -13,7 +13,7 @@ from types import ModuleType,SimpleNamespace
 import json,os,re,stat,time
 
 OPERATION='security-normal-datastore-activation-20261025-01'
-BASE_CONTRACT_SHA='97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317'
+BASE_CONTRACT_SHA='c07784fd6364b39db1b25f4e0e73dc95f9be6b7128b10f37f12c49dd681de140'
 BASE_UTILITIES_SHA='d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29'
 CATALOG_SHA='fc89cd6e75ee1b2b973b9436e55d05f41879e7f52be9cfe583acdecc5fe42263'
 CONTRACT_SHA='d210020e24fedd4986803a3fe2618a5016ecd99f9e3ca9588af02d77a967e17d'
@@ -256,8 +256,8 @@ def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_
     explicit=spec.get('environment',{});require(type(explicit) is dict and all(type(k) is str and type(v) is str for k,v in explicit.items()),'normal_environment')
     env=C.environment(defaults.get('Env',[]));env.update(explicit)
     require(C.same(C.environment(cfg['Env']),env),'normal_environment')
-    require(C.same(cfg.get('Cmd'),C._command(spec.get('command',defaults.get('Cmd'))))
-        and C.same(cfg.get('Entrypoint'),C._command(spec.get('entrypoint',defaults.get('Entrypoint'))))
+    require(C.same(cfg.get('Cmd'),C.image_command(spec,defaults,'command'))
+        and C.same(cfg.get('Entrypoint'),C.image_command(spec,defaults,'entrypoint'))
         and cfg['User']==spec.get('user',defaults.get('User') or '') and cfg['WorkingDir']==spec.get('working_dir',defaults.get('WorkingDir') or '')
         and cfg['Hostname']==spec.get('hostname',row['id'][:12]),'normal_execution')
     require(C.same(C.normalize_health(cfg.get('Healthcheck')),C.normalize_health(C.healthcheck(spec['healthcheck']) if 'healthcheck' in spec else defaults.get('Healthcheck'))),'normal_healthcheck')

@@ -476,6 +476,33 @@ class NormalMarketTests(unittest.TestCase):
                 if accepted:self.assertTrue(M.baked_archive_sources(*args)['ancestor_metadata_unchanged_in_ram'])
                 else:
                     with self.assertRaisesRegex(RuntimeError,'f79_baked_ancestor_changed'):M.baked_archive_sources(*args)
+    def test_market_null_entrypoint_inherits_exact_image_without_relaxing_role_command(self):
+        f=self.case();role='market-processor';spec=f.old['services'][role];defaults=f.old_image['Config']
+        defaults['Entrypoint']=['public-market-entrypoint'];f.old_row['config']['Entrypoint']=defaults['Entrypoint'][:]
+        for setting in ('missing','null','empty','explicit'):
+            if setting=='missing':spec.pop('entrypoint',None)
+            else:spec['entrypoint']={'null':None,'empty':[],'explicit':['public-override']}[setting]
+            expected=defaults['Entrypoint'] if setting in ('missing','null') else spec['entrypoint']
+            f.old_row['config']['Entrypoint']=deepcopy(expected);before=deepcopy((spec,defaults,f.old_row))
+            with self.subTest(setting=setting):
+                M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+                self.assertEqual((spec,defaults,f.old_row),before)
+                for changed in (None,[],['public-runtime-drift']):
+                    if changed==expected:continue
+                    f.old_row['config']['Entrypoint']=changed
+                    with self.assertRaisesRegex(RuntimeError,'normal_execution'):
+                        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+        spec['entrypoint']=None;f.old_row['config']['Entrypoint']=defaults['Entrypoint'][:]
+        for bad in (False,0,'',{},[False],['public',1]):
+            spec['entrypoint']=bad
+            with self.subTest(entrypoint=bad),self.assertRaisesRegex(RuntimeError,'normal_command'):
+                M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+        spec['entrypoint']=None
+        for bad in (None,[],['service','--role','other'],False):
+            spec['command']=bad;f.old_row['config']['Cmd']=deepcopy(bad)
+            with self.subTest(command=bad),self.assertRaisesRegex(RuntimeError,'normal_execution'):
+                M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
+
     def test_market_baseline_and_complete_parity_support_secrets_tmpfs_shm_argsescaped_without_mutating_operands(self):
         f=self.case();saved=deepcopy(f)
         M.baseline(self.C,f.old,'market-processor',f.old_row,f.old_image,f.scope,f.paths)

@@ -12,7 +12,7 @@ from types import ModuleType,SimpleNamespace
 import gzip,json,os,posixpath,re,stat,tarfile,time
 
 OPERATION='security-normal-market-activation-20261025-01'
-BASE_CONTRACT_SHA='97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317'
+BASE_CONTRACT_SHA='c07784fd6364b39db1b25f4e0e73dc95f9be6b7128b10f37f12c49dd681de140'
 BASE_UTILITIES_SHA='d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29'
 CATALOG_SHA='c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 LOAD_WORKER_SHA='5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
@@ -554,7 +554,7 @@ def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_
     env=C.environment(defaults.get('Env',[]));env.update(explicit)
     require(C.same(C.environment(cfg['Env']),env) and explicit.get('MARKET_PIPELINE_RELEASE_SHA')==scope['release'],'normal_environment')
     require(C.same(spec.get('command'),['service','--role',role]) and C.same(cfg.get('Cmd'),spec['command'])
-        and C.same(cfg.get('Entrypoint'),spec.get('entrypoint',defaults.get('Entrypoint')))
+        and C.same(cfg.get('Entrypoint'),C.image_command(spec,defaults,'entrypoint'))
         and cfg['User']==spec.get('user',defaults.get('User') or '') and cfg['WorkingDir']==spec.get('working_dir',defaults.get('WorkingDir') or '')
         and cfg['Hostname']==spec.get('hostname',row['id'][:12]),'normal_execution')
     require(C.same(C.normalize_health(cfg.get('Healthcheck')),C.normalize_health(C.healthcheck(spec['healthcheck']) if 'healthcheck' in spec else defaults.get('Healthcheck'))),'normal_healthcheck')

@@ -17,9 +17,9 @@ REBASE_SHA='2d567b9d105dbf21c490ad47587cb7c7352969ce0f7be8673814a408790dd2af'
 WIRE_SHA='ff32988c1b524abd145daac4f34d2b189900245ebeae033992dcfce44c4d82be'
 # Exact shared normal validators frozen by Root; historical proof pins above
 # remain independent and are never relabeled as these current validators.
-PRIMITIVE_PINS={'contract':'97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317',
+PRIMITIVE_PINS={'contract':'c07784fd6364b39db1b25f4e0e73dc95f9be6b7128b10f37f12c49dd681de140',
  'site':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
- 'market':'35c2e778b4b65de2301927382fcadfea6f2a4207b58dea4e829a6fcf69569b1d',
+ 'market':'512460eae7eadf9966a9d2a0dfb23efc976e1ead7f28921efc6f9fd53f3c44e5',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 PRIMITIVE_NAMES={'contract':'canonical_app_activation_contract.py','site':'canonical_app_activation_site.py',
  'market':'normal_market_activation_current.py','capture':'bounded_operational_capture.py'}
