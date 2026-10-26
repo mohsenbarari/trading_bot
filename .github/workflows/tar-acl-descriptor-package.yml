@@ -1,0 +1,79 @@
+name: Proper descriptor ACL Tar package evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tar-acl-descriptor-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out exactly the reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build and test only the proper Tar package
+        id: build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/acl_tar_descriptor_build/build_hosted.py \
+            --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
+            --root "$RUNNER_TEMP/tar-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 5315f7c3a7eaa4db9019d4b117a99b08f84979251c6fcc89d8ba60645f9efb68 \
+            --execute-hosted-build \
+            --confirm BUILD-ONLY-HOSTED-TAR-DESCRIPTOR-ACL-PACKAGE-20261026-02
+
+      - name: Retain only the twelve complete proper package outputs
+        if: success() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tar-acl-descriptor-package-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/tar_1.35+dfsg-5~trixie+gold2_amd64.deb
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/tar_1.35+dfsg-5~trixie+gold2_amd64.changes
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/tar_1.35+dfsg-5~trixie+gold2_amd64.buildinfo
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/acl_2.4.0-1~trixie+gold1_amd64.changes
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/acl_2.4.0-1~trixie+gold1_amd64.buildinfo
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/source-proof.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/sdk-proof.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/abi-contract.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/ordinary-compatibility.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/provenance.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/runtime-payload.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/caller-proof.json
+
+      - name: Retain bounded public source, resource and failure evidence
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tar-acl-descriptor-package-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/source-identity.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/result.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/hosted-failure.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.json
+            ${{ runner.temp }}/tar-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.log

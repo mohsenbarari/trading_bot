@@ -1,0 +1,806 @@
+From: Project local maintenance <local-build@invalid>
+Subject: [LOCAL DRAFT] Bind tar ACL operations to admitted runtime descriptors
+Forwarded: no
+Status: SOURCE-ONLY; not compiled, packaged or security-accepted
+
+For the pinned Linux/Trixie libacl2.4 toolchain. Preserve legacy libacl ABI.
+Use current tar payload FDs, admitted constructor parent/object handles, and
+separate actual delayed-directory identities. All four ACL operation families
+use AT_EMPTY_PATH. No legacy pathname fallback. This does not attest atomic
+special-node birth against arbitrary same-type hardlink replacement, nor fix
+unrelated chmod/chown/xattr paths or all other whole-image ACL consumers.
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -90,6 +90,24 @@
+   export enable_acl=no
+ fi
+ 
++# Local Trixie caller hardening has no legacy ACL pathname fallback.
++AS_IF([test "x$with_posix_acls" = xno],
++      [AC_MSG_ERROR([descriptor ACL support is mandatory for this build])])
++AC_CHECK_HEADERS([acl/libacl.h], [],
++                 [AC_MSG_ERROR([libacl 2.4 development headers required])])
++AC_CHECK_DECLS([O_PATH, AT_EMPTY_PATH], [],
++              [AC_MSG_ERROR([Linux descriptor ACL flags required])],
++              [[#include <fcntl.h>]])
++AC_CHECK_DECLS([acl_get_file_at, acl_set_file_at, acl_delete_def_file_at,
++                acl_extended_file_at], [],
++               [AC_MSG_ERROR([libacl 2.4 declarations required])],
++               [[#include <sys/types.h>
++                 #include <sys/acl.h>
++                 #include <acl/libacl.h>]])
++AC_CHECK_FUNCS([acl_get_file_at acl_set_file_at acl_delete_def_file_at
++                acl_extended_file_at], [],
++               [AC_MSG_ERROR([libacl 2.4 descriptor APIs required])])
++
+ AC_TYPE_MODE_T
+ AC_TYPE_PID_T
+ AC_TYPE_OFF_T
+@@ -105,6 +123,8 @@
+ 
+ # gnulib modules
+ gl_INIT
++AS_IF([test "x$USE_ACL" != x1],
++      [AC_MSG_ERROR([working descriptor ACL support is mandatory])])
+ 
+ AC_DEFINE([GNULIB_EXCLUDE_SINGLE_THREAD], [1],
+   [Define if all programs in this package call functions of the Gnulib
+--- a/src/create.c
++++ b/src/create.c
+@@ -1760,7 +1760,8 @@
+       bool ok;
+       struct stat st2;
+ 
+-      xattrs_acls_get (parentfd, name, st, !is_dir);
++      xattrs_acls_get (parentfd, name, st, !is_dir,
++                       st->fd > 0 ? st->fd : -1);
+       xattrs_selinux_get (parentfd, name, st, fd);
+       xattrs_xattrs_get (parentfd, name, st, fd);
+ 
+@@ -1923,21 +1924,21 @@
+   else if (S_ISCHR (st->stat.st_mode))
+     {
+       type = CHRTYPE;
+-      xattrs_acls_get (parentfd, name, st, true);
++      xattrs_acls_get (parentfd, name, st, true, -1);
+       xattrs_selinux_get (parentfd, name, st, 0);
+       xattrs_xattrs_get (parentfd, name, st, 0);
+     }
+   else if (S_ISBLK (st->stat.st_mode))
+     {
+       type = BLKTYPE;
+-      xattrs_acls_get (parentfd, name, st, true);
++      xattrs_acls_get (parentfd, name, st, true, -1);
+       xattrs_selinux_get (parentfd, name, st, 0);
+       xattrs_xattrs_get (parentfd, name, st, 0);
+     }
+   else if (S_ISFIFO (st->stat.st_mode))
+     {
+       type = FIFOTYPE;
+-      xattrs_acls_get (parentfd, name, st, true);
++      xattrs_acls_get (parentfd, name, st, true, -1);
+       xattrs_selinux_get (parentfd, name, st, 0);
+       xattrs_xattrs_get (parentfd, name, st, 0);
+     }
+--- a/src/extract.c
++++ b/src/extract.c
+@@ -34,6 +34,70 @@
+ static mode_t newdir_umask;	/* umask when creating new directories */
+ static mode_t current_umask;	/* current umask (which is set to 0 if -p) */
+ 
++
++/* Return -2 only when creation succeeded but runtime ACL admission did not.
++   Never send that outcome back through the ordinary creation retry loop.
++   The parent selected by tar's normal traversal is held through constructor
++   and O_PATH admission.  This is not an atomic-birth/hardlink attestation. */
++static int
++acl_create_object (char const *file_name, mode_t mode, dev_t device,
++                   int kind, int *object_fd)
++{
++  int parent = chdir_fd;
++  char *leaf = NULL;
++  bool owned = acls_option > 0;
++  *object_fd = -1;
++  if (owned)
++    {
++      parent = xattrs_acl_parent (chdir_fd, file_name, &leaf);
++      if (parent < 0)
++        return -1;
++    }
++  char const *name = owned ? leaf : file_name;
++  int status = (kind == 0 ? mkdirat (parent, name, mode)
++                : kind == 1 ? mknodat (parent, name, mode, device)
++                : mkfifoat (parent, name, mode));
++  if (status == 0 && owned)
++    {
++      struct stat observed;
++      *object_fd = xattrs_acl_open (parent, name, AT_SYMLINK_NOFOLLOW, NULL);
++      bool admitted = (*object_fd >= 0
++                       && fstat (*object_fd, &observed) == 0);
++      if (admitted)
++        admitted = (kind == 0 ? S_ISDIR (observed.st_mode)
++                    : kind == 1
++                    ? ((observed.st_mode & S_IFMT) == (mode & S_IFMT)
++                       && observed.st_rdev == device)
++                    : S_ISFIFO (observed.st_mode));
++      if (!admitted)
++        {
++          int e = *object_fd < 0 ? errno : ESTALE;
++          if (*object_fd >= 0)
++            close (*object_fd);
++          *object_fd = -1;
++          errno = e;
++          open_error (file_name);
++          status = -2;
++        }
++    }
++  int e = errno;
++  free (leaf);
++  if (owned && close (parent) != 0)
++    {
++      e = errno;
++      if (*object_fd >= 0)
++        close (*object_fd);
++      *object_fd = -1;
++      if (status == 0)
++        {
++          close_error (file_name);
++          status = -2;
++        }
++    }
++  errno = e;
++  return status;
++}
++
+ #define ALL_MODE_BITS ((mode_t) ~ (mode_t) 0)
+ 
+ #if ! HAVE_FCHMOD && ! defined fchmod
+@@ -85,6 +149,9 @@
+     /* Metadata for this directory.  */
+     dev_t dev;
+     ino_t ino;
++    /* Actual admitted filesystem identity, never archive dev/inode. */
++    struct stat acl_object;
++    bool acl_object_valid;
+     mode_t mode; /* The desired mode is MODE & ~ current_umask.  */
+     uid_t uid;
+     gid_t gid;
+@@ -388,8 +455,15 @@
+ set_stat (char const *file_name,
+ 	  struct tar_stat_info const *st,
+ 	  int fd, mode_t current_mode, mode_t current_mode_mask,
+-	  char typeflag, bool interdir, int atflag)
+-{
++          char typeflag, bool interdir, int atflag, int acl_fd)
++{
++  if (acls_option > 0 && typeflag != SYMTYPE && acl_fd < 0)
++    {
++      errno = EBADF;
++      open_error (file_name);
++      return;
++    }
++
+   /* Do the utime before the chmod because some versions of utime are
+      broken and trash the modes of the file.  */
+ 
+@@ -441,7 +515,7 @@
+   /* these three calls must be done *after* fd_chown() call because fd_chown
+      causes that linux capabilities becomes cleared. */
+   xattrs_xattrs_set (st, file_name, typeflag, 1);
+-  xattrs_acls_set (st, file_name, typeflag);
++  xattrs_acls_set (st, file_name, typeflag, acl_fd);
+   xattrs_selinux_set (st, file_name, typeflag);
+ }
+ 
+@@ -508,8 +582,17 @@
+ static void
+ delay_set_stat (char const *file_name, struct tar_stat_info const *st,
+ 		mode_t current_mode, mode_t current_mode_mask,
+-		mode_t mode, int atflag)
+-{
++                mode_t mode, int atflag, int acl_fd)
++{
++  struct stat acl_object;
++  if (acls_option > 0
++      && (acl_fd < 0 || fstat (acl_fd, &acl_object) != 0
++          || !S_ISDIR (acl_object.st_mode)))
++    {
++      errno = ESTALE;
++      open_error (file_name);
++      return;
++    }
+   size_t file_name_len = strlen (file_name);
+   struct delayed_set_stat *data;
+ 
+@@ -519,6 +602,14 @@
+ 
+   if (data)
+     {
++      if (acls_option > 0 && data->acl_object_valid
++          && (acl_object.st_dev != data->acl_object.st_dev
++              || acl_object.st_ino != data->acl_object.st_ino))
++        {
++          errno = ESTALE;
++          open_error (file_name);
++          return;
++        }
+       if (data->interdir)
+ 	{
+ 	  struct stat real_st;
+@@ -550,6 +641,9 @@
+       xattr_map_init (&data->xattr_map);
+     }
+ 
++  data->acl_object_valid = acls_option > 0;
++  if (data->acl_object_valid)
++    data->acl_object = acl_object;
+   data->mode = mode;
+   if (st)
+     {
+@@ -698,6 +792,7 @@
+       mode_t mode;
+       mode_t desired_mode;
+       int status;
++      int acl_fd = -1;
+ 
+       if (! ISSLASH (*cursor))
+ 	continue;
+@@ -718,7 +813,12 @@
+       *cursor = '\0';		/* truncate the name there */
+       desired_mode = MODE_RWX & ~ newdir_umask;
+       mode = desired_mode | (we_are_root ? 0 : MODE_WXUSR);
+-      status = mkdirat (chdir_fd, file_name, mode);
++      status = acl_create_object (file_name, mode, 0, 0, &acl_fd);
++      if (status == -2)
++        {
++          *cursor = '/';
++          return -1;
++        }
+ 
+       if (status == 0)
+ 	{
+@@ -727,9 +827,11 @@
+ 	     repair_delayed_set_stat may need to update the struct.  */
+ 	  delay_set_stat (file_name,
+ 			  0, mode & ~ current_umask, MODE_RWX,
+-			  desired_mode, AT_SYMLINK_NOFOLLOW);
+-
+-	  print_for_mkdir (file_name, desired_mode);
++                          desired_mode, AT_SYMLINK_NOFOLLOW, acl_fd);
++          if (acl_fd >= 0 && close (acl_fd) != 0)
++            close_error (file_name);
++
++          print_for_mkdir (file_name, desired_mode);
+ 	  parent_end = NULL;
+ 	}
+       else
+@@ -944,6 +1046,7 @@
+       struct delayed_set_stat *data = delayed_set_stat_head;
+       bool skip_this_one = 0;
+       struct stat st;
++      int acl_fd = -1;
+       mode_t current_mode = data->current_mode;
+       mode_t current_mode_mask = data->current_mode_mask;
+ 
+@@ -958,6 +1061,19 @@
+ 	break;
+ 
+       chdir_do (data->change_dir);
++      if (acls_option > 0)
++        {
++          if (data->acl_object_valid)
++            acl_fd = xattrs_acl_open (chdir_fd, data->file_name, data->atflag,
++                                      &data->acl_object);
++          else
++            errno = ESTALE;
++          if (acl_fd < 0)
++            {
++              open_error (data->file_name);
++              skip_this_one = 1;
++            }
++        }
+ 
+       if (check_for_renamed_directories)
+ 	{
+@@ -996,8 +1112,10 @@
+ 	  sb.xattr_map = data->xattr_map;
+ 	  set_stat (data->file_name, &sb,
+ 		    -1, current_mode, current_mode_mask,
+-		    DIRTYPE, data->interdir, data->atflag);
+-	}
++                    DIRTYPE, data->interdir, data->atflag, acl_fd);
++        }
++      if (acl_fd >= 0 && close (acl_fd) != 0)
++        close_error (data->file_name);
+ 
+       delayed_set_stat_head = data->next;
+       free_delayed_set_stat (data);
+@@ -1046,6 +1164,9 @@
+   mode_t current_mode = 0;
+   mode_t current_mode_mask = 0;
+   int atflag = 0;
++  int acl_fd = -1;
++  struct stat acl_existing;
++  bool acl_existing_known = false;
+   bool interdir_made = false;
+ 
+   /* Save 'root device' to avoid purging mount points. */
+@@ -1069,7 +1190,9 @@
+ 
+   for (;;)
+     {
+-      status = mkdirat (chdir_fd, file_name, mode);
++      status = acl_create_object (file_name, mode, 0, 0, &acl_fd);
++      if (status == -2)
++        return 1;
+       if (status == 0)
+ 	{
+ 	  current_mode = mode & ~ current_umask;
+@@ -1099,9 +1222,11 @@
+ 		  current_mode = st.st_mode;
+ 		  current_mode_mask = ALL_MODE_BITS;
+ 
+-		  if (S_ISDIR (current_mode))
+-		    {
+-		      if (interdir_made)
++                  if (S_ISDIR (current_mode))
++                    {
++                      acl_existing = st;
++                      acl_existing_known = true;
++                      if (interdir_made)
+ 			{
+ 			  repair_delayed_set_stat (file_name, &st);
+ 			  return 0;
+@@ -1166,9 +1291,26 @@
+   if (status == 0
+       || old_files_option == DEFAULT_OLD_FILES
+       || old_files_option == OVERWRITE_OLD_FILES)
+-    delay_set_stat (file_name, &current_stat_info,
+-		    current_mode, current_mode_mask,
+-		    current_stat_info.stat.st_mode, atflag);
++    {
++      if (acls_option > 0 && acl_fd < 0)
++        {
++          if (!acl_existing_known)
++            errno = ESTALE;
++          else
++            acl_fd = xattrs_acl_open (chdir_fd, file_name, atflag,
++                                      &acl_existing);
++          if (acl_fd < 0)
++            {
++              open_error (file_name);
++              return 1;
++            }
++        }
++      delay_set_stat (file_name, &current_stat_info,
++                      current_mode, current_mode_mask,
++                      current_stat_info.stat.st_mode, atflag, acl_fd);
++    }
++  if (acl_fd >= 0 && close (acl_fd) != 0)
++    close_error (file_name);
+   return status;
+ }
+ 
+@@ -1352,7 +1494,7 @@
+     set_stat (file_name, &current_stat_info, fd,
+ 	      current_mode, current_mode_mask, typeflag, false,
+ 	      (old_files_option == OVERWRITE_OLD_FILES
+-	       ? 0 : AT_SYMLINK_NOFOLLOW));
++               ? 0 : AT_SYMLINK_NOFOLLOW), fd);
+ 
+   status = close (fd);
+   if (status < 0)
+@@ -1585,7 +1727,7 @@
+       }
+ 
+   set_stat (file_name, &current_stat_info, -1, 0, 0,
+-	    SYMTYPE, false, AT_SYMLINK_NOFOLLOW);
++            SYMTYPE, false, AT_SYMLINK_NOFOLLOW, -1);
+   return 0;
+ 
+ #else
+@@ -1610,9 +1752,14 @@
+   mode_t mode = (current_stat_info.stat.st_mode & (MODE_RWX | S_IFBLK | S_IFCHR)
+ 		 & ~ (0 < same_owner_option ? S_IRWXG | S_IRWXO : 0));
+ 
+-  while (mknodat (chdir_fd, file_name, mode, current_stat_info.stat.st_rdev)
+-	 != 0)
+-    switch (maybe_recoverable (file_name, false, &interdir_made))
++  int acl_fd = -1;
++  int creation_status;
++  while ((creation_status = acl_create_object (file_name, mode,
++                  current_stat_info.stat.st_rdev, 1, &acl_fd)) != 0)
++    {
++      if (creation_status == -2)
++        return -1;
++      switch (maybe_recoverable (file_name, false, &interdir_made))
+       {
+       case RECOVER_OK:
+ 	continue;
+@@ -1621,13 +1768,16 @@
+ 	return 0;
+ 
+       case RECOVER_NO:
+-	mknod_error (file_name);
+-	return -1;
+-      }
++        mknod_error (file_name);
++        return -1;
++        }
++    }
+ 
+   set_stat (file_name, &current_stat_info, -1,
+ 	    mode & ~ current_umask, MODE_RWX,
+-	    typeflag, false, AT_SYMLINK_NOFOLLOW);
++            typeflag, false, AT_SYMLINK_NOFOLLOW, acl_fd);
++  if (acl_fd >= 0 && close (acl_fd) != 0)
++    close_error (file_name);
+   return 0;
+ }
+ #endif
+@@ -1640,8 +1790,14 @@
+   mode_t mode = (current_stat_info.stat.st_mode & MODE_RWX
+ 		 & ~ (0 < same_owner_option ? S_IRWXG | S_IRWXO : 0));
+ 
+-  while (mkfifoat (chdir_fd, file_name, mode) != 0)
+-    switch (maybe_recoverable (file_name, false, &interdir_made))
++  int acl_fd = -1;
++  int creation_status;
++  while ((creation_status = acl_create_object (file_name, mode, 0,
++                                              2, &acl_fd)) != 0)
++    {
++      if (creation_status == -2)
++        return -1;
++      switch (maybe_recoverable (file_name, false, &interdir_made))
+       {
+       case RECOVER_OK:
+ 	continue;
+@@ -1650,13 +1806,16 @@
+ 	return 0;
+ 
+       case RECOVER_NO:
+-	mkfifo_error (file_name);
+-	return -1;
+-      }
++        mkfifo_error (file_name);
++        return -1;
++        }
++    }
+ 
+   set_stat (file_name, &current_stat_info, -1,
+ 	    mode & ~ current_umask, MODE_RWX,
+-	    typeflag, false, AT_SYMLINK_NOFOLLOW);
++            typeflag, false, AT_SYMLINK_NOFOLLOW, acl_fd);
++  if (acl_fd >= 0 && close (acl_fd) != 0)
++    close_error (file_name);
+   return 0;
+ }
+ #endif
+@@ -1911,7 +2070,7 @@
+ 	      st1.acls_d_len = ds->acls_d_len;
+ 	      st1.xattr_map = ds->xattr_map;
+ 	      set_stat (source, &st1, -1, 0, 0, SYMTYPE,
+-			false, AT_SYMLINK_NOFOLLOW);
++                        false, AT_SYMLINK_NOFOLLOW, -1);
+ 	      valid_source = source;
+ 	    }
+ 	}
+--- a/src/xattrs.c
++++ b/src/xattrs.c
+@@ -24,6 +24,7 @@
+ 
+ #include <fnmatch.h>
+ #include <quotearg.h>
++#include <dirname.h>
+ 
+ #include "common.h"
+ 
+@@ -139,59 +140,80 @@
+ 
+ #ifdef HAVE_POSIX_ACLS
+ 
+-/* acl-at wrappers, TODO: move to gnulib in future? */
+-static acl_t tar_acl_get_file_at (int, const char *, acl_type_t);
+-static int tar_acl_set_file_at (int, const char *, acl_type_t, acl_t);
+-static int file_has_acl_at (int, char const *, struct stat const *);
+-static int tar_acl_delete_def_file_at (int, char const *);
+-
+-/* tar_acl_get_file_at */
+-#define AT_FUNC_NAME tar_acl_get_file_at
+-#define AT_FUNC_RESULT acl_t
+-#define AT_FUNC_FAIL (acl_t)NULL
+-#define AT_FUNC_F1 acl_get_file
+-#define AT_FUNC_POST_FILE_PARAM_DECLS   , acl_type_t type
+-#define AT_FUNC_POST_FILE_ARGS          , type
+-#include "at-func.c"
+-#undef AT_FUNC_NAME
+-#undef AT_FUNC_F1
+-#undef AT_FUNC_RESULT
+-#undef AT_FUNC_FAIL
+-#undef AT_FUNC_POST_FILE_PARAM_DECLS
+-#undef AT_FUNC_POST_FILE_ARGS
+-
+-/* tar_acl_set_file_at */
+-#define AT_FUNC_NAME tar_acl_set_file_at
+-#define AT_FUNC_F1 acl_set_file
+-#define AT_FUNC_POST_FILE_PARAM_DECLS   , acl_type_t type, acl_t acl
+-#define AT_FUNC_POST_FILE_ARGS          , type, acl
+-#include "at-func.c"
+-#undef AT_FUNC_NAME
+-#undef AT_FUNC_F1
+-#undef AT_FUNC_POST_FILE_PARAM_DECLS
+-#undef AT_FUNC_POST_FILE_ARGS
+-
+-/* tar_acl_delete_def_file_at */
+-#define AT_FUNC_NAME tar_acl_delete_def_file_at
+-#define AT_FUNC_F1 acl_delete_def_file
+-#define AT_FUNC_POST_FILE_PARAM_DECLS
+-#define AT_FUNC_POST_FILE_ARGS
+-#include "at-func.c"
+-#undef AT_FUNC_NAME
+-#undef AT_FUNC_F1
+-#undef AT_FUNC_POST_FILE_PARAM_DECLS
+-#undef AT_FUNC_POST_FILE_ARGS
+-
+-/* gnulib file_has_acl_at */
+-#define AT_FUNC_NAME file_has_acl_at
+-#define AT_FUNC_F1 file_has_acl
+-#define AT_FUNC_POST_FILE_PARAM_DECLS   , struct stat const *st
+-#define AT_FUNC_POST_FILE_ARGS          , st
+-#include "at-func.c"
+-#undef AT_FUNC_NAME
+-#undef AT_FUNC_F1
+-#undef AT_FUNC_POST_FILE_PARAM_DECLS
+-#undef AT_FUNC_POST_FILE_ARGS
++/* The local Trixie build requires libacl 2.4 descriptor APIs.  These
++   handles select runtime objects, not identities supplied by an archive. */
++int
++xattrs_acl_parent (int parentfd, char const *file_name, char **leaf)
++{
++  char *directory = dir_name (file_name);
++  char *base = base_name (file_name);
++  int fd = openat (parentfd, directory, O_PATH | O_DIRECTORY | O_CLOEXEC);
++  int e = errno;
++  free (directory);
++  if (fd < 0)
++    free (base);
++  else
++    *leaf = base;
++  errno = e;
++  return fd;
++}
++
++static bool
++acl_same_object (struct stat const *a, struct stat const *b)
++{
++  return (a->st_dev == b->st_dev && a->st_ino == b->st_ino
++          && (a->st_mode & S_IFMT) == (b->st_mode & S_IFMT));
++}
++
++int
++xattrs_acl_open (int parentfd, char const *file_name, int atflag,
++                 struct stat const *expected)
++{
++  char *leaf = NULL;
++  int parent = xattrs_acl_parent (parentfd, file_name, &leaf);
++  int fd = -1;
++  struct stat before, after;
++  if (parent < 0)
++    return -1;
++  /* Only ACL lookup strips a trailing slash, which would otherwise make
++     a final link into a directory component and defeat NOFOLLOW.
++     base_len preserves roots; constructors keep their original leaf syntax.
++     Intentional dereferencing still follows the operation's atflag. */
++  leaf[base_len (leaf)] = '\0';
++  if (fstatat (parent, leaf, &before, atflag) == 0)
++    {
++      if (S_ISLNK (before.st_mode)
++          || (expected && !acl_same_object (&before, expected)))
++        errno = ESTALE;
++      else
++        {
++          fd = openat (parent, leaf,
++                       O_PATH | O_CLOEXEC
++                       | (atflag & AT_SYMLINK_NOFOLLOW ? O_NOFOLLOW : 0));
++          if (fd >= 0)
++            {
++              int status = fstat (fd, &after);
++              if (status != 0 || !acl_same_object (&before, &after))
++                {
++                  int e = status != 0 ? errno : ESTALE;
++                  close (fd);
++                  fd = -1;
++                  errno = e;
++                }
++            }
++        }
++    }
++  int e = errno;
++  free (leaf);
++  if (close (parent) != 0 && fd >= 0)
++    {
++      e = errno;
++      close (fd);
++      fd = -1;
++    }
++  errno = e;
++  return fd;
++}
+ 
+ /* convert unix permissions into an ACL ... needed due to "default" ACLs */
+ static acl_t
+@@ -285,8 +307,8 @@
+    attribute.  Called only when acls_option > 0. */
+ static void
+ xattrs__acls_set (struct tar_stat_info const *st,
+-                  char const *file_name, int type,
+-		  char *ptr, bool def)
++                  char const *file_name, int object_fd, int type,
++                  char *ptr, bool def)
+ {
+   acl_t acl;
+ 
+@@ -300,7 +322,7 @@
+       /* No "default" IEEE 1003.1e ACL set for directory.  At this moment,
+          FILE_NAME may already have inherited default acls from parent
+          directory;  clean them up. */
+-      if (tar_acl_delete_def_file_at (chdir_fd, file_name))
++      if (acl_delete_def_file_at (object_fd, "", AT_EMPTY_PATH))
+         WARNOPT (WARN_XATTR_WRITE,
+                 (0, errno,
+                  _("tar_acl_delete_def_file_at: Cannot drop default POSIX ACLs "
+@@ -317,7 +339,7 @@
+       return;
+     }
+ 
+-  if (tar_acl_set_file_at (chdir_fd, file_name, type, acl) == -1)
++  if (acl_set_file_at (object_fd, "", AT_EMPTY_PATH, type, acl) == -1)
+     /* warn even if filesystem does not support acls */
+     WARNOPT (WARN_XATTR_WRITE,
+ 	     (0, errno,
+@@ -352,13 +374,13 @@
+ }
+ 
+ static void
+-acls_get_text (int parentfd, const char *file_name, acl_type_t type,
++acls_get_text (int object_fd, const char *file_name, acl_type_t type,
+ 	       char **ret_ptr, size_t * ret_len)
+ {
+   char *val = NULL;
+   acl_t acl;
+ 
+-  if (!(acl = tar_acl_get_file_at (parentfd, file_name, type)))
++  if (!(acl = acl_get_file_at (object_fd, "", AT_EMPTY_PATH, type)))
+     {
+       if (errno != ENOTSUP)
+         call_arg_warn ("tar_acl_get_file_at", file_name);
+@@ -395,18 +417,18 @@
+ }
+ 
+ static void
+-xattrs__acls_get_a (int parentfd, const char *file_name,
++xattrs__acls_get_a (int object_fd, const char *file_name,
+                     char **ret_ptr, size_t *ret_len)
+ {
+-  acls_get_text (parentfd, file_name, ACL_TYPE_ACCESS, ret_ptr, ret_len);
++  acls_get_text (object_fd, file_name, ACL_TYPE_ACCESS, ret_ptr, ret_len);
+ }
+ 
+ /* "system.posix_acl_default" */
+ static void
+-xattrs__acls_get_d (int parentfd, char const *file_name,
++xattrs__acls_get_d (int object_fd, char const *file_name,
+                     char **ret_ptr, size_t * ret_len)
+ {
+-  acls_get_text (parentfd, file_name, ACL_TYPE_DEFAULT, ret_ptr, ret_len);
++  acls_get_text (object_fd, file_name, ACL_TYPE_DEFAULT, ret_ptr, ret_len);
+ }
+ #endif /* HAVE_POSIX_ACLS */
+ 
+@@ -449,7 +471,7 @@
+ 
+ void
+ xattrs_acls_get (int parentfd, char const *file_name,
+-		 struct tar_stat_info *st, int xisfile)
++                 struct tar_stat_info *st, int xisfile, int object_fd)
+ {
+   if (acls_option > 0)
+     {
+@@ -459,27 +481,39 @@
+         WARN ((0, 0, _("POSIX ACL support is not available")));
+       done = 1;
+ #else
+-      int err = file_has_acl_at (parentfd, file_name, &st->stat);
+-      if (err == 0)
+-        return;
+-      if (err == -1)
+-        {
+-          call_arg_warn ("file_has_acl_at", file_name);
++      bool owned = object_fd < 0;
++      struct stat observed;
++      if (owned)
++        object_fd = xattrs_acl_open (parentfd, file_name, fstatat_flags,
++                                     &st->stat);
++      if (object_fd < 0 || fstat (object_fd, &observed) != 0
++          || !acl_same_object (&observed, &st->stat))
++        {
++          open_error (file_name);
++          if (owned && object_fd >= 0)
++            close (object_fd);
+           return;
+         }
+-
+-      xattrs__acls_get_a (parentfd, file_name,
+-                          &st->acls_a_ptr, &st->acls_a_len);
+-      if (!xisfile)
+-	xattrs__acls_get_d (parentfd, file_name,
+-                            &st->acls_d_ptr, &st->acls_d_len);
++      int err = acl_extended_file_at (object_fd, "", AT_EMPTY_PATH);
++      if (err < 0)
++        call_arg_warn ("acl_extended_file_at", file_name);
++      else if (err > 0)
++        {
++          xattrs__acls_get_a (object_fd, file_name,
++                              &st->acls_a_ptr, &st->acls_a_len);
++          if (!xisfile)
++            xattrs__acls_get_d (object_fd, file_name,
++                                &st->acls_d_ptr, &st->acls_d_len);
++        }
++      if (owned && close (object_fd) != 0)
++        close_error (file_name);
+ #endif
+     }
+ }
+ 
+ void
+ xattrs_acls_set (struct tar_stat_info const *st,
+-                 char const *file_name, char typeflag)
++                 char const *file_name, char typeflag, int object_fd)
+ {
+   if (acls_option > 0 && typeflag != SYMTYPE)
+     {
+@@ -489,10 +523,16 @@
+         WARN ((0, 0, _("POSIX ACL support is not available")));
+       done = 1;
+ #else
+-      xattrs__acls_set (st, file_name, ACL_TYPE_ACCESS,
++      if (object_fd < 0)
++        {
++          errno = EBADF;
++          open_error (file_name);
++          return;
++        }
++      xattrs__acls_set (st, file_name, object_fd, ACL_TYPE_ACCESS,
+ 			st->acls_a_ptr, false);
+       if (typeflag == DIRTYPE || typeflag == GNUTYPE_DUMPDIR)
+-        xattrs__acls_set (st, file_name, ACL_TYPE_DEFAULT,
++        xattrs__acls_set (st, file_name, object_fd, ACL_TYPE_DEFAULT,
+ 			  st->acls_d_ptr, true);
+ #endif
+     }
+--- a/src/xattrs.h
++++ b/src/xattrs.h
+@@ -29,15 +29,20 @@
+ /* clear helping structures when tar finishes */
+ extern void xattrs_clear_setup (void);
+ 
++extern int xattrs_acl_parent (int parentfd, char const *file_name, char **leaf);
++extern int xattrs_acl_open (int parentfd, char const *file_name, int atflag,
++                            struct stat const *expected);
+ extern void xattrs_acls_get (int parentfd, char const *file_name,
+-			     struct tar_stat_info *st, int xisfile);
++                            struct tar_stat_info *st, int xisfile,
++                            int object_fd);
+ extern void xattrs_selinux_get (int parentfd, char const *file_name,
+                                 struct tar_stat_info *st, int fd);
+ extern void xattrs_xattrs_get (int parentfd, char const *file_name,
+                                struct tar_stat_info *st, int fd);
+ 
+ extern void xattrs_acls_set (struct tar_stat_info const *st,
+-                             char const *file_name, char typeflag);
++                             char const *file_name, char typeflag,
++                             int object_fd);
+ extern void xattrs_selinux_set (struct tar_stat_info const *st,
+                                 char const *file_name, char typeflag);
+ extern void xattrs_xattrs_set (struct tar_stat_info const *st,
