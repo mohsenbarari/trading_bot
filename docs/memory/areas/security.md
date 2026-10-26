@@ -41,3 +41,5 @@
   Shared image size never proves reclaim.
 - Native browser trust passed actual Chromium/Firefox selected CI; UI acceptance
   OPEN. Normal App Config/loader admission passed five roles; no clone/activation.
+  Native bridge hooks/conntrack passed in new empty namespaces on both hosts;
+  this grants no clone/data/serving acceptance. F79 current-normal24 fixtures passed.
