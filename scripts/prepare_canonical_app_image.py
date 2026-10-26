@@ -101,13 +101,15 @@ def command(argv,*,maximum=MAX_COMMAND,seconds=120,environment=None,target=None)
     except BaseException:primary=True;raise
     finally:
         clean=True
-        if child is not None:
+        if child is not None and child.returncode is None:
             try:
-                os.killpg(child.pid,signal.SIGKILL)
-                if child.poll() is not None:clean=False
-            except ProcessLookupError:pass
-            except BaseException:clean=False
-            try:child.wait(timeout=3)
+                # WNOWAIT verifies that this PID remains our unreaped child.
+                # Never poll/reap it before a signal; a known returncode means
+                # the identity is already released and must not be signalled.
+                os.waitid(os.P_PID,child.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+                try:os.killpg(child.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                child.wait(timeout=3)
             except BaseException:clean=False
         if target is None:
             try:os.close(private)
