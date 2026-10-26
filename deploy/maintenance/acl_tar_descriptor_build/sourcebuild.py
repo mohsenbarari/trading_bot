@@ -305,10 +305,13 @@ def build_vendor(kind):
   config=owned_read(source/'config.h',maximum=1024**2).decode();require(all('#define HAVE_'+n.upper()+' 1'in config for n in NEW_APIS),'compiled_api_configuration')
  return source,rows,records,packaging
 
-def install_packages(paths,*,documentation):
+def install_packages(paths,*,documentation,complete_tar_payload=False):
  flags=[]
  for name in documentation:
   flags+=['--path-include=/usr/share/doc/'+name,'--path-include=/usr/share/doc/'+name+'/*']
+ if complete_tar_payload:
+  for root in ('/usr/share/locale','/usr/share/man','/usr/share/info'):
+   flags+=['--path-include='+root,'--path-include='+root+'/*']
  command(['/usr/bin/dpkg',*flags,'--install',*(str(p)for p in paths)],timeout=120)
  require(metadata(['/usr/bin/dpkg','--audit'])==b'','dpkg_audit')
 
@@ -369,7 +372,7 @@ def build():
  lib_payload=regular_payload(old_lib,'libacl1',SDK_VERSION,'approved-libacl');library=acl_library_binding(WORK/'expected-approved-libacl')
  approved_exports=exported_symbols(Path(library['path']));require(NEW_APIS<=set(approved_exports),'sdk_approved_api')
  before=inventory();source,tar_rows,tar_records,tar_packaging=build_vendor('tar');tar=next(r for r in tar_rows if r['name']=='tar')
- install_packages([Path(tar['path'])],documentation=('tar',))
+ install_packages([Path(tar['path'])],documentation=('tar',),complete_tar_payload=True)
  after=inventory();expected=dict(before);expected['tar']=VERSION;require(after==expected,'only_tar_runtime_delta')
  tar_payload=regular_payload(Path(tar['path']),'tar',VERSION,'candidate-tar');require(acl_library_binding(WORK/'expected-approved-libacl')==library
   and exported_symbols(Path(library['path']))==approved_exports,'libacl_abi_changed')

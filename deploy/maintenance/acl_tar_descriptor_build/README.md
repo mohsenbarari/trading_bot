@@ -2,10 +2,11 @@
 
 SOURCE ONLY; no Git, network, Docker, APT, C, Tar, ACL or package build has been
 performed by the author. Native01/02 and the failed Native02 request are unchanged.
-`build_hosted.py` defaults UNARMED. Fifteen owned inert-child/file and pure
+`build_hosted.py` defaults UNARMED. Eighteen owned inert-child/file and pure
 contract tests cover the new profile; those are not hosted/native-build proof.
 
-Root must adopt the seven exact Native02 recipe files and `build_hosted.py` at
+Root must adopt the six unchanged Native02 recipe files, the install-profile-only
+`sourcebuild.py` correction, and `build_hosted.py` at
 `deploy/maintenance/acl_tar_descriptor_build/`, and the reviewed workflow at a
 new `.github/workflows/` path. Only Root may commit, push or dispatch. No existing
 Native, App or release controller is broadened or repointed.
@@ -65,8 +66,27 @@ Package production does not assert whole-image ACL closure or security acceptanc
 Current GitHub runner capacity, the actual package result and its eventual byte
 hash are unknown until Root executes the reviewed fresh workflow.
 
-This immutable02 source cohort fixes the outer export-finalization gap found in
-Hosted01. Hosted01 and every historical request remain unchanged. The new owned
+The inherited immutable02 source correction fixes the outer export-finalization
+gap found in Hosted01. Hosted01 and every historical request remain unchanged. The new owned
 regression creates twelve actual public output files, mutates one during the
 last original-source physical close, and requires refusal after all FDs close.
 This is source/fixture evidence only; no hosted build or package is accepted.
+
+
+This immutable03 cohort preserves02 and the actual failed run40395481260.
+Root reports that the fresh hosted run completed the default Tar package build
+with exit0, actual sparse05 PASS and85GiB available, then the strict complete
+payload comparison refused because slim's dpkg exclusions omitted installed
+`/usr/share/locale/el`. No native C/ordinary compatibility or export success is
+claimed for that historical run.
+
+The only recipe behavior change opts the candidate Tar install into explicit
+`--path-include` entries for `/usr/share/locale`, `/usr/share/man` and
+`/usr/share/info`, each root and its `/*` descendants, in addition to the existing
+Tar documentation includes. SDK and approved libacl reinstall argv stay exact.
+No global dpkg configuration, package bytes, vendor tests, C patch, ABI/native
+checks, complete payload validator or output inventory is weakened. Three new
+owned semantic/AST regressions bind the exact install argv, unchanged SDK calls,
+unchanged full-payload validator and sole candidate Tar opt-in. They perform no
+package install or native operation; a fresh actual CI must prove real dpkg
+behavior and all previously unreached gates before any package acceptance.
