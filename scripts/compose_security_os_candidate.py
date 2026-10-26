@@ -188,6 +188,16 @@ def stream_digest(stream,size):
     require(total==size,'stream_size');return value.hexdigest()
 
 
+def cleanup_owned_child(child):
+    # The unreaped direct child is still kernel-owned; never signal after wait.
+    if child.returncode is not None: return
+    try: os.waitid(os.P_PID,child.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+    except ChildProcessError: return
+    try: os.killpg(child.pid,signal.SIGKILL)
+    except ProcessLookupError: pass
+    child.wait(timeout=10)
+
+
 def command(argv, *, seconds=30, maximum=1024**2, input_stream=None, environment=None,
             combine_stderr=False, log_path=None):
     env={'PATH':'/usr/bin:/bin','LC_ALL':'C.UTF-8',**(environment or {})}
@@ -207,10 +217,7 @@ def command(argv, *, seconds=30, maximum=1024**2, input_stream=None, environment
         require(child.wait(timeout=max(.01,deadline-time.monotonic()))==0,'command_failed');complete=True
         return bytes(out)
     finally:
-        if not complete or child.poll() is None:
-            try:os.killpg(child.pid,signal.SIGKILL)
-            except ProcessLookupError:pass
-        try:child.wait(timeout=10)
+        try:cleanup_owned_child(child)
         finally:
             child.stdout.close()
             if log_path is not None:write(log_path,bytes(out[:maximum]))
@@ -225,10 +232,7 @@ def fetch_artifact(identifier,path,size,digest):
             stdin=subprocess.DEVNULL,stdout=stream,stderr=subprocess.DEVNULL,start_new_session=True,preexec_fn=limits,
             env={'PATH':'/usr/bin:/bin','GH_TOKEN':os.environ['GH_TOKEN']})
         try:require(child.wait(timeout=300)==0,'artifact_download_failed')
-        finally:
-            try:os.killpg(child.pid,signal.SIGKILL)
-            except ProcessLookupError:pass
-            child.wait(timeout=10)
+        finally:cleanup_owned_child(child)
         stream.flush();os.fsync(stream.fileno())
     with pinned(path,size) as (source,observed):
         require(observed==size,'artifact_size')
@@ -737,10 +741,7 @@ def export_image(root,image):
             output.close();target.flush();os.fsync(target.fileno())
         require(child.wait(timeout=max(.01,deadline-time.monotonic()))==0,'export_failed');complete=True
     finally:
-        if not complete or child.poll() is None:
-            try:os.killpg(child.pid,signal.SIGKILL)
-            except ProcessLookupError:pass
-        try:child.wait(timeout=10)
+        try:cleanup_owned_child(child)
         finally:child.stdout.close()
     with pinned(path,maximum+16*1024**2) as (stream,size):
         digest=stream_digest(stream,size)

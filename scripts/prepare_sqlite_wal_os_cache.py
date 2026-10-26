@@ -16,7 +16,7 @@ LOCK_SHA='26b14975e21b51587bd39b9749c658ac37acdb861407745639e9913f6fed03eb'
 BASE_VERSION='3.46.1-7+deb13u2';VERSION=BASE_VERSION+'+gold1'
 PACKAGE='libsqlite3-0_'+VERSION+'_amd64.deb'
 CAPSULE=Path('/sqlite-capsule')
-FETCHER=('compose_security_os_candidate.py',54267,'10ccbe216fef04e5f7a7ce2ad31ac30eca7eeae090dfaaf8074fa3cc5c789d44')
+FETCHER=('compose_security_os_candidate.py',54258,'a7ba6515937e7ae8193be4d550547651fe5b313399ec3a1f7634efe513e151c1')
 DOC_INCLUDES=('--path-include=/usr/share/doc/libsqlite3-0','--path-include=/usr/share/doc/libsqlite3-0/*')
 OUTPUT_LIMITS={PACKAGE:32*1024**2,'sqlite3_'+VERSION+'_amd64.changes':4*1024**2,
  'sqlite3_'+VERSION+'_amd64.buildinfo':4*1024**2,'provenance.json':4*1024**2,

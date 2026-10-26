@@ -238,7 +238,7 @@ class AppSecurityOSCacheTests(unittest.TestCase):
         def process(argv,**kwargs):
             starts.append((argv,kwargs));kwargs['preexec_fn']()
             kwargs['stdout'].write(payload)
-            return SimpleNamespace(pid=123456,wait=Mock(return_value=0))
+            return SimpleNamespace(pid=123456,wait=Mock(return_value=0),returncode=0)
         path=self.root/'downloaded.zip'
         with patch.dict(os.environ,{'GH_TOKEN':'ordinary-public-auth-fixture'}), \
              patch('subprocess.Popen',side_effect=process),patch('os.killpg',side_effect=ProcessLookupError), \
