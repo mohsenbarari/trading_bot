@@ -61,6 +61,10 @@ RUN --network=none \
     --mount=type=bind,source=pip_packages/security-os-capsule,target=/capsule,ro \
     --mount=type=tmpfs,target=/tmp \
     ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/app/scripts/prepare_app_security_os_cache.py", "--install-image-cache", "--cache-dir", "/capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/sqlite-wal-capsule,target=/sqlite-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/app/scripts/prepare_sqlite_wal_os_cache.py", "--install-image-cache", "--cache-dir", "/sqlite-capsule"]
 RUN python -I -B scripts/verify_image_trust.py --require-certifi
 RUN python -I -B scripts/verify_psycopg2_runtime.py
 RUN python -I -B scripts/verify_sqlite_runtime.py --require-libmagic

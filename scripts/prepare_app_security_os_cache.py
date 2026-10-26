@@ -353,6 +353,19 @@ def reap_installer_descendants():
         need(time.monotonic()<deadline,'installer_cleanup');time.sleep(0.01)
     need(not unexpected,'installer_cleanup')
 
+def signal_owned_installer_child(pid,sig,group=False):
+    # A PID/group can be signalled only while its actual child identity remains
+    # unreaped. Interrupted waits that already reaped the child must not signal.
+    need(type(pid) is int and pid>0 and sig in {signal.SIGTERM,signal.SIGKILL}
+        and type(group) is bool,'installer_cleanup')
+    try:os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+    except ChildProcessError:return False
+    try:
+        if group:os.killpg(pid,sig)
+        else:os.kill(pid,sig)
+    except ProcessLookupError:pass
+    return True
+
 def execute_installer(raw,package_paths=()):
     # Only this fork patches subprocess. The parent keeps its libraries,
     # descriptors and limits; the approved INSTALLER bytes stay unchanged.
@@ -393,34 +406,29 @@ def execute_installer(raw,package_paths=()):
         need(status==0 and code=='ok',code if code!='ok' else 'installer_failed')
     finally:
         primary=sys.exc_info()[0] is not None;cleanup=False
-        if pid and pid>0:
-            if status is None:
-                # Let the isolated adapter kill and reap its current direct
-                # child, then reap any adopted descendants, before hard stop.
-                try:os.kill(pid,signal.SIGTERM)
-                except ProcessLookupError:pass
-                except BaseException:cleanup=True
-                deadline=time.monotonic()+3
-                while status is None and time.monotonic()<deadline:
-                    try:
-                        child,observed=os.waitpid(pid,os.WNOHANG)
-                        if child:status=observed
-                    except ChildProcessError:status=0
-                    if status is None:time.sleep(0.01)
+        if pid and pid>0 and status is None:
+            # Successful completion already proved descendant closure inside
+            # the isolated subreaper. A reaped successful child grants no PID
+            # or process-group signalling authority to this parent.
             try:
-                # A completed successful subreaper should leave no group.
-                # Finding survivors prevents a successful receipt even if
-                # this final backstop can kill them.
-                os.killpg(pid,signal.SIGKILL)
-                if status is not None:cleanup=True
-            except ProcessLookupError:pass
+                if not signal_owned_installer_child(pid,signal.SIGTERM):cleanup=True
             except BaseException:cleanup=True
+            deadline=time.monotonic()+3
+            while status is None and time.monotonic()<deadline:
+                try:
+                    child,observed=os.waitpid(pid,os.WNOHANG)
+                    if child:status=observed
+                except ChildProcessError:status=0;cleanup=True
+                if status is None:time.sleep(0.01)
             if status is None:
-                try:os.kill(pid,signal.SIGKILL)
-                except ProcessLookupError:pass
+                try:
+                    if not signal_owned_installer_child(pid,signal.SIGKILL,group=True):cleanup=True
                 except BaseException:cleanup=True
-                try:os.waitpid(pid,0)
-                except ChildProcessError:pass
+                try:
+                    if not signal_owned_installer_child(pid,signal.SIGKILL):cleanup=True
+                except BaseException:cleanup=True
+                try:_,status=os.waitpid(pid,0)
+                except ChildProcessError:cleanup=True
                 except BaseException:cleanup=True
         for fd in (private,read_fd,write_fd):
             if fd is not None:

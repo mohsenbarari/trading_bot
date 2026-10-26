@@ -491,18 +491,26 @@ class InstallerRunnerTests(unittest.TestCase):
                 M.execute_installer(raw)
             self.assert_reaped()
 
-    def test_execute_primary_survives_group_cleanup_fault_and_cleanup_only_refuses(self):
+    def test_execute_primary_or_success_never_signals_a_reaped_group(self):
+        with patch.object(M.os,'killpg',side_effect=AssertionError('reaped group must not be signalled')) as cleanup:
+            with self.assertRaisesRegex(RuntimeError,'^installer_failed$') as caught:
+                M.execute_installer(b"raise ValueError('ordinary-private-primary')")
+            self.assertNotIn('ordinary-private',M.encode(M.failure(caught.exception)).decode())
+            M.execute_installer(b'pass')
+        cleanup.assert_not_called();self.assert_reaped()
+
+    def test_execute_timeout_primary_survives_owned_group_cleanup_fault(self):
         cleanup=[]
         def failed_group(pid,number):
             cleanup.append(pid)
             try:self.kill_group(pid,number)
             except ProcessLookupError:pass
             raise RuntimeError('ordinary-private-cleanup-error')
-        for raw,code in ((b"raise ValueError('ordinary-private-primary')",'installer_failed'),(b'pass','installer_cleanup')):
-            with self.subTest(code=code),patch.object(M.os,'killpg',side_effect=failed_group),\
-                    self.assertRaisesRegex(RuntimeError,'^'+code+'$') as caught:
-                M.execute_installer(raw)
-            self.assertNotIn('ordinary-private',M.encode(M.failure(caught.exception)).decode());self.assert_reaped()
+        raw=b'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(10)'
+        with patch.object(M.os,'killpg',side_effect=failed_group),patch.object(M,'INSTALL_WALL_SECONDS',0.1),\
+                self.assertRaisesRegex(RuntimeError,'^installer_timeout$') as caught:
+            M.execute_installer(raw)
+        self.assertNotIn('ordinary-private',M.encode(M.failure(caught.exception)).decode());self.assert_reaped()
         self.assertEqual(cleanup,self.forks)
 
     def test_execute_reaps_leftover_descendant_and_refuses_cleanup_only_success(self):

@@ -593,6 +593,7 @@ foreign_image_signature() {
             Dockerfile \
             .dockerignore \
             requirements.txt \
+            deploy/production/pip-bootstrap-requirements.txt \
             pip_packages \
             api \
             bot \
@@ -697,6 +698,8 @@ prepare_app_security_os_cache() {
     fi
     python3 -I -B "$PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
         --cache-dir "$PROJECT_DIR/pip_packages/security-os-capsule" "${mode[@]}"
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/sqlite-wal-capsule" "${mode[@]}"
 }
 
 prepare_pip_packages() {

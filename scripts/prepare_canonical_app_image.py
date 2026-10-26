@@ -21,7 +21,7 @@ import sys
 import tarfile
 import time
 
-INPUTS=('Dockerfile','.dockerignore','requirements.txt','pip_packages','api','bot','core','src','migrations',
+INPUTS=('Dockerfile','.dockerignore','requirements.txt','deploy/production/pip-bootstrap-requirements.txt','pip_packages','api','bot','core','src','migrations',
     'models','templates','fonts','alembic.ini','main.py','manage.py','run_bot.py','schemas.py','seed_fake_data.py',
     'trading_settings.json','scripts','mini_app_dist')
 GENERATED={'pip_packages','mini_app_dist'}
@@ -179,6 +179,16 @@ def public_input_names(repo,source):
     for row in lock['packages']:
         path=row['path'];need(type(path) is str and re.fullmatch(r'[A-Za-z0-9_.+~\-]+\.deb',path),'input_inventory')
         names.add('pip_packages/security-os-capsule/'+path)
+    sqlite_expected=next(row for row in source['files'] if row['path']=='scripts/sqlite_wal_package.lock.json')
+    sqlite_raw,sqlite_metadata=read_file(repo/sqlite_expected['path'],65536)
+    need(sqlite_metadata==sqlite_expected['identity'] and sha256(sqlite_raw).hexdigest()==sqlite_expected['sha256'],'source_changed')
+    sqlite=document(sqlite_raw)
+    need(type(sqlite) is dict and sqlite.get('schema')=='sqlite_wal_image_package_lock/1'
+        and type(sqlite.get('package')) is dict and sqlite['package'].get('name')=='libsqlite3-0'
+        and sqlite['package'].get('version')=='3.46.1-7+deb13u2+gold1'
+        and sqlite['package'].get('path')=='libsqlite3-0_3.46.1-7+deb13u2+gold1_amd64.deb','input_inventory')
+    names|={'pip_packages/.sqlite-wal-capsule.lock','pip_packages/sqlite-wal-capsule/manifest.json',
+        'pip_packages/sqlite-wal-capsule/'+sqlite['package']['path']}
     return names
 
 def input_files(repo,allowed=None):
@@ -258,6 +268,9 @@ def prepare(root,repo):
         SUBPHASE='vendor_cache_prepare'
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_app_security_os_cache.py'),
             '--cache-dir',str(repo/'pip_packages/security-os-capsule')],seconds=600,environment=child_env)
+        SUBPHASE='sqlite_cache_prepare'
+        command([sys.executable,'-I','-B',str(repo/'scripts/prepare_sqlite_wal_os_cache.py'),
+            '--cache-dir',str(repo/'pip_packages/sqlite-wal-capsule')],seconds=600,environment=child_env)
         unchanged(root,repo,value,held)
     write_new(root/'prepare.json',{'schema':'canonical_app_prepare/1','status':'prepared','security_accepted':False})
     emit('root',str(root));return {'status':'prepared','security_accepted':False}
@@ -284,6 +297,9 @@ def build(root):
         SUBPHASE='vendor_cache_check'
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_app_security_os_cache.py'),
             '--check','--cache-dir',str(repo/'pip_packages/security-os-capsule')],environment=env(root),seconds=120)
+        SUBPHASE='sqlite_cache_check'
+        command([sys.executable,'-I','-B',str(repo/'scripts/prepare_sqlite_wal_os_cache.py'),
+            '--check','--cache-dir',str(repo/'pip_packages/sqlite-wal-capsule')],environment=env(root),seconds=120)
         allowed=public_input_names(repo,value);rows=input_files(repo,allowed);known={r['path'] for r in value['files']}
         need(all(r['path'] in known or r['path'].split('/')[0] in GENERATED for r in rows)
             and any(r['path']=='mini_app_dist/index.html' for r in rows),'input_inventory')

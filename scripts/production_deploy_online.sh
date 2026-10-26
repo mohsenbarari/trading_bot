@@ -5103,6 +5103,11 @@ market_pipeline_image_input_signature() {
             deploy/production/pip-bootstrap-requirements.txt \
             scripts/verify_psycopg2_runtime.py \
             scripts/verify_sqlite_runtime.py \
+            scripts/prepare_app_security_os_cache.py \
+            scripts/app_security_os_packages.lock.json \
+            scripts/compose_security_os_candidate.py \
+            scripts/prepare_sqlite_wal_os_cache.py \
+            scripts/sqlite_wal_package.lock.json \
             scripts/remove_runtime_pip.py \
             scripts/verify_image_trust.py
     } | sha256sum | awk '{print $1}'
@@ -5165,6 +5170,11 @@ build_market_pipeline_release_image() {
     [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
     [[ "$LOCAL_HOST_ARCH" == "amd64" && "$IRAN_HOST_ARCH" == "amd64" ]] \
         || die "Market Pipeline release currently requires linux/amd64 on both hosts."
+    mkdir -p -- "$LOCAL_PROJECT_DIR/pip_packages"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/security-os-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/sqlite-wal-capsule"
     local image_reference="market_pipeline_release:$RELEASE_SHA"
     local input_signature source_date_epoch existing_identity image_id
     input_signature="$(market_pipeline_image_input_signature)"
@@ -5256,6 +5266,11 @@ prepare_market_pipeline_control_payload() {
         deploy/production/pip-bootstrap-requirements.txt \
         scripts/verify_psycopg2_runtime.py \
         scripts/verify_sqlite_runtime.py \
+        scripts/prepare_app_security_os_cache.py \
+        scripts/app_security_os_packages.lock.json \
+        scripts/compose_security_os_candidate.py \
+        scripts/prepare_sqlite_wal_os_cache.py \
+        scripts/sqlite_wal_package.lock.json \
         scripts/remove_runtime_pip.py \
         scripts/verify_image_trust.py \
         scripts/prepare_market_pipeline_release.py \
@@ -6855,6 +6870,8 @@ build_release() {
     prepare_pip_packages "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages" "$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
         --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/security-os-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/sqlite-wal-capsule"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
     local iran_context_dir="$RELEASE_TMP_DIR/iran-build-context"
@@ -6863,6 +6880,8 @@ build_release() {
     prepare_pip_packages "$IRAN_HOST_ARCH" "$iran_pip_dir" "$iran_pip_hash"
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
         --cache-dir "$iran_pip_dir/security-os-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$iran_pip_dir/sqlite-wal-capsule"
     rm -rf "$iran_context_dir"
     mkdir -p "$iran_context_dir"
     rsync -a --delete \
@@ -6970,6 +6989,9 @@ verify_prepared_wheel_cache() {
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
         --check --cache-dir "$output_dir/security-os-capsule" \
         || die "Prepared App OS security cache failed admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --check --cache-dir "$output_dir/sqlite-wal-capsule" \
+        || die "Prepared SQLite security cache failed admission for architecture $target_arch."
     find "$output_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -print -quit | grep -q . \
         || die "Prepared wheel cache is empty for architecture $target_arch."
 }

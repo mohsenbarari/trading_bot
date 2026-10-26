@@ -17,7 +17,8 @@ import subprocess
 import sys
 import tempfile
 
-MINIMUM_PACKAGE = '3.46.1-7+deb13u2'
+MINIMUM_PACKAGE = '3.46.1-7+deb13u2+gold1'
+WAL_RESET_PACKAGE = MINIMUM_PACKAGE
 QUERY = ('SELECT source,event_id,commodity,price FROM quotes WHERE commodity=? '
          'ORDER BY seen_at DESC,event_id DESC,source')
 EXPECTED = [('g2', 3, 'emami', 62000000), ('g1', 1, 'emami', 61500000)]
@@ -61,6 +62,10 @@ def platform_package():
     version = command(['/usr/bin/dpkg-query', '-W', '-f=${Version}\n', 'libsqlite3-0'])
     require(version and '\n' not in version and len(version) <= 100, 'package_version')
     command(['/usr/bin/dpkg', '--compare-versions', version, 'ge', MINIMUM_PACKAGE])
+    # This exact local package is bound to the reviewed production backport.
+    # An unknown later distro revision is not assumed to carry this fix.
+    require(version == WAL_RESET_PACKAGE, 'wal_reset_package_not_admitted')
+    require(command(['/usr/bin/dpkg', '--verify', 'libsqlite3-0']) == '', 'sqlite_package_payload_changed')
     require(version.rsplit(':', 1)[-1].split('-', 1)[0] == sqlite3.sqlite_version and
             sqlite3.sqlite_version_info >= (3, 46, 1), 'sqlite_runtime_package_mismatch')
     return version
@@ -79,6 +84,103 @@ def system_library(raw, family):
                 Path(path).resolve(strict=True).is_relative_to(Path('/usr/lib')), 'non_system_library')
         found.add(Path(path).resolve(strict=True))
     require(len(found) == 1, 'system_library_missing_or_ambiguous')
+    return str(next(iter(found)))
+
+
+
+
+def mapped_binary_identity(path, maps):
+    """Bind one public immutable system binary to this process's real mapping."""
+    path = Path(path)
+    require(type(maps) is str and len(maps) <= 2*1024**2, 'mapping_bound')
+    parents = []
+    for parent in path.parents:
+        row = parent.lstat()
+        require(parent.resolve(strict=True) == parent and stat.S_ISDIR(row.st_mode)
+                and row.st_uid == row.st_gid == 0 and not row.st_mode & 0o022,
+                'binary_parent')
+        parents.append((parent, (row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid)))
+    ident = lambda row: (row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid,
+                         row.st_nlink,row.st_size,row.st_mtime_ns,row.st_ctime_ns)
+    before = ident(path.lstat())
+    require(path.resolve(strict=True) == path and stat.S_ISREG(before[2])
+            and before[3:6] == (0,0,1) and not before[2] & 0o022
+            and 0 < before[6] <= 16*1024**2, 'binary_identity')
+    selected = []
+    for line in maps.splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6 and fields[5] == str(path):
+            require(fields[4].isdigit(), 'binary_mapping')
+            parts = fields[3].split(':')
+            require(len(parts) == 2 and all(c and all(x in '0123456789abcdefABCDEF' for x in c) for c in parts),
+                    'binary_mapping')
+            selected.append((int(parts[0],16),int(parts[1],16),int(fields[4])))
+    require(selected and all(item == (os.major(before[0]),os.minor(before[0]),before[1]) for item in selected),
+            'binary_mapping')
+    fd = os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+    try:
+        require(ident(os.fstat(fd)) == before, 'binary_identity')
+        digest = sha256();count = 0
+        while True:
+            block = os.read(fd,min(65536,before[6]-count+1))
+            if not block:break
+            count += len(block);require(count <= before[6], 'binary_bound');digest.update(block)
+        require(count == before[6] and ident(os.fstat(fd)) == before == ident(path.lstat()),
+                'binary_changed')
+    finally:
+        os.close(fd)
+    require(ident(path.lstat()) == before and all(parent.resolve(strict=True) == parent
+            and (lambda row:(row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid))(parent.lstat()) == old
+            for parent,old in parents), 'binary_changed')
+    return {'path':str(path),'bytes':before[6],'sha256':digest.hexdigest(),'mapped_inode_verified':True}
+
+
+def installed_sqlite_identity(maps):
+    """The mapped object must be a payload of the verified installed package."""
+    selected = Path(system_library(maps,'libsqlite3'))
+    raw = command(['/usr/bin/dpkg-query','-L','libsqlite3-0'])
+    require(type(raw) is str and len(raw) < 4096, 'package_paths_bound')
+    files = set()
+    for line in raw.splitlines():
+        path = Path(line)
+        if path.name.startswith('libsqlite3.so.'):
+            require(path.is_absolute(), 'package_library_path')
+            resolved = path.resolve(strict=True)
+            require(resolved.is_relative_to(Path('/usr/lib')), 'package_library_path')
+            files.add(resolved)
+    require(files == {selected}, 'package_library_path')
+    return mapped_binary_identity(selected,maps)
+
+
+def loader_identity():
+    """Bind isolated stdlib code; ignored business PYTHONPATH is not a loader."""
+    import _sqlite3
+    import importlib.machinery
+    require(sys.flags.isolated == sys.flags.ignore_environment == sys.flags.no_user_site == 1,
+            'isolated_python_required')
+    require(not any(name.startswith('LD_') for name in os.environ), 'loader_override')
+    require('sitecustomize' not in sys.modules and 'usercustomize' not in sys.modules,
+            'python_customization')
+    stdlib = Path(sys.base_prefix) / 'lib/python3.11'
+    package = stdlib/'sqlite3/__init__.py'
+    require(Path(sqlite3.__file__) == package and sqlite3.__spec__ is not None
+            and sqlite3.__spec__.origin == str(package)
+            and isinstance(sqlite3.__spec__.loader,importlib.machinery.SourceFileLoader)
+            and isinstance(sqlite3.__loader__,importlib.machinery.SourceFileLoader)
+            and sqlite3.connect is _sqlite3.connect and sqlite3.Connection is _sqlite3.Connection,
+            'stdlib_sqlite_required')
+    path = Path(_sqlite3.__file__)
+    spec = _sqlite3.__spec__
+    require(path.parent == stdlib/'lib-dynload'
+            and path.name in {'_sqlite3'+suffix for suffix in importlib.machinery.EXTENSION_SUFFIXES}
+            and spec is not None and spec.origin == str(path)
+            and isinstance(spec.loader, importlib.machinery.ExtensionFileLoader)
+            and isinstance(_sqlite3.__loader__, importlib.machinery.ExtensionFileLoader),
+            'stdlib_extension_required')
+    with open('/proc/self/maps',encoding='ascii') as source:
+        maps = source.read(2*1024**2+1)
+    require(len(maps) <= 2*1024**2, 'mapping_bound')
+    return mapped_binary_identity(path,maps)
 
 
 def compatibility():
@@ -156,17 +258,22 @@ def compatibility():
 
 def verify(require_libmagic=False):
     require(sys.version_info[:3] == (3, 11, 17), 'python_version_changed')
+    extension = loader_identity()
     version = platform_package()
     if require_libmagic:
         import magic
         require(magic.from_buffer(b'plain text compatibility\n', mime=True) == 'text/plain', 'libmagic_contract')
     with open('/proc/self/maps', encoding='ascii') as stream:
         maps = stream.read(2 * 1024 * 1024 + 1)
-    system_library(maps, 'libsqlite3')
+    library = installed_sqlite_identity(maps)
     if require_libmagic:
         system_library(maps, 'libmagic')
     return {'status': 'PASS', 'sqlite_package': version, 'sqlite_runtime': sqlite3.sqlite_version,
-            'libmagic_checked': require_libmagic, 'compatibility': compatibility(),
+            'libmagic_checked': require_libmagic, 'sqlite_system_library': library,
+            'sqlite_stdlib_extension': extension,
+            'python_environment_ignored': True, 'compatibility': compatibility(),
+            'wal_reset_package_identity_checked': True,
+            'wal_reset_reproduction_performed': False,
             'production_data_accessed': False, 'all_cves_attested': False}
 
 
