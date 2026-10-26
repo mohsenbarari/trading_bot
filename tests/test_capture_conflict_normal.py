@@ -15,7 +15,7 @@ def fixture():
  ns={'C':C,'SimpleNamespace':SimpleNamespace,'deepcopy':deepcopy};exec(compile(ast.Module(body=[node],type_ignores=[]),'public_synthetic_operands','exec'),ns);f=ns['fixture']()
  role=H.SERVICE;spec=f.old['services'].pop('app');f.old['services'][role]=spec
  name=H.PROJECT+'-'+role+'-1';base='/public/normal/base.yml';extra='/public/normal/web.yml';env='/public/normal/normal.env'
- spec.update(image=H.IMAGE,container_name=name,command=['service','--role',role],profiles=['web'],user='10001:10001',read_only=True,
+ spec.update(image=H.IMAGE,container_name=name,command=['service','--role',role],profiles=['foundation-template','web'],user='10001:10001',read_only=True,
   cap_drop=['ALL'],security_opt=['no-new-privileges:true'],init=True,pids_limit=64,mem_limit=384*1024**2,memswap_limit=768*1024**2,
   cpus=1.0,shm_size=128*1024**2,tmpfs=['/tmp:size=16m,mode=1777,noexec,nosuid,nodev'],pull_policy='never',
   secrets=[{'source':'first','target':'first'},{'source':'second','target':'second'}],
@@ -97,6 +97,20 @@ class NormalTests(unittest.TestCase):
   model=new_model(f);row=new_row(f);self.assertTrue(self.parity(f,model,row))
   self.assertEqual(len(f.row['mounts']),5);self.assertEqual(len(row['mounts']),6);self.assertEqual(before,(f.model,f.row))
   self.assertNotIn(H.FOUNDATION_DEST,{r['Destination'] for r in row['mounts']})
+ def test_declared_foundation_web_profiles_are_exact_and_only_web_is_a_CLI_selector(self):
+  f=fixture();self.assertTrue(self.parity(f,f.model,f.row));before=deepcopy(f.model)
+  for profiles in (['foundation-template','web'],['web','foundation-template']):
+   model=deepcopy(f.model);model['services'][H.SERVICE]['profiles']=profiles;original=deepcopy(model)
+   with patch.object(M,'baseline',wraps=M.baseline) as baseline:self.assertTrue(self.parity(f,model,f.row))
+   self.assertEqual(baseline.call_args.args[5]['profiles'],['foundation-template','web']);self.assertEqual(model,original)
+  for profiles in (['web'],['foundation-template','web','web'],['foundation-template','web','unknown'],['foundation-template',True],'web',None):
+   model=deepcopy(f.model);model['services'][H.SERVICE]['profiles']=profiles
+   with self.subTest(profiles=profiles),self.assertRaisesRegex(RuntimeError,'normal_features'):self.parity(f,model,f.row)
+  self.assertEqual(f.model,before)
+  backend=object.__new__(N.normal_backend(H,C,None,M));backend.op=f.control
+  argv=backend.compose('config','--format','json')
+  self.assertEqual([argv[i+1] for i,v in enumerate(argv) if v=='--profile'],['web'])
+  self.assertNotIn('foundation-template',argv)
  def test_current_version_no_deps_and_exact_full_replace_label_are_independent_checks(self):
   f=fixture();model=new_model(f)
   for key,value in (('com.docker.compose.version','2.40.3'),('com.docker.compose.depends_on','db:service_started:false'),

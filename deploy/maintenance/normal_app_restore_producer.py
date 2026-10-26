@@ -19,7 +19,7 @@ REFUSAL_CODES=frozenset(('root_required','unarmed','control','source','source_ch
  'compose_labels','normal_environment','normal_execution','normal_healthcheck','normal_feature_scope','normal_pull_policy',
  'normal_labels','normal_host','normal_network','normal_ports','normal_command_refused','unbound_env_reference'))
 HEAD='ff6c7d8e9f01'
-ADMISSION_SHA='e1e56e4b5c424a1c7dcd7e484fbef243eab22fbe21ecbd53eb84c6e758c6af22'
+ADMISSION_SHA='8ba58bfb364655a091a165da704808f11d2680eacf1cc8fe65c4da06eab1cb2b'
 CAPTURE_SHA='a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'
 UPLOADS_SHA='526f40aae967343b5c0f2a6ac06254a02b8b72076a302ddaf36a3672aca5b69f'
 NAMESPACE_SHA='e508fbaa089a268d7d39b38a46105d540965fe583677705a232c85d6be0bdc0e'

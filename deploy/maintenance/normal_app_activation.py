@@ -15,10 +15,10 @@ CONFIRM='ACTIVATE-ONLY-ORDINARY-CANONICAL-APP-665220A2-20261026-01'
 ENTRY='normal_app_activation.py'
 MACHINE_ID=Path('/etc/machine-id')
 ROOTS={'bot':Path('/root/trading-bot/trading_bot/.local')/OP,'web':Path('/srv/trading-bot')/OP}
-PINS={'canonical_app_activation_contract.py':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
+PINS={'canonical_app_activation_contract.py':'97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317',
  'canonical_app_activation_site.py':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
  'canonical_app_activation_coordinator.py':'269dbb06a3c275878e6b7c55cc58b69419e3c3fe947a2b2b81d6a1712ae47df2',
- 'normal_app_restore_admission.py':'e1e56e4b5c424a1c7dcd7e484fbef243eab22fbe21ecbd53eb84c6e758c6af22',
+ 'normal_app_restore_admission.py':'8ba58bfb364655a091a165da704808f11d2680eacf1cc8fe65c4da06eab1cb2b',
  'bounded_operational_capture.py':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 SEMVER=r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?'
 def need(value,code):

@@ -248,6 +248,21 @@ class ActivationTests(unittest.TestCase):
         C.configuration_parity(f.old,f.new,'app',f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
         reverse = deepcopy(f.active); reverse['config']['Env'].reverse()
         C.configuration_parity(f.old,f.new,'app',f.old_row,reverse,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+    def test_OomKillDisable_nullable_bool_projects_only_present_null_without_raw_mutation(self):
+        old={'OomKillDisable':None,'Privileged':False};new={'OomKillDisable':False,'Privileged':False}
+        anchor=deepcopy((old,new));self.assertTrue(C.same(C.unordered_host(old),C.unordered_host(new)))
+        self.assertEqual((old,new),anchor);self.assertEqual(C.unordered_host({'OomKillDisable':True}),{'OomKillDisable':True})
+        self.assertFalse(C.same(C.unordered_host({}),C.unordered_host({'OomKillDisable':False})))
+        self.assertFalse(C.same(C.unordered_host(old),C.unordered_host({'OomKillDisable':True,'Privileged':False})))
+        for value in (0,1,'false','true',[],{}):
+            with self.subTest(value=value),self.assertRaisesRegex(RuntimeError,'normal_host'):C.unordered_host({'OomKillDisable':value})
+        f=fixture();f.old_row['host']['OomKillDisable']=None;f.stopped['host']['OomKillDisable']=False
+        original=deepcopy((f.old_row,f.stopped))
+        C.configuration_parity(f.old,f.new,'app',f.old_row,f.stopped,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{},stopped=True)
+        self.assertEqual((f.old_row,f.stopped),original)
+        for edit in (lambda h:h.update(OomKillDisable=True),lambda h:h.update(Privileged=True),lambda h:h.pop('OomKillDisable')):
+            row=deepcopy(f.stopped);edit(row['host'])
+            with self.assertRaises(RuntimeError):C.configuration_parity(f.old,f.new,'app',f.old_row,row,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{},stopped=True)
     def test_creation_no_dependencies_is_explicit_exact_empty_and_keeps_complete_model(self):
         f=fixture(); deps={'migration':{'condition':'service_completed_successfully'},'redis':{'condition':'service_started'}}
         f.old['services']['app']['depends_on']=deepcopy(deps)

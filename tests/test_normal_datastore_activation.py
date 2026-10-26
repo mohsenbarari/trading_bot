@@ -5,7 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType,SimpleNamespace
 from unittest.mock import patch
-import ast,json,os,stat,tempfile,time,unittest
+import ast,json,os,re,stat,tempfile,time,unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 DENIED=('subprocess.run','subprocess.Popen','os.system','os.popen','os.fork','os.kill','os.killpg',
@@ -47,7 +47,7 @@ class DatastoreTests(unittest.TestCase):
             model['services'][service]=model['services'].pop('app');spec=model['services'][service]
             spec['container_name']='fixture_'+service;spec['command']=['postgres'] if profile=='postgres' else ['redis-server']
             spec['environment']={'PUBLIC_BUSINESS_VALUE':'PUBLIC_SAME'}
-            spec['profiles']=['web'] if role=='web-market-postgres' else []
+            spec['profiles']=['foundation-template','web'] if role=='web-market-postgres' else []
         f.scope.update(container_name='fixture_'+service,profiles=f.old['services'][service]['profiles'],env_files=[],secret_files=[],public_sources=[],
             image_env_delta={},data_bindings=[])
         version='PG_VERSION' if profile=='postgres' else 'REDIS_VERSION'
@@ -121,6 +121,32 @@ class DatastoreTests(unittest.TestCase):
         for role in M.ROLES:
             f=self.case(role);M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths)
             M.parity(self.C,f.old,f.new,role,f.old_row,f.active,f.old_image,f.new_image,f.scope,f.paths,[*f.paths,f.override],{})
+    def test_public_market_postgres_inherited_profiles_keep_only_web_CLI_and_exact_rendered_pair(self):
+        base=(ROOT/'deploy/market-data/compose.yml').read_text()
+        web=(ROOT/'deploy/market-data/compose.web.yml').read_text()
+        self.assertIn('  market-postgres-base:\n',base)
+        self.assertIn('    profiles: [foundation-template]',re.search(r'(?ms)^  market-postgres-base:\n(.*?)(?=^  \S|\Z)',base).group(1))
+        child=re.search(r'(?ms)^  market-database:\n(.*?)(?=^  \S|\Z)',web).group(1)
+        self.assertIn('      file: compose.yml',child);self.assertIn('      service: market-postgres-base',child)
+        self.assertIn('    profiles: [web]',child)
+        f=self.case('web-market-postgres');spec=f.old['services']['market-database']
+        for profiles in (['foundation-template','web'],['web','foundation-template']):
+            spec['profiles']=profiles
+            M.baseline(self.C,f.old,'web-market-postgres',f.old_row,f.old_image,f.scope,f.paths)
+        for profiles in (['web'],['foundation-template'],['web','web'],['web','other'],['web','foundation-template',True],None,'web'):
+            spec['profiles']=profiles
+            with self.subTest(profiles=profiles),self.assertRaisesRegex(RuntimeError,'normal_features'):
+                M.baseline(self.C,f.old,'web-market-postgres',f.old_row,f.old_image,f.scope,f.paths)
+        for role in M.ROLES:
+            b=object.__new__(M.DatastoreBackend);b.role=role;b.scope=self.case(role).scope;b.paths=[]
+            b.scope['workdir']=str(self.root);b.scope['project']='fixture';b.scope['env_files']=[]
+            argv=b.compose();actual=[argv[i+1] for i,v in enumerate(argv) if v=='--profile']
+            self.assertEqual(actual,['web'] if role=='web-market-postgres' else [])
+        value=self.control('web-market-postgres');M.validate_control(self.C,value,self.now)
+        for profiles in (['web'],['web','foundation-template'],['foundation-template','web','web']):
+            value['scope']['profiles']=profiles
+            with self.assertRaisesRegex(RuntimeError,'normal_profiles'):M.validate_control(self.C,value,self.now)
+
     def test_explicit_public_vendor_minor_metadata_changes_preserve_business_environment(self):
         f=self.case();f.old_image['Config']['Env'][-1]='PG_VERSION=15.18';f.old_row['config']['Env'][1]='PG_VERSION=15.18'
         f.scope['image_env_delta']={'PG_VERSION':{'old':'15.18','new':'15.19'}}

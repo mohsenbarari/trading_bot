@@ -84,6 +84,8 @@ class AdmissionTests(unittest.TestCase):
    image=self.case.old_image if args[-1]==self.case.old_image['Id'] else self.case.new_image
    return 0,json.dumps({k:image[k] for k in ('Id','Config','RootFS','Os','Architecture')}).encode()
   if args[0]=='compose':
+   self.assertEqual(args.count('--profile'),1);self.assertEqual(args[args.index('--profile')+1],self.control['site'])
+   self.assertNotIn('foundation-template',args)
    if args[-1]=='--no-env-resolution':return 0,json.dumps({'services':{'market-processor':{'env_file':[{'path':'/unbound' if self.foreign_env else self.control['scope']['env_files'][0]['path']}]}}}).encode()
    return 0,json.dumps(self.model).encode()
   raise AssertionError('unexpected client')
@@ -108,6 +110,17 @@ class AdmissionTests(unittest.TestCase):
   self.assertTrue(public['normal_prefix_and_complete_current_config_admitted']);self.assertNotIn('PRIVATE_RUNTIME_SENTINEL',json.dumps(public))
   self.assertIn('PRIVATE_RUNTIME_SENTINEL',' '.join(private['actual']['Config']['Env']))
   self.assertFalse(any(set(argv)&{'run','up','create','start','stop','kill','load','rm','build'} for argv in self.calls))
+ def test_profile_scope_is_exact_declared_union_not_an_arbitrary_cli_selection(self):
+  A.scope_control(self.C,NM.M,self.control)
+  for profiles in (['web'],['web','foundation-template'],['foundation-template','web','web'],['foundation-template','other'],['foundation-template','web','other'],'web'):
+   value=deepcopy(self.control);value['scope']['profiles']=profiles
+   with self.assertRaisesRegex(RuntimeError,'market_scope'):A.scope_control(self.C,NM.M,value)
+ def test_actual_render_reverse_order_is_admitted_without_rewriting_model_or_control(self):
+  self.model['services']['market-processor']['profiles']=['web','foundation-template']
+  public,private=self.invoke()
+  self.assertTrue(public['normal_prefix_and_complete_current_config_admitted'])
+  self.assertEqual(self.control['scope']['profiles'],['foundation-template','web'])
+  self.assertEqual(private['model']['services']['market-processor']['profiles'],['web','foundation-template'])
  def test_current_major_five_is_observed_separately_from_exact_historical_creation_labels(self):
   for historical in ('2.40.3','5.5.0'):
    self.control['scope']['compose_version']=historical

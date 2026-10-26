@@ -12,7 +12,7 @@ from urllib.parse import urlsplit,parse_qs
 import argparse,json,os,re,stat,tempfile,time
 
 OP='normal-app-isolated-restore-admission-20261025-01'
-PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
+PINS={'contract':'97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317',
  'utilities':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 ROLES={'bot':('app','bot','sync_worker'),'web':('app','sync_worker')}

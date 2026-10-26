@@ -629,6 +629,9 @@ def configuration_parity(old_model,new_model,service,before,after,old_image,new_
 def unordered_host(value):
     """Compose iterates mount maps; retain every value, reject duplicate targets."""
     result = deepcopy(value)
+    if 'OomKillDisable' in result:
+        require(result['OomKillDisable'] is None or type(result['OomKillDisable']) is bool,'normal_host')
+        if result['OomKillDisable'] is None:result['OomKillDisable'] = False
     if result.get('Binds') is not None:
         require(type(result['Binds']) is list and all(type(v) is str for v in result['Binds'])
             and len(set(result['Binds'])) == len(result['Binds']),'mounts'); result['Binds'].sort()

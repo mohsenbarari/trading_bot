@@ -291,6 +291,26 @@ def cleanup_owned(control,lease):
   for key,bad in (('Env',['CUSTOM=PRIVATE_PAYLOAD']),('Cmd',['python','special_probe.py']),('Entrypoint',['sh']),('User','10001'),('WorkingDir','/source')):
    changed=deepcopy(row);changed['Config'][key]=bad
    with self.assertRaises(M.Refused):M.runtime_parity(normal,changed,c['candidate_image_id'],l,c)
+ def test_expected_null_OomKillDisable_matches_only_actual_false_with_every_other_field_exact(self):
+  c,l,p,s,n=self.case();normal=p['normal']['candidate'];normal['HostConfig']['OomKillDisable']=None
+  row=self.measured(normal,l,c['candidate_image_id']);row['HostConfig']['OomKillDisable']=False;anchor=deepcopy((normal,row))
+  M.runtime_parity(normal,row,c['candidate_image_id'],l,c);self.assertEqual((normal,row),anchor)
+  for value in (None,True,0,1,'false',[],{}):
+   changed=deepcopy(row);changed['HostConfig']['OomKillDisable']=value
+   with self.subTest(actual=value),self.assertRaises(M.Refused):M.runtime_parity(normal,changed,c['candidate_image_id'],l,c)
+  for value in (0,1,'false',[],{}):
+   before=deepcopy(normal);before['HostConfig']['OomKillDisable']=value;changed=deepcopy(row);changed['HostConfig']['OomKillDisable']=value
+   with self.subTest(expected=value),self.assertRaises(M.Refused):M.runtime_parity(before,changed,c['candidate_image_id'],l,c)
+  for old,new in ((True,False),(False,True)):
+   before=deepcopy(normal);before['HostConfig']['OomKillDisable']=old;changed=deepcopy(row);changed['HostConfig']['OomKillDisable']=new
+   with self.assertRaises(M.Refused):M.runtime_parity(before,changed,c['candidate_image_id'],l,c)
+  before=deepcopy(normal);before['HostConfig']['OomKillDisable']=True;changed=deepcopy(row);changed['HostConfig']['OomKillDisable']=True
+  M.runtime_parity(before,changed,c['candidate_image_id'],l,c)
+  for edit in (lambda h:h.pop('OomKillDisable'),lambda h:h.update(Privileged=True),lambda h:h.update(Memory=1)):
+   changed=deepcopy(row);edit(changed['HostConfig'])
+   with self.assertRaises(M.Refused):M.runtime_parity(normal,changed,c['candidate_image_id'],l,c)
+  before=deepcopy(normal);before['HostConfig'].pop('OomKillDisable')
+  with self.assertRaises(M.Refused):M.runtime_parity(before,row,c['candidate_image_id'],l,c)
  def test_source_or_production_mounts_and_dropped_normal_mounts_refuse(self):
   c,l,p,s,n=self.case();normal=p['normal']['candidate'];row=self.measured(normal,l,c['candidate_image_id'])
   changed=deepcopy(row);changed['Mounts'][0].update(Type='bind',Name='/srv/production/uploads')

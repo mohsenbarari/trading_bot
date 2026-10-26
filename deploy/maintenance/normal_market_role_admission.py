@@ -10,9 +10,9 @@ from types import ModuleType
 import argparse,ast,json,os,re,resource,stat,sys,tempfile,time
 
 OP='security-normal-market-admission-20261025-01'
-PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
+PINS={'contract':'97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317',
  'utilities':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
- 'market':'f6e4e59f5cacd057392be0e9fb5e79dfc933e717a473de460598fad5b790c32d',
+ 'market':'35c2e778b4b65de2301927382fcadfea6f2a4207b58dea4e829a6fcf69569b1d',
  'archive':'d210020e24fedd4986803a3fe2618a5016ecd99f9e3ca9588af02d77a967e17d',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0',
  'delta':'326215cc640078afbdcb774e7ecb03cd1e7a5a91afe69175fc83780eebeebaf1',
@@ -86,7 +86,7 @@ def scope_control(C,M,value):
  need(type(scope) is dict and set(scope)==fields and scope['image_model']=='authenticated_ci_rebuild','market_scope')
  C.absolute(scope['workdir']);need(type(scope['project']) is str and re.fullmatch('[a-z0-9][a-z0-9_-]{0,99}',scope['project'])
   and type(scope['container_name']) is str and re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{1,127}',scope['container_name'])
-  and C.same(scope['profiles'],['bot' if value['site']=='bot' else 'web']),'market_scope')
+  and C.same(scope['profiles'],['foundation-template',value['site']]),'market_scope')
  need(type(scope['compose_files']) is list and 2<=len(scope['compose_files'])<=24 and len({r['path'] for r in scope['compose_files']})==len(scope['compose_files']),'market_prefix')
  for row in scope['compose_files']:
   need(type(row) is dict and set(row)=={'path','sha256','bytes'} and type(row['bytes']) is int and 0<row['bytes']<=131072 and C.hex64(row['sha256']),'market_prefix')
@@ -144,7 +144,8 @@ def collect(value,stack,self_pin,*,capture=None):
  for name,path in (('marker',MARKER),*([('source',SOURCE)] if value['site']=='bot' else [])):
   fence=S.Held(path,stack,expected=value['fences'][name],opaque=True,lock=True);checks.append(fence.check)
  docker=['/usr/bin/docker','--host=unix:///var/run/docker.sock'];argv=[*docker,'compose','--project-directory',scope['workdir'],'--project-name',scope['project']]
- for profile in scope['profiles']:argv+=['--profile',profile]
+ # The inherited template declaration never enables that profile on the CLI.
+ argv+=['--profile',value['site']]
  for ref in scope['env_files']:
   held=S.OpaqueReference(ref,stack);checks.append(held.check)
   if ref['cli']:argv+=['--env-file',ref['path']]

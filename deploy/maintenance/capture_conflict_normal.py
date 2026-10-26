@@ -17,9 +17,9 @@ REBASE_SHA='2d567b9d105dbf21c490ad47587cb7c7352969ce0f7be8673814a408790dd2af'
 WIRE_SHA='ff32988c1b524abd145daac4f34d2b189900245ebeae033992dcfce44c4d82be'
 # Exact shared normal validators frozen by Root; historical proof pins above
 # remain independent and are never relabeled as these current validators.
-PRIMITIVE_PINS={'contract':'c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05',
+PRIMITIVE_PINS={'contract':'97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317',
  'site':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
- 'market':'f6e4e59f5cacd057392be0e9fb5e79dfc933e717a473de460598fad5b790c32d',
+ 'market':'35c2e778b4b65de2301927382fcadfea6f2a4207b58dea4e829a6fcf69569b1d',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 PRIMITIVE_NAMES={'contract':'canonical_app_activation_contract.py','site':'canonical_app_activation_site.py',
  'market':'normal_market_activation_current.py','capture':'bounded_operational_capture.py'}
@@ -177,7 +177,7 @@ def normal_parity(H,C,M,control,model,row,image,refs,*,current_version):
  created=row['id']!=H.OLD_CID
  scope={'project':H.PROJECT,'workdir':control['compose']['directory'],'container_name':H.PROJECT+'-'+role+'-1',
   'compose_version':current_version if created else control['normal']['creation_compose_version'],
-  'environment_file_label':control['compose']['env_reference'],'profiles':['web'],'public_sources':[],
+  'environment_file_label':control['compose']['env_reference'],'profiles':['foundation-template','web'],'public_sources':[],
   'secret_files':refs['secret_files'],'release':release}
  files=[r['path'] for r in control['compose']['files']]+([str(H.ROOTS['web']/control['nonce']/'diagnostic-source.yml')] if added else [])
  M.baseline(C,model,role,row,image,scope,files,replacement='com.docker.compose.replace' in row['config']['Labels'],

@@ -309,6 +309,9 @@ def runtime_parity(normal,measured,image_id,lease,control,*,stopped_required=Tru
  need(cid(measured['id']) and measured['image']==image_id and same(normal['Config'],measured['Config']),'normal_runtime')
  host=measured['HostConfig'];expected=deepcopy(normal['HostConfig'])
  need(type(host) is dict and type(expected) is dict,'normal_runtime')
+ if 'OomKillDisable' in expected:
+  need(expected['OomKillDisable'] is None or type(expected['OomKillDisable']) is bool,'normal_runtime')
+  if expected['OomKillDisable'] is None:expected['OomKillDisable']=False
  isolation_fields={'NetworkMode','PortBindings','PublishAllPorts','Dns','DnsSearch','ExtraHosts','Binds','Mounts','RestartPolicy','Memory','MemorySwap','NanoCpus','PidsLimit','LogConfig'}
  need(same({k:v for k,v in expected.items() if k not in isolation_fields},{k:v for k,v in host.items() if k not in isolation_fields}),'normal_runtime')
  need(host.get('NetworkMode')==lease['network_id'] and host.get('PortBindings') in ({},None)

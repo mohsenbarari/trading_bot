@@ -5,7 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType,SimpleNamespace
 from unittest.mock import patch
-import ast,gzip,io,json,os,tarfile,tempfile,time,tracemalloc,unittest
+import ast,gzip,io,json,os,re,tarfile,tempfile,time,tracemalloc,unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 DENIED=('subprocess.Popen','subprocess.run','os.system','os.popen','os.fork','os.kill','os.killpg',
@@ -41,14 +41,14 @@ class NormalMarketTests(unittest.TestCase):
         path.parent.mkdir(parents=True,exist_ok=True,mode=0o700);path.write_bytes(raw);path.chmod(mode);return path
     def case(self):
         f=self.builder();role='market-processor';old=f.old['services'].pop('app');f.old['services'][role]=old
-        old.update(container_name='public_market_processor',command=['service','--role',role],profiles=['web'],user='10001:10001',read_only=True,
+        old.update(container_name='public_market_processor',command=['service','--role',role],profiles=['foundation-template','web'],user='10001:10001',read_only=True,
             cap_drop=['ALL'],security_opt=['no-new-privileges:true'],init=True,pids_limit=128,mem_limit=384*1024**2,
             memswap_limit=768*1024**2,cpus=1.0,shm_size=128*1024**2,tmpfs=['/tmp:size=16m,mode=1777,noexec,nosuid,nodev'],
             secrets=[{'source':'public_secret','target':'public_secret'}],healthcheck={'test':['CMD','public-normal-health',role],'interval':'10s','timeout':'3s','retries':3})
         old['environment']={'MARKET_PIPELINE_RELEASE_SHA':'a'*40,'PUBLIC_BUSINESS_VALUE':'UNCHANGED'}
         secret=str(self.root/'public-secret');self.private(Path(secret),b'OPAQUE SYNTHETIC SECRET')
         f.old['secrets']={'public_secret':{'name':'public_secret','file':secret}}
-        f.scope.update(container_name=old['container_name'],env_files=[],profiles=['web'],release='a'*40,public_sources=[],secret_files=[{'path':secret,'target':secret,'aliases':[],
+        f.scope.update(container_name=old['container_name'],env_files=[],profiles=['foundation-template','web'],release='a'*40,public_sources=[],secret_files=[{'path':secret,'target':secret,'aliases':[],
             'identity':self.S.identity(Path(secret).stat()),'cli':False}])
         defaults=deepcopy(f.old_image['Config']);defaults.update(User='10001:10001',ArgsEscaped=True)
         f.old_image['Config']=defaults;f.old_image['RootFS']={'Type':'layers','Layers':['sha256:'+'e'*64]}
@@ -71,6 +71,48 @@ class NormalMarketTests(unittest.TestCase):
                 if network.get('DNSNames') is not None:network['DNSNames']=[old['container_name'],row['id'][:12]]
             if row is not f.stopped:row['health']='healthy'
         return f
+
+    def test_every_public_role_declares_exact_template_and_site_profiles(self):
+        base=(ROOT/'deploy/market-data/compose.yml').read_text()
+        block=re.search(r'^  market-runtime-base:\n(.*?)(?=^  [^ ]|\Z)',base,re.M|re.S).group(1)
+        self.assertRegex(block,r'profiles: \[foundation-template\]')
+        original,_=self.control()
+        for role,(site,_) in M.ROLES.items():
+            source=(ROOT/'deploy/market-data'/('compose.'+site+'.yml')).read_text()
+            block=re.search(r'^  '+re.escape(role)+r':\n(.*?)(?=^  [^ ]|\Z)',source,re.M|re.S).group(1)
+            self.assertRegex(block,r'extends:\n(?:[^\n]*\n)*?      service: market-runtime-base')
+            self.assertRegex(block,r'profiles: \['+site+r'\]')
+            value=deepcopy(original);value['role']=role;value['scope']['profiles']=['foundation-template',site]
+            if role=='market-capture-account2':
+                value['scope']['public_sources']=[{'kind':'image-baked','target':path,'bytes':size,'sha256':pin,
+                    'proof':{'name':'synthetic-source-proof.json','bytes':1,'sha256':'c'*64}}
+                    for path,(size,pin) in M.F79_SOURCES.items()]
+            M.validate_control(self.C,value,self.now)
+
+    def test_declared_profile_guard_rejects_missing_duplicate_wrong_order_and_unknown(self):
+        original,_=self.control()
+        for profiles in (['web'],['web','foundation-template'],['foundation-template','web','web'],['foundation-template','other'],['foundation-template','web','other'],'web'):
+            value=deepcopy(original);value['scope']['profiles']=profiles
+            with self.assertRaisesRegex(RuntimeError,'normal_profiles'):M.validate_control(self.C,value,self.now)
+
+    def test_every_role_cli_enables_only_site_never_the_template_profile(self):
+        for role,(site,_) in M.ROLES.items():
+            backend=M.MarketBackend.__new__(M.MarketBackend);backend.role=role
+            backend.scope={'workdir':'/public','project':'public','profiles':['foundation-template',site],'env_files':[]}
+            backend.paths=['/public/base.yml','/public/normal.yml']
+            argv=backend.compose();self.assertEqual(argv.count('--profile'),1)
+            self.assertEqual(argv[argv.index('--profile')+1],site);self.assertNotIn('foundation-template',argv)
+
+    def test_rendered_profile_order_is_cosmetic_but_typed_exact_members_stay_strict(self):
+        f=self.case();role='market-processor';rendered=deepcopy(f.old)
+        rendered['services'][role]['profiles']=['web','foundation-template']
+        M.baseline(self.C,rendered,role,f.old_row,f.old_image,f.scope,f.paths)
+        self.assertEqual(f.scope['profiles'],['foundation-template','web'])
+        self.assertEqual(rendered['services'][role]['profiles'],['web','foundation-template'])
+        for profiles in (['web'],['foundation-template','unknown'],['foundation-template','web','web'],['foundation-template',True],{'web':True}):
+            changed=deepcopy(rendered);changed['services'][role]['profiles']=profiles
+            with self.assertRaisesRegex(RuntimeError,'normal_features'):
+                M.baseline(self.C,changed,role,f.old_row,f.old_image,f.scope,f.paths)
 
     def control(self):
         C=self.C;value=M.unarmed_control();f=self.case();now=self.now
@@ -476,7 +518,7 @@ class NormalMarketTests(unittest.TestCase):
             ident=self.S.identity(Path(ref['target']).stat());ident[2]=stat_mode=0o100000|mode
             with self.subTest(mode=mode),self.assertRaises(RuntimeError):M.secret_metadata(ident)
     def test_compose_exact_per_role_prefix_profiles_and_only_declared_cli_env(self):
-        value,_=self.control();backend=object.__new__(M.MarketBackend);backend.scope=value['scope'];backend.paths=[r['path'] for r in value['scope']['compose_files']]
+        value,_=self.control();backend=object.__new__(M.MarketBackend);backend.role=value['role'];backend.scope=value['scope'];backend.paths=[r['path'] for r in value['scope']['compose_files']]
         backend.override=Path('/public/image-only.yml');backend.rollback_override=Path('/public/old-image.yml')
         command=backend.compose(extra=True);self.assertIn('--profile',command);self.assertNotIn('--env-file',command)
         backend.scope['env_files'][0]['cli']=True;command=backend.compose(rollback=True)

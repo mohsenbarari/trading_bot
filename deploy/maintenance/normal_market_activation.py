@@ -12,7 +12,7 @@ from types import ModuleType,SimpleNamespace
 import gzip,json,os,posixpath,re,stat,tarfile,time
 
 OPERATION='security-normal-market-activation-20261025-01'
-BASE_CONTRACT_SHA='c25551a45e80ab6f72f7d11671d7dd7c9b52c270cd6d70e37e72a37c5b5f5f05'
+BASE_CONTRACT_SHA='97e50fb2702b377a611599969fc96d5320442778a6cab8c0555b3cf576f35317'
 BASE_UTILITIES_SHA='d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29'
 CATALOG_SHA='c354498c3659fdf99613753d950416f134d81e0fe61fbdc80a32e7eec29b8d12'
 LOAD_WORKER_SHA='5017b7546a3f117e74fdd6314582e19e39395ae1ac183149be924ba720d68aac'
@@ -91,7 +91,7 @@ def validate_control(C,value,now):
         'secret_files','public_sources','compose_version','docker_version','environment_file_label','release','baseline'},'unarmed_prefix')
     C.absolute(scope['workdir']);require(type(scope['project']) is str and re.fullmatch('[a-z0-9][a-z0-9_-]{0,99}',scope['project']),'normal_project')
     require(type(scope['container_name']) is str and re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{1,127}',scope['container_name']),'normal_container_name')
-    require(C.same(scope['profiles'],['bot' if ROLES[value['role']][0]=='bot' else 'web']),'normal_profiles')
+    require(C.same(scope['profiles'],['foundation-template',ROLES[value['role']][0]]),'normal_profiles')
     files=scope['compose_files'];require(type(files) is list and 2<=len(files)<=24 and len({r['path'] for r in files})==len(files),'normal_prefix')
     for binding in files:
         require(type(binding) is dict and set(binding)=={'path','bytes','sha256'} and type(binding['bytes']) is int
@@ -543,7 +543,10 @@ finally:
 def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_dependencies=None):
     require(role in ROLES and type(model) is dict and type(model.get('services')) is dict and role in model['services'],'normal_role')
     spec=model['services'][role];cfg=row['config'];host=row['host'];defaults=image['Config']
-    require(set(spec)<=C.SERVICE_FIELDS|{'profiles','secrets','tmpfs','shm_size'} and C.same(spec.get('profiles'),scope['profiles']),'normal_features')
+    profiles=spec.get('profiles');declared=['foundation-template',ROLES[role][0]]
+    require(set(spec)<=C.SERVICE_FIELDS|{'profiles','secrets','tmpfs','shm_size'} and C.same(scope['profiles'],declared)
+        and type(profiles) is list and all(type(v) is str for v in profiles) and len(profiles)==len(set(profiles))==2
+        and set(profiles)==set(declared),'normal_features')
     container_name=spec.get('container_name',scope['project']+'-'+role+'-1')
     require(container_name==scope['container_name'] and row['image']==image['Id'] and cfg['Image']==spec['image'] and row['name']=='/'+container_name
         and set(cfg)<=C.CONFIG_FIELDS,'normal_identity')
@@ -762,7 +765,8 @@ class MarketBackend:
     def docker(self,*args,**kw):return self.cmd(['/usr/bin/docker',*args],**kw)
     def compose(self,extra=False,rollback=False):
         args=['/usr/bin/docker','compose','--project-directory',self.scope['workdir'],'--project-name',self.scope['project']]
-        for profile in self.scope['profiles']:args+=['--profile',profile]
+        # Declared inherited profiles are not ordinary CLI activation flags.
+        args+=['--profile',ROLES[self.role][0]]
         for proof in self.scope['env_files']:
             if proof['cli']:args+=['--env-file',proof['path']]
         for path in self.paths:args+=['--file',path]

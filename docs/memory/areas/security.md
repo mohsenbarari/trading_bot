@@ -36,10 +36,9 @@
   smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixtures; preserve guards/
   multiplicity. No Go RLIMIT_AS; bound output before accumulation; no payload
   FSIZE inheritance. Retain failed4194305B backup; shared size never proves reclaim.
-- Selected Chromium/Firefox trust, five App roles and both bridge prerequisites
-  passed; UI acceptance OPEN. Native c260 restore reached never-started
-  App; full Config exact, OomKillDisable null/false comparison OPEN. F79 DBus
-  ControlGroup wrong Unit interface proven; no diagnostic applied. Preserve
+- Selected browser trust passed. Native c260 restore reached never-started
+  App; full Config exact, OOM/profile source fixed; actual
+  rehearsal/F79 parity OPEN. No diagnostic applied. Preserve
   owned resources/expiry/refusals.
 - Removed cgroup directories may retain nlink2. Use retained directory/events
   identities, named absence, relative events ENOENT and retained events ENODEV;
