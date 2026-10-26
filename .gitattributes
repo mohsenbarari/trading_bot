@@ -5,3 +5,5 @@
 # Unified patches retain context prefixes and upstream tab indentation exactly.
 /deploy/maintenance/acl_tar_descriptor_build/0001-tar-descriptor-acl-caller.patch whitespace=-blank-at-eol,-space-before-tab
 /deploy/maintenance/acl_tar_descriptor_build/debian-local-changelog.patch whitespace=-blank-at-eol
+# Preserve the exact reviewed ba938 public inventory source bytes.
+/deploy/maintenance/ba938_smoke/inventory.py whitespace=-blank-at-eof
