@@ -269,7 +269,9 @@ def baseline(C,model,role,row,image,scope,files,*,replacement=False,creation_no_
     require(defaults.get('StopTimeout') is None or type(defaults['StopTimeout']) is int and defaults['StopTimeout']>=0,'normal_execution')
     require(C.same({k:v for k,v in cfg['Labels'].items() if not k.startswith('com.docker.compose.')},
         {**(defaults.get('Labels') or {}),**spec.get('labels',{})}),'normal_labels')
-    label_model=deepcopy(model);label_model['services'][SERVICE[role]]['container_name']=container_name
+    # Compose replacement metadata omits the project for an implicit name;
+    # keep the actual container identity/network checks above unchanged.
+    label_model=deepcopy(model);label_model['services'][SERVICE[role]]['container_name']=spec.get('container_name',SERVICE[role]+'-1')
     C.normal_labels(cfg['Labels'],label_model,SERVICE[role],scope,files,image['Id'],replacement=replacement,
         creation_no_dependencies=C.no_dependencies_label(cfg['Labels']) if creation_no_dependencies is None else creation_no_dependencies)
     expected=expected_mounts(C,model,role,scope);actual=row['mounts'];require(type(actual) is list and len(actual)==len(expected),'normal_mount')

@@ -117,6 +117,28 @@ class DatastoreTests(unittest.TestCase):
             lambda v:v['scope'].update(project='shadow'),lambda v:v['scope'].update(workdir='/other-release')):
             changed=deepcopy(value);mutate(changed)
             with self.assertRaises(RuntimeError):M.validate_control(self.C,changed,self.now)
+    def test_all_five_datastore_replace_labels_preserve_explicit_names_and_implicit_service_number(self):
+        for role in M.ROLES:
+            for implicit in (False,True):
+                f=self.case(role);service=M.SERVICE[role];spec=f.old['services'][service]
+                if implicit:
+                    spec.pop('container_name');actual=f.scope['project']+'-'+service+'-1'
+                    f.scope['container_name']=actual;f.old_row['name']='/'+actual
+                    for net in f.old_row['networks'].values():net['Aliases']=[actual,service];net['DNSNames']=[actual,f.old_row['id'][:12]]
+                    label=service+'-1'
+                else:label=actual=spec['container_name']
+                labels=f.old_row['config']['Labels'];labels['com.docker.compose.replace']=label;saved=deepcopy(f)
+                with self.subTest(role=role,implicit=implicit):
+                    M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+                    self.assertEqual(f.__dict__,saved.__dict__);self.assertEqual(f.old_row['name'],'/'+actual)
+                    with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+                        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=False)
+                    for wrong in (role+'-1',f.old_row['id'],actual if implicit else service+'-1',''):
+                        labels['com.docker.compose.replace']=wrong
+                        with self.subTest(wrong=wrong),self.assertRaisesRegex(RuntimeError,'compose_labels'):
+                            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+                    if implicit:self.assertNotIn('container_name',spec)
+
     def test_datastore_null_and_missing_commands_inherit_without_empty_or_runtime_drift_waivers(self):
         for role in M.ROLES:
             for key,field in (('command','Cmd'),('entrypoint','Entrypoint')):

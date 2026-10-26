@@ -19,7 +19,7 @@ WIRE_SHA='ff32988c1b524abd145daac4f34d2b189900245ebeae033992dcfce44c4d82be'
 # remain independent and are never relabeled as these current validators.
 PRIMITIVE_PINS={'contract':'c07784fd6364b39db1b25f4e0e73dc95f9be6b7128b10f37f12c49dd681de140',
  'site':'d6c0f59c63fe8932e9c3a378eced3dbf7a993fd4caef78dd0d1c19b49d506a29',
- 'market':'512460eae7eadf9966a9d2a0dfb23efc976e1ead7f28921efc6f9fd53f3c44e5',
+ 'market':'b30a8f63e1f385c55893eab77f635b6b67815fb2fd1d5d4366b3702d802dd540',
  'capture':'a223222cc8bf5221aafa49fd3d69307282dce884b8e998d49fe609c56078e2a0'}
 PRIMITIVE_NAMES={'contract':'canonical_app_activation_contract.py','site':'canonical_app_activation_site.py',
  'market':'normal_market_activation_current.py','capture':'bounded_operational_capture.py'}

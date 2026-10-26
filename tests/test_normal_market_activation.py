@@ -476,6 +476,37 @@ class NormalMarketTests(unittest.TestCase):
                 if accepted:self.assertTrue(M.baked_archive_sources(*args)['ancestor_metadata_unchanged_in_ram'])
                 else:
                     with self.assertRaisesRegex(RuntimeError,'f79_baked_ancestor_changed'):M.baked_archive_sources(*args)
+    def test_implicit_replace_label_uses_service_number_while_actual_identity_remains_project_service_number(self):
+        f=self.case();role='market-processor';spec=f.old['services'][role];spec.pop('container_name')
+        full=f.scope['project']+'-'+role+'-1';f.scope['container_name']=full;f.old_row['name']='/'+full
+        for net in f.old_row['networks'].values():net['Aliases']=[full,role];net['DNSNames']=[full,f.old_row['id'][:12]]
+        labels=f.old_row['config']['Labels'];labels['com.docker.compose.replace']=role+'-1';saved=deepcopy(f)
+        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+        self.assertEqual(f.__dict__,saved.__dict__);self.assertEqual(f.old_row['name'],'/'+full)
+        self.assertNotIn('container_name',spec)
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=False)
+        for wrong in (full,f.old_row['id'],role+'-2','wrong-1',''):
+            labels['com.docker.compose.replace']=wrong
+            with self.subTest(label=wrong),self.assertRaisesRegex(RuntimeError,'compose_labels'):
+                M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+        labels['com.docker.compose.replace']=role+'-1';f.old_row['name']='/'+role+'-1'
+        with self.assertRaisesRegex(RuntimeError,'normal_identity'):
+            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+
+    def test_explicit_replace_label_still_requires_the_exact_declared_name_and_replacement_flag(self):
+        f=self.case();role='market-processor';name=f.old['services'][role]['container_name']
+        labels=f.old_row['config']['Labels'];labels['com.docker.compose.replace']=name;saved=deepcopy(f)
+        M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+        self.assertEqual(f.__dict__,saved.__dict__)
+        for wrong in (role+'-1',f.scope['project']+'-'+role+'-1',f.old_row['id'],''):
+            labels['com.docker.compose.replace']=wrong
+            with self.subTest(label=wrong),self.assertRaisesRegex(RuntimeError,'compose_labels'):
+                M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=True)
+        labels['com.docker.compose.replace']=name
+        with self.assertRaisesRegex(RuntimeError,'compose_labels'):
+            M.baseline(self.C,f.old,role,f.old_row,f.old_image,f.scope,f.paths,replacement=False)
+
     def test_market_null_entrypoint_inherits_exact_image_without_relaxing_role_command(self):
         f=self.case();role='market-processor';spec=f.old['services'][role];defaults=f.old_image['Config']
         defaults['Entrypoint']=['public-market-entrypoint'];f.old_row['config']['Entrypoint']=defaults['Entrypoint'][:]
