@@ -200,6 +200,17 @@ def debian_checksums(raw):
 def build_argv(context,output):
  return ['/usr/bin/docker','buildx','build','--builder','default','--no-cache','--pull','--target','package-export','--progress','plain',
   '--output','type=local,dest='+str(output),'--file',str(context/'Dockerfile'),str(context)]
+def default_driver(R):
+ # buildx ls formats one builder row and its node rows. .Builder is the
+ # documented builder object on both; unrelated builders emit empty lines.
+ raw=R.metadata(['/usr/bin/docker','buildx','ls','--format','{{if eq .Builder.Name "default"}}{{json .Builder.Driver}}{{end}}'],maximum=1024)
+ need(type(raw)is bytes and 0<len(raw)<=1024,'dedicated_default_driver')
+ rows=[line.strip()for line in raw.splitlines()if line.strip()]
+ need(1<=len(rows)<=16,'dedicated_default_driver')
+ try:drivers=[document(line)for line in rows]
+ except (ValueError,UnicodeError):raise RuntimeError('dedicated_default_driver')from None
+ need(all(type(value)is str and value=='docker'for value in drivers),'dedicated_default_driver')
+ return 'docker'
 def check_disk(initial,current):
  need(type(initial)is int and type(current)is int and current>=DISK_RESERVE and initial-current<=DISK_GROWTH,'vm_disk_budget')
 def disk_scope(path,uid,*,initial=None):
@@ -237,7 +248,7 @@ def execute(args):
     'admission_basis':'trusted-workflow-hosted-selection-plus-uid-os-environment','buildkit_client_cgroup_limits_claimed':False,
     'global_wall_seconds':GLOBAL_SECONDS,'build_command_max_seconds':BUILD_SECONDS,'build_output_limit_bytes':LOG_MAX,
     'vm_disk_growth_limit_bytes':DISK_GROWTH,'vm_disk_free_floor_bytes':DISK_RESERVE,'security_accepted':False}),uid)
-   need(R.metadata(['/usr/bin/docker','buildx','inspect','default','--format','{{json .Driver}}'],maximum=128)==b'"docker"\n','dedicated_default_driver')
+   default_driver(R)
    docker_root=document(R.metadata(['/usr/bin/docker','info','--format','{{json .DockerRootDir}}'],maximum=4096))
    need(type(docker_root)is str and 0<len(docker_root)<=4096 and '\n'not in docker_root and '..'not in Path(docker_root).parts,'docker_disk_path')
    disks=[disk_scope(root,uid,initial=facts['free_bytes']),disk_scope(Path(docker_root),uid)]

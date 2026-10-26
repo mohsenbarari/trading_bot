@@ -158,6 +158,29 @@ class DriverTests(unittest.TestCase):
   tree=ast.parse((MAIN/'scripts/prepare_sqlite_wal_ci_context.py').read_bytes());attrs={n.func.attr for n in ast.walk(tree)if isinstance(n,ast.Call)and isinstance(n.func,ast.Attribute)}
   self.assertNotIn('stage_context',attrs);self.assertNotIn('inputs',attrs)
   self.assertTrue({'fetch','bounded_command'}<=attrs)
+ def test_documented_default_builder_driver_accepts_actual_builder_and_node_rows(self):
+  for raw in (b'"docker"\n"docker"\n',b'\n"docker"\n\n"docker"\n\n',b'"docker"\n'):
+   calls=[]
+   def metadata(argv,maximum):calls.append((argv,maximum));return raw
+   self.assertEqual(A.default_driver(SimpleNamespace(metadata=metadata)),'docker')
+   self.assertEqual(calls,[(['/usr/bin/docker','buildx','ls','--format','{{if eq .Builder.Name "default"}}{{json .Builder.Driver}}{{end}}'],1024)])
+  tree=ast.parse((MAIN/'scripts/prepare_sqlite_wal_ci_context.py').read_bytes())
+  execute=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='execute')
+  self.assertEqual(sum(isinstance(n,ast.Call)and isinstance(n.func,ast.Name)and n.func.id=='default_driver'for n in ast.walk(execute)),1)
+  self.assertFalse(any(isinstance(n,ast.Constant)and n.value=='inspect'for n in ast.walk(execute)))
+ def test_default_driver_rejects_empty_malformed_or_any_wrong_json_driver(self):
+  for raw in (b'',b'\n \n',b'docker\n',b'"docker"\ninvalid\n',b'"docker"\n"docker-container"\n',
+   b'null\n',b'false\n',b'1\n',b'{"Driver":"docker"}\n',b'["docker"]\n',b'"docker" "docker"\n',b'\xff\n'):
+   with self.subTest(raw=raw),self.assertRaisesRegex(RuntimeError,'dedicated_default_driver'):
+    A.default_driver(SimpleNamespace(metadata=lambda *a,**k:raw))
+ def test_default_driver_enforces_byte_and_nonempty_row_bounds(self):
+  for raw in (b'"docker"\n'*17,b' '*1025,b'\n'*1025,'"docker"\n',None):
+   with self.subTest(raw=repr(raw)),self.assertRaisesRegex(RuntimeError,'dedicated_default_driver'):
+    A.default_driver(SimpleNamespace(metadata=lambda *a,**k:raw))
+ def test_default_driver_preserves_bounded_metadata_command_refusal(self):
+  def metadata(*a,**k):raise RuntimeError('build_metadata_command_refused')
+  with self.assertRaisesRegex(RuntimeError,'build_metadata_command_refused'):
+   A.default_driver(SimpleNamespace(metadata=metadata))
  def test_report_schema_closure_matches_real_frozen_producer_ast(self):
   tree=ast.parse((MAIN/'deploy/security/sqlite-wal-backport/sourcebuild.py').read_bytes())
   report=next(n.value for n in ast.walk(tree)if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='report'for t in n.targets))
