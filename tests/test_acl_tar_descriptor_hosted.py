@@ -23,6 +23,7 @@ NATIVE02_RECIPE_PINS={'0001-tar-descriptor-acl-caller.patch': {'bytes': 26083,
  'source-manifest.json': {'bytes': 1866, 'sha256': '3bb405d134275541b4ecdecdce9fb597a9ed1d88adcfdca43574532be3bad77d'},
  'sourcebuild.py': {'bytes': 33670, 'sha256': '1c545c0a01eeeea2d599bee2cf56ba91c094d82c62e6fbdab9a642c9a262a23a'},
  'verify_ordinary.py': {'bytes': 13120, 'sha256': '868809e04a23a8797f3b79b04cc22416ff2ddbbfd8abdafe902de41eb3a011ca'}}
+REVIEWED_HOSTED03_SOURCEBUILD_PIN={'bytes': 33884, 'sha256': 'cb81a8923984881e427672d47928a597ed0d70f85ec3c8e5ce52d8202e28a5da'}
 NATIVE02_HELPER_SOURCE_SHA256={'cleanup_child': '189a3b8840a8496a35d63fd09bd51d8399f2f6177c92644ec4655c9fd1a48581',
  'context_inventory': 'b0035122aebe6539155da1114c69e5614938589d2c18062486395a4d600cc2d9',
  'encoded': 'aef615adb295aff97b7a383001acf3b2d20b156450ef0244b21246f6c0fba3bb',
@@ -33,6 +34,35 @@ NATIVE02_HELPER_SOURCE_SHA256={'cleanup_child': '189a3b8840a8496a35d63fd09bd51d8
  'run': 'a1c51bcf5a38f67cdcc5bcb6740b94d4113363e03dffecd605d6703e2966cf6e',
  'save': '1ec81fb0933c910a37df43d2fea47c27c2c648ae5d4f28d7bd244b93e253059e',
  'validate_manifest': '3acf6696e1a27b2e1f432b2044f10c1aa8eaabaaad7df669b5a695e1522c3838'}
+
+NATIVE02_RECIPE_FUNCTION_SOURCE_SHA256={'acl_library_binding': '4e32c2816cb0c6f606fd38a05bb42f457fd2d6470e13cee5fb57e9d8ffaabad8',
+ 'build': '2bc1e6af8f3b947266f1b0fee5fa862cea1a7d62ac0c776d95e0c95b7bfc2f1e',
+ 'build_vendor': 'a1d5e80e37018b618505192fda0d61dc4cfbf63abdbc4b67e70cdee45d7c0b61',
+ 'builder_context': '1b93a03d07823333dbeeed66e7139ccbc56f6a774af19daaa9d005a8f995ecca',
+ 'bytes_at': '30d2278d0749a62ba54af1109f92b8cc9b67dfab8a814fe1976cb3e2577adc5e',
+ 'cleanup_owned': 'f00df40cc7d10a7079ba2e742d10529c5ec3c9eec34c3e01f35a3471d926593b',
+ 'command': '6cf38eb68689dd5217abbb301af04b7494d3051d6959fab7f17d8ca49a097eb0',
+ 'configure_repository': '5ffb5ead0c3ecfe6fddaa338aa18a27c06c2ad42e8fa37a9607116608d62b19f',
+ 'copy_exact': '38ab22be838fd4d7f81f52a7c518acc6e326073892cb0d35ab1974c3c75031f5',
+ 'current_environment': '466a5f9e5dd5ea40c5ea05dd58dfa84e2487c26561146c5bb253c85ca94d67e8',
+ 'digest': '82deb322393c025eafff984d61248ca1e8b4d7a08539415d8ea89f6fb37c6723',
+ 'encoded': 'aef615adb295aff97b7a383001acf3b2d20b156450ef0244b21246f6c0fba3bb',
+ 'exported_symbols': '3ffaaefebc50d9b7a3e12d1042ebb37ba6e29d89eebadd7e47f39b181d68d08f',
+ 'family_outputs': 'c5989033eff69deeb742aaec0de31d478242695e71f2c1a25b41528b1f0d41d1',
+ 'forward': 'b54a4eec1887ce8c2e7fd33bc2d35988dbbf4c2916e10d733dd56411f5d07b53',
+ 'identity': 'd3ba0d56db3b4fc11165f3b434f51c9437065dcd6f303df5f1836eb657545355',
+ 'install_packages': 'a8f7bfb6094a05a1bb2420730ff6dd75a12cb6bcdc96ab23d39a879983a20f7e',
+ 'inventory': '08262b4f7e56077c72d9a6c160d7fac8fea2902ac5b60f9df7be9c94b1d10777',
+ 'main': '72a6894f07943b056ea5406e4f7891019bea7331c9a1911c26153092e91ccf1c',
+ 'metadata': '01f1e20e43db2999696a1b340a7979fd4c95d51a8142683b799bf73f7c86b64b',
+ 'owned_read': '8497ae6ccc9a018722eb74ecdbbe07069785aef74f37ccf3bef0d39d9aaa9e01',
+ 'package_fields': 'e3a064d8244239aae409fb20c54cc8d506bdf71fcf41c29505eda6cec0b96453',
+ 'publish': 'e13b6a77eef9709cd753de30051cc8fe17f28b2188d7fe254f43d4c727c9ac94',
+ 'regular_payload': 'b8040fe8c23237deabe4d71849396fa75f9ad41a032daf082a71faa051ceace7',
+ 'require': 'bdda49153807696b211bdcb0e3e08c0223f409ef1fa6d338b31f88dde6712fb1',
+ 'run': '948fd008cce230bfc0ca0d778afd0b5ace6f66e4aa1f9c721e2ec6692f4d210c',
+ 'tar_binary_contract': '78f58c0a8e378da555b9550a48beb3e888946475b5075a906e510b040e401222',
+ 'uid_idle': '531e22c07ab22ce4f81578b99a0708a115826f089ac79e9db470eca30ece2b60'}
 
 class HostedTests(unittest.TestCase):
  def setUp(self):
@@ -55,9 +85,10 @@ class HostedTests(unittest.TestCase):
   for key,value in [('uid',0),('euid',0),('runner_environment','self-hosted'),('machine','aarch64'),('os_version','26.04'),('free_bytes',40*1024**3-1),('cpus',True)]:
    facts=self.facts();facts[key]=value
    with self.subTest(key=key),self.assertRaises(RuntimeError):M.validate_host(facts)
- def test_native_reference_recipe_pins_and_shared_helpers_are_unchanged(self):
+ def test_six_native_recipe_files_reviewed_install_delta_and_shared_helpers(self):
   self.assertEqual(set(M.RECIPE_NAMES),set(NATIVE02_RECIPE_PINS))
-  for name,pin in NATIVE02_RECIPE_PINS.items():
+  for name,before_pin in NATIVE02_RECIPE_PINS.items():
+   pin=REVIEWED_HOSTED03_SOURCEBUILD_PIN if name=='sourcebuild.py'else before_pin
    raw=(HERE/name).read_bytes();self.assertEqual({'bytes':len(raw),'sha256':sha256(raw).hexdigest()},pin,name)
    self.assertEqual(M.PINS[name],(pin['bytes'],pin['sha256']),name)
   source=(HERE/'build_hosted.py').read_text();tree=ast.parse(source)
@@ -149,6 +180,47 @@ class HostedTests(unittest.TestCase):
   # final named-frame checks must still reject the real changed output.
   with patch.object(M.os,'close',side_effect=close),self.assertRaisesRegex(RuntimeError,'public_closed_changed'):M.finalize_public_inputs(held)
   self.assertTrue(changed);self.assertTrue(all(item.fd is None for item in held))
+
+ def recipe_module(self):
+   module=ModuleType('_owned_tar03_recipe');module.__file__=str(HERE/'sourcebuild.py')
+   exec(compile((HERE/'sourcebuild.py').read_bytes(),module.__file__,'exec'),module.__dict__);return module
+ def test_candidate_tar_install_restores_all_strictly_validated_payload_roots(self):
+   recipe=self.recipe_module();calls=[]
+   with patch.object(recipe,'command',side_effect=lambda argv,**kw:calls.append((argv,kw))),patch.object(recipe,'metadata',return_value=b''):
+    recipe.install_packages([Path('/OWNED-CANDIDATE.deb')],documentation=('tar',),complete_tar_payload=True)
+   self.assertEqual(len(calls),1);argv,options=calls[0]
+   roots=('/usr/share/doc/tar','/usr/share/locale','/usr/share/man','/usr/share/info')
+   expected=['/usr/bin/dpkg']
+   for root in roots:expected+=['--path-include='+root,'--path-include='+root+'/*']
+   self.assertEqual(argv,expected+['--install','/OWNED-CANDIDATE.deb']);self.assertEqual(options,{'timeout':120})
+   # Every required root and descendants is explicitly named; exclusions and
+   # global dpkg configuration are not altered by this call.
+   self.assertFalse(any('path-exclude' in arg for arg in argv))
+ def test_sdk_and_old_runtime_keep_the_exact_previous_install_contract(self):
+   recipe=self.recipe_module();calls=[]
+   for docs in (('libacl1','libacl1-dev'),('libacl1',)):
+    with patch.object(recipe,'command',side_effect=lambda argv,**kw:calls.append(argv)),patch.object(recipe,'metadata',return_value=b''):
+     recipe.install_packages([Path('/OWNED-LIBACL.deb')],documentation=docs)
+    expected=['/usr/bin/dpkg']
+    for name in docs:expected+=['--path-include=/usr/share/doc/'+name,'--path-include=/usr/share/doc/'+name+'/*']
+    self.assertEqual(calls[-1],expected+['--install','/OWNED-LIBACL.deb'])
+
+ def test_full_payload_validator_and_exact_reviewed_install_only_delta(self):
+  text=(HERE/'sourcebuild.py').read_text();tree=ast.parse(text);functions={n.name:n for n in tree.body if isinstance(n,ast.FunctionDef)}
+  self.assertEqual(set(functions),set(NATIVE02_RECIPE_FUNCTION_SOURCE_SHA256))
+  for name,node in functions.items():
+   segment=ast.get_source_segment(text,node)
+   if name=='install_packages':
+    segment=segment.replace('def install_packages(paths,*,documentation,complete_tar_payload=False):','def install_packages(paths,*,documentation):')
+    block=" if complete_tar_payload:\n  for root in ('/usr/share/locale','/usr/share/man','/usr/share/info'):\n   flags+=['--path-include='+root,'--path-include='+root+'/*']\n"
+    self.assertEqual(segment.count(block),1);segment=segment.replace(block,'',1)
+   elif name=='build':
+    before="install_packages([Path(tar['path'])],documentation=('tar',))";after="install_packages([Path(tar['path'])],documentation=('tar',),complete_tar_payload=True)"
+    self.assertEqual(segment.count(after),1);segment=segment.replace(after,before,1)
+   self.assertEqual(sha256(segment.encode()).hexdigest(),NATIVE02_RECIPE_FUNCTION_SOURCE_SHA256[name],name)
+  calls=[n for n in ast.walk(functions['build'])if isinstance(n,ast.Call)and isinstance(n.func,ast.Name)and n.func.id=='install_packages']
+  enabled=[n for n in calls if any(k.arg=='complete_tar_payload'and isinstance(k.value,ast.Constant)and k.value.value is True for k in n.keywords)]
+  self.assertEqual(len(calls),3);self.assertEqual(len(enabled),1);self.assertIn("tar['path']",ast.unparse(enabled[0]))
 
 
 if __name__=='__main__':unittest.main()

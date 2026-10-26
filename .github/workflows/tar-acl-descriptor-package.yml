@@ -33,9 +33,9 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/acl_tar_descriptor_build/build_hosted.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/tar-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 5315f7c3a7eaa4db9019d4b117a99b08f84979251c6fcc89d8ba60645f9efb68 \
+            --source-sha256 fbc94ef89de3d2e6dd652ad23155cb70e64d9073357b298cfa530212bf2d5847 \
             --execute-hosted-build \
-            --confirm BUILD-ONLY-HOSTED-TAR-DESCRIPTOR-ACL-PACKAGE-20261026-02
+            --confirm BUILD-ONLY-HOSTED-TAR-DESCRIPTOR-ACL-PACKAGE-20261026-03
 
       - name: Retain only the twelve complete proper package outputs
         if: success() && steps.build.outcome == 'success'

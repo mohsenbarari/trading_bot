@@ -13,7 +13,7 @@ from types import ModuleType
 BASE='python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3'
 VERSION='1.35+dfsg-5~trixie+gold2'
 MEMORY=3*1024**3;CPUS=2*10**9;PIDS=256;RESERVE=2*1024**3
-CONFIRM='BUILD-ONLY-HOSTED-TAR-DESCRIPTOR-ACL-PACKAGE-20261026-02'
+CONFIRM='BUILD-ONLY-HOSTED-TAR-DESCRIPTOR-ACL-PACKAGE-20261026-03'
 DOCKER='/usr/bin/docker';HOST='unix:///var/run/docker.sock'
 DOCKER_ROOT=Path('/var/lib/docker')
 HOST_UID=1001;DISK_GROWTH=32*1024**3;RESERVE=8*1024**3
@@ -28,7 +28,7 @@ PINS={'0001-tar-descriptor-acl-caller.patch': (26083, '8fbdc8332e1a9dc131bb18423
  'inputs/tar_1.35+dfsg-5~trixie+gold1_amd64.deb': (814984, 'b6a5715adc801680c94ab653641668d03f429dddc1efa822015b6395482195c4'),
  'ordinary_acl_fd_fixture.c': (4514, 'a0c7e9a44cd960058b2c906578cd2d224bf8b52d4d4ba6c64d4623aa825f2042'),
  'source-manifest.json': (1866, '3bb405d134275541b4ecdecdce9fb597a9ed1d88adcfdca43574532be3bad77d'),
- 'sourcebuild.py': (33670, '1c545c0a01eeeea2d599bee2cf56ba91c094d82c62e6fbdab9a642c9a262a23a'),
+ 'sourcebuild.py': (33884, 'cb81a8923984881e427672d47928a597ed0d70f85ec3c8e5ce52d8202e28a5da'),
  'verify_ordinary.py': (13120, '868809e04a23a8797f3b79b04cc22416ff2ddbbfd8abdafe902de41eb3a011ca')}
 OUTPUTS={'abi-contract.json': 4194304,
  'acl_2.4.0-1~trixie+gold1_amd64.buildinfo': 4194304,
