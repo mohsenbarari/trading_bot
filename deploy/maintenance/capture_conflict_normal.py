@@ -326,7 +326,7 @@ def normal_backend(H,C,S,M):
        absent();self.checks.append(absent);self.stack.callback(final)
      actual=list(map(str,unit('DropInPaths')))
      need(files and len(actual)==len(set(actual)) and set(actual)==files,'session_owner')
-     group=str(unit('ControlGroup'))
+     group=str(service('ControlGroup'))
      if group:
       need(group.startswith('/') and '..' not in Path(group).parts,'cgroup');folder=LEGACY_CGROUP_ROOT/group.lstrip('/')
       if folder.exists():

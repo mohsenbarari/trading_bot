@@ -40,12 +40,33 @@ class OwnedTests(unittest.TestCase):
    UnrefUnit=lambda name,timeout:calls.append(('unref',name)))
   def obj(bus,path):
    if path=='/org/freedesktop/systemd1':return manager
-   return SimpleNamespace(Get=lambda interface,key,timeout:units[path][key])
+   def get(interface,key,timeout):
+    calls.append(('get',path,interface,key));self.assertEqual(timeout,5)
+    expected='org.freedesktop.systemd1.Service' if key in {'MainPID','ControlPID','ControlGroup'} else 'org.freedesktop.systemd1.Unit'
+    if interface!=expected:raise LookupError('fixture_unknown_property')
+    return units[path][key]
+   return SimpleNamespace(Get=get)
   bus=SimpleNamespace(get_object=obj,close=lambda:calls.append(('close',)))
   stack.enter_context(patch.dict(sys.modules,{'dbus':SimpleNamespace(SystemBus=lambda private:bus,Interface=lambda value,interface:value)}))
   backend=object.__new__(N.normal_backend(H,None,None,None));backend.stack=stack;backend.checks=[]
   backend.check=lambda:[check() for check in backend.checks]
   return H,backend,units,paths,roots,calls
+ def test_legacy_ControlGroup_is_a_Service_property_and_old_Unit_lookup_refuses(self):
+  with ExitStack() as stack:
+   H,backend,units,paths,roots,calls=self.legacy_case(stack);backend.legacy_owners()
+   self.assertEqual([row for row in calls if row[0]=='get' and row[3]=='ControlGroup'],
+    [('get',name,'org.freedesktop.systemd1.Service','ControlGroup') for name in H.LEGACY_UNITS])
+   # Recreate only the actual prior one-line lookup in RAM. The strict owned
+   # D-Bus fixture rejects it before any cgroup filesystem or client action.
+   path=ROOT/'deploy/maintenance/capture_conflict_normal.py';raw=path.read_bytes()
+   self.assertEqual(raw.count(b"group=str(service('ControlGroup'))"),1)
+   previous=ModuleType('_prior_capture_Unit_property');previous.__file__=str(path)
+   exec(compile(raw.replace(b"group=str(service('ControlGroup'))",b"group=str(unit('ControlGroup'))"),str(path),'exec'),previous.__dict__)
+   for key,value in (('LEGACY_RUNTIME_ROOT',roots['runtime']),('LEGACY_PERSISTENT_ROOT',roots['persistent']),('LEGACY_CGROUP_ROOT',roots['cgroup'])):
+    stack.enter_context(patch.object(previous,key,value))
+   old=object.__new__(previous.normal_backend(H,None,None,None));old.stack=stack;old.checks=[];old.check=lambda:[check() for check in old.checks]
+   with self.assertRaisesRegex(LookupError,'fixture_unknown_property'):old.legacy_owners()
+   self.assertEqual(calls[-1],('close',))
  def test_legacy_persistent_only_after_reboot_and_both_present_are_exact_authorities(self):
   for runtime in (False,True):
    with ExitStack() as stack:
