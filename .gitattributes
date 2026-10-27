@@ -12,3 +12,7 @@
 # Preserve the exact reviewed inventory dependency, including its final newline.
 /deploy/maintenance/app_6de_smoke/inventory.py whitespace=-blank-at-eof
 /deploy/maintenance/app_6de_smoke/dpkg-docker-policy.original.txt whitespace=-blank-at-eol
+
+# Preserve exact GNU patch context prefixes and original tab indentation.
+/deploy/maintenance/coreutils_acl_build/0001-coreutils-bound-acl-callers.patch whitespace=-blank-at-eol,-space-before-tab
+/deploy/maintenance/coreutils_acl_build/0002-coreutils-unfiltered-vendor-tests.patch whitespace=-blank-at-eol,-space-before-tab

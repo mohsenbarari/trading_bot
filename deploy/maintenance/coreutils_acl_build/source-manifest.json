@@ -1,0 +1,332 @@
+{
+  "C_compiled": false,
+  "attr26_lineage": [
+    {
+      "original": "libmisc/getxattrat_compat.c",
+      "output": "src/gold-acl/getxattrat_compat.c",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 2754,
+      "upstream_sha256": "86ea6426869b36fa98a70c8f2d1d7247dfea85fd91ed188595077c18c1ea51c3"
+    },
+    {
+      "original": "libmisc/setxattrat_compat.c",
+      "output": "src/gold-acl/setxattrat_compat.c",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 2809,
+      "upstream_sha256": "99faab3426bcd6baef23d311f3ade0dd5a2b19b37fff7878bfa2f72331ac7e48"
+    },
+    {
+      "original": "libmisc/listxattrat_compat.c",
+      "output": "src/gold-acl/listxattrat_compat.c",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 2680,
+      "upstream_sha256": "62f6dae0bca5a922bc6f90885d1161cddbea5c8f61a76dc94c2cbd6d534bcf7f"
+    },
+    {
+      "original": "libmisc/removexattrat_compat.c",
+      "output": "src/gold-acl/removexattrat_compat.c",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 2632,
+      "upstream_sha256": "3a586290e81c4a67300215e4c9aa956608ab6cbdb8a4122048c51656e7f4dcb3"
+    },
+    {
+      "original": "libmisc/proc-self-fd.c",
+      "output": "src/gold-acl/proc-self-fd.c",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 2265,
+      "upstream_sha256": "38873bd966f13d9075d7d88645a6ef0b699b7c2c6fa04479f3e51b3995c644a4"
+    },
+    {
+      "original": "libmisc/proc-self-fd.h",
+      "output": "src/gold-acl/proc-self-fd.h",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 1090,
+      "upstream_sha256": "86212fdf6de07cf69f46ad3a74a952e01c592a084b8d667389569af42e952659"
+    },
+    {
+      "original": "libmisc/xattrat.c",
+      "output": "src/gold-acl/xattrat.c",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 2167,
+      "upstream_sha256": "108da0e4822261eecd04645a97a043d3a7666533041994b1f6b56541d750bccc"
+    },
+    {
+      "original": "include/xattrat.h",
+      "output": "src/gold-acl/xattrat.h",
+      "transforms": [
+        "private symbol namespace and local include paths",
+        "private syscall prototypes unconditional despite public HAVE_* macros; private header guard"
+      ],
+      "upstream_bytes": 643,
+      "upstream_sha256": "cdbf766e7c159ae52c15132215fa546f8460b2768af8ccf08602710df28fcd17"
+    },
+    {
+      "original": "include/xattrat_compat.h",
+      "output": "src/gold-acl/xattrat_compat.h",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 734,
+      "upstream_sha256": "3e9d3e539b72f4c5ca30debffbdbe969ef92b169906e80dedee570a723d4213d"
+    },
+    {
+      "original": "include/error_context.h",
+      "output": "src/gold-acl/error_context.h",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 1569,
+      "upstream_sha256": "0e698be1f3635b6edb0eeb6206255dac43280d6c173dcd94cae53e4fb6407a59"
+    },
+    {
+      "original": "include/nls.h",
+      "output": "src/gold-acl/nls.h",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 250,
+      "upstream_sha256": "22aeab5058fbeff680873f2e730c5ded2134978eb12f9af16daf5bd6f1d0f3cb"
+    },
+    {
+      "original": "include/visibility-hidden.h",
+      "output": "src/gold-acl/visibility-hidden.h",
+      "transforms": [
+        "private symbol namespace and local include paths"
+      ],
+      "upstream_bytes": 274,
+      "upstream_sha256": "921ca56ea1df3b3289534580335c3e43ab79707a3ba119c661107e9d142dd948"
+    },
+    {
+      "original": "libattr/attr_copy_fd.c",
+      "output": "src/gold-acl/attr_copy_fd.c",
+      "transforms": [
+        "private symbol namespace and local include paths",
+        "literal empty-path AT_EMPTY_PATH list/get/set primitives; reject negative descriptors; diagnostic names only"
+      ],
+      "upstream_bytes": 4356,
+      "upstream_sha256": "15b0d3fab6e576faa0efe6ddf02fe837ec666b0d4b2bedee631fa5852c4e7a29"
+    }
+  ],
+  "files": {
+    "configure.ac": {
+      "after": {
+        "bytes": 33382,
+        "sha256": "fae25c67d17dc894ed0c7c79246e05c2d0fed50858f237b8b77cdb468bfaf164"
+      },
+      "before": {
+        "bytes": 31532,
+        "sha256": "2855e2cea40c8ddc6d7347bea47c33778f727e590cec89ea806185a45b3cf38f"
+      }
+    },
+    "debian/control": {
+      "after": {
+        "bytes": 1397,
+        "sha256": "4f8710f88ef6b182cd4d636473211bc66b4a203635288d4798cb1e4d7c0aef37"
+      },
+      "before": {
+        "bytes": 1305,
+        "sha256": "ddb7355a9b5b913c71bdfcaa57fc79d92200cdc8d9616e1ddcc040dfba4daf4b"
+      }
+    },
+    "debian/rules": {
+      "after": {
+        "bytes": 2417,
+        "sha256": "0ebad18a80f8723145247b592e2c4fad154dd6c7365eee7fa4d4d7d66639a53b"
+      },
+      "after_test_hook": {
+        "bytes": 2480,
+        "sha256": "f7003c071aefd5d3972427cd5ce955507907503761a82c463f1101ef84c05afa"
+      },
+      "before": {
+        "bytes": 2199,
+        "sha256": "4a8872082d081107cf416afb1718993446416d25014c445a3019109590e22e26"
+      }
+    },
+    "lib/qcopy-acl.c": {
+      "after": {
+        "bytes": 4687,
+        "sha256": "8344b734caee7b46c77d2efb6857026ebbcbd916272938c8425b026dd94a4c18"
+      },
+      "before": {
+        "bytes": 4689,
+        "sha256": "d674a8620ac2145399160f35b1d61f8c182fb541d049363b5fb52ed164c4282d"
+      }
+    },
+    "src/copy.c": {
+      "after": {
+        "bytes": 131961,
+        "sha256": "faa64be356af1c25e91644428fe694a7d496d73c846be8741b8fb702648ca84e"
+      },
+      "before": {
+        "bytes": 126439,
+        "sha256": "7280de5f2eae246a48c252c4491100d04ada66bcb6dd0368d267d2583fa4cb22"
+      }
+    },
+    "src/gold-acl-fd.c": {
+      "after": {
+        "bytes": 4689,
+        "sha256": "8ab8712ac655a8e26cbffad2f72561f0eb487da482329f0daf945427e6aa13d3"
+      },
+      "before": null
+    },
+    "src/gold-acl-fd.h": {
+      "after": {
+        "bytes": 1164,
+        "sha256": "fb01f024d7d5e2c2e4dc9f3c40023fb80f9968dbb09da7b85da75129118d09d5"
+      },
+      "before": null
+    },
+    "src/gold-acl/attr_copy_fd.c": {
+      "after": {
+        "bytes": 4647,
+        "sha256": "8b4be0cd12c5b7cd3fbec63f29fba6a2003af5e564192cf334b2ee8585c8f10f"
+      },
+      "before": null
+    },
+    "src/gold-acl/error_context.h": {
+      "after": {
+        "bytes": 1569,
+        "sha256": "0e698be1f3635b6edb0eeb6206255dac43280d6c173dcd94cae53e4fb6407a59"
+      },
+      "before": null
+    },
+    "src/gold-acl/getxattrat_compat.c": {
+      "after": {
+        "bytes": 2881,
+        "sha256": "7d1e9a5388430b274751b3e6489dceca3e4b70e2885b6540edf2dc3a96beb4eb"
+      },
+      "before": null
+    },
+    "src/gold-acl/listxattrat_compat.c": {
+      "after": {
+        "bytes": 2816,
+        "sha256": "21738f66daba7186f4e9ddfc4bf2f4f9a831937086e1ff4f1371b57122bf5729"
+      },
+      "before": null
+    },
+    "src/gold-acl/nls.h": {
+      "after": {
+        "bytes": 250,
+        "sha256": "22aeab5058fbeff680873f2e730c5ded2134978eb12f9af16daf5bd6f1d0f3cb"
+      },
+      "before": null
+    },
+    "src/gold-acl/nontrivial.c": {
+      "after": {
+        "bytes": 8054,
+        "sha256": "19de2c8794617bb4115fa02876f40e2e6b079d392b7a5fef948aa23ce8da2ddf"
+      },
+      "before": null
+    },
+    "src/gold-acl/nontrivial.h": {
+      "after": {
+        "bytes": 375,
+        "sha256": "746c4e8a45ec2b18f6eaf9c9e459fddce1ed80c5631b10ecbcc94c364204b372"
+      },
+      "before": null
+    },
+    "src/gold-acl/proc-self-fd.c": {
+      "after": {
+        "bytes": 2374,
+        "sha256": "e80766c0d0f417edac866991c01c99482cd5072d8683b92cc303353ded6580fa"
+      },
+      "before": null
+    },
+    "src/gold-acl/proc-self-fd.h": {
+      "after": {
+        "bytes": 1172,
+        "sha256": "c52644de461d8a4243bc3b3d516327e71173052d71c4eb2904d6abff46e17390"
+      },
+      "before": null
+    },
+    "src/gold-acl/removexattrat_compat.c": {
+      "after": {
+        "bytes": 2768,
+        "sha256": "aa0c28d09ed98c782b8d7f74cea5693af033c23bfecfe07de421e6b8903bf7b6"
+      },
+      "before": null
+    },
+    "src/gold-acl/setxattrat_compat.c": {
+      "after": {
+        "bytes": 2945,
+        "sha256": "5ee3d7d57b5eb66e960cc62c12e2d2e559e702eae26a75887269126bf41d452a"
+      },
+      "before": null
+    },
+    "src/gold-acl/visibility-hidden.h": {
+      "after": {
+        "bytes": 274,
+        "sha256": "921ca56ea1df3b3289534580335c3e43ab79707a3ba119c661107e9d142dd948"
+      },
+      "before": null
+    },
+    "src/gold-acl/xattrat.c": {
+      "after": {
+        "bytes": 2203,
+        "sha256": "46997b9b4a43fb2db53d73f52e865b6e9b31d3d7c464618380b8bcb07158e629"
+      },
+      "before": null
+    },
+    "src/gold-acl/xattrat.h": {
+      "after": {
+        "bytes": 575,
+        "sha256": "6f7730ded7131ef1631e5761d097bf0b63574a3f24bcfbde32baf6a83a470762"
+      },
+      "before": null
+    },
+    "src/gold-acl/xattrat_compat.h": {
+      "after": {
+        "bytes": 842,
+        "sha256": "1d5bfbaf3c58d73ecf326898b18157a49d57417782bf0eda602f36731411a771"
+      },
+      "before": null
+    },
+    "src/local.mk": {
+      "after": {
+        "bytes": 24058,
+        "sha256": "829fe903b176d5fcaa1af552cc15aa869fe69a870dc85301d5f123eae0894074"
+      },
+      "before": {
+        "bytes": 23485,
+        "sha256": "c74f63e855e356e37fd5669bf2adb001da578381670c0ef7357b3f43b5c56133"
+      }
+    }
+  },
+  "local_packet_manifest": {
+    "bytes": 13474,
+    "rows": 76,
+    "sha256": "8300cbac75601f87591263811f95514e1faa8d99c25113189b8e4b91b13f8e0e"
+  },
+  "package_version": "9.7-3+gold1",
+  "patch": {
+    "bytes": 60929,
+    "sha256": "3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d"
+  },
+  "root_isolated_source_approval": {
+    "bytes": 1963,
+    "sha256": "39f1ddaffbe9f22ffad55edbe07556a62238e606b7a1f05685a6c712592444fa"
+  },
+  "schema": "coreutils_descriptor_source_contract/1",
+  "security_accepted": false,
+  "source_only": true,
+  "source_package": "coreutils",
+  "source_version": "9.7-3",
+  "vendor_test_hook_patch": {
+    "bytes": 304,
+    "sha256": "aac49190579f7b17df5d9cd6cb0d622a1b7ebe78950e3b8e27aeb1825441541d"
+  }
+}

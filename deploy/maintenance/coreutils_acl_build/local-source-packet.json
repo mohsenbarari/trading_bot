@@ -1,0 +1,400 @@
+{
+  "C_compilation_performed": false,
+  "Root_source_accepted": false,
+  "autotools_regeneration_performed": false,
+  "execution_armed": false,
+  "files": [
+    {
+      "bytes": 60929,
+      "path": "0001-coreutils-bound-acl-callers.patch",
+      "sha256": "3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d"
+    },
+    {
+      "bytes": 11638,
+      "path": "BUILD_AND_REVIEW.md",
+      "sha256": "2126ec5b45f25957e38a6f851b9fead50effe0b329cda7ec62669739fe496b81"
+    },
+    {
+      "bytes": 2727,
+      "path": "SOURCE_REVIEW_NOTES.md",
+      "sha256": "486b1079fd82fa6bc0e6e044b11458e107dbf181718b590c844a386741e9de97"
+    },
+    {
+      "bytes": 751,
+      "path": "attr-support-sources.json",
+      "sha256": "6a016917c68b33c898c1740f4cf5d1531027133bcf590bd2e3b45048b6fed544"
+    },
+    {
+      "bytes": 4229,
+      "path": "build-sources.json",
+      "sha256": "92f459a7f833f3c41194b97b6b5748b97ee1d957700f1aead117ae553c32d029"
+    },
+    {
+      "bytes": 4918,
+      "path": "check_source.py",
+      "sha256": "1c4a5c627ba6f5b38b7151861c8dd28aa6e575670fdb39fcb35d749f8d6d7a93"
+    },
+    {
+      "bytes": 9979,
+      "path": "fixtures/ordinary_fd_acl.c",
+      "sha256": "5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936"
+    },
+    {
+      "bytes": 671,
+      "path": "fixtures/owned-fixture.mk",
+      "sha256": "a47139700d07f4dda166c52c63acc8f980dbd28790bcfc91e5280fb82bcfefa0"
+    },
+    {
+      "bytes": 1111,
+      "path": "packaging-sources.json",
+      "sha256": "8cbb153cf4f94eed71baff2f452d09aef9138433b87f29226444a78e905c68bd"
+    },
+    {
+      "bytes": 1181,
+      "path": "provenance.json",
+      "sha256": "0d538b749c3ab8e3363d4d9836b3b099a31554931621c699bc34df0398724d8a"
+    },
+    {
+      "bytes": 487,
+      "path": "source-check-result.json",
+      "sha256": "6f268f3129b0730a707117b90b192740995d457c1cf19f4a471c2f3eb85da597"
+    },
+    {
+      "bytes": 33382,
+      "path": "tree/configure.ac",
+      "sha256": "fae25c67d17dc894ed0c7c79246e05c2d0fed50858f237b8b77cdb468bfaf164"
+    },
+    {
+      "bytes": 1397,
+      "path": "tree/debian/control",
+      "sha256": "4f8710f88ef6b182cd4d636473211bc66b4a203635288d4798cb1e4d7c0aef37"
+    },
+    {
+      "bytes": 2417,
+      "path": "tree/debian/rules",
+      "sha256": "0ebad18a80f8723145247b592e2c4fad154dd6c7365eee7fa4d4d7d66639a53b"
+    },
+    {
+      "bytes": 4687,
+      "path": "tree/lib/qcopy-acl.c",
+      "sha256": "8344b734caee7b46c77d2efb6857026ebbcbd916272938c8425b026dd94a4c18"
+    },
+    {
+      "bytes": 131961,
+      "path": "tree/src/copy.c",
+      "sha256": "faa64be356af1c25e91644428fe694a7d496d73c846be8741b8fb702648ca84e"
+    },
+    {
+      "bytes": 4647,
+      "path": "tree/src/gold-acl/attr_copy_fd.c",
+      "sha256": "8b4be0cd12c5b7cd3fbec63f29fba6a2003af5e564192cf334b2ee8585c8f10f"
+    },
+    {
+      "bytes": 1569,
+      "path": "tree/src/gold-acl/error_context.h",
+      "sha256": "0e698be1f3635b6edb0eeb6206255dac43280d6c173dcd94cae53e4fb6407a59"
+    },
+    {
+      "bytes": 2881,
+      "path": "tree/src/gold-acl/getxattrat_compat.c",
+      "sha256": "7d1e9a5388430b274751b3e6489dceca3e4b70e2885b6540edf2dc3a96beb4eb"
+    },
+    {
+      "bytes": 2816,
+      "path": "tree/src/gold-acl/listxattrat_compat.c",
+      "sha256": "21738f66daba7186f4e9ddfc4bf2f4f9a831937086e1ff4f1371b57122bf5729"
+    },
+    {
+      "bytes": 250,
+      "path": "tree/src/gold-acl/nls.h",
+      "sha256": "22aeab5058fbeff680873f2e730c5ded2134978eb12f9af16daf5bd6f1d0f3cb"
+    },
+    {
+      "bytes": 8054,
+      "path": "tree/src/gold-acl/nontrivial.c",
+      "sha256": "19de2c8794617bb4115fa02876f40e2e6b079d392b7a5fef948aa23ce8da2ddf"
+    },
+    {
+      "bytes": 375,
+      "path": "tree/src/gold-acl/nontrivial.h",
+      "sha256": "746c4e8a45ec2b18f6eaf9c9e459fddce1ed80c5631b10ecbcc94c364204b372"
+    },
+    {
+      "bytes": 2374,
+      "path": "tree/src/gold-acl/proc-self-fd.c",
+      "sha256": "e80766c0d0f417edac866991c01c99482cd5072d8683b92cc303353ded6580fa"
+    },
+    {
+      "bytes": 1172,
+      "path": "tree/src/gold-acl/proc-self-fd.h",
+      "sha256": "c52644de461d8a4243bc3b3d516327e71173052d71c4eb2904d6abff46e17390"
+    },
+    {
+      "bytes": 2768,
+      "path": "tree/src/gold-acl/removexattrat_compat.c",
+      "sha256": "aa0c28d09ed98c782b8d7f74cea5693af033c23bfecfe07de421e6b8903bf7b6"
+    },
+    {
+      "bytes": 2945,
+      "path": "tree/src/gold-acl/setxattrat_compat.c",
+      "sha256": "5ee3d7d57b5eb66e960cc62c12e2d2e559e702eae26a75887269126bf41d452a"
+    },
+    {
+      "bytes": 274,
+      "path": "tree/src/gold-acl/visibility-hidden.h",
+      "sha256": "921ca56ea1df3b3289534580335c3e43ab79707a3ba119c661107e9d142dd948"
+    },
+    {
+      "bytes": 2203,
+      "path": "tree/src/gold-acl/xattrat.c",
+      "sha256": "46997b9b4a43fb2db53d73f52e865b6e9b31d3d7c464618380b8bcb07158e629"
+    },
+    {
+      "bytes": 575,
+      "path": "tree/src/gold-acl/xattrat.h",
+      "sha256": "6f7730ded7131ef1631e5761d097bf0b63574a3f24bcfbde32baf6a83a470762"
+    },
+    {
+      "bytes": 842,
+      "path": "tree/src/gold-acl/xattrat_compat.h",
+      "sha256": "1d5bfbaf3c58d73ecf326898b18157a49d57417782bf0eda602f36731411a771"
+    },
+    {
+      "bytes": 4689,
+      "path": "tree/src/gold-acl-fd.c",
+      "sha256": "8ab8712ac655a8e26cbffad2f72561f0eb487da482329f0daf945427e6aa13d3"
+    },
+    {
+      "bytes": 1164,
+      "path": "tree/src/gold-acl-fd.h",
+      "sha256": "fb01f024d7d5e2c2e4dc9f3c40023fb80f9968dbb09da7b85da75129118d09d5"
+    },
+    {
+      "bytes": 24058,
+      "path": "tree/src/local.mk",
+      "sha256": "829fe903b176d5fcaa1af552cc15aa869fe69a870dc85301d5f123eae0894074"
+    },
+    {
+      "bytes": 1569,
+      "path": "upstream/attr-2.6.0/include/error_context.h",
+      "sha256": "0e698be1f3635b6edb0eeb6206255dac43280d6c173dcd94cae53e4fb6407a59"
+    },
+    {
+      "bytes": 250,
+      "path": "upstream/attr-2.6.0/include/nls.h",
+      "sha256": "22aeab5058fbeff680873f2e730c5ded2134978eb12f9af16daf5bd6f1d0f3cb"
+    },
+    {
+      "bytes": 274,
+      "path": "upstream/attr-2.6.0/include/visibility-hidden.h",
+      "sha256": "921ca56ea1df3b3289534580335c3e43ab79707a3ba119c661107e9d142dd948"
+    },
+    {
+      "bytes": 643,
+      "path": "upstream/attr-2.6.0/include/xattrat.h",
+      "sha256": "cdbf766e7c159ae52c15132215fa546f8460b2768af8ccf08602710df28fcd17"
+    },
+    {
+      "bytes": 734,
+      "path": "upstream/attr-2.6.0/include/xattrat_compat.h",
+      "sha256": "3e9d3e539b72f4c5ca30debffbdbe969ef92b169906e80dedee570a723d4213d"
+    },
+    {
+      "bytes": 4356,
+      "path": "upstream/attr-2.6.0/libattr/attr_copy_fd.c",
+      "sha256": "15b0d3fab6e576faa0efe6ddf02fe837ec666b0d4b2bedee631fa5852c4e7a29"
+    },
+    {
+      "bytes": 2754,
+      "path": "upstream/attr-2.6.0/libmisc/getxattrat_compat.c",
+      "sha256": "86ea6426869b36fa98a70c8f2d1d7247dfea85fd91ed188595077c18c1ea51c3"
+    },
+    {
+      "bytes": 2680,
+      "path": "upstream/attr-2.6.0/libmisc/listxattrat_compat.c",
+      "sha256": "62f6dae0bca5a922bc6f90885d1161cddbea5c8f61a76dc94c2cbd6d534bcf7f"
+    },
+    {
+      "bytes": 2265,
+      "path": "upstream/attr-2.6.0/libmisc/proc-self-fd.c",
+      "sha256": "38873bd966f13d9075d7d88645a6ef0b699b7c2c6fa04479f3e51b3995c644a4"
+    },
+    {
+      "bytes": 1090,
+      "path": "upstream/attr-2.6.0/libmisc/proc-self-fd.h",
+      "sha256": "86212fdf6de07cf69f46ad3a74a952e01c592a084b8d667389569af42e952659"
+    },
+    {
+      "bytes": 2632,
+      "path": "upstream/attr-2.6.0/libmisc/removexattrat_compat.c",
+      "sha256": "3a586290e81c4a67300215e4c9aa956608ab6cbdb8a4122048c51656e7f4dcb3"
+    },
+    {
+      "bytes": 2809,
+      "path": "upstream/attr-2.6.0/libmisc/setxattrat_compat.c",
+      "sha256": "99faab3426bcd6baef23d311f3ade0dd5a2b19b37fff7878bfa2f72331ac7e48"
+    },
+    {
+      "bytes": 2167,
+      "path": "upstream/attr-2.6.0/libmisc/xattrat.c",
+      "sha256": "108da0e4822261eecd04645a97a043d3a7666533041994b1f6b56541d750bccc"
+    },
+    {
+      "bytes": 8052,
+      "path": "upstream/coreutils-9.7-3/Makefile.am",
+      "sha256": "2735f3e02d5722c8e410e840daf1f40473d92e1cdd1bd0b476774fba93cfb30d"
+    },
+    {
+      "bytes": 7879,
+      "path": "upstream/coreutils-9.7-3/bootstrap.conf",
+      "sha256": "2c5ce2741b09b521c7c7f53f0f8a6d1c29f6a06638f8462083b7665a48932834"
+    },
+    {
+      "bytes": 31532,
+      "path": "upstream/coreutils-9.7-3/configure.ac",
+      "sha256": "2855e2cea40c8ddc6d7347bea47c33778f727e590cec89ea806185a45b3cf38f"
+    },
+    {
+      "bytes": 1305,
+      "path": "upstream/coreutils-9.7-3/debian/control",
+      "sha256": "ddb7355a9b5b913c71bdfcaa57fc79d92200cdc8d9616e1ddcc040dfba4daf4b"
+    },
+    {
+      "bytes": 2199,
+      "path": "upstream/coreutils-9.7-3/debian/rules",
+      "sha256": "4a8872082d081107cf416afb1718993446416d25014c445a3019109590e22e26"
+    },
+    {
+      "bytes": 9427,
+      "path": "upstream/coreutils-9.7-3/lib/acl-internal.h",
+      "sha256": "91834ab70496849e1c958b93040612b299847880cd1123ddbabd240fcc03d1a7"
+    },
+    {
+      "bytes": 3739,
+      "path": "upstream/coreutils-9.7-3/lib/acl.h",
+      "sha256": "0c58a39cf091b50cbff5b0cb0f41774b032a64aa092413bac2a238099c6f2762"
+    },
+    {
+      "bytes": 2227,
+      "path": "upstream/coreutils-9.7-3/lib/copy-acl.c",
+      "sha256": "d95e863b729095cd2e578039ee4454bb5b1371303725fef84aac5441863b0980"
+    },
+    {
+      "bytes": 4319,
+      "path": "upstream/coreutils-9.7-3/lib/fchmodat.c",
+      "sha256": "5e961417f63f309624cbc7886b0f95ce3c754e147ec2706a4f76a27197c66831"
+    },
+    {
+      "bytes": 3667,
+      "path": "upstream/coreutils-9.7-3/lib/fchownat.c",
+      "sha256": "0f666790d5e9e8cdc50c440bc399d9eb59fcd232e5650435e936bad08324ab4d"
+    },
+    {
+      "bytes": 13742,
+      "path": "upstream/coreutils-9.7-3/lib/fcntl.in.h",
+      "sha256": "8ee62aa67e0724bee998bb813d248804278b61360eb56da26554c54cc73eaaee"
+    },
+    {
+      "bytes": 31426,
+      "path": "upstream/coreutils-9.7-3/lib/file-has-acl.c",
+      "sha256": "b541789737db3596421da852ebd61173c6251d50faf2c0d91ea1ac3310b6b46d"
+    },
+    {
+      "bytes": 8318,
+      "path": "upstream/coreutils-9.7-3/lib/get-permissions.c",
+      "sha256": "7a49b4c77a2503e538aeb65bb2f7cdff7ed9b5ae808b8cac165e786f8b469f0c"
+    },
+    {
+      "bytes": 271785,
+      "path": "upstream/coreutils-9.7-3/lib/gnulib.mk",
+      "sha256": "83910336f2fa1a14267602775b0b3f5af804cb4e1ef9e10c4fd08d7f2034b8a8"
+    },
+    {
+      "bytes": 2290,
+      "path": "upstream/coreutils-9.7-3/lib/ignore-value.h",
+      "sha256": "d8d4f2bde2155181dc05597145fcecda968702d621bc0cddd3fd9b188704e1a1"
+    },
+    {
+      "bytes": 133,
+      "path": "upstream/coreutils-9.7-3/lib/local.mk",
+      "sha256": "561f287fc7ab65a04d765c62351ed30ade6bd528bdeef383b0f69b4c830a5ffd"
+    },
+    {
+      "bytes": 4689,
+      "path": "upstream/coreutils-9.7-3/lib/qcopy-acl.c",
+      "sha256": "d674a8620ac2145399160f35b1d61f8c182fb541d049363b5fb52ed164c4282d"
+    },
+    {
+      "bytes": 1774,
+      "path": "upstream/coreutils-9.7-3/lib/qset-acl.c",
+      "sha256": "0ae57c2e5d203d4e93b0c1bec974003d72ea5b9d439df2814ef7f85f9a4a59d9"
+    },
+    {
+      "bytes": 1132,
+      "path": "upstream/coreutils-9.7-3/lib/save-cwd.h",
+      "sha256": "584108c4a35c4414f0ea2dbb4891f56076fd9a0d28e9efbf42cdac0cfdef3468"
+    },
+    {
+      "bytes": 1902,
+      "path": "upstream/coreutils-9.7-3/lib/set-acl.c",
+      "sha256": "4c73e7d6c8c8909fba1375df661d28859eba63071b74f9b1ff9639554b3961bc"
+    },
+    {
+      "bytes": 25797,
+      "path": "upstream/coreutils-9.7-3/lib/set-permissions.c",
+      "sha256": "5ce102236ec463ca0cdc2866c0dc5915cd6b4d9edf8b789e6ba83922b1f74b10"
+    },
+    {
+      "bytes": 6958,
+      "path": "upstream/coreutils-9.7-3/lib/xalloc.h",
+      "sha256": "bdb01f42e3718518ea2a925630bcd0c70773eba1f6b9078a7c70908c36af6eff"
+    },
+    {
+      "bytes": 3734,
+      "path": "upstream/coreutils-9.7-3/m4/fchmodat.m4",
+      "sha256": "4a720e8c9e68a3b761ceb55cf0498fca906c427cd03ca727b51f354a09d3e66b"
+    },
+    {
+      "bytes": 3972,
+      "path": "upstream/coreutils-9.7-3/m4/fchownat.m4",
+      "sha256": "f57cc00d1dcf125d2c698538d4ada9cd43f7ea19f0a7666d64652fc509081ed4"
+    },
+    {
+      "bytes": 126439,
+      "path": "upstream/coreutils-9.7-3/src/copy.c",
+      "sha256": "7280de5f2eae246a48c252c4491100d04ada66bcb6dd0368d267d2583fa4cb22"
+    },
+    {
+      "bytes": 23485,
+      "path": "upstream/coreutils-9.7-3/src/local.mk",
+      "sha256": "c74f63e855e356e37fd5669bf2adb001da578381670c0ef7357b3f43b5c56133"
+    },
+    {
+      "bytes": 22704,
+      "path": "upstream/coreutils-9.7-3/src/system.h",
+      "sha256": "0175a3b3eca57deb7d5aa28b2048070ff3e66e45c6376f9146da018fca590edd"
+    },
+    {
+      "bytes": 5111,
+      "path": "upstream/gnulib-fd0-commit.json",
+      "sha256": "eb0cb293be036bfbc8681dff0f6f34112bcbeb96072585f44eecbd266958fae7"
+    },
+    {
+      "bytes": 4118,
+      "path": "upstream-transforms.json",
+      "sha256": "05ff3e38def6d80606444051557c02bfcf5d58f677a54aacdcda64bf43317be5"
+    }
+  ],
+  "frozen": true,
+  "image_built": false,
+  "independent_source_read": "finite blockers corrected; final Root review pending",
+  "owned_C_fixture_performed": false,
+  "package_boundary": "privateCoreutils9.7-3 cp/mv/ginstall copy_sources",
+  "package_built": false,
+  "schema": "private_coreutils_descriptor_acl_source_packet/1",
+  "security_accepted": false,
+  "source_only": true,
+  "source_patch_targets": 23,
+  "source_static_provenance_check": "PASS",
+  "whole_image_acl_accepted": false
+}

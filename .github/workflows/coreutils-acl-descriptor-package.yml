@@ -1,0 +1,87 @@
+name: Coreutils descriptor ACL vendor package evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: Build only the reviewed Coreutils vendor package on a fresh hosted VM
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: coreutils-acl-descriptor-package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: inputs.execute == true && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Check out exactly the reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build and test only the reviewed Coreutils package
+        id: build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_acl_build/build_hosted.py \
+            --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
+            --root "$RUNNER_TEMP/coreutils-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 d1f8fc065ea83dc60e90a5a2f9b903a1f3e78034421a2d346bfad708557c9893 \
+            --execute-hosted-build \
+            --confirm BUILD-ONLY-HOSTED-COREUTILS-DESCRIPTOR-ACL-PACKAGE-20261027-01
+
+      - name: Retain only the complete Coreutils package and provenance outputs
+        if: success() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coreutils-acl-descriptor-package-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold1_amd64.deb
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold1_amd64.changes
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold1_amd64.buildinfo
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/acl_2.4.0-1~trixie+gold1_amd64.changes
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/acl_2.4.0-1~trixie+gold1_amd64.buildinfo
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/source-proof.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/sdk-proof.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/abi-contract.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/ordinary-compatibility.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/provenance.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/runtime-payload.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/caller-proof.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/vendor-suite.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/generated-build-proof.json
+
+      - name: Retain bounded public source, capacity and failure evidence
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coreutils-acl-descriptor-package-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/source-identity.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/result.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/hosted-failure.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.log
