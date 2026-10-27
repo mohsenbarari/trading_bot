@@ -1,0 +1,701 @@
+"""Transactional Market Fact outbox sender for the private network lane."""
+
+from __future__ import annotations
+
+from collections import deque
+from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import random
+import threading
+import time
+from typing import Callable, Mapping
+
+from pydantic import ValidationError
+
+from .private_market_transport import (
+    FACT_PATH,
+    MarketTransportError,
+    client_tls_context,
+    post_document,
+    read_key,
+)
+from .private_pipeline_contracts import (
+    MarketFactAckV1,
+    MarketFactBatchV1,
+    MarketFactDeliveryV1,
+    MarketFactV1,
+    batch_items_hash,
+    content_hash,
+)
+from .market_fact_recovery import (
+    FactRecoveryError, FactRecoveryRetryableError, replay_acknowledged_prefix,
+)
+
+
+SYNC_SCHEMA = "market_fact_sync/1.0"
+MAX_BATCH_ITEMS = 500  # Existing wire/ACK contract limit; never wait to fill it.
+MAX_BATCH_DOCUMENT_BYTES = 768 * 1024
+DEFAULT_FLUSH_SECONDS = 0.25
+MAX_BACKOFF_SECONDS = 30.0
+ALERT_AFTER_ATTEMPTS = 8
+OUTBOX_ENVELOPE_RETENTION = timedelta(days=7)
+OUTBOX_COMPACTION_INTERVAL_SECONDS = 300.0
+OUTBOX_COMPACTION_BATCH_SIZE = 10_000
+
+# The two coin-group streams are direct estimator inputs.  They retain their
+# own causal sequence, but must not wait behind a noisy reference stream that
+# simply has an older acknowledgement watermark.
+ESTIMATOR_PRIORITY_STREAMS = (
+    "market.fact.coin.group.1",
+    "market.fact.coin.group.2",
+)
+
+
+class MarketFactSyncError(RuntimeError):
+    """An operator-safe sync failure without envelope contents."""
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_text(value: datetime | None = None) -> str:
+    return (value or _utc_now()).isoformat().replace("+00:00", "Z")
+
+
+def _postgres_connection():
+    import psycopg2
+
+    password_path = os.environ.get(
+        "MARKET_POSTGRES_PASSWORD_FILE", "/run/secrets/market_postgres_password"
+    )
+    password = Path(password_path).read_text(encoding="utf-8").strip()
+    if not password:
+        raise MarketFactSyncError("market_fact_sync_postgres_secret_invalid")
+    try:
+        connection = psycopg2.connect(
+            host=os.environ.get("MARKET_POSTGRES_HOST", "market-database"),
+            port=int(os.environ.get("MARKET_POSTGRES_PORT", "5432")),
+            user=os.environ.get("MARKET_POSTGRES_USER", "market_data"),
+            password=password,
+            dbname=os.environ.get("MARKET_POSTGRES_DB", "market_archive"),
+            connect_timeout=5,
+            application_name="market-fact-sync-worker",
+        )
+    except psycopg2.Error as exc:
+        raise MarketFactSyncError("market_fact_sync_database_unavailable") from exc
+    return connection
+
+
+def _batch_id(
+    *, stream_id: str, first_sequence: int, last_sequence: int, items_hash: str
+) -> str:
+    return content_hash(
+        {
+            "contract": "market_fact_batch_identity/1.0",
+            "stream_id": stream_id,
+            "first_sequence": first_sequence,
+            "last_sequence": last_sequence,
+            "items_hash": items_hash,
+        }
+    )
+
+
+def load_next_batch(
+    connection,
+    *,
+    sender_instance_id: str,
+    max_items: int = MAX_BATCH_ITEMS,
+    max_document_bytes: int = MAX_BATCH_DOCUMENT_BYTES,
+) -> MarketFactBatchV1 | None:
+    """Load a contiguous stream head without starving independent streams.
+
+    Delivery order is strict within a stream.  Eligible coin-group heads are
+    chosen first because they are direct estimator inputs; the other streams
+    are scheduled by least-recent acknowledgement so one historical source
+    cannot starve another.
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            WITH stream_heads AS (
+                SELECT DISTINCT ON (o.stream_id)
+                       o.stream_id,o.delivery_sequence,o.created_at_utc,
+                       o.next_attempt_at_utc,o.dead_lettered_at_utc,
+                       c.updated_at_utc AS last_acknowledged_at_utc,
+                       COALESCE(c.highest_contiguous_sequence,0) AS checkpoint
+                FROM market_data.market_fact_outbox o
+                LEFT JOIN market_data.market_fact_delivery_checkpoints c
+                  ON c.stream_id=o.stream_id
+                WHERE o.acknowledged_at_utc IS NULL
+                ORDER BY o.stream_id,o.delivery_sequence
+            )
+            SELECT stream_id,checkpoint,delivery_sequence
+            FROM stream_heads
+            WHERE dead_lettered_at_utc IS NULL
+              AND next_attempt_at_utc <= clock_timestamp()
+              AND delivery_sequence=checkpoint+1
+            ORDER BY CASE WHEN stream_id IN ('market.fact.coin.group.1',
+                                             'market.fact.coin.group.2')
+                          THEN 0 ELSE 1 END,
+                     last_acknowledged_at_utc ASC NULLS FIRST,
+                     created_at_utc ASC,
+                     stream_id ASC
+            LIMIT 1
+            """
+        )
+        head = cursor.fetchone()
+        if head is None:
+            connection.rollback()
+            return None
+        stream_id = str(head[0])
+        checkpoint = int(head[1])
+        first_pending = int(head[2])
+        if first_pending != checkpoint + 1:
+            connection.rollback()
+            raise MarketFactSyncError("market_fact_sync_sender_sequence_gap")
+        cursor.execute(
+            """
+            SELECT delivery_sequence,envelope
+            FROM market_data.market_fact_outbox
+            WHERE stream_id=%s
+              AND delivery_sequence >= %s
+              AND acknowledged_at_utc IS NULL
+              AND dead_lettered_at_utc IS NULL
+              AND next_attempt_at_utc <= clock_timestamp()
+            ORDER BY delivery_sequence
+            LIMIT %s
+            """,
+            (stream_id, checkpoint + 1, min(max_items, MAX_BATCH_ITEMS)),
+        )
+        rows = cursor.fetchall()
+    connection.rollback()
+    deliveries: list[MarketFactDeliveryV1] = []
+    expected = checkpoint + 1
+    created_at = _utc_now()
+    item_bytes = 0
+    # Metadata has fixed-length hashes. Only decimal count/last-sequence grow.
+    # Previously every appended item rehashed and revalidated the entire prefix
+    # twice, making large catch-up batches quadratic in their item count.
+    header = {
+        "contract": "market_fact_batch/1.0", "batch_id": "0" * 64,
+        "schema_version": "1.0", "stream_id": stream_id,
+        "first_sequence": expected, "last_sequence": expected,
+        "created_at_utc": created_at.isoformat().replace("+00:00", "Z"),
+        "item_count": 1, "items_hash": "0" * 64,
+        "sender_instance_id": sender_instance_id, "items": [],
+    }
+    header_bytes = len(json.dumps(header, separators=(",", ":"),
+                                 ensure_ascii=False).encode("utf-8"))
+    initial_sequence_digits = len(str(expected))
+    for sequence_value, envelope in rows:
+        sequence = int(sequence_value)
+        if sequence != expected:
+            break
+        try:
+            fact = MarketFactV1.model_validate(envelope)
+        except ValidationError as exc:
+            raise MarketFactSyncError("market_fact_sync_outbox_contract_invalid") from exc
+        candidate = MarketFactDeliveryV1(
+            delivery_sequence=sequence,
+            fact=fact,
+        )
+        candidate_bytes = len(candidate.model_dump_json().encode("utf-8"))
+        count = len(deliveries) + 1
+        size = (header_bytes + item_bytes + candidate_bytes + count - 1
+                + len(str(sequence)) - initial_sequence_digits
+                + len(str(count)) - 1)
+        if size > max_document_bytes:
+            if not deliveries:
+                raise MarketFactSyncError("market_fact_sync_single_item_too_large")
+            break
+        deliveries.append(candidate)
+        item_bytes += candidate_bytes
+        expected += 1
+    if not deliveries:
+        return None
+    items_hash = batch_items_hash(deliveries)
+    batch = MarketFactBatchV1(
+        contract="market_fact_batch/1.0",
+        batch_id=_batch_id(
+            stream_id=stream_id,
+            first_sequence=deliveries[0].delivery_sequence,
+            last_sequence=deliveries[-1].delivery_sequence,
+            items_hash=items_hash,
+        ),
+        schema_version="1.0",
+        stream_id=stream_id,
+        first_sequence=deliveries[0].delivery_sequence,
+        last_sequence=deliveries[-1].delivery_sequence,
+        created_at_utc=created_at,
+        item_count=len(deliveries),
+        items_hash=items_hash,
+        sender_instance_id=sender_instance_id,
+        items=tuple(deliveries),
+    )
+    if len(batch.model_dump_json().encode("utf-8")) > max_document_bytes:
+        raise MarketFactSyncError("market_fact_sync_batch_size_invariant")
+    return batch
+
+
+def acknowledge_batch(connection, batch: MarketFactBatchV1, ack: MarketFactAckV1) -> None:
+    if (
+        ack.batch_id != batch.batch_id
+        or ack.stream_id != batch.stream_id
+        or ack.status != "ACK"
+        or ack.highest_contiguous_sequence < batch.last_sequence
+        or ack.rejected_count
+    ):
+        raise MarketFactSyncError("market_fact_sync_ack_invalid")
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE market_data.market_fact_outbox
+                SET acknowledged_at_utc=clock_timestamp(),last_reason_code=NULL
+                WHERE stream_id=%s
+                  AND delivery_sequence BETWEEN %s AND %s
+                  AND acknowledged_at_utc IS NULL
+                """,
+                (batch.stream_id, batch.first_sequence, batch.last_sequence),
+            )
+            if cursor.rowcount != batch.item_count:
+                raise MarketFactSyncError("market_fact_sync_ack_update_mismatch")
+            cursor.execute(
+                """
+                INSERT INTO market_data.market_fact_delivery_checkpoints(
+                    stream_id,highest_contiguous_sequence,last_batch_id,updated_at_utc
+                ) VALUES(%s,%s,decode(%s,'hex'),clock_timestamp())
+                ON CONFLICT(stream_id) DO UPDATE SET
+                    highest_contiguous_sequence=GREATEST(
+                        market_data.market_fact_delivery_checkpoints.highest_contiguous_sequence,
+                        excluded.highest_contiguous_sequence
+                    ),
+                    last_batch_id=excluded.last_batch_id,
+                    updated_at_utc=excluded.updated_at_utc
+                """,
+                (batch.stream_id, batch.last_sequence, batch.batch_id),
+            )
+
+
+def record_batch_failure(
+    connection,
+    batch: MarketFactBatchV1,
+    *,
+    reason_code: str,
+    permanent: bool,
+    random_value: float | None = None,
+) -> int:
+    reason = str(reason_code).strip().upper()[:96] or "DELIVERY_FAILED"
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT attempt_count
+                FROM market_data.market_fact_outbox
+                WHERE stream_id=%s AND delivery_sequence BETWEEN %s AND %s
+                ORDER BY attempt_count DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                (batch.stream_id, batch.first_sequence, batch.last_sequence),
+            )
+            row = cursor.fetchone()
+            attempt = int(row[0]) + 1 if row else 1
+            jitter = random.random() if random_value is None else random_value
+            delay = min(MAX_BACKOFF_SECONDS, 0.25 * (2 ** min(attempt - 1, 7)))
+            delay *= 0.8 + (0.4 * max(0.0, min(1.0, jitter)))
+            cursor.execute(
+                """
+                UPDATE market_data.market_fact_outbox
+                SET attempt_count=attempt_count+1,
+                    next_attempt_at_utc=clock_timestamp()+(%s * interval '1 second'),
+                    last_reason_code=%s,
+                    dead_lettered_at_utc=CASE WHEN %s THEN clock_timestamp()
+                                             ELSE dead_lettered_at_utc END
+                WHERE stream_id=%s AND delivery_sequence BETWEEN %s AND %s
+                  AND acknowledged_at_utc IS NULL
+                """,
+                (
+                    delay,
+                    reason,
+                    permanent,
+                    batch.stream_id,
+                    batch.first_sequence,
+                    batch.last_sequence,
+                ),
+            )
+            if permanent:
+                cursor.execute(
+                    """
+                    INSERT INTO market_data.market_fact_dead_letters(
+                        stream_id,delivery_sequence,fact_id,fact_revision,
+                        envelope_hash,reason_code,first_failed_at_utc,
+                        last_failed_at_utc,failure_count
+                    )
+                    SELECT stream_id,delivery_sequence,fact_id,fact_revision,
+                           envelope_hash,%s,clock_timestamp(),clock_timestamp(),1
+                    FROM market_data.market_fact_outbox
+                    WHERE stream_id=%s AND delivery_sequence BETWEEN %s AND %s
+                    ON CONFLICT(stream_id,delivery_sequence) DO UPDATE SET
+                        reason_code=excluded.reason_code,
+                        last_failed_at_utc=excluded.last_failed_at_utc,
+                        failure_count=market_data.market_fact_dead_letters.failure_count+1,
+                        repaired_at_utc=NULL
+                    """,
+                    (reason, batch.stream_id, batch.first_sequence, batch.last_sequence),
+                )
+    return attempt
+
+
+def outbox_metrics(connection) -> dict[str, object]:
+    """Measure outstanding work, never rescan permanent acknowledged history."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT COUNT(*),
+                   COALESCE(EXTRACT(EPOCH FROM (clock_timestamp()-MIN(created_at_utc))),0),
+                   COUNT(*) FILTER (WHERE attempt_count >= %s),
+                   COUNT(*) FILTER (WHERE dead_lettered_at_utc IS NOT NULL),
+                   COALESCE(SUM(attempt_count),0)
+            FROM market_data.market_fact_outbox
+            WHERE acknowledged_at_utc IS NULL
+            """,
+            (ALERT_AFTER_ATTEMPTS,),
+        )
+        row = cursor.fetchone()
+    connection.rollback()
+    return {
+        "queue_depth": int(row[0]),
+        "oldest_age_seconds": round(float(row[1]), 3),
+        "retry_alert_count": int(row[2]),
+        "dead_letter_count": int(row[3]),
+        "send_attempt_count": int(row[4]),
+        "send_attempt_count_scope": "UNACKNOWLEDGED",
+    }
+
+
+def compact_acknowledged_outbox(
+    connection,
+    *,
+    now: datetime | None = None,
+    retention: timedelta = OUTBOX_ENVELOPE_RETENTION,
+    batch_size: int = OUTBOX_COMPACTION_BATCH_SIZE,
+) -> int:
+    """Redact delivered envelopes only behind the durable stream checkpoint."""
+
+    if retention.total_seconds() < 86_400 or not 1 <= batch_size <= 100_000:
+        raise MarketFactSyncError("market_fact_outbox_compaction_policy_invalid")
+    cutoff = (now or _utc_now()) - retention
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH eligible AS (
+                    SELECT o.ctid
+                    FROM market_data.market_fact_outbox AS o
+                    JOIN market_data.market_fact_delivery_checkpoints AS c
+                      ON c.stream_id=o.stream_id
+                    LEFT JOIN market_data.market_fact_dead_letters AS d
+                      ON d.stream_id=o.stream_id
+                     AND d.delivery_sequence=o.delivery_sequence
+                     AND d.repaired_at_utc IS NULL
+                    WHERE o.acknowledged_at_utc IS NOT NULL
+                      AND o.acknowledged_at_utc < %s
+                      AND o.delivery_sequence <= c.highest_contiguous_sequence
+                      AND o.envelope_compacted_at_utc IS NULL
+                      AND d.delivery_sequence IS NULL
+                    ORDER BY o.acknowledged_at_utc,o.stream_id,o.delivery_sequence
+                    LIMIT %s
+                )
+                UPDATE market_data.market_fact_outbox AS o
+                SET envelope='{}'::jsonb,
+                    envelope_compacted_at_utc=clock_timestamp()
+                FROM eligible
+                WHERE o.ctid=eligible.ctid
+                """,
+                (cutoff, batch_size),
+            )
+            return max(0, int(cursor.rowcount or 0))
+
+
+def repair_dead_letter(connection, *, stream_id: str, delivery_sequence: int) -> None:
+    """Re-arm exactly the blocked stream head without deleting audit evidence."""
+
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT d.repaired_at_utc,
+                       COALESCE(c.highest_contiguous_sequence,0)
+                FROM market_data.market_fact_dead_letters d
+                LEFT JOIN market_data.market_fact_delivery_checkpoints c
+                  ON c.stream_id=d.stream_id
+                WHERE d.stream_id=%s AND d.delivery_sequence=%s
+                FOR UPDATE OF d
+                """,
+                (stream_id, delivery_sequence),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise MarketFactSyncError("market_fact_dead_letter_not_found")
+            if row[0] is not None:
+                raise MarketFactSyncError("market_fact_dead_letter_already_repaired")
+            if delivery_sequence != int(row[1]) + 1:
+                raise MarketFactSyncError("market_fact_dead_letter_not_stream_head")
+            cursor.execute(
+                """
+                UPDATE market_data.market_fact_outbox
+                SET dead_lettered_at_utc=NULL,next_attempt_at_utc=clock_timestamp(),
+                    attempt_count=0,last_reason_code='OPERATOR_REPAIRED'
+                WHERE stream_id=%s AND delivery_sequence=%s
+                  AND acknowledged_at_utc IS NULL
+                """,
+                (stream_id, delivery_sequence),
+            )
+            if cursor.rowcount != 1:
+                raise MarketFactSyncError("market_fact_dead_letter_outbox_missing")
+            cursor.execute(
+                """
+                UPDATE market_data.market_fact_dead_letters
+                SET repaired_at_utc=clock_timestamp()
+                WHERE stream_id=%s AND delivery_sequence=%s
+                """,
+                (stream_id, delivery_sequence),
+            )
+
+
+def run_sync_cycle(
+    connection,
+    *,
+    sender_instance_id: str,
+    send: Callable[[Mapping[str, object]], tuple[int, Mapping[str, object]]],
+) -> dict[str, object]:
+    batch = load_next_batch(connection, sender_instance_id=sender_instance_id)
+    if batch is None:
+        return {"sent": 0, "acknowledged": 0, "duplicates": 0, "rejected": 0}
+    started = time.perf_counter()
+    try:
+        status, response = send(batch.model_dump(mode="json"))
+    except MarketTransportError:
+        attempt = record_batch_failure(
+            connection, batch, reason_code="TRANSPORT_UNAVAILABLE", permanent=False
+        )
+        return {
+            "sent": batch.item_count,
+            "acknowledged": 0,
+            "duplicates": 0,
+            "rejected": 0,
+            "attempt": attempt,
+            "ack_latency_ms": None,
+        }
+    try:
+        ack = MarketFactAckV1.model_validate(response)
+    except ValidationError:
+        attempt = record_batch_failure(
+            connection, batch, reason_code="ACK_CONTRACT_INVALID", permanent=False
+        )
+        return {
+            "sent": batch.item_count,
+            "acknowledged": 0,
+            "duplicates": 0,
+            "rejected": 0,
+            "attempt": attempt,
+            "ack_latency_ms": None,
+        }
+    if status == 200 and ack.status == "ACK":
+        acknowledge_batch(connection, batch, ack)
+        return {
+            "sent": batch.item_count,
+            "acknowledged": ack.accepted_count + ack.duplicate_count,
+            "duplicates": ack.duplicate_count,
+            "rejected": 0,
+            "ack_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+        }
+    # Restoring an older receiver snapshot can legitimately leave its prefix
+    # behind already ACKed sender rows. Redeliver the original retained rows;
+    # never skip a sequence, reset a checkpoint, or regenerate a fact revision.
+    # Bind the refusal to this exact request before trusting its watermark.
+    if (
+        status == 409 and ack.status == "REJECTED"
+        and ack.batch_id == batch.batch_id and ack.stream_id == batch.stream_id
+        and ack.received_count == batch.item_count
+        and ack.rejected_count == batch.item_count
+        and ack.rejection_reason_codes == ("SEQUENCE_GAP",)
+        and ack.highest_contiguous_sequence < batch.first_sequence - 1
+    ):
+        try:
+            recovery = replay_acknowledged_prefix(
+                connection, stream_id=batch.stream_id,
+                receiver_sequence=ack.highest_contiguous_sequence,
+                sender_sequence=batch.first_sequence - 1,
+                sender_instance_id=sender_instance_id, send=send,
+            )
+        except MarketTransportError:
+            reason, permanent = "REPLAY_TRANSPORT_UNAVAILABLE", False
+        except FactRecoveryRetryableError as exc:
+            reason, permanent = str(exc), False
+        except (FactRecoveryError, ValidationError) as exc:
+            reason = str(exc) if isinstance(exc, FactRecoveryError) else "REPLAY_CONTRACT_INVALID"
+            permanent = True
+        else:
+            return {
+                "sent": batch.item_count + int(recovery["replayed"]),
+                "acknowledged": 0, "duplicates": recovery["duplicates"], "rejected": 0,
+                "replayed": recovery["replayed"],
+                "recovery_receiver_sequence": recovery["receiver_sequence"],
+                "ack_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
+        attempt = record_batch_failure(connection, batch, reason_code=reason, permanent=permanent)
+        return {"sent": batch.item_count, "acknowledged": 0, "duplicates": 0,
+                "rejected": batch.item_count if permanent else 0, "attempt": attempt,
+                "ack_latency_ms": None}
+    attempt = record_batch_failure(
+        connection,
+        batch,
+        reason_code=(
+            ack.rejection_reason_codes[0]
+            if ack.rejection_reason_codes
+            else "RECEIVER_REJECTED"
+        ),
+        permanent=status in {400, 409, 413, 422},
+    )
+    return {
+        "sent": batch.item_count,
+        "acknowledged": 0,
+        "duplicates": 0,
+        "rejected": ack.rejected_count,
+        "attempt": attempt,
+        "ack_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+    }
+
+
+def run_market_fact_sync_service(
+    *,
+    role: str,
+    mode: str,
+    release_sha: str,
+    state_directory: Path,
+    stop: threading.Event,
+) -> int:
+    if role != "market-fact-sync-worker" or mode not in {"fixture", "live"}:
+        raise MarketFactSyncError("market_fact_sync_role_or_mode_invalid")
+    host = os.environ.get("MARKET_FACT_RECEIVER_HOST", "").strip()
+    if mode == "live" and not host:
+        raise MarketFactSyncError("market_fact_sync_receiver_host_required")
+    port = int(os.environ.get("MARKET_FACT_RECEIVER_PORT", "9443"))
+    key_id = os.environ.get("MARKET_HMAC_ACTIVE_KEY_ID", "active-v1").strip()
+    sender_instance_id = os.environ.get(
+        "MARKET_FACT_SENDER_INSTANCE_ID", "web-market-sync-1"
+    ).strip()
+    if mode == "live":
+        hmac_key = read_key(
+            os.environ.get(
+                "MARKET_HMAC_ACTIVE_PATH", "/run/secrets/market_hmac_active"
+            )
+        )
+        tls = client_tls_context(
+            ca=os.environ.get(
+                "MARKET_TRANSPORT_CA_PATH", "/run/secrets/market_transport_ca"
+            ),
+            cert=os.environ.get(
+                "MARKET_TRANSPORT_CERT_PATH", "/run/secrets/market_web_transport_cert"
+            ),
+            key=os.environ.get(
+                "MARKET_TRANSPORT_KEY_PATH", "/run/secrets/market_web_transport_key"
+            ),
+        )
+    else:
+        hmac_key = b"fixture-market-hmac-key-material!!"
+        tls = None
+    state_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    health_path = state_directory / "health.json"
+    started_at = _utc_text()
+    connection = _postgres_connection()
+    aggregate = {"sent": 0, "acknowledged": 0, "duplicates": 0, "rejected": 0, "replayed": 0}
+    ack_latencies: deque[float] = deque(maxlen=512)
+    last_compaction = 0.0
+    compacted_envelopes = 0
+
+    def sender(document: Mapping[str, object]) -> tuple[int, Mapping[str, object]]:
+        if mode != "live" or tls is None:
+            raise MarketTransportError("market_fact_sync_fixture_has_no_peer")
+        return post_document(
+            host=host,
+            port=port,
+            path=FACT_PATH,
+            document=document,
+            key_id=key_id,
+            hmac_key=hmac_key,
+            tls_context=tls,
+            timeout_seconds=3.0,
+        )
+
+    from .private_pipeline_foundation import atomic_json_write
+
+    try:
+        while not stop.is_set():
+            cycle = run_sync_cycle(
+                connection,
+                sender_instance_id=sender_instance_id,
+                send=sender,
+            )
+            for field in aggregate:
+                aggregate[field] += int(cycle.get(field, 0) or 0)
+            if cycle.get("ack_latency_ms") is not None:
+                ack_latencies.append(float(cycle["ack_latency_ms"]))
+            monotonic_now = time.monotonic()
+            if monotonic_now - last_compaction >= OUTBOX_COMPACTION_INTERVAL_SECONDS:
+                compacted_envelopes += compact_acknowledged_outbox(connection)
+                last_compaction = monotonic_now
+            metrics = outbox_metrics(connection)
+            ordered_latencies = sorted(ack_latencies)
+
+            def latency_percentile(ratio: float) -> float | None:
+                if not ordered_latencies:
+                    return None
+                index = min(
+                    len(ordered_latencies) - 1,
+                    max(0, int(len(ordered_latencies) * ratio) - 1),
+                )
+                return round(ordered_latencies[index], 3)
+
+            atomic_json_write(
+                health_path,
+                {
+                    "schema": SYNC_SCHEMA,
+                    "role": role,
+                    "mode": mode,
+                    "release_sha": release_sha,
+                    "pid": os.getpid(),
+                    "started_at_utc": started_at,
+                    "updated_at_utc": _utc_text(),
+                    "status": (
+                        f"{mode}-degraded"
+                        if int(metrics["dead_letter_count"]) > 0
+                        or (int(metrics["queue_depth"]) > 0 and float(metrics["oldest_age_seconds"]) > 120)
+                        else f"{mode}-ready"
+                    ),
+                    "durable_write": True,
+                    "private_transport_only": True,
+                    "last_ack_latency_ms": (
+                        round(ack_latencies[-1], 3) if ack_latencies else None
+                    ),
+                    "ack_latency_p95_ms": latency_percentile(0.95),
+                    "ack_latency_p99_ms": latency_percentile(0.99),
+                    "ack_latency_sample_count": len(ack_latencies),
+                    "compacted_outbox_envelopes": compacted_envelopes,
+                    **aggregate,
+                    **metrics,
+                },
+            )
+            # A blocked/backing-off stream must not spin at 100% CPU merely
+            # because it has pending rows but nothing eligible to send.
+            if int(cycle.get("sent", 0)) == 0:
+                stop.wait(DEFAULT_FLUSH_SECONDS)
+    finally:
+        connection.close()
+    return 0
