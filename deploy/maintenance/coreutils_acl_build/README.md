@@ -481,3 +481,34 @@ flags/duplicate assignments and inspect real owned configured Makefile bytes.
 The unchanged27 vendor-parser tests were not repeated. No compiler/autoreconf/
 sudo/Docker/Git/CI/SSH/live operation was executed by author. Root must review,
 run the genuine host tests and dispatch a NEW full build; no old retry/resume.
+
+## Source11: use the extracted-source ownership contract for m4 pins
+
+Actual CI10 run40508250677 refused BEFORE Coreutils configure at the new
+m4/acl.m4 original check: digest() correctly requires a Root-owned public input,
+whereas dpkg-source extraction and the patch child genuinely own files10001.
+That was an introduced helper misuse; the authenticated failure is preserved.
+
+11 changes ONLY the two new m4 production read/check calls to observed(), which
+uses existing owned_read(): admitted0/10001 UID/GID, WORK/canonical scope, regular
+nlink1, non-writable mode, expected byte bound and original full9/read/close/name
+guards. Each caller still compares the exact declared bytes+SHA before/after
+patching and emits a specific refusal on mismatch. Root-only digest() is entirely
+unchanged. No source owner, C code, patch, default, parser, native workspace,
+library dependency or genuine vendor gate changes.
+
+The AST regression inspects the ACTUAL build_vendor function: both m4 checks
+must use observed() with their expected byte bounds; no Root digest may read
+anything directly derived from its extracted-source path. Tests execute those
+actual check statements, not replacement copies, on owned files. WrongSHA,
+group-write permission, symlink and genuine close-time timestamp mutation must
+still refuse. A separate mandatory Root HOST case genuinely fchowns the m4
+fixture10001:10001, validates both before/after checks, then genuinely assigns
+10002:10002 and proves refusal. No UID/stat/flag result is masked.
+
+Author's managed environment cannot perform the two genuine credential/owner
+transitions. Both are explicitly omitted from the selected author run, not
+PASS/SKIP and not attempted again.57 other owned Python tests passed; Root must
+run all59 actual HOST tests before fresh CI. The unchanged27 parser tests were
+not repeated. No compiler, autotools, sudo, Docker, Git, CI, SSH or live operation
+was executed by author; full Coreutils+gnulib success remains pending.

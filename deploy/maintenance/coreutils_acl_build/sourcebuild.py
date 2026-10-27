@@ -470,9 +470,9 @@ def build_vendor(kind):
  if kind=='coreutils':
   manifest=json.loads(bytes_at(RECIPE/'source-manifest.json',SOURCE_MANIFEST_PIN));source_contract(source,manifest,'before')
   original_bindings=original_source_bindings(source);test_sources=test_source_inventory(source);configure_before=observed(source/'configure')
-  digest(source/'m4/acl.m4',LINK_M4_BEFORE)
+  require(observed(source/'m4/acl.m4',maximum=LINK_M4_BEFORE[0])=={'bytes':LINK_M4_BEFORE[0],'sha256':LINK_M4_BEFORE[1]},'qcopy_m4_original_pin')
   for patch in (PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
-  digest(source/'m4/acl.m4',LINK_M4_AFTER)
+  require(observed(source/'m4/acl.m4',maximum=LINK_M4_AFTER[0])=={'bytes':LINK_M4_AFTER[0],'sha256':LINK_M4_AFTER[1]},'qcopy_m4_declared_patch_pin')
   source_contract(source,manifest,'after')
   regeneration_before=regeneration_inputs(source)
   require(all(regeneration_before[n]==pin for n,pin in manifest['regeneration_infrastructure']['original_m4_pins'].items()),'original_imported_m4_pin')
