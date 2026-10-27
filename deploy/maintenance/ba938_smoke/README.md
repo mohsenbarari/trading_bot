@@ -1,6 +1,6 @@
 # Hosted ba938 public inventory and unchanged App smoke candidate
 
-This immutable source-only04 cohort targets exactly ordinary App image
+This immutable source-only06 cohort targets exactly ordinary App image
 `sha256:ba938a7dd1ab1a0d9ebacdae768861a45276ba7caacead40ed319fa8e1bef218`
 from genuine CI40368532303. It preserves source cohort01 and the historical
 19d/665 controls. This author has not executed Git, GitHub, Docker, image LOAD,
@@ -187,3 +187,50 @@ retained public log. The original32 assertions, genuine19 native expectation,
 image/graph/hosted/container admissions, first-use keeper/finalizers and all
 security/full-matrix false flags remain unchanged. Genuine fresh hosted04
 execution and independent Root review remain required.
+
+## Immutable05 fixed public Docker command diagnostics
+
+Actual04 run40407754006 also failed before the inventory START output existed,
+with completed owned cleanup. The old evidence cannot distinguish its CREATE
+from its initial inspect. The04 format fixes remain proven by public metadata,
+and neither failed workflow becomes a passed probe or a retry authorization.
+
+This05 adds one dedicated helper for exactly five fixed inventory stages:
+create, preinspect, start, exit and postinspect. It preserves stdout bytes
+without mixing stderr into the CID or JSON protocol, bounds both streams before
+accumulation, and retains a separate public JSON diagnostic per command. Only
+the fixed public Docker arguments and clean Docker environment reach the child.
+No token, private environment, exception argument or arbitrary command is used.
+The returned client exit is actual; nonzero, unknown, timeout, overflow, source
+drift or physical-close failure still refuses. START stdout is also retained
+on failure. The created CID receives an immediate public unstarted receipt
+before its initial inspection. Failure reports include a finite inventory stage.
+
+The helper reuses C's reviewed owned-unreaped cleanup and keeps C4156 unchanged.
+Both pipe closes, diagnostic creation and source/output checks precede a
+successful return. Six new tests run actual owned inert children for stable
+stdout with stderr warnings, nonzero exits, independent stream bounds, timeout
+with real WNOWAIT ownership proof, denied unknown stages and late pipe-close
+mutation of a creation-bound report. No image or Docker command executes in
+these tests. Source04, its failure artifact, all32 assertions, native19 and
+every admission/cleanup/security boundary remain preserved. Root must review
+this proposal before any fresh diagnostic CI request.
+
+## Immutable06 proven optional Tmpfs lookup correction
+
+Root reproduced the exact05 public inspect template against existing container
+metadata using only a read-only public field selection. The real CLI returned1
+because HostConfig omitted the optional Tmpfs key. Root then changed only that
+selector to `{{json (index .HostConfig "Tmpfs")}}`; the same public observation
+returned0 and parsed Tmpfs as null. Neither action changed production or read
+Env/private configuration. Both Root receipts and the failed04 run are retained.
+
+This06 includes that single proven selector correction and the unchanged05
+bounded diagnostics. Missing/empty Tmpfs remains the existing None/{} contract;
+a nonempty tmpfs map still refuses. Every other public selector and all actual
+container/image/source/resource checks remain unchanged. The added pure test
+asserts the exact optional selector plus None, empty and nonempty DTO cases.
+Root's actual Docker proof is separate from these source/inert tests. No local
+Go engine, Docker command, image or workflow is executed by this source QA.
+The frozen05 is preserved, and no05 workflow request was issued. Root review
+and a genuine fresh06 workflow are still required for any hosted smoke proof.
