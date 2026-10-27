@@ -4,8 +4,8 @@
   "execution_requires_reviewed_hosted_workflow": true,
   "files": {
     "README.md": {
-      "bytes": 12236,
-      "sha256": "6ad3261aada534b2edfabdef3b04aa55351a9cbdd1af2a8657b22d122015f18f"
+      "bytes": 15288,
+      "sha256": "56561edcfecc54a52f6e20917d3a4d9ad3993b603bb998932df59119b0258acc"
     },
     "admit_security_component_image_reuse.py": {
       "bytes": 27518,
@@ -24,12 +24,12 @@
       "sha256": "4156ad042885bc7104c5a9ce537193adf2211ade8447e77676ad29d520e7633d"
     },
     "control.genuine-metadata.json": {
-      "bytes": 5371,
-      "sha256": "2e8dbf39d7d32ea26984722bc8733cc259caab5fd9445491cd6bc082020a6ee4"
+      "bytes": 5935,
+      "sha256": "e3d387830bc061b4771c515d51581eb32839619215d6e6f8097825f5a9098ad5"
     },
     "controller.py": {
-      "bytes": 45839,
-      "sha256": "b7172d9b32e12a83a31f802f436b273104cedaef233beb1826209e82f11f4544"
+      "bytes": 50163,
+      "sha256": "2b0b2232e71bc5b219d1859cdc7a3e24d8bdaffef5f9116346a845cb27c825d6"
     },
     "datastore_candidate_contract.py": {
       "bytes": 38382,
@@ -73,11 +73,15 @@
     },
     "seal_and_run.py": {
       "bytes": 12528,
-      "sha256": "2c22d3c47cca11f9415037671b9cb1a9f4d53d493e06578d675dc83bbbca94c4"
+      "sha256": "976a00609a3ed7f9faae44b20a418cccb82d900bb3b30e13a5d54f0d58d45adc"
     },
     "test_integration.py": {
-      "bytes": 14445,
-      "sha256": "d5211cab1bf7d1725815dd097396a0e0573200bb860e69dda807014a2aee2fab"
+      "bytes": 14929,
+      "sha256": "07879b3b22e28f51a639a11c4eec739fda2f1ca50cbafcbf3fe888dc59101baa"
+    },
+    "test_inventory_cli.py": {
+      "bytes": 6443,
+      "sha256": "5e1777a37832fe38d4d1dcb717932e321fcbf0f14956981a73b9daad66a0fd9a"
     },
     "test_inventory_format.py": {
       "bytes": 6024,
@@ -109,26 +113,36 @@
     },
     "workflow.yml": {
       "bytes": 2039,
-      "sha256": "f8cf7c1d3f83491f4bb4de593784b97f6c4d198dcea84892a920ff8756643f52"
+      "sha256": "82b7caa354f87cd734a8040551278e6e962ca3f8e9d57aa553f64343ebac16a0"
     }
   },
   "first_use_archives_and_creation_time_proofs_retained": true,
+  "fixed_inventory_cli_stages": [
+    "create",
+    "preinspect",
+    "start",
+    "exit",
+    "postinspect"
+  ],
+  "fresh_hosted06_proof_still_required": true,
   "full_matrix_accepted": false,
+  "inventory_cli_streams_separately_bounded": true,
   "mutable_progress_exclusion": "exact root/reports/phase.json and .phase-PID-monotonic.json only",
   "new_workflow_execution_performed": false,
+  "optional_tmpfs_lookup_proven": true,
   "original32_runtime_assertions_unchanged": true,
-  "owned_fixture_count": 33,
-  "owned_fixture_passes": 32,
+  "owned_fixture_count": 40,
+  "owned_fixture_passes": 39,
   "owned_fixture_skips": [
     {
       "case": "actual_wrong_gid_refuses_before_any_input_payload_read",
       "reason": "alternate genuine GID unmapped in author namespace; no identity masking"
     }
   ],
-  "previous_failed_hosted_run_id": 40404202231,
-  "previous_source_cohort_issued": true,
-  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-03",
-  "previous_source_manifest_sha256": "396be0f4dce0aab94d8258d3bbd4ea3654cd6dee4793353b4cce56cd9cff1e32",
+  "previous_failed_hosted_run_id": 40407754006,
+  "previous_source_cohort_issued": false,
+  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-05",
+  "previous_source_manifest_sha256": "a30516a72933c2a101ab73cb8f3eb7fd8031f58b65b238a9a908837b1378d2d2",
   "public_inventory_refusal_output_retained": true,
   "public_metadata_fixtures": {
     "dpkg_status": {
@@ -150,7 +164,20 @@
     "explicit_source_epoch_only": true,
     "malformed_duplicate_redundant_formats_refuse": true
   },
-  "schema": "ba938_hosted_smoke_source_candidate/4",
+  "root_public_template_receipts": {
+    "fixed": {
+      "actual_exit": 0,
+      "bytes": 184,
+      "sha256": "3f58827edbe7534f1445a38e18b46b4884f9d13a104f7ea2fdfcae3eaeba04a9",
+      "tmpfs_value": null
+    },
+    "original": {
+      "actual_exit": 1,
+      "bytes": 106,
+      "sha256": "14ce06e8e3c6722dc2861d532df4c93deac640d0ba5dad13f965eb0824e2d325"
+    }
+  },
+  "schema": "ba938_hosted_smoke_source_candidate/6",
   "security_accepted": false,
   "source_only": true,
   "whole_image_acl_closed": false

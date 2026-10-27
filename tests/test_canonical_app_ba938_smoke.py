@@ -46,15 +46,17 @@ class IntegrationTests(unittest.TestCase):
     def test_original_frozen_source_cohort_and_runtime32_functions_are_unchanged(self):
         actual=function_fingerprints('controller.py')
         self.assertEqual({name:actual[name]for name in BASE_CONTROLLER_FUNCTIONS},BASE_CONTROLLER_FUNCTIONS)
-        self.assertEqual(set(actual),set(BASE_CONTROLLER_NAMES)|{'inventory_document','inventory_args','inventory_container','whole_image_inventory'})
+        self.assertEqual(set(actual),set(BASE_CONTROLLER_NAMES)|{'inventory_document','inventory_args','inventory_container','whole_image_inventory','inventory_inspect_template','inventory_cli'})
+        self.assertEqual(actual['inventory_args'],'d3fb65741e52a95a2064755b169cf09bd5701ec473e36749cb5606af26f8010f')
+        self.assertEqual(actual['inventory_container'],'dc1e07511f092302a4bb9fadcb75d278bd76843f20f1f7f125b419c800298e6a')
         tree=ast.parse((HERE/'controller.py').read_bytes())
-        inventory=deepcopy(next(node for node in tree.body if isinstance(node,ast.FunctionDef)and node.name=='whole_image_inventory'));added=[]
-        for node in ast.walk(inventory):
-            if isinstance(node,ast.Call):
-                added.extend(ast.dump(keyword.value)for keyword in node.keywords if keyword.arg=='public_log')
-                node.keywords=[keyword for keyword in node.keywords if keyword.arg!='public_log']
-        self.assertEqual(added,[ast.dump(ast.parse("ctx.root/'reports/fresh-whole-image-acl-output.json'",mode='eval').body)])
-        self.assertEqual(sha256(ast.dump(inventory).encode()).hexdigest(),'7472b844daa9128ea36c816b4168ec2b7350ecb982d386441571fd2ad0ccb128')
+        factory=next(node for node in tree.body if isinstance(node,ast.FunctionDef)and node.name=='inventory_inspect_template')
+        expression=deepcopy(factory.body[0].value);changes=[]
+        for node in ast.walk(expression):
+            if isinstance(node,ast.Constant)and type(node.value)is str and '{{json (index .HostConfig "Tmpfs")}}'in node.value:
+                changes.append(True);node.value=node.value.replace('{{json (index .HostConfig "Tmpfs")}}','{{json .HostConfig.Tmpfs}}')
+        self.assertEqual(changes,[True])
+        self.assertEqual(sha256(ast.dump(expression).encode()).hexdigest(),'1f3d4e5e40b7d1ac275d317d29593ae7948414e42876b17a29c49397880674cc')
         self.assertEqual(sum(value[1]for value in O.SELECTORS.values()),24)
         self.assertEqual(C.CONTROL['image_id'],'sha256:ba938a7dd1ab1a0d9ebacdae768861a45276ba7caacead40ed319fa8e1bef218')
         C.validate_control(C.CONTROL)

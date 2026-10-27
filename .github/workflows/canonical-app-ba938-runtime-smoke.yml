@@ -37,7 +37,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -S -B deploy/maintenance/ba938_smoke/seal_and_run.py \
             --root "$RUNNER_TEMP/security-app-ci-smoke-ba938-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 2c22d3c47cca11f9415037671b9cb1a9f4d53d493e06578d675dc83bbbca94c4 \
+            --source-sha256 976a00609a3ed7f9faae44b20a418cccb82d900bb3b30e13a5d54f0d58d45adc \
             --execute-reviewed-ba938-proof
 
       - name: Preserve raw evidence, actual public observations and cleanup

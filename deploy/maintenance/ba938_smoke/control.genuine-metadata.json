@@ -75,17 +75,39 @@
   "controller_commit": "actual_future_GITHUB_SHA_must_differ_from_image_release_identity",
   "earlier_source_cohort_issued": true,
   "first_use_archives_and_creation_time_proofs_retained": true,
+  "fixed_inventory_cli_stages": [
+    "create",
+    "preinspect",
+    "start",
+    "exit",
+    "postinspect"
+  ],
   "full_matrix_accepted": false,
   "image_acceptance": false,
+  "immediate_predecessor_issued": false,
+  "optional_tmpfs_lookup_proven": true,
   "original_source19_expectation": {
     "bytes": 34994,
     "sha256": "2cf0e5410381cd0e0303611e72949daed67e4fd12d7913de2912775f53df51cb"
   },
-  "previous_failed_hosted_run_id": 40404202231,
+  "previous_failed_hosted_run_id": 40407754006,
   "previous_inventory_sha256": "1ec1e29c2a673eb14f1e8734014ea49a2b04a78ffce928b60aa447b5bd8c5469",
-  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-03",
+  "previous_source_cohort_preserved": "security-canonical-app-smoke-ba938-20261026-05",
+  "root_public_template_receipts": {
+    "fixed": {
+      "actual_exit": 0,
+      "bytes": 184,
+      "sha256": "3f58827edbe7534f1445a38e18b46b4884f9d13a104f7ea2fdfcae3eaeba04a9",
+      "tmpfs_value": null
+    },
+    "original": {
+      "actual_exit": 1,
+      "bytes": 106,
+      "sha256": "14ce06e8e3c6722dc2861d532df4c93deac640d0ba5dad13f965eb0824e2d325"
+    }
+  },
   "runtime_proof_performed": false,
-  "schema": "ba938_hosted_smoke_candidate_control/4",
+  "schema": "ba938_hosted_smoke_candidate_control/6",
   "security_accepted": false,
   "whole_image_inventory_sha256": "8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc"
 }

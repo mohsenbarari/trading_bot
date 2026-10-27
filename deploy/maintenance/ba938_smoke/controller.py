@@ -10,6 +10,8 @@ from types import ModuleType
 import argparse
 import json
 import math
+import selectors
+import subprocess
 import os
 import re
 import stat
@@ -35,7 +37,8 @@ PHASE = 'source_admission'
 CODES = frozenset(('intake_unarmed','payload_expectation_missing','actual_archive_observation_missing','intake_shape','evidence_shape','evidence_identity','evidence_signature',
     'evidence_reports','export_shape','export_identity','export_binding','archive_observation','canonical_labels',
     'capsule_binding','presence_identity','presence_mounts','presence_exit','smoke_receipt','source_admission','hosted_ci_only',
-    'owned_cleanup_unproven','cleanup_report_unproven','outer_keeper_required','inventory_receipt','inventory_input','inventory_bounds','unexpected_failure'))
+    'owned_cleanup_unproven','cleanup_report_unproven','outer_keeper_required','inventory_receipt','inventory_input','inventory_bounds','unexpected_failure',
+    'inventory_cli_stage','inventory_cli_timeout','inventory_cli_stdout_bound','inventory_cli_stderr_bound','inventory_cli_nonzero','inventory_cli_pipe_close'))
 
 # Actual official artifacts plus bounded public archive measurement by the source
 # agent, receipt770e2521ddaaa20c360ba28ac76b5260d54d673a72ea6507c05d6464d4447278.
@@ -423,6 +426,70 @@ def inventory_container(value, old, name, image, proof):
     return value
 
 
+INVENTORY_STAGES=frozenset(('create','preinspect','start','exit','postinspect'))
+INVENTORY_STAGE='none'
+INVENTORY_STDERR=8192
+
+
+def inventory_inspect_template(old):
+    return '{"name":{{json .Name}},"image":{{json .Image}},"owner":{{json (index .Config.Labels "'+old.LABEL+'")}},"user":{{json .Config.User}},"readonly":{{json .HostConfig.ReadonlyRootfs}},"privileged":{{json .HostConfig.Privileged}},"network":{{json .HostConfig.NetworkMode}},"networks":{{json .NetworkSettings.Networks}},"caps_add":{{json .HostConfig.CapAdd}},"caps_drop":{{json .HostConfig.CapDrop}},"security":{{json .HostConfig.SecurityOpt}},"memory":{{json .HostConfig.Memory}},"memory_swap":{{json .HostConfig.MemorySwap}},"nano_cpus":{{json .HostConfig.NanoCpus}},"pids":{{json .HostConfig.PidsLimit}},"tmpfs":{{json (index .HostConfig "Tmpfs")}},"mounts":{{json .Mounts}},"running":{{json .State.Running}},"paused":{{json .State.Paused}},"pid":{{json .State.Pid}}}'
+
+
+def inventory_cli(ctx,old,stage,*,image,proof,gid,control,cid=None):
+    """Only five fixed public Docker commands, with distinct bounded streams."""
+    global INVENTORY_STAGE
+    need(stage in INVENTORY_STAGES and old.DOCKER==['/usr/bin/docker','--host=unix:///var/run/docker.sock']
+        and proof==ctx.root/'whole-acl-proof' and type(gid)is int and 0<=gid<=65535
+        and type(image)is str and re.fullmatch('sha256:[a-f0-9]{64}',image),'inventory_cli_stage')
+    name='app-ci-whole-acl-'+old.owner()
+    if stage=='create':
+        need(cid is None,'inventory_cli_stage');argv=inventory_args(old,name,image,proof,gid,control);maximum,seconds=256,30
+    else:
+        need(type(cid)is str and re.fullmatch('[a-f0-9]{64}',cid),'inventory_cli_stage')
+        if stage in ('preinspect','postinspect'):
+            argv=['container','inspect','--format',inventory_inspect_template(old),cid];maximum,seconds=16384,30
+        elif stage=='start':argv=['start','--attach',cid];maximum,seconds=MAX_ACL_REPORT,150
+        else:argv=['inspect','--format','{{.State.ExitCode}}',cid];maximum,seconds=64,30
+    INVENTORY_STAGE=stage;ctx.check()
+    end=min(time.monotonic()+seconds,ctx.cleanup_end or ctx.end)
+    environment={'PATH':'/usr/bin:/bin','LC_ALL':'C.UTF-8','DOCKER_CONFIG':str(ctx.root/'docker-config')}
+    child=subprocess.Popen([*old.DOCKER,*argv],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+        env=environment,start_new_session=True,close_fds=True)
+    buffers={'stdout':bytearray(),'stderr':bytearray()};counts={'stdout':0,'stderr':0}
+    try:
+        with selectors.DefaultSelector()as selector:
+            for key,pipe in (('stdout',child.stdout),('stderr',child.stderr)):
+                os.set_blocking(pipe.fileno(),False);selector.register(pipe.fileno(),selectors.EVENT_READ,key)
+            while selector.get_map():
+                ctx.check();left=end-time.monotonic();need(left>0,'inventory_cli_timeout')
+                for event,_ in selector.select(min(.1,left)):
+                    key=event.data;limit=maximum if key=='stdout'else INVENTORY_STDERR
+                    block=os.read(event.fd,min(65536,limit-counts[key]+1))
+                    if not block:selector.unregister(event.fd);continue
+                    counts[key]+=len(block);buffers[key].extend(block[:max(0,limit-len(buffers[key]))])
+                    need(counts[key]<=limit,'inventory_cli_stdout_bound'if key=='stdout'else'inventory_cli_stderr_bound')
+        try:code=child.wait(timeout=max(.01,end-time.monotonic()))
+        except subprocess.TimeoutExpired:raise RuntimeError('inventory_cli_timeout')from None
+        ctx.check()
+        need(type(code)is int and code==0,'inventory_cli_nonzero');return bytes(buffers['stdout'])
+    finally:
+        try:ctx.C.cleanup_owned_child(child)
+        finally:
+            close_error=False
+            for pipe in (child.stdout,child.stderr):
+                try:pipe.close()
+                except BaseException:close_error=True
+            actual=child.returncode
+            if stage=='start':ctx.C.write(ctx.root/'reports/fresh-whole-image-acl-output.json',bytes(buffers['stdout']))
+            ctx.write(ctx.root/'reports'/('inventory-cli-'+stage+'.json'),{
+                'schema':'ba938_public_inventory_cli/1','stage':stage,
+                'actual_client_returncode':actual if type(actual)is int else None,
+                'stdout_bytes_observed':counts['stdout'],'stderr_bytes_observed':counts['stderr'],
+                'stderr_text':bytes(buffers['stderr']).decode('utf-8',errors='replace'),
+                'stderr_truncated':counts['stderr']>INVENTORY_STDERR,'security_accepted':False})
+            ctx.check();need(not close_error,'inventory_cli_pipe_close')
+
+
 def whole_image_inventory(ctx, old, image, control, evidence_zip):
     """Independent public ELF/source inventory FIRST, never a caller-safety gate."""
     global PHASE
@@ -439,13 +506,13 @@ def whole_image_inventory(ctx, old, image, control, evidence_zip):
     need((proof/'inventory.py').lstat().st_uid == (proof/'sbom.cdx.json').lstat().st_uid == 1001
         and (proof/'sbom.cdx.json').lstat().st_gid == gid,'inventory_input')
     name='app-ci-whole-acl-'+old.owner();ctx.created.append((name,image))
-    cid=ctx.docker(inventory_args(old,name,image,proof,gid,control),maximum=256).decode().strip()
-    need(re.fullmatch('[a-f0-9]{64}',cid),'presence_identity')
-    template='{"name":{{json .Name}},"image":{{json .Image}},"owner":{{json (index .Config.Labels "'+old.LABEL+'")}},"user":{{json .Config.User}},"readonly":{{json .HostConfig.ReadonlyRootfs}},"privileged":{{json .HostConfig.Privileged}},"network":{{json .HostConfig.NetworkMode}},"networks":{{json .NetworkSettings.Networks}},"caps_add":{{json .HostConfig.CapAdd}},"caps_drop":{{json .HostConfig.CapDrop}},"security":{{json .HostConfig.SecurityOpt}},"memory":{{json .HostConfig.Memory}},"memory_swap":{{json .HostConfig.MemorySwap}},"nano_cpus":{{json .HostConfig.NanoCpus}},"pids":{{json .HostConfig.PidsLimit}},"tmpfs":{{json .HostConfig.Tmpfs}},"mounts":{{json .Mounts}},"running":{{json .State.Running}},"paused":{{json .State.Paused}},"pid":{{json .State.Pid}}}'
-    def admit(): return inventory_container(document(ctx.docker(['container','inspect','--format',template,cid],maximum=16384)),old,name,image,proof)
-    admit();raw=ctx.docker(['start','--attach',cid],seconds=150,maximum=MAX_ACL_REPORT,
-        public_log=ctx.root/'reports/fresh-whole-image-acl-output.json')
-    need(ctx.docker(['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip() == b'0','presence_exit');admit()
+    def cli(stage,cid=None):return inventory_cli(ctx,old,stage,image=image,proof=proof,gid=gid,control=control,cid=cid)
+    cid=cli('create').decode().strip();need(re.fullmatch('[a-f0-9]{64}',cid),'presence_identity')
+    ctx.write(ctx.root/'reports/inventory-created.json',{'schema':'ba938_public_inventory_created/1',
+        'cid':cid,'name':name,'image_id':image,'owner':old.owner(),'started':False,'security_accepted':False})
+    def admit(stage):return inventory_container(document(cli(stage,cid)),old,name,image,proof)
+    admit('preinspect');raw=cli('start',cid)
+    need(cli('exit',cid).strip()==b'0','presence_exit');admit('postinspect')
     value=inventory_document(raw);old.public(value)
     need(value.get('schema') == 'image_acl_import_inventory/1' and value.get('image_id') == control['image_id']
         and value.get('source_commit') == control['source_commit'] and value.get('verifier_sha256') == INVENTORY_SHA256
@@ -563,7 +630,8 @@ def main(argv=None, *, outer_keeper=None):
         known = frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError','PermissionError','TimeoutError',
             'KeyError','TypeError','ValueError','JSONDecodeError'))
         number = error.errno if isinstance(error,OSError) else None
-        record = {'status':'canonical_image_smoke_failed','phase':PHASE,'closed_code':code if code in allowed else 'unexpected_failure',
+        record = {'status':'canonical_image_smoke_failed','phase':PHASE,
+            'inventory_stage':INVENTORY_STAGE if PHASE=='fresh_same_image_whole_acl_inventory'and INVENTORY_STAGE in INVENTORY_STAGES else None,'closed_code':code if code in allowed else 'unexpected_failure',
             'exception_class':type(error).__name__ if type(error).__name__ in known else 'unclassified_exception',
             'os_errno':number if type(number) is int and 0 < number <= 4095 else None,
             'cleanup_causes':errors,'security_accepted':False,'full_matrix_accepted':False}
