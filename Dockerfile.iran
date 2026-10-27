@@ -1,4 +1,4 @@
-FROM python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3 AS patched-base
+FROM python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac AS patched-base
 RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/debian-security#g' /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true upgrade -y --no-install-recommends \
@@ -60,7 +60,12 @@ RUN --network=none \
     --mount=type=bind,source=pip_packages/tar-acl-capsule,target=/tar-capsule,ro \
     --mount=type=tmpfs,target=/tmp \
     ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/app/scripts/prepare_tar_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/tar-capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/coreutils-acl-capsule,target=/coreutils-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/app/scripts/prepare_coreutils_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/coreutils-capsule"]
 RUN python -I -B scripts/verify_image_trust.py --require-certifi
+RUN --network=none python -I -S -B scripts/probe_python_micro_release.py --image-self-check
 RUN python -I -B scripts/verify_psycopg2_runtime.py
 RUN python -I -B scripts/verify_sqlite_runtime.py --require-libmagic
 RUN python -I -B scripts/remove_runtime_pip.py --image-build \

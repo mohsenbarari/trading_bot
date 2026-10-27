@@ -17,7 +17,7 @@ def require(ok):
 
 
 def bundled_plan(stdlib):
-    """Admit only CPython 3.11.17's two known bootstrap archives, never stdlib."""
+    """Admit only CPython 3.11.18's two known bootstrap archives, never stdlib."""
     require(stdlib.resolve(strict=True) == stdlib)
     value = stdlib.lstat()
     require(stat.S_ISDIR(value.st_mode) and value.st_uid == os.geteuid() and not value.st_mode & 0o022)
@@ -51,7 +51,7 @@ def bundled_plan(stdlib):
 def image_layout():
     # No configurable prefix/path, venv, old interpreter or ordinary invocation
     # is a mutation route. Dockerfiles explicitly opt in with isolated Python.
-    require(sys.flags.isolated and sys.version_info[:3] == (3, 11, 17) and os.geteuid() == 0)
+    require(sys.flags.isolated and sys.version_info[:3] == (3, 11, 18) and os.geteuid() == 0)
     require(sys.prefix == sys.base_prefix == '/usr/local')
     require(sysconfig.get_path('stdlib') == '/usr/local/lib/python3.11')
     require(sysconfig.get_config_var('WHEEL_PKG_DIR') in (None, ''))

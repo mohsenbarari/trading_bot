@@ -257,7 +257,7 @@ def compatibility():
 
 
 def verify(require_libmagic=False):
-    require(sys.version_info[:3] == (3, 11, 17), 'python_version_changed')
+    require(sys.version_info[:3] == (3, 11, 18), 'python_version_changed')
     extension = loader_identity()
     version = platform_package()
     if require_libmagic:

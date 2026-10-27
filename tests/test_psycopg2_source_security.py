@@ -160,7 +160,7 @@ class PsycopgSourceSecurity(unittest.TestCase):
         for name in ('Dockerfile', 'Dockerfile.iran'):
             source = (REPO / name).read_text()
             with self.subTest(name=name):
-                self.assertIn('3.11.17-slim-trixie@sha256:b95327ce', source)
+                self.assertIn('3.11.18-slim-trixie@sha256:0451b9ee', source)
                 builder, runtime = source.split('FROM patched-base AS runtime')
                 self.assertIn('prepare_psycopg2_source.py check', builder)
                 self.assertIn('--wheel-dir=/wheelhouse /opt/pip_packages/psycopg2_binary-2.9.13.tar.gz', builder)

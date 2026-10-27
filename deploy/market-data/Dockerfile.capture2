@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
-ARG PYTHON_BASE_IMAGE=python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3
+ARG PYTHON_BASE_IMAGE=python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac
 ARG SOURCE_DATE_EPOCH=0
 
 FROM ${PYTHON_BASE_IMAGE} AS patched-base
@@ -11,6 +11,7 @@ RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/
 COPY scripts/prepare_app_security_os_cache.py scripts/app_security_os_packages.lock.json scripts/compose_security_os_candidate.py /usr/local/libexec/
 COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json /usr/local/libexec/
 COPY scripts/prepare_tar_acl_os_cache.py scripts/tar_acl_package.lock.json /usr/local/libexec/
+COPY scripts/prepare_coreutils_acl_os_cache.py scripts/coreutils_acl_package.lock.json /usr/local/libexec/
 RUN --network=none \
     --mount=type=bind,source=pip_packages/security-os-capsule,target=/capsule,ro \
     --mount=type=tmpfs,target=/tmp \
@@ -23,10 +24,15 @@ RUN --network=none \
     --mount=type=bind,source=pip_packages/tar-acl-capsule,target=/tar-capsule,ro \
     --mount=type=tmpfs,target=/tmp \
     ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_tar_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/tar-capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/coreutils-acl-capsule,target=/coreutils-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_coreutils_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/coreutils-capsule"]
 COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py
 COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py
 COPY scripts/verify_sqlite_runtime.py /usr/local/libexec/verify_sqlite_runtime.py
 COPY scripts/remove_runtime_pip.py /usr/local/libexec/remove_runtime_pip.py
+COPY scripts/probe_python_micro_release.py /usr/local/libexec/probe_python_micro_release.py
 COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/pip-bootstrap-requirements.txt \
     && rm /tmp/pip-bootstrap-requirements.txt
@@ -94,6 +100,7 @@ COPY --from=assembly /rootfs/ /
 WORKDIR /app
 RUN python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python
 RUN python -I -B /usr/local/libexec/verify_sqlite_runtime.py
+RUN --network=none python -I -S -B /usr/local/libexec/probe_python_micro_release.py --image-self-check
 RUN python -I -B /usr/local/libexec/remove_runtime_pip.py --image-build \
     && python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python --final-runtime
 

@@ -242,8 +242,8 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         bot = (DEPLOY / "compose.bot.yml").read_text(encoding="utf-8")
         dockerfile = (DEPLOY / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn(
-            "python:3.11.17-slim-trixie@sha256:"
-            "b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3",
+            "python:3.11.18-slim-trixie@sha256:"
+            "0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac",
             dockerfile,
         )
         self.assertIn("USER 10001:10001", dockerfile)
