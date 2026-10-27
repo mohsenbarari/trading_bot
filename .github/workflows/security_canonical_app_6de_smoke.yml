@@ -1,0 +1,55 @@
+name: Canonical App 6de isolated runtime and whole-image ACL proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_smoke:
+        description: Run the reviewed 6de public inventory and unchanged 32 assertions; no security or deployment acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-canonical-app-6de-runtime-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: github.repository == 'mohsenbarari/trading_bot' && github.ref == 'refs/heads/security/remediation-20261023' && inputs.run_smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exactly this reviewed controller commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Seal exact source and run disposable 6de public proofs
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/app_6de_smoke/seal_and_run.py \
+            --root "$RUNNER_TEMP/security-app-ci-smoke-6de-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 9b79f6ad0b4909e3083bc19adf046dffc35329d1a14dc8434a7d5e6457b00628 \
+            --execute-reviewed-6de-proof
+
+      - name: Preserve raw evidence, actual public observations and cleanup
+        if: always() && steps.run.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-canonical-app-6de-runtime-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ steps.run.outputs.root }}/reports/*.json
+            ${{ steps.run.outputs.root }}/evidence/public-evidence.zip
