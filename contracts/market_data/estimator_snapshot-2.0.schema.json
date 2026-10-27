@@ -1,0 +1,515 @@
+{
+  "$defs": {
+    "EstimatorInputHealthV1": {
+      "additionalProperties": false,
+      "properties": {
+        "age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age Seconds"
+        },
+        "component": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Component",
+          "type": "string"
+        },
+        "latest_available_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Latest Available At Utc"
+        },
+        "reason_codes": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "FRESH",
+            "STALE",
+            "MISSING",
+            "REJECTED"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "status",
+        "latest_available_at_utc"
+      ],
+      "title": "EstimatorInputHealthV1",
+      "type": "object"
+    },
+    "EstimatorInputTraceV1": {
+      "additionalProperties": false,
+      "properties": {
+        "age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age Seconds"
+        },
+        "available_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available At Utc"
+        },
+        "component": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Component",
+          "type": "string"
+        },
+        "fact_revision": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fact Revision"
+        },
+        "fallback": {
+          "title": "Fallback",
+          "type": "boolean"
+        },
+        "freshness": {
+          "enum": [
+            "FRESH",
+            "STALE",
+            "MISSING",
+            "REJECTED"
+          ],
+          "title": "Freshness",
+          "type": "string"
+        },
+        "mean_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Value"
+        },
+        "occurred_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At Utc"
+        },
+        "parsed_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parsed At Utc"
+        },
+        "point_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Value"
+        },
+        "sample_count": {
+          "minimum": 0,
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "selection_method": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Selection Method",
+          "type": "string"
+        },
+        "source_codes": {
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "title": "Source Codes",
+          "type": "array"
+        },
+        "source_event_key": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Event Key"
+        },
+        "source_fact_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Fact Id"
+        },
+        "transferred_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transferred At Utc"
+        },
+        "unit": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "source_codes",
+        "unit",
+        "sample_count",
+        "selection_method",
+        "fallback",
+        "freshness"
+      ],
+      "title": "EstimatorInputTraceV1",
+      "type": "object"
+    },
+    "EstimatorRateV2": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor_age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor Age Seconds"
+        },
+        "confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW_PAPER_FALLBACK",
+            "NONE"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "instrument": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Instrument",
+          "type": "string"
+        },
+        "lower_bound": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lower Bound"
+        },
+        "market_regime": {
+          "enum": [
+            "RANGE",
+            "UP",
+            "DOWN",
+            "SHOCK",
+            "UNKNOWN"
+          ],
+          "title": "Market Regime",
+          "type": "string"
+        },
+        "method": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Method",
+          "type": "string"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "settlement": {
+          "enum": [
+            "CASH",
+            "TOMORROW"
+          ],
+          "title": "Settlement",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ESTIMATED",
+            "NO_DATA"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "underlying_age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Underlying Age Seconds"
+        },
+        "underlying_source": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Underlying Source"
+        },
+        "unit": {
+          "const": "PROJECT_THOUSAND_TOMAN",
+          "enum": [
+            "PROJECT_THOUSAND_TOMAN"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "upper_bound": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Upper Bound"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "instrument",
+        "settlement",
+        "status",
+        "value",
+        "unit",
+        "lower_bound",
+        "upper_bound",
+        "confidence",
+        "method",
+        "market_regime"
+      ],
+      "title": "EstimatorRateV2",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "estimator_snapshot/2.0",
+      "enum": [
+        "estimator_snapshot/2.0"
+      ],
+      "title": "Contract",
+      "type": "string"
+    },
+    "feed_mode": {
+      "default": "PRIVATE_SHADOW",
+      "enum": [
+        "LEGACY",
+        "PRIVATE_SHADOW",
+        "PRIVATE_PRIMARY"
+      ],
+      "title": "Feed Mode",
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "format": "date-time",
+      "title": "Generated At Utc",
+      "type": "string"
+    },
+    "health": {
+      "items": {
+        "$ref": "#/$defs/EstimatorInputHealthV1"
+      },
+      "title": "Health",
+      "type": "array"
+    },
+    "input_snapshot_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Snapshot Hash",
+      "type": "string"
+    },
+    "inputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EstimatorInputTraceV1"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
+    "model_version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Model Version",
+      "type": "string"
+    },
+    "rates": {
+      "items": {
+        "$ref": "#/$defs/EstimatorRateV2"
+      },
+      "title": "Rates",
+      "type": "array"
+    },
+    "reason_codes": {
+      "default": [],
+      "items": {
+        "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "snapshot_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "snapshot_version": {
+      "minimum": 1,
+      "title": "Snapshot Version",
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "OK",
+        "SAFE_NO_DATA",
+        "FAILURE"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract",
+    "snapshot_id",
+    "snapshot_version",
+    "generated_at_utc",
+    "input_snapshot_hash",
+    "model_version",
+    "status",
+    "rates",
+    "health"
+  ],
+  "title": "EstimatorSnapshotV2",
+  "type": "object"
+}
