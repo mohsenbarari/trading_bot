@@ -66,6 +66,8 @@ Discover optional memory without loading it. Entries here are not default loads.
   frozen Market business-source selection, or security release provenance.
 - `areas/security-runtime-guards.md` — load for security runtime probes,
   container/cgroup closure, fixture identity, or verification guard failures.
+- `areas/security-proof-inputs.md` — load for scanner cost/finality, whole-ELF
+  source joins, proof-data bounds, or installed-wheel provenance.
 - `areas/two-server-refactor.md` — load for the two-server master plan, Finland
   consolidation/runtime/data merge, human Writer handover, or its cutover gates.
 - `areas/documentation-execution.md` — load for developer onboarding,
