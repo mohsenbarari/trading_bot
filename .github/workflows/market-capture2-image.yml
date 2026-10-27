@@ -1,5 +1,5 @@
-# SOURCE PROPOSAL ONLY: the selected driver remains EXECUTION_ARMED=False.
-# Root alone may integrate/review a new Main commit. Do not dispatch this draft.
+# Reviewed build/proof only; no activation or deployment authority.
+# Root dispatches only after Main/remote identity and source review.
 name: Normal Capture2 two Git sources image evidence
 on:
   workflow_dispatch:

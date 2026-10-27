@@ -1,7 +1,7 @@
-"""UNARMED source proposal for the normal two-Git Capture2 image build.
+"""Reviewed normal two-Git Capture2 image build and isolated evidence.
 
 No legacy image profile, layer composer, release controller or activation API
-is imported. Root must finish/review normal Main integration before arming.
+is imported. Activation and deployment remain outside this build-only API.
 """
 from contextlib import ExitStack
 from hashlib import sha1,sha256
@@ -9,7 +9,7 @@ from pathlib import Path,PurePosixPath
 from types import ModuleType
 import argparse,gzip,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time
 
-EXECUTION_ARMED=False
+EXECUTION_ARMED=True
 REPOSITORY='mohsenbarari/trading_bot'
 SELF='scripts/prepare_market_capture2_image.py'
 SEALER='scripts/prepare_market_product_source.py'
@@ -950,9 +950,8 @@ def main(argv=None,*,retained=None,final_checks=None):
  if not args.execute:
   print(json.dumps({'schema':'normal_market_two_source_ci_proposal/1','status':'UNARMED','execution_armed':EXECUTION_ARMED,
    'build_performed':False,'activation_authority':False,'security_accepted':False}));return 0
- # This source draft deliberately has no arming flag or placeholder authority.
- # Root must integrate/review the concrete phase orchestrator and actual probe
- # producers before a new normal Main commit can change this source constant.
+ # No CLI flag or input document can change the reviewed source gate.
+ # Hosted Main/source/ownership and strict evidence checks remain mandatory.
  need(EXECUTION_ARMED is True,'normal_main_integration_unarmed')
  need(args.root is not None and args.repo is not None,'arguments')
  value={'build':normal_build,'finalize':finalize,'raw-gate':raw_gate,'complete-gate':complete_gate}[args.phase](args.root,args.repo,retained=retained,final_checks=final_checks)
