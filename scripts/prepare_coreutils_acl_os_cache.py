@@ -458,6 +458,20 @@ def install(cache):
  previous=signal.signal(signal.SIGALRM,expired);signal.alarm(600)
  try:return install_admitted(cache)
  finally:signal.alarm(0);signal.signal(signal.SIGALRM,previous)
+def failure(error):
+ code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CODES else 'unexpected_refusal'
+ kinds=(RuntimeError,OSError,FileNotFoundError,PermissionError,FileExistsError,NotADirectoryError,IsADirectoryError,ValueError,TypeError,KeyError,TimeoutError)
+ kind=type(error).__name__ if type(error)in kinds else 'unclassified'
+ number=error.errno if type(error)in(OSError,FileNotFoundError,PermissionError,FileExistsError,NotADirectoryError,IsADirectoryError,TimeoutError)else None
+ number=number if type(number)is int and 0<number<=4095 else None
+ frames=[];trace=error.__traceback__;public=str(Path(__file__).absolute())
+ while trace is not None and len(frames)<24:
+  code_object=trace.tb_frame.f_code
+  if code_object.co_filename==public and re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,99}',code_object.co_name)and 0<trace.tb_lineno<=10000:
+   frames.append({'function':code_object.co_name,'line':trace.tb_lineno})
+  trace=trace.tb_next
+ return {'status':'refused','code':code,'exception_class':kind,'errno':number,'public_source_frames':frames,'security_accepted':False}
+
 def main(argv=None):
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--cache-dir',type=Path,required=True);parser.add_argument('--artifact-zip',type=Path)
  mode=parser.add_mutually_exclusive_group();mode.add_argument('--check',action='store_true');mode.add_argument('--install-image-cache',action='store_true')
@@ -467,7 +481,6 @@ def main(argv=None):
   with Held()as gate:load_lock(gate)
   result=install(args.cache_dir) if args.install_image_cache else prepare(args.cache_dir,args.artifact_zip,args.check)
  except Exception as error:
-  code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CODES else 'unexpected_refusal'
-  result={'status':'refused','code':code,'security_accepted':False};print(json.dumps(result,sort_keys=True));return 1
+  result=failure(error);print(json.dumps(result,sort_keys=True));return 1
  print(json.dumps(result,sort_keys=True));return 0
 if __name__=='__main__':raise SystemExit(main())

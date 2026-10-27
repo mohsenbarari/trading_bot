@@ -30,6 +30,7 @@ LOCK_NAME='app_security_os_packages.lock.json'
 LOCK_SHA='14eefb6a4d40e02f2407b676c6c4c418b69968227a2059a67ddf58fdf99b1a82'
 GROUPS=('util','ncurses','acl-tar')
 CAPSULE=Path('/capsule')
+LIBACL_DOC_APT_OPTIONS=('-o','DPkg::Options::=--path-include=/usr/share/doc/libacl1','-o','DPkg::Options::=--path-include=/usr/share/doc/libacl1/*')
 MAX_SOURCE=131072
 MAX_PACKAGE=32*1024**2
 MAX_INSTALL_OUTPUT=2*1024**2
@@ -283,6 +284,10 @@ class InstallerCommands:
     def run(self,argv,*,capture_output=False,check=False,timeout=None,text=False,encoding=None,errors=None,
             stdout=None,stderr=None,stdin=None,env=None):
         need(type(argv) in {list,tuple} and all(type(v) is str for v in argv) and self.allowed(argv),'installer_command')
+        # Only the already authenticated 15-package install argv gets these
+        # exact libacl1 doc includes; approved INSTALLER bytes remain unchanged.
+        if tuple(argv[:4])==('/usr/bin/apt-get','--yes','--no-remove','install'):
+            argv=[argv[0],*LIBACL_DOC_APT_OPTIONS,*argv[1:]]
         need((stdin is None or stdin==subprocess.DEVNULL) and not (capture_output and (stdout is not None or stderr is not None)),'installer_command')
         if capture_output:stdout=stderr=subprocess.PIPE
         timeout=min(INSTALL_COMMAND_SECONDS,timeout) if timeout is not None else INSTALL_COMMAND_SECONDS

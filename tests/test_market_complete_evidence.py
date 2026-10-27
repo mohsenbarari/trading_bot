@@ -42,7 +42,9 @@ class CompleteEvidenceTests(unittest.TestCase):
 
  def test_workflow_retains_exact_strict_gates_and_uploads_factual_evidence_after_failure(self):
   raw=(ROOT/'.github/workflows/market-capture2-image.yml').read_bytes();marker=b'\n      - name: Preserve factual completion evidence without acceptance\n';self.assertEqual(raw.count(marker),1);original,appended=raw.split(marker)
-  self.assertEqual((len(original),sha256(original).hexdigest()),(18370,'4d948e1f4e788ab31ecc73fdfbdbab71172cbbc4011ed11f2f90e7d228aed2e9'))
+  old_group=b'  group: normal-market-capture2-image-evidence\n';scoped_group=b"  group: normal-market-capture2-image-evidence-${{ inputs.role || 'capture2-f79' }}\n  queue: max\n"
+  self.assertEqual(original.count(scoped_group),1);historical_prefix=original.replace(scoped_group,old_group)
+  self.assertEqual((len(historical_prefix),sha256(historical_prefix).hexdigest()),(18370,'4d948e1f4e788ab31ecc73fdfbdbab71172cbbc4011ed11f2f90e7d228aed2e9'))
   text=raw.decode();upload=appended.decode();self.assertIn("if: always() && steps.finalize.outcome == 'success'",upload);self.assertNotIn('steps.vulnerabilities.outcome',upload);self.assertNotIn('continue-on-error',upload)
   self.assertIn('uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',upload);self.assertIn('if-no-files-found: error',upload);self.assertIn('factual-completion-unaccepted-',upload);self.assertEqual([line.strip()for line in upload.splitlines()if line.strip().startswith('path:')],['path: ${{ steps.build.outputs.root }}/ci-evidence.json'])
   self.assertLess(text.index("'--phase','raw-gate'"),text.index("'--phase','complete-gate'"));self.assertLess(text.index("'--phase','complete-gate'"),text.index(marker.decode()));self.assertNotIn("'--phase','complete-evidence'",text)
@@ -50,6 +52,14 @@ class CompleteEvidenceTests(unittest.TestCase):
   # count refusal. A separate phase would collide with exclusive publication.
   tree=ast.parse(PATH.read_bytes());gate=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='complete_gate');body=ast.get_source_segment(PATH.read_text(),gate)
   self.assertLess(body.index('observed=complete_evidence('),body.index("'raw_high_critical_findings'"));self.assertIn("root/'ci-completed.json'",body)
+
+ def test_workflow_isolates_all_ten_role_queues_and_retains_pending_work(self):
+  text=(ROOT/'.github/workflows/market-capture2-image.yml').read_text();block=text.split('concurrency:\n',1)[1].split('jobs:\n',1)[0]
+  self.assertEqual(block,"  group: normal-market-capture2-image-evidence-${{ inputs.role || 'capture2-f79' }}\n  queue: max\n  cancel-in-progress: false\n")
+  roles=('capture2-f79',*M.ROLE_MAP);groups=['normal-market-capture2-image-evidence-'+r for r in roles]
+  self.assertEqual(len(roles),10);self.assertEqual(len({g.casefold()for g in groups}),10)
+  self.assertEqual('normal-market-capture2-image-evidence-'+(None or 'capture2-f79'),groups[0])
+  self.assertNotIn('github.run_id',block);self.assertNotIn('cancel-in-progress: true',block)
 
  def test_original_strict_raw_gate_body_is_byte_protocol_unchanged(self):
   f=next(n for n in ast.parse(PATH.read_bytes()).body if isinstance(n,ast.FunctionDef)and n.name=='raw_gate')
