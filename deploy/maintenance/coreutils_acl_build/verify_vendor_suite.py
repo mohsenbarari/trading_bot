@@ -15,6 +15,10 @@ SCOPES={'coreutils':('', 'tests/test-suite.log'),'gnulib':('gnulib-tests','test-
 RESULTS=('PASS','SKIP','XFAIL','FAIL','XPASS','ERROR')
 MAX_SELECTION=4*1024**2;MAX_TESTS=8192;MAX_FILE=4*1024**2;MAX_TOTAL=64*1024**2
 MAX_RECEIPT=4*1024**2;BLOCK=65536;MAX_DIRS=1024
+DRIVERS={(4879,'08ff8986c3a0ce8bf32d25ec7e4752ffbce9c89589f018836c97a08b6573ac2c'):
+ {'name':'coreutils9.7-original','collect_skipped_logs_option':False},
+ (5215,'05d9c1057354db27b965fcd154860f938186324ccd72fdb8c5767083194c8b5a'):
+ {'name':'Debian-Automake1.17-4','collect_skipped_logs_option':True}}
 
 def need(ok,code):
  if not ok:raise RuntimeError(code)
@@ -24,10 +28,15 @@ def canonical(value):
  return(type(value)is str and 0<len(value)<=512 and re.fullmatch(r'[A-Za-z0-9_+./-]+',value)is not None and not value.startswith('/')
   and str(PurePosixPath(value))==value and all(p not in{'.','..'}for p in PurePosixPath(value).parts))
 
+def driver_profile(binding):
+ need(type(binding)is dict and set(binding)=={'bytes','sha256'}and type(binding['bytes'])is int
+  and type(binding['sha256'])is str,'vendor_driver_source')
+ key=(binding['bytes'],binding['sha256']);need(key in DRIVERS,'vendor_driver_source');return DRIVERS[key]
+
 def selection(raw,scope):
  need(scope in SCOPES and type(raw)is bytes and 0<len(raw)<=MAX_SELECTION,'vendor_selection_bound')
- source=io.BytesIO(raw);need(source.readline(4097)==b'GOLD_VENDOR_SELECTION_V1\n','vendor_selection_header')
- suite=None;tests=[];logs=[];extensions=[];seen=set();line_count=0
+ source=io.BytesIO(raw);need(source.readline(4097)==b'GOLD_VENDOR_SELECTION_V2\n','vendor_selection_header')
+ suite=None;collect_skipped_logs=None;tests=[];logs=[];extensions=[];seen=set();line_count=0
  while True:
   line=source.readline(4097)
   if not line:break
@@ -37,13 +46,14 @@ def selection(raw,scope):
   need('='in text,'vendor_selection_field');key,value=text.split('=',1)
   need((key,value)not in seen,'vendor_selection_duplicate');seen.add((key,value))
   if key=='suite_log':need(suite is None and value==SCOPES[scope][1],'vendor_suite_path');suite=value
+  elif key=='collect_skipped_logs':need(collect_skipped_logs is None and value in{'yes','no'},'vendor_skip_log_policy');collect_skipped_logs=value
   elif key in{'test','log'}:
    need(canonical(value),'vendor_selection_path');target=tests if key=='test'else logs
    need(len(target)<MAX_TESTS,'vendor_selection_count');target.append(value)
   elif key=='extension':
    need(len(extensions)<8 and re.fullmatch(r'\.[A-Za-z0-9_]{1,16}',value)is not None,'vendor_selection_extension');extensions.append(value)
   else:raise RuntimeError('vendor_selection_field')
- need(suite is not None and 0<len(tests)==len(logs)<=MAX_TESTS and all(x.endswith('.log')for x in logs),'vendor_selection_inventory')
+ need(suite is not None and collect_skipped_logs is not None and 0<len(tests)==len(logs)<=MAX_TESTS and all(x.endswith('.log')for x in logs),'vendor_selection_inventory')
  # TEST_LOGS is the genuine configured Makefile expansion. Its declared
  # TEST_EXTENSIONS govern stripping, not a guessed universal .sh rule.
  expected=[]
@@ -54,10 +64,13 @@ def selection(raw,scope):
   expected.append(stem+'.log')
  need(logs==expected and len(set(logs))==len(logs),'vendor_selection_mapping')
  if scope=='coreutils':need(all(x.startswith('tests/')for x in tests+logs),'vendor_selection_scope')
- else:need(all('/'not in x or x.startswith('test-')for x in tests+logs),'vendor_selection_scope')
- return{'suite_log':suite,'tests':tests,'logs':logs,'extensions':extensions,'raw_bytes':len(raw),'raw_sha256':sha256(raw).hexdigest()}
+ # gnulib's genuine unfiltered Make selection includes nested directories
+ # (e.g. uniwidth/test-uc_width2.sh). Canonical relative paths, no symlink
+ # parents and the fixed gnulib-tests root enforce confinement, not prefixes.
+ return{'suite_log':suite,'collect_skipped_logs':collect_skipped_logs,'tests':tests,'logs':logs,'extensions':extensions,'raw_bytes':len(raw),'raw_sha256':sha256(raw).hexdigest()}
 
-def trs(raw):
+def trs(raw,*,skip_copy):
+ need(skip_copy in{'yes','no'},'vendor_skip_log_policy')
  need(type(raw)is bytes and 0<len(raw)<=4096,'vendor_trs_bound');rows={}
  for line in raw.splitlines():
   match=re.fullmatch(rb':(test-result|global-test-result|recheck|copy-in-global-log): ([A-Za-z]+)',line)
@@ -66,7 +79,7 @@ def trs(raw):
  need(set(rows)=={'test-result','global-test-result','recheck','copy-in-global-log'}and rows['test-result']in RESULTS
   and rows['global-test-result']==rows['test-result'],'vendor_trs_inventory')
  result=rows['test-result'];need(result not in{'FAIL','XPASS','ERROR'},'vendor_failed_test')
- need(rows['recheck']=='no'and rows['copy-in-global-log']==('no'if result=='PASS'else'yes'),'vendor_trs_driver_contract')
+ need(rows['recheck']=='no'and rows['copy-in-global-log']==('no'if result=='PASS'else skip_copy if result=='SKIP'else'yes'),'vendor_trs_driver_contract')
  return result
 
 def log_facts(tail,result,test):
@@ -174,22 +187,22 @@ class Scope:
   except BaseException as error:errors.append(error)
   if errors:raise errors[0]
 
-def collect(selection_raws,*,guard,end,started_at_ns):
+def collect(selection_raws,*,driver_binding,guard,end,started_at_ns):
  """Production namespace/identity are fixed. Caller proves the actual command."""
  need(os.geteuid()==os.getegid()==10001,'vendor_actual_unprivileged_user')
- return _collect_at(ROOT,selection_raws,owner=10001,guard=guard,end=end,started_at_ns=started_at_ns)
+ return _collect_at(ROOT,selection_raws,driver_binding=driver_binding,owner=10001,guard=guard,end=end,started_at_ns=started_at_ns)
 
-def _collect_at(root,selection_raws,*,owner,guard,end,started_at_ns):
+def _collect_at(root,selection_raws,*,driver_binding,owner,guard,end,started_at_ns):
  """Explicit owned-test path only; no production override or CLI invokes it."""
  need(type(selection_raws)is dict and set(selection_raws)==set(SCOPES),'vendor_scopes')
- parsed={name:selection(raw,name)for name,raw in selection_raws.items()};scope=Scope(root,owner,guard,end,started_at_ns)
+ driver=driver_profile(driver_binding);parsed={name:selection(raw,name)for name,raw in selection_raws.items()};scope=Scope(root,owner,guard,end,started_at_ns)
  values={};budget=65536
  try:
   for name,(base,_)in SCOPES.items():
-   chosen=parsed[name];counts=Counter({k:0 for k in RESULTS});rows=[]
+   chosen=parsed[name];skip_copy=chosen['collect_skipped_logs']if driver['collect_skipped_logs_option']else'yes';counts=Counter({k:0 for k in RESULTS});rows=[]
    for test,log in zip(chosen['tests'],chosen['logs']):
     relative=(base+'/'if base else'')+log;receipt=relative[:-4]+'.trs'
-    tr,body,_=scope.read(receipt,4096);result=trs(body)
+    tr,body,_=scope.read(receipt,4096);result=trs(body,skip_copy=skip_copy)
     lr,_,tail=scope.read(relative,MAX_FILE);facts=log_facts(tail,result,test);counts[result]+=1
     row={'test':test,'trs':tr,'log':lr,**facts};cost=len(encode(row));need(budget+cost<=MAX_RECEIPT,'vendor_receipt_bound');budget+=cost;rows.append(row)
    target=(base+'/'if base else'')+chosen['suite_log'];sr,prefix,_=scope.read(target,MAX_FILE);totals=summary(prefix,counts)
@@ -201,6 +214,7 @@ def _collect_at(root,selection_raws,*,owner,guard,end,started_at_ns):
  result={'schema':'coreutils_9_7_vendor_suite_output_observation/1','source_root':str(root),'source_owner_uid':owner,'scopes':values,
   'all_selected_trs_log_pairs_observed':True,'all_observed_file_and_parent_fds_physically_closed':True,
   'all_observed_files_named_after_physical_closes':True,'observed_skip_count':sum(v['actual_summary']['SKIP']for v in values.values()),
+  'caller_observed_exact_test_driver':{'binding':driver_binding,'profile':driver['name']},
   'observed_xfail_count':sum(v['actual_summary']['XFAIL']for v in values.values()),'failed_unexpected_or_error_results':0,
   'actual_unfiltered_command_authority_implemented':False,'actual_vendor_process_completion_proven':False,
   'all_configured_default_tests_proven_by_parser':False,'zero_skip_coverage_claimed':False,'owned_c_fixtures_included':False,
