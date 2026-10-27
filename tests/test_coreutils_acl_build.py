@@ -136,6 +136,48 @@ class SourceTests(unittest.TestCase):
    p.write_bytes(after);self.assertEqual((p.stat().st_uid,p.stat().st_gid),(10001,10001));exec(checks[1],env)
    os.chown(p,10002,10002);self.assertEqual(p.stat().st_uid,10002)
    with self.assertRaisesRegex(RuntimeError,'owned_file'):exec(checks[1],env)
+ def generated_header_fixture(self):
+  temporary=tempfile.TemporaryDirectory(dir=TREE);self.addCleanup(temporary.cleanup);work=Path(temporary.name);source=work/'source'
+  values={'configure':b'OWNED generated GOLD_DESCRIPTOR_ACL configure\n','Makefile.in':b'OWNED Makefile template\n','Makefile':b'OWNED generated Makefile\n','lib/config.h':b'#define GOLD_DESCRIPTOR_ACL 1\n','config.log':b'OWNED configure log\n','config.status':b'OWNED configure status\n','gnulib-tests/Makefile.in':b'OWNED gnulib template\n','gnulib-tests/Makefile':self.acl_makefile_fixture()}
+  for name,raw in values.items():p=source/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(raw);p.chmod(0o644)
+  return work,source
+ def actual_postbuild_header_checks(self):
+  tree=ast.parse((ROOT/'sourcebuild.py').read_bytes());fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='build_vendor')
+  assignment=next(n for n in ast.walk(fn)if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='config'for t in n.targets))
+  feature=next(n for n in ast.walk(fn)if isinstance(n,ast.Expr)and isinstance(n.value,ast.Call)and isinstance(n.value.func,ast.Name)and n.value.func.id=='require'and any(isinstance(a,ast.Constant)and a.value=='compiled_api_configuration'for a in n.value.args))
+  return compile(ast.Module(body=[assignment,feature],type_ignores=[]),'<actual build_vendor generated header>','exec')
+ def check_postbuild_header(self,source):
+  exec(self.actual_postbuild_header_checks(),{'source':source,'owned_read':self.source.owned_read,'require':self.source.require})
+ def test_actual_postbuild_and_generated_proof_use_canonical_lib_config_header(self):
+  work,source=self.generated_header_fixture()
+  with patch.object(self.source,'WORK',work):
+   self.assertFalse((source/'config.h').exists());self.check_postbuild_header(source);value=self.source.generated_proof(source,{'bytes':1,'sha256':'0'*64})
+  self.assertEqual(set(value['actual_generated_files']),{'configure','Makefile.in','Makefile','lib/config.h','config.log','config.status','gnulib-tests/Makefile.in','gnulib-tests/Makefile'})
+  self.assertTrue(value['configured_descriptor_acl_feature']);self.assertFalse(value['security_accepted']);self.assertEqual(value['actual_generated_files']['lib/config.h']['sha256'],sha256(b'#define GOLD_DESCRIPTOR_ACL 1\n').hexdigest())
+ def test_root_header_decoy_cannot_replace_missing_or_invalid_canonical_header(self):
+  work,source=self.generated_header_fixture();canonical=source/'lib/config.h';(source/'config.h').write_bytes(b'#define GOLD_DESCRIPTOR_ACL 1\n');canonical.unlink()
+  with patch.object(self.source,'WORK',work):
+   with self.assertRaises(FileNotFoundError):self.check_postbuild_header(source)
+   with self.assertRaises(FileNotFoundError):self.source.generated_proof(source,{'bytes':1,'sha256':'0'*64})
+   canonical.write_bytes(b'#define GOLD_DESCRIPTOR_ACL 0\n');canonical.chmod(0o644)
+   with self.assertRaisesRegex(RuntimeError,'compiled_api_configuration'):self.check_postbuild_header(source)
+   with self.assertRaisesRegex(RuntimeError,'real_autotools_regeneration'):self.source.generated_proof(source,{'bytes':1,'sha256':'0'*64})
+ def test_canonical_generated_header_keeps_mode_alias_and_physicalclose_guards(self):
+  for kind in('mode','symlink','hardlink','lateclose'):
+   work,source=self.generated_header_fixture();header=source/'lib/config.h'
+   with self.subTest(kind=kind),patch.object(self.source,'WORK',work):
+    if kind=='mode':header.chmod(0o664)
+    elif kind=='symlink':saved=header.with_suffix('.original');header.rename(saved);header.symlink_to(saved.name)
+    elif kind=='hardlink':os.link(header,header.with_suffix('.alias'))
+    if kind=='lateclose':
+     realclose=os.close;identity=header.stat();changed=[]
+     def close(fd):
+      before=os.fstat(fd);selected=(before.st_dev,before.st_ino)==(identity.st_dev,identity.st_ino);realclose(fd)
+      if selected and not changed:os.utime(header,ns=(identity.st_atime_ns,identity.st_mtime_ns+1000000000));changed.append(True)
+     with patch.object(self.source.os,'close',close),self.assertRaisesRegex(RuntimeError,'owned_closed_changed'):self.check_postbuild_header(source)
+     self.assertEqual(changed,[True])
+    else:
+     with self.assertRaisesRegex(RuntimeError,'owned_path'if kind=='symlink'else'owned_file'):self.check_postbuild_header(source)
  def test_host_refuses_nonhosted_actual_context(self):
   with self.assertRaisesRegex(RuntimeError,'hosted_job'):self.host.hosted_layout(SimpleNamespace(),{})
  def test_capacity_requires_real_full_suite_allowance(self):

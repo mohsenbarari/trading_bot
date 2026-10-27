@@ -486,7 +486,7 @@ def build_vendor(kind):
   paths=list(directory.glob('*.'+suffix));require(len(paths)==1,'build_record_inventory');path=paths[0];os.chown(path,0,0);path.chmod(0o644);records[suffix]=path
  if kind=='coreutils':
   require(regeneration_inputs(source)==regeneration_before,'imported_infrastructure_changed')
-  source_contract(source,manifest,'after');config=owned_read(source/'config.h',maximum=1024**2).decode()
+  source_contract(source,manifest,'after');config=owned_read(source/'lib/config.h',maximum=1024**2).decode()
   require('#define GOLD_DESCRIPTOR_ACL 1'in config,'compiled_api_configuration')
   verify_test_sources(source,test_sources)
   publish(directory/'source-contract.json',encoded({'schema':'coreutils_authenticated_source_contract/1','original_pinned_source_files':original_bindings,
@@ -626,10 +626,10 @@ def configured_acl_linkage(source):
  return parse_acl_linkage(owned_read(source/'gnulib-tests/Makefile',maximum=4*1024**2))
 
 def generated_proof(source,configure_before):
- names=('configure','Makefile.in','Makefile','config.h','config.log','config.status','gnulib-tests/Makefile.in','gnulib-tests/Makefile')
+ names=('configure','Makefile.in','Makefile','lib/config.h','config.log','config.status','gnulib-tests/Makefile.in','gnulib-tests/Makefile')
  rows={name:observed(source/name)for name in names}
  require(rows['configure']!=configure_before and b'GOLD_DESCRIPTOR_ACL'in owned_read(source/'configure',maximum=16*1024**2)
-  and b'#define GOLD_DESCRIPTOR_ACL 1'in owned_read(source/'config.h',maximum=1024**2),'real_autotools_regeneration')
+  and b'#define GOLD_DESCRIPTOR_ACL 1'in owned_read(source/'lib/config.h',maximum=1024**2),'real_autotools_regeneration')
  return {'schema':'coreutils_actual_generated_build_provenance/1','original_configure':configure_before,'actual_generated_files':rows,'actual_acl_link_metadata':configured_acl_linkage(source),
   'configured_descriptor_acl_feature':True,'debian_dh_autoreconf_noop_removed':True,'security_accepted':False}
 
