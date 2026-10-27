@@ -9,3 +9,5 @@
 /deploy/maintenance/ba938_smoke/inventory.py whitespace=-blank-at-eof
 # Preserve the original, hash-bound public dpkg status fixture without editing it.
 /tests/fixtures/ba938_inventory/dpkg-status.actual-ba938.txt whitespace=-blank-at-eol,-blank-at-eof
+# Preserve the exact reviewed inventory dependency, including its final newline.
+/deploy/maintenance/app_6de_smoke/inventory.py whitespace=-blank-at-eof
