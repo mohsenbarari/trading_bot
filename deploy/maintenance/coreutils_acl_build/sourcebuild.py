@@ -20,11 +20,16 @@ REGEN_PATCH='0003-preserve-imported-gnulib-infrastructure.patch'
 REGEN_PIN=(486,'d69eb7cb24de5f9cfbe3a88eb8b2bc4c28040fa3e7030d6b971f6936f59fef8a')
 PROBE_PATCH='0004-declare-fchownat-in-configure-probe.patch'
 PROBE_PIN=(279,'778a40348081f8ce9a99041174fce50bfc84de3a1740e8cb2d6661e0cb9eaf3d')
+LINK_PATCH='0005-qcopy-acl-transitive-link-dependencies.patch'
+LINK_PIN=(538,'053f1359be9a14f54c642523f4360fffd796b73582a21f2d2d687b9b55fab17e')
+LINK_M4_BEFORE=(8723,'fc2bbf5d7927bc85a8f91913903b23b5d3195bdbc4f98bcd9698e01dc618bbe2')
+LINK_M4_AFTER=(8955,'5ad6011fd819277a636e4b03bc4ffaf2932d812c791c48153ddbb56b497e3da7')
 FIXTURE_PIN=(9979, '5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936')
 CA_PIN=(222073,'e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7')
 RECIPE_FILES={'ordinary_fd_acl.c', 'local-source-packet.json', 'root-source-approval.json', 'sourcebuild.py', 'owned-fixture.mk', 'Dockerfile', 'ordinary_gnulib_fd0.c', 'print-vendor-selection.mk', 'verify_ordinary.py', 'gnulib-fd0-fixture.mk', 'verify_vendor_suite.py', '0002-coreutils-unfiltered-vendor-tests.patch', 'source-manifest.json', '0001-coreutils-bound-acl-callers.patch'}
 RECIPE_FILES.add(REGEN_PATCH)
 RECIPE_FILES.add(PROBE_PATCH)
+RECIPE_FILES.add(LINK_PATCH)
 ENV={'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','HOME':'/work/home','LC_ALL':'C.UTF-8','LANG':'C.UTF-8',
  'DEBIAN_FRONTEND':'noninteractive','SOURCE_DATE_EPOCH':str(SOURCE_EPOCH),
  'DEB_BUILD_OPTIONS':'parallel=2','DEB_BUILD_PROFILES':'noudeb','QUILT_PATCHES':'debian/patches','QUILT_PATCH_OPTS':'--fuzz=0'}
@@ -245,7 +250,7 @@ def builder_context():
    and type(pin['sha256'])is str and re.fullmatch('[a-f0-9]{64}',pin['sha256']),'context_binding')
   digest(RECIPE/name,(pin['bytes'],pin['sha256']))
  for name,pin in OLD_PACKAGES.items():digest(INPUTS/name,pin)
- for name,pin in ((PATCH,PATCH_PIN),(CHANGELOG,CHANGELOG_PIN),(REGEN_PATCH,REGEN_PIN),(PROBE_PATCH,PROBE_PIN),('source-manifest.json',SOURCE_MANIFEST_PIN),('ordinary_fd_acl.c',FIXTURE_PIN)):digest(RECIPE/name,pin)
+ for name,pin in ((PATCH,PATCH_PIN),(CHANGELOG,CHANGELOG_PIN),(REGEN_PATCH,REGEN_PIN),(PROBE_PATCH,PROBE_PIN),(LINK_PATCH,LINK_PIN),('source-manifest.json',SOURCE_MANIFEST_PIN),('ordinary_fd_acl.c',FIXTURE_PIN)):digest(RECIPE/name,pin)
  return ctx
 
 def source_signature(path):
@@ -418,7 +423,8 @@ def log_vendor_selection(name,raw):
 def vendor_tests():
  require(os.getuid()==os.geteuid()==os.getgid()==os.getegid()==10001 and Path.cwd()==WORK/'coreutils/source','actual_vendor_test_context')
  require(ENV['DEB_BUILD_OPTIONS']=='parallel=2'and 'nocheck'not in ENV['DEB_BUILD_OPTIONS'],'unfiltered_test_environment')
- public=WORK/'public-inputs';guard=public_guards();raw=bytes_at(public/'verify_vendor_suite.py',(14431, '6c2d5036dcc88ae3ec04bd9f9cee5c2e8a398f462db1ad50e3415edae61bb2a0'),maximum=65536)
+ public=WORK/'public-inputs';guard=public_guards();link_metadata=configured_acl_linkage(Path.cwd());forward(encoded(link_metadata),time.monotonic()+60)
+ raw=bytes_at(public/'verify_vendor_suite.py',(14431, '6c2d5036dcc88ae3ec04bd9f9cee5c2e8a398f462db1ad50e3415edae61bb2a0'),maximum=65536)
  module=ModuleType('coreutils_vendor_results');exec(compile(raw,str(public/'verify_vendor_suite.py'),'exec'),module.__dict__)
  driver=observed(Path.cwd()/'build-aux/test-driver',maximum=65536)
  forward(encoded({'schema':'coreutils_actual_generated_test_driver_source/1','binding':driver}),time.monotonic()+60);guard();module.driver_profile(driver)
@@ -436,7 +442,7 @@ def vendor_tests():
  require(all(observed((Path.cwd()if n=='coreutils'else Path.cwd()/'gnulib-tests')/'Makefile')==v for n,v in generated.items()),'configured_selection_changed')
  receipt={'schema':'coreutils_unfiltered_vendor_command/1','actual_command':['/usr/bin/dh_auto_test'],'actual_returncode':0,
   'actual_uid':os.getuid(),'actual_gid':os.getgid(),'actual_pipe_closed':True,'actual_test_driver_source':driver,'configured_default_selections_captured_before_test':True,
-  'test_filter_override_used':False,'test_bodies_modified':False,'observation':observation,'security_accepted':False}
+  'test_filter_override_used':False,'test_bodies_modified':False,'actual_acl_link_metadata':link_metadata,'observation':observation,'security_accepted':False}
  publish(WORK/'coreutils/vendor-suite.json',encoded(receipt));guard()
 
 def regeneration_inputs(source):
@@ -464,7 +470,9 @@ def build_vendor(kind):
  if kind=='coreutils':
   manifest=json.loads(bytes_at(RECIPE/'source-manifest.json',SOURCE_MANIFEST_PIN));source_contract(source,manifest,'before')
   original_bindings=original_source_bindings(source);test_sources=test_source_inventory(source);configure_before=observed(source/'configure')
-  for patch in (PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
+  digest(source/'m4/acl.m4',LINK_M4_BEFORE)
+  for patch in (PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
+  digest(source/'m4/acl.m4',LINK_M4_AFTER)
   source_contract(source,manifest,'after')
   regeneration_before=regeneration_inputs(source)
   require(all(regeneration_before[n]==pin for n,pin in manifest['regeneration_infrastructure']['original_m4_pins'].items()),'original_imported_m4_pin')
@@ -483,7 +491,8 @@ def build_vendor(kind):
   verify_test_sources(source,test_sources)
   publish(directory/'source-contract.json',encoded({'schema':'coreutils_authenticated_source_contract/1','original_pinned_source_files':original_bindings,
    'unchanged_original_vendor_tests':test_sources,'unchanged_imported_m4_and_po_infrastructure':regeneration_before,
-   'regeneration_guard_patch':{'bytes':REGEN_PIN[0],'sha256':REGEN_PIN[1]},'configure_probe_header_patch':{'bytes':PROBE_PIN[0],'sha256':PROBE_PIN[1]},'only_test_hook_delta':{'bytes':CHANGELOG_PIN[0],'sha256':CHANGELOG_PIN[1]},'security_accepted':False}))
+   'regeneration_guard_patch':{'bytes':REGEN_PIN[0],'sha256':REGEN_PIN[1]},'configure_probe_header_patch':{'bytes':PROBE_PIN[0],'sha256':PROBE_PIN[1]},'only_test_hook_delta':{'bytes':CHANGELOG_PIN[0],'sha256':CHANGELOG_PIN[1]},
+   'qcopy_acl_transitive_link_patch':{'bytes':LINK_PIN[0],'sha256':LINK_PIN[1],'original_m4_acl':{'bytes':LINK_M4_BEFORE[0],'sha256':LINK_M4_BEFORE[1]},'declared_m4_acl_after_patch':{'bytes':LINK_M4_AFTER[0],'sha256':LINK_M4_AFTER[1]},'C_and_test_bodies_changed_by_this_patch':False},'security_accepted':False}))
   publish(directory/'generated-build-proof.json',encoded(generated_proof(source,configure_before)))
   receipt=json.loads(owned_read(directory/'vendor-suite.json'));require(receipt['schema']=='coreutils_unfiltered_vendor_command/1'and receipt['actual_returncode']==0 and receipt['actual_uid']==receipt['actual_gid']==10001,'actual_vendor_suite_required')
  return source,rows,records,packaging
@@ -592,12 +601,36 @@ def verify_test_sources(source,inventory):
   elif pin['bytes']==0:require(path.is_file()and not path.is_symlink()and path.stat().st_size==0,'vendor_test_source_changed')
   else:require(observed(path)==pin,'vendor_test_source_changed')
 
+def parse_acl_linkage(raw):
+ """Actual configure substitutions and all four gnulib ACL test link stanzas.
+
+ Never evaluate Make/shell expressions. The new qcopy fallback must propagate
+ the configured file-has-acl dependencies, not a hardcoded library workaround.
+ """
+ require(type(raw)is bytes and 0<len(raw)<=4*1024**2,'acl_link_makefile_bound');variables={};tests={}
+ def assignment(name):
+  matches=re.findall(rb'^'+name.encode()+rb'[ \t]*=[ \t]*(.*)$',raw,re.M)
+  require(len(matches)==1 and len(matches[0])<=4096,'acl_link_assignment');return matches[0]
+ for name in('FILE_HAS_ACL_LIB','QCOPY_ACL_LIB','LIB_SELINUX'):
+  value=assignment(name);require(re.fullmatch(rb'[A-Za-z0-9_+.,:/=@ -]*',value)is not None,'acl_link_flags')
+  variables[name]=value.decode('ascii').split()
+ require('-lselinux'in variables['LIB_SELINUX']and bool(variables['FILE_HAS_ACL_LIB'])
+  and set(variables['LIB_SELINUX'])<=set(variables['FILE_HAS_ACL_LIB'])<=set(variables['QCOPY_ACL_LIB']),'acl_transitive_link_dependency')
+ for name,dependency in(('test_set_mode_acl_LDADD','LIB_ACL'),('test_copy_acl_LDADD','QCOPY_ACL_LIB'),('test_sameacls_LDADD','LIB_ACL'),('test_file_has_acl_LDADD','FILE_HAS_ACL_LIB')):
+  value=assignment(name);require(b'$('+dependency.encode()+b')'in value and b'$(LDADD)'in value,'acl_test_link_stanza')
+  tests[name]=value.decode('ascii')
+ return{'schema':'coreutils_actual_configured_acl_link_metadata/1','variables':variables,'all_four_gnulib_acl_test_LDADD':tests,'qcopy_transitively_carries_file_has_acl_libraries':True,
+  'test_body_or_selection_override':False,'security_accepted':False}
+
+def configured_acl_linkage(source):
+ return parse_acl_linkage(owned_read(source/'gnulib-tests/Makefile',maximum=4*1024**2))
+
 def generated_proof(source,configure_before):
  names=('configure','Makefile.in','Makefile','config.h','config.log','config.status','gnulib-tests/Makefile.in','gnulib-tests/Makefile')
  rows={name:observed(source/name)for name in names}
  require(rows['configure']!=configure_before and b'GOLD_DESCRIPTOR_ACL'in owned_read(source/'configure',maximum=16*1024**2)
   and b'#define GOLD_DESCRIPTOR_ACL 1'in owned_read(source/'config.h',maximum=1024**2),'real_autotools_regeneration')
- return {'schema':'coreutils_actual_generated_build_provenance/1','original_configure':configure_before,'actual_generated_files':rows,
+ return {'schema':'coreutils_actual_generated_build_provenance/1','original_configure':configure_before,'actual_generated_files':rows,'actual_acl_link_metadata':configured_acl_linkage(source),
   'configured_descriptor_acl_feature':True,'debian_dh_autoreconf_noop_removed':True,'security_accepted':False}
 
 def build():
