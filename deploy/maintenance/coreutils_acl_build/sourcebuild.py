@@ -15,13 +15,16 @@ SOURCE_FILES={'acl_2.4.0-1.dsc': (2624, 'b987ebbeb3d498794bad29cd65301b773849784
 OLD_PACKAGES={'libacl1_2.4.0-1~trixie+gold1_amd64.deb': (37076, 'bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1')}
 PATCH='0001-coreutils-bound-acl-callers.patch';PATCH_PIN=(60929,'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d')
 CHANGELOG='0002-coreutils-unfiltered-vendor-tests.patch';CHANGELOG_PIN=(304,'aac49190579f7b17df5d9cd6cb0d622a1b7ebe78950e3b8e27aeb1825441541d')
-SOURCE_MANIFEST_PIN=(11863,'587a5cfd75dfd4103a474e48773b3f05ef0b582c756b332279ffaf1a8f6266e0')
+SOURCE_MANIFEST_PIN=(12344,'572665dc9ca67f4ce9a45c184cc842e1123dc55bc1517162ed7b16b8542de356')
 REGEN_PATCH='0003-preserve-imported-gnulib-infrastructure.patch'
 REGEN_PIN=(486,'d69eb7cb24de5f9cfbe3a88eb8b2bc4c28040fa3e7030d6b971f6936f59fef8a')
+PROBE_PATCH='0004-declare-fchownat-in-configure-probe.patch'
+PROBE_PIN=(279,'778a40348081f8ce9a99041174fce50bfc84de3a1740e8cb2d6661e0cb9eaf3d')
 FIXTURE_PIN=(9979, '5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936')
 CA_PIN=(222073,'e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7')
 RECIPE_FILES={'ordinary_fd_acl.c', 'local-source-packet.json', 'root-source-approval.json', 'sourcebuild.py', 'owned-fixture.mk', 'Dockerfile', 'ordinary_gnulib_fd0.c', 'print-vendor-selection.mk', 'verify_ordinary.py', 'gnulib-fd0-fixture.mk', 'verify_vendor_suite.py', '0002-coreutils-unfiltered-vendor-tests.patch', 'source-manifest.json', '0001-coreutils-bound-acl-callers.patch'}
 RECIPE_FILES.add(REGEN_PATCH)
+RECIPE_FILES.add(PROBE_PATCH)
 ENV={'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','HOME':'/work/home','LC_ALL':'C.UTF-8','LANG':'C.UTF-8',
  'DEBIAN_FRONTEND':'noninteractive','SOURCE_DATE_EPOCH':str(SOURCE_EPOCH),
  'DEB_BUILD_OPTIONS':'parallel=2','DEB_BUILD_PROFILES':'noudeb','QUILT_PATCHES':'debian/patches','QUILT_PATCH_OPTS':'--fuzz=0'}
@@ -231,7 +234,7 @@ def builder_context():
    and type(pin['sha256'])is str and re.fullmatch('[a-f0-9]{64}',pin['sha256']),'context_binding')
   digest(RECIPE/name,(pin['bytes'],pin['sha256']))
  for name,pin in OLD_PACKAGES.items():digest(INPUTS/name,pin)
- for name,pin in ((PATCH,PATCH_PIN),(CHANGELOG,CHANGELOG_PIN),(REGEN_PATCH,REGEN_PIN),('source-manifest.json',SOURCE_MANIFEST_PIN),('ordinary_fd_acl.c',FIXTURE_PIN)):digest(RECIPE/name,pin)
+ for name,pin in ((PATCH,PATCH_PIN),(CHANGELOG,CHANGELOG_PIN),(REGEN_PATCH,REGEN_PIN),(PROBE_PATCH,PROBE_PIN),('source-manifest.json',SOURCE_MANIFEST_PIN),('ordinary_fd_acl.c',FIXTURE_PIN)):digest(RECIPE/name,pin)
  return ctx
 
 def source_signature(path):
@@ -305,7 +308,7 @@ def public_guards():
 
 def source_contract(source,manifest,phase):
  for name,pins in manifest['files'].items():
-  target=source/name;pin=pins.get('after_regeneration_guard',pins.get('after_test_hook',pins['after']))if phase=='after'else pins['before']
+  target=source/name;pin=pins.get('after_probe_header',pins.get('after_regeneration_guard',pins.get('after_test_hook',pins['after'])))if phase=='after'else pins['before']
   if pin is None:require(not os.path.lexists(target),'source_before_new_file')
   else:require(observed(target)==pin,'source_'+phase+'_patch')
 
@@ -354,7 +357,7 @@ def build_vendor(kind):
  if kind=='coreutils':
   manifest=json.loads(bytes_at(RECIPE/'source-manifest.json',SOURCE_MANIFEST_PIN));source_contract(source,manifest,'before')
   original_bindings=original_source_bindings(source);test_sources=test_source_inventory(source);configure_before=observed(source/'configure')
-  for patch in (PATCH,CHANGELOG,REGEN_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
+  for patch in (PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
   source_contract(source,manifest,'after')
   regeneration_before=regeneration_inputs(source)
   require(all(regeneration_before[n]==pin for n,pin in manifest['regeneration_infrastructure']['original_m4_pins'].items()),'original_imported_m4_pin')
@@ -373,7 +376,7 @@ def build_vendor(kind):
   verify_test_sources(source,test_sources)
   publish(directory/'source-contract.json',encoded({'schema':'coreutils_authenticated_source_contract/1','original_pinned_source_files':original_bindings,
    'unchanged_original_vendor_tests':test_sources,'unchanged_imported_m4_and_po_infrastructure':regeneration_before,
-   'regeneration_guard_patch':{'bytes':REGEN_PIN[0],'sha256':REGEN_PIN[1]},'only_test_hook_delta':{'bytes':CHANGELOG_PIN[0],'sha256':CHANGELOG_PIN[1]},'security_accepted':False}))
+   'regeneration_guard_patch':{'bytes':REGEN_PIN[0],'sha256':REGEN_PIN[1]},'configure_probe_header_patch':{'bytes':PROBE_PIN[0],'sha256':PROBE_PIN[1]},'only_test_hook_delta':{'bytes':CHANGELOG_PIN[0],'sha256':CHANGELOG_PIN[1]},'security_accepted':False}))
   publish(directory/'generated-build-proof.json',encoded(generated_proof(source,configure_before)))
   receipt=json.loads(owned_read(directory/'vendor-suite.json'));require(receipt['schema']=='coreutils_unfiltered_vendor_command/1'and receipt['actual_returncode']==0 and receipt['actual_uid']==receipt['actual_gid']==10001,'actual_vendor_suite_required')
  return source,rows,records,packaging

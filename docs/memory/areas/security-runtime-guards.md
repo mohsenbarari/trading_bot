@@ -1,14 +1,13 @@
 # Security runtime verification guards
 
-- Docker Health can be absent; null never means healthy. Public Env deltas need
-  literal-byte writers and real serialization tests, not the report validator.
+- Docker Health is optional; null means unknown. Public Env deltas need
+  literal-byte writers and real serialization tests.
 - Artifact modes are typed: public source0644, private controls0600. Never
   change originals or substitute an identity mask for genuine UID/GID tests.
 - Docker cp cannot target tmpfs. Stage public CA bytes under /build and verify
   before HTTPS; never read private PKI for this purpose.
-- Ubuntu compatibility probes use -I -S -B to exclude stock sitecustomize.
-  Keep loader guards. Output and payload bounds are distinct; no Go address
-  space limit inherited from a small receipt helper.
+- Ubuntu probes use -I -S -B to exclude sitecustomize. Keep loader guards and
+  separate output/payload bounds; never inherit small-receipt RLIMIT_AS into Go.
 - Removed cgroup directories may retain nlink2. Prove closure with held
   directory/events, named absence and relative ENOENT/retained ENODEV; polling
   alone is insufficient. Never relax regular-file unlink checks.
@@ -35,6 +34,8 @@
 - FIFO writes naturally change mtime/ctime. Bind original dev/inode/mode/uid/gid/
   nlink/size and fd flags, plus exact stream length/hash/EOF; timestamps are
   observations. Keep every regular-file full9 guard unchanged.
+- Host PID claims need host-visible processes. Retired dev/inode numbers can be
+  reused; identify the actual mapped public payload before calling it an old library.
 - Admit new adapter refusal codes in the outer closed mapping before costly CI;
   unknown exception operands remain private. Budget repeated source guards and
   full hashes within the global deadline; timing alone is an inferred cause.

@@ -177,3 +177,23 @@ The original Cpatch/SDK/compiler base, full GNU selection and suites remain
 byteexact03. Root's clean active controller formatting is inherited. Prior
 Root integration/pathspec copies outside the source tree are excluded from04
 (their originals remain preserved); they are not new execution evidence.
+
+
+Successor05 responds only to the fully retained authentic failed CI40486023971.
+The real regenerated configure's private ACL AC_LINK_IFELSE test failed under
+unchanged -Werror=implicit-function-declaration solely because fchownat's
+unistd.h was missing. Earlier real configure already detected fchownat. The
+separate279-byte0004 patch adds exactly that declaring header; the original
+60929-byte Cpatch remains byteexact. The final configure.ac must match the new
+separate33402-byte source hash after all four admitted patches. Official
+versioned glibc2.41, authenticated ACL2.4 headers and Debian attr2.5.2 headers
+map every other direct call to its existing included declaration. This is a
+SOURCE header audit, never an assertion that a new C link/build already passed.
+
+Actual owned source-only patch fuzz0 reconstruction verifies both the complete
+final private-probe source and Debian rules. No Werror, typed ACL function
+pointer, flag assertion, actual regeneration/GOLD/link test, library/runtime
+binding, native fixture or full GNU test gate is disabled or cached away.
+Root must run a fresh real CI; the complete failed04 output and all predecessors
+remain preserved. No compiler, Autoconf, linker, package, Git, Docker or live
+operation was executed by the SOURCE preparer.

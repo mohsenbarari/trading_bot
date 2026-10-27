@@ -1,0 +1,10 @@
+--- a/configure.ac
++++ b/configure.ac
+@@ -72,6 +72,7 @@
+ AC_MSG_CHECKING([for nonzero object flags and the real descriptor ACL ABI])
+ AC_LINK_IFELSE([AC_LANG_PROGRAM([[
+ #include <fcntl.h>
++#include <unistd.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <sys/acl.h>
