@@ -178,6 +178,23 @@ class SourceTests(unittest.TestCase):
      self.assertEqual(changed,[True])
     else:
      with self.assertRaisesRegex(RuntimeError,'owned_path'if kind=='symlink'else'owned_file'):self.check_postbuild_header(source)
+ def test_complete_coreutils_install_uses_exact_lintian_leaf_not_subtree_override(self):
+  # Captured argv only: no package is read or installed, no policy is edited.
+  calls=[]
+  def command(argv,**kw):calls.append((argv,kw));return b''
+  def metadata(argv):self.assertEqual(argv,['/usr/bin/dpkg','--audit']);return b''
+  with patch.object(self.source,'command',command),patch.object(self.source,'metadata',metadata):self.source.install_packages([Path('/OWNED-NOT-OPENED/coreutils.deb')],documentation=('coreutils',),complete_package_payload=True)
+  self.assertEqual(len(calls),1);argv,options=calls[0];self.assertEqual(options,{'timeout':120});self.assertEqual(argv[0],'/usr/bin/dpkg');self.assertEqual(argv[-2:],['--install','/OWNED-NOT-OPENED/coreutils.deb'])
+  expected=['--path-include='+name for root in('/usr/share/doc/coreutils','/usr/share/locale','/usr/share/man','/usr/share/info')for name in(root,root+'/*')]+['--path-include=/usr/share/lintian/overrides/coreutils']
+  self.assertEqual(argv[1:-2],expected);self.assertEqual(argv.count('--path-include=/usr/share/lintian/overrides/coreutils'),1)
+  for bad in('--path-include=/usr/share/lintian/*','--path-include=/usr/share/lintian/overrides/*','--path-include=/usr/share/*','--force-all'):self.assertNotIn(bad,argv)
+ def test_noncomplete_SDK_install_and_package_audit_keep_existing_boundaries(self):
+  calls=[]
+  with patch.object(self.source,'command',side_effect=lambda argv,**kw:calls.append(argv)),patch.object(self.source,'metadata',return_value=b''):
+   self.source.install_packages([Path('/OWNED-NOT-OPENED/libacl.deb')],documentation=('libacl1',))
+  self.assertEqual(calls,[['/usr/bin/dpkg','--path-include=/usr/share/doc/libacl1','--path-include=/usr/share/doc/libacl1/*','--install','/OWNED-NOT-OPENED/libacl.deb']])
+  with patch.object(self.source,'command',return_value=b''),patch.object(self.source,'metadata',return_value=b'OWNED failing package audit'),self.assertRaisesRegex(RuntimeError,'dpkg_audit'):
+   self.source.install_packages([Path('/OWNED-NOT-OPENED/coreutils.deb')],documentation=('coreutils',),complete_package_payload=True)
  def test_host_refuses_nonhosted_actual_context(self):
   with self.assertRaisesRegex(RuntimeError,'hosted_job'):self.host.hosted_layout(SimpleNamespace(),{})
  def test_capacity_requires_real_full_suite_allowance(self):

@@ -537,3 +537,22 @@ export/native/ABI/image/security acceptance is inferred from it. Root source
 review and a fresh ordinary CI run remain required. PRIMARY_FINDINGS.md binds
 the exact public primary files and actual failed-CI log that establish this
 path correction.
+
+
+## Source13: preserve the exact lintian package leaf
+
+The slim base excludes /usr/share/lintian/overrides/*, although Coreutils DEB
+contains /usr/share/lintian/overrides/coreutils. Complete Coreutils installation
+now includes exactly that leaf in addition to the existing doc/locale/man/info
+roots. SDK/noncomplete calls retain their old arguments, and global dpkg policy
+is unchanged. All-member regular_payload remains mandatory and byte-identical:
+unknown/missing paths and changed bytes/modes/owners/links still refuse.
+
+Two captured-command SOURCE methods verify the exact narrow argv, absence of
+broader lintian/subtree/force flags, unchanged SDK command and mandatory failing
+dpkg-audit refusal. No package is installed by these tests. The author selected
+62 Python tests, all pass without skips; Root must still run all64 genuine HOST
+cases. No actual new build/native/ABI/export/security acceptance is claimed.
+The actual candidate inventory was not exported by the failed prior CI, so
+POLICY_COVERAGE_SOURCE.json records remaining unknown classes honestly and does
+not grant absence waivers. A fresh full real build remains required.
