@@ -33,7 +33,7 @@ class ProductSourceTests(unittest.TestCase):
   self.assertIn('COPY scripts/probe_python_micro_release.py /usr/local/libexec/probe_python_micro_release.py',self.S.RELEASE_COPY_LINES)
   self.assertEqual(len(self.S.release_files()),20);self.assertEqual(self.M.source_parameters()['count'],93)
   for role,spec in self.M.ROLE_MAP.items():
-   self.assertEqual(len(self.S.release_files(role)),21);self.assertEqual(len(self.M.controller_files(role)),len(self.M.CONTROLLER_FILES)+2)
+   self.assertEqual(len(self.S.release_files(role)),21);self.assertEqual(len(self.M.controller_files(role)),len(self.M.CONTROLLER_FILES)+3)
  def test_owned_unarmed_driver_policy_refuses_without_operations(self):
   with patch.object(self.M,'EXECUTION_ARMED',False),patch.object(self.M,'normal_build',side_effect=AssertionError('no operation')):
    with redirect_stdout(io.StringIO())as out:self.assertEqual(self.M.main([]),0)

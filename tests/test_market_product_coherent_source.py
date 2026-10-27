@@ -53,7 +53,7 @@ class CoherentSourceTests(unittest.TestCase):
         self.assertTrue(self.S.copy_contract((ROOT / 'deploy/market-data/Dockerfile.capture2').read_bytes()))
         for role in self.M.ROLE_MAP:
             self.assertEqual(len(self.S.release_files(role)), 21)
-            self.assertEqual(len(self.M.controller_files(role)), 32)
+            self.assertEqual(len(self.M.controller_files(role)), 33)
 
     def test_all_three_exact_role_parcel_sizes_have_one_extra_index(self):
         helper = load('tests/test_market_role_normal_builder.py')
@@ -71,9 +71,9 @@ class CoherentSourceTests(unittest.TestCase):
             self.M.receipt_contract(receipt, signature, controllers, cache, 1793085646)
             values = self.M.controller_parcel_inputs(Path('/OWNED-NOT-OPENED'),
                                                       receipt, controllers, cache)
-            self.assertEqual(len(values), {93: 172, 94: 173, 95: 174}[spec['count']])
+            self.assertEqual(len(values), {93: 173, 94: 174, 95: 175}[spec['count']])
             sizes.add((len(values), len(values) + 1))
-        self.assertEqual(sizes, {(172, 173), (173, 174), (174, 175)})
+        self.assertEqual(sizes, {(173, 174), (174, 175), (175, 176)})
 
 
 if __name__ == '__main__':

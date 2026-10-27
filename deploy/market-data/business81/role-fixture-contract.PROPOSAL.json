@@ -1,0 +1,299 @@
+{
+  "F79_fixture_bytes_modified": false,
+  "approved": false,
+  "business_code_modified": false,
+  "catalog": {
+    "bytes": 179771,
+    "sha256": "33c092cafd2cd301bd1f7b92a73aeca7c685ea189ddc44e8f98bd8d7c09c2831"
+  },
+  "changes": {
+    "canonical": {
+      "after_sha256": "7b9c35e7ceab5dd66c53c45ac419ea8bf04c5c3bc06167e00ae4afcc25c2a128",
+      "before_sha256": "e397cb2b0f7bb7b98969d73233db66a5dc30b9122f9b7b0839d2c8d082a0672f",
+      "class": "ReplayManifestDigestTests",
+      "method": "test_streaming_summary_matches_existing_canonical_contract"
+    },
+    "migration": {
+      "after_sha256": "748023b7db8ba933e89ccd5e43787e01e7e6319a0ea8b082f956450766bdbdd3",
+      "before_sha256": "9acbdcf493ca6712d57101d8d513778ff89fa7847e7a744d8c22a91893c5209d",
+      "class": "ExplicitBackfillAdapterTests",
+      "method": "test_schema_v6_migrates_to_v8_lineage_without_raw_columns"
+    },
+    "retry": {
+      "after_sha256": "e04509af906cd17651cb6b400a1cdc993b979e491e482f85f90a429da711030e",
+      "before_sha256": "191c4b9dd56a30a83f9315f7916a94e79fceeb393c8881a364de5e4fc744fe33",
+      "class": "CaptureFixture",
+      "method": "test_explicit_backfill_retries_after_transport_interruption"
+    }
+  },
+  "components": {
+    "0c440e791bde77790179ef65b30b9f5abda5434287c09bf87648b61f19011157": {
+      "business_commit": "6cad2c7e4a4b4622ec3610ddb91cce32cd04f2c0",
+      "business_tree": "c3a25a925927802f413dc1eda59ca87b3af3e6b7",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "native/market-store-adapter"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115011,
+          "git_blob": "1efcf4d23cecb2e0112a9f667848667e7de6985a",
+          "sha256": "a1dd60e539cce2252beb643e375cc925986ec98e08736e49192491f3d78cfc0d"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "12cac77ad8481fa6d11f7885c97ab4e8593290ed70cf388a7b15e86c4139dbad": {
+      "business_commit": "4ee3fd21003ebb3038a2e4b572ca2eb01cb45d2f",
+      "business_tree": "c63f575f2a67287076a2188a72494ee236b2109c",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "web/market-capture-account1"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 107308,
+          "git_blob": "429473cc6fd95918a72fc3cb9fd47f1d86a03fd6",
+          "sha256": "dccb2760de7c36cd34dcd3bd4e440a2ebf43a8a3b13ef276c0495d71dd1a94e3"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "45ccb288a62edc6a5f08042ca33060ce81ca45e34a2a2bf4e18b55f2de73a884": {
+      "business_commit": "89b64c47c952c6f6a6ba75df2b2f40d0208de196",
+      "business_tree": "9ba0c52b9a9d3a1cbdb01d0417eaa9891b2585e2",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "web/estimator-snapshot-receiver"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115011,
+          "git_blob": "1efcf4d23cecb2e0112a9f667848667e7de6985a",
+          "sha256": "a1dd60e539cce2252beb643e375cc925986ec98e08736e49192491f3d78cfc0d"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "4a848dcf6a46d6f5a0f0e2784f537f6deb2cd6722fcb6ae580a12dfdc7cbf53d": {
+      "business_commit": "064451c17c9f2f1b72f3f33fbe68f15fc1384f60",
+      "business_tree": "7f7f209b17b06984b2ac2fa989177277ed876b24",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "web/market-fact-sync-worker"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115011,
+          "git_blob": "1efcf4d23cecb2e0112a9f667848667e7de6985a",
+          "sha256": "a1dd60e539cce2252beb643e375cc925986ec98e08736e49192491f3d78cfc0d"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "5cc7196abb5cfafeb5ca00aab2d34579c94d493c933768253bfba7a34d995c30": {
+      "business_commit": "db0f8eba339b830ab7ae5fb1c810f149992458b3",
+      "business_tree": "e956bcc0ae619fd7495bb4ba41d8a1aeaa7885c1",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "web/market-processor"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115861,
+          "git_blob": "a244f712f416d90b5b49219aeeece7c8ab65f0c8",
+          "sha256": "3a188d3291d66fab54da359cd5f613d00642899c71a1ddf814abf9116b0e2288"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "83c61098e5581bcb9795859444df9730888c46cac911046f293a8056ef3bc3c1": {
+      "business_commit": "c9f8ada468c94af99a30ede8cdcbd9a220e9b917",
+      "business_tree": "08d9d82693f8a42a49da89067c4def1862ce1e83",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "native/market-fact-receiver"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115011,
+          "git_blob": "1efcf4d23cecb2e0112a9f667848667e7de6985a",
+          "sha256": "a1dd60e539cce2252beb643e375cc925986ec98e08736e49192491f3d78cfc0d"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "971dc9e57b1a4220b3604af0ed101377a62ae7b9f6510340b0cc9c6b9a3cb33f": {
+      "business_commit": "6c7bfb3fe3714f1b9ecb375e68bbb0b1263ef328",
+      "business_tree": "bc90e1224cda5bd2c58be81ea2aa12d1c6fbcadd",
+      "changes": [
+        "canonical"
+      ],
+      "facts": {
+        "min_id_resume": false,
+        "schema": 8,
+        "streamer": false
+      },
+      "roles": [
+        "native/estimator-snapshot-sender",
+        "web/market-capture-external"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 97196,
+          "git_blob": "78e0f97ee9bba1aec71678c4aee007c1d968a838",
+          "sha256": "f8e0a43c29c5c8695cf17146e584d5c9761f32b829f6a65246235498fb9c1b8a"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 110403,
+          "git_blob": "6683f4273675996e5de97068fbb95cd06681078e",
+          "sha256": "d8f15f8212b9510e3abb5301d0201b2ba1eca13224f5a01c682d1de6716cb7d5"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 56967,
+          "git_blob": "df6b523711b747036acd00a74f37864ee2249f05",
+          "sha256": "75db6178b8f254ae3af5ca679d6e81dd2c3d72074fff78431e718865488aa327"
+        }
+      }
+    },
+    "fc622107fadf1de9adec789425c1d3816271829e1310b75347a524c5c104bbcd": {
+      "business_commit": "f4871edbe507546a0a6544c56bc7d6b34bf770a6",
+      "business_tree": "9b049e5031a33f416b6c6a2a45d89c3ba334fc3e",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "native/coin-estimator"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115011,
+          "git_blob": "1efcf4d23cecb2e0112a9f667848667e7de6985a",
+          "sha256": "a1dd60e539cce2252beb643e375cc925986ec98e08736e49192491f3d78cfc0d"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    }
+  },
+  "original_test_IDs_and_79_1_1_selection_preserved": true,
+  "required_root_review": "Exact three scoped method bodies and authenticated component facts; no generic latest-schema or kwargs fallback",
+  "schema": "market_role_scoped_fixture_contract_proposal/1",
+  "security_accepted": false
+}

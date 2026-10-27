@@ -5,6 +5,7 @@ The actual CI producer must still run every declared profile on the admitted
 candidate image. This preparer never returns a completed-business-test receipt.
 """
 from hashlib import sha1,sha256
+from types import ModuleType
 from pathlib import Path,PurePosixPath
 import argparse,ast,json,os,re,stat,time
 
@@ -80,12 +81,24 @@ CAPTURE='tests/test_market_pipeline_stage4_capture.py'
 MODULES=('test_market_pipeline_stage3_foundation','test_market_pipeline_stage4_capture',
  'test_market_pipeline_stage5_coin_processor','test_market_pipeline_stage6_channel_processor','test_market_private_pipeline_contracts')
 HELPERS={
- 'run_business81.py':(22729,'a5ea5d68b852d7a09231040d911cb7c5f95300cb085fac36601c96839539aa75'),
+ 'run_business81.py':(23747,'61e040557b222edbb20268e975569fa7ac70fa3f9592ef81b1651b0043c448be'),
  'test_guard_source.py':(1055,'eddfce484567bccb6cfe40f4587f89aad9d700104ca99fb09f0f6ebe5eca4340'),
  'product_check_source.py':(2292,'e022ec3d0847808167f2401fd5208f04506fa723f0433312ab6606f31a88a007'),
  'f79-business-test-selection.json':(17201,SELECTION_SHA),
  'accepted-f79-business-manifest.json':(27889,BUSINESS_SHA)}
 
+
+ROLE_FIXTURE_HELPER='role_fixture_contract.py'
+ROLE_FIXTURE_HELPER_PIN=(26890, 'd5d65f0b3cec4cef197c2684bec9865875b5669c6112bbced57d3e0efde7e686')
+ROLE_FIXTURE_CONTRACT_SHA256='b1ceeb9eb95de2696a55781c8e47267b2c5597ac126a6e8e0663622b94cc37be'
+# Requires separate actual Root source review; no document/CLI arms this.
+ROLE_FIXTURE_CONTRACT_APPROVED_SHA256='b1ceeb9eb95de2696a55781c8e47267b2c5597ac126a6e8e0663622b94cc37be'
+
+def role_fixture_helper(raw):
+ need(type(raw)is bytes and(len(raw),sha256(raw).hexdigest())==ROLE_FIXTURE_HELPER_PIN,'role_fixture_helper_pin')
+ need(ROLE_FIXTURE_CONTRACT_APPROVED_SHA256==ROLE_FIXTURE_CONTRACT_SHA256,'separate_role_fixture_review_required')
+ value=ModuleType('_exact_role_fixture_contract');exec(compile(raw,'<sealed-role-fixture-contract>','exec'),value.__dict__)
+ need(value.CONTRACT_SHA256==ROLE_FIXTURE_CONTRACT_SHA256,'role_fixture_contract_pin');return value
 
 def need(value,code):
  if not value:raise RuntimeError(code)
@@ -211,12 +224,17 @@ def prepare_bundle(selection,base,replay,*,image,release_commit,two_git_signatur
  need(type(recipe_spec)is dict and set(recipe_spec)=={'path','source_commit','bytes','sha256','git_blob'}
   and recipe_spec['path']=='deploy/market-data/Dockerfile.capture2'and recipe_spec['source_commit']==release_commit
   and(len(release_recipe),sha256(release_recipe).hexdigest(),blob(release_recipe))==(recipe_spec['bytes'],recipe_spec['sha256'],recipe_spec['git_blob']),'release_recipe_source')
+ role_helper=role_fixture_helper(helper_sources[ROLE_FIXTURE_HELPER])if candidate_product is not None else None
+ component=candidate_product['role_source']['rows_sha256']if candidate_product is not None else None
  contents={};rows=[];originals={r['path']:r for r in selection['historical_fixture_files']}
  for prefix in('base','replay'):
   for name,before in base.items():
    spec=selection['capture_added_replay_test_source']if prefix=='replay'and name==CAPTURE else originals[name]
    raw=replay if prefix=='replay'and name==CAPTURE else before;original=raw;transform='none'
    if name==FOUNDATION:raw=raw.replace(OLD_ASSERTION,NEW_ASSERTION,1);transform='reviewed_security_base_assertion_only'
+   if role_helper is not None and name==CAPTURE:
+    raw,changes=role_helper.propose(raw,component,fixture=prefix)
+    if changes:transform='reviewed_role_fixture_contract'
    path=prefix+'/'+name;contents[path]=raw;rows.append({'path':path,'bytes':len(raw),'sha256':sha256(raw).hexdigest(),
     'original_bytes':len(original),'original_sha256':sha256(original).hexdigest(),'git_blob':spec['git_blob'],
     'source_commit':spec['source_commit'],'transformation':transform})
@@ -224,7 +242,7 @@ def prepare_bundle(selection,base,replay,*,image,release_commit,two_git_signatur
   rows.append({'path':path,'bytes':len(release_recipe),'sha256':sha256(release_recipe).hexdigest(),
    'original_bytes':len(release_recipe),'original_sha256':sha256(release_recipe).hexdigest(),'git_blob':recipe_spec['git_blob'],
    'source_commit':release_commit,'transformation':'release_build_recipe'})
- need(type(helper_sources)is dict and set(helper_sources)==set(HELPERS),'helper_inventory')
+ need(type(helper_sources)is dict and set(helper_sources)==set(HELPERS)|({ROLE_FIXTURE_HELPER}if candidate_product is not None else set()),'helper_inventory')
  for name,(size,digest)in HELPERS.items():
   raw=helper_sources[name];need(type(raw)is bytes and 0<len(raw)<=131072 and(size is None or len(raw)==size)
    and sha256(raw).hexdigest()==digest,'helper_pin');contents[name]=raw
@@ -236,7 +254,9 @@ def prepare_bundle(selection,base,replay,*,image,release_commit,two_git_signatur
   'security_assertion_update':{'path':FOUNDATION,'old_line':OLD_ASSERTION.decode(),'new_line':NEW_ASSERTION.decode(),
    'approved_source_delta_sha256':approved_assertion_source_sha256},'security_accepted':False}
  if candidate_product is not None:
-  manifest['schema']='normal_market_business81_sources/3'
+  manifest['schema']='normal_market_business81_sources/4'
+  manifest['role_fixture_update']=role_helper.update_metadata(component)
+  contents[ROLE_FIXTURE_HELPER]=helper_sources[ROLE_FIXTURE_HELPER]
   manifest['fixture_business_provenance']={key:manifest.pop(key)for key in('business_commit','business_tree','business_manifest_sha256')}
   manifest['candidate_product']=candidate_product
   contents['role-business-components.json']=role_catalog_raw

@@ -151,17 +151,21 @@ def execute(args):
  evidence=Path('/evidence');held=Held();value=None
  try:
   manifest_raw=held.read(evidence/'suite-manifest.json',4*1024**2);need(sha256(manifest_raw).hexdigest()==args.manifest_sha256,'manifest_pin');manifest=json.loads(manifest_raw)
-  role_candidate=manifest.get('schema')=='normal_market_business81_sources/3'
+  role_candidate=manifest.get('schema')=='normal_market_business81_sources/4'
   keys={'schema','image_id','release_commit','two_git_input_signature','business_commit','business_tree','selection_sha256','business_manifest_sha256','files','runner_sha256','release_recipe_path','security_assertion_update','security_accepted'}
-  if role_candidate:keys=keys-{'business_commit','business_tree','business_manifest_sha256'}|{'candidate_product','fixture_business_provenance'}
+  if role_candidate:keys=keys-{'business_commit','business_tree','business_manifest_sha256'}|{'candidate_product','fixture_business_provenance','role_fixture_update'}
   fixture_provenance=manifest['fixture_business_provenance']if role_candidate else{k:manifest[k]for k in('business_commit','business_tree','business_manifest_sha256')}
   need(set(fixture_provenance)=={'business_commit','business_tree','business_manifest_sha256'},'manifest')
   spec=candidate_spec(manifest['candidate_product'])if role_candidate else None
   need(set(manifest)==keys
-   and manifest['release_recipe_path']=='deploy/market-data/Dockerfile.capture2'and manifest['schema']==('normal_market_business81_sources/3'if role_candidate else'normal_market_business81_sources/2')and manifest['image_id']==args.image_id
+   and manifest['release_recipe_path']=='deploy/market-data/Dockerfile.capture2'and manifest['schema']==('normal_market_business81_sources/4'if role_candidate else'normal_market_business81_sources/2')and manifest['image_id']==args.image_id
    and re.fullmatch('[a-f0-9]{40}',manifest['release_commit'])and re.fullmatch('[a-f0-9]{64}',manifest['two_git_input_signature'])
    and fixture_provenance['business_commit']==BUSINESS_COMMIT and fixture_provenance['business_tree']==BUSINESS_TREE
    and manifest['selection_sha256']==SELECTION_SHA and fixture_provenance['business_manifest_sha256']==BUSINESS_SHA and manifest['security_accepted']is False,'manifest')
+  role_helper=None;component=None
+  if role_candidate:
+   helper_raw=held.read(evidence/'role_fixture_contract.py',131072);need((len(helper_raw),sha256(helper_raw).hexdigest())==ROLE_FIXTURE_HELPER_PIN,'role_fixture_helper_pin');role_helper=ModuleType('_sealed_role_fixture_contract');exec(compile(helper_raw,'<sealed-role-fixture-contract>','exec'),role_helper.__dict__);component=manifest['candidate_product']['role_source']['rows_sha256']
+   need(manifest['role_fixture_update']==role_helper.update_metadata(component),'role_fixture_contract')
   need(sha256(held.read(evidence/'run_business81.py',131072)).hexdigest()==manifest['runner_sha256'],'runner_pin')
   selection_raw=held.read(evidence/'f79-business-test-selection.json',32768);business_raw=held.read(evidence/'accepted-f79-business-manifest.json',65536)
   need(sha256(selection_raw).hexdigest()==SELECTION_SHA and sha256(business_raw).hexdigest()==BUSINESS_SHA,'baseline_pin')
@@ -170,7 +174,7 @@ def execute(args):
   expected_paths={prefix+'/'+r['path']for prefix in('base','replay')for r in selection['historical_fixture_files']}|{prefix+'/deploy/market-data/Dockerfile'for prefix in('base','replay')}
   need(set(by_path)==expected_paths,'fixture_inventory')
   declared=expected_paths|{'run_business81.py','test_guard_source.py','product_check_source.py','f79-business-test-selection.json','accepted-f79-business-manifest.json','suite-manifest.json'}
-  if role_candidate:declared.add('role-business-components.json')
+  if role_candidate:declared.update({'role-business-components.json','role_fixture_contract.py'})
   inventory(evidence,declared);sources={}
   for name,row in by_path.items():
    raw=held.read(evidence/name,4*1024**2);need(type(row)is dict and set(row)=={'path','bytes','sha256','original_bytes','original_sha256','git_blob','source_commit','transformation'}
@@ -181,7 +185,9 @@ def execute(args):
      and row['git_blob']==sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest(),'release_recipe')
    else:
     original=raw
-    if row['transformation']=='reviewed_security_base_assertion_only':
+    if row['transformation']=='reviewed_role_fixture_contract':
+     need(role_helper is not None and name in{'base/tests/test_market_pipeline_stage4_capture.py','replay/tests/test_market_pipeline_stage4_capture.py'},'role_fixture_contract');original=role_helper.restore(raw,component,fixture=name.split('/',1)[0])
+    elif row['transformation']=='reviewed_security_base_assertion_only':
      update=manifest['security_assertion_update'];need(name.endswith('tests/test_market_pipeline_stage3_foundation.py')and type(update)is dict
       and set(update)=={'path','old_line','new_line','approved_source_delta_sha256'}
       and update['path']=='tests/test_market_pipeline_stage3_foundation.py'and update['approved_source_delta_sha256']==row['sha256']
@@ -248,6 +254,7 @@ def execute(args):
  return value
 
 
+ROLE_FIXTURE_HELPER_PIN=(26890, 'd5d65f0b3cec4cef197c2684bec9865875b5669c6112bbced57d3e0efde7e686')
 GUARD_SHA='eddfce484567bccb6cfe40f4587f89aad9d700104ca99fb09f0f6ebe5eca4340'
 PRODUCT_CHECK_SHA='e022ec3d0847808167f2401fd5208f04506fa723f0433312ab6606f31a88a007'
 OLD_ASSERTION='        self.assertIn("python:3.11-slim-bookworm@sha256:", dockerfile)\n'

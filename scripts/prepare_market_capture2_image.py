@@ -107,7 +107,7 @@ def require_selected(receipt,role):
 
 def controller_files(role=None):
  need(role is None or type(role)is str and role in ROLE_MAP,'role_component')
- return CONTROLLER_FILES if role is None else(*CONTROLLER_FILES,ROLE_READER,ROLE_CATALOG_PATH)
+ return CONTROLLER_FILES if role is None else(*CONTROLLER_FILES,ROLE_READER,ROLE_CATALOG_PATH,BUSINESS_DIR+'/role_fixture_contract.py')
 
 def business_schema(receipt):
  return 'normal_market_historical81_business_tests/2'if receipt.get('schema')=='normal_market_git_component_inputs/2'else'normal_market_historical81_business_tests/1'
@@ -115,6 +115,7 @@ def business_schema(receipt):
 def preflight_assertion_sources(raws):
  # Source approval only. No candidate image, plan or completed-test DTO is invented.
  B=module(raws[BUSINESS],Path(BUSINESS));O=module(raws[OUTER],Path(OUTER))
+ if BUSINESS_DIR+'/role_fixture_contract.py'in raws:B.role_fixture_helper(raws[BUSINESS_DIR+'/role_fixture_contract.py'])
  proposal,_=B.security_assertion_proposal(raws[BUSINESS_DIR+'/fixtures/base/'+B.FOUNDATION])
  update={'path':B.FOUNDATION,'old_line':B.OLD_ASSERTION.decode(),'new_line':B.NEW_ASSERTION.decode(),
   'approved_source_delta_sha256':proposal['after']['sha256']}
@@ -227,7 +228,7 @@ def git(repo,*args,maximum=MAX_SOURCE):
  return command(['/usr/bin/git','--no-optional-locks','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C',str(repo),*args],
   environment=env,seconds=30,maximum=maximum)
 def git_source(repo,commit,path):
- need(hex40(commit)and path in (*CONTROLLER_FILES,ROLE_READER,ROLE_CATALOG_PATH),'controller_source')
+ need(hex40(commit)and path in (*CONTROLLER_FILES,ROLE_READER,ROLE_CATALOG_PATH,BUSINESS_DIR+'/role_fixture_contract.py'),'controller_source')
  operand=commit+':'+path;size=git(repo,'cat-file','-s',operand,maximum=64)
  need(re.fullmatch(rb'[1-9][0-9]{0,5}\n',size)and int(size)<=MAX_CONTROLLER_SOURCE,'controller_source_bound')
  raw=git(repo,'cat-file','blob',operand,maximum=int(size));need(len(raw)==int(size),'controller_source_bound')
@@ -603,6 +604,7 @@ def historical81_sources(raws,release,receipt,image,signature,context):
  accepted=Held(context/'deploy/market-data/accepted-f79-business.manifest.json',maximum=65536,binding={k:required['deploy/market-data/accepted-f79-business.manifest.json'][k]for k in('bytes','sha256')})
  try:
   helpers={name:(accepted.raw()if name=='accepted-f79-business-manifest.json'else raws[BUSINESS_DIR+'/'+name])for name in B.HELPERS}
+  if role:helpers[B.ROLE_FIXTURE_HELPER]=raws[BUSINESS_DIR+'/'+B.ROLE_FIXTURE_HELPER]
   approval=document(raws[BUSINESS_DIR+'/python31118-root-assertion-approval.json'])
   contents,manifest,plans=B.prepare_bundle(selection,base,replay,image=image,release_commit=receipt['release_commit'],two_git_signature=signature,
    release_recipe=recipe.raw(),recipe_spec={'path':'deploy/market-data/Dockerfile.capture2','source_commit':receipt['release_commit'],**{k:recipe_pin[k]for k in('bytes','sha256','git_blob')}},
@@ -1171,7 +1173,7 @@ def main(argv=None,*,retained=None,final_checks=None):
  print(json.dumps(value,sort_keys=True));return 0
 
 CODES=frozenset(('archive_bound', 'archive_config', 'archive_shape', 'arguments', 'build_contract', 'build_not_completed', 'build_receipt', 'buildx_driver', 'cache_binding', 'cache_inventory', 'clean_main_required', 'command_bound', 'command_contract', 'command_failed', 'command_timeout', 'context_bound', 'context_changed', 'context_directory', 'context_inventory', 'controller_inventory', 'controller_signature', 'controller_source', 'controller_source_bound', 'disk_reserve', 'export_not_completed', 'historical81_business_producer_not_integrated', 'hosted_main_only', 'image_config', 'image_identity', 'image_labels', 'image_layers', 'json_bound', 'json_duplicate', 'json_nonfinite', 'live_main_changed', 'live_main_scope', 'normal_main_integration_unarmed', 'normal_workflow_token_required', 'output_bound', 'output_write', 'probe_cleanup', 'probe_exit', 'probe_isolation', 'probe_mounts', 'probe_owner', 'probe_resources', 'probe_scope', 'raw_high_critical_findings', 'release_commit', 'report_changed', 'report_identity', 'report_shape', 'repository_identity', 'root_scope', 'source93_probe', 'source_binding', 'source_bound', 'source_changed', 'source_contract', 'source_epoch', 'source_file', 'source_parent', 'sqlite_lock', 'sqlite_probe', 'two_git_signature', 'vendor_lock'))
-CODES=CODES|frozenset(('coreutils_lock','role_component','role_catalog','role_manifest','role_receipt','role_candidate','reader_role_source_pin','reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
+CODES=CODES|frozenset(('separate_role_fixture_review_required','role_fixture_helper_pin','role_fixture_contract_pin','coreutils_lock','role_component','role_catalog','role_manifest','role_receipt','role_candidate','reader_role_source_pin','reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
 def closed_failure(error):
  def fields(exc):
   code=exc.args[0]if type(exc)is RuntimeError and len(exc.args)==1 and type(exc.args[0])is str and exc.args[0]in CODES else'unclassified'
