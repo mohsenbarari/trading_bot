@@ -1,3 +1,140 @@
+# App06 — portable historical QA pins only
+
+This source successor changes ONLY the historical-comparison QA dependency in
+test_distribution_absence.py. The actual tracked deployment directory has no
+.local/security-canonical-app-smoke-6de-20261027-04 sibling. Canonical packages
+and aliases JSON SHA256 constants independently derived from authentic frozen04
+now preserve the exact154 original entries and28 aliases without reading that
+sibling. The original32 wrapper and whole-image archive adapter are checked
+against exact historical bytes/SHA constants, not the current implementation.
+A temporary owned deploy/maintenance/app_6de_smoke layout with no04 sibling
+exercises this one pure test independently.
+
+The operational probe, controller, expectation, sealer, workflow and all other
+source/test files remain byte-for-byte App05. Root independently ran all10
+App05 genuine-capability cases PASS; the earlier managed-sandbox privilege-drop
+failure remains honestly recorded in05, rather than rewritten. No additional
+image/CI/live operation or security acceptance is claimed by06.
+
+## Preserved App05 contract and prior history
+
+# App05 — all154 historical entries,153 measured payloads and ONE policy absence
+
+SOURCE ONLY. Root authorized this new semantic contract after independent
+read-only original image/DEB/recipe audits. App03 failed evidence and the App04
+154-positive expectation/probe remain unchanged in their original cohorts.
+No image rebuild, LOAD, source operation, activation or security acceptance is
+performed by this source cohort.
+
+The original154 package expected_files entries and28 aliases are byte-for-byte
+preserved. Schema /2 distinguishes153 required positive runtime payload hashes,
+ONE exact distribution-filtered documentation absence, and154 historical files
+covered. Packages contain153 actual_files after collection; no report claims
+154 files were hashed. Positive native bytes_hashed and the additional3501
+policy_bytes_hashed are reported separately. All19 package source/DEB/ABI
+bindings, original32 runtime assertions and whole-image ELF inventory stay exact.
+
+The ONLY negative path is:
+/usr/share/doc/util-linux/examples/getopt-example.bash
+Original authentic util-linux DEB contains that1594-byte mode0755 Bash example,
+SHA c524a9bf17762fd444b6d238d0004e904f54579414013aa18c5cae47818dd16c.
+The same immutable6de image inherits its3501-byte /etc/dpkg/dpkg.cfg.d/docker
+policy, SHA050ba34b74480e1cc00dd774153e729e76553b0af595e0d517fddc95b855d4ce,
+from layera70f6272827f64e1427d048ced77491aab5d64ab95725e56920802ff391197d7.
+That exact policy excludes /usr/share/doc/* and only reincludes matching paths
+such as copyright; this example does not match a reinclusion. Root-admitted
+policy audit7735/609e997b085f57e53a6bcaff4840f4cfd157a17477bd1bd82069d3df7a09fc99
+and the immutable release/tree/input signature plus exact Dockerfile/cache
+installer hashes are bound inside the one closed contract. The policy is freshly
+hashed in-container as a held normal Root-owned mode0644 file. Changing ANY
+contract field, its package/DEB/original file, policy hash or immutable recipe
+binding refuses. There is no arbitrary exclusion pattern or path-skip API.
+
+Absence means genuine ENOENT ONLY. Every existing canonical ancestor is Root0:0,
+nonwritable by group/other, admitted against its original actual descriptor/stat
+identity, and held with O_PATH|O_DIRECTORY|O_NOFOLLOW. If examples/ is absent,
+the first missing component is fixed beneath its held canonical existing parent;
+if examples/ exists, the missing filename is fixed instead. Admission and final
+checks use dir_fd stat with follow_symlinks=false. Present files/directories,
+dangling symlinks, prefix symlinks, ENOTDIR, EACCES and unknown lookup errors
+refuse. A component created later, prefix inode replacement or mode change also
+refuses. All directory FDs survive every native/policy/alias physical close;
+the first-missing lookup and all actual retained/named prefix identities are
+checked through the last directory close. Native/policy/alias named finals run
+afterwards. Success is emitted only after these real finalizers.
+
+The new Root-only genuine owned-FS test suite covers both missing-parent and
+missing-leaf cases, present/symlink cases, real late creation/inode replacement/
+mode change, late mutation at the LAST physical directory close, exact policy
+hash and same-bytes inode replacement, full153+1+28 output truthfulness, late
+creation at a positive payload close, and closed-contract/schema refusal. A
+separate genuine privilege-drop EACCES case requires actual Root capabilities;
+a sandbox capability refusal is pending verification, never masked or skipped.
+The checked-in original public policy fixture is only Root QA input, not an
+invented CI observation. Existing portable hosted preflights still execute
+before image operations; these Root-only fixture tests are not run as UID1001.
+
+App04 bounded diagnostics remain intact. A later actual hosted proof must
+independently measure153 positives, the exact policy and one negative plus all
+28 aliases, whole-image inventory,32 assertions, cleanup and outer finalizers.
+The runtime evidence normalizer must use a new typed /2 successor; an old
+154-positive normalizer cannot accept this report. Actual security acceptance
+and deployment stay FALSE/OPEN.
+
+## Preserved historical source descriptions (superseded native count above)
+
+# App04 — fixed public probe START diagnostics, SOURCE ONLY
+
+This independent diagnostics successor preserves failed App03 CI40460458632.
+Its real whole-image inventory and both presence probes passed; Native START
+failed without retaining its REFUSED JSON, and32 assertions were not reached.
+No actual cause was assumed from the generic command_failed receipt.
+
+All three fixed public probe STARTs now use one bounded two-PIPE collector:
+native payload and the existing component/ACL presence probes ONLY. Dockerargv
+is exactly start--attach plus the admitted CID; the child environment contains
+only PATH/LC_ALL/private public-CI Docker config path. No Env values, arbitrary
+argv, raw exception operands or unrelated command output are serialized.
+The generic C.command, native154 verifier,32 assertion/capsule bodies, probe
+isolation/create/exit checks, owner cleanup and global deadline are unchanged.
+
+Stdout is bounded before accumulation at each fixed probe's existing maximum;
+stderr is independently bounded at8192 bytes. Diagnostics contain actual client
+return code(unknown remainsNone), observed/captured byte counts, captured SHA,
+stdout prefix/tail4096 each with exact offset/honest truncation and public
+stderr. Nonzero client outcome, output overflow and timeout still REFUSE. Only
+six finite helper failure codes may be published; an unknown/private or even
+unhashable exception argument never enters the report.
+
+On every success/failure path the original owned unreaped child is safely
+settled, then the exact diagnostic bytes are created with the existing outer
+ProofKeeper BEFORE collector selector/stdout/stderr physical closes. All three
+resources close even when output/source guards fail; the keeper is checked
+again afterwards and survives through all inner/outer finalization. A late
+actual diagnostic-file mutation during pipe close refuses rather than returning
+success. No old helper/inventory CLI is repointed and no hidden retry is added.
+
+Eight new portable inert-child/real-keeper regressions are tracked and run in
+the workflow BEFORE image operations. They cover all three fixed probe labels,
+real nonzero REFUSED stdout/stderr retention before all collector closes,
+bounded prefix/tail, both overflow classes, actual timeout/reaping, unknown
+contract refusal, genuine post-close mutation and private exception exclusion.
+Full73 owned tests PASS4.348s, zero skips; original65 remain intact apart from
+an explicit integration-assertion update declaring the two changed START call
+sites. No business test body or verifier assertion was changed.
+
+Actual Root read-only original-image audit subsequently identified exactly one
+missing expectation entry: /usr/share/doc/util-linux/examples/getopt-example.bash.
+All other153 payloads and28 aliases match; no bad ancestor metadata was found.
+This04 retains the OLD154 expectation and failed history unchanged. Diagnostics
+alone do not repair that known expectation/normal-image policy discrepancy.
+Root must separately decide and review the documented runtime-policy successor
+or fresh image build BEFORE another actual proof dispatch. No silent153 waiver,
+new path exclusion, permission relaxation or actual security acceptance occurs
+in this cohort. The original artifact audit and any policy proof remain separate.
+
+Prior03 design and all remaining gates follow unchanged:
+
 # Hosted successor03 — finite inventory budget and public refusal codes
 
 Actual02 run40456560330 is preserved as a failure, not retried or relabeled.

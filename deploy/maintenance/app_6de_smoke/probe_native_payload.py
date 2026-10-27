@@ -5,11 +5,12 @@ the manifest must be complete, source-admitted, sealed and explicitly armed.
 """
 from hashlib import sha256
 from pathlib import Path,PurePosixPath
-import argparse,json,math,os,re,signal,stat,time
+import argparse,errno,json,math,os,re,signal,stat,time
 MAX_JSON=4*1024**2;MAX_BYTES=2*1024**3;MAX_FILES=16384;MAX_SECONDS=60
-NATIVE_SCOPE='all_ELF_executable_scripts_and_ncurses_terminfo_with_native_aliases'
+NATIVE_SCOPE='all_ELF_executable_scripts_and_ncurses_terminfo_with_native_aliases_and_one_exact_distribution_filtered_doc_absence'
+FILTERED_ABSENCE={'schema': 'exact_distribution_filtered_documentation_absence/1', 'package': 'util-linux', 'installed_version': '2.41.6-0+deb13u0+gold1', 'source_package': 'util-linux', 'source_version': '2.41.6', 'source_release': '0+deb13u0+gold1', 'deb_sha256': 'a5670cae12a53439815e45666c7dc31cc7f413b1c9a644fb4f4e54a95e68da6b', 'original_deb_file': {'bytes': 1594, 'gid': 0, 'mode': 33261, 'path': '/usr/share/doc/util-linux/examples/getopt-example.bash', 'sha256': 'c524a9bf17762fd444b6d238d0004e904f54579414013aa18c5cae47818dd16c', 'uid': 0}, 'reason': 'inherited_dpkg_path_exclude_documentation_example', 'policy_file': {'path': '/etc/dpkg/dpkg.cfg.d/docker', 'bytes': 3501, 'sha256': '050ba34b74480e1cc00dd774153e729e76553b0af595e0d517fddc95b855d4ce', 'mode': 33188, 'uid': 0, 'gid': 0}, 'policy_origin_layer': 'sha256:a70f6272827f64e1427d048ced77491aab5d64ab95725e56920802ff391197d7', 'policy_audit': {'bytes': 7735, 'sha256': '609e997b085f57e53a6bcaff4840f4cfd157a17477bd1bd82069d3df7a09fc99'}, 'frozen_recipe': {'source_commit': '1e73f135f87ce37e23ad3e91c1e4c8ba21d4bf55', 'source_tree': 'f4b595abae928fe7a1daa666dc57bd1e41b91beb', 'input_signature': 'b0322182cb5af4f9814eaa0cafa6d07bde759e74254f2f58a9577024a372b5b4', 'files': [{'path': 'Dockerfile', 'bytes': 5270, 'sha256': '8fe63bddc02daf99859d922e794fccca147779efd9ebc07054276f42d8279ca5'}, {'path': 'scripts/prepare_app_security_os_cache.py', 'bytes': 27505, 'sha256': '4f35aa785ea53f18ad42f5fdd2ab69362daf3af3e96efe3945fa8910dc8ffcb9'}, {'path': 'scripts/prepare_tar_acl_os_cache.py', 'bytes': 34914, 'sha256': '88ebb72fc3189dd5f779db1fcdf601c522fe49e03dbce2cec882dea492609a25'}]}, 'image_id': 'sha256:6de16645515f11b041315fafe832025a588f6a131d3cce98b91ebc3fd61e7b04'}
 PHASE='bootstrap'
-PUBLIC_CODES=frozenset({'manifest_unarmed_or_incomplete', 'native_hardlink_target', 'native_fd_changed', 'manifest_counts', 'native_alias_parent', 'manifest_nonfinite', 'duplicate_manifest_key', 'manifest_bound', 'native_deadline', 'native_alias_open', 'actual_container_root_required', 'manifest_file', 'expectation_changed', 'native_open_identity', 'native_parent', 'manifest_identity', 'native_named_changed', 'expectation_file', 'native_payload_hash', 'native_output_bound', 'native_metadata', 'native_file_bound', 'manifest_shape', 'manifest_files', 'manifest_alias', 'manifest_package', 'native_alias_changed', 'native_parent_changed', 'native_alias_target', 'native_read_bound', 'manifest_inventory'})
+PUBLIC_CODES=frozenset({'manifest_unarmed_or_incomplete', 'native_hardlink_target', 'native_fd_changed', 'manifest_counts', 'native_alias_parent', 'manifest_nonfinite', 'duplicate_manifest_key', 'manifest_bound', 'native_deadline', 'native_alias_open', 'actual_container_root_required', 'manifest_file', 'expectation_changed', 'native_open_identity', 'native_parent', 'manifest_identity', 'native_named_changed', 'expectation_file', 'native_payload_hash', 'native_output_bound', 'native_metadata', 'native_file_bound', 'manifest_shape', 'manifest_files', 'manifest_alias', 'manifest_package', 'native_alias_changed', 'native_parent_changed', 'native_alias_target', 'native_read_bound', 'manifest_inventory','native_absence_contract','native_absence_present','native_absence_lookup','native_absence_parent','native_absence_parent_changed'})
 def need(value,code):
  if not value:raise ValueError(code)
 def identity(row):return (row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid,row.st_nlink,row.st_size,row.st_mtime_ns,row.st_ctime_ns)
@@ -44,20 +45,96 @@ def file_hold(path,expected,held,end,total):
  need(count==expected['bytes']and digest.hexdigest()==expected['sha256'],'native_payload_hash')
  need(identity(os.fstat(fd))==before,'native_fd_changed');named(path,before,parents)
  return dict(expected)
+
+def same(left,right):
+ if type(left)is not type(right):return False
+ if type(left)is dict:return set(left)==set(right)and all(same(left[k],right[k])for k in left)
+ if type(left)is list:return len(left)==len(right)and all(same(a,b)for a,b in zip(left,right))
+ return left==right
+class Absent:
+ """Exact ENOENT under held canonical Root-owned nonwritable prefix dirs.
+
+ The first absent component is fixed at admission. A newly created component,
+ any symlink, permission/lookup error or renamed/replaced prefix refuses.
+ Existing dirs retain genuine O_PATH FDs until physical finalization.
+ """
+ def __init__(self,path):
+  need(path.is_absolute()and len(str(path))<=4096 and '..'not in path.parts and str(path)==str(PurePosixPath(path)),'native_absence_contract')
+  self.path=path;self.dirs=[];self.closed=set();self.missing=None
+  try:
+   current=Path('/');before=identity(current.lstat())[:5];fd=os.open(current,os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+   self.admit(current,fd,before)
+   for component in path.parts[1:]:
+    try:row=os.stat(component,dir_fd=fd,follow_symlinks=False)
+    except OSError as error:
+     need(error.errno==errno.ENOENT,'native_absence_lookup');self.missing=(current,fd,component);break
+    need(stat.S_ISDIR(row.st_mode)and row.st_uid==row.st_gid==0 and not row.st_mode&0o022,'native_absence_parent')
+    current=current/component
+    try:next_fd=os.open(component,os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
+    except OSError:raise ValueError('native_absence_parent')from None
+    self.admit(current,next_fd,identity(row)[:5]);fd=next_fd
+   need(self.missing is not None,'native_absence_present');self.check()
+  except BaseException:
+   self.cleanup();raise
+ def admit(self,path,fd,expected):
+  row=identity(os.fstat(fd));self.dirs.append((path,fd,row[:5]))
+  need(stat.S_ISDIR(row[2])and row[3]==row[4]==0 and not row[2]&0o022
+   and row[:5]==expected and path.resolve(strict=True)==path and identity(path.lstat())[:5]==row[:5],'native_absence_parent')
+ def named(self):
+  for path,_,before in self.dirs:
+   need(path.resolve(strict=True)==path and identity(path.lstat())[:5]==before,'native_absence_parent_changed')
+  if self.missing is not None:
+   parent,_,component=self.missing
+   try:os.stat(parent/component,follow_symlinks=False)
+   except OSError as error:need(error.errno==errno.ENOENT,'native_absence_lookup')
+   else:raise ValueError('native_absence_present')
+ def check(self):
+  self.named()
+  for _,fd,before in self.dirs:
+   if fd not in self.closed:need(identity(os.fstat(fd))[:5]==before,'native_absence_parent_changed')
+  if self.missing is not None and self.missing[1]not in self.closed:
+   _,fd,component=self.missing
+   try:os.stat(component,dir_fd=fd,follow_symlinks=False)
+   except OSError as error:need(error.errno==errno.ENOENT,'native_absence_lookup')
+   else:raise ValueError('native_absence_present')
+ def close(self):
+  for _,fd,_ in reversed(self.dirs):
+   self.check()
+   if fd not in self.closed:self.closed.add(fd);os.close(fd)
+   self.check()
+  self.named()
+ def cleanup(self):
+  for _,fd,_ in reversed(self.dirs):
+   if fd not in self.closed:
+    self.closed.add(fd)
+    try:os.close(fd)
+    except OSError:pass
+ def observation(self,root):
+  parent,_,component=self.missing
+  return {'contract':FILTERED_ABSENCE,'status':'distribution_filtered_absence_verified','lookup_errno':'ENOENT',
+   'canonical_existing_prefix':'/'+str(parent.relative_to(root))if parent!=root else '/',
+   'first_missing_component':component,'all_existing_prefix_directories_held_until_physical_finalization':True,
+   'policy_file_hash_verified':True,'security_accepted':False}
+
 def observe(raw,*,image,commit,verifier,root=Path('/')):
  global PHASE
  PHASE='manifest'
  value=parse(raw)
- need(type(value)is dict and set(value)=={'schema','armed','scope','native_scope','packages','aliases','original_package_lock_sha256','missing_package_sources','native_file_count','alias_count','actual_installed_payload_measured','security_accepted'},'manifest_shape')
- need(value['schema']=='image_native_payload_expectation/1'and value['armed']is True
+ need(type(value)is dict and set(value)=={'schema','armed','scope','native_scope','packages','aliases','original_package_lock_sha256','missing_package_sources','native_file_count','alias_count','actual_installed_payload_measured','security_accepted','historical_native_file_count','distribution_filtered_absences'},'manifest_shape')
+ need(value['schema']=='image_native_payload_expectation/2'and value['armed']is True
   and value['missing_package_sources']==[]and value['native_scope']==NATIVE_SCOPE and value['security_accepted']is False,'manifest_unarmed_or_incomplete')
  scope=value['scope'];need(type(scope)is dict and scope.get('image_id')==image and scope.get('source_commit')==commit and scope.get('platform')=='linux/amd64'
   and type(verifier)is str and re.fullmatch('[a-f0-9]{64}',verifier),'manifest_identity')
  need(type(value['packages'])is list and 0<len(value['packages'])<=128 and type(value['aliases'])is list and len(value['aliases'])<=MAX_FILES,'manifest_inventory')
- end=time.monotonic()+MAX_SECONDS;held=[];alias_held=[];total=[0];packages=[];count=0;all_expected={};package_names=set();aliases=[];closed=False;closed_fds=set()
+ need(same(value['distribution_filtered_absences'],[FILTERED_ABSENCE])and type(value['native_file_count'])is int and value['native_file_count']==153
+  and type(value['historical_native_file_count'])is int and value['historical_native_file_count']==154
+  and scope.get('image_id')==FILTERED_ABSENCE['image_id']and all(scope.get(k)==v for k,v in FILTERED_ABSENCE['frozen_recipe'].items()if k!='files'),'native_absence_contract')
+ end=time.monotonic()+MAX_SECONDS;held=[];alias_held=[];total=[0];packages=[];count=0;historical_count=0;all_expected={};package_names=set();aliases=[];closed=False;closed_fds=set();absence=None;negative=[];policy_total=[0]
  def close_once(fd):
   if fd not in closed_fds:closed_fds.add(fd);os.close(fd)
  try:
+  PHASE='distribution_policy'
+  policy=FILTERED_ABSENCE['policy_file'];file_hold(root/policy['path'].lstrip('/'),policy,held,end,policy_total)
   PHASE='native_files'
   for package in value['packages']:
    need(type(package)is dict and set(package)=={'package','installed_version','source_package','source_version','source_release','deb_sha256','expected_files'},'manifest_package')
@@ -69,14 +146,18 @@ def observe(raw,*,image,commit,verifier,root=Path('/')):
      and type(file['bytes'])is int and 0<file['bytes']<=128*1024**2 and type(file['sha256'])is str and re.fullmatch('[a-f0-9]{64}',file['sha256'])
      and type(file['mode'])is int and 0<=file['mode']<=0o177777 and file['mode']&0o170000==stat.S_IFREG
      and type(file['uid'])is int and 0<=file['uid']<=65535 and type(file['gid'])is int and 0<=file['gid']<=65535,'manifest_file')
-    count+=1;need(count<=MAX_FILES,'native_file_bound');all_expected[file['path']]=file
+    historical_count+=1;need(historical_count<=MAX_FILES,'native_file_bound');all_expected[file['path']]=file
+    if file['path']==FILTERED_ABSENCE['original_deb_file']['path']:
+     need(same(file,FILTERED_ABSENCE['original_deb_file'])and all(same(package[k],FILTERED_ABSENCE[k])for k in ('package','installed_version','source_package','source_version','source_release','deb_sha256'))and absence is None,'native_absence_contract')
+     PHASE='distribution_absence';absence=Absent(root/file['path'].lstrip('/'));negative.append(absence.observation(root));PHASE='native_files';continue
+    count+=1
     actual.append(file_hold(root/file['path'].lstrip('/'),file,held,end,total))
    packages.append({**package,'actual_files':actual})
   PHASE='native_aliases';seen=set()
   for alias in value['aliases']:
    need(type(alias)is dict and set(alias)=={'path','target','link_text','kind','resolved_native_target'}and path_allowed(alias['path'])
     and alias['path']not in seen and alias['path']not in all_expected and alias['resolved_native_target']in all_expected
-    and alias['kind']in {'symlink','hardlink'},'manifest_alias');seen.add(alias['path'])
+    and alias['resolved_native_target']!=FILTERED_ABSENCE['original_deb_file']['path']and alias['kind']in {'symlink','hardlink'},'manifest_alias');seen.add(alias['path'])
    path=root/alias['path'].lstrip('/');target=root/alias['resolved_native_target'].lstrip('/');parents=[]
    for parent in path.parents:
     row=parent.lstat();need(parent.resolve(strict=True)==parent and stat.S_ISDIR(row.st_mode)and row.st_uid==row.st_gid==0 and not row.st_mode&0o022,'native_alias_parent');parents.append((parent,identity(row)[:5]))
@@ -85,21 +166,23 @@ def observe(raw,*,image,commit,verifier,root=Path('/')):
    if alias['kind']=='symlink':need(stat.S_ISLNK(before[2])and os.readlink(path)==alias['link_text']and path.resolve(strict=True)==target,'native_alias_target')
    else:need(stat.S_ISREG(before[2])and (before[0],before[1])==(target.stat().st_dev,target.stat().st_ino),'native_hardlink_target')
    aliases.append((path,before,alias))
-  need(count==value['native_file_count']and len(aliases)==value['alias_count'],'manifest_counts')
+  need(count==value['native_file_count']and historical_count==value['historical_native_file_count']and len(negative)==1 and absence is not None and len(aliases)==value['alias_count'],'manifest_counts')
   PHASE='physical_finalization'
   for path,fd,before,parents in reversed(held):
-   need(identity(os.fstat(fd))==before,'native_fd_changed');named(path,before,parents);close_once(fd)
+   need(identity(os.fstat(fd))==before,'native_fd_changed');named(path,before,parents);absence.check();close_once(fd);absence.check()
   for path,fd,before,parents in reversed(alias_held):
-   need(identity(os.fstat(fd))==before==identity(path.lstat())and all(p.resolve(strict=True)==p and identity(p.lstat())[:5]==old for p,old in parents),'native_alias_changed');close_once(fd)
-  closed=True
+   need(identity(os.fstat(fd))==before==identity(path.lstat())and all(p.resolve(strict=True)==p and identity(p.lstat())[:5]==old for p,old in parents),'native_alias_changed');absence.check();close_once(fd);absence.check()
+  absence.close();absence.named();closed=True
   for path,fd,before,parents in held:named(path,before,parents)
   for path,fd,before,parents in alias_held:need(identity(path.lstat())==before and all(p.resolve(strict=True)==p and identity(p.lstat())[:5]==old for p,old in parents),'native_alias_changed')
-  need(time.monotonic()<end,'native_deadline')
-  return {'schema':'image_native_payload_observation/1','scope':scope,'verifier_sha256':verifier,'expectation_sha256':sha256(raw).hexdigest(),
+  absence.named();need(time.monotonic()<end and total[0]+policy_total[0]<=MAX_BYTES,'native_deadline')
+  return {'schema':'image_native_payload_observation/2','scope':scope,'verifier_sha256':verifier,'expectation_sha256':sha256(raw).hexdigest(),
    'native_scope':NATIVE_SCOPE,'inventory_complete':True,'packages':packages,'aliases_verified':len(aliases),
-   'native_files_verified':count,'bytes_hashed':total[0],'production_mounts_or_data_used':False,'scanner_findings_modified':False,'security_accepted':False}
+   'native_files_verified':count,'distribution_filtered_files_verified':len(negative),'historical_native_files_covered':historical_count,
+   'distribution_filtered_absences':negative,'policy_files_verified':1,'policy_bytes_hashed':policy_total[0],'bytes_hashed':total[0],'production_mounts_or_data_used':False,'scanner_findings_modified':False,'security_accepted':False}
  finally:
   if not closed:
+   if absence is not None:absence.cleanup()
    for _,fd,_,_ in reversed(held+alias_held):
     try:close_once(fd)
     except OSError:pass
@@ -127,7 +210,7 @@ def main(argv=None):
  print(encoded.decode(),end='');return 0
 def failure(error):
  code=error.args[0]if type(error)is ValueError and len(error.args)==1 and type(error.args[0])is str and error.args[0]in PUBLIC_CODES else 'unclassified_native_refusal'
- return {'status':'REFUSED','code':code,'phase':PHASE if PHASE in {'bootstrap','manifest','expectation','native_files','native_aliases','physical_finalization'}else'bootstrap','security_accepted':False}
+ return {'status':'REFUSED','code':code,'phase':PHASE if PHASE in {'bootstrap','manifest','expectation','native_files','native_aliases','physical_finalization','distribution_policy','distribution_absence'}else'bootstrap','security_accepted':False}
 if __name__=='__main__':
  try:raise SystemExit(main())
  except Exception as error:

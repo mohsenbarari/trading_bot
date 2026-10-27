@@ -32,6 +32,9 @@ jobs:
       - name: Check bounded flat inventory contracts before image operations
         run: /usr/bin/python3 -I -S -B deploy/maintenance/app_6de_smoke/test_flat_inventory_regression.py
 
+      - name: Check bounded public probe diagnostics before image operations
+        run: /usr/bin/python3 -I -S -B deploy/maintenance/app_6de_smoke/test_public_probe_start.py
+
       - name: Seal exact source and run disposable 6de public proofs
         id: run
         env:
@@ -40,7 +43,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -S -B deploy/maintenance/app_6de_smoke/seal_and_run.py \
             --root "$RUNNER_TEMP/security-app-ci-smoke-6de-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 a69deb5c8202542a4701591b62f46794253148bd56641e0372bbb590c804421c \
+            --source-sha256 48dd8d37a72caa8aaaf4175c725f693d753046367fa78b0112f226ee421357a9 \
             --execute-reviewed-6de-proof
 
       - name: Preserve raw evidence, actual public observations and cleanup

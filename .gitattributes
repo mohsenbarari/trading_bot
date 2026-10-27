@@ -11,3 +11,4 @@
 /tests/fixtures/ba938_inventory/dpkg-status.actual-ba938.txt whitespace=-blank-at-eol,-blank-at-eof
 # Preserve the exact reviewed inventory dependency, including its final newline.
 /deploy/maintenance/app_6de_smoke/inventory.py whitespace=-blank-at-eof
+/deploy/maintenance/app_6de_smoke/dpkg-docker-policy.original.txt whitespace=-blank-at-eol

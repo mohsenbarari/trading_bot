@@ -23,6 +23,8 @@
   replacement inode or metadata transition.
 - Docker can return CAP_-prefixed capability names. Normalize that known prefix
   only after validating typed lists, exact cardinality and the allowed set.
+  Root chmod of a UID10001-owned fixture needs genuine FOWNER or that actual
+  owner's process; never mask ownership or weaken the check to hide EPERM.
 - Docker creates WORKDIR before a later cp. Copy public packet contents with
   `packet/.`, then verify the expected container file before START.
 - Under workflow umask0077, mkdir0755 creates0700. Explicitly set newly-created
