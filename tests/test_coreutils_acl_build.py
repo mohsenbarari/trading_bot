@@ -78,28 +78,96 @@ class SourceTests(unittest.TestCase):
    'running':state=='running','paused':False,'state':state,'pid':123 if state=='running'else 0,'apparmor':profile,
    'started':'0001-01-01T00:00:00Z'if state=='created'else'2026-10-27T11:00:00Z',
    'caps_add':list(self.host.CAPS),'caps_drop':['ALL'],'security':['no-new-privileges:true','apparmor=unconfined'],
-   'networks':{'bridge':{}},'mounts':[{'Type':'bind','Destination':'/public-context','Source':str(context),'RW':False}]}
+   'networks':{'bridge':{}},'mounts':[{'Type':'bind','Destination':'/public-context','Source':str(context),'RW':False},{'Type':'bind','Destination':'/build','Source':'/owned-native-build','RW':True}]}
   return value,nonce,cid,context
  def test_only_disposable_builder_has_exact_apparmor_override_and_original_bounds(self):
-  args=self.host.create_argv('a'*32,Path('/owned-context'));options=[args[i+1]for i,v in enumerate(args[:-1])if v=='--security-opt']
-  self.assertEqual(options,['no-new-privileges:true','apparmor=unconfined']);self.assertNotIn('--privileged',args);self.assertEqual(args.count('--mount'),1)
+  args=self.host.create_argv('a'*32,Path('/owned-context'),Path('/owned-native-build'));options=[args[i+1]for i,v in enumerate(args[:-1])if v=='--security-opt']
+  self.assertEqual(options,['no-new-privileges:true','apparmor=unconfined']);self.assertNotIn('--privileged',args);self.assertEqual(args.count('--mount'),2)
   self.assertEqual(args[args.index('--tmpfs')+1],'/tmp:rw,exec,nosuid,nodev,mode=1777,size=268435456')
  def test_created_empty_profile_is_unknown_not_poststart_applied_authority(self):
-  value,nonce,cid,context=self.builder_metadata('created','');self.assertTrue(self.host.validate_inspect(value,nonce,cid,context,offline=False,running=False))
-  with self.assertRaises(RuntimeError):self.host.validate_inspect(value,nonce,cid,context,offline=False,running=True)
+  value,nonce,cid,context=self.builder_metadata('created','');self.assertTrue(self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False,running=False))
+  with self.assertRaises(RuntimeError):self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False,running=True)
   value['started']='2026-10-27T11:00:00Z'
-  with self.assertRaisesRegex(RuntimeError,'apparmor_created_unknown'):self.host.validate_inspect(value,nonce,cid,context,offline=False,running=False)
+  with self.assertRaisesRegex(RuntimeError,'apparmor_created_unknown'):self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False,running=False)
  def test_running_and_previously_started_exited_require_actual_unconfined(self):
   for state in('running','exited'):
    for profile in('',None,'docker-default','unconfined'):
     value,nonce,cid,context=self.builder_metadata(state,profile)
-    if profile=='unconfined':self.assertTrue(self.host.validate_inspect(value,nonce,cid,context,offline=False,running=state=='running'))
+    if profile=='unconfined':self.assertTrue(self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False,running=state=='running'))
     else:
-     with self.assertRaisesRegex(RuntimeError,'apparmor_applied_after_start'):self.host.validate_inspect(value,nonce,cid,context,offline=False,running=state=='running')
+     with self.assertRaisesRegex(RuntimeError,'apparmor_applied_after_start'):self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False,running=state=='running')
  def test_new_profile_does_not_widen_capability_network_mount_or_no_new_privileges(self):
   for key,wrong in(('privileged',True),('security',['apparmor=unconfined']),('caps_add',['SYS_ADMIN']),('network_mode','host'),('mounts',[])):
    value,nonce,cid,context=self.builder_metadata();value[key]=wrong
-   with self.subTest(key=key),self.assertRaises(RuntimeError):self.host.validate_inspect(value,nonce,cid,context,offline=False)
+   with self.subTest(key=key),self.assertRaises(RuntimeError):self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False)
+ def test_native_build_exact_second_mount_without_other_policy_changes(self):
+  args=self.host.create_argv('a'*32,Path('/owned-context'),Path('/owned-native-build'))
+  mounts=[args[i+1]for i,v in enumerate(args[:-1])if v=='--mount']
+  self.assertEqual(mounts,['type=bind,src=/owned-context,dst=/public-context,readonly','type=bind,src=/owned-native-build,dst=/build'])
+  for bad in(('Source','/arbitrary'),('RW',False),('Destination','/work'),('Type','volume')):
+   value,nonce,cid,context=self.builder_metadata();value['mounts'][1][bad[0]]=bad[1]
+   with self.subTest(bad=bad),self.assertRaisesRegex(RuntimeError,'mounts'):self.host.validate_inspect(value,nonce,cid,context,Path('/owned-native-build'),offline=False)
+ def test_native_frames_types_and_exact_root0755(self):
+  frame=(2049,123,0o40755,0,0);self.assertEqual(self.host.validate_native_frame(frame),frame)
+  for bad in((2049,123,0o40700,0,0),(2049,123,0o40755,1001,1001),(2049,123,0o40777,0,0),(False,123,0o40755,0,0)):
+   with self.assertRaisesRegex(RuntimeError,'metadata'):self.host.validate_native_frame(bad)
+ def test_native_freshness_refuses_before_privileged_child(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw:
+   root=Path(raw);(root/'native-build').mkdir(mode=0o755)
+   def forbidden(*a,**kw):self.fail('existing workspace must not reach privileged child')
+   with self.assertRaisesRegex(RuntimeError,'fresh'):self.host.create_native_workspace(root,forbidden)
+ def test_native_child_command_is_fixed_root_creation_not_adoption(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw:
+   root=Path(raw)
+   def stop(argv,**kw):
+    self.assertEqual(argv,['/usr/bin/sudo','-n','/usr/bin/mkdir','--mode=0755','--',str(root/'native-build')]);self.assertEqual(kw,{'maximum':4096,'seconds':15});raise RuntimeError('OWNED no actual privileged child')
+   with self.assertRaisesRegex(RuntimeError,'OWNED no actual'):self.host.create_native_workspace(root,stop)
+ def test_native_container_observation_matches_original_host_fd(self):
+  before=(2049,123,0o40755,0,0);checks=[];workspace=SimpleNamespace(before=before,check=lambda:checks.append(True))
+  value={'first5':list(before),'filesystem_magic':'0xef53'};self.assertEqual(self.host.validate_workspace_observation(value,workspace),value);self.assertEqual(checks,[True])
+  for bad in({'first5':list(before),'filesystem_magic':'0x794c7630'},{'first5':[2049,124,0o40755,0,0],'filesystem_magic':'0xef53'},{'first5':[2049,123,0o40755,False,0],'filesystem_magic':'0xef53'}):
+   with self.assertRaisesRegex(RuntimeError,'identity'):self.host.validate_workspace_observation(bad,workspace)
+ def test_native_actual_owned_directory_fd_and_mode_guard(self):
+  # Genuine local ext-family inode/UID/mode; only this tiny fixture's budget is
+  # reduced. No stat/UID/magic result is substituted, no host-capacity claim.
+  with tempfile.TemporaryDirectory(dir=TREE)as raw,patch.multiple(self.host,RESERVE=0,DISK_GROWTH=16*1024**2):
+   path=Path(raw);path.chmod(0o755);item=self.host.NativeWorkspace(path)
+   try:
+    self.assertEqual(item.before,self.host.ident(os.fstat(item.fd))[:5]);self.assertEqual(item.observation()['filesystem_magic'],'0xef53')
+    path.chmod(0o700)
+    with self.assertRaisesRegex(RuntimeError,'changed'):item.check()
+   finally:os.close(item.fd);item.fd=None
+ def test_native_actual_replacement_refuses_with_original_fd_held(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw,patch.multiple(self.host,RESERVE=0,DISK_GROWTH=16*1024**2):
+   parent=Path(raw);path=parent/'native';path.mkdir(mode=0o755);item=self.host.NativeWorkspace(path)
+   try:
+    path.rename(parent/'original');path.mkdir(mode=0o755)
+    with self.assertRaisesRegex(RuntimeError,'changed'):item.check()
+    self.assertNotEqual(self.host.ident(os.fstat(item.fd))[:2],self.host.ident(path.lstat())[:2])
+   finally:os.close(item.fd);item.fd=None
+ def test_native_actual_postclose_mode_change_refuses(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw,patch.multiple(self.host,RESERVE=0,DISK_GROWTH=16*1024**2):
+   path=Path(raw);path.chmod(0o755);item=self.host.NativeWorkspace(path);original_close=os.close;target=item.fd
+   def close_then_mutate(fd):
+    original_close(fd)
+    if fd==target:path.chmod(0o700)
+   with patch.object(self.host.os,'close',close_then_mutate),self.assertRaisesRegex(RuntimeError,'changed'):item.close()
+   self.assertIsNone(item.fd)
+ def test_native_real_capacity_refuses_impossible_budget_without_masks(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw:
+   path=Path(raw);path.chmod(0o755);fs=os.statvfs(path)
+   with patch.multiple(self.host,RESERVE=0,DISK_GROWTH=fs.f_blocks*fs.f_frsize+1),self.assertRaisesRegex(RuntimeError,'capacity'):self.host.NativeWorkspace(path)
+ def test_native_failed_public_root_child_retains_bounded_real_known_logs(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw:
+   root=Path(raw);owners=[];error=RuntimeError('OWNED public child failed')
+   error.public_command_failure={'captured_output':b'OWNED fixture permission refusal','actual_returncode':17,'observed_output_bytes':32,'actual_pipe_closed':True,'maximum_output_bytes':4096,'stdout_eof_observed':True}
+   try:
+    with self.assertRaisesRegex(RuntimeError,'OWNED public'):self.host.create_native_workspace(root,lambda *a,**kw:(_ for _ in()).throw(error),owners)
+    self.assertEqual((root/'native_workspace_creation.failed.log').read_bytes(),b'OWNED fixture permission refusal')
+    value=json.loads((root/'native_workspace_creation.failed.json').read_bytes());self.assertEqual(value['actual_returncode'],17);self.assertFalse(value['command_accepted'])
+    self.assertEqual(len(owners),2)
+   finally:
+    for item in owners:item.close()
  def test_public_lsm_typed_metadata_is_capability_context_only(self):
   value={'uid':10001,'euid':10001,'gid':10001,'egid':10001,'apparmor':'unconfined'}
   self.assertEqual(self.source.validate_public_lsm(value),value)
