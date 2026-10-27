@@ -51,3 +51,11 @@
   include a real constructor-prefix regression, beyond import/AST checks.
 - Test exact Docker/systemd wire serialization and omitted-field behavior;
   valid hand-built dictionaries cannot verify the CLI template that produces them.
+- Source sealing requires an actual clean Main checkout. Use a registered
+  temporary checkout; preserve the sealer's branch checks. Use full9 without
+  atime and the actual host interpreter rather than a container Python path.
+- Run report-writing verifiers from fresh packet copies. Preserve author and
+  Root receipts separately; do not overwrite frozen QA metadata.
+- systemd can remove a stopped timer from its oneshot's After and TriggeredBy.
+  Admit only that measured pair through the same context's completed-stop receipt;
+  preserve the original policy and every unrelated dependency.
