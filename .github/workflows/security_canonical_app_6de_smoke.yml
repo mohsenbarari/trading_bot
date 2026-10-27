@@ -29,6 +29,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Check bounded flat inventory contracts before image operations
+        run: /usr/bin/python3 -I -S -B deploy/maintenance/app_6de_smoke/test_flat_inventory_regression.py
+
       - name: Seal exact source and run disposable 6de public proofs
         id: run
         env:
@@ -37,7 +40,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -S -B deploy/maintenance/app_6de_smoke/seal_and_run.py \
             --root "$RUNNER_TEMP/security-app-ci-smoke-6de-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 9b79f6ad0b4909e3083bc19adf046dffc35329d1a14dc8434a7d5e6457b00628 \
+            --source-sha256 a69deb5c8202542a4701591b62f46794253148bd56641e0372bbb590c804421c \
             --execute-reviewed-6de-proof
 
       - name: Preserve raw evidence, actual public observations and cleanup

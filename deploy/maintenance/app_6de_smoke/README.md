@@ -1,3 +1,47 @@
+# Hosted successor03 — finite inventory budget and public refusal codes
+
+Actual02 run40456560330 is preserved as a failure, not retried or relabeled.
+All four export CLI stages returned0; the never-started same-image container
+remained identical before/after, cleanup succeeded, but native154/original32
+were never reached. The authenticated artifact timestamps place the export
+receipt/postinspect at05:40:54UTC and failure/cleanup at05:42:54UTC: exactly the
+old120-second inventory budget. Insufficient inventory time is INFERRED from
+that boundary; it is not claimed as the exact closed code because02 hid it.
+
+Root explicitly authorized600seconds for this bounded inventory while retaining
+the ordinary1800-second global deadline. This successor changes ONLY the
+adapter's admitted finite interval and export caller's min(globalend,now+600).
+ALL per-read checks, original/source/full9/parent guards, byte/count/format/report
+limits and physical finalization remain unchanged. No guard becomes periodic.
+Export's existing client300/readback120 limits also remain unchanged.
+
+Root's genuine never-started publiced59 export was independently parsed by the
+same adapter:18158rows/18161physical headers/15281regular+hardlink files in6.511s.
+There was no extraction or inspected-code execution. This confirms actual
+Docker flat-TAR format compatibility only; it is not a same6de inventory,
+package/ACL decision or release acceptance. The diagnostic receipt is retained.
+
+The controller now admits a fixed closed set of132 reviewed parser/export
+refusal codes. Unknown/private exception operands, extra arguments and
+non-RuntimeError names stay unexpected_failure. Public failure receipts add only
+bounded finite stage elapsed seconds. These diagnostics cannot turn a failed
+inventory into acceptance or export Config/Env/keys/exception text.
+
+Five portable source-only regression cases are tracked beside the controller
+and run before image operations in the proposed workflow. They catch a new
+literal parser refusal missing its closed mapping, private operand disclosure,
+regression to120seconds, unbounded601seconds, expired real monotonic deadlines,
+loss of the global bound or missing read guards. They need no old local cohort,
+image, Git/GH, network, database, UID/capability override or hosted bypass.
+
+Owned verification65PASS/no skip: budget6, closed-code3, genuineintake8,
+armed/capacity4, export14, adapter24, full inert-child join1, portablepreflight5.
+The original32/native154 bodies and actual image/release bindings stay exact.
+Root still must review/integrate/dispatch. Actual security, native/runtime,
+whole-image ACL, full matrix and production activation remain FALSE/OPEN.
+The accepted02 source description below is historical;03 does not claim that
+02's actual hosted run passed.
+
 # New6de App proof: explicitly armed hosted successor02
 
 This is a NEW proof cohort for config

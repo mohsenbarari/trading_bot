@@ -13,6 +13,7 @@ EXECUTION_ARMED=True
 MAX_EXPORT=2*1024**3
 MAX_STDERR=8192
 MAX_REPORT=4*1024**2
+MAX_INVENTORY_SECONDS=600
 STAGES=frozenset(('create','preinspect','export','postinspect'))
 ZERO_TIME='0001-01-01T00:00:00Z'
 PURE_INVENTORY_SHA256='8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc'
@@ -213,7 +214,7 @@ def whole_image_inventory(ctx,old,image,control,sbom,*,I,T,A,adapter_sha256):
  with output.borrow(ctx.check)as stream:
   value=A.collect(I,T,stream,binding['bytes'],image_id=image,source_commit=control['source_commit'],
    sbom_raw=sbom,sbom_sha256=control['sbom_sha256'],verifier_sha256=adapter_sha256,
-   export_sha256=binding['sha256'],container_receipt=receipt,check=ctx.check,end=min(ctx.end,time.monotonic()+120))
+   export_sha256=binding['sha256'],container_receipt=receipt,check=ctx.check,end=min(ctx.end,time.monotonic()+MAX_INVENTORY_SECONDS))
  need(type(value)is dict and value.get('schema')=='image_acl_archive_inventory/1'
   and value.get('image_id')==image and value.get('source_commit')==control['source_commit']
   and value.get('security_accepted')is False,'flat_export_receipt')
