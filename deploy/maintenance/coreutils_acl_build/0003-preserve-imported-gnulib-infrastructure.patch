@@ -1,0 +1,11 @@
+--- a/debian/rules
++++ b/debian/rules
+@@ -34,7 +34,7 @@
+ # source patch.  Debian9.7-3 otherwise disables this necessary step.
+ # dh_autoreconf uses the declared local toolchain; no bootstrap/Git/network.
+ override_dh_autoreconf:
+-	dh_autoreconf
++	AUTOPOINT=true dh_autoreconf
+ 
+ override_dh_auto_configure:
+ 	dh_auto_configure -- --enable-systemd --enable-install-program=arch --with-openssl=auto-gpl-compat --with-packager=$(DEB_VENDOR) --with-packager-version=$(DEB_VERSION) $(Y2038)

@@ -147,6 +147,10 @@
         "bytes": 2417,
         "sha256": "0ebad18a80f8723145247b592e2c4fad154dd6c7365eee7fa4d4d7d66639a53b"
       },
+      "after_regeneration_guard": {
+        "bytes": 2495,
+        "sha256": "694ac03b399e601eb065b0ee56a5bb7d71c9bff67930be40bb88cacee70e64fd"
+      },
       "after_test_hook": {
         "bytes": 2480,
         "sha256": "f7003c071aefd5d3972427cd5ce955507907503761a82c463f1101ef84c05afa"
@@ -315,6 +319,37 @@
   "patch": {
     "bytes": 60929,
     "sha256": "3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d"
+  },
+  "regeneration_guard_patch": {
+    "bytes": 486,
+    "sha256": "d69eb7cb24de5f9cfbe3a88eb8b2bc4c28040fa3e7030d6b971f6936f59fef8a"
+  },
+  "regeneration_infrastructure": {
+    "GNU_manual": "https://www.gnu.org/software/gnulib/manual/html_node/gettextize-and-autopoint.html",
+    "failing_authentic_CI_run": 40479759340,
+    "original_m4_pins": {
+      "m4/gnulib-comp.m4": {
+        "bytes": 168829,
+        "sha256": "ca857130ac0cd1c9df89544693b3a4c96b2a2ceaf4a8c15f282537155823a5e2"
+      },
+      "m4/threadlib.m4": {
+        "bytes": 25750,
+        "sha256": "9f2918239350b7585b4d7f1e56dcc35fb560e989446e945b4d7b8ab27b9cf66b"
+      },
+      "m4/wint_t.m4": {
+        "bytes": 1875,
+        "sha256": "ba830916939364150c5d1a28fd1a8648eab2ed288f781960a3a89d85e27d4b42"
+      }
+    },
+    "policy": "Coreutils release already contains imported gettext/gnulib; prevent a second autopoint as its own bootstrap does; real autoreconf remains mandatory",
+    "source_archive": {
+      "bytes": 6158960,
+      "sha256": "e8bb26ad0293f9b5a1fc43fb42ba970e312c66ce92c1b0b16713d7500db251bf"
+    },
+    "upstream_bootstrap": {
+      "bytes": 56233,
+      "sha256": "c3adcc2d8a03004f63a157bc5d6dfaa0f4cf8e03aaa9c8debf870bccfdd99b02"
+    }
   },
   "root_isolated_source_approval": {
     "bytes": 1963,
