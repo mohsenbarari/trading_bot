@@ -512,3 +512,28 @@ PASS/SKIP and not attempted again.57 other owned Python tests passed; Root must
 run all59 actual HOST tests before fresh CI. The unchanged27 parser tests were
 not repeated. No compiler, autotools, sudo, Docker, Git, CI, SSH or live operation
 was executed by author; full Coreutils+gnulib success remains pending.
+
+
+## Source12: use the actual canonical generated config header
+
+Coreutils9.7 configures `lib/config.h`, as authenticated configure.ac's
+`AC_CONFIG_HEADERS([lib/config.h:lib/config.hin])`, the gnulib Makefile template,
+and actual CI11 configure output all agree. The previously requested root-level
+`config.h` is not that generated header. Source12 corrects exactly three path
+references, preserving the full eight-file generated provenance and the actual
+GOLD_DESCRIPTOR_ACL=1 feature checks. No cleanup behavior, lifecycle exception,
+rehydrated file, fallback path, test body/filter or reader guard is introduced.
+
+Three new owned regression methods run the actual build_vendor header-check
+AST and actual generated_proof on the canonical path. A root/config.h decoy
+cannot replace a missing or invalid lib/config.h. Actual bad modes, hardlinks,
+symlinks and a timestamp mutation at physical close still refuse. These are
+explicit source fixtures, not an actual compile/build claim.
+
+The author ran60 selected Python methods, zero skips, excluding both genuine
+Root HOST credential/chown cases. Root must run all62. Prior Source11's full
+Coreutils and gnulib success is retained truthfully, but no new completed build,
+export/native/ABI/image/security acceptance is inferred from it. Root source
+review and a fresh ordinary CI run remain required. PRIMARY_FINDINGS.md binds
+the exact public primary files and actual failed-CI log that establish this
+path correction.
