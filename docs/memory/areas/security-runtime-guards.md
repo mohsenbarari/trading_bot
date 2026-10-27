@@ -1,7 +1,8 @@
 # Security runtime verification guards
 
-- Docker Health is optional; null means unknown. Public Env deltas need
-  literal-byte writers and real serialization tests.
+- Docker Health is optional (null is unknown). An empty AppArmorProfile before
+  first START is not an applied policy; verify it after actual START.
+  Public Env deltas need literal-byte writers and real serialization tests.
 - Artifact modes are typed: public source0644, private controls0600. Never
   change originals or substitute an identity mask for genuine UID/GID tests.
 - Docker cp cannot target tmpfs. Stage public CA bytes under /build and verify
