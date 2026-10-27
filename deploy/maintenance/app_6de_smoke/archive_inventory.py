@@ -12,6 +12,7 @@ import json,math,os,posixpath,re,stat,struct,time
 MAX_ENTRIES=100000;MAX_FILES=50000;MAX_BYTES=2*1024**3;MAX_ELF=128*1024**2
 MAX_REPORT=4*1024**2;MAX_NAMES=8*1024**2;MAX_META=4*1024**2;MAX_PAX=65536
 MAX_PACKAGE_LIST_TOTAL=64*1024**2
+MAX_INVENTORY_SECONDS=600
 PURE_INVENTORY_SHA256='8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc'
 EXCLUDED=frozenset()
 
@@ -52,7 +53,7 @@ class Source:
  """A private duplicate; the original already-held stream is never closed."""
  def __init__(self,stream,size,check,end):
   need(callable(check)and type(size)is int and 1024<=size<=MAX_BYTES and size%512==0,'archive_bound')
-  need(type(end)in(int,float)and math.isfinite(end)and 0<end-time.monotonic()<=120,'archive_deadline')
+  need(type(end)in(int,float)and math.isfinite(end)and 0<end-time.monotonic()<=MAX_INVENTORY_SECONDS,'archive_deadline')
   self.original=stream.fileno();self.size=size;self.checker=check;self.end=end;self.fd=None;self.digest_pin=None
   check();self.frame=identity(os.fstat(self.original));need(stat.S_ISREG(self.frame[2])and self.frame[5]==1 and self.frame[6]==size,'archive_source')
   self.fd=os.dup(self.original)

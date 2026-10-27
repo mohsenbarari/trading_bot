@@ -142,6 +142,29 @@ def publish_completion(M,path,value,rows):
  return value
 
 
+def public_evidence_directory(M,evidence,path,owned):
+ """Only this new owned public fixture tree gets traversable0755 modes."""
+ need(path==evidence or path.is_relative_to(evidence),'business81_bundle')
+ if path in owned:
+  need(path.resolve(strict=True)==path and M.identity(path.lstat())[:5]==owned[path],'source_changed');return
+ need(path==evidence or path.parent in owned,'business81_bundle')
+ parent=path.parent;before_parent=M.identity(parent.lstat())
+ need(parent.resolve(strict=True)==parent and before_parent[2]&0o170000==0o040000
+  and before_parent[3:5]==(os.geteuid(),os.getegid())and not before_parent[2]&0o022,'source_changed')
+ # EXCL mkdir: pre-existing or symlink paths are never adopted or chmodded.
+ path.mkdir(mode=0o700);before=M.identity(path.lstat());fd=None
+ try:
+  need(path.resolve(strict=True)==path and before[2:5]==(0o040700,os.geteuid(),os.getegid()),'source_changed')
+  fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+  need(M.identity(os.fstat(fd))==before,'source_changed');os.fchmod(fd,0o755);after=M.identity(os.fstat(fd))
+  need(after[:2]==before[:2]and after[2]==0o040755 and after[3:8]==before[3:8]
+   and M.identity(path.lstat())==after,'source_changed')
+ finally:
+  if fd is not None:os.close(fd)
+ need(path.resolve(strict=True)==path and M.identity(path.lstat())==after
+  and M.identity(parent.lstat())[:5]==before_parent[:5],'source_changed');owned[path]=after[:5]
+
+
 def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,contents,manifest,plans,source_paths,approval_paths,guard):
  """Called only by the reviewed normal controller; no JSON flag arms it.
 
@@ -161,7 +184,8 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
   and Path(M.__file__).resolve()==source_paths['normal']['path']and Path(B.__file__).resolve()==source_paths['business']['path']
   and Path(__file__).resolve()==source_paths['outer']['path'],'business81_source')
  rows=[];value=None;begun=time.monotonic();nonce=uuid4().hex;owner=signature+':'+nonce
- work=root/('business81-'+nonce);work.mkdir(mode=0o700);evidence=work/'evidence';evidence.mkdir(mode=0o755)
+ work=root/('business81-'+nonce);work.mkdir(mode=0o700);evidence=work/'evidence';evidence_dirs={}
+ public_evidence_directory(M,evidence,evidence,evidence_dirs)
  def check():
   guard();need(time.monotonic()-begun<900,'business81_deadline')
   for row in rows:row.check()
@@ -189,7 +213,12 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
   need(B.encode(plans)==B.encode(B.profiles(selection,image=image,release_commit=receipt['release_commit'],two_git_signature=signature)),'business81_plans')
   for name,raw in sorted(contents.items()):
    need(B.relative(name)and type(raw)is bytes and 0<len(raw)<=4*1024**2,'business81_bundle')
-   path=evidence/name;path.parent.mkdir(mode=0o755,parents=True,exist_ok=True);M.save(path,raw,mode=0o644)
+   path=evidence/name;parent=evidence
+   public_evidence_directory(M,evidence,evidence,evidence_dirs)
+   for part in Path(name).parts[:-1]:
+    need(part not in ('','.','..'),'business81_bundle');parent=parent/part
+    public_evidence_directory(M,evidence,parent,evidence_dirs)
+   M.save(path,raw,mode=0o644)
    rows.append(M.Held(path,maximum=4*1024**2,binding={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}))
   manifest_sha=sha256(contents['suite-manifest.json']).hexdigest();initial=image_frame();observations={};cleaned=[]
   for profile in PROFILES:

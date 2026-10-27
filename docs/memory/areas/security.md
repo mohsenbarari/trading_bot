@@ -1,45 +1,47 @@
 # Security remediation
 
-- Acceptance false: App/Market/datastores old; refactor STOP/streak0.
-  After closure require30 accepted clean units; failures reset, history retained.
-  Tests/polls never count. Preserve behavior/capture owner/user dirt; Writer/DNS human.
-- Host/TLS/backup06/PG-restore passed. O10 backup05 both-site write/old-read/
-  persistence/cleanup passed; serving pending. Gate assembly remains unarmed.
-  Final: ciphertext only; no App provisioning.
-- Ordinary665220a2/E1 preloaded, not serving. UI needs new artifact; never relabel
-  E1. Main frozen; retain rollback.
-- Never retry/reroute App C/S/R fresh-profile/COW adaptation/probe. Use ordinary
-  main artifact with fresh config/backup/functional evidence.
-- Raw44HIGH/43 assessments; ACL/capture OPEN. LOAD is not serving/retry.
-  F79 two baked/five mounts/no code binds;27d441:new19/parent18 versus old8;
-  old-prefix invalid.
-- PG49a8/Redis98c4 loaded, not activated; Windows UNKNOWN retains Linux absence
-  proof.
-- Ten Market candidates preloaded/inactive. Retain failures/unknowns/spent
-  controls. Watchdogs normal apply, finite windows; eight readers. Exclude daemon heap.
-- Publish authoritative success AFTER all FD/parent/ExitStack finalizers and
-  actual peer exit0. Require physical late-finalizer fault tests; early green
-  cannot authorize the next operation.
-- Expired controls grant no authority; unknown RPC never proves cancel/retry.
-  Classic IDs never query Descriptor. TAR physical members unique; logical
-  layer repeats allowed; ordered DiffIDs strict.
-- Permanent empty Native SOURCE: metadata/flock only, preserve inode; never
-  read/hash/write/remove/replace payload. Permanent M payload also forbidden.
-  Close only exact owned temporary guards after durable closure.
-- No diagnostic Env/session/key reads/copies/hashes. Normal backup/crypto/parity
-  may consume in RAM; no private output/hash. Admit
-  leaf/full9 before open, FD/full9 before payload; retain FDs/parents through end.
-- Env/secret aliases require raw-parent and resolved-held-leaf checks; hidden hops refuse.
-- Compose creation labels distinguish exact declared dependencies from present
-  empty `--no-deps` metadata; keep full model and forward mode through rollback.
-- Register Root modules; Git-only fixtures, UID0/CAP_CHOWN/result2;
-  smoke UID1001/caps0. No UID/stat/mode waiver/hostdata fixtures; preserve guards/
-  multiplicity. No Go RLIMIT_AS; bound output before accumulation; no payload
-  FSIZE inheritance; preserve open-incident evidence.
-- Native6c9 failed; expiry stopped owned3 (PID0/noOOM/restarts). Fresh normal
-  Config17 equal; HostOOM startnull proven from exactMoby/cgroup2; scoped fix
-  Root326+final111PASS. F79 labels OPEN after Entry fix/Root321PASS.
-  Retain failed resources; no diagnostic applied.
-- Removed cgroup directories may retain nlink2. Use retained directory/events
-  identities, named absence, relative events ENOENT and retained events ENODEV;
-  never relax regular-file unlink guards or accept poll alone.
+- Proper Tar gold2 App6de build completed; raw44HIGH, image inactive. Capture2 recovered; replay paused,
+  live reconciliation retained; identity repair OPEN.
+  Exact90d RAM read approved/performed0.
+- Acceptance false: App/Market/datastores old, refactor STOP/streak0. After closure
+  require30 consecutive accepted completed clean units; failure resets streak,
+  preserving history. Tests/polls never count. Preserve behavior/user dirt;
+  Writer/DNS human.
+- Hosts/TLS passed. Both host SQLite gold1 backports are active: ordinary checks
+  passed, old inode absent, Native four daemons/seven timers and Web fail2ban
+  stable. Serving App/Market remain old; never activate E1.
+  Expired backup07/O10 proofs retained, not renewed authority.
+  PG49a8/Redis98c4 inactive; raw44HIGH retained, ACL OPEN.
+- Reviewed security-only Main commits allowed; serving baseline unchanged.
+  Retain rollback/failures/unknowns/spent controls.
+  Final ciphertext only, no App provisioning. Never reroute rejected App
+  C/S/R fresh-profile/COW adaptations.
+- F79 diagnostic09e and Capture8ed outcomes remain unknown in history;
+  independently reconcile current state, never retry/resume them. Pause does
+  not resolve historical replay. Retain active145 override while Compose uses it.
+- Public environment overrides need exact fixed-byte writers, not C.public;
+  exercise real serialization. Created Docker may lack Health; use optional
+  map lookup, genuine daemon/DTO regression; null never means healthy.
+- Docker cp cannot target tmpfs. Copy public CA into /build, install and verify
+  size/SHA before HTTPS; genuine Ubuntu fixture passed. Fresh builds only;
+  failed builder/source retained.
+- Ubuntu positive probe requires -I -S -B/no_site: -I alone loads stock
+  sitecustomize. Preserve loader guards; genuine Native baseline passed.
+- Admit artifact-specific modes: public source0644, operator/control0600;
+  never chmod originals or assume one universal mode.
+- Success follows FD/parent/ExitStack/physical-close checks and actual peer0.
+  Test real late-finalizer faults. Expired controls grant none; unknown RPC
+  never proves cancellation. Bridge proof covers whole restore lifetime.
+- Permanent SOURCE/M: metadata/flock only, never read/hash/change payload/inode.
+  Retire only exact owned inactive temporary guards. No diagnostic Env/session/
+  key reads/copies/hashes. Normal backup/crypto/parity may consume in RAM,
+  without private output/hash. Admit parents/full9 before open, FD/full9 before
+  payload, retain through finalizers. Alias raw parents/resolved leaf required.
+- Classic IDs never query Descriptor; TAR physical members unique, logical
+  layer repeats allowed, ordered DiffIDs strict. Compose declared/empty no-deps
+  labels differ; preserve full model/forward mode through rollback.
+- Fixtures genuine UID0/CAP_CHOWN or smoke1001/caps0, no hostdata or identity
+  waivers. No Go RLIMIT_AS/payload FSIZE; bound output before accumulation.
+- Removed cgroup directories may retain nlink2: held directory/events, named
+  absence, relative ENOENT/retained ENODEV prove closure. Never relax regular
+  file unlink checks or accept polling alone.

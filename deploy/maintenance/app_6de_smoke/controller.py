@@ -21,8 +21,8 @@ import zipfile
 MAX_JSON = 2*1024**2
 MAX_NATIVE_REPORT = 2*1024**2
 MAX_ACL_REPORT = 4*1024**2
-EXPORT_CONTROLLER_SHA256 = '78b39cce80ce1c18a59ad393d39ca545ebd94155bdb26ac66c58fcaf2e6c8cc4'
-ARCHIVE_INVENTORY_SHA256 = '0ef759ea64e7eaa0e7727d3db457090c4c95d5f943ac4f8140ab85e25839a847'
+EXPORT_CONTROLLER_SHA256 = 'c54334137c97279db2b081c484a48fb502c00ab9d750e3da354f98fa303cc716'
+ARCHIVE_INVENTORY_SHA256 = 'cf5e665286429b02e64963620538c339f29e0839b60f97db58347a89764022c3'
 INVENTORY_SHA256 = '8b4b0091a1e8d20786e33c97a6bb4b63c28b263180527b313883815c67cfe5dc'
 SBOM_SHA256 = '171941abfdb3ec731dbd4b98730ba343eddda6732834213bec7593b95f15eb2f'
 CONFIRM = 'RUN-ONLY-6DE-ISOLATED-SMOKE-AND-FLAT-PUBLIC-INVENTORY-20261027-01'
@@ -34,7 +34,9 @@ VERIFIERS = {
     'verify_acl_consumer_presence.py': ('001e51d270c079153cc38db1be53c723fbbc8a8bb9e981e718e7b657127bc778', 'security_acl_consumer_presence/1', MAX_JSON),
 }
 EVIDENCE_NAMES = frozenset(('source-identity.json', 'input-manifest.json', 'image-build.json', 'prepare.json', 'finalize.json', 'reports/vulnerabilities.json', 'reports/sbom.cdx.json', 'reports/docker-build-output.json'))
+FLAT_FAILURE_CODES = frozenset(('alias_cycle', 'alias_depth', 'archive_bound', 'archive_deadline', 'archive_digest', 'archive_read_bound', 'archive_source', 'archive_source_changed', 'archive_truncated', 'container_receipt', 'directory_changed', 'directory_closed_changed', 'directory_component', 'directory_type', 'elf_dynamic_after_null', 'elf_dynamic_bound', 'elf_dynamic_inventory', 'elf_dynamic_section_required', 'elf_dynamic_shape', 'elf_dynamic_string_binding', 'elf_dynamic_symbol_binding', 'elf_dynamic_symbols_required', 'elf_encoding', 'elf_header', 'elf_header_bound', 'elf_identity', 'elf_inventory_count', 'elf_needed_name', 'elf_null_section', 'elf_program_bound', 'elf_section_bound', 'elf_section_inventory', 'elf_static_string_bound', 'elf_static_symbol_bound', 'elf_string_bound', 'elf_string_encoding', 'elf_symbol_bound', 'elf_symbol_inventory', 'flat_export_bound', 'flat_export_changed', 'flat_export_client', 'flat_export_close', 'flat_export_container', 'flat_export_contract', 'flat_export_metadata', 'flat_export_not_frozen', 'flat_export_pipe_close', 'flat_export_readback', 'flat_export_receipt', 'flat_export_scope', 'flat_export_stage', 'flat_export_stderr_bound', 'flat_export_stdout_bound', 'flat_export_timeout', 'flat_export_unarmed', 'flat_export_write', 'image_root', 'image_root_changed', 'image_root_closed_changed', 'inventory_byte_bound', 'inventory_changed', 'inventory_closed_changed', 'inventory_count_bound', 'inventory_depth', 'inventory_name_bound', 'inventory_timeout', 'isolated_container_root_required', 'metadata_bound', 'metadata_changed', 'metadata_closed_changed', 'metadata_duplicate', 'metadata_file', 'metadata_grew', 'metadata_nonfinite', 'metadata_open_changed', 'metadata_path', 'metadata_short', 'package_count', 'package_duplicate', 'package_identity', 'package_list_count', 'package_list_inventory', 'package_list_missing_or_ambiguous', 'package_list_total', 'package_list_type', 'package_path_total', 'package_source', 'package_status_bound', 'package_status_shape', 'report_bound', 'sbom_component', 'sbom_duplicate', 'sbom_layer', 'sbom_package_type', 'sbom_properties', 'sbom_purl', 'sbom_shape', 'sbom_source', 'sealed_proof', 'sealed_proof_changed', 'sealed_proof_closed_changed', 'sealed_source_path', 'source_identity', 'special_file_count', 'symlink_bound', 'tar_checksum', 'tar_count', 'tar_device', 'tar_duplicate', 'tar_file_count', 'tar_format', 'tar_hardlink', 'tar_header', 'tar_length', 'tar_link', 'tar_name', 'tar_names_bound', 'tar_number', 'tar_padding', 'tar_path', 'tar_pax', 'tar_pax_bound', 'tar_pax_duplicate', 'tar_pax_key', 'tar_pax_time', 'tar_root', 'tar_shadow', 'tar_special_payload', 'tar_tail', 'tar_type', 'tar_whiteout', 'trusted_parser_interface'))
 PHASE = 'source_admission'
+INVENTORY_STARTED=None
 CODES = frozenset(('intake_unarmed','payload_expectation_missing','actual_archive_observation_missing','intake_shape','evidence_shape','evidence_identity','evidence_signature',
     'evidence_reports','export_shape','export_identity','export_binding','archive_observation','canonical_labels',
     'capsule_binding','presence_identity','presence_mounts','presence_exit','smoke_receipt','source_admission','hosted_ci_only',
@@ -497,8 +499,8 @@ def inventory_cli(ctx,old,stage,*,image,proof,gid,control,cid=None):
 
 def whole_image_inventory(ctx, old, image, control, evidence_zip):
     """Never-started SAME-image export; no extra caps, modes or omissions."""
-    global PHASE
-    PHASE='fresh_same_image_whole_acl_inventory'
+    global PHASE,INVENTORY_STARTED
+    PHASE='fresh_same_image_whole_acl_inventory';INVENTORY_STARTED=time.monotonic()
     I,check=source_module(ctx.root,ctx.stack,'inventory.py',INVENTORY_SHA256);ctx.checks.append(check)
     E,check=source_module(ctx.root,ctx.stack,'export_controller.py',EXPORT_CONTROLLER_SHA256);ctx.checks.append(check)
     A,check=source_module(ctx.root,ctx.stack,'archive_inventory.py',ARCHIVE_INVENTORY_SHA256);ctx.checks.append(check)
@@ -582,6 +584,18 @@ def finish_cleanup(ctx, old, primary):
     return errors
 
 
+def public_inventory_elapsed():
+    if PHASE!='fresh_same_image_whole_acl_inventory'or type(INVENTORY_STARTED)not in(int,float):return None
+    elapsed=time.monotonic()-INVENTORY_STARTED
+    return round(elapsed,3)if math.isfinite(elapsed)and 0<=elapsed<=3600 else None
+
+
+def public_failure_code(error, allowed):
+    """Only finite reviewed source codes may become public failure metadata."""
+    code=error.args[0]if isinstance(error,RuntimeError)and len(error.args)==1 and type(error.args[0])is str else None
+    return code if code in allowed else 'unexpected_failure'
+
+
 def main(argv=None, *, outer_keeper=None):
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--execute-reviewed-6de-proof',action='store_true'); parser.add_argument('--confirm')
@@ -609,7 +623,7 @@ def main(argv=None, *, outer_keeper=None):
         print(json.dumps({'status':'canonical_image_smoke_passed','tests':32,'fresh_presence_reports':2,'fresh_native_payload_reports':1,'fresh_whole_image_acl_inventory_reports':1,'security_accepted':False,'full_matrix_accepted':False})); return 0
     except BaseException as error:
         code = error.args[0] if isinstance(error,RuntimeError) and len(error.args) == 1 and type(error.args[0]) is str else None
-        allowed = set(CODES)
+        allowed = set(CODES)|set(FLAT_FAILURE_CODES)
         if old is not None: allowed.update(old.FAILURE_CODES)
         if ctx is not None:
             for module in ctx.modules.values(): allowed.update(getattr(module,'PUBLIC_FAILURE_CODES',())); allowed.update(getattr(module,'PUBLIC_CODES',()))
@@ -617,7 +631,7 @@ def main(argv=None, *, outer_keeper=None):
             'KeyError','TypeError','ValueError','JSONDecodeError'))
         number = error.errno if isinstance(error,OSError) else None
         record = {'status':'canonical_image_smoke_failed','phase':PHASE,
-            'inventory_stage':INVENTORY_STAGE if PHASE=='fresh_same_image_whole_acl_inventory'and INVENTORY_STAGE in INVENTORY_STAGES else None,'closed_code':code if code in allowed else 'unexpected_failure',
+            'inventory_elapsed_seconds':public_inventory_elapsed(),'inventory_stage':INVENTORY_STAGE if PHASE=='fresh_same_image_whole_acl_inventory'and INVENTORY_STAGE in INVENTORY_STAGES else None,'closed_code':public_failure_code(error,allowed),
             'exception_class':type(error).__name__ if type(error).__name__ in known else 'unclassified_exception',
             'os_errno':number if type(number) is int and 0 < number <= 4095 else None,
             'cleanup_causes':errors,'security_accepted':False,'full_matrix_accepted':False}
