@@ -16,12 +16,11 @@
 - A never-started mount-free export excludes no kernel/proof paths: inspect
   every regular ELF, including /proc, /sys, /dev and /proof. TAR metadata is not
   full9; hash the archive before parsing and after the borrowed FD closes.
-- Small bounded responses should remain in bounded RAM through collector
-  closure; create logs afterward from immutable known bytes. No live output file
-  then exists whose metadata could be adopted after close.
-- Streaming logs need original-writer full9 and known byte/hash admission before
-  selector/pipe closes, plus a retained reader checked immediately after writer
-  close. Known bytes never justify inode or metadata replacement.
+- Keep small bounded responses in RAM until collectors close; log immutable
+  known bytes afterward. Streaming files require original-writer full9 and
+  byte/hash admission before selector/pipe closes, with a retained reader
+  acquired before writer close and checked immediately afterward. Known bytes
+  never justify inode or metadata replacement.
 - Docker can return CAP_-prefixed capability names. Normalize that known prefix
   only after validating typed lists, exact cardinality and the allowed set.
   Foreign-owned fixture chmod needs genuine FOWNER or the actual owner;
@@ -38,6 +37,9 @@
   observations. Keep every regular-file full9 guard unchanged.
 - Host PID claims need host-visible processes. Retired dev/inode numbers can be
   reused; identify the actual mapped public payload before calling it an old library.
-- Admit new adapter refusal codes in the outer closed mapping before costly CI;
-  unknown exception operands remain private. Budget repeated source guards and
-  full hashes within the global deadline; timing alone is an inferred cause.
+- Closed refusal mappings must cover new adapter codes; unknown operands stay
+  private. Physical-finalizer errors outrank earlier errors; preserve both.
+  Closure evidence needs actual driver/readers/collector closes and final names,
+  bound to that invocation, never earlier success or published JSON alone.
+  Budget repeated guards/hashing within the original deadline; timing alone is
+  inference.
