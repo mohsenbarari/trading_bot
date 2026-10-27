@@ -88,6 +88,54 @@ class SourceTests(unittest.TestCase):
    self.assertEqual(self.source.configured_acl_linkage(source)['variables']['QCOPY_ACL_LIB'],['-lattr','-lselinux'])
   tree=ast.parse((ROOT/'sourcebuild.py').read_bytes());fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='vendor_tests')
   text=ast.get_source_segment((ROOT/'sourcebuild.py').read_text(),fn);self.assertLess(text.index('configured_acl_linkage'),text.index("command(['/usr/bin/dh_auto_test']"))
+ def m4_check_protocol(self):
+  tree=ast.parse((ROOT/'sourcebuild.py').read_bytes());fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='build_vendor');found=[]
+  for node in ast.walk(fn):
+   if not isinstance(node,ast.Expr)or not isinstance(node.value,ast.Call)or not isinstance(node.value.func,ast.Name)or node.value.func.id!='require':continue
+   compare=node.value.args[0]
+   if isinstance(compare,ast.Compare)and isinstance(compare.left,ast.Call)and ast.unparse(compare.left.args[0])=="source / 'm4/acl.m4'":found.append(node)
+  found.sort(key=lambda n:n.lineno);return fn,found
+ def test_m4_actual_build_vendor_protocol_uses_owned_observation_at_both_pins(self):
+  fn,nodes=self.m4_check_protocol();self.assertEqual(len(nodes),2)
+  for node,pin in zip(nodes,('LINK_M4_BEFORE','LINK_M4_AFTER')):
+   call=node.value.args[0].left;self.assertEqual(ast.unparse(call.func),'observed');self.assertEqual([(v.arg,ast.unparse(v.value))for v in call.keywords],[('maximum',pin+'[0]')])
+  wrong=[n for n in ast.walk(fn)if isinstance(n,ast.Call)and isinstance(n.func,ast.Name)and n.func.id=='digest'and n.args and any(isinstance(part,ast.Name)and part.id=='source'for part in ast.walk(n.args[0]))]
+  self.assertEqual(wrong,[])
+ def m4_fixture_checks(self,source,before,after):
+  _,nodes=self.m4_check_protocol();env={'source':source,'observed':self.source.observed,'require':self.source.require,'LINK_M4_BEFORE':(len(before),sha256(before).hexdigest()),'LINK_M4_AFTER':(len(after),sha256(after).hexdigest())}
+  return [compile(ast.Module(body=[node],type_ignores=[]),'<actual build_vendor m4 pin>','exec')for node in nodes],env
+ def test_m4_actual_check_wrong_sha_mode_symlink_and_lateclose_refuse(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw,patch.object(self.source,'WORK',Path(raw)):
+   source=Path(raw)/'source';(source/'m4').mkdir(parents=True);p=source/'m4/acl.m4';before=b'OWNED before m4';after=b'OWNED after m4!';p.write_bytes(before);p.chmod(0o644);checks,env=self.m4_fixture_checks(source,before,after);exec(checks[0],env)
+   p.write_bytes(b'X'*len(before))
+   with self.assertRaisesRegex(RuntimeError,'qcopy_m4_original_pin'):exec(checks[0],env)
+   p.write_bytes(before);p.chmod(0o664)
+   with self.assertRaisesRegex(RuntimeError,'owned_file'):exec(checks[0],env)
+   p.chmod(0o644);saved=p.with_suffix('.original');p.rename(saved);p.symlink_to(saved)
+   with self.assertRaisesRegex(RuntimeError,'owned_path'):exec(checks[0],env)
+   p.unlink();saved.rename(p);original_open=os.open;original_close=os.close;targets=set()
+   def opened(path,*a,**kw):
+    fd=original_open(path,*a,**kw)
+    if Path(path)==p:targets.add(fd)
+    return fd
+   def closed(fd):
+    original_close(fd)
+    if fd in targets:os.utime(p,ns=(p.stat().st_mtime_ns+1000000000,p.stat().st_mtime_ns+1000000000))
+   with patch.object(self.source.os,'open',opened),patch.object(self.source.os,'close',closed),self.assertRaisesRegex(RuntimeError,'owned_closed_changed'):exec(checks[0],env)
+ def test_genuine_uid10001_owned_m4_both_actual_checks_and_wrong_owner_refuse(self):
+  # Root HOST only when managed credentials/chown are unavailable: never skip
+  # or manufacture UID/stat values. The real build coordinator is Root and
+  # dpkg-source/patch produces genuine10001-owned source files.
+  self.assertEqual((os.getuid(),os.geteuid()),(0,0))
+  with tempfile.TemporaryDirectory(dir=TREE)as raw,patch.object(self.source,'WORK',Path(raw)):
+   source=Path(raw)/'source';(source/'m4').mkdir(parents=True);p=source/'m4/acl.m4';before=b'OWNED genuine before m4';after=b'OWNED genuine after m4';p.write_bytes(before);p.chmod(0o644)
+   fd=os.open(p,os.O_RDONLY|os.O_CLOEXEC)
+   try:os.fchown(fd,10001,10001)
+   finally:os.close(fd)
+   self.assertEqual((p.stat().st_uid,p.stat().st_gid),(10001,10001));checks,env=self.m4_fixture_checks(source,before,after);exec(checks[0],env)
+   p.write_bytes(after);self.assertEqual((p.stat().st_uid,p.stat().st_gid),(10001,10001));exec(checks[1],env)
+   os.chown(p,10002,10002);self.assertEqual(p.stat().st_uid,10002)
+   with self.assertRaisesRegex(RuntimeError,'owned_file'):exec(checks[1],env)
  def test_host_refuses_nonhosted_actual_context(self):
   with self.assertRaisesRegex(RuntimeError,'hosted_job'):self.host.hosted_layout(SimpleNamespace(),{})
  def test_capacity_requires_real_full_suite_allowance(self):
