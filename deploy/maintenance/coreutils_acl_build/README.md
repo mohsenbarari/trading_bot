@@ -153,3 +153,27 @@ Autoconf/Automake, changed vendor suite or network bootstrap is permitted.
 Actual owned patch-only fuzz0 reconstruction and Python SOURCE QA do not prove
 autoreconf/C compilation. The failed authentic CI and all predecessors stay
 preserved; Root must review a fresh complete execution before any acceptance.
+
+
+Successor04 fixes failure observability after authentic CI40481949063 reached
+real Coreutils configure (the previous autopoint cause was fixed) and failed
+before Coreutils compilation. Its3,479,467-byte command output had been bounded
+and fully captured in RAM, but old failure evidence retained only16KiB prefix
+and16KiB tail, losing the intervening configure cause. Available partial bytes
+show only generic configure exit1; no missing cause is guessed here.
+
+Every failed phase now retains ALL already captured known bytes, bounded to
+its unchanged <=128MiB command maximum, in an exclusive .failed.log. A separate
+<=4KiB .failed.json records actual returncode, received/captured byte counts,
+SHA, bound, EOF and physical pipe closure, plus acceptance=false. Timeout or
+overflow remains explicitly incomplete; no beyond-bound byte is appended or
+written. Both original creationframes/readers are established before writer
+close and registered with the same outer owner through all finalizers. No late
+pathname adoption, extra permissions, ignored error, retry/resume or gate change
+is introduced. The existing success path is unchanged. Actual inert exit7 with
+a middle-only cause marker, outbound overflow, and a timestamp change to an
+older log at the newer metadata reader's physical close are SOURCE regressions.
+The original Cpatch/SDK/compiler base, full GNU selection and suites remain
+byteexact03. Root's clean active controller formatting is inherited. Prior
+Root integration/pathspec copies outside the source tree are excluded from04
+(their originals remain preserved); they are not new execution evidence.

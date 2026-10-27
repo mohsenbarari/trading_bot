@@ -172,4 +172,34 @@ class SourceTests(unittest.TestCase):
   with tempfile.TemporaryDirectory(dir=ROOT)as directory:
    source=Path(directory);(source/'m4').mkdir();(source/'po').mkdir();(source/'po/Makefile.in.in').write_bytes(b'owned template');(source/'m4/unexpected.m4').symlink_to('../po/Makefile.in.in')
    with patch.object(self.source,'WORK',source),self.assertRaisesRegex(RuntimeError,'imported_m4_inventory'):self.source.regeneration_inputs(source)
+ def actual_failed(self,body,maximum):
+  try:self.host.run([sys.executable,'-I','-S','-c',body],env={'PATH':'/usr/bin:/bin'},deadline=time.monotonic()+10,maximum=maximum)
+  except RuntimeError as error:return error.public_command_failure
+  self.fail('actual failure did not reject')
+ def test_actual_exit7_middle_cause_survives_complete_known_failed_log(self):
+  data=b'A'*25000+b'OWNED_MIDDLE_CAUSE\n'+b'Z'*25000
+  observed=self.actual_failed('import os;os.write(1,b"A"*25000+b"OWNED_MIDDLE_CAUSE\\n"+b"Z"*25000);raise SystemExit(7)',65536)
+  self.assertEqual(observed['actual_returncode'],7);self.assertEqual(observed['captured_output'],data);self.assertTrue(observed['stdout_eof_observed']);self.assertTrue(observed['actual_pipe_closed'])
+  self.assertNotIn(b'OWNED_MIDDLE_CAUSE',observed['prefix']+observed['tail'])
+  with tempfile.TemporaryDirectory(dir=ROOT)as directory:
+   owners=[];path=Path(directory);self.host.retain_failed_command(path,'offline_build',observed,owners)
+   self.assertEqual((path/'offline_build.failed.log').read_bytes(),data);metadata=json.loads((path/'offline_build.failed.json').read_bytes());self.assertTrue(metadata['complete_received_stdout']);self.assertFalse(metadata['command_accepted'])
+   self.assertEqual(metadata['captured_output_sha256'],sha256(data).hexdigest());self.assertEqual(len(owners),2);self.host.finalize_public_inputs(owners)
+ def test_actual_output_overflow_retains_only_bounded_received_prefix_truthfully(self):
+  observed=self.actual_failed('import os;os.write(1,b"owned"*20000);raise SystemExit(7)',32768)
+  self.assertLessEqual(len(observed['captured_output']),32768);self.assertLessEqual(observed['observed_output_bytes'],32769);self.assertFalse(observed['stdout_eof_observed']);self.assertTrue(observed['actual_pipe_closed'])
+  with tempfile.TemporaryDirectory(dir=ROOT)as directory:
+   owners=[];path=Path(directory);self.host.retain_failed_command(path,'offline_build',observed,owners)
+   self.assertLessEqual((path/'offline_build.failed.log').stat().st_size,32768);metadata=json.loads((path/'offline_build.failed.json').read_bytes());self.assertFalse(metadata['complete_received_stdout']);self.assertFalse(metadata['command_accepted']);self.host.finalize_public_inputs(owners)
+ def test_actual_failed_metadata_reader_close_cannot_change_prior_full_log(self):
+  observed=self.actual_failed('import os;os.write(1,b"owned middle");raise SystemExit(7)',64)
+  with tempfile.TemporaryDirectory(dir=ROOT)as directory:
+   owners=[];path=Path(directory);self.host.retain_failed_command(path,'offline_build',observed,owners);last=owners[-1].fd;real_close=os.close;changed=[]
+   def closed(fd):
+    real_close(fd)
+    if fd==last and not changed:
+     target=path/'offline_build.failed.log';before=target.stat();os.utime(target,ns=(before.st_atime_ns,before.st_mtime_ns+1000000));changed.append(True)
+   with patch.object(self.host.os,'close',closed):
+    with self.assertRaisesRegex(RuntimeError,'public_changed'):self.host.finalize_public_inputs(owners)
+   self.assertTrue(changed)
 if __name__=='__main__':unittest.main()
