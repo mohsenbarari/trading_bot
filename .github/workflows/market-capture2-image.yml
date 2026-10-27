@@ -26,7 +26,8 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: normal-market-capture2-image-evidence
+  group: normal-market-capture2-image-evidence-${{ inputs.role || 'capture2-f79' }}
+  queue: max
   cancel-in-progress: false
 jobs:
   candidate:

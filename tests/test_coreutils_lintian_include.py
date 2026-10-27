@@ -24,6 +24,13 @@ def cache03_bytes():
  if M.LOCK_SHA!='c9f287289d6bdcec280b0e49bb615f4df01856bc21b84ca2398543b0e57484d6'or actual['armed']is not True:raise AssertionError('actual Root lock stage required')
  raw=SOURCE.read_bytes();armed=b"LOCK_SHA='c9f287289d6bdcec280b0e49bb615f4df01856bc21b84ca2398543b0e57484d6'";historical=b"LOCK_SHA='77c9f3af5db1492c5cabec52c3791c61bc6f44e92ba419ec50bfa52844176803'"
  if raw.count(armed)!=1:raise AssertionError('actual Root lock pin source required')
+ # Reverse only the explicitly reviewed closed-diagnostic function/catch.
+ # Real companion-lock authentication above precedes historical reconstruction.
+ text=raw.decode();tree=ast.parse(text);diagnostic=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='failure');segment=ast.get_source_segment(text,diagnostic)
+ if sha256(segment.encode()).hexdigest()!='c3128006dac819aec7932337c0c4f3662591604d5be801eb06ec112b1f6cb7a0':raise AssertionError('reviewed closed diagnostics source required')
+ text=text.replace(segment+'\n\n','',1);current="  result=failure(error);print(json.dumps(result,sort_keys=True));return 1";prior="  code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CODES else 'unexpected_refusal'\n  result={'status':'refused','code':code,'security_accepted':False};print(json.dumps(result,sort_keys=True));return 1"
+ if text.count(current)!=1:raise AssertionError('reviewed closed diagnostic catch required')
+ raw=text.replace(current,prior).encode()
  return raw.replace(armed,historical).replace(CACHE04_JOIN.encode(),CACHE03_JOIN.encode())
 
 POLICY_PIN=(3501,'050ba34b74480e1cc00dd774153e729e76553b0af595e0d517fddc95b855d4ce')
