@@ -7,13 +7,15 @@ from contextlib import ExitStack
 from hashlib import sha1,sha256
 from pathlib import Path,PurePosixPath
 from types import ModuleType
-import argparse,gzip,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time
+import argparse,ast,gzip,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time
 
 EXECUTION_ARMED=True
 REPOSITORY='mohsenbarari/trading_bot'
 SELF='scripts/prepare_market_capture2_image.py'
 SEALER='scripts/prepare_market_product_source.py'
 READER='scripts/verify_market_product_source.py'
+READER_BYTES=30085
+READER_SHA256='da8455903a8194b3b321331ed6fa5eb70b5c4e09a227004be3519e3a5e8d8d66'
 WORKFLOW='.github/workflows/market-capture2-image.yml'
 BUSINESS='scripts/market_business81.py'
 OUTER='scripts/market_business81_outer.py'
@@ -60,11 +62,12 @@ def periodic(check,seconds=1):
   now=time.monotonic()
   if last[0]is None or now-last[0]>=seconds:check();last[0]=now
  return guard
-def command(argv,*,environment,seconds=60,maximum=MAX_JSON,target=None,guard=lambda:None,stream_complete=None):
+def command(argv,*,environment,seconds=60,maximum=MAX_JSON,target=None,guard=lambda:None,stream_complete=None,nonzero=None):
  """Same owned-unreaped rule as the reviewed ordinary bounded runner."""
  need(type(argv)is list and bool(argv)and all(type(v)is str and '\0'not in v for v in argv)
   and type(maximum)is int and 0<maximum<=2*1024**3 and type(seconds)in(int,float)and math.isfinite(seconds)and 0<seconds<=3600,'command_contract')
  need(stream_complete is None or target is not None and callable(stream_complete),'command_contract')
+ need(nonzero is None or target is None and callable(nonzero),'command_contract')
  guard();end=time.monotonic()+seconds
  child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
   env=environment,close_fds=True,start_new_session=True);parts=[];count=0;stream_hash=sha256()
@@ -82,6 +85,11 @@ def command(argv,*,environment,seconds=60,maximum=MAX_JSON,target=None,guard=lam
      view=memoryview(raw)
      while view:n=os.write(target,view);need(n>0,'output_write');view=view[n:]
      if stream_complete is not None:stream_hash.update(raw)
+   if nonzero is not None:
+    code=child.wait(timeout=max(.1,end-time.monotonic()));guard()
+    if code!=0:
+     need(nonzero(code,b''.join(parts),count)is None,'command_contract')
+     need(False,'command_failed')
    if stream_complete is not None:
     need(child.wait(timeout=max(.1,end-time.monotonic()))==0,'command_failed');guard();os.fsync(target)
     created=identity(os.fstat(target));need(created[6]==count,'source_bound')
@@ -343,7 +351,20 @@ def validate_sqlite_probe(value,lock):
 def run_owned_probe(root,image,signature,kind,plan,*,guard):
  need(kind in {'source93','sqlite'}and hex64(signature),'probe_scope')
  name='normal-market-'+kind+'-'+signature[:24];cid=None;env=environment(root)
- def cli(argv,maximum=MAX_JSON,seconds=60,enforce=True):return command([*DOCKER,*argv],environment=env,maximum=maximum,seconds=seconds,guard=guard if enforce else lambda:None)
+ def failed_start(code,raw,count):
+  # Only these two fixed public no-business-Env probes may publish child text.
+  # No command arguments, auth, environment or arbitrary subprocess is logged.
+  need(type(code)is int and code!=0 and type(raw)is bytes and type(count)is int and count==len(raw)<=MAX_JSON,'probe_diagnostic')
+  maximum=8192;prefix=raw[:maximum];tail=raw[max(len(prefix),len(raw)-maximum):]
+  value={'schema':'normal_market_fixed_public_probe_failure/1','kind':kind,'stage':'start',
+   'actual_client_returncode':code,'combined_stdout_stderr':True,'observed_bytes':count,
+   'prefix_bytes':len(prefix),'prefix_offset':0,'output_prefix':prefix.decode('utf-8',errors='replace'),
+   'tail_bytes':len(tail),'tail_offset':count-len(tail),'output_tail':tail.decode('utf-8',errors='replace'),
+   'output_truncated':len(prefix)+len(tail)<count,'diagnostic_only':True,'acceptance_evidence':False,'security_accepted':False}
+  save(root/'reports'/('probe-'+kind+'-start-failure.json'),encoded(value))
+ def cli(argv,maximum=MAX_JSON,seconds=60,enforce=True):
+  kwargs={'nonzero':failed_start}if enforce and argv==['container','start','--attach',cid]else{}
+  return command([*DOCKER,*argv],environment=env,maximum=maximum,seconds=seconds,guard=guard if enforce else lambda:None,**kwargs)
  def inspect(enforce=True):
   value=document(cli(['container','inspect','--format','{{json .}}',cid],enforce=enforce));need(value.get('Id')==cid,'probe_owner')
   return validate_probe_container(value,name,image,signature,kind,root)
@@ -379,11 +400,27 @@ def receipt_contract(receipt,signature,controllers,cache_rows,epoch):
   'normal_cache_files':cache_rows,'source_date_epoch':epoch,'source_signature_format_unchanged':'normal-market-two-git-sources-v1',
   'business_tests_actual':False,'complete_control_payload':False,'activation_authority':False,'security_accepted':False}
  return value,sha256(encoded(value)).hexdigest()
+def validate_reader_source(raw):
+ """Admit the exact pure image payload, never its Root SSH launcher."""
+ need(type(raw)is bytes and len(raw)==READER_BYTES and sha256(raw).hexdigest()==READER_SHA256,'reader_source_pin')
+ tree=ast.parse(raw);values={}
+ for node in tree.body:
+  if isinstance(node,ast.Assign)and len(node.targets)==1 and isinstance(node.targets[0],ast.Name)and node.targets[0].id in {'ROWS','ROWS_SHA','MANIFEST_SHA'}:
+   need(node.targets[0].id not in values,'reader_source_contract');values[node.targets[0].id]=ast.literal_eval(node.value)
+ need(set(values)=={'ROWS','ROWS_SHA','MANIFEST_SHA'}and values['MANIFEST_SHA']==MANIFEST_SHA and values['ROWS_SHA']==ROWS_SHA
+  and type(values['ROWS'])is list and len(values['ROWS'])==93 and sha256(encoded(values['ROWS'])).hexdigest()==ROWS_SHA,'reader_source_contract')
+ need(all(type(row)is dict and set(row)=={'path','mode','bytes','sha256','git_blob'}and relative(row['path'])and row['mode']=='100644'
+  and type(row['bytes'])is int and 0<=row['bytes']<=MAX_FILE and hex64(row['sha256'])and hex40(row['git_blob'])for row in values['ROWS'])
+  and len({row['path']for row in values['ROWS']})==93,'reader_source_contract')
+ return {'bytes':READER_BYTES,'sha256':READER_SHA256,'manifest_sha256':MANIFEST_SHA,'rows_sha256':ROWS_SHA,'source_files':93}
+
 def controller_sources(repo,release,root):
  """A separate actual Git receipt; explicit separate actual Git controller inventory."""
  folder=root/'controller-source';folder.mkdir(mode=0o700);rows=[];raws={}
  for name in sorted(CONTROLLER_FILES):
-  raw=git_source(repo,release,name);entry=git(repo,'ls-tree','-z',release,'--',name,maximum=4096)
+  raw=git_source(repo,release,name)
+  if name==READER:validate_reader_source(raw)
+  entry=git(repo,'ls-tree','-z',release,'--',name,maximum=4096)
   match=re.fullmatch(rb'(100644|100755) blob ([a-f0-9]{40})\t'+re.escape(name.encode())+rb'\x00',entry)
   need(match is not None,'controller_source')
   blob=sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest();need(blob==match[2].decode(),'controller_source')
@@ -961,7 +998,7 @@ def main(argv=None,*,retained=None,final_checks=None):
  print(json.dumps(value,sort_keys=True));return 0
 
 CODES=frozenset(('archive_bound', 'archive_config', 'archive_shape', 'arguments', 'build_contract', 'build_not_completed', 'build_receipt', 'buildx_driver', 'cache_binding', 'cache_inventory', 'clean_main_required', 'command_bound', 'command_contract', 'command_failed', 'command_timeout', 'context_bound', 'context_changed', 'context_directory', 'context_inventory', 'controller_inventory', 'controller_signature', 'controller_source', 'controller_source_bound', 'disk_reserve', 'export_not_completed', 'historical81_business_producer_not_integrated', 'hosted_main_only', 'image_config', 'image_identity', 'image_labels', 'image_layers', 'json_bound', 'json_duplicate', 'json_nonfinite', 'live_main_changed', 'live_main_scope', 'normal_main_integration_unarmed', 'normal_workflow_token_required', 'output_bound', 'output_write', 'probe_cleanup', 'probe_exit', 'probe_isolation', 'probe_mounts', 'probe_owner', 'probe_resources', 'probe_scope', 'raw_high_critical_findings', 'release_commit', 'report_changed', 'report_identity', 'report_shape', 'repository_identity', 'root_scope', 'source93_probe', 'source_binding', 'source_bound', 'source_changed', 'source_contract', 'source_epoch', 'source_file', 'source_parent', 'sqlite_lock', 'sqlite_probe', 'two_git_signature', 'vendor_lock'))
-CODES=CODES|frozenset(('evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
+CODES=CODES|frozenset(('reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
 def closed_failure(error):
  code=error.args[0]if type(error)is RuntimeError and len(error.args)==1 and type(error.args[0])is str and error.args[0]in CODES else'unclassified'
  kind=type(error).__name__ if type(error)in (RuntimeError,OSError,FileNotFoundError,PermissionError,ValueError,TypeError,KeyError)else'unclassified'
