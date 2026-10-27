@@ -556,3 +556,31 @@ cases. No actual new build/native/ABI/export/security acceptance is claimed.
 The actual candidate inventory was not exported by the failed prior CI, so
 POLICY_COVERAGE_SOURCE.json records remaining unknown classes honestly and does
 not grant absence waivers. A fresh full real build remains required.
+
+
+## Source14: source-derived caller imports and complete ABI observations
+
+CI40528106274 passed both full GNU suites, installed the candidate and verified
+its complete payload, then refused the old three-import caller requirement.
+The unchanged configure probe references GET, SET and DELETE, but authenticated
+gold-acl-fd.c calls only SET and DELETE at runtime; qcopy copies bound-FD xattrs.
+Authenticated src/local.mk gives cp, mv and ginstall the same copy_sources and
+copy_ldadd, with the unchanged patch adding gold_acl_sources to copy_sources.
+Each caller therefore requires SET and DELETE. The approved SDK/runtime export
+requirement still includes all four NEW_APIS, including GET and EXTENDED.
+
+Before caller semantic ABI checks, actual bounded readelf dynamic, dynsym and
+version output plus ldd output for all three callers is collected and printed
+as public JSON with semantic_ABI_checked=false and security_accepted=false.
+Per-command and combined output limits precede accumulation, and the encoded
+receipt is bounded before printing. Identity, source, custody and command errors
+refuse immediately. An ABI refusal remains blocking after complete observations;
+the unchanged hosted failed-command collector retains these diagnostics. There
+is no exception deferral or acceptance path. Private symbol versions, GLIBC2.41,
+approved loaded libacl, full export-set equality and all later native, FD0,
+ordinary, vendor, payload, source and cleanup requirements remain mandatory.
+
+The Source14 author passed 71 selected Python tests with no skips. Two genuine
+HOST credential/chown methods were not run by the author; Root must run all73.
+These tests use inert owned parser fixtures and never claim actual candidate
+ELF or ABI success. No new build/package/activation/security acceptance follows.

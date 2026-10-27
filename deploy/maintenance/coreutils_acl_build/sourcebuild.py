@@ -537,22 +537,50 @@ def exported_symbols(path):
  raw=metadata(['/usr/bin/readelf','--wide','--dyn-syms',str(path)]).decode()
  return sorted({line.split()[-1].split('@')[0]for line in raw.splitlines()if ' UND 'not in line and re.search(r'\bacl_[A-Za-z0-9_]+(?:@@?[^\s]+)?\s*$',line)})
 
-def caller_binary_contract(path,library):
- dynamic=metadata(['/usr/bin/readelf','--wide','--dynamic',str(path)]).decode();symbols=metadata(['/usr/bin/readelf','--wide','--dyn-syms',str(path)]).decode()
+def caller_binary_observations(paths,library):
+ """Bounded actual public ELF/loader output for ALL callers before ABI gates.
+
+ These are observations, never successful ABI or callsite attestations. Any
+ command, file identity, loader execution or output-bound error still refuses
+ immediately; semantic ABI errors are not caught or converted to successes.
+ """
+ require(type(paths)is dict and set(paths)=={'cp','mv','install'}and all(type(name)is str and isinstance(path,Path)and path.name==name for name,path in paths.items()),'caller_observation_scope')
+ libpath=Path(library['path']);lib_before=identity(libpath.lstat())
+ require(digest(libpath)=={'bytes':library['bytes'],'sha256':library['sha256']},'approved_runtime_library_changed')
+ libraw=metadata(['/usr/bin/readelf','--wide','--dyn-syms',str(libpath)]);count=len(libraw)
+ require(count<=MAX_METADATA,'caller_observation_output_bound');libsymbols=libraw.decode();rows={}
+ require(identity(libpath.lstat())==lib_before,'caller_observation_changed')
+ for name in ('cp','mv','install'):
+  path=paths[name];before=identity(path.lstat());binary=digest(path);values={}
+  for key,argv in [('dynamic',['/usr/bin/readelf','--wide','--dynamic',str(path)]),('symbols',['/usr/bin/readelf','--wide','--dyn-syms',str(path)]),('versions',['/usr/bin/readelf','--wide','--version-info',str(path)]),('loaded',['/usr/bin/ldd',str(path)])]:
+   raw=metadata(argv);require(count+len(raw)<=MAX_METADATA,'caller_observation_output_bound');count+=len(raw);values[key]=raw.decode()
+   require(identity(path.lstat())==before and identity(libpath.lstat())==lib_before,'caller_observation_changed')
+  require(digest(path)==binary and digest(libpath)=={'bytes':library['bytes'],'sha256':library['sha256']},'caller_observation_changed')
+  rows[name]={'path':str(path),'candidate_binary':binary,'binary_full9':list(before),'library_full9':list(lib_before),'library_symbols':libsymbols,**values}
+ # encoded bounds BEFORE print; no partial publication of a successful ABI.
+ raw=encoded({'schema':'coreutils_actual_all_caller_binary_observation/1','callers':rows,'semantic_ABI_checked':False,'security_accepted':False},maximum=MAX_METADATA)
+ print(raw.decode(),end='',flush=True);return rows
+
+def caller_binary_contract(path,library,observation):
+ require(observation['path']==str(path)and list(identity(path.lstat()))==observation['binary_full9']and list(identity(Path(library['path']).lstat()))==observation['library_full9']and digest(path)==observation['candidate_binary'],'caller_observation_changed')
+ dynamic=observation['dynamic'];symbols=observation['symbols']
  undefined=set(re.findall(r'\bUND\s+(acl_[A-Za-z0-9_]+)(?:@[^\s]+)?(?:\s+\([0-9]+\))?\s*$',symbols,re.M))
- required={'acl_get_file_at','acl_set_file_at','acl_delete_def_file_at'}
+ # The unchanged shared gold_acl_qset_fd runtime calls exactly these two.
+ # acl_get_file_at is a configure-only capability probe, not a runtime call.
+ required={'acl_set_file_at','acl_delete_def_file_at'}
  require('Shared library: [libacl.so.1]'in dynamic and required<=undefined,'coreutils_private_at_imports')
  # GNU regular-FD compatibility code remains intact and may retain legitimate
  # pathname symbols. Imports alone neither close nor prove a source callsite.
- versions=metadata(['/usr/bin/readelf','--wide','--version-info',str(path)]).decode();glibc=[tuple(map(int,v.split('.')))for v in re.findall(r'GLIBC_([0-9]+\.[0-9]+)',versions)]
+ versions=observation['versions'];glibc=[tuple(map(int,v.split('.')))for v in re.findall(r'GLIBC_([0-9]+\.[0-9]+)',versions)]
  require(glibc and max(glibc)<=(2,41),'glibc_abi')
  bindings={}
- libsymbols=metadata(['/usr/bin/readelf','--wide','--dyn-syms',library['path']]).decode()
+ libsymbols=observation['library_symbols']
  for name in required:
   expected=re.findall(r'\b'+name+r'@@([^\s]+)',libsymbols);actual=re.findall(r'\bUND\s+'+name+r'@([^\s]+)',symbols)
   require(len(expected)==len(actual)==1 and actual==expected,'versioned_acl_abi');bindings[name]=actual[0]
- loaded=metadata(['/usr/bin/ldd',str(path)]).decode();match=re.findall(r'^\s*libacl\.so\.1 => (/[^\s]+)',loaded,re.M)
+ loaded=observation['loaded'];match=re.findall(r'^\s*libacl\.so\.1 => (/[^\s]+)',loaded,re.M)
  require(len(match)==1 and Path(match[0]).resolve(strict=True)==Path(library['path'])and digest(Path(library['path']))=={'bytes':library['bytes'],'sha256':library['sha256']},'loaded_approved_libacl')
+ require(list(identity(path.lstat()))==observation['binary_full9']and list(identity(Path(library['path']).lstat()))==observation['library_full9'],'caller_observation_changed')
  return {'path':str(path),'candidate_binary':digest(path),'libacl':library,'required_private_at_imports':sorted(required),'actual_versioned_acl_bindings':bindings,
   'retained_legacy_import_names_not_callsite_proof':sorted(LEGACY&undefined),'actual_ldd_acl_target':str(Path(match[0]).resolve()),
   'maximum_glibc_requirement':'.'.join(map(str,max(glibc))),'dynamic_approved_libacl_not_static_sdk':True,'security_accepted':False}
@@ -660,8 +688,9 @@ def build():
  install_packages([Path(candidate['path'])],documentation=('coreutils',),complete_package_payload=True)
  after=inventory();expected=dict(before);expected['coreutils']=VERSION;require(after==expected,'only_coreutils_runtime_delta')
  payload=regular_payload(Path(candidate['path']),'coreutils',VERSION,'candidate-coreutils')
+ observations=caller_binary_observations({n:Path('/usr/bin')/n for n in ('cp','mv','install')},library)
  require(acl_library_binding(WORK/'expected-approved-libacl')==library and exported_symbols(Path(library['path']))==approved_exports,'libacl_abi_changed')
- abi={n:caller_binary_contract(Path('/usr/bin')/n,library)for n in ('cp','mv','install')}
+ abi={n:caller_binary_contract(Path('/usr/bin')/n,library,observations[n])for n in ('cp','mv','install')}
  # Compile actual frozen private helper fixture using actual generated GNU flags,
  # and a separate companion invoking the real GNU qcopy_acl regular-FD0 fix.
  native={}
