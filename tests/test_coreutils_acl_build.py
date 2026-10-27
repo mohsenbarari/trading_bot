@@ -6,7 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType,SimpleNamespace
 from unittest.mock import patch
-import ast,io,json,os,stat,subprocess,sys,tempfile,time,unittest
+import ast,io,json,os,re,stat,subprocess,sys,tempfile,time,unittest
 
 TREE=Path(__file__).absolute().parent.parent
 ROOT=TREE/'deploy/maintenance/coreutils_acl_build'
@@ -495,4 +495,99 @@ class SourceTests(unittest.TestCase):
   self.assertIn('driver_binding=driver',text);self.assertIn("observed(Path.cwd()/'build-aux/test-driver',maximum=65536)==driver",text)
   fragment=(ROOT/'print-vendor-selection.mk').read_text();self.assertIn('$(if $(IGNORE_SKIPPED_LOGS),no,yes)',fragment)
   self.assertNotRegex(fragment,r'(?m)^\s*IGNORE_SKIPPED_LOGS\s*[:+?]?=')
+ def test_runtime_imports_follow_authenticated_shared_sources_not_configure_probe(self):
+  # Authentic original Makefile bytes, pinned by the unchanged local packet.
+  original=(TREE/'tests/fixtures/coreutils97_src_local.mk').read_bytes();packet=json.loads((ROOT/'local-source-packet.json').read_bytes());row=next(r for r in packet['files']if r['path']=='upstream/coreutils-9.7-3/src/local.mk')
+  self.assertEqual((len(original),sha256(original).hexdigest()),(row['bytes'],row['sha256']))
+  text=original.decode()
+  for target in('src_cp','src_mv','src_ginstall'):
+   self.assertRegex(text,rf'(?m)^{target}_SOURCES = [^\n]*\$\(copy_sources\)');self.assertIn(target+'_LDADD += $(copy_ldadd)',text)
+  patch_text=(ROOT/self.source.PATCH).read_text()
+  def added(name):
+   segment=patch_text.split('+++ b/'+name+'\n',1)[1].split('\n--- ',1)[0]
+   return ''.join(line[1:]+'\n'for line in segment.splitlines()if line.startswith('+')and not line.startswith('+++'))
+  runtime=added('src/gold-acl-fd.c');configure=added('configure.ac');local=added('src/local.mk');manifest=json.loads((ROOT/'source-manifest.json').read_bytes())
+  self.assertEqual({'bytes':len(runtime.encode()),'sha256':sha256(runtime.encode()).hexdigest()},manifest['files']['src/gold-acl-fd.c']['after'])
+  called=set(re.findall(r'\b(acl_[A-Za-z0-9_]+_at)\s*\(',runtime));self.assertEqual(called,{'acl_set_file_at','acl_delete_def_file_at'})
+  self.assertIn('= acl_get_file_at;',configure);self.assertNotIn('acl_get_file_at',runtime)
+  self.assertIn('gold_acl_attr_copy_fd (source, source_fd, dest, dest_fd,',runtime)
+  self.assertIn('copy_sources = $(gold_acl_sources)',local);self.assertIn('  src/gold-acl-fd.c',local)
+  tree=ast.parse((ROOT/'sourcebuild.py').read_bytes());fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='caller_binary_contract');required=next(n.value for n in fn.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='required'for t in n.targets))
+  self.assertEqual(ast.literal_eval(required),called);self.assertEqual(self.source.NEW_APIS,{'acl_get_file_at','acl_set_file_at','acl_extended_file_at','acl_delete_def_file_at'})
+ def caller_observation_fixture(self):
+  temporary=tempfile.TemporaryDirectory(dir=TREE);self.addCleanup(temporary.cleanup);root=Path(temporary.name).resolve();paths={}
+  for name in('cp','mv','install'):
+   p=root/name;p.write_bytes(('OWNED nonexecuted '+name+' parsing fixture\n').encode());p.chmod(0o644);paths[name]=p
+  lib=root/'libacl.so.1.fixture';lib.write_bytes(b'OWNED nonexecuted library parsing fixture\n');lib.chmod(0o644);library={'path':str(lib),**self.source.digest(lib)}
+  return paths,library
+ def test_all_caller_observations_precede_any_semantic_ABI_gate(self):
+  paths,library=self.caller_observation_fixture();calls=[]
+  def metadata(argv):calls.append(argv);return ('OWNED output '+str(len(calls))+'\n').encode()
+  with patch.object(self.source,'metadata',metadata),redirect_stdout(io.StringIO())as out:rows=self.source.caller_binary_observations(paths,library)
+  report=json.loads(out.getvalue());self.assertEqual(report['schema'],'coreutils_actual_all_caller_binary_observation/1');self.assertEqual(set(report['callers']),{'cp','mv','install'});self.assertIs(report['semantic_ABI_checked'],False);self.assertIs(report['security_accepted'],False)
+  self.assertEqual(len(calls),13);self.assertEqual(calls[0],['/usr/bin/readelf','--wide','--dyn-syms',library['path']])
+  for i,name in enumerate(('cp','mv','install')):
+   self.assertEqual(calls[1+4*i:5+4*i],[['/usr/bin/readelf','--wide',option,str(paths[name])]for option in('--dynamic','--dyn-syms','--version-info')]+[['/usr/bin/ldd',str(paths[name])]])
+   self.assertEqual(rows[name]['candidate_binary'],self.source.digest(paths[name]));self.assertEqual(rows[name]['binary_full9'],list(self.source.identity(paths[name].stat())))
+  # Exercise the ACTUAL build ordering statements, using observations as DTOs.
+  tree=ast.parse((ROOT/'sourcebuild.py').read_bytes());build=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='build');chosen=[n for n in build.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id in{'observations','abi'}for t in n.targets)];self.assertEqual(len(chosen),2);events=[]
+  build_text=ast.get_source_segment((ROOT/'sourcebuild.py').read_text(),build);self.assertLess(build_text.index('observations=caller_binary_observations'),build_text.index("'libacl_abi_changed'"))
+  def observe(actual,lib):events.append(('all3_observed',tuple(actual)));return rows
+  def refuse(path,lib,row):events.append(('first_semantic_refusal',path.name));raise RuntimeError('OWNED semantic failure remains blocking')
+  with self.assertRaisesRegex(RuntimeError,'OWNED semantic failure remains blocking'):exec(compile(ast.Module(body=chosen,type_ignores=[]),'<actual build ABI ordering>','exec'),{'Path':Path,'library':library,'caller_binary_observations':observe,'caller_binary_contract':refuse})
+  self.assertEqual(events,[('all3_observed',('cp','mv','install')),('first_semantic_refusal','cp')])
+ def test_observation_identity_and_unknown_command_errors_stop_without_receipt(self):
+  for kind in('samebyte_metadata','unknown_command','scope'):
+   paths,library=self.caller_observation_fixture();calls=[]
+   def metadata(argv):
+    calls.append(argv)
+    if kind=='unknown_command':raise RuntimeError('OWNED unknown command failure')
+    if len(calls)==2:
+     p=paths['cp'];before=p.stat();os.utime(p,ns=(before.st_atime_ns,before.st_mtime_ns+1000000000))
+    return b'OWNED output\n'
+   if kind=='scope':paths.pop('install')
+   with self.subTest(kind=kind),patch.object(self.source,'metadata',metadata),redirect_stdout(io.StringIO())as out:
+    with self.assertRaisesRegex(RuntimeError,{'samebyte_metadata':'caller_observation_changed','unknown_command':'OWNED unknown command failure','scope':'caller_observation_scope'}[kind]):self.source.caller_binary_observations(paths,library)
+   self.assertEqual(out.getvalue(),'');self.assertEqual(len(calls),{'samebyte_metadata':2,'unknown_command':1,'scope':0}[kind])
+ def test_observation_total_output_bound_precedes_any_print(self):
+  paths,library=self.caller_observation_fixture()
+  with patch.object(self.source,'metadata',return_value=b'x'),patch.object(self.source,'MAX_METADATA',64),redirect_stdout(io.StringIO())as out:
+   with self.assertRaisesRegex(RuntimeError,'json_output_bound'):self.source.caller_binary_observations(paths,library)
+  self.assertEqual(out.getvalue(),'')
+ def test_combined_observation_stdout_bound_precedes_row_accumulation(self):
+  paths,library=self.caller_observation_fixture();calls=[]
+  def metadata(argv):calls.append(argv);return b'x'*33
+  with patch.object(self.source,'metadata',metadata),patch.object(self.source,'MAX_METADATA',64),redirect_stdout(io.StringIO())as out:
+   with self.assertRaisesRegex(RuntimeError,'caller_observation_output_bound'):self.source.caller_binary_observations(paths,library)
+  self.assertEqual(len(calls),2);self.assertEqual(out.getvalue(),'')
+ def test_workflow_selects_exact_new_host_source_and_unarmed_default(self):
+  text=(TREE/'.github/workflows/coreutils-acl-descriptor-package.yml').read_text();pins=re.findall(r'--source-sha256 ([a-f0-9]{64})',text)
+  self.assertEqual(pins,[sha256((ROOT/'build_hosted.py').read_bytes()).hexdigest()]);self.assertRegex(text,r'(?s)execute:.*?default: false')
+ def test_actual_semantic_failure_retains_all_three_bounded_public_observations(self):
+  paths,library=self.caller_observation_fixture()
+  body='from pathlib import Path\nfrom types import ModuleType\nS=ModuleType("source")\nexec(compile(Path('+repr(str(ROOT/'sourcebuild.py'))+').read_bytes(),"<owned source>","exec"),S.__dict__)\n'
+  body+='S.metadata=lambda argv:b"OWNED inert parser output\\n"\npaths={name:Path(path)for name,path in '+repr({name:str(path)for name,path in paths.items()})+'.items()}\nlibrary='+repr(library)+'\n'
+  body+='observations=S.caller_binary_observations(paths,library)\nS.caller_binary_contract(paths["cp"],library,observations["cp"])\n'
+  observed=self.actual_failed(body,65536);raw=observed['captured_output'];report=json.loads(raw.splitlines()[0]);self.assertEqual(set(report['callers']),{'cp','mv','install'})
+  self.assertFalse(report['semantic_ABI_checked']);self.assertFalse(report['security_accepted']);self.assertIn(b'RuntimeError: coreutils_private_at_imports',raw);self.assertNotEqual(observed['actual_returncode'],0)
+  self.assertTrue(observed['stdout_eof_observed']);self.assertTrue(observed['actual_pipe_closed']);self.assertLess(len(raw),65536)
+  with tempfile.TemporaryDirectory(dir=ROOT)as directory:
+   owners=[];root=Path(directory);self.host.retain_failed_command(root,'offline_build',observed,owners);self.assertEqual((root/'offline_build.failed.log').read_bytes(),raw);self.host.finalize_public_inputs(owners)
+ def abi_parsing_fixture(self):
+  # Pure semantic DTOs; real owned regular files provide identity only. This
+  # never claims those inert files are ELF or supplies a runtime ABI receipt.
+  paths,library=self.caller_observation_fixture();path=paths['cp'];required=('acl_set_file_at','acl_delete_def_file_at')
+  value={'path':str(path),'candidate_binary':self.source.digest(path),'binary_full9':list(self.source.identity(path.stat())),'library_full9':list(self.source.identity(Path(library['path']).stat())),
+   'dynamic':'Shared library: [libacl.so.1]\n','symbols':''.join('  1: 000 GLOBAL DEFAULT UND '+name+'@ACL_2.4 (2)\n'for name in required),
+   'library_symbols':''.join('  1: 000 GLOBAL DEFAULT 11 '+name+'@@ACL_2.4\n'for name in required),'versions':'Name: GLIBC_2.41\n','loaded':' libacl.so.1 => '+library['path']+' (0x1234)\n'}
+  return path,library,value
+ def test_source_called_two_API_parsing_contract_and_all_other_gates_remain_required(self):
+  path,library,value=self.abi_parsing_fixture();result=self.source.caller_binary_contract(path,library,value);self.assertEqual(result['required_private_at_imports'],['acl_delete_def_file_at','acl_set_file_at']);self.assertFalse(result['security_accepted'])
+  changes=[('symbols',value['symbols'].replace('acl_set_file_at','OWNED_missing_set'),'coreutils_private_at_imports'),('symbols',value['symbols'].replace('acl_delete_def_file_at','OWNED_missing_delete'),'coreutils_private_at_imports'),('dynamic','Shared library: [OWNED_wrong.so]\n','coreutils_private_at_imports'),('symbols',value['symbols'].replace('@ACL_2.4','@ACL_WRONG'),'versioned_acl_abi'),('library_symbols',value['library_symbols']+value['library_symbols'],'versioned_acl_abi'),('versions','Name: GLIBC_2.42\n','glibc_abi'),('loaded',' libacl.so.1 => /OWNED-missing-library (0x1234)\n','loaded_approved_libacl')]
+  for key,wrong,code in changes:
+   with self.subTest(key=key,code=code),self.assertRaises((RuntimeError,FileNotFoundError))as failed:self.source.caller_binary_contract(path,library,{**value,key:wrong})
+   if isinstance(failed.exception,RuntimeError):self.assertEqual(str(failed.exception),code)
+ def test_observed_candidate_metadata_cannot_change_before_semantic_contract(self):
+  path,library,value=self.abi_parsing_fixture();before=path.stat();os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns+1000000000))
+  with self.assertRaisesRegex(RuntimeError,'caller_observation_changed'):self.source.caller_binary_contract(path,library,value)
 if __name__=='__main__':unittest.main()
