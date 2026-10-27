@@ -35,6 +35,9 @@
   disposable CI, unchanged tests and measured capacity. GNU inotify suites need
   a proven native build filesystem: OverlayFS can silently force polling.
   Never skip required tests to fit storage.
+- Compiler and ordinary-image package installs must share exact dpkg leaf
+  includes; keep complete payload verification. A discovered excluded member
+  needs both paths corrected, never an absence waiver or global policy change.
 - Transport parcels/binaries use separate explicit bounded writers; preserve
   receipt limits. Retain exported files through all outer physical finalizers.
 - Named-context builds use a dedicated fixed recipe; preserve ordinary callers.

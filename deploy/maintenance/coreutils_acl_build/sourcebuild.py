@@ -504,6 +504,7 @@ def install_packages(paths,*,documentation,complete_package_payload=False):
  if complete_package_payload:
   for root in ('/usr/share/locale','/usr/share/man','/usr/share/info'):
    flags+=['--path-include='+root,'--path-include='+root+'/*']
+  flags+=['--path-include=/usr/share/lintian/overrides/coreutils']
  command(['/usr/bin/dpkg',*flags,'--install',*(str(p)for p in paths)],timeout=120)
  require(metadata(['/usr/bin/dpkg','--audit'])==b'','dpkg_audit')
 
