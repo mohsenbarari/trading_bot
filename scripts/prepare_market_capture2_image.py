@@ -85,6 +85,8 @@ MANIFEST_SHA='fef6305b1d7e6db851d1d0b77f3aa9910aad535e83f64f012790165a3d62c81b'
 ROWS_SHA='75d7d2cfb2c20fd036501e7aac198cb5567fb82c53301fb3972f8c81b935e57f'
 MAX_SOURCE=131072;MAX_CONTROLLER_SOURCE=262144;MAX_JSON=4*1024**2;MAX_FILE=64*1024**2;MAX_CONTEXT=128*1024**2
 MAX_LOG=64*1024**2;RESERVE=2*1024**3;PHASE='bootstrap'
+OUTER_PHYSICAL_FINALIZERS_COMPLETED=False
+OUTER_FAILURE=None
 APT_LOCK='scripts/app_security_os_packages.lock.json'
 SQLITE_LOCK='scripts/sqlite_wal_package.lock.json'
 TAR_LOCK='scripts/tar_acl_package.lock.json'
@@ -779,17 +781,22 @@ def hold_written(path,fd,maximum,*,binding=None,guard=lambda:None,expected_frame
 
 
 def outer_main(argv=None,*,close_driver,driver_named):
- """The verified workflow closes its original driver before global finals."""
- resources=[];checks=[];error=None;code=None
+ """Physical finalizer failures outrank a prior main failure, never hide it."""
+ global OUTER_PHYSICAL_FINALIZERS_COMPLETED,OUTER_FAILURE
+ OUTER_PHYSICAL_FINALIZERS_COMPLETED=False;OUTER_FAILURE=None
+ resources=[];checks=[];error=None;code=None;physical=[]
  try:code=main(argv,retained=resources,final_checks=checks)
  except BaseException as exc:error=exc
- try:close_driver()
- except BaseException as exc:
-  if error is None:error=exc
- try:finish_evidence(resources,[*checks,driver_named])
- except BaseException as exc:
-  if error is None:error=exc
- if error is not None:raise error
+ try:need(close_driver()is None,'physical_finalizer')
+ except BaseException as exc:physical.append(('close_driver',exc))
+ try:finish_evidence(resources,[*checks,lambda:need(driver_named()is None,'physical_finalizer')])
+ except BaseException as exc:physical.append(('finish_evidence',exc))
+ OUTER_PHYSICAL_FINALIZERS_COMPLETED=not physical
+ selected=physical[0][1]if physical else error
+ if selected is not None:
+  OUTER_FAILURE=(selected,error,tuple(physical))
+  if physical and error is not None:raise selected from error
+  raise selected
  return code
 
 
@@ -1145,6 +1152,8 @@ def complete_gate(root,repo,*,retained=None,final_checks=None,role=None):
  return value
 
 def main(argv=None,*,retained=None,final_checks=None):
+ global OUTER_PHYSICAL_FINALIZERS_COMPLETED,OUTER_FAILURE
+ OUTER_PHYSICAL_FINALIZERS_COMPLETED=False;OUTER_FAILURE=None
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--root',type=Path);p.add_argument('--repo',type=Path);p.add_argument('--phase',choices=('build','finalize','raw-gate','complete-evidence','complete-gate'),default='build')
  p.add_argument('--role',choices=tuple(ROLE_MAP))
  args=p.parse_args(argv)
@@ -1164,10 +1173,17 @@ def main(argv=None,*,retained=None,final_checks=None):
 CODES=frozenset(('archive_bound', 'archive_config', 'archive_shape', 'arguments', 'build_contract', 'build_not_completed', 'build_receipt', 'buildx_driver', 'cache_binding', 'cache_inventory', 'clean_main_required', 'command_bound', 'command_contract', 'command_failed', 'command_timeout', 'context_bound', 'context_changed', 'context_directory', 'context_inventory', 'controller_inventory', 'controller_signature', 'controller_source', 'controller_source_bound', 'disk_reserve', 'export_not_completed', 'historical81_business_producer_not_integrated', 'hosted_main_only', 'image_config', 'image_identity', 'image_labels', 'image_layers', 'json_bound', 'json_duplicate', 'json_nonfinite', 'live_main_changed', 'live_main_scope', 'normal_main_integration_unarmed', 'normal_workflow_token_required', 'output_bound', 'output_write', 'probe_cleanup', 'probe_exit', 'probe_isolation', 'probe_mounts', 'probe_owner', 'probe_resources', 'probe_scope', 'raw_high_critical_findings', 'release_commit', 'report_changed', 'report_identity', 'report_shape', 'repository_identity', 'root_scope', 'source93_probe', 'source_binding', 'source_bound', 'source_changed', 'source_contract', 'source_epoch', 'source_file', 'source_parent', 'sqlite_lock', 'sqlite_probe', 'two_git_signature', 'vendor_lock'))
 CODES=CODES|frozenset(('coreutils_lock','role_component','role_catalog','role_manifest','role_receipt','role_candidate','reader_role_source_pin','reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
 def closed_failure(error):
- code=error.args[0]if type(error)is RuntimeError and len(error.args)==1 and type(error.args[0])is str and error.args[0]in CODES else'unclassified'
- kind=type(error).__name__ if type(error)in (RuntimeError,OSError,FileNotFoundError,PermissionError,ValueError,TypeError,KeyError)else'unclassified'
+ def fields(exc):
+  code=exc.args[0]if type(exc)is RuntimeError and len(exc.args)==1 and type(exc.args[0])is str and exc.args[0]in CODES else'unclassified'
+  kind=type(exc).__name__ if type(exc)in (RuntimeError,OSError,FileNotFoundError,PermissionError,ValueError,TypeError,KeyError)else'unclassified'
+  return code,kind
+ code,kind=fields(error)
+ history=OUTER_FAILURE if OUTER_FAILURE is not None and OUTER_FAILURE[0]is error else None
  return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','git_product_seal','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
-  'code':code,'exception_class':kind,'activation_authority':False,'security_accepted':False}
+  'code':code,'exception_class':kind,'outer_physical_finalizers_completed':bool(history is not None and OUTER_PHYSICAL_FINALIZERS_COMPLETED),
+  'original_failure_code':fields(history[1])[0]if history is not None and history[1]is not None else None,
+  'physical_finalizer_failures':[{'stage':stage,'code':fields(exc)[0],'exception_class':fields(exc)[1]}for stage,exc in history[2]]if history is not None else[],
+  'activation_authority':False,'security_accepted':False}
 
 if __name__=='__main__':
  try:raise SystemExit(main())
