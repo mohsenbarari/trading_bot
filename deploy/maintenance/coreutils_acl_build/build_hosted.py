@@ -212,6 +212,18 @@ def save_known_log(path,raw,owners):
   require(item.before==created and ident(os.fstat(writer))==created,'known_log_creation_changed');item.check()
  finally:os.close(writer)
  item.check();parents_ok(parents);return item
+def retain_failed_command(evidence,name,observed,owners):
+ require(name in {'pull_public_base','configure_repository','offline_build'} and type(observed)is dict,'known_failure_phase')
+ captured=observed['captured_output'];require(type(captured)is bytes and len(captured)<=observed['maximum_output_bytes']<=128*1024**2,'known_failure_output_bound')
+ header=encoded({'schema':'coreutils_bounded_failed_command_log/2','actual_returncode':observed['actual_returncode'],
+  'observed_output_bytes':observed['observed_output_bytes'],'actual_pipe_closed':observed['actual_pipe_closed'],
+  'captured_output_bytes':len(captured),'captured_output_sha256':sha256(captured).hexdigest(),
+  'maximum_output_bytes':observed['maximum_output_bytes'],'stdout_eof_observed':observed['stdout_eof_observed'],
+  'complete_received_stdout':observed['stdout_eof_observed']and len(captured)==observed['observed_output_bytes'],
+  'command_accepted':False,'security_accepted':False},maximum=4096)
+ save_known_log(evidence/(name+'.failed.log'),captured,owners)
+ save_known_log(evidence/(name+'.failed.json'),header,owners)
+
 def cleanup_child(child):
  if child.returncode is not None:return
  try:os.waitid(os.P_PID,child.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
@@ -222,7 +234,7 @@ def cleanup_child(child):
 def run(argv,*,env,deadline,maximum,log=None,guard=lambda:None):
  guard();require(time.monotonic()<deadline,'deadline')
  child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,close_fds=True,start_new_session=True)
- total=0;parts=[];prefix=b'';tail=b'';failure=None
+ total=0;parts=[];prefix=b'';tail=b'';failure=None;eof=False
  try:
   with selectors.DefaultSelector() as selector:
    fd=child.stdout.fileno();os.set_blocking(fd,False);selector.register(fd,selectors.EVENT_READ)
@@ -230,7 +242,7 @@ def run(argv,*,env,deadline,maximum,log=None,guard=lambda:None):
     guard();left=deadline-time.monotonic();require(left>0,'deadline')
     if not selector.select(min(1,left)):continue
     block=os.read(fd,min(65536,maximum-total+1))
-    if not block:break
+    if not block:eof=True;break
     total+=len(block);require(total<=maximum,'command_output_bound')
     if len(prefix)<16384:prefix+=block[:16384-len(prefix)]
     tail=(tail+block)[-16384:]
@@ -254,7 +266,8 @@ def run(argv,*,env,deadline,maximum,log=None,guard=lambda:None):
   # Public build commands only use this finite evidence in phase_log. It is
   # explicitly partial and never licenses success, resume, or a package.
   failure.public_command_failure={'actual_returncode':child.returncode,'observed_output_bytes':total,
-   'actual_pipe_closed':child.stdout.closed,'prefix':prefix,'tail':tail}
+   'actual_pipe_closed':child.stdout.closed,'prefix':prefix,'tail':tail,
+   'captured_output':b''.join(parts),'stdout_eof_observed':eof,'maximum_output_bytes':maximum}
   raise failure
  return b''.join(parts)
 def create_argv(nonce,context):
@@ -329,10 +342,7 @@ def build_container(args,admission,outer_guard,log_owners):
   except BaseException as error:
    observed=getattr(error,'public_command_failure',None)
    if type(observed)is dict:
-    header=encoded({'schema':'coreutils_partial_failed_command_log/1','actual_returncode':observed['actual_returncode'],
-     'observed_output_bytes':observed['observed_output_bytes'],'actual_pipe_closed':observed['actual_pipe_closed'],
-     'complete_log':False,'command_accepted':False,'security_accepted':False},maximum=4096)
-    save_known_log(evidence/(name+'.failed.log'),header+b'\nPREFIX (bounded)\n'+observed['prefix']+b'\nTAIL (bounded; may overlap prefix)\n'+observed['tail'],log_owners)
+    retain_failed_command(evidence,name,observed,log_owners)
    raise
   save_known_log(evidence/(name+'.log'),raw,log_owners);guard()
  try:
