@@ -127,6 +127,10 @@
         "bytes": 33382,
         "sha256": "fae25c67d17dc894ed0c7c79246e05c2d0fed50858f237b8b77cdb468bfaf164"
       },
+      "after_probe_header": {
+        "bytes": 33402,
+        "sha256": "924ca77cc8ff169dd0651e683e37b52d03c6e9f04d65af643337db699535c3d2"
+      },
       "before": {
         "bytes": 31532,
         "sha256": "2855e2cea40c8ddc6d7347bea47c33778f727e590cec89ea806185a45b3cf38f"
@@ -319,6 +323,15 @@
   "patch": {
     "bytes": 60929,
     "sha256": "3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d"
+  },
+  "probe_header_cause": {
+    "C_compile_or_link_bypass": false,
+    "authentic_CI_run": 40486023971,
+    "failure": "Only implicit fchownat declaration in private AC_LINK_IFELSE; missing unistd.h"
+  },
+  "probe_header_patch": {
+    "bytes": 279,
+    "sha256": "778a40348081f8ce9a99041174fce50bfc84de3a1740e8cb2d6661e0cb9eaf3d"
   },
   "regeneration_guard_patch": {
     "bytes": 486,

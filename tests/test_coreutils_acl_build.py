@@ -202,4 +202,13 @@ class SourceTests(unittest.TestCase):
    with patch.object(self.host.os,'close',closed):
     with self.assertRaisesRegex(RuntimeError,'public_changed'):self.host.finalize_public_inputs(owners)
    self.assertTrue(changed)
+ def test_private_probe_patch_only_adds_declaring_header(self):
+  raw=(ROOT/'0004-declare-fchownat-in-configure-probe.patch').read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),self.source.PROBE_PIN)
+  text=raw.decode();added=[line for line in text.splitlines()if line.startswith('+')and not line.startswith('+++')];removed=[line for line in text.splitlines()if line.startswith('-')and not line.startswith('---')]
+  self.assertEqual(added,['+#include <unistd.h>']);self.assertEqual(removed,[])
+  manifest=json.loads((ROOT/'source-manifest.json').read_text());self.assertEqual(manifest['files']['configure.ac']['after']['bytes'],33382);self.assertEqual(manifest['files']['configure.ac']['after_probe_header']['bytes'],33402)
+  self.assertIn(self.source.PROBE_PATCH,self.source.RECIPE_FILES)
+ def test_probe_header_contract_does_not_bypass_actual_compile_or_feature_gates(self):
+  text=(ROOT/'sourcebuild.py').read_text();self.assertIn('(PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH)',text);self.assertIn("pins.get('after_probe_header'",text)
+  self.assertIn("#define GOLD_DESCRIPTOR_ACL 1",text);self.assertIn("real_autotools_regeneration",text);self.assertNotIn('m4_pattern_allow',text);self.assertNotIn('ac_cv_',text)
 if __name__=='__main__':unittest.main()
