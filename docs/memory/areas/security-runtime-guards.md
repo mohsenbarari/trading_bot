@@ -12,10 +12,9 @@
 - Removed cgroup directories may retain nlink2. Prove closure with held
   directory/events, named absence and relative ENOENT/retained ENODEV; polling
   alone is insufficient. Never relax regular-file unlink checks.
-- A never-started, mount-free Docker export has no kernel/proof path exclusions:
-  inspect every regular ELF, including /proc, /sys, /dev and /proof. TAR header
-  metadata is not filesystem full9. Check the known archive digest before parse
-  and after the borrowed FD closes.
+- A never-started mount-free export excludes no kernel/proof paths: inspect
+  every regular ELF, including /proc, /sys, /dev and /proof. TAR metadata is not
+  full9; hash the archive before parsing and after the borrowed FD closes.
 - Small bounded responses should remain in bounded RAM through collector
   closure; create logs afterward from immutable known bytes. No live output file
   then exists whose metadata could be adopted after close.
@@ -33,6 +32,9 @@
 - Receiver work/nonce ancestors stay Root0700; engine changes only restore
   ownership. Genuine UID10001 needs the exact restore inode mounted at /clone.
   Never chmod ancestors or reuse the old immutable, .sqlite-only engine helper.
+- FIFO writes naturally change mtime/ctime. Bind original dev/inode/mode/uid/gid/
+  nlink/size and fd flags, plus exact stream length/hash/EOF; timestamps are
+  observations. Keep every regular-file full9 guard unchanged.
 - Admit new adapter refusal codes in the outer closed mapping before costly CI;
   unknown exception operands remain private. Budget repeated source guards and
   full hashes within the global deadline; timing alone is an inferred cause.

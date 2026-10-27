@@ -37,7 +37,7 @@ must match exact before/after hashes; new target paths must genuinely be
 absent before patching. This is self-contained in the tracked layout and does
 not execute the older local-only checker or load any .local sibling source.
 
-Two declared deltas follow the original ordinary Debian package recipe:
+Three declared deltas follow the original ordinary Debian package recipe:
 
 1. The unchanged Root-reviewed 60,929-byte C/BuildDepends/dh_autoreconf patch
    performs the private descriptor caller fix and official GNU FD0 correction.
@@ -132,3 +132,24 @@ resume/retry. Genuine inert Python-child SOURCE regressions cover failed exit,
 source timestamp mutation at actual stdout close, same-byte timestamp mutation
 at actual log writer close, and mutation at actual outer reader close. These
 remain SOURCE lifetime tests, with no C, package, Git, Docker or GNU execution.
+
+
+Successor03 responds only to actual failed VendorCI run40479759340. The
+unchanged real regeneration was invoked, but a second autopoint import copied
+old gettext0.19.2 macros over the release's newer Gnulib imports, then autoconf
+lost four existing definitions. Authentic9.7 source threadlib.m4 and wint_t.m4
+contain all four. The exact release bootstrap itself runs autopoint before
+Gnulib import, then preserves those imports using AUTOPOINT=true during actual
+autoreconf. GNU Gnulib manual section3.11 documents that ordering.
+
+The third separately declared486-byte packaging-only patch sets only
+AUTOPOINT=true for Coreutils dh_autoreconf. SDK build environments, the original
+Cpatch and the GNU test hook remain unchanged. Every original imported .m4
+file and po/Makefile.in.in is observed before and after real regeneration;
+three exact critical original-source pins join to the authenticated release.
+Changed generated configure/config.h/Makefiles and GOLD_DESCRIPTOR_ACL remain
+mandatory. No old configure, ignored macro error, m4_pattern_allow, skipped
+Autoconf/Automake, changed vendor suite or network bootstrap is permitted.
+Actual owned patch-only fuzz0 reconstruction and Python SOURCE QA do not prove
+autoreconf/C compilation. The failed authentic CI and all predecessors stay
+preserved; Root must review a fresh complete execution before any acceptance.

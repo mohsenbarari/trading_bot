@@ -153,4 +153,23 @@ class SourceTests(unittest.TestCase):
     self.assertTrue(changed);self.assertEqual(path.read_bytes(),b'unchanged source bytes')
    finally:
     if item.fd is not None:os.close(item.fd);item.fd=None
+ def test_regeneration_guard_is_one_packaging_command_not_configure_waiver(self):
+  raw=(ROOT/'0003-preserve-imported-gnulib-infrastructure.patch').read_bytes()
+  self.assertEqual((len(raw),sha256(raw).hexdigest()),self.source.REGEN_PIN)
+  text=raw.decode();self.assertEqual([line for line in text.splitlines()if line.startswith('+')and not line.startswith('+++')],['+\tAUTOPOINT=true dh_autoreconf'])
+  self.assertEqual([line for line in text.splitlines()if line.startswith('-')and not line.startswith('---')],['-\tdh_autoreconf'])
+  self.assertNotIn('m4_pattern_allow',text);self.assertNotIn('|| true',text)
+  manifest=json.loads((ROOT/'source-manifest.json').read_text());self.assertIn('after_regeneration_guard',manifest['files']['debian/rules'])
+  self.assertEqual(set(manifest['regeneration_infrastructure']['original_m4_pins']),{'m4/threadlib.m4','m4/wint_t.m4','m4/gnulib-comp.m4'})
+ def test_imported_macro_and_po_inventory_retains_content_changes(self):
+  with tempfile.TemporaryDirectory(dir=ROOT)as directory:
+   source=Path(directory);(source/'m4').mkdir();(source/'po').mkdir();(source/'m4/owned.m4').write_bytes(b'owned current imported macro\n');(source/'po/Makefile.in.in').write_bytes(b'owned gettext template\n')
+   with patch.object(self.source,'WORK',source):
+    before=self.source.regeneration_inputs(source);self.assertEqual(set(before),{'m4/owned.m4','po/Makefile.in.in'})
+    (source/'m4/owned.m4').write_bytes(b'older overwritten macro\n');after=self.source.regeneration_inputs(source)
+   self.assertNotEqual(after,before);self.assertEqual(after['po/Makefile.in.in'],before['po/Makefile.in.in'])
+ def test_imported_macro_symlink_is_not_admitted(self):
+  with tempfile.TemporaryDirectory(dir=ROOT)as directory:
+   source=Path(directory);(source/'m4').mkdir();(source/'po').mkdir();(source/'po/Makefile.in.in').write_bytes(b'owned template');(source/'m4/unexpected.m4').symlink_to('../po/Makefile.in.in')
+   with patch.object(self.source,'WORK',source),self.assertRaisesRegex(RuntimeError,'imported_m4_inventory'):self.source.regeneration_inputs(source)
 if __name__=='__main__':unittest.main()
