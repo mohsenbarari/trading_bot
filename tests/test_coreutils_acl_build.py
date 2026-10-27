@@ -29,7 +29,7 @@ class SourceTests(unittest.TestCase):
   self.assertEqual(self.host.OUTPUTS,self.source.OUTPUTS)
   self.assertEqual([n for n in self.host.OUTPUTS if n.endswith('.deb')],['coreutils_9.7-3+gold1_amd64.deb'])
  def test_immutable_historical_patch_and_fixtures(self):
-  expected={'0001-coreutils-bound-acl-callers.patch':(60929,'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'),'ordinary_fd_acl.c':(9979,'5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936'),'verify_vendor_suite.py':(13055,'3db1e3bf662282fbeea5c43c68713f01d5f9996fdfb202bbca87fdf6d55bafcd')}
+  expected={'0001-coreutils-bound-acl-callers.patch':(60929,'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'),'ordinary_fd_acl.c':(9979,'5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936')}
   for name,pin in expected.items():raw=(ROOT/name).read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),pin)
  def test_bound_encoder_before_append(self):
   for module in (self.source,self.host):
@@ -211,4 +211,22 @@ class SourceTests(unittest.TestCase):
  def test_probe_header_contract_does_not_bypass_actual_compile_or_feature_gates(self):
   text=(ROOT/'sourcebuild.py').read_text();self.assertIn('(PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH)',text);self.assertIn("pins.get('after_probe_header'",text)
   self.assertIn("#define GOLD_DESCRIPTOR_ACL 1",text);self.assertIn("real_autotools_regeneration",text);self.assertNotIn('m4_pattern_allow',text);self.assertNotIn('ac_cv_',text)
+ def test_actual_parser_refusal_retains_complete_public_selection_before_failure(self):
+  raw=b'GOLD_VENDOR_SELECTION_V2\nsuite_log=test-suite.log\ncollect_skipped_logs=no\ntest=../owned-outside\nlog=../owned-outside.log\n'
+  script='from pathlib import Path\nfrom types import ModuleType\n'
+  for variable,name in(('S','sourcebuild.py'),('V','verify_vendor_suite.py')):
+   script+=variable+'=ModuleType('+repr(variable)+');exec(compile(Path('+repr(str(ROOT/name))+').read_bytes(),'+repr(str(ROOT/name))+',"exec"),'+variable+'.__dict__)\n'
+  script+='raw='+repr(raw)+'\nS.log_vendor_selection("gnulib",raw)\ntry:V.selection(raw,"gnulib")\nexcept RuntimeError:raise SystemExit(7)\nraise SystemExit(99)\n'
+  observed=self.actual_failed(script,65536);data=observed['captured_output'];self.assertEqual(observed['actual_returncode'],7)
+  self.assertIn(raw,data);self.assertIn(('bytes='+str(len(raw))+' sha256='+sha256(raw).hexdigest()).encode(),data)
+  self.assertLess(data.index(b'GOLD_VENDOR_SELECTION_LOG_BEGIN'),data.index(raw));self.assertIn(b'GOLD_VENDOR_SELECTION_LOG_END gnulib\n',data)
+ def test_selection_diagnostics_bound_before_forward_or_output(self):
+  for raw in(b'',b'x'*(self.source.MAX_METADATA+1),'not bytes'):
+   with patch.object(self.source,'forward',side_effect=AssertionError('must not write')),self.assertRaisesRegex(RuntimeError,'vendor_selection_log_bound'):self.source.log_vendor_selection('gnulib',raw)
+  with patch.object(self.source,'forward',side_effect=AssertionError('must not write')),self.assertRaisesRegex(RuntimeError,'vendor_selection_log_bound'):self.source.log_vendor_selection('foreign',b'x')
+ def test_selection_before_parser_and_real_driver_observation_remain_required(self):
+  text=(ROOT/'sourcebuild.py').read_text();self.assertLess(text.index('log_vendor_selection(name,chosen[name])'),text.index('module.selection(chosen[name],name)'))
+  self.assertIn('driver_binding=driver',text);self.assertIn("observed(Path.cwd()/'build-aux/test-driver',maximum=65536)==driver",text)
+  fragment=(ROOT/'print-vendor-selection.mk').read_text();self.assertIn('$(if $(IGNORE_SKIPPED_LOGS),no,yes)',fragment)
+  self.assertNotRegex(fragment,r'(?m)^\s*IGNORE_SKIPPED_LOGS\s*[:+?]?=')
 if __name__=='__main__':unittest.main()

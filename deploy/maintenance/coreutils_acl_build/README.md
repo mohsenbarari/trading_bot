@@ -197,3 +197,58 @@ binding, native fixture or full GNU test gate is disabled or cached away.
 Root must run a fresh real CI; the complete failed04 output and all predecessors
 remain preserved. No compiler, Autoconf, linker, package, Git, Docker or live
 operation was executed by the SOURCE preparer.
+
+Successor06 responds to authentic CI40488040479. Real configure and Coreutils
+C compilation passed in that prior run; the additional hook refused the
+gnulib selection BEFORE dh_auto_test. The old parser incorrectly required a
+nested gnulib name to start test-. Official9.7 Makefile.in declares nested
+uniwidth/test-uc_width2.sh, and the same source family includes unictype and
+unistr. The new parser accepts only canonical relative names under the fixed
+gnulib-tests scope. Absolute, traversal, ambiguous, non-ASCII, symlink, foreign
+parent, hardlink, stale or missing outputs still refuse; no unreadable skip or
+namespace override exists. The output Scope, canonical, summary and log suffix
+implementations are byteexact05, preserving every bound/full9/physicalclose.
+
+Before parsing, each actual <=4MiB configured Make protocol is forwarded to
+the existing bounded public build stderr with scope/size/SHA and end markers.
+A parser failure can no longer hide the captured selection in RAM. There is
+no additional artifact/output family or unbounded accumulator. An actual
+inert exit7 fixture proves complete raw bytes remain in failure evidence;
+separate excessive/invalid inputs refuse before the first forward.
+
+The primary-source audit also found an independent future SKIP metadata
+mismatch. Actual builder package metadata says Automake1:1.17-4, whose basic
+driver supports --collect-skipped-logs. Its generated Makefile passes no when
+IGNORE_SKIPPED_LOGS is nonempty; original9.7 gnulib.mk sets that variable to1.
+The older original9.7 basic driver lacks that option. Rather than assume which
+existing script autoreconf replaced, the hook observes the actual generated
+build-aux/test-driver before selection, logs its public binding, admits only
+the two exact reviewed primary bytes, and reobserves the same hash after the
+genuine command. The receipt records the actual selected driver source.
+
+The V2 read-only Make protocol adds actual collect_skipped_logs=yes/no without
+assigning or filtering any vendor variable. Parser TRS semantics derive from
+the exact observed driver plus that real Make policy: PASS copies no, SKIP
+copies yes for original9.7 or the configured option for1.17, and XFAIL copies
+yes for BOTH. All skip logs are still independently opened/read/hashed even
+when Automake omits their text from its global summary. FAIL/XPASS/ERROR still
+refuse. The basic driver's four fields, full configured test/log mapping,
+actual suffix/name/exit status, both exact summaries and count agreement stay
+mandatory. This is output interpretation, never a test exclusion or success
+waiver. Genuine unfiltered dh_auto_test exit0 remains indispensable.
+
+Primary Automake source URLs (exact version matching the actual preparation):
+https://sources.debian.org/data/main/a/automake-1.17/1:1.17-4/lib/test-driver
+https://sources.debian.org/data/main/a/automake-1.17/1:1.17-4/lib/am/check.am
+Original9.7 driver4879/08ff8986c3a0ce8bf32d25ec7e4752ffbce9c89589f018836c97a08b6573ac2c;
+Automake1.17-4 driver5215/05d9c1057354db27b965fcd154860f938186324ccd72fdb8c5767083194c8b5a.
+Both genuine old parser failures were reproduced separately using immutable05.
+
+The original Cpatch, four source patches, SDK/runtime/ABI preparation, compiler
+base, GNU test bodies/default selection, C/CLI fixtures, command/output caps,
+physicalclose guards and final artifact list remain unchanged. Fresh current06
+C compile, full GNU and new native fixtures/package/image acceptance remain
+OPEN. SOURCE QA passes35 recipe/real inert-child tests plus27 owned parser
+fixtures (including the prior20 ported to a self-contained tracked path),0
+skips. No C, autotools, GNU test, Git, CI, Docker, SSH or live command was run
+by this SOURCE preparer; historical real05 C compile is not relabelled as06.

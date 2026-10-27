@@ -312,23 +312,34 @@ def source_contract(source,manifest,phase):
   if pin is None:require(not os.path.lexists(target),'source_before_new_file')
   else:require(observed(target)==pin,'source_'+phase+'_patch')
 
+def log_vendor_selection(name,raw):
+ """Retain each bounded public Make protocol before any parser refusal."""
+ require(name in{'coreutils','gnulib'}and type(raw)is bytes and 0<len(raw)<=MAX_METADATA,'vendor_selection_log_bound')
+ end=time.monotonic()+60
+ forward(('GOLD_VENDOR_SELECTION_LOG_BEGIN '+name+' bytes='+str(len(raw))+' sha256='+sha256(raw).hexdigest()+'\n').encode(),end)
+ forward(raw,end);forward(('GOLD_VENDOR_SELECTION_LOG_END '+name+'\n').encode(),end)
+
 def vendor_tests():
  require(os.getuid()==os.geteuid()==os.getgid()==os.getegid()==10001 and Path.cwd()==WORK/'coreutils/source','actual_vendor_test_context')
  require(ENV['DEB_BUILD_OPTIONS']=='parallel=2'and 'nocheck'not in ENV['DEB_BUILD_OPTIONS'],'unfiltered_test_environment')
- public=WORK/'public-inputs';guard=public_guards();raw=bytes_at(public/'verify_vendor_suite.py',(13055,'3db1e3bf662282fbeea5c43c68713f01d5f9996fdfb202bbca87fdf6d55bafcd'),maximum=65536)
+ public=WORK/'public-inputs';guard=public_guards();raw=bytes_at(public/'verify_vendor_suite.py',(14431, '6c2d5036dcc88ae3ec04bd9f9cee5c2e8a398f462db1ad50e3415edae61bb2a0'),maximum=65536)
  module=ModuleType('coreutils_vendor_results');exec(compile(raw,str(public/'verify_vendor_suite.py'),'exec'),module.__dict__)
+ driver=observed(Path.cwd()/'build-aux/test-driver',maximum=65536)
+ forward(encoded({'schema':'coreutils_actual_generated_test_driver_source/1','binding':driver}),time.monotonic()+60);guard();module.driver_profile(driver)
  fragment=public/'print-vendor-selection.mk';chosen={};generated={}
  for name,scope in [('coreutils',Path.cwd()),('gnulib',Path.cwd()/'gnulib-tests')]:
-  generated[name]=observed(scope/'Makefile');chosen[name]=metadata(['/usr/bin/make','--no-print-directory','-s','-f','Makefile','-f',str(fragment),'gold-print-vendor-selection'],cwd=scope);module.selection(chosen[name],name);guard()
+  generated[name]=observed(scope/'Makefile');chosen[name]=metadata(['/usr/bin/make','--no-print-directory','-s','-f','Makefile','-f',str(fragment),'gold-print-vendor-selection'],cwd=scope)
+  log_vendor_selection(name,chosen[name]);guard();module.selection(chosen[name],name);guard()
  # This is the explicit additional Debian hook. It invokes the ordinary
  # debhelper runner without test selections, exclusions, or test-body edits.
  started=time.time_ns();end=time.monotonic()+9000;command(['/usr/bin/dh_auto_test'],cwd=Path.cwd(),timeout=8400);guard()
  # The direct child and pipe are physically closed in run(). Any descendant
  # that kept the inherited output pipe open would prevent that EOF/completion.
- observation=module.collect(chosen,guard=guard,end=min(end,time.monotonic()+300),started_at_ns=started);guard()
+ observation=module.collect(chosen,driver_binding=driver,guard=guard,end=min(end,time.monotonic()+300),started_at_ns=started);guard()
+ require(observed(Path.cwd()/'build-aux/test-driver',maximum=65536)==driver,'vendor_driver_source_changed')
  require(all(observed((Path.cwd()if n=='coreutils'else Path.cwd()/'gnulib-tests')/'Makefile')==v for n,v in generated.items()),'configured_selection_changed')
  receipt={'schema':'coreutils_unfiltered_vendor_command/1','actual_command':['/usr/bin/dh_auto_test'],'actual_returncode':0,
-  'actual_uid':os.getuid(),'actual_gid':os.getgid(),'actual_pipe_closed':True,'configured_default_selections_captured_before_test':True,
+  'actual_uid':os.getuid(),'actual_gid':os.getgid(),'actual_pipe_closed':True,'actual_test_driver_source':driver,'configured_default_selections_captured_before_test':True,
   'test_filter_override_used':False,'test_bodies_modified':False,'observation':observation,'security_accepted':False}
  publish(WORK/'coreutils/vendor-suite.json',encoded(receipt));guard()
 
