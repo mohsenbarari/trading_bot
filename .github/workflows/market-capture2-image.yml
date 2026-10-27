@@ -1,0 +1,302 @@
+# SOURCE PROPOSAL ONLY: the selected driver remains EXECUTION_ARMED=False.
+# Root alone may integrate/review a new Main commit. Do not dispatch this draft.
+name: Normal Capture2 two Git sources image evidence
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: normal-market-capture2-image-evidence
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main' && github.repository == 'mohsenbarari/trading_bot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Fetch normal Main and the immutable published product objects
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Root supplied official immutable metadata
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Seal the driver from the exact dispatched Main Git blob and build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,re,resource,stat,subprocess,sys,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          assert os.environ['GITHUB_REF']=='refs/heads/main' and os.environ['GITHUB_REPOSITORY']=='mohsenbarari/trading_bot'
+          os.umask(0o077)
+          repo=pathlib.Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          def capture(argv,maximum):
+              fd=os.memfd_create('normal-market-controller-source',os.MFD_CLOEXEC)
+              def limits():
+                  resource.setrlimit(resource.RLIMIT_FSIZE,(maximum+1,maximum+1));resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+              try:
+                  subprocess.run(argv,cwd=repo,stdin=subprocess.DEVNULL,stdout=fd,stderr=subprocess.DEVNULL,
+                      env={'PATH':os.defpath,'LC_ALL':'C.UTF-8','GIT_NO_REPLACE_OBJECTS':'1','GIT_NO_LAZY_FETCH':'1'},
+                      timeout=15,check=True,preexec_fn=limits)
+                  size=os.fstat(fd).st_size;assert 0<size<=maximum
+                  raw=os.pread(fd,size+1,0);assert len(raw)==size;return raw
+              finally:os.close(fd)
+          assert capture(['git','--no-optional-locks','rev-parse','HEAD'],64).strip()==commit.encode()
+          assert capture(['git','--no-optional-locks','symbolic-ref','--short','HEAD'],128).strip()==b'main'
+          assert capture(['git','--no-optional-locks','rev-parse','origin/main'],64).strip()==commit.encode()
+          operand=commit+':scripts/prepare_market_capture2_image.py'
+          size=capture(['git','--no-optional-locks','cat-file','-s',operand],64)
+          assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=131072
+          raw=capture(['git','--no-optional-locks','cat-file','blob',operand],int(size));assert len(raw)==int(size)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          root=pathlib.Path(tempfile.mkdtemp(prefix='normal-market-capture2-',dir=parent));assert not root.is_relative_to(repo)
+          (root/'source').mkdir(mode=0o700);path=root/'source/prepare_market_capture2_image.py'
+          fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+          driver_open=[True]
+          before=None
+          identity=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          frame=identity
+          before=None
+          try:
+              view=memoryview(raw)
+              while view:n=os.write(fd,view);assert n>0;view=view[n:]
+              os.fsync(fd);before=identity(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1
+              with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('root='+str(root)+'\nhelper_sha256='+sha256(raw).hexdigest()+'\n')
+              sys.argv=[str(path),'--execute','--phase','build','--root',str(root),'--repo',str(repo)]
+              import json
+              namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              def driver_named():
+                  namespace['need'](before==frame(path.lstat()),'source_changed')
+              def close_driver():
+                  namespace['need'](driver_open[0],'physical_finalizer')
+                  try:
+                      namespace['need'](before==frame(os.fstat(fd))==frame(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw,'source_changed')
+                  finally:
+                      os.close(fd);driver_open[0]=False
+                  driver_named()
+              try:
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+              except Exception as error:
+                  print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
+              raise SystemExit(result)
+          finally:
+              if driver_open[0]:
+                  try:
+                      if before is not None:assert before==frame(os.fstat(fd))==frame(path.lstat())
+                  finally:os.close(fd);driver_open[0]=False
+              if before is not None:assert before==frame(path.lstat())
+          PY
+
+      - name: Preserve every raw finding for the same actual image
+        id: vulnerabilities
+        if: always() && steps.build.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, same normal App path
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          cache-dir: ${{ steps.build.outputs.root }}/trivy-cache
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.build.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.build.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Preserve the SBOM of that same actual image
+        id: sbom
+        if: always() && steps.build.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          cache-dir: ${{ steps.build.outputs.root }}/trivy-cache
+          format: cyclonedx
+          output: ${{ steps.build.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.build.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Bind reports and export the same unaccepted ordinary image
+        id: finalize
+        if: always() && steps.build.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+        env:
+          ROOT: ${{ steps.build.outputs.root }}
+          EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          root=pathlib.Path(os.environ['ROOT']);path=root/'source/prepare_market_capture2_image.py'
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+          driver_open=[True]
+          before=None
+          frame=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=frame(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1 and 0<before[6]<=131072
+              raw=os.pread(fd,before[6]+1,0);assert len(raw)==before[6] and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
+              sys.argv=[str(path),'--execute','--phase','finalize','--root',str(root),'--repo',os.environ['GITHUB_WORKSPACE']]
+              import json
+              namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              def driver_named():
+                  namespace['need'](before==frame(path.lstat()),'source_changed')
+              def close_driver():
+                  namespace['need'](driver_open[0],'physical_finalizer')
+                  try:
+                      namespace['need'](before==frame(os.fstat(fd))==frame(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw,'source_changed')
+                  finally:
+                      os.close(fd);driver_open[0]=False
+                  driver_named()
+              try:
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+              except Exception as error:
+                  print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
+              raise SystemExit(result)
+          finally:
+              if driver_open[0]:
+                  try:
+                      if before is not None:assert before==frame(os.fstat(fd))==frame(path.lstat())
+                  finally:os.close(fd);driver_open[0]=False
+              if before is not None:assert before==frame(path.lstat())
+          PY
+
+      - name: Preserve the ordinary unaccepted image archive
+        if: always() && steps.finalize.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Root supplied official immutable metadata
+        with:
+          name: normal-market-capture2-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.build.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.build.outputs.root }}/image-export.json
+
+      - name: Preserve the complete normal CI source and controller parcel
+        if: always() && steps.finalize.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: normal-market-capture2-controller-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ steps.build.outputs.root }}/controller-sources.tar.gz
+            ${{ steps.build.outputs.root }}/controller-sources.json
+
+      - name: Preserve raw source, native, scan and failure evidence
+        if: always() && steps.build.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: normal-market-capture2-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 10
+          if-no-files-found: warn
+          path: |
+            ${{ steps.build.outputs.root }}/source-identity.json
+            ${{ steps.build.outputs.root }}/input-manifest.json
+            ${{ steps.build.outputs.root }}/image-build.json
+            ${{ steps.build.outputs.root }}/reports/*.json
+            ${{ steps.build.outputs.root }}/business81-*/**/*.json
+            ${{ steps.build.outputs.root }}/business81-*/**/*.stderr
+            ${{ steps.build.outputs.root }}/build.log
+            ${{ steps.build.outputs.root }}/cache-*.log
+
+      - name: Enforce original raw HIGH and CRITICAL gate without suppressions
+        if: always() && steps.finalize.outcome == 'success'
+        env:
+          ROOT: ${{ steps.build.outputs.root }}
+          EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          root=pathlib.Path(os.environ['ROOT']);path=root/'source/prepare_market_capture2_image.py'
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+          driver_open=[True]
+          before=None
+          frame=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=frame(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1 and 0<before[6]<=131072
+              raw=os.pread(fd,before[6]+1,0);assert len(raw)==before[6] and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
+              sys.argv=[str(path),'--execute','--phase','raw-gate','--root',str(root),'--repo',os.environ['GITHUB_WORKSPACE']]
+              import json
+              namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              def driver_named():
+                  namespace['need'](before==frame(path.lstat()),'source_changed')
+              def close_driver():
+                  namespace['need'](driver_open[0],'physical_finalizer')
+                  try:
+                      namespace['need'](before==frame(os.fstat(fd))==frame(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw,'source_changed')
+                  finally:
+                      os.close(fd);driver_open[0]=False
+                  driver_named()
+              try:
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+              except Exception as error:
+                  print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
+              raise SystemExit(result)
+          finally:
+              if driver_open[0]:
+                  try:
+                      if before is not None:assert before==frame(os.fstat(fd))==frame(path.lstat())
+                  finally:os.close(fd);driver_open[0]=False
+              if before is not None:assert before==frame(path.lstat())
+          PY
+
+      - name: Verify genuine historical81 and complete CI controller sources
+        if: always() && steps.finalize.outcome == 'success'
+        env:
+          ROOT: ${{ steps.build.outputs.root }}
+          EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          root=pathlib.Path(os.environ['ROOT']);path=root/'source/prepare_market_capture2_image.py'
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+          driver_open=[True]
+          before=None
+          frame=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=frame(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1 and 0<before[6]<=131072
+              raw=os.pread(fd,before[6]+1,0);assert len(raw)==before[6] and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
+              sys.argv=[str(path),'--execute','--phase','complete-gate','--root',str(root),'--repo',os.environ['GITHUB_WORKSPACE']]
+              import json
+              namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              def driver_named():
+                  namespace['need'](before==frame(path.lstat()),'source_changed')
+              def close_driver():
+                  namespace['need'](driver_open[0],'physical_finalizer')
+                  try:
+                      namespace['need'](before==frame(os.fstat(fd))==frame(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw,'source_changed')
+                  finally:
+                      os.close(fd);driver_open[0]=False
+                  driver_named()
+              try:
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+              except Exception as error:
+                  print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
+              raise SystemExit(result)
+          finally:
+              if driver_open[0]:
+                  try:
+                      if before is not None:assert before==frame(os.fstat(fd))==frame(path.lstat())
+                  finally:os.close(fd);driver_open[0]=False
+              if before is not None:assert before==frame(path.lstat())
+          PY

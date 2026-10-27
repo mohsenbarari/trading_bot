@@ -1,0 +1,219 @@
+{
+  "base_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+  "capture_added_replay_test_count": 1,
+  "capture_added_replay_test_ids": [
+    "tests.test_market_pipeline_stage4_capture.ReplayManifestDigestTests.test_streaming_summary_matches_existing_canonical_contract"
+  ],
+  "capture_added_replay_test_source": {
+    "bytes": 107740,
+    "git_blob": "6b0a4969da6cea2f8124527d359a50751be56246",
+    "path": "tests/test_market_pipeline_stage4_capture.py",
+    "sha256": "88f56bd00af9a14e5012319436980c8687c87eddc53fbb3a2558dafe88b4f4c6",
+    "source_commit": "adca507b261d3e139befc67b4a937c48c96bb949"
+  },
+  "capture_override_commit": "adca507b261d3e139befc67b4a937c48c96bb949",
+  "capture_shared_method_changes_not_silently_replaced": [],
+  "historical_fixture_files": [
+    {
+      "bytes": 17243,
+      "git_blob": "10be25f84f40311c4897a1c27a8ac99f8dff3ec0",
+      "path": "tests/test_market_pipeline_stage3_foundation.py",
+      "sha256": "03427e144e057b4809dd6553b556dbd4f3b4ab5299fa9738a068dbda061c9eb1",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 105383,
+      "git_blob": "a3326103eec109cbe05c6e79e09d95094fb2c951",
+      "path": "tests/test_market_pipeline_stage4_capture.py",
+      "sha256": "90276156939cb57455bcefe2f935c5484fec852fca20a820e711cc7c15810f44",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 14894,
+      "git_blob": "388bb65356ccfeb1ea196d2ac03b44c2f475b267",
+      "path": "tests/test_market_pipeline_stage5_coin_processor.py",
+      "sha256": "45ee48a2027dd03e23bdbc8b9faf832287184760938555544c0ec3fc6200c9de",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 11550,
+      "git_blob": "585c13f03bbf3539cbcbff6bd5f3778065d6d37c",
+      "path": "tests/test_market_pipeline_stage6_channel_processor.py",
+      "sha256": "e1256d7f75db712a7047ecc36b904162f06a140b0ad7f972614f797d5ea7c270",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 11853,
+      "git_blob": "28a36ffdfed88e2d6f32f3d46fe2e52fe54cf3dc",
+      "path": "tests/test_market_private_pipeline_contracts.py",
+      "sha256": "795008f3f04db95051f03229f4a750e51489ed350fd08286639e8611c2599a23",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 335,
+      "git_blob": "2d0fdb4a42bfef3200f43fefb522254c8c2b7851",
+      "path": "tests/__init__.py",
+      "sha256": "7a0754c2e117da2210cc89005c764696568c456b56b868bb7a1a7a3ce3b3a48f",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 21638,
+      "git_blob": "6d2651a2538eda724d5afa8aa96b7bb7638656bc",
+      "path": "scripts/manage_market_pipeline_stage3.py",
+      "sha256": "78097e457388eedbc187a29867a8f79434a469cfa0048d601555e53d5e963c49",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 148956,
+      "git_blob": "f0c2fa49af7f9b25d2113b8a47b497a5a1859f0b",
+      "path": "scripts/audit_production_market_catchup.py",
+      "sha256": "b21a1a4d0d59e83dc7f70b934090a753e9464adb050e56d625747075b14c67d9",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 2088,
+      "git_blob": "464c1f3cd3cb259503eb86a0406b79a70142db5f",
+      "path": "scripts/export_market_private_pipeline_schemas.py",
+      "sha256": "e31a4c343cf6267d42eafa7a71ead77fb1eb05e7a52fb8ce126ab4c4b69cf81c",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 799,
+      "git_blob": "d7af82e05c3ba958b0fe62d1fe273bd7957aba15",
+      "path": "tests/fixtures/market_private_pipeline/capture_record.json",
+      "sha256": "92aba7e98caea0fefa8b4d4dfe1f6b5931d5c0d34eae4452a213ba5618857d02",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 1061,
+      "git_blob": "1f1fc17a5c12bd6a3321340533029d7b982777ff",
+      "path": "tests/fixtures/market_private_pipeline/market_fact.json",
+      "sha256": "6b7f75236f948ba4b2c3ca3ba987fbc3865c24399b867818e8fadab27c94f64e",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 1745,
+      "git_blob": "1e94a59d74c5c51d70a23d510cb43731ca7af03c",
+      "path": "tests/fixtures/market_private_pipeline/market_fact_batch.json",
+      "sha256": "08a192f56cd582182840a09e42d7c1847531c5a510d48fbd557872ea8657534b",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 839,
+      "git_blob": "631d444aa2cda0dc82ae40270c2e42149801aab4",
+      "path": "tests/fixtures/market_private_pipeline/estimator_snapshot.json",
+      "sha256": "2091fa7a7d2c04822ea55c3f559e27ebe64d986122032b9778dc91f36cbd38e9",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 1768,
+      "git_blob": "0bc249ba4dd138b9e5a16615b1f2fdcd0ecb409e",
+      "path": "deploy/market-data/compose.yml",
+      "sha256": "38a9191e4f55799f1f8193b88136993e01758c1d1dcac6e8fbff03ed731fec5b",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 13605,
+      "git_blob": "18f4be1a45f096aa3fe863c091f39e0cd6d8efdf",
+      "path": "deploy/market-data/compose.web.yml",
+      "sha256": "25a794f6f9f4303c96adb69b35eeb19af86d153fb57f0ff87307f72797937cd5",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    },
+    {
+      "bytes": 7242,
+      "git_blob": "103099c664ce59727ef7441471a9db0290905b76",
+      "path": "deploy/market-data/compose.bot.yml",
+      "sha256": "05c3415dc6e2de82b2f6d9b550fe5ffe71bbf0e3e42d29a9f9154056e6063880",
+      "source_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a"
+    }
+  ],
+  "historical_security_base_assertion_requires_separate_reviewed_update": true,
+  "historical_test_count": 80,
+  "historical_test_ids": [
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_adapter_wal_reader_mount_must_not_be_filesystem_read_only",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_bind_and_path_guards_reject_public_or_broad_targets",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_compose_is_split_by_host_and_pins_security_contract",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_durable_atomic_write_and_owner_lock",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_fact_fixture_is_durable_idempotent_and_gap_fails_closed",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_live_capture_starting_is_process_healthy_during_backfill",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_live_mode_stage10_roles_bind_the_release_revision",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_live_preflight_accepts_only_registry_digest_or_exact_local_image_id",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_secret_contract_requires_root_only_parent_and_shared_runtime_group",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_shared_resource_locks_live_on_session_and_market_store_mounts",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_snapshot_version_regression_does_not_replace_latest",
+    "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_sqlite_market_store_survives_reinitialization",
+    "tests.test_market_pipeline_stage4_capture.CaptureContractTests.test_config_requires_exact_account_allowlist",
+    "tests.test_market_pipeline_stage4_capture.CaptureContractTests.test_group_backfill_updates_gap_recovery_metric",
+    "tests.test_market_pipeline_stage4_capture.CaptureContractTests.test_group_reply_edit_delete_metadata_matches_existing_contract",
+    "tests.test_market_pipeline_stage4_capture.CaptureContractTests.test_live_authority_marker_is_release_bound_and_private",
+    "tests.test_market_pipeline_stage4_capture.CaptureContractTests.test_marked_group_identity_normalizes_for_anonymous_admin_detection",
+    "tests.test_market_pipeline_stage4_capture.CaptureContractTests.test_market_revision_identity_covers_pinned_and_silent_metadata",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_489_legacy_occurrences_accept_exhaustive_full_account_proof",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_event_quarantine_identity_prevents_cross_source_collision",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_exact_catchup_runtime_settings_are_fail_closed",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_exact_resolution_is_idempotent_and_new_occurrence_reopens_it",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_exact_three_day_retention_compacts_mixed_file_and_is_auditable",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_includes_exact_cutoff_across_many_results",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_limit_failure_never_marks_coverage",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_reaches_owner_cutoff_despite_newer_watermark",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_rejects_naive_cutoff_everywhere",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_restart_deduplicates_durable_partial_work",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_retries_after_transport_interruption",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_systemic_capture_error_is_not_hidden",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_backfill_terminals_non_model_media_without_quarantine",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_group_backfill_accounts_reply_ancestor_before_cutoff",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_explicit_replay_refuses_revision_newer_than_fixed_upper_bound",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_fsync_failure_keeps_outbox_and_restart_recovers_without_loss",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_global_sequence_duplicate_delivery_and_first_receipt_are_stable",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_heartbeat_is_per_source_and_contains_no_raw_event",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_invalid_reply_context_does_not_drop_valid_group_child",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_legacy_quarantine_expands_replay_to_complete_account_inventory",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_legacy_quarantine_requires_bounded_full_account_replay",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_live_reply_cache_skips_account1_and_is_bounded_for_account2",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_non_model_in_window_parent_is_terminal_and_does_not_block_child",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_partial_tail_is_repaired_but_corrupt_middle_fails_closed",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_reconciliation_stops_after_durable_watermark_overlap",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_reconciliation_terminals_media_only_message_without_quarantine",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_replay_run_resumes_fixed_upper_bound_after_interruption",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_spool_repair_and_retention_never_buffer_whole_files",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_two_group_children_share_one_explicit_reply_ancestor",
+    "tests.test_market_pipeline_stage4_capture.CaptureFixture.test_write_failure_never_acknowledges_internal_delivery",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_explicit_contract_requires_backfill_and_known_account_sources",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_explicit_delivery_and_projection_are_idempotent",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_explicit_media_and_service_are_identity_bound_terminal_filters",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_lineage_is_purged_with_raw_retention",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_old_explicit_group_bypasses_only_six_hour_projection_bound",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_old_explicit_market_reaches_parser_and_lineage_terminal",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_routine_current_duplicate_is_reparsed_for_explicit_lineage",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_routine_old_market_and_group_remain_bounded",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_routine_seen_event_is_upgraded_to_accounted_explicit_replay",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_schema_v6_migrates_to_v8_lineage_without_raw_columns",
+    "tests.test_market_pipeline_stage4_capture.ExplicitBackfillAdapterTests.test_valid_no_fact_forward_and_delete_are_terminal_not_silent",
+    "tests.test_market_pipeline_stage5_coin_processor.MarketPipelineStage5CoinProcessorTests.test_cutover_reconciliation_loads_historical_anchors_without_dirty_group",
+    "tests.test_market_pipeline_stage5_coin_processor.MarketPipelineStage5CoinProcessorTests.test_expired_raw_exact_review_projects_and_marks_feedback_applied",
+    "tests.test_market_pipeline_stage5_coin_processor.MarketPipelineStage5CoinProcessorTests.test_fixture_cycle_projects_both_groups_and_exact_reply_branch",
+    "tests.test_market_pipeline_stage5_coin_processor.MarketPipelineStage5CoinProcessorTests.test_invalid_sibling_is_quarantined_without_payload_persistence",
+    "tests.test_market_pipeline_stage5_coin_processor.MarketPipelineStage5CoinProcessorTests.test_live_paths_require_both_causal_sidecars",
+    "tests.test_market_pipeline_stage5_coin_processor.MarketPipelineStage5CoinProcessorTests.test_partial_tail_is_not_advanced_and_replay_is_idempotent",
+    "tests.test_market_pipeline_stage6_channel_processor.MarketPipelineStage6ChannelProcessorTests.test_all_channels_and_private_lifecycle_project_independently",
+    "tests.test_market_pipeline_stage6_channel_processor.MarketPipelineStage6ChannelProcessorTests.test_inconsistent_revision_is_ambiguous_but_offer_stays_original",
+    "tests.test_market_pipeline_stage6_channel_processor.MarketPipelineStage6ChannelProcessorTests.test_public_melted_facts_are_not_kept_beyond_three_days",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_batch_requires_contiguous_exactly_hashed_items",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_capture_hash_time_retention_and_source_binding_fail_closed",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_coin_trade_can_publish_agreed_terms_different_from_offer",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_fact_rejects_raw_identity_and_non_string_price",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_fact_revision_keeps_source_sequence_but_gets_new_delivery_sequence",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_fact_semantic_fingerprint_covers_quality_parser_and_times",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_fixture_contracts_and_exported_schemas_are_current",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_private_gold_offer_has_no_final_price_or_quantity",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_safe_no_data_cannot_carry_rates",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_source_registry_matches_capture_and_retention_decisions",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_v1_and_v2_reject_cross_version_documents",
+    "tests.test_market_private_pipeline_contracts.MarketPrivatePipelineContractTests.test_v1_keeps_its_published_toman_per_coin_unit"
+  ],
+  "root_fixture_test_id": "tests.test_market_pipeline_stage3_foundation.MarketPipelineStage3FoundationTests.test_secret_contract_requires_root_only_parent_and_shared_runtime_group",
+  "runtime_data_used": false,
+  "schema": "normal_market_f79_business_test_selection/1",
+  "security_accepted": false,
+  "test_execution_performed": false
+}
