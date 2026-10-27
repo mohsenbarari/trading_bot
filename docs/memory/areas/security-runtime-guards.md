@@ -43,3 +43,11 @@
   bound to that invocation, never earlier success or published JSON alone.
   Budget repeated guards/hashing within the original deadline; timing alone is
   inference.
+- Pilot every distinct frozen business/fixture API before dispatching all roles;
+  one successful Capture2 pilot does not cover schema9/min_id or older replay APIs.
+  Preserve historical assertions and business bytes when adapting fixtures.
+- Constructor cleanup must handle the actual acquired prefix and preserve the
+  original error. Do not call full-context guards before their fields exist;
+  include a real constructor-prefix regression, beyond import/AST checks.
+- Test exact Docker/systemd wire serialization and omitted-field behavior;
+  valid hand-built dictionaries cannot verify the CLI template that produces them.

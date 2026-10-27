@@ -13,7 +13,7 @@ import json,os,re,selectors,subprocess,time
 PROFILES=('base-nonroot','base-root','added-replay')
 OWNER='io.gold-trade.normal-business81-owner'
 PROFILE='io.gold-trade.normal-business81-profile'
-NORMAL_PIN=(101344, '0b2e163e3da3f9339991e67909086f43f1b94bb6cfd61f6eb2b20416246b1b41')
+NORMAL_PIN=(101728, 'da10285d3b47a48e27b7427267234e53e8efeae10ff7331971ccfce331479740')
 APPROVAL_PIN={'bytes': 1031, 'sha256': '3bbc244f4e044975a8f3e9761e8690a4f48f8051454134e66ef26332c3d2627f'}
 PROPOSAL_PIN={'bytes': 771, 'sha256': '18b59cbdf722a15de894f50fca1170072c0b6ac278582575cadb68b6e3446415'}
 PATCH_PIN={'bytes': 333, 'sha256': '88d5b46f2726fb570bb6727fe7955f9b5c399f370bf61fc81601c26c40f8da8c'}
@@ -209,9 +209,10 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
   for name,pin in(('approval',APPROVAL_PIN),('proposal',PROPOSAL_PIN),('patch',PATCH_PIN)):
    row=M.Held(approval_paths[name],maximum=pin['bytes'],binding=pin);rows.append(row);approval_sources[name]=row.raw(pin['bytes'])
   approval=assertion_approval(B,approval_sources['approval'],approval_sources['proposal'],approval_sources['patch'],manifest)
-  extra={'role-business-components.json'}if candidate is not None else set()
+  extra={'role-business-components.json',B.ROLE_FIXTURE_HELPER}if candidate is not None else set()
   need(len(contents)==40+len(extra)and set(contents)=={r['path']for r in manifest['files']}|set(B.HELPERS)|{'suite-manifest.json'}|extra,'business81_bundle')
-  if candidate is not None:need(manifest.get('candidate_product')==candidate and manifest.get('fixture_business_provenance')==B.fixture_business_provenance(),'business81_bundle')
+  if candidate is not None:
+   role_helper=B.role_fixture_helper(contents[B.ROLE_FIXTURE_HELPER]);need(manifest.get('candidate_product')==candidate and manifest.get('fixture_business_provenance')==B.fixture_business_provenance()and manifest.get('role_fixture_update')==role_helper.update_metadata(candidate['role_source']['rows_sha256']),'business81_bundle')
   for name,(size,digest)in B.HELPERS.items():
    need(type(contents[name])is bytes and(len(contents[name]),sha256(contents[name]).hexdigest())==(size,digest),'business81_helper_pin')
   for spec in manifest['files']:

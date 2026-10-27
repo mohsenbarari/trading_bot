@@ -71,8 +71,7 @@ class RoleBuilderTests(unittest.TestCase):
         return value, sha256(self.S.encoded(value)).hexdigest()
 
     def historical(self, role=None):
-        names = (*self.M.CONTROLLER_FILES,
-                 *((self.M.ROLE_READER, self.M.ROLE_CATALOG_PATH) if role else ()))
+        names = self.M.controller_files(role)
         raws = {name: (ROOT / name).read_bytes() for name in names}
         if role:
             receipt, signature = self.receipt(role)
@@ -214,14 +213,26 @@ class RoleBuilderTests(unittest.TestCase):
         _, _, legacy_contents, legacy_manifest, legacy_plans = self.historical()
         for role in self.M.ROLE_MAP:
             _, _, contents, manifest, plans = self.historical(role)
-            self.assertEqual(manifest['schema'], 'normal_market_business81_sources/3')
+            self.assertEqual(manifest['schema'], 'normal_market_business81_sources/4')
             self.assertEqual(manifest['fixture_business_provenance'], self.B.fixture_business_provenance())
             self.assertNotIn('business_commit', manifest)
             self.assertEqual(manifest['candidate_product']['role'], role)
             self.assertEqual(sum(plan['expected_test_count'] for plan in plans.values()), 81)
-            self.assertEqual(manifest['files'], legacy_manifest['files'])
+            codec = self.B.role_fixture_helper(contents[self.B.ROLE_FIXTURE_HELPER])
+            component = self.M.ROLE_MAP[role]['rows_sha256']
+            self.assertEqual(manifest['role_fixture_update'], codec.update_metadata(component))
+            self.assertEqual(len(contents), 42)
+            old_rows = {row['path']: row for row in legacy_manifest['files']}
+            self.assertEqual(set(old_rows), {row['path'] for row in manifest['files']})
             for row in manifest['files']:
-                self.assertEqual(contents[row['path']], legacy_contents[row['path']])
+                name = row['path']
+                restored = codec.restore(contents[name], component, fixture=name.split('/', 1)[0]) \
+                    if name.endswith('tests/test_market_pipeline_stage4_capture.py') else contents[name]
+                self.assertEqual(restored, legacy_contents[name])
+                self.assertEqual({key: row[key] for key in ('original_bytes', 'original_sha256', 'git_blob', 'source_commit')},
+                                 {key: old_rows[name][key] for key in ('original_bytes', 'original_sha256', 'git_blob', 'source_commit')})
+                if row['transformation'] != 'reviewed_role_fixture_contract':
+                    self.assertEqual(row, old_rows[name])
             for profile in plans:
                 self.assertEqual(plans[profile]['test_ids'], legacy_plans[profile]['test_ids'])
                 self.assertEqual(plans[profile]['business_commit'], self.M.ROLE_MAP[role]['business_commit'])
