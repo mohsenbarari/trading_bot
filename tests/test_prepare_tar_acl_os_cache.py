@@ -161,4 +161,90 @@ class FetchTests(unittest.TestCase):
    self.assertLessEqual(path.stat().st_size,8);self.assertEqual(signals,[children[0].pid]);self.assertIsNotNone(children[0].returncode)
 
 
+@unittest.skipUnless(os.geteuid()==os.getegid()==0,'requires genuine Root-owned directories; no owner spoof')
+class TarManDirectoryTests(unittest.TestCase):
+ def setUp(self):
+  temp=tempfile.TemporaryDirectory(prefix='.owned-tar-man-',dir=ROOT);self.addCleanup(temp.cleanup);self.root=Path(temp.name)
+ def directory(self,name='man1',mode=0o755):
+  path=self.root/name;path.mkdir();path.chmod(mode);self.assertEqual((path.stat().st_uid,path.stat().st_gid),(0,0));return path
+ def test_actual_0755_is_noop_without_chmod(self):
+  path=self.directory();before=M.identity(path.stat())
+  with patch.object(M.os,'fchmod',side_effect=AssertionError('0755 must be a no-op')),M.Held()as held:
+   row=M._TarManDirectory(path);held.files.append(row);row.normalize();held.check()
+  self.assertEqual(M.identity(path.stat()),before)
+ def test_actual_0775_chmod_preserves_inode_and_all_other_stable_fields(self):
+  path=self.directory(mode=0o775);before=M.identity(path.stat());actual=os.fchmod;calls=[];fds=[]
+  def chmod(fd,mode):
+   self.assertEqual(M.identity(os.fstat(fd)),before);self.assertEqual(mode,0o755);calls.append(fd);return actual(fd,mode)
+  with patch.object(M.os,'fchmod',chmod),M.Held()as held:
+   row=M._TarManDirectory(path);held.files.append(row);fds=[row.fd]+[fd for fd,_ in row.ancestors];row.normalize();held.check()
+  after=M.identity(path.stat());self.assertEqual(len(calls),1);self.assertEqual(after[:2],before[:2]);self.assertEqual(after[2],0o40755);self.assertEqual(after[3:8],before[3:8]);self.assertGreaterEqual(after[8],before[8])
+  for fd in fds:
+   with self.assertRaises(OSError):os.fstat(fd)
+ def test_symlink_and_every_other_original_mode_refuse_without_chmod(self):
+  target=self.directory('target');link=self.root/'link';link.symlink_to(target)
+  with patch.object(M.os,'fchmod',side_effect=AssertionError('unadmitted mutation')):
+   with self.assertRaises(RuntimeError):M._TarManDirectory(link)
+   for mode in(0o700,0o750,0o777,0o1755,0o2755):
+    path=self.directory('mode-'+str(mode),mode)
+    with self.subTest(mode=mode),self.assertRaisesRegex(RuntimeError,'tar_man_directory'):M._TarManDirectory(path)
+ def test_actual_foreign_gid_refuses_without_owner_spoof(self):
+  path=self.directory()
+  try:os.chown(path,0,1)
+  except OSError as error:self.skipTest('actual alternate GID unavailable: errno '+str(error.errno))
+  self.assertEqual(path.stat().st_gid,1)
+  with patch.object(M.os,'fchmod',side_effect=AssertionError('foreign owner mutation')),self.assertRaisesRegex(RuntimeError,'tar_man_directory'):M._TarManDirectory(path)
+ def test_drift_before_transition_is_not_adopted(self):
+  path=self.directory(mode=0o775)
+  with self.assertRaisesRegex(RuntimeError,'tar_man_directory'),M.Held()as held:
+   row=M._TarManDirectory(path);held.files.append(row);path.chmod(0o777)
+   with patch.object(M.os,'fchmod',side_effect=AssertionError('changed object mutation')):row.normalize()
+ def test_chmod_cannot_adopt_unrelated_mtime_change(self):
+  path=self.directory(mode=0o775);actual=os.fchmod
+  def chmod(fd,mode):
+   actual(fd,mode);before=os.fstat(fd);os.utime(fd,ns=(before.st_atime_ns,before.st_mtime_ns+1))
+  with patch.object(M.os,'fchmod',chmod),self.assertRaisesRegex(RuntimeError,'tar_man_directory'),M.Held()as held:
+   row=M._TarManDirectory(path);held.files.append(row);row.normalize()
+ def test_actual_parent_swap_refuses_with_all_descriptors_closed(self):
+  parent=self.directory('parent');path=parent/'man1';path.mkdir();path.chmod(0o775);fds=[]
+  with self.assertRaises(RuntimeError),M.Held()as held:
+   row=M._TarManDirectory(path);held.files.append(row);fds=[row.fd]+[fd for fd,_ in row.ancestors]
+   parent.rename(self.root/'retired');parent.mkdir();(parent/'man1').mkdir();row.normalize()
+  for fd in fds:
+   with self.assertRaises(OSError):os.fstat(fd)
+ def test_last_original_source_physical_close_drift_refuses(self):
+  path=self.directory(mode=0o775);source=self.root/'source';source.write_bytes(b'OWNED_PUBLIC');close=os.close;changed=[];fds=[]
+  def closing(fd):
+   chosen=os.fstat(fd).st_ino==source.stat().st_ino;close(fd)
+   if chosen:path.chmod(0o775);changed.append(True)
+  with patch.object(M.os,'close',closing),self.assertRaisesRegex(RuntimeError,'tar_man_directory'),M.Held()as held:
+   held.read(source,65536);row=M._TarManDirectory(path);held.files.append(row);fds=[row.fd]+[fd for fd,_ in row.ancestors];row.normalize()
+  self.assertEqual(changed,[True])
+  for fd in fds:
+   with self.assertRaises(OSError):os.fstat(fd)
+ def test_ancestor_actual_physical_close_drift_refuses(self):
+  path=self.directory(mode=0o775);close=os.close;chosen=[];changed=[]
+  def closing(fd):
+   close(fd)
+   if chosen and fd==chosen[0]:path.chmod(0o775);changed.append(True)
+  with patch.object(M.os,'close',closing),self.assertRaisesRegex(RuntimeError,'tar_man_directory'),M.Held()as held:
+   row=M._TarManDirectory(path);held.files.append(row);chosen.append(row.ancestors[-1][0]);row.normalize()
+  self.assertEqual(changed,[True])
+ def test_general_parent_guard_still_refuses_group_writable_directories(self):
+  path=self.directory(mode=0o775)
+  with self.assertRaisesRegex(RuntimeError,'parent'):M.parents(path/'unread-public-file')
+ def test_production_paths_are_fixed_and_both_admitted_before_first_chmod(self):
+  events=[]
+  class OwnedModel:
+   def __init__(self,path):events.append(('admit',str(path)))
+   def normalize(self):
+    self_test.assertEqual(events[:2],[('admit','/usr/share/man/man1'),('admit','/usr/share/man/man8')]);events.append(('normalize',))
+   def check(self):events.append(('check',))
+   def close(self):pass
+   def named(self):pass
+  self_test=self
+  with patch.object(M,'_TarManDirectory',OwnedModel),M.Held()as held:M.normalize_tar_man_dirs(held)
+  self.assertEqual([row for row in events if row==('normalize',)],[('normalize',),('normalize',)])
+
+
 if __name__=='__main__':unittest.main()

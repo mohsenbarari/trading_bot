@@ -29,7 +29,7 @@ CODES=frozenset(('lock_unarmed','lock_contract','path','parent','parent_changed'
  'archive_contract','archive_bound','archive_pin','archive_member','source_contract','image_boundary','loader_override',
  'installer_command','installer_output','installer_deadline','installer_failed','installer_descendants','installer_cleanup',
  'package_control','package_baseline','package_inventory','package_payload','installed_library','write','unexpected_refusal',
- 'artifact_token','artifact_timeout','artifact_failed','artifact_bound','artifact_write'))
+ 'artifact_token','artifact_timeout','artifact_failed','artifact_bound','artifact_write','tar_man_directory'))
 
 def need(ok,code):
  if not ok:raise RuntimeError(code)
@@ -146,6 +146,54 @@ class PublicLink:
   try:self.check()
   finally:os.close(self.fd);self.fd=None
   self.named()
+class _TarManDirectory:
+ """One admitted Root-owned directory; only its known mode transition is allowed."""
+ def __init__(self,path):
+  self.path=Path(path).absolute();self.parents=parents(self.path);self.before=identity(self.path.lstat());self.fd=None;self.ancestors=[]
+  need(self.path.resolve(strict=True)==self.path and self.before[2]in(0o40755,0o40775)
+   and self.before[3:5]==(0,0),'tar_man_directory')
+  try:
+   for parent,expected in self.parents:
+    fd=os.open(parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);self.ancestors.append((fd,expected))
+    need(identity(os.fstat(fd))[:5]==expected,'parent_changed')
+   self.fd=os.open(self.path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);self.check()
+  except BaseException:
+   for fd in ([]if self.fd is None else[self.fd])+[fd for fd,_ in reversed(self.ancestors)]:
+    try:os.close(fd)
+    except BaseException:pass
+   self.fd=None
+   self.ancestors=[];raise
+ def named(self):
+  check_parents(self.parents)
+  need(self.path.resolve(strict=True)==self.path and identity(self.path.lstat())==self.before,'tar_man_directory')
+ def check(self):
+  self.named();need(identity(os.fstat(self.fd))==self.before,'tar_man_directory')
+  for fd,expected in self.ancestors:need(identity(os.fstat(fd))[:5]==expected,'parent_changed')
+ def normalize(self):
+  self.check()
+  if self.before[2]==0o40775:
+   old=self.before;os.fchmod(self.fd,0o755);after=identity(os.fstat(self.fd))
+   need(after[:2]==old[:2] and after[2]==0o40755 and after[3:8]==old[3:8] and after[8]>=old[8],'tar_man_directory')
+   need(identity(self.path.lstat())==after,'tar_man_directory');self.before=after
+  self.check()
+ def close(self):
+  failed=None
+  try:self.check()
+  except BaseException as error:failed=error
+  for fd in [self.fd]+[fd for fd,_ in reversed(self.ancestors)]:
+   try:os.close(fd)
+   except BaseException as error:failed=error
+  self.fd=None;self.ancestors=[]
+  try:self.named()
+  except BaseException as error:failed=error
+  if failed is not None:raise failed
+def normalize_tar_man_dirs(held):
+ # Admit BOTH fixed directories before changing either; no caller-selected paths.
+ rows=[]
+ for path in (Path('/usr/share/man/man1'),Path('/usr/share/man/man8')):
+  row=_TarManDirectory(path);held.files.append(row);rows.append(row)
+ for row in rows:row.normalize()
+ held.check()
 def load_lock(held):
  row=held.read(ROOT/LOCK_NAME,65536,owner=(os.geteuid(),os.getegid()))
  need(row.binding['sha256']==LOCK_SHA,'lock_contract');return validate_lock(document(row.raw))
@@ -439,6 +487,7 @@ def install_admitted(cache):
   bounded(['/usr/bin/dpkg',*DOC_INCLUDES,'--install',str(package.path)],allowed,guard=held.check)
   after=package_inventory(bounded(list(INVENTORY),allowed,guard=held.check));verify_transition(before,after)
   need(bounded(['/usr/bin/dpkg','--audit'],allowed,guard=held.check).strip()==b'' and bounded(['/usr/bin/dpkg','--verify','tar'],allowed,guard=held.check).strip()==b'','package_payload')
+  normalize_tar_man_dirs(held)
   verify_tar_payload(lock,held)
   held.read(Path(library['path']),16*1024**2,{k:library[k] for k in ('bytes','sha256')},owner=(0,0))
   held.check()
