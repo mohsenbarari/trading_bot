@@ -261,6 +261,7 @@ jobs:
       - name: Verify genuine historical81 and complete CI controller sources
         if: always() && steps.finalize.outcome == 'success'
         env:
+          GH_TOKEN: ${{ github.token }}
           ROOT: ${{ steps.build.outputs.root }}
           EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
         run: |

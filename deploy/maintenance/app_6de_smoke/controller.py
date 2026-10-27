@@ -78,8 +78,8 @@ def same(a, b):
 
 
 ARMED = True
-NATIVE_PAYLOAD_PROBE_SHA256 = '078e412950039b0e2055597022f89eab001e63e69eb1b7137e56c12e44d66eae'
-NATIVE_PAYLOAD_EXPECTATION_SHA256 = '2fb66fafc72ed0733546506ffd4554ddfde9643122b87aecd205adce271310d9'
+NATIVE_PAYLOAD_PROBE_SHA256 = 'aa68171f817fbe7435501c4ca99a5b22a1960ec0b4e38593d439a359f060a414'
+NATIVE_PAYLOAD_EXPECTATION_SHA256 = '19521e7a64af35f94c9f57563d15285d6080569879eec3ef8fd9cbc53d41b0bf'
 
 def validate_control(value):
     need(ARMED is True, 'intake_unarmed')
@@ -333,6 +333,80 @@ def presence_args(old, ctx, name, image, proof, filename, pin, control):
         '--mount','type=bind,source='+str(proof)+',target=/proof,readonly','--entrypoint','/usr/local/bin/python3',image,*command[1:]]
 
 
+PUBLIC_PROBE_LIMITS={'probe_native_payload.py':MAX_NATIVE_REPORT,
+    'verify_image_component_presence.py':65536,'verify_acl_consumer_presence.py':MAX_JSON}
+PUBLIC_PROBE_START_CODES=frozenset(('public_probe_start_contract','public_probe_start_timeout',
+    'public_probe_stdout_bound','public_probe_stderr_bound','public_probe_start_nonzero','public_probe_start_finalization'))
+
+
+def public_probe_start(ctx,old,cid,filename):
+    """Only fixed public probe STARTs; retain bounded diagnostics before closes."""
+    need(type(filename)is str and filename in PUBLIC_PROBE_LIMITS and old.DOCKER==['/usr/bin/docker','--host=unix:///var/run/docker.sock']
+        and type(cid)is str and re.fullmatch('[a-f0-9]{64}',cid),'public_probe_start_contract')
+    maximum=PUBLIC_PROBE_LIMITS[filename];end=min(ctx.end,time.monotonic()+90);begun=time.monotonic()
+    buffers={'stdout':bytearray(),'stderr':bytearray()};counts={'stdout':0,'stderr':0}
+    child=None;selector=None;error=None;result=None;close_errors=[]
+    environment={'PATH':'/usr/bin:/bin','LC_ALL':'C.UTF-8','DOCKER_CONFIG':str(ctx.root/'docker-config')}
+    try:
+        ctx.check()
+        child=subprocess.Popen([*old.DOCKER,'start','--attach',cid],stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=environment,start_new_session=True,close_fds=True)
+        selector=selectors.DefaultSelector()
+        for key,pipe in (('stdout',child.stdout),('stderr',child.stderr)):
+            os.set_blocking(pipe.fileno(),False);selector.register(pipe.fileno(),selectors.EVENT_READ,key)
+        while selector.get_map():
+            ctx.check();left=end-time.monotonic();need(left>0,'public_probe_start_timeout')
+            for event,_ in selector.select(min(.1,left)):
+                key=event.data;limit=maximum if key=='stdout'else 8192
+                raw=os.read(event.fd,min(65536,limit-counts[key]+1))
+                if not raw:selector.unregister(event.fd);continue
+                counts[key]+=len(raw);buffers[key].extend(raw[:max(0,limit-len(buffers[key]))])
+                need(counts[key]<=limit,'public_probe_stdout_bound'if key=='stdout'else'public_probe_stderr_bound')
+        try:code=child.wait(timeout=max(.01,end-time.monotonic()))
+        except subprocess.TimeoutExpired:raise RuntimeError('public_probe_start_timeout')from None
+        ctx.check();need(type(code)is int and code==0,'public_probe_start_nonzero');result=bytes(buffers['stdout'])
+    except BaseException as failure:error=failure
+    # Preserve actual owned-child outcome, including bounded timeout/overflow
+    # cleanup, without signalling any reaped or unowned PID.
+    if child is not None:
+        try:ctx.C.cleanup_owned_child(child)
+        except BaseException as failure:
+            if error is None:error=failure
+    output=bytes(buffers['stdout']);detail=bytes(buffers['stderr']);tail_offset=max(min(len(output),4096),len(output)-4096)
+    elapsed=time.monotonic()-begun
+    receipt={'schema':'canonical_app_public_probe_start/1','probe':filename,
+        'client_spawned':child is not None,'actual_client_returncode':child.returncode if child is not None and type(child.returncode)is int else None,
+        'stdout_bytes_observed':counts['stdout'],'stdout_bytes_captured':len(output),'stdout_captured_sha256':sha256(output).hexdigest(),
+        'stdout_prefix_text':output[:4096].decode('utf-8',errors='replace'),
+        'stdout_tail_text':output[tail_offset:].decode('utf-8',errors='replace'),'stdout_tail_offset':tail_offset,
+        'stdout_truncated':counts['stdout']>len(output)or tail_offset>min(len(output),4096),
+        'stderr_bytes_observed':counts['stderr'],'stderr_text':detail.decode('utf-8',errors='replace'),
+        'stderr_truncated':counts['stderr']>len(detail),
+        'elapsed_seconds':round(elapsed,3)if math.isfinite(elapsed)and 0<=elapsed<=3600 else None,
+        'closed_code':error.args[0]if type(error)is RuntimeError and len(error.args)==1 and type(error.args[0])is str and error.args[0]in PUBLIC_PROBE_START_CODES else('success'if error is None else'unclassified'),
+        'capture_before_collector_physical_closes':True,'security_accepted':False}
+    try:
+        # C.write registers the exact known bytes/FD with the existing outer
+        # ProofKeeper at creation; neither selector nor child pipe is closed yet.
+        ctx.C.write(ctx.root/'reports'/('public-probe-start-'+filename[:-3]+'.json'),encode(receipt));ctx.check()
+    except BaseException as failure:
+        if error is None:error=failure
+    # All resources are closed even when diagnostics or a source guard refuse.
+    if selector is not None:
+        try:selector.close()
+        except BaseException as failure:close_errors.append(failure)
+    if child is not None:
+        for pipe in(child.stdout,child.stderr):
+            try:pipe.close()
+            except BaseException as failure:close_errors.append(failure)
+    try:ctx.check()
+    except BaseException as failure:
+        if error is None:error=failure
+    if close_errors and error is None:error=RuntimeError('public_probe_start_finalization')
+    if error is not None:raise error
+    return result
+
+
 def presence(ctx, old, image, control):
     global PHASE
     PHASE = 'fresh_same_image_presence'; proof = ctx.root/'presence-proof'; proof.mkdir(mode=0o755); proof.chmod(0o755)
@@ -347,7 +421,7 @@ def presence(ctx, old, image, control):
         mounts = old.document(ctx.docker(['container','inspect','--format','{{json .Mounts}}',cid],maximum=8192))
         need(type(mounts) is list and len(mounts) == 1 and mounts[0].get('Type') == 'bind' and mounts[0].get('Source') == str(proof)
             and mounts[0].get('Destination') == '/proof' and mounts[0].get('RW') is False,'presence_mounts')
-        raw = ctx.docker(['start','--attach',cid],seconds=90,maximum=maximum)
+        raw = public_probe_start(ctx,old,cid,filename)
         need(ctx.docker(['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip() == b'0','presence_exit')
         value = document(raw)
         need(value.get('schema') == schema and value.get('image_id') == image and value.get('source_commit') == control['source_commit']
@@ -364,7 +438,7 @@ def native_payload(ctx, old, image, control):
     expectation, expectation_check = old.sealed(ctx.stack,ctx.root/'source/native-expectation.json',NATIVE_PAYLOAD_EXPECTATION_SHA256,MAX_NATIVE_REPORT)
     ctx.checks.extend((script_check,expectation_check))
     expected = document(expectation)
-    need(expected.get('schema') == 'image_native_payload_expectation/1' and expected.get('armed') is True
+    need(expected.get('schema') == 'image_native_payload_expectation/2' and expected.get('armed') is True
         and expected.get('missing_package_sources') == [] and expected.get('security_accepted') is False,'payload_expectation_missing')
     proof = ctx.root/'native-proof'; proof.mkdir(mode=0o755); proof.chmod(0o755)
     ctx.C.write(proof/'probe_native_payload.py',script,0o444)
@@ -378,13 +452,23 @@ def native_payload(ctx, old, image, control):
     mounts = old.document(ctx.docker(['container','inspect','--format','{{json .Mounts}}',cid],maximum=8192))
     need(type(mounts) is list and len(mounts) == 1 and mounts[0].get('Type') == 'bind' and mounts[0].get('Source') == str(proof)
         and mounts[0].get('Destination') == '/proof' and mounts[0].get('RW') is False,'presence_mounts')
-    raw = ctx.docker(['start','--attach',cid],seconds=90,maximum=MAX_NATIVE_REPORT)
+    raw = public_probe_start(ctx,old,cid,'probe_native_payload.py')
     need(ctx.docker(['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip() == b'0','presence_exit')
     value = document(raw)
     expected_scope = {key:control[key] for key in ('image_id','source_commit','source_tree','input_signature')}
     expected_scope.update(platform='linux/amd64',build_run_id=control['run_id'],build_run_attempt=control['run_attempt'])
-    need(value.get('schema') == 'image_native_payload_observation/1' and same(value.get('scope'),expected_scope)
+    need(value.get('schema') == 'image_native_payload_observation/2' and same(value.get('scope'),expected_scope)
         and value.get('verifier_sha256') == NATIVE_PAYLOAD_PROBE_SHA256 and value.get('expectation_sha256') == NATIVE_PAYLOAD_EXPECTATION_SHA256
+        and same(value.get('native_scope'),expected.get('native_scope'))
+        and type(value.get('native_files_verified')) is int and value['native_files_verified'] == expected.get('native_file_count') == 153
+        and type(value.get('historical_native_files_covered')) is int and value['historical_native_files_covered'] == expected.get('historical_native_file_count') == 154
+        and type(value.get('distribution_filtered_files_verified')) is int and value['distribution_filtered_files_verified'] == 1
+        and type(value.get('policy_files_verified')) is int and value['policy_files_verified'] == 1
+        and type(value.get('distribution_filtered_absences')) is list and len(value['distribution_filtered_absences']) == 1
+        and same(value['distribution_filtered_absences'][0].get('contract'),expected['distribution_filtered_absences'][0])
+        and value['distribution_filtered_absences'][0].get('lookup_errno') == 'ENOENT'
+        and value['distribution_filtered_absences'][0].get('all_existing_prefix_directories_held_until_physical_finalization') is True
+        and value['distribution_filtered_absences'][0].get('policy_file_hash_verified') is True
         and value.get('inventory_complete') is True and value.get('production_mounts_or_data_used') is False
         and value.get('scanner_findings_modified') is False and value.get('security_accepted') is False,'presence_identity')
     ctx.write(ctx.root/'reports/fresh-native-payload.json',value)
@@ -623,7 +707,7 @@ def main(argv=None, *, outer_keeper=None):
         print(json.dumps({'status':'canonical_image_smoke_passed','tests':32,'fresh_presence_reports':2,'fresh_native_payload_reports':1,'fresh_whole_image_acl_inventory_reports':1,'security_accepted':False,'full_matrix_accepted':False})); return 0
     except BaseException as error:
         code = error.args[0] if isinstance(error,RuntimeError) and len(error.args) == 1 and type(error.args[0]) is str else None
-        allowed = set(CODES)|set(FLAT_FAILURE_CODES)
+        allowed = set(CODES)|set(FLAT_FAILURE_CODES)|set(PUBLIC_PROBE_START_CODES)
         if old is not None: allowed.update(old.FAILURE_CODES)
         if ctx is not None:
             for module in ctx.modules.values(): allowed.update(getattr(module,'PUBLIC_FAILURE_CODES',())); allowed.update(getattr(module,'PUBLIC_CODES',()))
