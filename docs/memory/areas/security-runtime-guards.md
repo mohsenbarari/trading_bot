@@ -1,12 +1,11 @@
 # Security runtime verification guards
 
-- Optional Docker Health may be absent; null never means healthy. Public Env
-  overrides use exact fixed-byte writers and real serialization tests, rather
-  than passing raw values through the generic public-report validator.
+- Docker Health can be absent; null never means healthy. Public Env deltas need
+  literal-byte writers and real serialization tests, not the report validator.
 - Artifact modes are typed: public source0644, private controls0600. Never
   change originals or substitute an identity mask for genuine UID/GID tests.
-- Docker cp cannot target tmpfs. Stage the public CA under /build, verify its
-  exact bytes, then use HTTPS; never read private PKI for this purpose.
+- Docker cp cannot target tmpfs. Stage public CA bytes under /build and verify
+  before HTTPS; never read private PKI for this purpose.
 - Ubuntu compatibility probes use -I -S -B to exclude stock sitecustomize.
   Keep loader guards. Output and payload bounds are distinct; no Go address
   space limit inherited from a small receipt helper.
@@ -17,19 +16,23 @@
   inspect every regular ELF, including /proc, /sys, /dev and /proof. TAR header
   metadata is not filesystem full9. Check the known archive digest before parse
   and after the borrowed FD closes.
-- Retain stderr's original writer identity before selector/pipe closes; admit its
-  known byte/hash binding while the writer remains open, then check the retained
-  reader immediately after writer close. Known payload alone cannot admit a
-  replacement inode or metadata transition.
+- Small bounded responses should remain in bounded RAM through collector
+  closure; create logs afterward from immutable known bytes. No live output file
+  then exists whose metadata could be adopted after close.
+- Streaming logs need original-writer full9 and known byte/hash admission before
+  selector/pipe closes, plus a retained reader checked immediately after writer
+  close. Known bytes never justify inode or metadata replacement.
 - Docker can return CAP_-prefixed capability names. Normalize that known prefix
   only after validating typed lists, exact cardinality and the allowed set.
-  Root chmod of a UID10001-owned fixture needs genuine FOWNER or that actual
-  owner's process; never mask ownership or weaken the check to hide EPERM.
+  Foreign-owned fixture chmod needs genuine FOWNER or the actual owner;
+  never mask ownership or hide EPERM.
 - Docker creates WORKDIR before a later cp. Copy public packet contents with
   `packet/.`, then verify the expected container file before START.
-- Under workflow umask0077, mkdir0755 creates0700. Explicitly set newly-created
-  public fixture directories0755 before file admission; keep private work0700.
-  Prove real non-root readability and denial of the private sibling.
+- Under umask0077, mkdir0755 creates0700. Set new public fixture dirs0755;
+  keep private work0700. Prove actual non-root access and private-sibling denial.
+- Receiver work/nonce ancestors stay Root0700; engine changes only restore
+  ownership. Genuine UID10001 needs the exact restore inode mounted at /clone.
+  Never chmod ancestors or reuse the old immutable, .sqlite-only engine helper.
 - Admit new adapter refusal codes in the outer closed mapping before costly CI;
   unknown exception operands remain private. Budget repeated source guards and
   full hashes within the global deadline; timing alone is an inferred cause.
