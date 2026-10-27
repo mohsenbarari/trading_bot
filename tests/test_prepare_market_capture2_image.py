@@ -12,7 +12,8 @@ class DriverTests(unittest.TestCase):
  def test_default_and_execute_remain_unarmed_without_actual_actions(self):
   with patch.object(M,'normal_build',side_effect=AssertionError('operations denied')),redirect_stdout(io.StringIO())as out:self.assertEqual(M.main([]),0)
   self.assertEqual(json.loads(out.getvalue())['status'],'UNARMED')
-  with self.assertRaisesRegex(RuntimeError,'normal_main_integration_unarmed'):M.main(['--execute'])
+  with patch.object(M,'EXECUTION_ARMED',False),self.assertRaisesRegex(RuntimeError,'normal_main_integration_unarmed'):M.main(['--execute'])
+  with patch.object(M,'normal_build',side_effect=AssertionError('operations denied')),self.assertRaisesRegex(RuntimeError,'arguments'):M.main(['--execute'])
  def contract(self):
   root=Path('/OWNED-PUBLIC-NOT-OPENED')
   args={'SOURCE_SHA':'a'*40,'SOURCE_TREE':'b'*40,'IMAGE_INPUT_SIGNATURE':'c'*64,'IMAGE_VERSION':'production-private-primary',

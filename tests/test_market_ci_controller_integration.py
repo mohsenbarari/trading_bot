@@ -149,7 +149,7 @@ class IntegrationTests(unittest.TestCase):
   build['historical81']['profile_outputs'].pop('base-root/container-closed.json')
   with self.assertRaisesRegex(RuntimeError,'business81_actual'):M.business81_outputs(root,build,lambda:None)
  def test_unarmed_is_enforced_before_any_live_phase(self):
-  with patch.object(M,'normal_build',side_effect=AssertionError('live action denied')),self.assertRaisesRegex(RuntimeError,'normal_main_integration_unarmed'):M.main(['--execute'])
+  with patch.object(M,'EXECUTION_ARMED',False),patch.object(M,'normal_build',side_effect=AssertionError('live action denied')),self.assertRaisesRegex(RuntimeError,'normal_main_integration_unarmed'):M.main(['--execute'])
  def test_new_finite_diagnostics_never_export_unknown_exception_operands(self):
   for code in('business81_actual','controller_parcel_binding','tar_lock'):self.assertEqual(M.closed_failure(RuntimeError(code))['code'],code)
   self.assertNotIn('OWNED_PRIVATE_DETAIL',json.dumps(M.closed_failure(ValueError('OWNED_PRIVATE_DETAIL'))))
