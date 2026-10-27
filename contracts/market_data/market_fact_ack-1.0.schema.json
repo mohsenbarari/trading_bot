@@ -1,0 +1,89 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "accepted_count": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Accepted Count",
+      "type": "integer"
+    },
+    "batch_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Batch Id",
+      "type": "string"
+    },
+    "contract": {
+      "const": "market_fact_ack/1.0",
+      "enum": [
+        "market_fact_ack/1.0"
+      ],
+      "title": "Contract",
+      "type": "string"
+    },
+    "duplicate_count": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Duplicate Count",
+      "type": "integer"
+    },
+    "highest_contiguous_sequence": {
+      "minimum": 0,
+      "title": "Highest Contiguous Sequence",
+      "type": "integer"
+    },
+    "received_count": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Received Count",
+      "type": "integer"
+    },
+    "receiver_timestamp_utc": {
+      "format": "date-time",
+      "title": "Receiver Timestamp Utc",
+      "type": "string"
+    },
+    "rejected_count": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Rejected Count",
+      "type": "integer"
+    },
+    "rejection_reason_codes": {
+      "default": [],
+      "items": {
+        "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+        "type": "string"
+      },
+      "title": "Rejection Reason Codes",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "ACK",
+        "PARTIAL",
+        "REJECTED"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "stream_id": {
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+      "title": "Stream Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract",
+    "batch_id",
+    "stream_id",
+    "status",
+    "highest_contiguous_sequence",
+    "received_count",
+    "accepted_count",
+    "duplicate_count",
+    "rejected_count",
+    "receiver_timestamp_utc"
+  ],
+  "title": "MarketFactAckV1",
+  "type": "object"
+}
