@@ -32,6 +32,17 @@ MAX_METADATA=4*1024**2
 SDK_FAMILY={'acl','libacl1','libacl1-dev'}
 LEGACY={'acl_get_file','acl_set_file','acl_extended_file','acl_delete_def_file'}
 NEW_APIS={'acl_get_file_at','acl_set_file_at','acl_extended_file_at','acl_delete_def_file_at'}
+DEEP_SETUP=['/usr/bin/perl','-e','my $d = "x" x 200; foreach my $i (1..52)',
+ '-e','  { mkdir ($d, 0700) && chdir $d or die "$!" }']
+PUBLIC_LSM=r'''import json,os
+def read(path,maximum):
+ fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC)
+ try:
+  raw=os.read(fd,maximum+1);assert len(raw)<=maximum;return raw.decode('ascii').strip()
+ finally:os.close(fd)
+profile=read('/proc/self/attr/current',256)
+print(json.dumps({'uid':os.getuid(),'euid':os.geteuid(),'gid':os.getgid(),'egid':os.getegid(),'apparmor':profile},sort_keys=True))
+'''
 OUTPUTS={'coreutils_9.7-3+gold1_amd64.deb': 67108864, 'coreutils_9.7-3+gold1_amd64.changes': 4194304, 'coreutils_9.7-3+gold1_amd64.buildinfo': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.changes': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.buildinfo': 4194304, 'source-proof.json': 4194304, 'sdk-proof.json': 4194304, 'abi-contract.json': 4194304, 'ordinary-compatibility.json': 4194304, 'provenance.json': 4194304, 'runtime-payload.json': 4194304, 'caller-proof.json': 4194304, 'vendor-suite.json': 4194304, 'generated-build-proof.json': 4194304}
 
 
@@ -243,6 +254,90 @@ def source_signature(path):
  require(len(rows)==1 and len(rows[0])>=3 and re.fullmatch(rb'[A-F0-9]{40}',rows[0][2]),'dsc_signature')
  return {'status':'VALIDSIG','signer_fingerprint':rows[0][2].decode(),'dsc':digest(path)}
 
+def parse_public_path_max(raw):
+ require(type(raw)is bytes and 0<len(raw)<=32 and re.fullmatch(rb'[0-9]{1,10}\n?',raw)is not None,'public_path_max_shape')
+ value=int(raw);require(4096<=value<=2**30,'public_path_max_range');return value
+
+def root_public_path_max():
+ """Only the fixed public Root0400 sysparam; never ask UID10001 to read it."""
+ require(os.getuid()==os.geteuid()==os.getgid()==os.getegid()==0,'root_public_path_max_reader')
+ path=Path('/sys/module/apparmor/parameters/path_max')
+ try:before=identity(path.lstat())
+ except FileNotFoundError:return{'state':'not_present','value':None,'reader_uid':0,'permission_bypassed':False}
+ require(path.resolve(strict=True)==path and stat.S_ISREG(before[2])and before[3:6]==(0,0,1)and not before[2]&0o022,'root_public_path_max_metadata')
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+ try:
+  require(identity(os.fstat(fd))==identity(path.lstat())==before,'root_public_path_max_changed')
+  raw=os.read(fd,33);value=parse_public_path_max(raw)
+  require(identity(os.fstat(fd))==identity(path.lstat())==before,'root_public_path_max_changed')
+ finally:os.close(fd)
+ require(identity(path.lstat())==before,'root_public_path_max_changed')
+ return{'state':'read_by_root','value':value,'reader_uid':0,'source_full9':list(before),'source_bytes':len(raw),'permission_bypassed':False}
+
+def validate_public_lsm(value):
+ require(type(value)is dict and set(value)=={'uid','euid','gid','egid','apparmor'}
+  and all(type(value[k])is int and value[k]==10001 for k in('uid','euid','gid','egid'))
+  and value['apparmor']=='unconfined','actual_preflight_lsm')
+ return value
+
+def deep_path_preflight():
+ """One genuine UID10001 unchanged52-level setup before any compilation.
+
+This is only an environment capability gate; GNU tail/full suites stay open.
+No fallback, retry, test alteration or host/global profile operation exists.
+ """
+ path_max=root_public_path_max()
+ code,raw=run([sys.executable,'-I','-S','-B','-c',PUBLIC_LSM],cwd=Path('/work'),user=10001,with_code=True,timeout=10,maximum=2048)
+ require(code==0,'preflight_lsm_process');lsm=validate_public_lsm(json.loads(raw))
+ root=Path('/work/.coreutils-deep-preflight');root.mkdir(mode=0o700);os.chown(root,10001,10001)
+ fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);before=identity(os.fstat(fd))[:5];rows=[];cleaned=False;outcome=None
+ require(root.resolve(strict=True)==root and before==identity(root.lstat())[:5]and before[2:]==(0o40700,10001,10001),'preflight_root')
+ def check():require(root.resolve(strict=True)==root and identity(root.lstat())[:5]==before and identity(os.fstat(fd))[:5]==before,'preflight_root_changed')
+ def children_of(value):
+  result=[]
+  with os.scandir(value)as stream:
+   for item in stream:require(len(result)<2,'preflight_child_bound');result.append(item.name)
+  return result
+ try:
+  check();code,raw=run(DEEP_SETUP,cwd=root,user=10001,with_code=True,timeout=15,maximum=2048);check()
+  # Raw public setup failure is preserved before refusing, not converted into
+  # a filtered test status. Its file tree is only this exclusive owned scope.
+  outcome={'schema':'coreutils_actual_unprivileged_deep_path_preflight/1','public_lsm':lsm,'Root_public_path_max':path_max,'actual_uid':10001,
+   'actual_command':DEEP_SETUP,'actual_setup_returncode':code,'captured_setup_output':raw.decode('ascii','replace'),
+   'required_depth':52,'component_bytes':200,'full_GNU_suite_or_tail_pass_claimed':False,'global_or_production_profile_changed':False,'security_accepted':False}
+  current=fd;name='x'*200
+  for i in range(52):
+   children=children_of(current)
+   require(children in([], [name]),'preflight_unknown_child')
+   if not children:break
+   child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=current);meta=identity(os.fstat(child))[:5];rows.append((current,name,child,meta))
+   require(meta==identity(os.stat(name,dir_fd=current,follow_symlinks=False))[:5]and meta[2:]==(0o40700,10001,10001),'preflight_created_directory');current=child
+  outcome['observed_depth']=len(rows)
+  print(json.dumps(outcome,sort_keys=True),flush=True)
+  require(code==0 and len(rows)==52 and raw==b'','actual_deep_path_setup_required')
+ finally:
+  errors=[]
+  for parent,name,child,meta in reversed(rows):
+   try:
+    check();require(identity(os.fstat(child))[:5]==identity(os.stat(name,dir_fd=parent,follow_symlinks=False))[:5]==meta,'preflight_cleanup_identity')
+    require(not children_of(child),'preflight_cleanup_not_empty')
+    os.rmdir(name,dir_fd=parent);require(os.fstat(child).st_nlink==0,'preflight_cleanup_unlink')
+   except BaseException as error:errors.append(error)
+   finally:
+    try:os.close(child)
+    except BaseException as error:errors.append(error)
+  try:
+   check();require(not children_of(fd),'preflight_cleanup_not_empty')
+   root.rmdir();require(os.fstat(fd).st_nlink==0 and not os.path.lexists(root),'preflight_cleanup_root')
+  except BaseException as error:errors.append(error)
+  finally:
+   try:os.close(fd)
+   except BaseException as error:errors.append(error)
+  if errors:raise errors[0]
+  cleaned=True
+ require(cleaned and not os.path.lexists(root),'preflight_cleanup_root')
+ return{**outcome,'all_known_directories_removed_and_original_fds_closed':True,'actual_child_reaped_and_stdout_closed':True}
+
 def configure_repository():
  builder_context();require(not WORK.exists(),'fresh_build_required');digest(Path('/etc/ssl/certs/ca-certificates.crt'),CA_PIN)
  Path('/work').mkdir(mode=0o755,exist_ok=True);os.chown('/work',10001,10001);Path('/work/home').mkdir(mode=0o700,exist_ok=True);os.chown('/work/home',10001,10001)
@@ -258,6 +353,7 @@ def configure_repository():
  command([*apt,'-y','--no-install-recommends','install','build-essential','dpkg-dev','binutils','ca-certificates','pkgconf','patch','debian-keyring','gpgv','util-linux','passwd','autoconf','automake','autopoint','dh-autoreconf','fakeroot','locales-all','acl','attr'],timeout=600)
  command(['/usr/sbin/groupadd','--gid','10001','candidate-builder'],timeout=30)
  command(['/usr/sbin/useradd','--uid','10001','--gid','10001','--home-dir','/work/home','--no-create-home','--shell','/usr/sbin/nologin','candidate-builder'],timeout=30)
+ preflight=deep_path_preflight()
  downloads=Path('/build/source-inputs');downloads.mkdir(mode=0o755)
  command([*apt,'source','--download-only','--only-source','acl=2.4.0-1','coreutils=9.7-3'],cwd=downloads,timeout=600)
  require({p.name for p in downloads.iterdir()}==set(SOURCE_FILES)-{'attr-2.6.0.tar.xz'},'source_input_inventory')
@@ -281,7 +377,7 @@ def configure_repository():
  publish(Path('/build/preparation.json'),encoded({'schema':'coreutils_acl_authenticated_preparation/1','releases':release,
   'source_inputs':{n:{'bytes':p[0],'sha256':p[1]}for n,p in SOURCE_FILES.items()},'binary_repository_family':'trixie_only',
   'forky_source_only':True,'maintainer_dsc_signatures':signatures,'maintainer_dsc_signatures_authenticated':True,
-  'attr_official_https_exact_pin_not_debian_apt':True,'security_accepted':False}))
+  'attr_official_https_exact_pin_not_debian_apt':True,'actual_deep_path_preflight':preflight,'security_accepted':False}))
 
 def package_fields(path):
  raw=metadata(['/usr/bin/dpkg-deb','-f',str(path),'Package','Version','Architecture']).decode();rows=[line.split(': ',1)for line in raw.splitlines()]

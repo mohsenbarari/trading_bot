@@ -252,3 +252,112 @@ OPEN. SOURCE QA passes35 recipe/real inert-child tests plus27 owned parser
 fixtures (including the prior20 ported to a self-contained tracked path),0
 skips. No C, autotools, GNU test, Git, CI, Docker, SSH or live command was run
 by this SOURCE preparer; historical real05 C compile is not relabelled as06.
+
+
+## Finite Source07: evidenced deep-path capability, tail cause still open
+
+Authentic CI40491755157 ran the unchanged658-case Coreutils suite:521 PASS,
+135 SKIP,1 FAIL (`tail/inotify-dir-recreate`) and1 ERROR (`rm/deep-2` setup).
+Full gnulib was not reached. That failure remains preserved; Source07 does not
+claim either full-suite pass, a package, a current image or security acceptance.
+
+Root's actual controlled comparison is retained at
+`.local/security-coreutils-filesystem-probe-actual-20261027-03/result.json`.
+It used four real disposable cached-image observations, with actual applied
+profiles AFTER START and all actual removals/CID/name absences. With both
+OverlayFS and tmpfs, default docker-default made the two unchanged upstream
+Perl setup expressions fail at40/52 levels with ENAMETOOLONG. Actual unconfined
+made all52 levels succeed on both filesystems. Public host path_max was8192.
+This proves the scoped deep-path/profile effect on that comparison host; it
+never retroactively proves the future hosted runner or a full GNU test.
+
+Only this fresh isolated hosted package-builder container now declares
+`--security-opt apparmor=unconfined`. Its8GiB memory,4 CPUs,512 PIDs,48GiB growth
+allowance,8GiB disk floor, exact capability set, no-new-privileges, original
+network cutoff, source binds,256MiB /tmp and output/identity/finalizer guards
+remain unchanged. There is no new bind/tmpfs/VM, production profile change,
+global AppArmor path_max change, privileged mode, extra capability or retry.
+Normal product image/runtime AppArmor policies are outside this exception.
+
+Docker lifecycle matters: a genuinely created/never-STARTed container reports
+empty AppArmorProfile even if HostConfig declares an option. That empty value
+is explicitly UNKNOWN/applied-not-proven. Complete created-state metadata may
+be checked only with PID0 and the zero StartedAt, retaining every other
+isolation check. Running or previously started/exited observations require
+actual `unconfined`; null/default/empty cannot establish an applied profile.
+Source tests cover the distinction and resource/mount/capability negatives.
+
+After creating numeric UID/GID10001 and BEFORE downloading/building vendor
+source, configure now runs a finite environment preflight. A genuine10001
+child reports only fixed public /proc/self/attr/current plus its actual
+real/effective IDs. Source08 reads the optional numeric path_max separately as
+Root, as detailed below; that Root0400 sysparam is not sent to the10001 reader.
+Another genuine10001 child executes the TWO UNCHANGED upstream9.7 deep-2 Perl
+setup expressions once. It must actually return0, produce no error output and
+create all52 successive200-byte components. Its original bounded output/status,
+physical pipe closure/reaping, held directory identities, exact reverse cleanup,
+final FD closes and root absence are checked. Failures remain failures and
+bounded public evidence; no ready flag, filtered case, fallback or retry grants
+pass. The result remains in normal preparation/provenance. It is an environment
+capability gate, not the rm test, complete GNU suite or a security proof.
+
+The tail FAIL remains independently OPEN. Corrected direct syscall probes saw
+IN_DELETE_SELF on all four profile/filesystem cases after matching relevant FD
+lifetimes; that does not execute or certify GNU tail's full recheck loop. In
+upstream9.7 the test waits for initial content, while tail installs parent/file
+watches later, so timing/recheck is a possible cause, not a proven diagnosis of
+this particular CI failure. Source07 changes no tail/test body, expected output,
+wait, retry, default TESTS/TEST_LOGS or genuine platform SKIP reporting. Fresh
+unfiltered dh_auto_test must still pass the complete default Coreutils AND
+gnulib suites; any FAIL/XPASS/ERROR blocks export. A surviving real tail failure
+needs a separately evidenced Source08 investigation, never a waiver.
+
+Source-only QA:41 recipe/protocol/real bounded-inert-child tests plus27 unchanged
+vendor parser/lifetime tests,68 PASS, zero skips. The author ran no C/autotools,
+Perl52 setup, unprivileged environment preflight, GNU suite, Docker, Git, CI, SSH,
+product installation or live action. Default workflow/CLI remain unarmed.
+
+Primary references:
+https://raw.githubusercontent.com/coreutils/coreutils/v9.7/tests/rm/deep-2.sh
+https://raw.githubusercontent.com/coreutils/coreutils/v9.7/tests/tail/inotify-dir-recreate.sh
+https://raw.githubusercontent.com/coreutils/coreutils/v9.7/src/tail.c
+https://raw.githubusercontent.com/torvalds/linux/v6.17/security/apparmor/path.c
+https://lists.ubuntu.com/archives/apparmor/2016-June/009779.html
+https://docs.docker.com/engine/security/apparmor/
+
+
+## Source08 supersedes07 before dispatch: respect public metadata permissions
+
+Root's pre-dispatch review found that the public AppArmor path_max sysparam is
+Root0400, not readable by10001. Source07 was NOT dispatched. Its unprivileged
+reader would have raised PermissionError before the actual capability check.
+This successor changes only that diagnostic read and its exact source pins.
+
+The UID10001 child now reads ONLY its own profile and real/effective IDs; its
+closed schema rejects extra path_max fields. A separate Root coordinator reads
+ONLY `/sys/module/apparmor/parameters/path_max` with a32-byte numeric bound,
+original nofollow FD, full9 before/after/read and post-close named check. The
+readable value, actual Root reader and source frame are separately recorded as
+`Root_public_path_max` observational metadata. A truly missing parameter is
+explicit `state=not_present,value=null`; no guessed8192 or false readability is
+substituted. Permission failures are not silently relabelled missing. There is
+no chmod, UID/stat mask, privilege change, arbitrary-path API or sysparam write.
+The actual10001 profile and unchanged52-level Perl capability remain mandatory.
+All AppArmor lifecycle guards, other isolation/resources, vendor bodies/default
+selections, truthful skip handling and full fresh GNU/gnulib gates are unchanged.
+Tail's actual CI FAIL cause remains OPEN and is neither waived nor retried.
+
+A new owned permission test creates only a fresh /tmp public0755 parent and a
+5-byte Root0400 fixture. It retains the actual original FD/frame, reads it as
+Root and launches genuine10001 children: first actual read denial, then the
+corrected profile/ID-only program with no protected-file access. It uses no
+mocked identity/stat/result. The author's managed environment rejected the
+credential transition with real EPERM before a child started. That is recorded
+as a real ERROR, not PASS or SKIP. Root must run this exact test on the actual
+host after reviewing the frozen packet before dispatch.
+
+Remaining Source QA:42 tests passed, zero skips; the one genuine permission test
+is explicitly pending Root host execution. The vendor parser and its27 tests
+are byte-identical to already-tested07 and were not needlessly repeated. The
+author ran no actual preflight/Perl52/GNU/Docker/Git/CI/SSH/live operation. Root's
+separate host-test result must not be silently folded into author evidence.

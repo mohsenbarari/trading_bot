@@ -1,10 +1,12 @@
-"""SOURCE-only QA. No C/autotools/build, Docker, Git, network or CLI fixtures."""
+"""Source/owned-Python QA, including one actual UID10001 permission case.
+No C/autotools/build, Docker, Git, network or Coreutils CLI fixtures.
+"""
 from contextlib import redirect_stdout
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType,SimpleNamespace
 from unittest.mock import patch
-import ast,io,json,os,stat,sys,tempfile,time,unittest
+import ast,io,json,os,stat,subprocess,sys,tempfile,time,unittest
 
 TREE=Path(__file__).absolute().parent.parent
 ROOT=TREE/'deploy/maintenance/coreutils_acl_build'
@@ -68,6 +70,72 @@ class SourceTests(unittest.TestCase):
  def test_capacity_requires_real_full_suite_allowance(self):
   self.assertEqual(self.host.MEMORY,8*1024**3);self.assertEqual(self.host.CPUS,4*10**9);self.assertEqual(self.host.PIDS,512)
   self.assertEqual(self.host.RESERVE,8*1024**3);self.assertEqual(self.host.DISK_GROWTH,48*1024**3)
+ def builder_metadata(self,state='running',profile='unconfined'):
+  nonce='a'*32;cid='b'*64;context=Path('/owned-public-context')
+  value={'id':cid,'name':'/security-hosted-coreutils-acl-package-build-'+nonce,'label':nonce,'image_reference':self.host.BASE,
+   'memory':self.host.MEMORY,'memory_swap':self.host.MEMORY,'nano_cpus':self.host.CPUS,'pids':self.host.PIDS,
+   'privileged':False,'init':True,'readonly_rootfs':False,'tmpfs':{'/tmp':'rw,exec,nosuid,nodev,mode=1777,size=268435456'},'network_mode':'bridge',
+   'running':state=='running','paused':False,'state':state,'pid':123 if state=='running'else 0,'apparmor':profile,
+   'started':'0001-01-01T00:00:00Z'if state=='created'else'2026-10-27T11:00:00Z',
+   'caps_add':list(self.host.CAPS),'caps_drop':['ALL'],'security':['no-new-privileges:true','apparmor=unconfined'],
+   'networks':{'bridge':{}},'mounts':[{'Type':'bind','Destination':'/public-context','Source':str(context),'RW':False}]}
+  return value,nonce,cid,context
+ def test_only_disposable_builder_has_exact_apparmor_override_and_original_bounds(self):
+  args=self.host.create_argv('a'*32,Path('/owned-context'));options=[args[i+1]for i,v in enumerate(args[:-1])if v=='--security-opt']
+  self.assertEqual(options,['no-new-privileges:true','apparmor=unconfined']);self.assertNotIn('--privileged',args);self.assertEqual(args.count('--mount'),1)
+  self.assertEqual(args[args.index('--tmpfs')+1],'/tmp:rw,exec,nosuid,nodev,mode=1777,size=268435456')
+ def test_created_empty_profile_is_unknown_not_poststart_applied_authority(self):
+  value,nonce,cid,context=self.builder_metadata('created','');self.assertTrue(self.host.validate_inspect(value,nonce,cid,context,offline=False,running=False))
+  with self.assertRaises(RuntimeError):self.host.validate_inspect(value,nonce,cid,context,offline=False,running=True)
+  value['started']='2026-10-27T11:00:00Z'
+  with self.assertRaisesRegex(RuntimeError,'apparmor_created_unknown'):self.host.validate_inspect(value,nonce,cid,context,offline=False,running=False)
+ def test_running_and_previously_started_exited_require_actual_unconfined(self):
+  for state in('running','exited'):
+   for profile in('',None,'docker-default','unconfined'):
+    value,nonce,cid,context=self.builder_metadata(state,profile)
+    if profile=='unconfined':self.assertTrue(self.host.validate_inspect(value,nonce,cid,context,offline=False,running=state=='running'))
+    else:
+     with self.assertRaisesRegex(RuntimeError,'apparmor_applied_after_start'):self.host.validate_inspect(value,nonce,cid,context,offline=False,running=state=='running')
+ def test_new_profile_does_not_widen_capability_network_mount_or_no_new_privileges(self):
+  for key,wrong in(('privileged',True),('security',['apparmor=unconfined']),('caps_add',['SYS_ADMIN']),('network_mode','host'),('mounts',[])):
+   value,nonce,cid,context=self.builder_metadata();value[key]=wrong
+   with self.subTest(key=key),self.assertRaises(RuntimeError):self.host.validate_inspect(value,nonce,cid,context,offline=False)
+ def test_public_lsm_typed_metadata_is_capability_context_only(self):
+  value={'uid':10001,'euid':10001,'gid':10001,'egid':10001,'apparmor':'unconfined'}
+  self.assertEqual(self.source.validate_public_lsm(value),value)
+  for key,wrong in(('uid',0),('euid',True),('apparmor','docker-default (enforce)'),('path_max','8192\nprivate')):
+   bad={**value,key:wrong}
+   with self.subTest(key=key),self.assertRaises(RuntimeError):self.source.validate_public_lsm(bad)
+ def test_root_public_path_max_reader_is_numeric_bounded_and_fixed_only(self):
+  self.assertNotIn('path_max',self.source.PUBLIC_LSM)
+  self.assertEqual(self.source.parse_public_path_max(b'8192\n'),8192)
+  for raw in(b'',b'8192\nprivate',b'1',b'0',b'9'*33,b'8192\n\n'):
+   with self.assertRaises(RuntimeError):self.source.parse_public_path_max(raw)
+  text=(ROOT/'sourcebuild.py').read_text();tree=ast.parse(text);node=next(v for v in tree.body if isinstance(v,ast.FunctionDef)and v.name=='root_public_path_max');body=ast.get_source_segment(text,node)
+  self.assertEqual(node.args.args,[]);self.assertIn("Path('/sys/module/apparmor/parameters/path_max')",body);self.assertIn('os.read(fd,33)',body);self.assertNotIn('chmod',body)
+ def test_genuine_root0400_file_denies_actual_uid10001_and_child_lsm_avoids_it(self):
+  # Genuine credentials, modes and child execution. No UID/stat/result masks.
+  self.assertEqual((os.getuid(),os.geteuid()),(0,0))
+  with tempfile.TemporaryDirectory(prefix='owned-public-lsm-',dir='/tmp')as directory:
+   os.chmod(directory,0o755);path=Path(directory)/'public-path-max';path.write_bytes(b'8192\n');path.chmod(0o400)
+   before=self.source.identity(path.lstat());self.assertEqual(before[2:6],(0o100400,0,0,1));fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+   try:
+    self.assertEqual(os.pread(fd,33,0),b'8192\n')
+    code='import os,json\np='+repr(str(path))+'\ntry:\n fd=os.open(p,os.O_RDONLY)\nexcept PermissionError:\n result="PERMISSION_DENIED"\nelse:\n os.close(fd);result="UNEXPECTED_READ"\nprint(json.dumps({"uid":os.getuid(),"euid":os.geteuid(),"gid":os.getgid(),"egid":os.getegid(),"result":result}))'
+    r=subprocess.run([sys.executable,'-I','-S','-B','-c',code],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,user=10001,group=10001,extra_groups=[],env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},close_fds=True,timeout=5,check=True)
+    value=json.loads(r.stdout);self.assertEqual(value,{'uid':10001,'euid':10001,'gid':10001,'egid':10001,'result':'PERMISSION_DENIED'})
+    r=subprocess.run([sys.executable,'-I','-S','-B','-c',self.source.PUBLIC_LSM],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,user=10001,group=10001,extra_groups=[],env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},close_fds=True,timeout=5,check=True)
+    value=json.loads(r.stdout);self.assertEqual({k:value[k]for k in('uid','euid','gid','egid')},{k:10001 for k in('uid','euid','gid','egid')});self.assertNotIn('path_max',value)
+    self.assertEqual(self.source.identity(os.fstat(fd)),before)
+   finally:os.close(fd)
+   self.assertEqual(self.source.identity(path.lstat()),before)
+ def test_early_capability_uses_unchanged_perl_setup_before_source_build(self):
+  self.assertEqual(self.source.DEEP_SETUP,['/usr/bin/perl','-e','my $d = "x" x 200; foreach my $i (1..52)','-e','  { mkdir ($d, 0700) && chdir $d or die "$!" }'])
+  text=(ROOT/'sourcebuild.py').read_text();tree=ast.parse(text);node=next(v for v in tree.body if isinstance(v,ast.FunctionDef)and v.name=='deep_path_preflight');body=ast.get_source_segment(text,node)
+  self.assertIn('user=10001',body);self.assertIn('maximum=2048',body);self.assertIn('actual_deep_path_setup_required',body)
+  calls=[v for v in ast.walk(node)if isinstance(v,ast.Call)and isinstance(v.func,ast.Name)and v.func.id=='run'and v.args and isinstance(v.args[0],ast.Name)and v.args[0].id=='DEEP_SETUP'];self.assertEqual(len(calls),1)
+  configure=next(v for v in tree.body if isinstance(v,ast.FunctionDef)and v.name=='configure_repository');body=ast.get_source_segment(text,configure)
+  self.assertLess(body.index('preflight=deep_path_preflight()'),body.index("downloads=Path('/build/source-inputs')"))
  def test_single_coreutils_runtime_only(self):
   self.assertEqual(set(self.source.OLD_PACKAGES),{'libacl1_2.4.0-1~trixie+gold1_amd64.deb'})
   self.assertFalse(any('libacl1-dev'in name for name in self.host.OUTPUTS))
