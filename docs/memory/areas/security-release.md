@@ -31,9 +31,10 @@
   including inactive periodic consumers and watchdogs. Pause exact timers,
   await successful natural job completion, then restart only admitted daemons.
   Failed jobs refuse without reset or waiver; retain old-inode/rollback proofs.
-- Vendor suites whose actual physical demand exceeds production disk reserve
-  move to separately admitted disposable CI with unchanged tests and measured
-  capacity. Never skip required tests to fit production storage.
+- Vendor suites exceeding production disk reserve use separately admitted
+  disposable CI, unchanged tests and measured capacity. GNU inotify suites need
+  a proven native build filesystem: OverlayFS can silently force polling.
+  Never skip required tests to fit storage.
 - Transport parcels/binaries use separate explicit bounded writers; preserve
   receipt limits. Retain exported files through all outer physical finalizers.
 - Named-context builds use a dedicated fixed recipe; preserve ordinary callers.

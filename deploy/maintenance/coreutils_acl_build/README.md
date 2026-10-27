@@ -361,3 +361,63 @@ is explicitly pending Root host execution. The vendor parser and its27 tests
 are byte-identical to already-tested07 and were not needlessly repeated. The
 author ran no actual preflight/Perl52/GNU/Docker/Git/CI/SSH/live operation. Root's
 separate host-test result must not be silently folded into author evidence.
+
+## Source09: evidenced native build workspace, unchanged full GNU gates
+
+Actual CI08 run40497508702 reached the unfiltered658 Coreutils cases:
+524PASS/133SKIP/1FAIL/0ERROR. Deep2 now passed; the remaining failure was the
+unchanged `tests/tail/inotify-dir-recreate.sh`. Full gnulib was not reached.
+That failure and the earlier failed observations remain preserved.
+
+Official v9.7 `src/stat.c`456–460 deliberately marks OverlayFS0x794c7630 remote
+so tail uses polling; generated `is_local_fs_type` returns0 and `tail.c`963 plus
+2514–2525 silently disable inotify. The test's different `df --local` precondition
+still accepts OverlayFS. Its3.1-second wait expires before the polling reopen
+cadence. A direct kernel inotify probe therefore could not diagnose this case.
+Exact gnulib41e7b7e... `tests/init.sh`424–430 creates its private test directory
+under INITIAL_CWD and mktempd_ unsets TMPDIR, so a TMPDIR tweak is insufficient.
+
+Root's actual two-cached-container comparison is retained at
+`.local/security-coreutils-tail-policy-observation-20261027-02/result.json`,
+5360/SHA2565480bf14218173d975048dca98778e1425aa7c2d32576d2affd9ffdeaaa918b2.
+Actual10001/defaultAppArmor, same9.7 tail80360/ca27a636..., hard8192-byte writer
+cap: OverlayFS polling/appeared tokens bothfalse, tmpfs bothtrue. Both actual
+container exits0, first removals and CID/name absences completed; outer exit0
+was independently observed by Root. This is a bounded semantic comparison,
+not the unchanged GNU suite or proof of the future hosted job.
+
+09 creates ONE fresh `native-build` directory inside the exact ephemeral hosted
+run root, using finite sudo/mkdir --mode=0755 as genuineRoot. mkdir refuses an
+existing path instead of install-d silently adopting it. An actual original
+directoryFD binds dev/inode/mode0755/UID0/GID0; first5 is immutable while directory
+nlink/size/times legitimately change. Exact ext-family fstatfs magic0xef53 is
+required. Initial available capacity remains48GiB growth plus8GiB floor; both
+floor and physical growth are checked throughout. No new tmpfs limit or reduced
+large/sparse test coverage is introduced. Failed fixed public Root creation
+retains bounded actual returncode/output/physical-close evidence.
+
+The builder gets exactly ONE additional RW bind, from that held host inode to
+the WHOLE `/build`. The public context remains RO; all private siblings remain
+0700. Mount source/destination/RW and complete original policy stay exact. A
+bounded child observes actual `/build` dev/inode/mode/UID/GID/magic before any
+configure/compile and after the build; it must equal the original hostFD.
+Sourcebuild already gives10001 ownership only to nested vendor directories;
+the `/build` root remainsRoot0755. Both GNU suites thus use native working
+directories without changed test bodies/defaults/selections or skip outcomes.
+
+The original directoryFD survives all build/export/stop, package/source/log
+physical finalizers and the final result writer; then original close and named
+checks must pass. The owned ephemeral directory and stopped builder remain until
+VM teardown; no recursive or production cleanup is added. Sourcebuild, vendor
+parser, C patches/fixtures, AppArmor, resources,48GiB/8GiB policy, network cutoff,
+source/output pins and all existing GNU/gnulib gates are byte-exact or unchanged.
+No early modified test is substituted for full genuine GNU+gnulib success.
+
+Author QA:52 selected owned Python protocol tests passed, zero skips. New cases
+include genuine original nativeFD, real mode/replacement/post-close mutations,
+and a real impossible-capacity refusal. Only these tiny fixtures use a declared
+smaller budget; no UID/stat/magic result is masked and no hosted capacity is
+claimed. The unchanged genuineRoot0400→actual10001 test still cannot run in the
+managed environment (real EPERM, not PASS/SKIP); Root's fresh full53 actual-host
+tests are required before dispatch. The unchanged27 parser tests were not rerun.
+No sudo/Docker/build/compiler/Git/CI/SSH or live operation was executed by author.

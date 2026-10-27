@@ -7,7 +7,7 @@ workflow-attested Ubuntu24.04 UID1001 VM; it never builds on production storage.
 from contextlib import ExitStack
 from hashlib import sha256
 from pathlib import Path
-import argparse,io,json,os,re,selectors,signal,stat,subprocess,sys,time,uuid,zipfile
+import argparse,ctypes,io,json,os,re,selectors,signal,stat,subprocess,sys,time,uuid,zipfile
 from types import ModuleType
 
 BASE='python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3'
@@ -16,6 +16,7 @@ MEMORY=8*1024**3;CPUS=4*10**9;PIDS=512
 CONFIRM='BUILD-ONLY-HOSTED-COREUTILS-DESCRIPTOR-ACL-PACKAGE-20261027-01'
 DOCKER='/usr/bin/docker';HOST='unix:///var/run/docker.sock'
 DOCKER_ROOT=Path('/var/lib/docker')
+NATIVE_FS_MAGIC=0xef53
 HOST_UID=1001;DISK_GROWTH=48*1024**3;RESERVE=8*1024**3
 TRACKED=Path('deploy/maintenance/coreutils_acl_build')
 SOURCE_ROOT=Path(__file__).absolute().parent
@@ -150,6 +151,74 @@ def parent_frame(path):
   rows.append((p,ident(s)[:5]))
  return rows
 def parents_ok(rows):require(all(p.resolve(strict=True)==p and ident(p.lstat())[:5]==old for p,old in rows),'parent_changed')
+def filesystem_magic(fd):
+ libc=ctypes.CDLL(None,use_errno=True);buf=ctypes.create_string_buffer(256)
+ libc.fstatfs.argtypes=[ctypes.c_int,ctypes.c_void_p];libc.fstatfs.restype=ctypes.c_int
+ require(libc.fstatfs(fd,buf)==0,'native_workspace_statfs')
+ return ctypes.c_ulong.from_buffer(buf).value
+def validate_native_frame(value):
+ require(type(value)is tuple and len(value)==5 and all(type(v)is int for v in value)
+  and value[0]>0 and value[1]>0 and value[2:]==(stat.S_IFDIR|0o755,0,0),'native_workspace_metadata');return value
+class NativeWorkspace:
+ """Original Root-created mutable build directory, never an existing adoption.
+
+ Directory nlink/size/times legitimately change during builds; dev/inode/mode/
+ UID/GID and native FS identity stay exact through all package/source finalizers.
+ """
+ def __init__(self,path):
+  self.path=path;self.parents=parent_frame(path);self.before=validate_native_frame(ident(path.lstat())[:5]);self.fd=None
+  require(path.is_absolute()and path.resolve(strict=True)==path and ','not in str(path)and '\n'not in str(path),'native_workspace_path')
+  self.fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+  try:
+   fs=os.fstatvfs(self.fd);self.initial_free=fs.f_bavail*fs.f_frsize
+   require(self.initial_free>=RESERVE+DISK_GROWTH,'native_workspace_capacity');self.check()
+  except BaseException:os.close(self.fd);self.fd=None;raise
+ def named(self):
+  parents_ok(self.parents);require(ident(self.path.lstat())[:5]==self.before,'native_workspace_changed')
+ def check(self):
+  self.named();require(ident(os.fstat(self.fd))[:5]==self.before and filesystem_magic(self.fd)==NATIVE_FS_MAGIC,'native_workspace_identity_or_fs')
+  fs=os.fstatvfs(self.fd);free=fs.f_bavail*fs.f_frsize
+  require(free>=RESERVE and self.initial_free-free<=DISK_GROWTH,'native_workspace_reserve')
+ def observation(self):
+  self.check();return{'path':str(self.path),'original_directory_first5':list(self.before),'filesystem_magic':hex(NATIVE_FS_MAGIC),'initial_available_bytes':self.initial_free,'growth_allowance_bytes':DISK_GROWTH,'reserve_bytes':RESERVE}
+ def close(self):
+  try:self.check()
+  finally:os.close(self.fd);self.fd=None
+  self.named()
+
+WORKSPACE_OBSERVATION=r'''import ctypes,json,os,stat
+path='/build';before=os.stat(path,follow_symlinks=False);fields=lambda s:[s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid]
+assert fields(before)[2:]==[stat.S_IFDIR|0o755,0,0]
+fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+try:
+ assert fields(os.fstat(fd))==fields(before)
+ libc=ctypes.CDLL(None,use_errno=True);buf=ctypes.create_string_buffer(256);libc.fstatfs.argtypes=[ctypes.c_int,ctypes.c_void_p];libc.fstatfs.restype=ctypes.c_int
+ assert libc.fstatfs(fd,buf)==0
+ magic=ctypes.c_ulong.from_buffer(buf).value
+ assert magic==0xef53 and fields(os.fstat(fd))==fields(os.stat(path,follow_symlinks=False))==fields(before)
+finally:os.close(fd)
+assert fields(os.stat(path,follow_symlinks=False))==fields(before)
+print(json.dumps({'first5':fields(before),'filesystem_magic':hex(magic)},sort_keys=True))
+'''
+def validate_workspace_observation(value,workspace):
+ require(type(value)is dict and set(value)=={'first5','filesystem_magic'}and type(value['first5'])is list and len(value['first5'])==5 and all(type(v)is int for v in value['first5'])and value['first5']==list(workspace.before)
+  and value['filesystem_magic']==hex(NATIVE_FS_MAGIC),'native_workspace_mount_identity');workspace.check();return value
+
+def create_native_workspace(root,command,owners=None):
+ path=root/'native-build';parents=parent_frame(path);parents_ok(parents)
+ require(not os.path.lexists(path),'native_workspace_fresh')
+ # mkdir fails EEXIST: no existing directory can be silently adopted by install-d.
+ try:raw=command(['/usr/bin/sudo','-n','/usr/bin/mkdir','--mode=0755','--',str(path)],maximum=4096,seconds=15)
+ except BaseException as error:
+  observed=getattr(error,'public_command_failure',None)
+  if owners is not None and type(observed)is dict:retain_failed_command(root,'native_workspace_creation',observed,owners)
+  raise
+ require(raw==b'','native_workspace_root_creation')
+ parents_ok(parents);workspace=NativeWorkspace(path)
+ try:
+  with os.scandir(workspace.fd)as entries:require(next(entries,None)is None,'native_workspace_initial_not_empty')
+  workspace.check();return workspace
+ except BaseException:workspace.close();raise
 class Held:
  def __init__(self,path,maximum,pin=None,*,allow_empty=False):
   self.path=path;self.parents=parent_frame(path);self.before=ident(path.lstat())
@@ -213,7 +282,7 @@ def save_known_log(path,raw,owners):
  finally:os.close(writer)
  item.check();parents_ok(parents);return item
 def retain_failed_command(evidence,name,observed,owners):
- require(name in {'pull_public_base','configure_repository','offline_build'} and type(observed)is dict,'known_failure_phase')
+ require(name in {'pull_public_base','configure_repository','offline_build','native_workspace_creation'} and type(observed)is dict,'known_failure_phase')
  captured=observed['captured_output'];require(type(captured)is bytes and len(captured)<=observed['maximum_output_bytes']<=128*1024**2,'known_failure_output_bound')
  header=encoded({'schema':'coreutils_bounded_failed_command_log/2','actual_returncode':observed['actual_returncode'],
   'observed_output_bytes':observed['observed_output_bytes'],'actual_pipe_closed':observed['actual_pipe_closed'],
@@ -270,16 +339,17 @@ def run(argv,*,env,deadline,maximum,log=None,guard=lambda:None):
    'captured_output':b''.join(parts),'stdout_eof_observed':eof,'maximum_output_bytes':maximum}
   raise failure
  return b''.join(parts)
-def create_argv(nonce,context):
+def create_argv(nonce,context,workspace):
  args=[DOCKER,'--host',HOST,'container','create','--name','security-hosted-coreutils-acl-package-build-'+nonce,
   '--label',LABEL+'='+nonce,'--memory',str(MEMORY),'--memory-swap',str(MEMORY),'--cpus','4','--pids-limit',str(PIDS),
   '--shm-size','134217728','--ulimit','core=0:0','--init','--cap-drop','ALL','--security-opt','no-new-privileges:true','--security-opt','apparmor=unconfined',
   '--network','bridge','--log-driver','none','--workdir','/build',
   '--mount','type=bind,src='+str(context)+',dst=/public-context,readonly',
+  '--mount','type=bind,src='+str(workspace)+',dst=/build',
   '--tmpfs','/tmp:rw,exec,nosuid,nodev,mode=1777,size=268435456']
  for cap in CAPS:args+=['--cap-add',cap]
  return args+['--entrypoint','/usr/local/bin/python3',BASE,'-I','-B','-u','-c',IDLE]
-def validate_inspect(value,nonce,cid,context,*,offline,running=True,paused=False):
+def validate_inspect(value,nonce,cid,context,workspace,*,offline,running=True,paused=False):
  require(type(value) is dict and value.get('id')==cid and value.get('name')=='/security-hosted-coreutils-acl-package-build-'+nonce
   and value.get('label')==nonce and value.get('image_reference')==BASE,'owned_builder')
  for key,expected in [('memory',MEMORY),('memory_swap',MEMORY),('nano_cpus',CPUS),('pids',PIDS)]:
@@ -299,15 +369,15 @@ def validate_inspect(value,nonce,cid,context,*,offline,running=True,paused=False
   require(running is False and value.get('apparmor')==''and value.get('started')in{'0001-01-01T00:00:00Z','0001-01-01T00:00:00.000000000Z'},'apparmor_created_unknown')
  else:require(value.get('apparmor')=='unconfined','apparmor_applied_after_start')
  networks=value.get('networks');require(type(networks) is dict and set(networks)==(set() if offline else {'bridge'}),'network')
- mounts=value.get('mounts');require(type(mounts) is list and len(mounts) in (1,2),'mounts')
+ mounts=value.get('mounts');require(type(mounts) is list and len(mounts) in (2,3),'mounts')
  actual={}
  for row in mounts:
   require(type(row) is dict and type(row.get('Destination')) is str,'mounts')
   if row.get('Type')=='tmpfs':
    require(row.get('Destination')=='/tmp' and row.get('RW') is True and row.get('Source','')=='','mounts');continue
-  require(row.get('Type')=='bind' and row.get('RW') is False,'mounts')
-  require(row['Destination'] not in actual,'mounts');actual[row['Destination']]=row.get('Source')
- require(actual=={'/public-context':str(context)},'mounts')
+  require(row.get('Type')=='bind' and type(row.get('RW'))is bool,'mounts')
+  require(row['Destination'] not in actual,'mounts');actual[row['Destination']]=(row.get('Source'),row['RW'])
+ require(actual=={'/public-context':(str(context),False),'/build':(str(workspace),True)},'mounts')
  return True
 def validate_manifest(value):
  require(type(value) is dict and set(value)==set(OUTPUTS),'output_inventory')
@@ -317,7 +387,7 @@ def validate_manifest(value):
   frame=row['identity'];require(type(frame) is list and len(frame)==9 and all(type(v) is int for v in frame)
    and frame[2:7]==[stat.S_IFREG|0o644,0,0,1,row['bytes']],'output_identity')
  return value
-def build_container(args,admission,outer_guard,log_owners):
+def build_container(args,admission,outer_guard,log_owners,workspace):
  context=Path(args.context);output=Path(args.output);evidence=Path(args.evidence);nonce=args.nonce
  require(context.is_absolute() and context.resolve(strict=True)==context and ',' not in str(context) and '\n' not in str(context),'context')
  context_inventory(context)
@@ -327,6 +397,7 @@ def build_container(args,admission,outer_guard,log_owners):
  end=time.monotonic()+15600;disk_initial={}
  def guard():
   outer_guard()
+  workspace.check()
   if docker_root_frame is not None:require(root.resolve(strict=True)==root and ident(root.lstat())[:5]==docker_root_frame,'docker_root_changed')
   for row in held:row.check()
   for path in (output,root):
@@ -339,7 +410,7 @@ def build_container(args,admission,outer_guard,log_owners):
   return run([DOCKER,'--host',HOST,*parts],env=env,deadline=min(end,time.monotonic()+seconds) if enforce else time.monotonic()+seconds,maximum=maximum,log=log,guard=guard if enforce else lambda:None)
  def inspect(*,offline,running=True,paused_value=False,enforce=True):
   value=json.loads(cli(['container','inspect','--format',INSPECT,cid],enforce=enforce))
-  validate_inspect(value,nonce,cid,context,offline=offline,running=running,paused=paused_value);return value
+  validate_inspect(value,nonce,cid,context,workspace.path,offline=offline,running=running,paused=paused_value);return value
  def exec_public(code):return json.loads(cli(['container','exec','--workdir','/build',cid,'/usr/local/bin/python3','-I','-S','-B','-c',code]))
  def phase_log(name,action):
   try:raw=action(None)
@@ -364,8 +435,10 @@ def build_container(args,admission,outer_guard,log_owners):
   phase='public_base_identity';digests=json.loads(cli(['image','inspect','--format','{{json .RepoDigests}}',BASE]))
   require(type(digests) is list and all(type(v) is str for v in digests)
    and any(v in {'python@'+BASE.split('@')[1],'docker.io/library/python@'+BASE.split('@')[1]} for v in digests),'base_digest')
-  phase='create';created=cli(create_argv(nonce,context)[3:]).decode('ascii').strip();require(re.fullmatch('[a-f0-9]{64}',created),'container_id');cid=created
+  phase='create';created=cli(create_argv(nonce,context,workspace.path)[3:]).decode('ascii').strip();require(re.fullmatch('[a-f0-9]{64}',created),'container_id');cid=created
   cli(['container','start',cid]);inspect(offline=False)
+  phase='native_workspace_admission';mount_identity=validate_workspace_observation(exec_public(WORKSPACE_OBSERVATION),workspace)
+  save(evidence/'native-workspace-mount.json',encoded(mount_identity))
   phase='stage_public_copies';copies=exec_public(stage_code(context,False));validate_copies(copies);save(evidence/'root-public-copies.json',encoded(copies))
   phase='configure_repository';phase_log(phase,lambda fd:cli(['container','exec','--workdir','/build',cid,'/usr/local/bin/python3','-I','-S','-B','/recipe/sourcebuild.py','--configure-build-repository'],seconds=2400,maximum=64*1024**2,log=fd))
   require(exec_public(stage_code(context,True))==copies,'public_copy_changed')
@@ -373,6 +446,7 @@ def build_container(args,admission,outer_guard,log_owners):
   require(exec_public(OFFLINE)==['lo'],'loopback_only')
   phase='offline_build';phase_log(phase,lambda fd:cli(['container','exec','--workdir','/build',cid,'/usr/local/bin/python3','-I','-S','-B','/recipe/sourcebuild.py','--build'],seconds=13200,maximum=128*1024**2,log=fd))
   inspect(offline=True);require(exec_public(OFFLINE)==['lo'],'loopback_only');require(exec_public(stage_code(context,True))==copies,'public_copy_changed');before=validate_manifest(exec_public(MANIFEST))
+  require(validate_workspace_observation(exec_public(WORKSPACE_OBSERVATION),workspace)==mount_identity,'native_workspace_mount_changed')
   phase='export';cli(['container','pause',cid]);paused=True;inspect(offline=True,paused_value=True)
   for name,row in before.items():
    target=output/name;require(not target.exists(),'export_exclusive')
@@ -516,7 +590,7 @@ def execute_hosted(args):
  # lacks the 48GiB growth allowance plus the independent8GiB floor.
  rootfs=os.statvfs('/');require(rootfs.f_bavail*rootfs.f_frsize>=RESERVE+DISK_GROWTH,'hosted_docker_disk_capacity')
  root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o700);(context/'inputs').mkdir(mode=0o700)
- evidence=root/'reports';output=root/'package-output';held=[];closed=False;result=None;PHASE='source_admission'
+ evidence=root/'reports';output=root/'package-output';held=[];closed=False;result=None;workspace=None;PHASE='source_admission'
  env={'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','HOME':str(root),
   'LC_ALL':'C.UTF-8','GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null','GIT_OPTIONAL_LOCKS':'0','GIT_TERMINAL_PROMPT':'0'}
  start=time.monotonic();end=start+16200
@@ -524,6 +598,7 @@ def execute_hosted(args):
  def guard():
   require(time.monotonic()<end,'hosted_deadline')
   for item in held:item.check()
+  if workspace is not None:workspace.check()
   for path,before in initial.items():
    fs=os.statvfs(path);free=fs.f_bavail*fs.f_frsize;require(free>=RESERVE and before-free<=DISK_GROWTH,'hosted_disk_reserve')
  def command(argv,maximum=65536,seconds=60,child_env=None):
@@ -555,13 +630,14 @@ def execute_hosted(args):
   for name,data in (('context-manifest.json',manifest),('.dockerignore',allow.encode())):
    save(context/name,data);held.append(Held(context/name,len(data),(len(data),sha256(data).hexdigest())))
   context_inventory(context);guard()
+  PHASE='native_workspace_creation';workspace=create_native_workspace(root,command,held);guard()
   source={'schema':'coreutils_acl_hosted_source_identity/1','commit':args.commit,'repository':REPOSITORY,'run_id':run_id,'run_attempt':attempt,
    'tracked_files':bindings,'prior_runtime_input':{'artifact_id':OLD_ARTIFACT_ID,'run_id':OLD_RUN_ID,'zip_bytes':OLD_ZIP_PIN[0],'zip_sha256':OLD_ZIP_PIN[1]},
    'actual_host_uid':os.getuid(),'actual_host_gid':os.getgid(),'host_facts':facts,'docker_root_contract':str(DOCKER_ROOT),
-   'disk_growth_allowance_bytes':DISK_GROWTH,'disk_reserve_bytes':RESERVE,'sdk_paths_removed':[],'security_accepted':False}
+   'disk_growth_allowance_bytes':DISK_GROWTH,'disk_reserve_bytes':RESERVE,'native_build_workspace':workspace.observation(),'sdk_paths_removed':[],'security_accepted':False}
   save(root/'source-identity.json',encoded(source));PHASE='container_build'
   params=argparse.Namespace(context=str(context),output=str(output),evidence=str(evidence),nonce=uuid.uuid4().hex,source_sha256=args.source_sha256)
-  result=build_container(params,source,guard,held)
+  result=build_container(params,source,guard,held,workspace)
   retain_exported_outputs(output,result,held)
   PHASE='mandatory_vendor_coverage';coverage=vendor_case_evidence(output,result,held)
   save(evidence/'vendor-case-evidence.json',encoded(coverage))
@@ -569,11 +645,14 @@ def execute_hosted(args):
   require(set(logs)=={'pull_public_base.log','configure_repository.log','offline_build.log'},'known_log_inventory')
   PHASE='outer_physical_finalization'
   finalize_public_inputs(held)
-  held=[];closed=True
   final={**result,'source_identity_sha256':sha256(encoded(source)).hexdigest(),'mandatory_vendor_case':coverage,
    'original_command_log_creation_bindings':logs,
    'outer_source_physical_finalizers_complete':True,'native_production_build_profile_used':False,'ordinary_image_ci_still_required':True}
-  save(root/'result.json',encoded(final));return final
+  save(root/'result.json',encoded(final))
+  workspace.close()
+  for item in held:item.named()
+  workspace.named()
+  held=[];closed=True;return final
  except BaseException:
   try:save(root/'hosted-failure.json',encoded({'schema':'coreutils_acl_hosted_package_builder/1','status':'FAILED','phase':PHASE,'security_accepted':False,'automatic_retry':False}))
   except BaseException:pass
@@ -584,6 +663,9 @@ def execute_hosted(args):
     if item.fd is not None:
      try:item.close()
      except BaseException:pass
+  if workspace is not None and workspace.fd is not None:
+   try:workspace.close()
+   except BaseException:pass
 
 
 def main(argv=None):
@@ -604,6 +686,8 @@ def failure(error):
 
 PUBLIC_CODES=frozenset(('artifact_authentication_required', 'base_digest', 'builder_pid', 'builder_state', 'capabilities', 'capability_type', 'cleanup_not_stopped', 'cleanup_owner', 'command_failed', 'command_output_bound', 'container_id', 'context', 'context_inventory', 'context_manifest', 'deadline', 'disk_reserve', 'docker_root', 'docker_root_changed', 'docker_root_metadata', 'dockerignore', 'export_exclusive', 'export_inventory', 'export_source_changed', 'fresh_hosted_root', 'host_memory', 'host_metadata', 'host_metadata_bound', 'hosted_deadline', 'hosted_disk_capacity', 'hosted_disk_reserve', 'hosted_docker_disk_capacity', 'hosted_job', 'hosted_platform', 'hosted_resources', 'hosted_run', 'hosted_source', 'hosted_source_root', 'isolation', 'log_write', 'loopback_only', 'mandatory_large_sparse_case_unproven', 'mounts', 'network', 'new_directory', 'old_artifact_member', 'old_artifact_members', 'old_artifact_pin', 'old_runtime_bound', 'old_runtime_inventory', 'old_runtime_member', 'old_runtime_pin', 'output_binding', 'output_identity', 'output_inventory', 'owned_builder', 'parent', 'parent_changed', 'prior_artifact_digest', 'prior_artifact_metadata', 'public_bound', 'public_changed', 'public_closed_changed', 'public_copy_binding', 'public_copy_changed', 'public_copy_identity', 'public_copy_inventory', 'public_copy_pin', 'public_file', 'public_pin', 'public_size', 'receipt_bound', 'receipt_write', 'resource', 'source_bytes', 'tracked_blob_binding', 'tracked_blob_metadata', 'vendor_log_deadline', 'vendor_log_line_bound'))
 
+
+PUBLIC_CODES=PUBLIC_CODES|frozenset(('native_workspace_statfs','native_workspace_metadata','native_workspace_path','native_workspace_capacity','native_workspace_changed','native_workspace_identity_or_fs','native_workspace_reserve','native_workspace_mount_identity','native_workspace_fresh','native_workspace_root_creation','native_workspace_initial_not_empty','native_workspace_mount_changed'))
 
 if __name__=='__main__':
  try:raise SystemExit(main())
