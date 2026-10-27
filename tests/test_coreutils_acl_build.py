@@ -65,6 +65,29 @@ class SourceTests(unittest.TestCase):
   text=(ROOT/'ordinary_gnulib_fd0.c').read_text();self.assertIn('qcopy_acl ("deliberately-missing-source-diagnostic", source_fd,',text);self.assertIn('source_fd == 0',text)
   self.assertNotIn('gold_acl_qcopy_fd (',text);self.assertIn('actual_gnulib_qcopy_acl_called',text)
   fragment=(ROOT/'gnulib-fd0-fixture.mk').read_text();self.assertIn('lib/libcoreutils.a',fragment);self.assertIn('$(copy_ldadd)',fragment)
+ def test_fifth_qcopy_link_patch_is_only_declared_m4_dependency_metadata(self):
+  patch=(ROOT/self.source.LINK_PATCH).read_bytes();self.assertEqual((len(patch),sha256(patch).hexdigest()),self.source.LINK_PIN)
+  text=patch.decode();self.assertEqual([line for line in text.splitlines()if line.startswith('+++ ')],['+++ b/m4/acl.m4'])
+  self.assertIn('+  AC_REQUIRE([gl_FILE_HAS_ACL])',text);self.assertIn('+  QCOPY_ACL_LIB="$QCOPY_ACL_LIB $FILE_HAS_ACL_LIB"',text)
+  for forbidden in('TESTS','LDADD','--without-selinux','--disable-acl','-Wl,'):self.assertNotIn(forbidden,text)
+  self.assertEqual(self.source.LINK_M4_BEFORE,(8723,'fc2bbf5d7927bc85a8f91913903b23b5d3195bdbc4f98bcd9698e01dc618bbe2'))
+ def acl_makefile_fixture(self,qcopy='-lattr -lselinux'):
+  return('FILE_HAS_ACL_LIB = -lselinux\nQCOPY_ACL_LIB = '+qcopy+'\nLIB_SELINUX = -lselinux\n'
+   'test_set_mode_acl_LDADD = $(LDADD) $(LIB_ACL) $(LIBUNISTRING) $(MBRTOWC_LIB) $(LIBC32CONV)\n'
+   'test_copy_acl_LDADD = $(LDADD) $(LIB_ACL) $(QCOPY_ACL_LIB) $(LIBUNISTRING) $(MBRTOWC_LIB) $(LIBC32CONV)\n'
+   'test_sameacls_LDADD = $(LDADD) $(LIB_ACL) $(MBRTOWC_LIB)\n'
+   'test_file_has_acl_LDADD = $(LDADD) $(FILE_HAS_ACL_LIB)\n').encode()
+ def test_actual_link_metadata_parser_checks_all_four_unchanged_acl_consumers(self):
+  value=self.source.parse_acl_linkage(self.acl_makefile_fixture());self.assertEqual(len(value['all_four_gnulib_acl_test_LDADD']),4)
+  self.assertTrue(value['qcopy_transitively_carries_file_has_acl_libraries']);self.assertFalse(value['test_body_or_selection_override'])
+  for raw in(self.acl_makefile_fixture('-lattr'),self.acl_makefile_fixture('$(LIB_SELINUX)'),self.acl_makefile_fixture()+b'LIB_SELINUX = -lselinux\n',b'x'*(4*1024**2+1)):
+   with self.assertRaises(RuntimeError):self.source.parse_acl_linkage(raw)
+ def test_owned_configured_makefile_and_early_vendor_gate_use_real_bytes(self):
+  with tempfile.TemporaryDirectory(dir=TREE)as raw,patch.object(self.source,'WORK',Path(raw)):
+   source=Path(raw)/'source';directory=source/'gnulib-tests';directory.mkdir(parents=True);(directory/'Makefile').write_bytes(self.acl_makefile_fixture())
+   self.assertEqual(self.source.configured_acl_linkage(source)['variables']['QCOPY_ACL_LIB'],['-lattr','-lselinux'])
+  tree=ast.parse((ROOT/'sourcebuild.py').read_bytes());fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='vendor_tests')
+  text=ast.get_source_segment((ROOT/'sourcebuild.py').read_text(),fn);self.assertLess(text.index('configured_acl_linkage'),text.index("command(['/usr/bin/dh_auto_test']"))
  def test_host_refuses_nonhosted_actual_context(self):
   with self.assertRaisesRegex(RuntimeError,'hosted_job'):self.host.hosted_layout(SimpleNamespace(),{})
  def test_capacity_requires_real_full_suite_allowance(self):
@@ -345,7 +368,7 @@ class SourceTests(unittest.TestCase):
   manifest=json.loads((ROOT/'source-manifest.json').read_text());self.assertEqual(manifest['files']['configure.ac']['after']['bytes'],33382);self.assertEqual(manifest['files']['configure.ac']['after_probe_header']['bytes'],33402)
   self.assertIn(self.source.PROBE_PATCH,self.source.RECIPE_FILES)
  def test_probe_header_contract_does_not_bypass_actual_compile_or_feature_gates(self):
-  text=(ROOT/'sourcebuild.py').read_text();self.assertIn('(PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH)',text);self.assertIn("pins.get('after_probe_header'",text)
+  text=(ROOT/'sourcebuild.py').read_text();self.assertTrue('(PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH)'in text,'all five declared patches remain required');self.assertIn("pins.get('after_probe_header'",text)
   self.assertIn("#define GOLD_DESCRIPTOR_ACL 1",text);self.assertIn("real_autotools_regeneration",text);self.assertNotIn('m4_pattern_allow',text);self.assertNotIn('ac_cv_',text)
  def test_actual_parser_refusal_retains_complete_public_selection_before_failure(self):
   raw=b'GOLD_VENDOR_SELECTION_V2\nsuite_log=test-suite.log\ncollect_skipped_logs=no\ntest=../owned-outside\nlog=../owned-outside.log\n'

@@ -421,3 +421,63 @@ claimed. The unchanged genuineRoot0400→actual10001 test still cannot run in th
 managed environment (real EPERM, not PASS/SKIP); Root's fresh full53 actual-host
 tests are required before dispatch. The unchanged27 parser tests were not rerun.
 No sudo/Docker/build/compiler/Git/CI/SSH or live operation was executed by author.
+
+## Source10: declared qcopy ACL transitive link dependency
+
+Actual CI09 run40504182125 proved Source09's native workspace: all658 ordinary
+Coreutils cases completed525PASS/133SKIP/0FAIL/0ERROR, including the unchanged
+tail/inotify-dir-recreate case. The newly reached unfiltered gnulib build then
+failed to link test-copy-acl. The authenticated log's actual command linked
+libcoreutils.a and `-lacl -lattr`, with no `-lselinux`; undefined symbols came
+from file-has-acl/getfilecon (freecon and getfilecon variants). This remains a
+failed full build, not a GNU+gnulib success or security acceptance.
+
+The exact official9.7 source and Debian9.7-3 source patch establish the cause:
+Debian's gnulib-nfs-acl.patch adds qcopy_acl's EOPNOTSUPP fallback through
+fdfile_has_aclinfo/aclinfo_free. Those functions carry configured SELinux/SMACK/
+ACL library dependencies in FILE_HAS_ACL_LIB, but gl_QCOPY_ACL still substituted
+only LIB_XATTR (or LIB_ACL) into QCOPY_ACL_LIB. The missing transitive dependency
+is broader than a single failing executable.
+
+All four exact gnulib ACL test link definitions were audited:
+
+| Target | Existing dependencies after common LDADD | Dependency use |
+| --- | --- | --- |
+| test-set-mode-acl | LIB_ACL plus conversion/intl flags | qset/set ACL; already actually linked |
+| test-copy-acl | LIB_ACL + QCOPY_ACL_LIB plus conversion/intl flags | Debian qcopy fallback now pulls file-has-acl |
+| test-sameacls | LIB_ACL plus intl/conversion flags | Direct ACL APIs; no file-has-acl call |
+| test-file-has-acl | FILE_HAS_ACL_LIB | Already declares its correct dependency |
+
+New separate538-byte patch0005 modifies ONLY m4/acl.m4. gl_QCOPY_ACL now
+AC_REQUIREs gl_FILE_HAS_ACL and appends the CONFIGURED FILE_HAS_ACL_LIB to
+QCOPY_ACL_LIB. No hardcoded-lselinux workaround is put into a test or product
+LDADD. Every existing qcopy consumer automatically inherits its real dependency.
+All four prior patches, every C/test body, gnulib.mk/Makefile.am, default test
+selection, parser, genuine skip handling, resource/network/AppArmor/native-FS
+policy and SDK/runtime promotion boundary remain unchanged.
+
+The exact official m4/acl.m4 original8723/fc2bbf5d... is required before patching,
+and declared8955/5ad6011f... afterward. Existing original infrastructure pins
+and full post-patch m4/po equality across autoreconf/build remain mandatory;
+only this explicitly declared m4 metadata delta is added to source provenance.
+Actual configured gnulib Makefile variables and ALL FOUR LDADD definitions are
+checked/recorded before unfiltered dh_auto_test and in generated-build-proof.
+The configured QCOPY library set must really carry FILE_HAS_ACL_LIB, which must
+contain the detected Trixie SELinux library. An unexpanded or missing dependency
+refuses early; this precheck never replaces GNU/gnulib tests or evaluates Make.
+
+Primary inputs were bounded official public sources, with no compilation:
+coreutils9.7 orig6158960/e8bb26ad... and Debian9.7-3 patch archive26820/483f7787...
+are exactly the existing source recipe pins. Original gnulib.mk120565/10acc320...
+and Makefile.in753410/a353ef52... carry the four unchanged link stanzas;
+Debian gnulib-nfs-acl.patch18341/5b8d055c... adds the fallback. Gnulib's exact
+41e7b7e... m4/acl.m4 specifies FILE_HAS_ACL_LIB += LIB_SELINUX. The source-only
+cohort PRIMARY_FINDINGS.md has full pins and paths for independent review.
+
+Author55 selected owned Python cases passed; the unchanged genuineRoot0400→
+actual10001 credential case remains separately Root-only (full56 host tests
+required). New tests reject the observed old missing dependency/unexpanded
+flags/duplicate assignments and inspect real owned configured Makefile bytes.
+The unchanged27 vendor-parser tests were not repeated. No compiler/autoreconf/
+sudo/Docker/Git/CI/SSH/live operation was executed by author. Root must review,
+run the genuine host tests and dispatch a NEW full build; no old retry/resume.

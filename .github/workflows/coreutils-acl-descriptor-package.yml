@@ -39,7 +39,7 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_acl_build/build_hosted.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/coreutils-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 2f7ece4c388571e94d587552693dc701f32791d6d9f681e8aa0cb7d6f9625bc7 \
+            --source-sha256 9a194e08a4819ef751662ade70d7ef96dd274cc323c29402e2aa111a61d734a7 \
             --execute-hosted-build \
             --confirm BUILD-ONLY-HOSTED-COREUTILS-DESCRIPTOR-ACL-PACKAGE-20261027-01
 
