@@ -200,6 +200,15 @@ def public_input_names(repo,source):
         and tar['package'].get('path')=='tar_1.35+dfsg-5~trixie+gold2_amd64.deb','input_inventory')
     names|={'pip_packages/.tar-acl-capsule.lock','pip_packages/tar-acl-capsule/manifest.json',
         'pip_packages/tar-acl-capsule/'+tar['package']['path']}
+    core_expected=next(row for row in source['files']if row['path']=='scripts/coreutils_acl_package.lock.json')
+    core_raw,core_metadata=read_file(repo/core_expected['path'],1024**2)
+    need(core_metadata==core_expected['identity']and sha256(core_raw).hexdigest()==core_expected['sha256'],'source_changed')
+    core=document(core_raw)
+    need(type(core)is dict and core.get('schema')=='coreutils_acl_image_package_lock/1'and core.get('armed')is True
+        and core.get('package',{}).get('name')=='coreutils'and core['package'].get('version')=='9.7-3+gold1'
+        and core['package'].get('path')=='coreutils_9.7-3+gold1_amd64.deb','input_inventory')
+    names|={'pip_packages/.coreutils-acl-capsule.lock','pip_packages/coreutils-acl-capsule/manifest.json',
+        'pip_packages/coreutils-acl-capsule/'+core['package']['path']}
     return names
 
 def input_files(repo,allowed=None):
@@ -285,6 +294,8 @@ def prepare(root,repo):
         SUBPHASE='tar_cache_prepare'
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_tar_acl_os_cache.py'),
             '--cache-dir',str(repo/'pip_packages/tar-acl-capsule')],seconds=600,environment=child_env)
+        command([sys.executable,'-I','-B',str(repo/'scripts/prepare_coreutils_acl_os_cache.py'),
+            '--cache-dir',str(repo/'pip_packages/coreutils-acl-capsule')],seconds=600,environment=child_env)
         unchanged(root,repo,value,held)
     write_new(root/'prepare.json',{'schema':'canonical_app_prepare/1','status':'prepared','security_accepted':False})
     emit('root',str(root));return {'status':'prepared','security_accepted':False}
@@ -342,6 +353,8 @@ def build(root):
         SUBPHASE='tar_cache_check'
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_tar_acl_os_cache.py'),
             '--check','--cache-dir',str(repo/'pip_packages/tar-acl-capsule')],environment=env(root),seconds=120)
+        command([sys.executable,'-I','-B',str(repo/'scripts/prepare_coreutils_acl_os_cache.py'),
+            '--check','--cache-dir',str(repo/'pip_packages/coreutils-acl-capsule')],environment=env(root),seconds=120)
         allowed=public_input_names(repo,value);rows=input_files(repo,allowed);known={r['path'] for r in value['files']}
         need(all(r['path'] in known or r['path'].split('/')[0] in GENERATED for r in rows)
             and any(r['path']=='mini_app_dist/index.html' for r in rows),'input_inventory')
@@ -361,7 +374,7 @@ def build(root):
             and encode(inspect(root,image,value,signature)['Config'])==encode(first['Config']),'input_changed')
         record={'schema':'canonical_app_image_build/1','image_id':image,'source_commit':value['source_commit'],
             'source_tree':value['source_tree'],'input_signature':signature,'run_id':value['run_id'],'run_attempt':value['run_attempt'],
-            'platform':'linux/amd64','rootfs':first['RootFS'],'dockerfile_checks':['trust','psycopg2','sqlite_libmagic','pip_removed'],
+            'platform':'linux/amd64','rootfs':first['RootFS'],'dockerfile_checks':['trust','coreutils_acl','python_micro_release','psycopg2','sqlite_libmagic','pip_removed'],
             'activation_performed':False,'market_roles_built':False,'security_accepted':False}
         write_new(root/'image-build.json',record)
     emit('image_id',image);return {'status':'built_not_accepted','image_id':image,'security_accepted':False}

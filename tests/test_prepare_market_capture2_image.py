@@ -8,12 +8,14 @@ from unittest.mock import patch
 import io,json,os,stat,subprocess,sys,tempfile,unittest
 HERE=Path(__file__).resolve().parent
 M=ModuleType('_owned_normal_market');M.__file__=str(HERE.parent/'scripts/prepare_market_capture2_image.py');exec(compile(Path(M.__file__).read_bytes(),M.__file__,'exec'),M.__dict__)
+F=ModuleType('_owned_policy_fixtures');F.__file__=str(HERE/'market_security_source_fixtures.py');exec(compile(Path(F.__file__).read_bytes(),F.__file__,'exec'),F.__dict__)
 class DriverTests(unittest.TestCase):
- def test_default_and_execute_remain_unarmed_without_actual_actions(self):
+ def test_explicit_negative_policy_and_actual_armed_arguments_without_actions(self):
   with patch.object(M,'normal_build',side_effect=AssertionError('operations denied')),redirect_stdout(io.StringIO())as out:self.assertEqual(M.main([]),0)
   self.assertEqual(json.loads(out.getvalue())['status'],'UNARMED')
   with patch.object(M,'EXECUTION_ARMED',False),self.assertRaisesRegex(RuntimeError,'normal_main_integration_unarmed'):M.main(['--execute'])
-  with patch.object(M,'normal_build',side_effect=AssertionError('operations denied')),self.assertRaisesRegex(RuntimeError,'arguments'):M.main(['--execute'])
+  self.assertIs(M.EXECUTION_ARMED,True)
+  with self.assertRaisesRegex(RuntimeError,'^arguments$'):M.main(['--execute'])
  def contract(self):
   root=Path('/OWNED-PUBLIC-NOT-OPENED')
   args={'SOURCE_SHA':'a'*40,'SOURCE_TREE':'b'*40,'IMAGE_INPUT_SIGNATURE':'c'*64,'IMAGE_VERSION':'production-private-primary',
@@ -63,13 +65,13 @@ class DriverTests(unittest.TestCase):
    selected=M.identity(os.fstat(fd))==old;close(fd)
    if selected:p.chmod(0o400)
   with patch.object(M.os,'close',side_effect=physical),self.assertRaisesRegex(RuntimeError,'source_changed'):held.close()
- def test_two_actual_public_locks_get_exact_typed_twenty_cache_files(self):
+ def test_owned_four_lockset_refuses_explicit_unarmed_coreutils_cache(self):
   root=self.owned();(root/'scripts').mkdir();repo=HERE.parent;rows=[]
-  for name in (M.APT_LOCK,M.SQLITE_LOCK,M.TAR_LOCK):
-   raw=(repo/name).read_bytes();(root/name).write_bytes(raw);(root/name).chmod(0o644);rows.append({'path':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
-  expected,new=M.cache_inputs(root,{'release_files':rows});self.assertEqual(len(expected),23)
-  self.assertEqual(sum(name.endswith('.deb')for name in expected),17);self.assertEqual(expected['pip_packages/.security-os-capsule.lock']['bytes'],0)
-  self.assertEqual(new['package']['name'],'libsqlite3-0')
+  for name in (M.APT_LOCK,M.SQLITE_LOCK,M.TAR_LOCK,M.COREUTILS_LOCK):
+   raw=(repo/name).read_bytes()
+   if name==M.COREUTILS_LOCK:raw=F.encoded(F.unarmed_lock(raw))
+   (root/name).write_bytes(raw);(root/name).chmod(0o644);rows.append({'path':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
+  with self.assertRaisesRegex(RuntimeError,'coreutils_lock'):M.cache_inputs(root,{'release_files':rows})
  def test_same_sqlite_bytes_refresh_provenance_does_not_change_stable_cache_manifest(self):
   repo=HERE.parent;old=json.loads((repo/M.SQLITE_LOCK).read_bytes());changed=deepcopy(old);changed['artifact']['id']+=100
   def manifest(lock):return M.encoded({'schema':'sqlite_wal_image_package_cache/1','package':lock['package'],'binding':lock['outputs'][lock['package']['path']],

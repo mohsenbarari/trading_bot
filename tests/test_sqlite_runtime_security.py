@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('_sqlite_security_fixture', ROOT / 'scripts/verify_sqlite_runtime.py')
 G = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(G)
-BASE = 'python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3'
+BASE = 'python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac'
 
 
 class SQLiteRuntimeSecurityTests(unittest.TestCase):

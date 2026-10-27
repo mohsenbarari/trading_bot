@@ -4999,7 +4999,7 @@ prepare_pip_packages() {
             -v "$output_dir:/tmp/pip_packages:ro" \
             -v "$bootstrap_requirements:/tmp/pip-bootstrap-requirements.txt:ro" \
             -v "$output_dir/.requirements-without-psycopg2.txt:/tmp/requirements.txt:ro" \
-            "python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
+            "python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
             log "Existing wheel cache failed validation; rebuilding it."
             needs_refresh=1
         fi
@@ -5054,7 +5054,7 @@ build_image_bundle_signature() {
         printf 'signature_scope=%s\n' "iran-immutable-runtime-image-v3"
         printf 'iran_image_platform=%s\n' "$IRAN_IMAGE_PLATFORM"
         printf 'iran_host_arch=%s\n' "$IRAN_HOST_ARCH"
-        printf 'python_base_image=%s\n' "python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3"
+        printf 'python_base_image=%s\n' "python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac"
         printf 'postgres_image=%s\n' "postgres:15-alpine"
         printf 'redis_image=%s\n' "redis:7-alpine"
         # Production containers execute only the receipt-bound image payload.
@@ -5110,6 +5110,8 @@ market_pipeline_image_input_signature() {
             scripts/sqlite_wal_package.lock.json \
             scripts/prepare_tar_acl_os_cache.py \
             scripts/tar_acl_package.lock.json \
+            scripts/prepare_coreutils_acl_os_cache.py \
+            scripts/coreutils_acl_package.lock.json \
             scripts/remove_runtime_pip.py \
             scripts/verify_image_trust.py
     } | sha256sum | awk '{print $1}'
@@ -5179,6 +5181,8 @@ build_market_pipeline_release_image() {
         --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/sqlite-wal-capsule"
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
         --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/tar-acl-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/coreutils-acl-capsule"
     local image_reference="market_pipeline_release:$RELEASE_SHA"
     local input_signature source_date_epoch existing_identity image_id
     input_signature="$(market_pipeline_image_input_signature)"
@@ -5277,6 +5281,8 @@ prepare_market_pipeline_control_payload() {
         scripts/sqlite_wal_package.lock.json \
         scripts/prepare_tar_acl_os_cache.py \
         scripts/tar_acl_package.lock.json \
+        scripts/prepare_coreutils_acl_os_cache.py \
+        scripts/coreutils_acl_package.lock.json \
         scripts/remove_runtime_pip.py \
         scripts/verify_image_trust.py \
         scripts/prepare_market_pipeline_release.py \
@@ -6880,6 +6886,8 @@ build_release() {
         --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/sqlite-wal-capsule"
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
         --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/tar-acl-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/coreutils-acl-capsule"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
     local iran_context_dir="$RELEASE_TMP_DIR/iran-build-context"
@@ -6892,6 +6900,8 @@ build_release() {
         --cache-dir "$iran_pip_dir/sqlite-wal-capsule"
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
         --cache-dir "$iran_pip_dir/tar-acl-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --cache-dir "$iran_pip_dir/coreutils-acl-capsule"
     rm -rf "$iran_context_dir"
     mkdir -p "$iran_context_dir"
     rsync -a --delete \
@@ -7005,6 +7015,9 @@ verify_prepared_wheel_cache() {
     python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
         --check --cache-dir "$output_dir/tar-acl-capsule" \
         || die "Prepared Tar ACL caller cache failed admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --check --cache-dir "$output_dir/coreutils-acl-capsule" \
+        || die "Prepared Coreutils ACL caller cache failed admission for architecture $target_arch."
     find "$output_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -print -quit | grep -q . \
         || die "Prepared wheel cache is empty for architecture $target_arch."
 }

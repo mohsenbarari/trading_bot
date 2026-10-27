@@ -13,10 +13,10 @@ import json,os,re,selectors,subprocess,time
 PROFILES=('base-nonroot','base-root','added-replay')
 OWNER='io.gold-trade.normal-business81-owner'
 PROFILE='io.gold-trade.normal-business81-profile'
-NORMAL_PIN=(83244, '03ff9f9ea1517f994356b3babaa4725da764773d1c9c2cce221ba41f91fee67e')
-APPROVAL_PIN={'bytes':1021,'sha256':'4ab6ef5e065d4ed81a82675e3e5d40586f7479940d30686c1acbb978a65c6c83'}
-PROPOSAL_PIN={'bytes':771,'sha256':'b3ef050fb81205924bf01c08959a603322ef5587320db4db00b6b539313f21df'}
-PATCH_PIN={'bytes':333,'sha256':'2b6a4449a619069d203848c61478b91c48a2b29b855c7026e4844051ea78e38c'}
+NORMAL_PIN=(100199, '84d6dc567701b7b48cd5a294360a870d28e3f3a8df70caee8ee7a3d6223f3144')
+APPROVAL_PIN={'bytes': 1031, 'sha256': '3bbc244f4e044975a8f3e9761e8690a4f48f8051454134e66ef26332c3d2627f'}
+PROPOSAL_PIN={'bytes': 771, 'sha256': '18b59cbdf722a15de894f50fca1170072c0b6ac278582575cadb68b6e3446415'}
+PATCH_PIN={'bytes': 333, 'sha256': '88d5b46f2726fb570bb6727fe7955f9b5c399f370bf61fc81601c26c40f8da8c'}
 MAX_STDOUT=32768;MAX_STDERR=4*1024**2
 
 
@@ -174,9 +174,14 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
  """
  M.hosted(root,repo)
  need(type(source_paths)is dict and set(source_paths)=={'outer','business','normal'}and isinstance(root,Path),'business81_source')
- need(receipt.get('schema')=='normal_market_git_component_inputs/1'and receipt.get('business_commit')==B.BUSINESS_COMMIT
+ candidate=None
+ if receipt.get('schema')=='normal_market_git_component_inputs/2':
+  B.receipt_role(receipt);candidate=B.role_candidate(contents['role-business-components.json'],receipt['role'])
+ else:
+  need(receipt.get('schema')=='normal_market_git_component_inputs/1'and receipt.get('business_commit')==B.BUSINESS_COMMIT
   and receipt.get('business_tree')==B.BUSINESS_TREE and receipt.get('accepted_manifest_sha256')==B.BUSINESS_SHA
-  and sha256(M.encoded(receipt)).hexdigest()==signature,'business81_two_git')
+   and sha256(M.encoded(receipt)).hexdigest()==signature,'business81_two_git')
+ need(sha256(M.encoded(receipt)).hexdigest()==signature,'business81_two_git')
  need(manifest['image_id']==image and manifest['release_commit']==receipt['release_commit']and manifest['two_git_input_signature']==signature
   and set(plans)==set(PROFILES)and contents['suite-manifest.json']==B.encode(manifest),'business81_bundle')
  # This caller cannot supply an unsealed alternate primitive module.
@@ -204,13 +209,15 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
   for name,pin in(('approval',APPROVAL_PIN),('proposal',PROPOSAL_PIN),('patch',PATCH_PIN)):
    row=M.Held(approval_paths[name],maximum=pin['bytes'],binding=pin);rows.append(row);approval_sources[name]=row.raw(pin['bytes'])
   approval=assertion_approval(B,approval_sources['approval'],approval_sources['proposal'],approval_sources['patch'],manifest)
-  need(len(contents)==40 and set(contents)=={r['path']for r in manifest['files']}|set(B.HELPERS)|{'suite-manifest.json'},'business81_bundle')
+  extra={'role-business-components.json'}if candidate is not None else set()
+  need(len(contents)==40+len(extra)and set(contents)=={r['path']for r in manifest['files']}|set(B.HELPERS)|{'suite-manifest.json'}|extra,'business81_bundle')
+  if candidate is not None:need(manifest.get('candidate_product')==candidate and manifest.get('fixture_business_provenance')==B.fixture_business_provenance(),'business81_bundle')
   for name,(size,digest)in B.HELPERS.items():
    need(type(contents[name])is bytes and(len(contents[name]),sha256(contents[name]).hexdigest())==(size,digest),'business81_helper_pin')
   for spec in manifest['files']:
    need((len(contents[spec['path']]),sha256(contents[spec['path']]).hexdigest())==(spec['bytes'],spec['sha256']),'business81_fixture_pin')
   selection=M.document(contents['f79-business-test-selection.json'])
-  need(B.encode(plans)==B.encode(B.profiles(selection,image=image,release_commit=receipt['release_commit'],two_git_signature=signature)),'business81_plans')
+  need(B.encode(plans)==B.encode(B.profiles(selection,image=image,release_commit=receipt['release_commit'],two_git_signature=signature,candidate_product=candidate)),'business81_plans')
   for name,raw in sorted(contents.items()):
    need(B.relative(name)and type(raw)is bytes and 0<len(raw)<=4*1024**2,'business81_bundle')
    path=evidence/name;parent=evidence

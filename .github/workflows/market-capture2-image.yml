@@ -3,6 +3,25 @@
 name: Normal Capture2 two Git sources image evidence
 on:
   workflow_dispatch:
+    inputs:
+      role:
+        description: Exact published business role; default retains Capture2 F79
+        type: choice
+        required: true
+        default: capture2-f79
+        options:
+          - capture2-f79
+          - native/coin-estimator
+          - native/estimator-snapshot-sender
+          - native/market-fact-receiver
+          - native/market-store-adapter
+          - web/estimator-snapshot-receiver
+          - web/market-capture-account1
+          - web/market-capture-external
+          - web/market-fact-sync-worker
+          - web/market-processor
+env:
+  NORMAL_MARKET_ROLE: ${{ inputs.role || 'capture2-f79' }}
 permissions:
   contents: read
   actions: read
@@ -32,6 +51,7 @@ jobs:
           import os,pathlib,re,resource,stat,subprocess,sys,tempfile
           assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
           assert os.environ['GITHUB_REF']=='refs/heads/main' and os.environ['GITHUB_REPOSITORY']=='mohsenbarari/trading_bot'
+          assert os.environ.get('NORMAL_MARKET_ROLE','capture2-f79') in ('capture2-f79', 'native/coin-estimator', 'native/estimator-snapshot-sender', 'native/market-fact-receiver', 'native/market-store-adapter', 'web/estimator-snapshot-receiver', 'web/market-capture-account1', 'web/market-capture-external', 'web/market-fact-sync-worker', 'web/market-processor')
           os.umask(0o077)
           repo=pathlib.Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
           commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
@@ -67,8 +87,9 @@ jobs:
               view=memoryview(raw)
               while view:n=os.write(fd,view);assert n>0;view=view[n:]
               os.fsync(fd);before=identity(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1
-              with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('root='+str(root)+'\nhelper_sha256='+sha256(raw).hexdigest()+'\n')
+              with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('root='+str(root)+'\nhelper_sha256='+sha256(raw).hexdigest()+'\nrole_slug='+os.environ.get('NORMAL_MARKET_ROLE','capture2-f79').replace('/','-')+'\n')
               sys.argv=[str(path),'--execute','--phase','build','--root',str(root),'--repo',str(repo)]
+              if os.environ.get('NORMAL_MARKET_ROLE','capture2-f79')!='capture2-f79':sys.argv+=['--role',os.environ['NORMAL_MARKET_ROLE']]
               import json
               namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
               exec(compile(raw,str(path),'exec'),namespace)
@@ -151,6 +172,7 @@ jobs:
               before=frame(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1 and 0<before[6]<=131072
               raw=os.pread(fd,before[6]+1,0);assert len(raw)==before[6] and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
               sys.argv=[str(path),'--execute','--phase','finalize','--root',str(root),'--repo',os.environ['GITHUB_WORKSPACE']]
+              if os.environ.get('NORMAL_MARKET_ROLE','capture2-f79')!='capture2-f79':sys.argv+=['--role',os.environ['NORMAL_MARKET_ROLE']]
               import json
               namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
               exec(compile(raw,str(path),'exec'),namespace)
@@ -180,7 +202,7 @@ jobs:
         if: always() && steps.finalize.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Root supplied official immutable metadata
         with:
-          name: normal-market-capture2-image-${{ github.run_id }}-${{ github.run_attempt }}
+          name: normal-market-${{ steps.build.outputs.role_slug }}-image-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: error
           path: |
@@ -191,7 +213,7 @@ jobs:
         if: always() && steps.finalize.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: normal-market-capture2-controller-${{ github.run_id }}-${{ github.run_attempt }}
+          name: normal-market-${{ steps.build.outputs.role_slug }}-controller-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 10
           if-no-files-found: error
           path: |
@@ -202,7 +224,7 @@ jobs:
         if: always() && steps.build.outputs.root != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: normal-market-capture2-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: normal-market-${{ steps.build.outputs.role_slug }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 10
           if-no-files-found: warn
           path: |
@@ -233,6 +255,7 @@ jobs:
               before=frame(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1 and 0<before[6]<=131072
               raw=os.pread(fd,before[6]+1,0);assert len(raw)==before[6] and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
               sys.argv=[str(path),'--execute','--phase','raw-gate','--root',str(root),'--repo',os.environ['GITHUB_WORKSPACE']]
+              if os.environ.get('NORMAL_MARKET_ROLE','capture2-f79')!='capture2-f79':sys.argv+=['--role',os.environ['NORMAL_MARKET_ROLE']]
               import json
               namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
               exec(compile(raw,str(path),'exec'),namespace)
@@ -277,6 +300,7 @@ jobs:
               before=frame(os.fstat(fd));assert before[2]==0o100600 and before[3]==1001 and before[5]==1 and 0<before[6]<=131072
               raw=os.pread(fd,before[6]+1,0);assert len(raw)==before[6] and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
               sys.argv=[str(path),'--execute','--phase','complete-gate','--root',str(root),'--repo',os.environ['GITHUB_WORKSPACE']]
+              if os.environ.get('NORMAL_MARKET_ROLE','capture2-f79')!='capture2-f79':sys.argv+=['--role',os.environ['NORMAL_MARKET_ROLE']]
               import json
               namespace={'__name__':'_sealed_normal_market_driver','__file__':str(path)}
               exec(compile(raw,str(path),'exec'),namespace)
@@ -301,3 +325,12 @@ jobs:
                   finally:os.close(fd);driver_open[0]=False
               if before is not None:assert before==frame(path.lstat())
           PY
+
+      - name: Preserve factual completion evidence without acceptance
+        if: always() && steps.finalize.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: normal-market-${{ steps.build.outputs.role_slug }}-factual-completion-unaccepted-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 10
+          if-no-files-found: error
+          path: ${{ steps.build.outputs.root }}/ci-evidence.json

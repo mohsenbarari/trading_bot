@@ -19,6 +19,63 @@ import tarfile
 import tempfile
 import time
 
+
+# Closed published source expectations, never runtime-identity substitutes.
+from hashlib import sha256 as _role_sha256
+ROLE_CATALOG_PATH = 'deploy/market-data/role-business-components.json'
+ROLE_CATALOG_SHA = '33c092cafd2cd301bd1f7b92a73aeca7c685ea189ddc44e8f98bd8d7c09c2831'
+ROLE_MAP = {'native/coin-estimator': {'business_commit': 'f4871edbe507546a0a6544c56bc7d6b34bf770a6', 'business_tree': '9b049e5031a33f416b6c6a2a45d89c3ba334fc3e', 'bytes': 1928470, 'component': 'market-role-sources-20261027-fc622107fadf1de9-v1', 'count': 94, 'manifest_sha256': '6ddbb7459a9b69c20accb2e277c8e25c701b95958b8219cfd38a08e998f1b1ca', 'rows_sha256': 'fc622107fadf1de9adec789425c1d3816271829e1310b75347a524c5c104bbcd'}, 'native/estimator-snapshot-sender': {'business_commit': '6c7bfb3fe3714f1b9ecb375e68bbb0b1263ef328', 'business_tree': 'bc90e1224cda5bd2c58be81ea2aa12d1c6fbcadd', 'bytes': 1848102, 'component': 'market-role-sources-20261027-971dc9e57b1a4220-v1', 'count': 93, 'manifest_sha256': '3ce2f0f0b6ed975c2665f68ca0dc53198b9c00c9673fde3979c094c4ae05ec5c', 'rows_sha256': '971dc9e57b1a4220b3604af0ed101377a62ae7b9f6510340b0cc9c6b9a3cb33f'}, 'native/market-fact-receiver': {'business_commit': 'c9f8ada468c94af99a30ede8cdcbd9a220e9b917', 'business_tree': '08d9d82693f8a42a49da89067c4def1862ce1e83', 'bytes': 1934716, 'component': 'market-role-sources-20261027-83c61098e5581bcb-v1', 'count': 95, 'manifest_sha256': '384995da7738128ca902737e7324cd8fc1abff5a581047e41533b06c14683f16', 'rows_sha256': '83c61098e5581bcb9795859444df9730888c46cac911046f293a8056ef3bc3c1'}, 'native/market-store-adapter': {'business_commit': '6cad2c7e4a4b4622ec3610ddb91cce32cd04f2c0', 'business_tree': 'c3a25a925927802f413dc1eda59ca87b3af3e6b7', 'bytes': 1937533, 'component': 'market-role-sources-20261027-0c440e791bde7779-v1', 'count': 95, 'manifest_sha256': '88a982cf6c6da9f736fa11708be694a444ee7d6b3ffcfaea81b43e1c6c52f133', 'rows_sha256': '0c440e791bde77790179ef65b30b9f5abda5434287c09bf87648b61f19011157'}, 'web/estimator-snapshot-receiver': {'business_commit': '89b64c47c952c6f6a6ba75df2b2f40d0208de196', 'business_tree': '9ba0c52b9a9d3a1cbdb01d0417eaa9891b2585e2', 'bytes': 1934784, 'component': 'market-role-sources-20261027-45ccb288a62edc6a-v1', 'count': 95, 'manifest_sha256': 'bacda97ab7e51af550207a9930977be8e12d37d28ed5354d60cc3c078decedc9', 'rows_sha256': '45ccb288a62edc6a5f08042ca33060ce81ca45e34a2a2bf4e18b55f2de73a884'}, 'web/market-capture-account1': {'business_commit': '4ee3fd21003ebb3038a2e4b572ca2eb01cb45d2f', 'business_tree': 'c63f575f2a67287076a2188a72494ee236b2109c', 'bytes': 1896295, 'component': 'market-role-sources-20261027-12cac77ad8481fa6-v1', 'count': 93, 'manifest_sha256': '1693511310372cb9e8906141bfcb0818d19cd32ed4ca5066acf61d8719013394', 'rows_sha256': '12cac77ad8481fa6d11f7885c97ab4e8593290ed70cf388a7b15e86c4139dbad'}, 'web/market-capture-external': {'business_commit': '6c7bfb3fe3714f1b9ecb375e68bbb0b1263ef328', 'business_tree': 'bc90e1224cda5bd2c58be81ea2aa12d1c6fbcadd', 'bytes': 1848102, 'component': 'market-role-sources-20261027-971dc9e57b1a4220-v1', 'count': 93, 'manifest_sha256': '3ce2f0f0b6ed975c2665f68ca0dc53198b9c00c9673fde3979c094c4ae05ec5c', 'rows_sha256': '971dc9e57b1a4220b3604af0ed101377a62ae7b9f6510340b0cc9c6b9a3cb33f'}, 'web/market-fact-sync-worker': {'business_commit': '064451c17c9f2f1b72f3f33fbe68f15fc1384f60', 'business_tree': '7f7f209b17b06984b2ac2fa989177277ed876b24', 'bytes': 1935251, 'component': 'market-role-sources-20261027-4a848dcf6a46d6f5-v1', 'count': 95, 'manifest_sha256': '83a42c0507c28c40574538c61382034a6f376001cf5cb76a1aed97148416de36', 'rows_sha256': '4a848dcf6a46d6f5a0f0e2784f537f6deb2cd6722fcb6ae580a12dfdc7cbf53d'}, 'web/market-processor': {'business_commit': 'db0f8eba339b830ab7ae5fb1c810f149992458b3', 'business_tree': 'e956bcc0ae619fd7495bb4ba41d8a1aeaa7885c1', 'bytes': 1946368, 'component': 'market-role-sources-20261027-5cc7196abb5cfafe-v1', 'count': 95, 'manifest_sha256': 'a5b587cc382563735bb66df783e8def505d12509a9133a08a2537e562cbaf2c9', 'rows_sha256': '5cc7196abb5cfafeb5ca00aab2d34579c94d493c933768253bfba7a34d995c30'}}
+
+def _role_encoded(value):
+    return (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+
+def role_data(raw, role):
+    need(type(role) is str and role in ROLE_MAP, 'role_component')
+    need(type(raw) is bytes and len(raw) == 179771 and
+         _role_sha256(raw).hexdigest() == ROLE_CATALOG_SHA, 'role_catalog')
+    value = json.loads(raw)
+    spec = ROLE_MAP[role]
+    manifest = value['components'][spec['rows_sha256']]
+    need(value['schema'] == 'normal_market_published_role_components/1' and
+         _role_sha256(_role_encoded(manifest)).hexdigest() == spec['manifest_sha256'] and
+         role in manifest['roles'] and manifest['business_commit'] == spec['business_commit'] and
+         manifest['business_tree'] == spec['business_tree'] and
+         manifest['source_files'] == spec['count'] and manifest['source_bytes'] == spec['bytes'] and
+         _role_sha256(_role_encoded(manifest['product_files'])).hexdigest() == spec['rows_sha256'] and
+         all(manifest[key] is False for key in ('already_running_code_proven',
+             'complete_effective_business_inventory_proven', 'full_outer_business_proven',
+             'activation_authority', 'security_accepted')), 'role_manifest')
+    return manifest
+
+def receipt_role(receipt):
+    need(type(receipt) is dict and receipt.get('schema') == 'normal_market_git_component_inputs/2'
+         and type(receipt.get('role')) is str and receipt['role'] in ROLE_MAP, 'role_receipt')
+    spec = ROLE_MAP[receipt['role']]
+    locked = {'business_commit': spec['business_commit'], 'business_tree': spec['business_tree'],
+              'repository_identity': {'host': 'github.com', 'repository': 'mohsenbarari/trading_bot'},
+              'role': receipt['role'], 'catalog_sha256': ROLE_CATALOG_SHA,
+              'source_policy': 'whole_git_component_no_main_fallback'}
+    need(receipt.get('role_source') == spec and receipt.get('role_catalog_sha256') == ROLE_CATALOG_SHA and
+         receipt.get('repository_identity') == locked['repository_identity'] and
+         receipt.get('component') == spec['component'] and
+         receipt.get('business_commit') == spec['business_commit'] and
+         receipt.get('business_tree') == spec['business_tree'] and
+         receipt.get('business_manifest_sha256') == spec['manifest_sha256'] and
+         receipt.get('product_lock_sha256') == _role_sha256(_role_encoded(locked)).hexdigest() and
+         type(receipt.get('product_files')) is list and len(receipt['product_files']) == spec['count'] and
+         _role_sha256(_role_encoded(receipt['product_files'])).hexdigest() == spec['rows_sha256'],
+         'role_receipt')
+    return dict(spec)
+
+def candidate_spec(value):
+    need(type(value) is dict and type(value.get('role')) is str and value['role'] in ROLE_MAP,
+         'role_candidate')
+    role = value['role']
+    need(value == {'role': role, 'role_source': ROLE_MAP[role],
+                   'catalog_sha256': ROLE_CATALOG_SHA}, 'role_candidate')
+    return dict(ROLE_MAP[role])
+
+
 SCHEMA = 'normal_market_business_source_lock/1'
 COMPONENT = 'capture2-f79-accepted-20261026'
 ROLE = 'market-capture-account2'
@@ -37,8 +94,9 @@ RELEASE_FILES = (
     'scripts/prepare_app_security_os_cache.py', 'scripts/app_security_os_packages.lock.json',
     'scripts/compose_security_os_candidate.py', 'scripts/prepare_sqlite_wal_os_cache.py',
     'scripts/sqlite_wal_package.lock.json', 'scripts/prepare_tar_acl_os_cache.py',
-    'scripts/tar_acl_package.lock.json', 'scripts/remove_runtime_pip.py',
-    'scripts/verify_image_trust.py', SELF_PATH, LOCK_PATH, MANIFEST_PATH)
+    'scripts/tar_acl_package.lock.json', 'scripts/prepare_coreutils_acl_os_cache.py',
+    'scripts/coreutils_acl_package.lock.json', 'scripts/remove_runtime_pip.py',
+    'scripts/verify_image_trust.py', 'scripts/probe_python_micro_release.py', SELF_PATH, LOCK_PATH, MANIFEST_PATH)
 PRODUCT_COPY_LINES = frozenset((
     'COPY --from=business-source core/__init__.py /rootfs/app/core/__init__.py',
     'COPY --from=business-source core/market_intelligence /rootfs/app/core/market_intelligence',
@@ -49,10 +107,12 @@ RELEASE_COPY_LINES = frozenset((
     'COPY scripts/prepare_app_security_os_cache.py scripts/app_security_os_packages.lock.json scripts/compose_security_os_candidate.py /usr/local/libexec/',
     'COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json /usr/local/libexec/',
     'COPY scripts/prepare_tar_acl_os_cache.py scripts/tar_acl_package.lock.json /usr/local/libexec/',
+    'COPY scripts/prepare_coreutils_acl_os_cache.py scripts/coreutils_acl_package.lock.json /usr/local/libexec/',
     'COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py',
     'COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py',
     'COPY scripts/verify_sqlite_runtime.py /usr/local/libexec/verify_sqlite_runtime.py',
     'COPY scripts/remove_runtime_pip.py /usr/local/libexec/remove_runtime_pip.py',
+    'COPY scripts/probe_python_micro_release.py /usr/local/libexec/probe_python_micro_release.py',
     'COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt',
     'COPY deploy/market-data/requirements.lock ./requirements.lock',
     'COPY --from=assembly /rootfs/ /'))
@@ -77,7 +137,7 @@ REFUSAL_CODES = frozenset(('accepted_inventory', 'accepted_manifest_identity', '
     'output_inventory', 'output_operand', 'output_parent', 'output_parent_changed', 'output_readback',
     'output_write', 'phase', 'product_file_mismatch', 'product_git_identity', 'product_inventory',
     'product_lock_unarmed', 'public_source_bound', 'public_source_changed', 'public_source_metadata',
-    'release_changed', 'release_commit', 'release_input_empty', 'release_inputs_missing',
+    'role_component', 'role_catalog', 'role_manifest', 'role_receipt', 'release_changed', 'release_commit', 'release_input_empty', 'release_inputs_missing',
     'repository_identity', 'repository_path', 'sealer_source_identity', 'signature_binding',
     'source_deadline', 'source_parent', 'source_total_bound'))
 PHASES = frozenset(('bootstrap', 'source', 'release', 'product', 'output', 'control_component', 'final'))
@@ -152,6 +212,19 @@ def origin_identity(raw):
     repository = match.group(1)
     need(not repository.split('/')[1].startswith('.') and '..' not in repository.split('/'), 'repository_identity')
     return {'host': 'github.com', 'repository': repository.lower()}
+
+
+
+def source_scope(receipt):
+    if receipt.get('schema') == 'normal_market_git_component_inputs/2':
+        return receipt_role(receipt)
+    need(receipt.get('schema') == 'normal_market_git_component_inputs/1', 'input_receipt')
+    return {'component': COMPONENT, 'manifest_sha256': MANIFEST_SHA,
+            'rows_sha256': ROWS_SHA, 'count': 93, 'bytes': 1851697}
+
+def release_files(role=None):
+    need(role is None or type(role) is str and role in ROLE_MAP, 'role_component')
+    return RELEASE_FILES if role is None else (*RELEASE_FILES, ROLE_CATALOG_PATH)
 
 
 def template():
@@ -341,20 +414,21 @@ def copy_contract(raw):
     return True
 
 
-def collect(repository, release, self_raw):
+def collect(repository, release, self_raw, *, role=None):
     """Public source only; no local dirty file or Main product fallback."""
     phase('release')
+    selected_files = release_files(role)
     end = time.monotonic() + 180
     def checkpoint():
         need(time.monotonic() < end, 'source_deadline')
     before = release_snapshot(repository, release)
     checkpoint()
     tree = repository.tree(release)
-    need(all(name in tree for name in RELEASE_FILES), 'release_inputs_missing')
+    need(all(name in tree for name in selected_files), 'release_inputs_missing')
     releases = []
     release_raw = {}
     total = 0
-    for name in sorted(RELEASE_FILES):
+    for name in sorted(selected_files):
         checkpoint()
         row, raw = read_blob(repository, name, tree[name])
         need(len(raw) > 0, 'release_input_empty')
@@ -365,8 +439,15 @@ def collect(repository, release, self_raw):
         release_raw[name] = raw
     need(release_raw[SELF_PATH] == self_raw, 'sealer_source_identity')
     copy_contract(release_raw['deploy/market-data/Dockerfile.capture2'])
-    lock = lock_document(release_raw[LOCK_PATH])
-    expected = manifest_document(release_raw[MANIFEST_PATH])
+    if role is None:
+        lock = lock_document(release_raw[LOCK_PATH])
+        expected = manifest_document(release_raw[MANIFEST_PATH])
+    else:
+        selected = role_data(release_raw[ROLE_CATALOG_PATH], role)
+        lock = {'business_commit': selected['business_commit'], 'business_tree': selected['business_tree'],
+                'repository_identity': {'host': 'github.com', 'repository': 'mohsenbarari/trading_bot'},
+                'role': role, 'catalog_sha256': ROLE_CATALOG_SHA, 'source_policy': 'whole_git_component_no_main_fallback'}
+        expected = selected['product_files']
     need(origin_identity(before['origin']) == lock['repository_identity'], 'repository_identity')
     phase('product')
     commit = lock['business_commit']
@@ -389,10 +470,15 @@ def collect(repository, release, self_raw):
                'release_commit': release, 'release_tree': before['tree'],
                'business_commit': commit, 'business_tree': lock['business_tree'],
                'repository_identity': lock['repository_identity'],
-               'product_lock_sha256': sha256(release_raw[LOCK_PATH]).hexdigest(),
+               'product_lock_sha256': sha256(release_raw[LOCK_PATH] if role is None else encoded(lock)).hexdigest(),
                'accepted_manifest_sha256': MANIFEST_SHA, 'product_files': expected, 'release_files': releases,
                'signature_format': 'normal-market-two-git-sources-v1',
                'live_remote_main_gate_performed': False, 'activation_authority': False, 'security_accepted': False}
+    if role is not None:
+        receipt.update(schema='normal_market_git_component_inputs/2', component=selected['component'], role=role,
+                       business_manifest_sha256=ROLE_MAP[role]['manifest_sha256'],
+                       role_source=dict(ROLE_MAP[role]), role_catalog_sha256=ROLE_CATALOG_SHA)
+        del receipt['accepted_manifest_sha256']
     signature = sha256(encoded(receipt)).hexdigest()
     return receipt, signature, product_raw, release_raw, before
 
@@ -500,9 +586,14 @@ def input_receipt(receipt, signature):
     keys = {'schema', 'component', 'role', 'release_commit', 'release_tree', 'business_commit', 'business_tree',
             'repository_identity', 'product_lock_sha256', 'accepted_manifest_sha256', 'product_files', 'release_files',
             'signature_format', 'live_remote_main_gate_performed', 'activation_authority', 'security_accepted'}
-    need(type(receipt) is dict and set(receipt) == keys and receipt['schema'] == 'normal_market_git_component_inputs/1'
-         and receipt['component'] == COMPONENT and receipt['role'] == ROLE
-         and receipt['accepted_manifest_sha256'] == MANIFEST_SHA and receipt['signature_format'] == 'normal-market-two-git-sources-v1'
+    spec = source_scope(receipt)
+    role = receipt.get('schema') == 'normal_market_git_component_inputs/2'
+    manifest_key = 'business_manifest_sha256' if role else 'accepted_manifest_sha256'
+    if role:
+        keys = keys - {'accepted_manifest_sha256'} | {'business_manifest_sha256', 'role_source', 'role_catalog_sha256'}
+    need(type(receipt) is dict and set(receipt) == keys and receipt['schema'] == ('normal_market_git_component_inputs/2' if role else 'normal_market_git_component_inputs/1')
+         and receipt['component'] == spec['component'] and receipt['role'] == (receipt['role'] if role else ROLE)
+         and receipt[manifest_key] == spec['manifest_sha256'] and receipt['signature_format'] == 'normal-market-two-git-sources-v1'
          and all(receipt[name] is False for name in ('live_remote_main_gate_performed', 'activation_authority', 'security_accepted'))
          and all(hex40(receipt[name]) for name in ('release_commit', 'release_tree', 'business_commit', 'business_tree'))
          and receipt['release_commit'] != receipt['business_commit'] and hex64(receipt['product_lock_sha256']), 'input_receipt')
@@ -510,20 +601,20 @@ def input_receipt(receipt, signature):
     need(type(origin) is dict and set(origin) == {'host', 'repository'} and origin['host'] == 'github.com'
          and type(origin['repository']) is str and origin_identity('https://github.com/' + origin['repository']) == origin, 'input_receipt')
     product_rows = receipt['product_files']
-    need(type(product_rows) is list and len(product_rows) == 93, 'input_receipt')
+    need(type(product_rows) is list and len(product_rows) == spec['count'], 'input_receipt')
     for row in product_rows:
         need(type(row) is dict and set(row) == {'path', 'mode', 'git_blob', 'bytes', 'sha256'}
              and copied(row['path']) and row['mode'] in {'100644', '100755'}
              and hex40(row['git_blob']) and hex64(row['sha256'])
              and type(row['bytes']) is int and 0 <= row['bytes'] <= MAX_FILE, 'input_receipt')
-    need(sha256(encoded(product_rows)).hexdigest() == ROWS_SHA, 'input_receipt')
+    need(sha256(encoded(product_rows)).hexdigest() == spec['rows_sha256'], 'input_receipt')
     rows = receipt['release_files']
-    need(type(rows) is list and len(rows) == len(RELEASE_FILES), 'input_receipt')
+    need(type(rows) is list and len(rows) == len(release_files(receipt['role'] if role else None)), 'input_receipt')
     for row in rows:
         need(type(row) is dict and set(row) == {'path', 'mode', 'git_blob', 'bytes', 'sha256'}
              and row['mode'] in {'100644', '100755'} and hex40(row['git_blob']) and hex64(row['sha256'])
-             and row['path'] in RELEASE_FILES and type(row['bytes']) is int and 0 < row['bytes'] <= MAX_FILE, 'input_receipt')
-    need(rows == sorted(rows, key=lambda row: row['path']) and {row['path'] for row in rows} == set(RELEASE_FILES), 'input_receipt')
+             and row['path'] in release_files(receipt['role'] if role else None) and type(row['bytes']) is int and 0 < row['bytes'] <= MAX_FILE, 'input_receipt')
+    need(rows == sorted(rows, key=lambda row: row['path']) and {row['path'] for row in rows} == set(release_files(receipt['role'] if role else None)), 'input_receipt')
     need(hex64(signature) and sha256(encoded(receipt)).hexdigest() == signature, 'signature_binding')
     return receipt
 
@@ -531,8 +622,9 @@ def input_receipt(receipt, signature):
 def control_component(product_raw, receipt, signature):
     """Only the product parcel; never pretend this is a complete deploy payload."""
     input_receipt(receipt, signature)
+    spec = source_scope(receipt)
     rows = receipt['product_files']
-    need(type(product_raw) is dict and sha256(encoded(rows)).hexdigest() == ROWS_SHA
+    need(type(product_raw) is dict and sha256(encoded(rows)).hexdigest() == spec['rows_sha256']
          and set(product_raw) == {row['path'] for row in rows} and hex64(signature), 'control_product_inventory')
     for row in rows:
         raw = product_raw[row['path']]
@@ -551,11 +643,14 @@ def control_component(product_raw, receipt, signature):
             info.mode = 0o444 if row['mode'] == '100644' else 0o555
             info.uid = info.gid = info.mtime = 0
             archive.addfile(info, io.BytesIO(raw))
-        metadata = encoded({'schema': 'normal_market_control_product_component/1',
+        metadata_value = {'schema': 'normal_market_control_product_component/1',
                             'release_commit': receipt['release_commit'], 'business_commit': receipt['business_commit'],
                             'business_tree': receipt['business_tree'], 'input_signature': signature,
-                            'accepted_manifest_sha256': MANIFEST_SHA, 'component': COMPONENT, 'role': ROLE,
-                            'complete_deployment_payload': False, 'activation_authority': False})
+                            'business_manifest_sha256': spec['manifest_sha256'], 'component': spec['component'], 'role': receipt['role'],
+                            'complete_deployment_payload': False, 'activation_authority': False}
+        if receipt['schema'] == 'normal_market_git_component_inputs/1':
+            metadata_value['accepted_manifest_sha256'] = metadata_value.pop('business_manifest_sha256')
+        metadata = encoded(metadata_value)
         info = tarfile.TarInfo('market-business-component.json')
         info.size = len(metadata)
         info.mode = 0o444
@@ -577,7 +672,7 @@ def build_contract(receipt, signature, root):
                            'IMAGE_INPUT_SIGNATURE': signature, 'IMAGE_VERSION': 'production-private-primary',
                            'BUSINESS_SOURCE_COMMIT': receipt['business_commit'],
                            'BUSINESS_SOURCE_TREE': receipt['business_tree'],
-                           'BUSINESS_SOURCE_MANIFEST_SHA256': MANIFEST_SHA},
+                           'BUSINESS_SOURCE_MANIFEST_SHA256': source_scope(receipt)['manifest_sha256']},
             'source_date_epoch_from_same_release_commit_required': True,
             'normal_security_cache_preparation_required': True,
             'fresh_exact_context_revalidation_before_build_required': True,
@@ -585,7 +680,7 @@ def build_contract(receipt, signature, root):
             'activation_authority': False}
 
 
-def seal(repository, release, root):
+def seal(repository, release, root, *, role=None):
     output = source = None
     phase('output')
     need('.git' not in Path(root).parts, 'output_git_path')
@@ -593,7 +688,7 @@ def seal(repository, release, root):
     with ExitStack() as stack:
         phase('source')
         source = PublicFile(Path(__file__), stack, 131072)
-        receipt, signature, product, releases, before = collect(repository, release, source.raw)
+        receipt, signature, product, releases, before = collect(repository, release, source.raw, role=role)
         phase('output')
         output = NewTree(root, stack)
         for row in receipt['product_files']:
@@ -618,9 +713,9 @@ def seal(repository, release, root):
     source.check(closed=True)
     output.check(closed=True)
     need(time.monotonic() < end, 'source_deadline')
-    return {'schema': 'normal_market_sealed_git_product/1', 'component': COMPONENT, 'role': ROLE,
+    return {'schema': 'normal_market_sealed_git_product/1', 'component': receipt['component'], 'role': receipt['role'],
             'release_commit': release, 'business_commit': receipt['business_commit'],
-            'input_signature': signature, 'product_files': 93, 'release_files': len(RELEASE_FILES),
+            'input_signature': signature, 'product_files': len(receipt['product_files']), 'release_files': len(receipt['release_files']),
             'build_performed': False, 'activation_authority': False, 'security_accepted': False}
 
 
@@ -628,6 +723,7 @@ def main(argv=None):
     phase('bootstrap')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path)
+    parser.add_argument('--role', choices=tuple(ROLE_MAP))
     parser.add_argument('--release-commit')
     parser.add_argument('--root', type=Path)
     parser.add_argument('--seal-public-source', action='store_true')
@@ -637,7 +733,7 @@ def main(argv=None):
                           'git_invoked': False, 'build_performed': False, 'activation_authority': False}, sort_keys=True))
         return 0
     need(args.repo is not None and args.root is not None and hex40(args.release_commit), 'arguments')
-    result = seal(GitRepository(args.repo), args.release_commit, args.root)
+    result = seal(GitRepository(args.repo), args.release_commit, args.root, role=args.role)
     print(json.dumps(result, sort_keys=True))
     return 0
 
