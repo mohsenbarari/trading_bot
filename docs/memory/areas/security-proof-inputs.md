@@ -18,15 +18,16 @@
 - Size the complete source-review document before execution. Synchronize its
   dedicated parser/controller/sealer bounds; preserve unrelated code limits.
   Report source gaps before attempting a complete source-flags review.
-- Group ELF provenance by exact source version and actual build variant, retaining
-  every path/hash and multiple real owners. LTO absence cannot be inferred from
-  missing imports. An older Python source is not current-version evidence.
-- Wheel ownership requires exact RECORD path/hash/size, including bundled DSOs,
-  then published-artifact and source/build joins. Requirements versions, module
-  prefixes and a deleted wheelhouse do not prove installed code identity.
+- Group ELF provenance by exact source/build variant; retain every path/hash and
+  owner. Missing imports do not prove no LTO; older Python is not current evidence.
+- Wheel ownership needs exact RECORD path/hash/size (bundled DSOs included),
+  published artifacts and source/build joins. Versions, module prefixes and a
+  deleted wheelhouse cannot prove installed identity.
 - Foreign group exit needs the original retained pidfd; leader Z is insufficient.
   Individual-thread exit needs original birth custody and kernel absence proof;
   UID0 alone proves nothing and cannot retire live-group holder history.
   Later exit never heals errors. Preserve historical holders, source-owned exit
   proofs and proc-container metadata; test actual UID/thread transitions without
   demanding global PID/TID-set equality.
+- After FIRST-stat ENOENT, a reappearing foreign FD is fresh bounded work;
+  only two proven absences count closed. Known-target drift stays fatal.
