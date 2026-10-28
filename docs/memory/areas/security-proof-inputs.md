@@ -1,7 +1,7 @@
 # Security proof inputs
 
-- Inspect actual schemas, keys and modes of every consumed manifest or report
-  before implementing its verifier. Fresh copies preserve referenced siblings.
+- Inspect actual input schemas, keys and modes before writing verifiers;
+  fresh copies preserve referenced siblings.
 - Budget scanners using all thread FD tables and genuine owner/source/cgroup
   topology. A partial child benchmark is no HOST pass. Prefer a measured fixed
   budget with unchanged Request windows over extra guard complexity; never extend
@@ -24,8 +24,9 @@
 - Wheel ownership requires exact RECORD path/hash/size, including bundled DSOs,
   then published-artifact and source/build joins. Requirements versions, module
   prefixes and a deleted wheelhouse do not prove installed code identity.
-- Foreign group exit needs the same original retained pidfd; leader Z alone is
-  insufficient. Later exit never heals prior errors. Preserve historical holders
-  and derive active admission from source-owned birth/exit proofs. Keep original
-  proc-container metadata contracts; test genuine UID/thread transitions instead
-  of demanding global PID/TID-set equality.
+- Foreign group exit needs the original retained pidfd; leader Z is insufficient.
+  Individual-thread exit needs original birth custody and kernel absence proof;
+  UID0 alone proves nothing and cannot retire live-group holder history.
+  Later exit never heals errors. Preserve historical holders, source-owned exit
+  proofs and proc-container metadata; test actual UID/thread transitions without
+  demanding global PID/TID-set equality.
