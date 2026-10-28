@@ -1,0 +1,60 @@
+name: Fixed App R2 Q02 helper imports and single cache structure observation
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_collection:
+        description: Observe fixed R2 helper imports plus one isolated compile-only cache proof; no business assertions or security acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-fixed-app-r2-q02-public-inventory
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    if: github.repository == 'mohsenbarari/trading_bot' && github.ref == 'refs/heads/main' && inputs.run_collection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out this exact reviewed observation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify bounded fixed public observation contracts
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/app_r2_observe02/test_collection_contract.py
+          /usr/bin/python3 -I -S -B deploy/maintenance/app_r2_observe02/test_q02_contract.py
+
+      - name: Seal exact Q Git source and collect fixed R2 facts
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/app_r2_observe02/seal_and_run.py \
+            --root "$RUNNER_TEMP/security-app-ci-smoke-r2-observe02-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 92ed86d14afd6aac6ea8e5600297f47a0e5bd0df32437fab142ea24662715f64 \
+            --execute-fixed-R2-observation
+
+      - name: Preserve genuine public observations and cleanup without acceptance
+        if: always() && steps.run.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fixed-app-r2-q02-public-observations-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ steps.run.outputs.root }}/reports/*.json
+            ${{ steps.run.outputs.root }}/evidence/public-evidence.zip
