@@ -1,11 +1,14 @@
 # Security proof inputs
 
-- Inspect each packet's actual manifest schema and mode contract before writing
-  its verifier. Fresh fixture copies must preserve referenced sibling layouts.
+- Inspect actual schemas, keys and modes of every consumed manifest or report
+  before implementing its verifier. Fresh copies preserve referenced siblings.
 - Budget scanners using all thread FD tables and genuine owner/source/cgroup
   topology. A partial child benchmark is no HOST pass. Prefer a measured fixed
   budget with unchanged Request windows over extra guard complexity; never extend
   a running scan. Predictions can refuse work, never replace the complete census.
+  OWNED LIVE preflight may omit optional sizing and run the unchanged bounded
+  census directly. Never convert failed sizing into success or reuse its failed
+  context; create a fresh scope. Global process stability is no sizing guarantee.
 - Original scanner loans outlive every proc read and physical close. Keep their
   retirement/failure state separate from replaceable telemetry; failed scans
   cannot become positive through a later profile. After scanner-source close,
