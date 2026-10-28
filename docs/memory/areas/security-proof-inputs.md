@@ -10,6 +10,6 @@
 - Foreign group exit needs original pidfd, not leader Z. Thread exit needs original birth custody/kernel absence; UID0 cannot erase live holders. Retain holders, source-owned exit proofs and proc-container metadata; test real UID/thread changes without global PID/TID-set equality.
 - FIRST-stat ENOENT then foreign FD reappearance is fresh bounded work; closure needs two proven absences. Known-target drift is fatal.
 - Failed-only disposal accounts for retained Pair prefixes before releasing context fences. Unknown close keeps fences; known closure never heals errors.
-- Run all physical finalizers, then enforce original request/global deadlines before positive completion; preserve earlier primary errors.
+- After all physical finalizers, check every final name/full9 and original client/request/global deadline; preserve every error.
 - Select each exact binary name/full version/Epoch/BinNMU/arch separately; canonical signed Source-Version may differ from provider +bN job context. Source limit=1 is insufficient. Retain duplicates; metadata pointers never prove product hashes, signatures or installed ELF equivalence, nor cover sibling variants.
 - Resource forward entries reject failed/closed scopes before open/spawn/mutation; errors stay latched.
