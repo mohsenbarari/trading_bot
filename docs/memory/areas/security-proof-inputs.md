@@ -1,11 +1,11 @@
 # Security proof inputs
 
 - Before QA inspect schemas/keys/modes/fixtures; fresh copies keep siblings and authenticated dependencies.
-- Size scanners from all thread FD tables and owner/source/cgroup topology. Partial/predicted work never closes HOST; stable PIDs prove no cost bound. Fix measured budgets/Request windows; never extend active scans. OWNED LIVE may skip optional sizing, not bounded census. Failed sizing needs fresh scope, never relabeling.
+- Size in the actual execution namespace, from thread FD tables and owner/source/cgroup topology. Predictions/stable PIDs never close HOST or prove cost. Fix measured Request windows; never extend active scans. OWNED LIVE may skip optional sizing, not bounded census. Failed sizing needs fresh scope, never relabeling.
 - Original scanner loans outlive all proc reads/physical closes. Retirement/failure stay separate from telemetry; later profiles/exits never heal errors. After source close, final checks open no proc loans; failed-only disposal remains usable.
-- Pilot genuine constructors and decorated/generated code before negative matrices; DATA objects prove no operation. Before callbacks check original descriptors/code/defining globals and wrapper cells; original captures determine required checks.
+- Pilot genuine constructors/full caller I/O and decorated/generated code; DATA objects prove no operation. Bind the intended receiver/method descriptor/code/globals/closure before callbacks; original captures determine required checks.
 - Size whole source review first; align parser/controller/sealer bounds, preserve unrelated limits and report gaps.
-- ELF joins retain exact source/build variants, path/hash and owner. Inspect actual matched-tool IL; missing imports, native stubs or old Python prove no LTO closure.
+- ELF joins retain exact source/build variants and path/hash/owner. Check disassembly against actual symbol intervals/bytes; match LTO tools. Imports/stubs/old Python prove no LTO closure.
 - Wheel identity needs exact RECORD path/hash/size, bundled DSOs, published artifacts and source/build joins; versions/prefixes/deleted wheelhouses prove none.
 - Foreign group exit needs original pidfd, not leader Z. Thread exit needs original birth custody/kernel absence; UID0 cannot erase live holders. Retain holders, source-owned exit proofs and proc-container metadata; test real UID/thread changes without global PID/TID-set equality.
 - FIRST-stat ENOENT then foreign FD reappearance is fresh bounded work; closure needs two proven absences. Known-target drift is fatal.
