@@ -59,6 +59,8 @@ def compare_code(reference,observed):
 PROBE = STRUCTURE + r'''
 import os,sys,stat,marshal,importlib.util,time
 SOURCE='/usr/local/bin/jp.py';CACHE='/usr/local/bin/__pycache__/jp.cpython-311.pyc'
+# Exact installed RECORD spelling preserved in this cache's compiler metadata.
+REFERENCE_COMPILE_FILENAME='/usr/local/lib/python3.11/site-packages/../../../bin/jp.py'
 PINS=((1704,'75f9cbd2f38e045e583d2cd8c4d65ba1f21f9bc4474bd5a503d4460587621336'),(3453,'e381ec10784c6811fcf931a10e84c24d3414b362c2aa383be8eca7e12f45d912'))
 CLOSED=frozenset(('cache_version','cache_isolation','cache_input_metadata','cache_input_pin','cache_input_changed','cache_header','cache_CodeType_field_inventory','cache_structure_bound','cache_derived_row_bound','cache_scalar_bound','cache_const_bound','cache_const_type','cache_code_type','cache_probe_bound','cache_marshal_EOF'))
 def frame(s):return(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
@@ -71,7 +73,7 @@ try:
   before=frame(os.lstat(path));admit_input_mode(before,index);need(before[3:7]==(0,0,1,pin[0]),'cache_input_metadata');fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC);row={'fd':fd,'path':path,'before':before};held.append(row);check(row);raw=os.pread(fd,pin[0]+1,0);need((len(raw),hashlib.sha256(raw).hexdigest())==pin,'cache_input_pin');check(row);raws.append(raw)
  source,cache=raws;flags,timestamp,source_bytes=struct.unpack('<III',cache[4:16]);need(cache[:4]==importlib.util.MAGIC_NUMBER and flags==0 and timestamp==1793122203 and timestamp==((held[0]['before'][7]//10**9)&0xffffffff) and source_bytes==len(source)==held[0]['before'][6]==1704,'cache_header')
  for row in held:check(row)
- reference=compile(source,SOURCE,'exec',dont_inherit=True,optimize=0)
+ reference=compile(source,REFERENCE_COMPILE_FILENAME,'exec',dont_inherit=True,optimize=0)
  observed,marshal_decode=decode_cache_code(cache[16:]);need(type(observed)is types.CodeType,'cache_code_type');comparison=compare_code(reference,observed)
  for row in held:check(row)
  result={'schema':'App_R2_single_jmespath_trusted_compile_cache_structure/1','interpreter':{'implementation':sys.implementation.name,'version':list(sys.version_info[:3]),'magic_hex':importlib.util.MAGIC_NUMBER.hex(),'isolated':True,'site_disabled':True,'bytecode_writes_disabled':True},'inputs':[{'path':r['path'],'full9':list(r['before']),'bytes':p[0],'sha256':p[1]}for r,p in zip(held,PINS)],'PYC_header':{'magic_hex':cache[:4].hex(),'flags':flags,'timestamp':timestamp,'source_bytes':source_bytes,'source_fstat_integer_mtime':held[0]['before'][7]//10**9},'marshal_payload_bytes':len(cache)-16,'marshal_decode':marshal_decode,'marshal_exact_cursor_and_EOF_verified':True,'marshal_payload_sha256':hashlib.sha256(cache[16:]).hexdigest(),'comparison':comparison,'inspected_source_imported_or_executed':False,'inspected_PYC_executed':False,'business_assertions_executed':0,'security_accepted':False}

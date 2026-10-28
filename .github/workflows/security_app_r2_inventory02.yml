@@ -42,7 +42,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -S -B deploy/maintenance/app_r2_observe02/seal_and_run.py \
             --root "$RUNNER_TEMP/security-app-ci-smoke-r2-observe02-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 92ed86d14afd6aac6ea8e5600297f47a0e5bd0df32437fab142ea24662715f64 \
+            --source-sha256 a0bc3a12ecf403841e5a7d7b1f7bd66b3fd6490a9efd800c49f5af80a4e7bf14 \
             --execute-fixed-R2-observation
 
       - name: Preserve genuine public observations and cleanup without acceptance
