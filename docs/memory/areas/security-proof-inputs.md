@@ -1,9 +1,9 @@
 # Security proof inputs
 
-- Inspect actual schemas/keys/modes/every referenced fixture before QA; fresh copies retain siblings and authenticated dependencies.
+- Before QA inspect actual schemas/keys/modes/all fixtures; fresh copies keep siblings and authenticated dependencies.
 - Size scanners from all thread FD tables and owner/source/cgroup topology. Partial/predicted work never closes HOST; stable PIDs prove no cost bound. Fix measured budgets/Request windows; never extend active scans. OWNED LIVE may skip optional sizing, not bounded census. Failed sizing needs fresh scope, never relabeling.
 - Original scanner loans outlive all proc reads/physical closes. Retirement/failure stay separate from telemetry; later profiles/exits never heal errors. After source close, final checks open no proc loans; failed-only disposal remains usable.
-- Positive caller results need the top-level path through both adapters and the downstream join.
+- Producer success needs actual I/O and the full caller/adapters/join; exact types, empty closed owners or DTOs prove none.
 - Size whole source review first; align parser/controller/sealer bounds, preserve unrelated limits and report gaps before full review.
 - ELF joins retain each exact source/build variant, path/hash and owner. Missing imports do not prove no LTO; old Python is not current proof.
 - Wheel identity needs exact RECORD path/hash/size, bundled DSOs, published artifacts and source/build joins; versions/prefixes/deleted wheelhouses prove none.
