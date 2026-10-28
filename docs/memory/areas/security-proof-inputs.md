@@ -1,34 +1,15 @@
 # Security proof inputs
 
-- Inspect actual schemas, keys, modes and every referenced fixture before QA;
-  fresh copies preserve relative siblings and their authenticated dependencies.
-- Size scanners from all thread FD tables and genuine owner/source/cgroup
-  topology; partial benchmarks never prove HOST closure. Prefer measured fixed
-  budgets with unchanged Request windows; never extend a running scan.
-  Predictions may refuse, never replace the complete census. OWNED LIVE may
-  omit optional sizing and run the unchanged bounded census. Failed sizing needs
-  a fresh scope, never success relabeling. Stable PID sets prove no cost bound.
-- Original scanner loans outlive all proc reads and physical closes. Retirement
-  and failure stay separate from telemetry; later profiles never heal failure.
-  After scanner-source close, final checks open no new proc loans; failed-only
-  disposal stays usable.
-- Positive caller classifications need the top-level path consumed by both proof
-  adapters. Exercise the downstream join, not only individual classification.
-- Size the complete source review first; synchronize its parser/controller/sealer
-  bounds without changing unrelated limits. Report source gaps before full review.
-- Group ELF provenance by exact source/build variant; retain every path/hash and
-  owner. Missing imports do not prove no LTO; older Python is not current evidence.
-- Wheel ownership needs exact RECORD path/hash/size, bundled DSOs, published
-  artifacts and source/build joins; versions, prefixes or deleted wheelhouses
-  never prove installed identity.
-- Foreign group exit needs original retained pidfd, never leader Z. Thread exit
-  needs original birth custody and kernel absence; UID0 cannot erase live-group
-  holders. Later exit never heals errors. Preserve holders, source-owned exit
-  proofs and proc-container metadata; test real UID/thread transitions without
-  global PID/TID-set equality.
-- After FIRST-stat ENOENT, a reappearing foreign FD is fresh bounded work;
-  only two proven absences count closed. Known-target drift stays fatal.
-- Failed-only disposal must account for retained Pair prefixes before releasing
-  context fences. Unknown close keeps fences held; known closure never heals errors.
-- Run every physical finalizer; then enforce the original request/global deadline
-  before positive completion. Earlier errors remain primary.
+- Inspect actual schemas/keys/modes/every referenced fixture before QA; fresh copies retain siblings and authenticated dependencies.
+- Size scanners from all thread FD tables and owner/source/cgroup topology. Partial/predicted work never closes HOST; stable PIDs prove no cost bound. Fix measured budgets/Request windows; never extend active scans. OWNED LIVE may skip optional sizing, not bounded census. Failed sizing needs fresh scope, never relabeling.
+- Original scanner loans outlive all proc reads/physical closes. Retirement/failure stay separate from telemetry; later profiles/exits never heal errors. After source close, final checks open no proc loans; failed-only disposal remains usable.
+- Positive caller results need the top-level path through both adapters and the downstream join.
+- Size whole source review first; align parser/controller/sealer bounds, preserve unrelated limits and report gaps before full review.
+- ELF joins retain each exact source/build variant, path/hash and owner. Missing imports do not prove no LTO; old Python is not current proof.
+- Wheel identity needs exact RECORD path/hash/size, bundled DSOs, published artifacts and source/build joins; versions/prefixes/deleted wheelhouses prove none.
+- Foreign group exit needs original pidfd, not leader Z. Thread exit needs original birth custody/kernel absence; UID0 cannot erase live holders. Retain holders, source-owned exit proofs and proc-container metadata; test real UID/thread changes without global PID/TID-set equality.
+- FIRST-stat ENOENT then foreign FD reappearance is fresh bounded work; closure needs two proven absences. Known-target drift is fatal.
+- Failed-only disposal accounts for retained Pair prefixes before releasing context fences. Unknown close keeps fences; known closure never heals errors.
+- Run all physical finalizers, then enforce original request/global deadlines before positive completion; preserve earlier primary errors.
+- Select each exact binary name/full version/Epoch/BinNMU/arch separately; canonical signed Source-Version may differ from provider +bN job context. Source limit=1 is insufficient. Retain duplicates; metadata pointers never prove product hashes, signatures or installed ELF equivalence, nor cover sibling variants.
+- Resource forward entries reject failed/closed scopes before open/spawn/mutation; errors stay latched.
