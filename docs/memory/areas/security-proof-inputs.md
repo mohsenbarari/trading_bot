@@ -3,7 +3,7 @@
 - Before QA inspect schemas/keys/modes/fixtures; fresh copies keep siblings and authenticated dependencies.
 - Size scanners from all thread FD tables and owner/source/cgroup topology. Partial/predicted work never closes HOST; stable PIDs prove no cost bound. Fix measured budgets/Request windows; never extend active scans. OWNED LIVE may skip optional sizing, not bounded census. Failed sizing needs fresh scope, never relabeling.
 - Original scanner loans outlive all proc reads/physical closes. Retirement/failure stay separate from telemetry; later profiles/exits never heal errors. After source close, final checks open no proc loans; failed-only disposal remains usable.
-- Success needs actual I/O/full caller-adapter joins; types/empty closed owners/DTOs prove none. Check original compiled module/method refs before callbacks.
+- Pilot genuine constructors and decorated/generated code before negative matrices; DATA objects prove no operation. Before callbacks check original descriptors/code/defining globals and wrapper cells; original captures determine required checks.
 - Size whole source review first; align parser/controller/sealer bounds, preserve unrelated limits and report gaps.
 - ELF joins retain exact source/build variants, path/hash and owner. Inspect actual matched-tool IL; missing imports, native stubs or old Python prove no LTO closure.
 - Wheel identity needs exact RECORD path/hash/size, bundled DSOs, published artifacts and source/build joins; versions/prefixes/deleted wheelhouses prove none.
