@@ -24,3 +24,8 @@
 - Wheel ownership requires exact RECORD path/hash/size, including bundled DSOs,
   then published-artifact and source/build joins. Requirements versions, module
   prefixes and a deleted wheelhouse do not prove installed code identity.
+- Foreign group exit needs the same original retained pidfd; leader Z alone is
+  insufficient. Later exit never heals prior errors. Preserve historical holders
+  and derive active admission from source-owned birth/exit proofs. Keep original
+  proc-container metadata contracts; test genuine UID/thread transitions instead
+  of demanding global PID/TID-set equality.
