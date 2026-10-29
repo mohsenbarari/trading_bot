@@ -184,6 +184,16 @@
         "sha256": "7280de5f2eae246a48c252c4491100d04ada66bcb6dd0368d267d2583fa4cb22"
       }
     },
+    "src/cp.c": {
+      "after": {
+        "bytes": 46515,
+        "sha256": "480b19ee4e3c73e1d3e65420520e064843167095b4abe2742a5e46dd0ce11c82"
+      },
+      "before": {
+        "bytes": 42619,
+        "sha256": "bd80e7765ca45d675d8bb0e32d208e4e91a89f1c432e297395376ee728ca7436"
+      }
+    },
     "src/gold-acl-fd.c": {
       "after": {
         "bytes": 4689,
@@ -319,7 +329,19 @@
     "rows": 76,
     "sha256": "8300cbac75601f87591263811f95514e1faa8d99c25113189b8e4b91b13f8e0e"
   },
-  "package_version": "9.7-3+gold1",
+  "package_version": "9.7-3+gold2",
+  "parent_acl_patch": {
+    "bytes": 7052,
+    "sha256": "3aa37c907b7ec19b2d3c070dc713120e4f60bd3db034926f6ec25887a6425ff3"
+  },
+  "parent_acl_source_approval": {
+    "bytes": 1553,
+    "sha256": "06ffe0a1604bafffb1abfa60dc80b3eab4982c7740326ac2fd9f0f2af9e98475"
+  },
+  "parent_acl_source_variant": {
+    "bytes": 2430,
+    "sha256": "0f846a5911e012c361c0cff50401b7d61c91ff74340d0fb24ab383ac0a040d9b"
+  },
   "patch": {
     "bytes": 60929,
     "sha256": "3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d"

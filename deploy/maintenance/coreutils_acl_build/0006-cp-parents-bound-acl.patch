@@ -1,0 +1,219 @@
+--- a/src/cp.c
++++ b/src/cp.c
+@@ -34,8 +34,9 @@
+ #include "stat-time.h"
+ #include "targetdir.h"
+ #include "utimens.h"
+ #include "acl.h"
++#include "gold-acl-fd.h"
+-
++
+ /* The official name of this program (e.g., no 'g' prefix).  */
+ #define PROGRAM_NAME "cp"
+-
++
+@@ -49,8 +50,11 @@
+    need to be fixed after copying. */
+ struct dir_attr
+ {
+   struct stat st;
++  /* Retained only for --preserve=mode parent restoration.  */
++  struct stat destination_st;
++  struct gold_acl_handles handles;
+   bool restore_mode;
+   size_t slash_offset;
+   struct dir_attr *next;
+ };
+@@ -283,8 +287,31 @@
+     }
+   exit (status);
+ }
+-
++
++/* Recheck retained parent objects after copying and before restoring selected
++   metadata.  Mutable mode/owner/time values are not object identity.  */
++static bool
++parent_acl_handle_matches (int fd, struct stat const *expected)
++{
++  struct stat actual;
++  if (fd < 0)
++    {
++      errno = EBADF;
++      return false;
++    }
++  if (fstat (fd, &actual) != 0)
++    return false;
++  if (! S_ISDIR (actual.st_mode)
++      || actual.st_dev != expected->st_dev
++      || actual.st_ino != expected->st_ino)
++    {
++      errno = ESTALE;
++      return false;
++    }
++  return true;
++}
++
+ /* Ensure that parents of CONST_DST_NAME have correct protections, for
+    the --parents option.  This is done after all copying has been
+    completed, to allow permissions that don't include user write/execute.
+-
++
+@@ -323,8 +350,25 @@
+-
++
+   for (p = attr_list; p; p = p->next)
+     {
+       dst_name[p->slash_offset] = '\0';
++
++      if (x->preserve_mode)
++        {
++          if (! parent_acl_handle_matches (p->handles.source, &p->st))
++            {
++              error (0, errno, _("failed to get attributes of %s"),
++                     quoteaf (src_name));
++              return false;
++            }
++          if (! parent_acl_handle_matches (p->handles.destination,
++                                            &p->destination_st))
++            {
++              error (0, errno, _("failed to get attributes of %s"),
++                     quoteaf (dst_name));
++              return false;
++            }
++        }
+-
++
+       /* Adjust the times (and if possible, ownership) for the copy.
+          chown turns off set[ug]id bits for non-root,
+          so do the chmod last.  */
+@@ -362,9 +406,19 @@
+         }
+-
++
+       if (x->preserve_mode)
+         {
+-          if (xcopy_acl (src_name, -1, dst_name, -1, p->st.st_mode) != 0)
++          /* These names are diagnostics only.  Never retry parent ACL
++             transfer through source or destination pathname operations.  */
++          int ret = gold_acl_qcopy_fd (src_name, p->handles.source,
++                                       dst_name, p->handles.destination,
++                                       p->st.st_mode);
++          if (ret == -2)
++            error (0, errno, "%s", quote (src_name));
++          else if (ret == -1)
++            error (0, errno, _("preserving permissions for %s"),
++                   quote (dst_name));
++          if (ret != 0)
+             return false;
+         }
+       else if (p->restore_mode)
+         {
+@@ -472,12 +526,26 @@
+                 }
+-
++
+               new = xmalloc (sizeof *new);
+               new->st = src_st;
++              new->handles = (struct gold_acl_handles) { -1, -1 };
+               new->slash_offset = slash - dir;
+               new->restore_mode = false;
+               new->next = *attr_list;
+               *attr_list = new;
++
++              if (x->preserve_mode)
++                {
++                  /* Parent components use stat, including source directory
++                     symlinks under -P/-H/-L; retain that admitted target.  */
++                  new->handles.source = gold_acl_open_bound (AT_FDCWD, src,
++                                                             &src_st, true);
++                  if (new->handles.source < 0)
++                    {
++                      error (0, errno, _("cannot open %s"), quoteaf (src));
++                      return false;
++                    }
++                }
+             }
+-
++
+           /* If required set the default context for created dirs.  */
+           if (! set_process_security_ctx (src, dir,
+@@ -538,8 +606,26 @@
+                   return false;
+                 }
+-
++
+-
++
++              if (x->preserve_mode && ! S_ISDIR (stats.st_mode))
++                {
++                  error (0, ESTALE, _("failed to get attributes of %s"),
++                         quoteaf (dir));
++                  return false;
++                }
++              if (x->preserve_mode)
++                {
++                  new->destination_st = stats;
++                  new->handles.destination
++                    = gold_acl_open_bound (dst_dirfd, dst_reldir, &stats, false);
++                  if (new->handles.destination < 0)
++                    {
++                      error (0, errno, _("cannot open %s"), quoteaf (dir));
++                      return false;
++                    }
++                }
++
+               if (! x->preserve_mode)
+                 {
+                   if (omitted_permissions & ~stats.st_mode)
+                     omitted_permissions &= ~ cached_umask ();
+@@ -556,9 +642,11 @@
+                 {
+                   /* Make the new directory searchable and writable.
+                      The original permissions will be restored later.  */
+-
++
+-                  if (lchmodat (dst_dirfd, dst_reldir, accessible) != 0)
++                  if ((x->preserve_mode
++                       ? gold_acl_chmod_fd (new->handles.destination, accessible)
++                       : lchmodat (dst_dirfd, dst_reldir, accessible)) != 0)
+                     {
+                       error (0, errno, _("setting permissions for %s"),
+                              quoteaf (dir));
+                       return false;
+@@ -571,9 +659,23 @@
+                      quoteaf (dir));
+               return false;
+             }
+           else
+-            *new_dst = false;
++            {
++              *new_dst = false;
++              if (x->preserve_mode)
++                {
++                  /* fstatat(..., 0) follows existing directory aliases.  */
++                  new->destination_st = stats;
++                  new->handles.destination
++                    = gold_acl_open_bound (dst_dirfd, dst_reldir, &stats, true);
++                  if (new->handles.destination < 0)
++                    {
++                      error (0, errno, _("cannot open %s"), quoteaf (dir));
++                      return false;
++                    }
++                }
++            }
+-
++
+           /* For existing dirs, set the security context as per that already
+              set for the process global context.  */
+           if (! *new_dst
+@@ -773,8 +875,9 @@
+               while (attr_list)
+                 {
+                   struct dir_attr *p = attr_list;
+                   attr_list = attr_list->next;
++                  gold_acl_close_handles (&p->handles);
+                   free (p);
+                 }
+             }
+-
++

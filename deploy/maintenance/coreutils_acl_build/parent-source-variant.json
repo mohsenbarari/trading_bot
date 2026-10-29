@@ -1,0 +1,67 @@
+{
+  "CVE_runtime_deployment_or_global_security_accepted": false,
+  "Root_new_recipe_and_fixture_integration_accepted": false,
+  "Root_parent_patch_source_only_approval": {
+    "bytes": 2036,
+    "sha256": "cb3c55b5d5814ba5f7d7f9b35c258eca461b3e920542aeaa176196daef48af38"
+  },
+  "additional_parent_cli_case_count": 9,
+  "fixture_sources": {
+    "ordinary_parent_acl.c": {
+      "bytes": 11994,
+      "sha256": "4ea72f85ba8fb146d483289a2cdd72c77b8b60dcc996d9967e31a803b5a300f7"
+    },
+    "parent-fixture.mk": {
+      "bytes": 623,
+      "sha256": "603b6662be55dbb1a728fd66d0083c0e755b9ee5f5d8d8ab2308f0c70d906b45"
+    },
+    "verify_ordinary.py": {
+      "bytes": 13927,
+      "sha256": "52ca0581f219a76bb8401615edf52fb82433b51872eb6f31e2215c8167e4898c"
+    }
+  },
+  "native_parent_fixtures_executed": false,
+  "new_cp": {
+    "bytes": 46515,
+    "sha256": "480b19ee4e3c73e1d3e65420520e064843167095b4abe2742a5e46dd0ce11c82"
+  },
+  "ordinary_cli_cases": [
+    "regular_acl_mode_xattr",
+    "cp_P_command_line_symlink",
+    "cp_H_command_line_dereference",
+    "recursive_P_nested_symlink",
+    "recursive_H_nested_symlink",
+    "recursive_L_nested_symlink",
+    "cp_s_intended_symlink_destination",
+    "directory_default_acl_general_xattr",
+    "directory_no_preserve_mode",
+    "fifo_no_payload_open",
+    "mv_same_filesystem_rename",
+    "mv_cross_device_default_acl",
+    "install_regular_mode",
+    "install_directory_mode",
+    "parents_new_acl_mode",
+    "parents_existing_metadata",
+    "parents_existing_fast_path",
+    "parents_source_alias_P",
+    "parents_source_alias_H",
+    "parents_source_alias_L",
+    "parents_destination_alias",
+    "parents_search_without_read",
+    "parents_no_preserve_mode"
+  ],
+  "original_cli_case_count": 14,
+  "original_cp": {
+    "bytes": 42619,
+    "sha256": "bd80e7765ca45d675d8bb0e32d208e4e91a89f1c432e297395376ee728ca7436"
+  },
+  "package_version": "9.7-3+gold2",
+  "parent_C_companion_cases": 4,
+  "parent_C_real_EMFILE_partial_prefixes": 2,
+  "parent_patch": {
+    "bytes": 7052,
+    "sha256": "3aa37c907b7ec19b2d3c070dc713120e4f60bd3db034926f6ec25887a6425ff3"
+  },
+  "schema": "coreutils_parent_ACL_source_variant/1",
+  "source_scope": "Exact parent ACL handle/identity/transfer/temporary-chmod/cleanup patch; original ownership and timestamp pathname semantics preserved. Root source approval covers that patch only; this producer/fixture integration is pending Root review."
+}

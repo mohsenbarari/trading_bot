@@ -1,3 +1,41 @@
+# Parent ACL source successor: 9.7-3+gold2
+
+This source unit adds only `0006-cp-parents-bound-acl.patch` after the unchanged
+five historical patches. It binds the exact `src/cp.c` source from 42619 bytes
+(`bd80e776...`) to 46515 bytes (`480b19ee...`). The parent source approval covers
+that one-file ACL handle/identity/transfer/temporary-chmod/cleanup change for
+isolated CI. The producer and fixture integration remains pending Root review;
+no native, CVE, image, runtime, deployment or global security acceptance follows.
+The existing libacl SDK and approved runtime remain `2.4.0-1~trixie+gold1`.
+
+The real installed-program matrix now requires all original 14 CLI cases plus
+nine parent cases: new/existing parents, access/default ACL and mode copying,
+original metadata behavior, source aliases under -P/-H/-L, destination aliases,
+searchable parents without read permission and the original no-preserve flow.
+The separate C companion includes the actual patched `src/cp.c`, links its
+configured copy sources and libraries, and calls the actual parent frontend,
+copy worker and restoration functions. Its four cases cover genuine O_PATH
+descriptor0, two bounded real EMFILE partial acquisitions, and copy failure;
+each verifies physical pair closure and owned cleanup before success.
+
+Original ownership and timestamp pathname branches remain byte-exact. In
+particular, ownership of a final destination symlink keeps its original
+`lchownat` semantics while ACL copying follows the admitted directory target.
+Those owner/time operations are outside the descriptor ACL claim. There is no
+new empty-path timestamp API requirement. Both original C fixtures and the full
+unchanged Coreutils/gnulib vendor selections remain mandatory. The new fixtures
+are implemented source, with actual compilation and execution still required
+in the later Root-controlled isolated CI.
+
+The notes below describe the historical gold1 producer ancestry. Current source
+contracts include the additional twenty-fourth target, `src/cp.c`, above.
+
+After editing a parent fixture, refresh its `parent-source-variant.json` entry,
+then `sourcebuild.py`'s variant pin, the hosted producer's changed recipe pins,
+and finally the workflow's hosted-source SHA. Check this entire dependency
+chain before running QA. The no-preserve CLI case compares with an ordinary
+new directory under the actual umask; it must not expect the source's mode.
+
 This is a SOURCE-only, default-unarmed recipe for one isolated Coreutils
 9.7-3+gold1 Debian runtime package. It does not build or activate a product
 image and does not access production. Root must review this new recipe before
