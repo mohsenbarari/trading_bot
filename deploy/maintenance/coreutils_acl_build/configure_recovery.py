@@ -159,14 +159,33 @@ def installed_dependencies(raw):
  need(len(values)>100 and len(values)==len({v[0]for v in values}),'dependency_inventory');return values
 
 def check_dependencies(S,deps):
- raw=S.metadata(['/usr/bin/dpkg-query','-W','-f=${binary:Package}\t${Version}\n',*[n for n,v in deps]])
- observed={}
+ # Package identity and architecture are separate wire fields. binary:Package
+ # may be qualified for Multi-Arch:same; never use it as an unqualified key.
+ need(type(deps)is list and deps,'dependency_expected_inventory')
+ expected=[];names=set()
+ for row in deps:
+  need(type(row)is tuple and len(row)==2 and all(type(v)is str for v in row),'dependency_expected_row')
+  name,version=row;parts=name.split(':')
+  need(len(parts)in(1,2)and re.fullmatch('[a-z0-9][a-z0-9+.-]*',parts[0])and name not in names and version and not any(v.isspace()for v in version),'dependency_expected_identity')
+  arch=None if len(parts)==1 else parts[1]
+  need(arch is None or arch in{'amd64','all'},'dependency_expected_architecture');names.add(name);expected.append((name,parts[0],arch,version))
+ raw=S.metadata(['/usr/bin/dpkg-query','-W','-f=${Package}\t${Architecture}\t${Version}\n',*[row[0]for row in expected]])
+ need(type(raw)is bytes,'dependency_metadata_type');observed={};records=[]
  for line in raw.decode('ascii').splitlines():
-  pieces=line.split('\t');need(len(pieces)==2,'package_state');observed[pieces[0]]=pieces[1]
- for name,version in deps:
-  if name.split(':')[0]in{'libacl1','libacl1-dev'}:continue
-  actual=observed.get(name,observed.get(name.split(':')[0]));need(actual==version,'exact_dependency_version')
- return observed
+  values=line.split('\t');need(len(values)==3,'dependency_status_fields');package,arch,version=values
+  need(re.fullmatch('[a-z0-9][a-z0-9+.-]*',package)and arch in{'amd64','all'}and version and not any(v.isspace()for v in version),'dependency_status_identity')
+  identity=(package,arch);need(identity not in observed and len(observed)<len(expected),'dependency_status_duplicate_or_extra');observed[identity]=version;records.append({'package':package,'architecture':arch,'version':version})
+ # Typed public package metadata only; retain it before a later strict refusal
+ # so a genuine drift cannot become another opaque failure. No Env is queried.
+ print(encode({'schema':'coreutils_actual_dependency_inventory/1','records':records,'strict_comparison_pending':True,'global_security_accepted':False}).decode(),end='')
+ used=set()
+ for name,package,arch,version in expected:
+  matches=[identity for identity in observed if identity[0]==package and(arch is None or identity[1]==arch)]
+  need(len(matches)==1,'dependency_status_missing_or_ambiguous');identity=matches[0];need(identity not in used,'dependency_expected_duplicate_identity');used.add(identity)
+  # Preserve only the two existing separately approved ACL-input exceptions.
+  # All other versions, Epoch and BinNMU suffixes remain exact and unchanged.
+  if package not in{'libacl1','libacl1-dev'}:need(observed[identity]==version,'exact_dependency_version')
+ need(used==set(observed),'dependency_status_extra_inventory');return{package+':'+arch:version for(package,arch),version in observed.items()}
 
 def manifest_script(H):
  expected='limits='+repr(H.OUTPUTS);need(H.MANIFEST.count(expected)==1,'actual_manifest_API');limits={leaf:BODY_MAX for leaf in GENERATED.values()};limits['configure-recovery.json']=RECEIPT_MAX

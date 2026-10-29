@@ -175,4 +175,46 @@ class Tests(unittest.TestCase):
   with patch.object(os,'open',side_effect=AssertionError('NO_WRITER')),self.assertRaisesRegex(RuntimeError,'controller_public_bytes_pin'):M.stage_controller_bytes(raw,pin,destination)
   self.assertFalse(destination.exists());actual=DRIVER.read_bytes();actual_pin=(len(actual),sha256(actual).hexdigest())
   with patch.object(M,'CONTROLLER_ARGV_MAX',32),self.assertRaisesRegex(RuntimeError,'controller_public_argv_bound'):M.controller_copy_code(actual,actual_pin)
+ def test_actual_complete_buildinfo_dependency_set_uses_separate_package_arch_fields(self):
+  deps=M.installed_dependencies(base64.b64decode(M.BUILDINFO));calls=[];records=[]
+  for name,version in deps:
+   package=name.split(':')[0];actual='2.3.2-2'if package in{'libacl1','libacl1-dev'}else version;arch='all'if package in{'autoconf','automake','debconf','debian-keyring'}else'amd64';records.append((package,arch,actual))
+  wire=''.join('\t'.join(row)+'\n'for row in records).encode();out=io.StringIO()
+  def metadata(argv):calls.append(argv);return wire
+  with contextlib.redirect_stdout(out):observed=M.check_dependencies(SimpleNamespace(metadata=metadata),deps)
+  self.assertEqual(len(observed),174);self.assertEqual(calls,[['/usr/bin/dpkg-query','-W','-f=${Package}\t${Architecture}\t${Version}\n',*[name for name,version in deps]]]);receipt=json.loads(out.getvalue());self.assertEqual(len(receipt['records']),174);self.assertIs(receipt['strict_comparison_pending'],True);self.assertIs(receipt['global_security_accepted'],False);self.assertEqual(observed['libacl1:amd64'],'2.3.2-2')
+ def test_explicit_dependency_architecture_qualification_is_preserved_exactly(self):
+  deps=[('libc6:amd64','2.41-12+deb13u4'),('debconf:all','1.5.91')];wire=b'libc6\tamd64\t2.41-12+deb13u4\ndebconf\tall\t1.5.91\n';calls=[]
+  def metadata(argv):calls.append(argv);return wire
+  with contextlib.redirect_stdout(io.StringIO()):result=M.check_dependencies(SimpleNamespace(metadata=metadata),deps)
+  self.assertEqual(calls[0][-2:],['libc6:amd64','debconf:all']);self.assertEqual(result,{'libc6:amd64':'2.41-12+deb13u4','debconf:all':'1.5.91'})
+  with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(RuntimeError,'dependency_status_missing_or_ambiguous'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire.replace(b'libc6\tamd64',b'libc6\tall')),deps)
+ def test_duplicate_ambiguous_missing_or_extra_dependency_rows_are_refused(self):
+  deps=[('libc6','2.41-12+deb13u4'),('debconf','1.5.91')];a=b'libc6\tamd64\t2.41-12+deb13u4\n';b=b'debconf\tall\t1.5.91\n'
+  for wire in (a+a,a+b+b'other\tamd64\t1.0\n',a,a+b'libc6\tall\t2.41-12+deb13u4\n',a+b'other\tall\t1.5.91\n'):
+   with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(RuntimeError,'dependency_status_'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire),deps)
+ def test_foreign_arch_or_binary_qualified_package_field_never_normalized(self):
+  deps=[('libc6','2.41-12+deb13u4')]
+  for wire in (b'libc6\ti386\t2.41-12+deb13u4\n',b'libc6\tarm64\t2.41-12+deb13u4\n',b'libc6:amd64\tamd64\t2.41-12+deb13u4\n'):
+   with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(RuntimeError,'dependency_status_identity'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire),deps)
+  for name in ('libc6:i386','libc6:any','libc6:native'):
+   with patch.object(M,'encode',side_effect=AssertionError('NO_QUERY_OR_INVENTORY')),self.assertRaisesRegex(RuntimeError,'dependency_expected_architecture'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:(_ for _ in()).throw(AssertionError('NO_QUERY'))),[(name,'2.41-12+deb13u4')])
+ def test_epoch_and_binNMU_dependency_version_drift_remain_strict_and_observable(self):
+  expected='1:2.4-3+b2'
+  for actual in ('2.4-3+b2','1:2.4-3+b3','1:2.4-3'):
+   out=io.StringIO();wire=('ordinary-library\tamd64\t'+actual+'\n').encode()
+   with contextlib.redirect_stdout(out),self.assertRaisesRegex(RuntimeError,'exact_dependency_version'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire),[('ordinary-library',expected)])
+   receipt=json.loads(out.getvalue());self.assertEqual(receipt['records'],[{'package':'ordinary-library','architecture':'amd64','version':actual}]);self.assertIs(receipt['strict_comparison_pending'],True)
+ def test_duplicate_expected_package_or_alias_identity_refuses_without_reuse(self):
+  row=('libc6','2.41-12+deb13u4')
+  with self.assertRaisesRegex(RuntimeError,'dependency_expected_identity'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:(_ for _ in()).throw(AssertionError('NO_QUERY'))),[row,row])
+  wire=b'libc6\tamd64\t2.41-12+deb13u4\n'
+  with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(RuntimeError,'dependency_expected_duplicate_identity'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire),[row,('libc6:amd64',row[1])])
+ def test_dependency_wire_field_count_and_bytes_type_are_exact(self):
+  for wire in (b'libc6:amd64\t2.41-12+deb13u4\n',b'libc6\tamd64\t2.41-12+deb13u4\textra\n',False):
+   with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(RuntimeError,'dependency_(status_fields|metadata_type)'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire),[('libc6','2.41-12+deb13u4')])
+ def test_only_named_existing_ACL_input_exceptions_can_differ(self):
+  deps=[('libacl1','2.4.0-1~trixie+gold1'),('libacl1-dev','2.4.0-1~trixie+gold1'),('libattr1','1:2.5.2-3')];wire=b'libacl1\tamd64\t2.3.2-2\nlibacl1-dev\tamd64\t2.3.2-2\nlibattr1\tamd64\t1:2.5.2-3\n'
+  with contextlib.redirect_stdout(io.StringIO()):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire),deps)
+  with contextlib.redirect_stdout(io.StringIO()),self.assertRaisesRegex(RuntimeError,'exact_dependency_version'):M.check_dependencies(SimpleNamespace(metadata=lambda argv:wire.replace(b'1:2.5.2-3',b'1:2.5.2-4')),deps)
 if __name__=='__main__':unittest.main(verbosity=2)
