@@ -36,3 +36,8 @@ For source/collector APIs and FD/pipe custody also load `security-io-custody.md`
 - systemd can remove a stopped timer from its oneshot's After and TriggeredBy.
   Admit only that measured pair through the same context's completed-stop receipt;
   preserve the original policy and every unrelated dependency.
+- Systemd Before/After are ordering edges, not activation or proof a target
+  cannot write. Record every edge; explicit `order-only` applies only to those
+  properties. Keep Requires/Triggers, metadata CAS, writer/HOST census and stop
+  ownership strict. Never add unrelated host services to business stop actions
+  merely to close an ordering graph.
