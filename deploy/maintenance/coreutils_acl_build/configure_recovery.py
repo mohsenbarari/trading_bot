@@ -240,10 +240,51 @@ def admit_public_base(cli,H):
  need(type(refs)is list and all(type(v)is str for v in refs)and any(v in expected for v in refs),'base_digest')
  return raw
 
+CONTROLLER_TARGET=Path('/build/recovery-controller.py')
+CONTROLLER_BYTES_MAX=65536
+CONTROLLER_ARGV_MAX=116*1024
+
+def public_controller_pin(raw,pin):
+ need(type(raw)is bytes and type(pin)is tuple and len(pin)==2 and type(pin[0])is int and 0<pin[0]<=CONTROLLER_BYTES_MAX and type(pin[1])is str and re.fullmatch('[a-f0-9]{64}',pin[1])and(len(raw),sha256(raw).hexdigest())==pin,'controller_public_bytes_pin')
+
+def stage_controller_bytes(raw,pin,destination):
+ """Known public bytes to an exclusive fresh Root0644 leaf; never normalize CP."""
+ need(os.getuid()==os.geteuid()==os.getgid()==os.getegid()==0,'controller_copy_Root')
+ public_controller_pin(raw,pin);s=State();observed=None
+ try:observed=fixed_write(s,destination,raw,0o644,maximum=CONTROLLER_BYTES_MAX)
+ except BaseException as error:s.note(error)
+ finish(s)
+ for row in s.rows:
+  try:os.fstat(row.original_fd)
+  except OSError as error:
+   if error.errno!=errno.EBADF:raise
+  else:raise RuntimeError('controller_copy_original_close_unknown')
+ s.check();before=frame(destination.lstat());need(before[2:7]==(0o100644,0,0,1,pin[0])and all(row.before==before for row in s.rows),'controller_copy_named_metadata')
+ return{'schema':'known_public_controller_copy/1','path':str(destination),'bytes':pin[0],'sha256':pin[1],'identity':list(before),'Root_writer_and_reader_original_EBADF':True,'rows':len(s.rows),'global_security_accepted':False}
+
+def controller_copy_code(raw,pin):
+ public_controller_pin(raw,pin)
+ # Only already-admitted PUBLIC source bytes cross this explicit bounded argv.
+ # The standard-library bootstrap hashes them before compiling non-main code.
+ script=("from pathlib import Path\nfrom hashlib import sha256\nfrom types import ModuleType\nimport base64,json\n"
+  +"raw=base64.b64decode("+repr(base64.b64encode(raw).decode('ascii'))+",validate=True)\n"
+  +"pin="+repr(pin)+"\n"
+  +"if not (0<len(raw)<=65536 and (len(raw),sha256(raw).hexdigest())==pin):raise RuntimeError('controller_bootstrap_public_pin')\n"
+  +"destination=Path('/build/recovery-controller.py')\n"
+  +"module=ModuleType('known_public_controller_capsule');module.__file__=str(destination)\n"
+  +"exec(compile(raw,'<known public controller bytes>','exec'),module.__dict__)\n"
+  +"print(json.dumps(module.stage_controller_bytes(raw,pin,destination),sort_keys=True))\n")
+ need(len(script.encode())<=CONTROLLER_ARGV_MAX,'controller_public_argv_bound');return script
+
+def validate_controller_copy(value,pin,destination=CONTROLLER_TARGET):
+ keys={'schema','path','bytes','sha256','identity','Root_writer_and_reader_original_EBADF','rows','global_security_accepted'}
+ need(type(value)is dict and set(value)==keys and value['schema']=='known_public_controller_copy/1'and value['path']==str(destination)and type(value['bytes'])is int and value['bytes']==pin[0]and type(value['sha256'])is str and value['sha256']==pin[1]and value['Root_writer_and_reader_original_EBADF']is True and type(value['rows'])is int and value['rows']==2 and value['global_security_accepted']is False,'controller_copy_receipt')
+ identity=value['identity'];need(type(identity)is list and len(identity)==9 and all(type(v)is int for v in identity)and identity[2:7]==[0o100644,0,0,1,pin[0]],'controller_copy_typed_Root_metadata');return value
+
 def execute(args):
  s=State();H=None;cid=None;workspace=None;workspace_binding=None;result=None;nonce=None;offline=False;env=None;stopped=False;create_requested=False
  try:
-  need(args.confirm==CONFIRM,'explicit_recovery_confirmation');repo=Path(args.repo).absolute();own=repo/'deploy/maintenance/coreutils_acl_build/configure_recovery.py';need(Path(__file__).absolute()==own,'controller_path');Loan(s,own,(own.stat().st_size,args.controller_sha256),owners=(1001,));H=load(s,own.with_name('build_hosted.py'),HOST_PIN);load(s,own.with_name('sourcebuild.py'),SOURCE_PIN)
+  need(args.confirm==CONFIRM,'explicit_recovery_confirmation');repo=Path(args.repo).absolute();own=repo/'deploy/maintenance/coreutils_acl_build/configure_recovery.py';need(Path(__file__).absolute()==own,'controller_path');controller=Loan(s,own,(own.stat().st_size,args.controller_sha256),owners=(1001,));H=load(s,own.with_name('build_hosted.py'),HOST_PIN);load(s,own.with_name('sourcebuild.py'),SOURCE_PIN)
   oldargs=SimpleNamespace(repo=str(repo),root=args.root,commit=args.commit,source_sha256=HOST_PIN[1],confirm=H.CONFIRM);repo,root,run_id,attempt=H.hosted_layout(oldargs,os.environ);facts=H.host_facts(root.parent);rootfs=os.statvfs('/');need(rootfs.f_bavail*rootfs.f_frsize>=H.RESERVE+H.DISK_GROWTH,'hosted_docker_disk_capacity');initial={str(root.parent):facts['free_bytes'],'/':rootfs.f_bavail*rootfs.f_frsize};docker_root_frame=None;root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o700);(context/'inputs').mkdir(mode=0o700);logs=root/'reports';logs.mkdir(mode=0o700);output=root/'configure-output';output.mkdir(mode=0o700)
   env={'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','HOME':str(root),'LC_ALL':'C.UTF-8','DOCKER_CONFIG':str(root/'docker-config'),'GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1'};Path(env['DOCKER_CONFIG']).mkdir(mode=0o700)
   def guard():
@@ -269,7 +310,7 @@ def execute(args):
   docker_root=Path(cli(['info','--format','{{.DockerRootDir}}']).decode().strip());need(docker_root==H.DOCKER_ROOT and docker_root.resolve(strict=True)==docker_root and docker_root.lstat().st_dev==Path('/').lstat().st_dev,'docker_root');docker_root_frame=frame(docker_root.lstat())[:5];need(stat.S_ISDIR(docker_root_frame[2])and docker_root_frame[3:5]==(0,0)and not docker_root_frame[2]&0o022,'docker_root_metadata');guard()
   pull_log=admit_public_base(cli,H);fixed_write(s,logs/'pull-base.log',pull_log,0o600,maximum=OUTPUT_MAX)
   create_requested=True
-  cid=command(H.create_argv(nonce,context,workspace.path),maximum=128).decode().strip();need(re.fullmatch('[a-f0-9]{64}',cid),'container_id');cli(['container','start',cid]);inspect();copies=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.stage_code(context,False)]));H.validate_copies(copies);observation=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.WORKSPACE_OBSERVATION]));mount_identity=H.validate_workspace_observation(observation,workspace);fixed_write(s,logs/'native-workspace-mount.json',encode(mount_identity),0o600);cli(['container','cp',str(own),cid+':/build/recovery-controller.py'])
+  cid=command(H.create_argv(nonce,context,workspace.path),maximum=128).decode().strip();need(re.fullmatch('[a-f0-9]{64}',cid),'container_id');cli(['container','start',cid]);inspect();copies=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.stage_code(context,False)]));H.validate_copies(copies);observation=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.WORKSPACE_OBSERVATION]));mount_identity=H.validate_workspace_observation(observation,workspace);fixed_write(s,logs/'native-workspace-mount.json',encode(mount_identity),0o600);controller_pin=(controller.before[6],args.controller_sha256);controller_observation=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',controller_copy_code(controller.read(),controller_pin)]));validate_controller_copy(controller_observation,controller_pin);fixed_write(s,logs/'controller-copy.json',encode(controller_observation),0o600)
   for phase in('prepare','configure'):
    if phase=='configure':cli(['network','disconnect','bridge',cid]);offline=True;inspect()
    raw=cli(['container','exec','--workdir','/build',cid,'/usr/local/bin/python3','-I','-S','-B','/build/recovery-controller.py','--inner-phase',phase,'--controller-sha256',args.controller_sha256],maximum=16*1024**2,seconds=1500);fixed_write(s,logs/(phase+'.log'),raw,0o600,maximum=OUTPUT_MAX)

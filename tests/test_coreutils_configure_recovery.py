@@ -141,4 +141,38 @@ class Tests(unittest.TestCase):
   tree=ast.parse(DRIVER.read_text());execute=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='execute');calls=[n for n in ast.walk(execute)if isinstance(n,ast.Call)]
   pull=next(n for n in calls if isinstance(n.func,ast.Name)and n.func.id=='admit_public_base');create=next(n for n in calls if isinstance(n.func,ast.Attribute)and n.func.attr=='create_argv');self.assertLess(pull.lineno,create.lineno)
   self.assertTrue(any(isinstance(n.func,ast.Attribute)and n.func.attr=='validate_workspace_observation'for n in calls));self.assertTrue(any(isinstance(n,ast.Constant)and n.value=='hosted_disk_reserve'for n in ast.walk(execute)))
+ def test_actual_known_public_capsule_stage_exec_and_typed_copy_receipt(self):
+  raw=DRIVER.read_bytes();pin=(len(raw),sha256(raw).hexdigest());script=M.controller_copy_code(raw,pin);self.assertLessEqual(len(script.encode()),116*1024);self.assertEqual(script.count("destination=Path('/build/recovery-controller.py')"),1)
+  destination=self.root/'fresh-controller.py'
+  # Only this private wire-fixture destination differs; exact source payload and
+  # actual bootstrap/known-byte writer/readback/close code execute unchanged.
+  owned=script.replace("destination=Path('/build/recovery-controller.py')",'destination=Path('+repr(str(destination))+')',1)
+  with contextlib.redirect_stdout(io.StringIO())as output:exec(compile(owned,'<owned public controller wire>','exec'),{})
+  report=json.loads(output.getvalue());self.assertEqual(destination.read_bytes(),raw);self.assertEqual(destination.stat().st_mode,0o100644);self.assertEqual((destination.stat().st_uid,destination.stat().st_gid),(0,0));self.assertIs(M.validate_controller_copy(report,pin,destination),report);self.assertTrue(report['Root_writer_and_reader_original_EBADF']);self.assertEqual(report['rows'],2)
+ def test_capsule_wrong_pin_refuses_before_compile_or_new_output(self):
+  raw=DRIVER.read_bytes();pin=(len(raw),sha256(raw).hexdigest());destination=self.root/'never-created'
+  with self.assertRaisesRegex(RuntimeError,'controller_public_bytes_pin'):M.stage_controller_bytes(raw,(pin[0],'0'*64),destination)
+  script=M.controller_copy_code(raw,pin).replace('pin='+repr(pin),'pin='+repr((pin[0],'0'*64)),1);script=script.replace("destination=Path('/build/recovery-controller.py')",'destination=Path('+repr(str(destination))+')',1)
+  with patch('types.ModuleType',side_effect=AssertionError('NO_UNADMITTED_SOURCE_COMPILE')),self.assertRaisesRegex(RuntimeError,'controller_bootstrap_public_pin'):exec(compile(script,'<owned wrong pin wire>','exec'),{})
+  self.assertFalse(destination.exists())
+ def test_capsule_preexisting_leaf_or_alias_never_adopted_or_normalized(self):
+  raw=DRIVER.read_bytes();pin=(len(raw),sha256(raw).hexdigest());existing=self.root/'existing-controller';existing.write_bytes(b'OWNED existing bytes');existing.chmod(0o600);before=existing.stat();alias=self.root/'controller-alias';alias.symlink_to(existing.name)
+  for destination in (existing,alias):
+   with patch.object(os,'pread',side_effect=AssertionError('NO_EXISTING_PAYLOAD_READ')),self.assertRaises(M.Held):M.stage_controller_bytes(raw,pin,destination)
+  self.assertEqual(existing.read_bytes(),b'OWNED existing bytes');self.assertEqual(M.frame(existing.stat()),M.frame(before));self.assertTrue(alias.is_symlink())
+ def test_capsule_copy_receipt_refuses_wrong_owner_mode_hash_or_false_close(self):
+  raw=DRIVER.read_bytes();pin=(len(raw),sha256(raw).hexdigest());destination=self.root/'copy-receipt';report=M.stage_controller_bytes(raw,pin,destination);M.validate_controller_copy(report,pin,destination)
+  variants=[]
+  for index,value in ((2,0o100600),(3,1001),(4,1001),(5,2),(6,pin[0]+1)):
+   bad={**report,'identity':list(report['identity'])};bad['identity'][index]=value;variants.append(bad)
+  variants.extend([{**report,'sha256':'0'*64},{**report,'Root_writer_and_reader_original_EBADF':False},{**report,'rows':True},{**report,'path':'/other-controller'}])
+  for bad in variants:
+   with self.assertRaisesRegex(RuntimeError,'controller_copy_'):M.validate_controller_copy(bad,pin,destination)
+ def test_actual_controller_copy_gate_precedes_first_inner_phase(self):
+  tree=ast.parse(DRIVER.read_bytes());execute=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='execute');gate=next(n for n in ast.walk(execute)if isinstance(n,ast.Call)and isinstance(n.func,ast.Name)and n.func.id=='validate_controller_copy');phases=next(n for n in ast.walk(execute)if isinstance(n,ast.For)and isinstance(n.target,ast.Name)and n.target.id=='phase');self.assertLess(gate.lineno,phases.lineno);text=DRIVER.read_text();self.assertNotIn("cli(['container','cp',str(own)",text);self.assertIn('controller_copy_code(controller.read(),controller_pin)',text)
+ def test_capsule_byte_and_argv_limits_refuse_before_writer(self):
+  raw=b'X'*(M.CONTROLLER_BYTES_MAX+1);pin=(len(raw),sha256(raw).hexdigest());destination=self.root/'oversized'
+  with patch.object(os,'open',side_effect=AssertionError('NO_WRITER')),self.assertRaisesRegex(RuntimeError,'controller_public_bytes_pin'):M.stage_controller_bytes(raw,pin,destination)
+  self.assertFalse(destination.exists());actual=DRIVER.read_bytes();actual_pin=(len(actual),sha256(actual).hexdigest())
+  with patch.object(M,'CONTROLLER_ARGV_MAX',32),self.assertRaisesRegex(RuntimeError,'controller_public_argv_bound'):M.controller_copy_code(actual,actual_pin)
 if __name__=='__main__':unittest.main(verbosity=2)

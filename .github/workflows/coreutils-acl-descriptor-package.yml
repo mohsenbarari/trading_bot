@@ -60,7 +60,7 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_acl_build/configure_recovery.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/coreutils-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --controller-sha256 e4591dd07aee6015258f60e89a16d8652d0c70c7d625158f544e8b94024ab8fe \
+            --controller-sha256 995c79eb38ec71ef2b846aa5024b620697b10112fcd41e606fd8e25a4cafff49 \
             --execute-configure-only \
             --confirm ROOT-COREUTILS-CONFIGURE-ONLY-EXACT-HEADER-20261029-01
 
@@ -121,3 +121,5 @@ jobs:
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/configure-output/*
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.log
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/failure.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/controller-copy.json
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/native-workspace-mount.json
