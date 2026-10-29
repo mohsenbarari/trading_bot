@@ -1,9 +1,8 @@
 # Security I/O and custody
 
-- QA: preflight schemas/APIs/returns/counts/modes/fixtures/bounds/DAG; retain assertions/limits/siblings; report gaps. Bound B.run logs beforehand. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes before admission; never retouch inputs/receipts. Profilers compare precomputed filenames/code; no pathlib/I/O per call.
-- Readers/modes are typed: Root source0644, UID10001 extracted build sources,
-  private controls0600. Preserve original owners/modes; new boundaries need
-  genuine UID/GID tests.
+- QA: preflight schemas/APIs/returns/counts/modes/fixtures/bounds/DAG; retain assertions/limits/siblings. Survey all roles before exceptions. Bound B.run logs beforehand. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes before admission; never retouch inputs/receipts. Profilers compare precomputed filenames/code; no pathlib/I/O per call.
+- Typed modes: Root sources0644, receipts0600/0644, UID10001 build sources,
+  private controls0600. Preserve original owners/modes; test real UID/GID.
 - Keep small bounded responses in RAM until collectors close; log immutable
   known bytes afterward. Streaming files require original-writer full9 and
   byte/hash admission before selector/pipe closes, with a retained reader
