@@ -35,6 +35,9 @@ jobs:
           APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/test_io.py
           APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/test_metadata_pass.py
           APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/test_export_gold2.py
+          APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/test_inventory_wiring.py
+          APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B -m unittest discover -s deploy/maintenance/app_gold2_smoke -p test_window.py -v
+          APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B -m unittest discover -s deploy/maintenance/app_gold2_smoke -p test02_failure_ownership.py -v
 
       - name: Seal current source and run exact gold2 disposable proofs
         id: run
@@ -44,7 +47,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/seal_and_run.py \
             --root "$RUNNER_TEMP/security-app-ci-smoke-gold2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 26f68de41c9baf0bd2a4b479a7eb77d50933c2ce1240a316a433591f4e6e184e \
+            --source-sha256 06e59f02741c14c854c9d32391fdbe03ff69128c295c62286d6aca2c85ae18d8 \
             --execute-reviewed-gold2-proof
 
       - name: Preserve complete inventory, raw evidence, actual assertions and finalizers

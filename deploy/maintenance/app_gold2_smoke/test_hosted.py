@@ -53,7 +53,7 @@ class Owned(unittest.TestCase):
         for name in ('controller.py','intake.json','source-manifest.json'):
             raw=(HERE/name).read_bytes()
             self.assertEqual(S.SOURCES[name],(len(raw),sha256(raw).hexdigest()))
-        self.assertEqual(len(S.SOURCES),19)
+        self.assertEqual(len(S.SOURCES),20)
         raw=(HERE/'export_controller_gold2.py').read_bytes()
         self.assertEqual(S.SOURCES['export_controller_gold2.py'],(len(raw),sha256(raw).hexdigest()))
         self.assertEqual(Q.GOLD2_EXPORT_PIN,S.SOURCES['export_controller_gold2.py'])
@@ -166,10 +166,13 @@ class Owned(unittest.TestCase):
             with self.subTest(field=key),self.assertRaises(RuntimeError):P.validate_result(changed,image,OLD)
         self.assertEqual(OLD.CAPSULE,old);self.assertFalse(P.ARMED);self.assertIsNone(P.CONTROL)
 
-    def test_actual_source_call_graph_and_never_started_wire(self):
+    def test_source20_forwarding_call_graph_and_never_started_wire(self):
         tree=ast.parse((HERE/'controller.py').read_bytes());execute=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='execute')
         calls=[n.func.attr for n in ast.walk(execute)if isinstance(n,ast.Call)and isinstance(n.func,ast.Attribute)]
-        self.assertIn('admit_app',calls);self.assertIn('whole_image_inventory',calls);self.assertIn('run_smoke',calls)
+        self.assertIn('admit_app',calls);self.assertIn('run_smoke',calls)
+        self.assertIn('inventory_attempt',[n.func.id for n in ast.walk(execute)if isinstance(n,ast.Call)and isinstance(n.func,ast.Name)])
+        attempt=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='inventory_attempt')
+        self.assertIn('whole_image_inventory',[n.func.attr for n in ast.walk(attempt)if isinstance(n,ast.Call)and isinstance(n.func,ast.Attribute)])
         self.assertNotIn('execute',calls);self.assertNotIn('native_payload',calls)
         self.assertEqual(P.CONTROL,None)
         args=E.create_args(OLD,'OWNED_PROTOCOL_ONLY',INTAKE['control']['image_id'])

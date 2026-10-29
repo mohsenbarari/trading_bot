@@ -10,6 +10,7 @@ from types import ModuleType
 import argparse,errno,fcntl,json,os,re,stat,time
 CONFIRM='RUN-ONLY-GOLD2-2389-FLAT-INVENTORY-AND-UNCHANGED32-20261029-04'
 GOLD2_EXPORT_PIN=(27863, '5480efd9fb0a5443e19262323821f917c57e2168f4aec6151bc44c27ecae95ad')
+GOLD2_INVENTORY_PIN=(33083, '04a58e38792d9c5e11ac3ee37db593b6a624b059f0378d0ff2bf6aa560dff005')
 PHASE='unarmed'
 LAST_FAILURE_RECORD=None
 PINS={'admit_security_component_image_reuse.py': (27518, '9adddae3d6966443f33040f54a57ce597a1816af918e8c606557801d27bf4025'), 'archive_inventory.py': (16581, '05780cb0566e7e9c77395eaef84c039190fa610befc46437ea1daf5204bddd23'), 'compose_app_mountpoint_image.py': (49042, '14849bd8c616b27ade1c8488b8e6f276b369480456d0acc1a8c8eb4284f40226'), 'compose_market_security_os_candidate.py': (52231, 'c53cfd7ae4570314ef7f13d43ecd73de26436cf56407676ac2fe24d19dc1caa9'), 'compose_security_os_candidate.py': (60894, '4156ad042885bc7104c5a9ce537193adf2211ade8447e77676ad29d520e7633d'), 'datastore_candidate_contract.py': (38383, '253f234f2ba68dea6929e16128d8dcb48021cda7bf71ffd004ecb8e709c575ee'), 'export_controller.py': (15009, '965c335b56b852ccb9d1aa512e0d19fb91d0198a431c0e685aaa8c4c037f380e'), 'inventory.py': (27509, 'e8171fb6d28a5b3e938e0136dab230c13a9e864f66aad4c2727878e22a3ea73f'), 'prepare_canonical_app_image.py': (33828, '403e95c4f59a4f22c6154f5ebddfd8d6f77b1b3a9c84fff4f7ab84a10ae698f3'), 'producer02_controller.py': (57553, '9de2b86dedbb773351b042bcd3177ebb41a88272cfd76e13f24de5ece6d49a25'), 'run_app_image_ci_smoke.py': (68163, 'b2c958060d176c0098b86a44d0dc225d4494023120b3253239bef9e2f3f2acb2'), 'runtime_image_archive_transport.py': (35148, '20c4b90f1c719d4cdee69df8ad1c31c2bcd663b99619b1d58dcbafa1eafecad2'), 'test_security_form_parser.py': (3910, 'de0090351837742ba6b0be747f0b586d4943590831215a4b4ea2619ebd5149fb'), 'test_stage6_otp_delivery_redis.py': (25543, 'b1e59ad7285a3c1f034aa269e024e091fe331cbdb446ac5e82f85de64530bd50'), 'test_telegram_otp_ephemeral_queue_redis.py': (8024, 'cbe02df0618239e4affa1f8e51b2e69cdfe13f332a44d46e8b4626b21d80e22e')}
@@ -136,8 +137,8 @@ class ObservationSources:
 
 EVIDENCE_NAMES=frozenset(('source-identity.json','input-manifest.json','image-build.json','prepare.json','finalize.json','reports/vulnerabilities.json','reports/sbom.cdx.json','reports/docker-build-output.json'))
 MAX_JSON=2*1024**2
-PUBLIC_CLASSES=frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError','PermissionError','TimeoutError','ValueError','TypeError','KeyError','JSONDecodeError','BootstrapFailure','ExportIOFailure'))
-CODES=frozenset(('bootstrap_io_finality','bootstrap_flags_or_source','bootstrap_close_unknown','explicit_action','outer_keeper_required','source_pin','source_manifest','intake_shape','evidence_shape','evidence_identity','evidence_signature','evidence_reports','inventory_receipt','inventory_cardinality_changed','source_identity','hosted_ci_only','owned_cleanup_unproven','unexpected_failure','inner_source_callback_bound','inner_clock'))
+PUBLIC_CLASSES=frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError','PermissionError','TimeoutError','ValueError','TypeError','KeyError','JSONDecodeError','BootstrapFailure','ExportIOFailure','ArchiveIOFailure','InventoryAttemptFailure'))
+CODES=frozenset(('bootstrap_io_finality','bootstrap_flags_or_source','bootstrap_close_unknown','explicit_action','outer_keeper_required','source_pin','source_manifest','intake_shape','evidence_shape','evidence_identity','evidence_signature','evidence_reports','inventory_receipt','inventory_cardinality_changed','source_identity','hosted_ci_only','owned_cleanup_unproven','unexpected_failure','inner_source_callback_bound','inner_clock','inventory_attempt_finality','inventory_attempt_identity','inventory_observation_identity','inventory_observation_bound'))
 
 def same(a,b):
  if type(a)is not type(b):return False
@@ -178,6 +179,91 @@ def inventory_gate(value,image,intake):
  need(len(rows)==intake['expected_elf_paths'],'inventory_cardinality_changed')
  return value
 
+class InventoryAttemptFailure(RuntimeError):
+ def __init__(self,errors,record=None,artifact_written=False,artifact_publication_complete=False):
+  super().__init__('inventory_attempt_finality');self.errors=tuple(errors);self.record=record;self.artifact_written=artifact_written;self.artifact_publication_complete=artifact_publication_complete
+
+def inventory_causes(error,old,ctx):
+ # Only the exact admitted aggregate types are traversed, with public closed
+ # rows for every actual leaf. Exception text and unknown operands stay private.
+ kinds=[InventoryAttemptFailure,BootstrapFailure]
+ for module in (()if ctx is None else ctx.modules.values()):
+  for name in('ArchiveIOFailure','ExportIOFailure'):
+   kind=getattr(module,name,None)
+   if type(kind)is type:kinds.append(kind)
+ pending=[error];rows=[];count=0
+ while pending:
+  item=pending.pop();count+=1;need(count<=8192,'inventory_observation_bound')
+  if type(item)in kinds:pending.extend(reversed(item.errors))
+  else:rows.append(closed_error(item,allowed_codes(old,ctx)))
+ return rows
+
+def inventory_guarded(ctx,function):
+ errors=[];value=None
+ try:ctx.check();value=function()
+ except BaseException as error:errors.append(error)
+ finally:
+  try:ctx.check()
+  except BaseException as error:errors.append(error)
+ if errors:
+  if len(errors)==1:raise errors[0]
+  raise InventoryAttemptFailure(errors)from errors[0]
+ return value
+
+def inventory_attempt(ctx,old,E,A,I,image,control,sbom):
+ # This one-shot synchronous bridge observes only the fixed E05 -> A02 call.
+ # It grants no parser, file, cleanup or completion authority of its own.
+ before=A.ATTEMPT_SEQUENCE;original_collect=A.collect;original_public=A.public_failure
+ need(type(before)is int and before>=0,'inventory_attempt_identity')
+ calls=0;entered=False;binding=None;collection_error=None;errors=[];value=None;observation=None;written=False
+ def collect(parser,transport,stream,size,**kwargs):
+  nonlocal calls,entered,binding,collection_error
+  calls+=1
+  def actual():
+   nonlocal entered,binding,collection_error
+   need(calls==1 and A.ATTEMPT_SEQUENCE==before and A.collect is original_collect and A.public_failure is original_public
+    and parser is I and transport is ctx.T and type(size)is int and 0<size<=E.MAX_EXPORT
+    and kwargs.get('image_id')==image and kwargs.get('source_commit')==control['source_commit']
+    and kwargs.get('sbom_sha256')==control['sbom_sha256']and kwargs.get('verifier_sha256')==GOLD2_INVENTORY_PIN[1]
+    and type(kwargs.get('export_sha256'))is str and re.fullmatch('[a-f0-9]{64}',kwargs['export_sha256']),'inventory_attempt_identity')
+   binding={'ordinal':before+1,'image_id':image,'source_commit':control['source_commit'],'verifier_sha256':GOLD2_INVENTORY_PIN[1],'export_sha256':kwargs['export_sha256']}
+   entered=True
+   try:return original_collect(parser,transport,stream,size,**kwargs)
+   except BaseException as error:collection_error=error;raise
+  return inventory_guarded(ctx,actual)
+ bridge=ModuleType('_gold2_current_attempt_only');bridge.collect=collect
+ try:value=inventory_guarded(ctx,lambda:E.whole_image_inventory(ctx,old,image,control,sbom,I=I,T=ctx.T,A=bridge,adapter_sha256=GOLD2_INVENTORY_PIN[1]))
+ except BaseException as error:errors.append(error)
+ after=A.ATTEMPT_SEQUENCE
+ try:
+  ctx.check();need(A.collect is original_collect and A.public_failure is original_public,'inventory_attempt_identity')
+  if entered:
+   candidate=A.LAST_OBSERVATION
+   need(after==before+1 and type(candidate)is dict and candidate.get('attempt')==binding,'inventory_observation_identity')
+   if value is not None:need(value.get('image_id')==image and value.get('source_commit')==control['source_commit']and value.get('verifier_sha256')==binding['verifier_sha256']and value.get('export_sha256')==binding['export_sha256'],'inventory_observation_identity')
+   raw=encoded(candidate);need(len(raw)<=1024**2,'inventory_observation_bound');observation=document(raw)
+  else:need(after==before and calls<=1 and value is None,'inventory_observation_identity')
+ except BaseException as error:errors.append(error)
+ closed_collection=None
+ if collection_error is not None:
+  try:closed_collection=original_public(collection_error)
+  except BaseException as error:errors.append(error)
+ record={'schema':'gold2_current_inventory_attempt/1','ordinal_before':before,'ordinal_after':after,
+  'collect_forward_calls':calls,'original_collect_entered':entered,'bound_current_operands':binding,
+  'current_observation':observation,'previous_observation_reused':False,'collection_failure':closed_collection,
+  'call_failures':[row for error in errors for row in inventory_causes(error,old,ctx)],
+  'security_accepted':False,'whole_image_proof':False,'artifact_finality':'conditional_on_actual_publication_and_outer_finalizers'}
+ def publish():
+  nonlocal written
+  ctx.write(ctx.root/'reports/archive-inventory-attempt.json',record);written=True
+ publication_complete=False
+ try:
+  need(len(encoded(record))<=1024**2,'inventory_observation_bound')
+  inventory_guarded(ctx,publish);publication_complete=True
+ except BaseException as error:errors.append(error)
+ if errors:raise InventoryAttemptFailure(errors,record,written,publication_complete)from errors[0]
+ return value
+
 def execute(ctx,old,P,builder,E,A,I,intake):
  global PHASE
  control=intake['control'];PHASE='gold2_exact_public_evidence'
@@ -187,12 +273,12 @@ def execute(ctx,old,P,builder,E,A,I,intake):
   need(size==control['evidence_zip_bytes']and ctx.C.stream_digest(stream,size)==control['evidence_zip_sha256'],'evidence_identity');stream.seek(0);raws=P.read_zip(stream,EVIDENCE_NAMES)
  evidence=admit_evidence(raws,intake,builder)
  need((len(raws['reports/sbom.cdx.json']),sha256(raws['reports/sbom.cdx.json']).hexdigest())==(intake['sbom']['bytes'],intake['sbom']['sha256']),'evidence_identity')
- ctx.write(ctx.root/'reports/source-binding.json',{'schema':'gold2_same_image_source_binding/1','image_id':control['image_id'],'image_source_commit':control['source_commit'],'image_source_tree':control['source_tree'],'input_signature':control['input_signature'],'controller_commit':os.environ['GITHUB_SHA'],'image_and_controller_commits_are_distinct_operands':True,'installed_business_source':'admitted_image_only_no_app_overlay','selector_fixture_source':'sealed_exact_collector_files','product_originals':evidence,'raw_counts':control['raw_counts'],'security_accepted':False})
+ ctx.write(ctx.root/'reports/source-binding.json',{'schema':'gold2_same_image_source_binding/1','image_id':control['image_id'],'image_source_commit':control['source_commit'],'image_source_tree':control['source_tree'],'input_signature':control['input_signature'],'controller_commit':os.environ['GITHUB_SHA'],'image_and_controller_commits_are_distinct_operands':True,'installed_business_source':'admitted_image_only_no_app_overlay','selector_fixture_source':'sealed_exact_collector_files','product_originals':evidence,'inventory_adapter_source':{'name':'archive_inventory_gold2.py','bytes':GOLD2_INVENTORY_PIN[0],'sha256':GOLD2_INVENTORY_PIN[1]},'raw_counts':control['raw_counts'],'security_accepted':False})
  PHASE='gold2_physical_archive_and_daemon_admission'
  image=P.admit_app(ctx,old,control,evidence)
  need(image==control['image_id'],'source_identity')
  PHASE='gold2_never_started_export_all_regular_ELF';ctx.capacity(E.MAX_EXPORT+E.MAX_REPORT)
- value=E.whole_image_inventory(ctx,old,image,{**control,'sbom_sha256':intake['sbom']['sha256']},raws['reports/sbom.cdx.json'],I=I,T=ctx.T,A=A,adapter_sha256=PINS['archive_inventory.py'][1])
+ value=inventory_attempt(ctx,old,E,A,I,image,{**control,'sbom_sha256':intake['sbom']['sha256']},raws['reports/sbom.cdx.json'])
  inventory_gate(value,image,intake)
  PHASE='gold2_unchanged32_business_assertions'
  result=P.run_smoke(ctx,old,image,control);ctx.check()
@@ -260,8 +346,8 @@ def main(argv=None,*,outer_keeper=None,outer_check=None):
   ctx=old.Controller(args.root,sources);ctx.C.PROOF_KEEPER=outer_keeper;ctx.checks.extend((old_check,outer_keeper.check))
   if outer_check is not None:ctx.checks.append(outer_check)
   def load(name):
-   pin=GOLD2_EXPORT_PIN if name=='export_controller_gold2.py'else PINS[name];raw=source(old,args.root,sources,ctx.checks,name,pin);module=ModuleType('_gold2_'+name[:-3]);module.__file__=str(args.root/'source'/name);exec(compile(raw,module.__file__,'exec'),module.__dict__);ctx.modules[name]=module;return module
-  P=load('producer02_controller.py');builder=load('prepare_canonical_app_image.py');E=load('export_controller_gold2.py');A=load('archive_inventory.py');I=load('inventory.py')
+   pin=GOLD2_EXPORT_PIN if name=='export_controller_gold2.py'else GOLD2_INVENTORY_PIN if name=='archive_inventory_gold2.py'else PINS[name];raw=source(old,args.root,sources,ctx.checks,name,pin);module=ModuleType('_gold2_'+name[:-3]);module.__file__=str(args.root/'source'/name);exec(compile(raw,module.__file__,'exec'),module.__dict__);ctx.modules[name]=module;return module
+  P=load('producer02_controller.py');builder=load('prepare_canonical_app_image.py');E=load('export_controller_gold2.py');A=load('archive_inventory_gold2.py');I=load('inventory.py')
   intake_raw=source(old,args.root,sources,ctx.checks,'intake.json',INTAKE_PIN);manifest_raw=source(old,args.root,sources,ctx.checks,'source-manifest.json',MANIFEST_PIN)
   intake=checked_document(intake_raw,INTAKE_PIN);manifest=checked_document(manifest_raw,MANIFEST_PIN);validate_inputs(intake,manifest)
   execute(ctx,old,P,builder,E,A,I,intake)
@@ -288,7 +374,9 @@ def main(argv=None,*,outer_keeper=None,outer_check=None):
  # Physical failures take the top diagnostic position, while the original
  # cause and every closed cleanup/finalizer failure remain separately visible.
  selected=finalizers[0]if finalizers else secondary[0]if secondary else closed_error(RuntimeError('owned_cleanup_unproven'),CODES)if cleanup_errors else closed_error(primary,allowed_codes(old,ctx))
- record={'schema':'gold2_hosted_public_proof_failure/1','phase':failure_phase or PHASE,**{k:selected[k]for k in('code','exception_class','os_errno')},'primary_failure':None if primary is None else closed_error(primary,allowed_codes(old,ctx)),'cleanup_causes':cleanup_errors,'secondary_failures':secondary,'inner_finalizer_failures':finalizers,'bootstrap_io_failures':[closed_error(error,allowed_codes(old,ctx))for item in getattr(sources,'bootstrap_prefixes',())for error in item.errors],'inner_sources_physically_closed':sources is not None and sources.closed and not finalizers,'security_accepted':False}
+ inventory_failure=primary if type(primary)is InventoryAttemptFailure else None
+ primary_rows=[]if primary is None else inventory_causes(primary,old,ctx)
+ record={'schema':'gold2_hosted_public_proof_failure/1','phase':failure_phase or PHASE,**{k:selected[k]for k in('code','exception_class','os_errno')},'primary_failure':None if not primary_rows else primary_rows[0],'primary_failure_causes':primary_rows,'inventory_attempt':None if inventory_failure is None else{'artifact_written':inventory_failure.artifact_written,'artifact_publication_complete':inventory_failure.artifact_publication_complete,'record':inventory_failure.record},'cleanup_causes':cleanup_errors,'secondary_failures':secondary,'inner_finalizer_failures':finalizers,'bootstrap_io_failures':[closed_error(error,allowed_codes(old,ctx))for item in getattr(sources,'bootstrap_prefixes',())for error in item.errors],'inner_sources_physically_closed':sources is not None and sources.closed and not finalizers,'security_accepted':False}
  LAST_FAILURE_RECORD=record
  if ctx is not None:
   try:ctx.write(ctx.root/'reports/failure.json',record)

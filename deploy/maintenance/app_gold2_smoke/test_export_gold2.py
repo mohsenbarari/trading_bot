@@ -37,7 +37,7 @@ class Tests(unittest.TestCase):
         else:self.fail('owned original FD remained open')
  def output(self,f):f.output=E.ExportFile(f.C,f.keeper,f.root);return f.output
  def test_new_source_is_additive_and_historical15_exact(self):
-  rows=json.loads((HERE/'source-manifest.json').read_bytes())['files'];self.assertEqual(len(rows),15);self.assertEqual(len(Q.PINS),15);self.assertEqual(len(S.SOURCES),19)
+  rows=json.loads((HERE/'source-manifest.json').read_bytes())['files'];self.assertEqual(len(rows),15);self.assertEqual(len(Q.PINS),15);self.assertEqual(len(S.SOURCES),20)
   for row in rows:
    raw=dependency(row['name']).read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),Q.PINS[row['name']]);self.assertEqual(S.SOURCES[row['name']],Q.PINS[row['name']])
   raw=(HERE/'export_controller_gold2.py').read_bytes();self.assertEqual(Q.GOLD2_EXPORT_PIN,(len(raw),sha256(raw).hexdigest()));self.assertEqual(S.SOURCES['export_controller_gold2.py'],Q.GOLD2_EXPORT_PIN)
