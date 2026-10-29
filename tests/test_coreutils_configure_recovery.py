@@ -128,4 +128,17 @@ class Tests(unittest.TestCase):
   with patch.object(os,'open',side_effect=AssertionError('NO_FD')),self.assertRaisesRegex(RuntimeError,'original_deadline'):M.Loan(s,p,pin)
   self.assertIsNone(s.rows[0].original_fd)
   with self.assertRaises(M.Held):M.finish(s)
+ def test_actual_base_pull_progress_has_distinct_bound_and_digest_admission(self):
+  host=SimpleNamespace(BASE='python:fixed@sha256:'+'a'*64);calls=[];progress=b'ordinary public pull progress\n'*30
+  def cli(args,**kw):
+   calls.append((args,kw));return progress if args[0]=='pull'else json.dumps(['python@sha256:'+'a'*64]).encode()
+  self.assertEqual(M.admit_public_base(cli,host),progress);self.assertGreater(len(progress),128);self.assertEqual(calls[0][1],{'maximum':16*1024**2,'seconds':600});self.assertEqual(calls[1][0][:2],['image','inspect'])
+ def test_actual_base_wrong_digest_or_untyped_reference_refuses(self):
+  host=SimpleNamespace(BASE='python:fixed@sha256:'+'a'*64)
+  for refs in [['python@sha256:'+'b'*64],[],[7],{'wrong':'type'}]:
+   with self.subTest(refs=refs),self.assertRaisesRegex(RuntimeError,'base_digest'):M.admit_public_base(lambda args,**kw:b'pull\n'if args[0]=='pull'else json.dumps(refs).encode(),host)
+ def test_actual_hosted_entry_preserves_pull_before_create_and_native_mount_gate(self):
+  tree=ast.parse(DRIVER.read_text());execute=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='execute');calls=[n for n in ast.walk(execute)if isinstance(n,ast.Call)]
+  pull=next(n for n in calls if isinstance(n.func,ast.Name)and n.func.id=='admit_public_base');create=next(n for n in calls if isinstance(n.func,ast.Attribute)and n.func.attr=='create_argv');self.assertLess(pull.lineno,create.lineno)
+  self.assertTrue(any(isinstance(n.func,ast.Attribute)and n.func.attr=='validate_workspace_observation'for n in calls));self.assertTrue(any(isinstance(n,ast.Constant)and n.value=='hosted_disk_reserve'for n in ast.walk(execute)))
 if __name__=='__main__':unittest.main(verbosity=2)

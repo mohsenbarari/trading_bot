@@ -232,13 +232,28 @@ def inner(args):
  except BaseException as e:s.note(e)
  finish(s);return report
 
+def admit_public_base(cli,H):
+ # Pull progress is a separate bounded stream, never a container-ID response.
+ raw=cli(['pull',H.BASE],maximum=16*1024**2,seconds=600)
+ refs=json.loads(cli(['image','inspect','--format','{{json .RepoDigests}}',H.BASE]))
+ expected={'python@'+H.BASE.split('@')[1],'docker.io/library/python@'+H.BASE.split('@')[1]}
+ need(type(refs)is list and all(type(v)is str for v in refs)and any(v in expected for v in refs),'base_digest')
+ return raw
+
 def execute(args):
- s=State();H=None;cid=None;workspace=None;workspace_binding=None;result=None;nonce=None;offline=False;env=None;stopped=False
+ s=State();H=None;cid=None;workspace=None;workspace_binding=None;result=None;nonce=None;offline=False;env=None;stopped=False;create_requested=False
  try:
   need(args.confirm==CONFIRM,'explicit_recovery_confirmation');repo=Path(args.repo).absolute();own=repo/'deploy/maintenance/coreutils_acl_build/configure_recovery.py';need(Path(__file__).absolute()==own,'controller_path');Loan(s,own,(own.stat().st_size,args.controller_sha256),owners=(1001,));H=load(s,own.with_name('build_hosted.py'),HOST_PIN);load(s,own.with_name('sourcebuild.py'),SOURCE_PIN)
-  oldargs=SimpleNamespace(repo=str(repo),root=args.root,commit=args.commit,source_sha256=HOST_PIN[1],confirm=H.CONFIRM);repo,root,run_id,attempt=H.hosted_layout(oldargs,os.environ);H.host_facts(root.parent);root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o700);(context/'inputs').mkdir(mode=0o700);logs=root/'reports';logs.mkdir(mode=0o700);output=root/'configure-output';output.mkdir(mode=0o700)
+  oldargs=SimpleNamespace(repo=str(repo),root=args.root,commit=args.commit,source_sha256=HOST_PIN[1],confirm=H.CONFIRM);repo,root,run_id,attempt=H.hosted_layout(oldargs,os.environ);facts=H.host_facts(root.parent);rootfs=os.statvfs('/');need(rootfs.f_bavail*rootfs.f_frsize>=H.RESERVE+H.DISK_GROWTH,'hosted_docker_disk_capacity');initial={str(root.parent):facts['free_bytes'],'/':rootfs.f_bavail*rootfs.f_frsize};docker_root_frame=None;root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o700);(context/'inputs').mkdir(mode=0o700);logs=root/'reports';logs.mkdir(mode=0o700);output=root/'configure-output';output.mkdir(mode=0o700)
   env={'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','HOME':str(root),'LC_ALL':'C.UTF-8','DOCKER_CONFIG':str(root/'docker-config'),'GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1'};Path(env['DOCKER_CONFIG']).mkdir(mode=0o700)
-  def command(argv,maximum=65536,seconds=60,child_env=None):return H.run(argv,env=env if child_env is None else child_env,deadline=min(s.end,time.monotonic()+seconds),maximum=maximum,guard=s.check)
+  def guard():
+   s.check()
+   for path,before in initial.items():
+    fs=os.statvfs(path);free=fs.f_bavail*fs.f_frsize;need(free>=H.RESERVE and before-free<=H.DISK_GROWTH,'hosted_disk_reserve')
+   if docker_root_frame is not None:need(H.DOCKER_ROOT.resolve(strict=True)==H.DOCKER_ROOT and frame(H.DOCKER_ROOT.lstat())[:5]==docker_root_frame,'docker_root_changed')
+   if workspace is not None:
+    need((workspace,workspace.fd,flags(workspace.fd),workspace.before)==workspace_binding,'workspace_actual_fd_alias');workspace.check()
+  def command(argv,maximum=65536,seconds=60,child_env=None):return H.run(argv,env=env if child_env is None else child_env,deadline=min(s.end,time.monotonic()+seconds),maximum=maximum,guard=guard)
   for name,pin in H.PINS.items():
    if name.startswith('inputs/'):continue
    src=own.parent/name;loan=Loan(s,src,pin,owners=(1001,));need(command(['/usr/bin/git','-C',str(repo),'cat-file','blob',args.commit+':'+str(H.TRACKED/name)],maximum=pin[0]+1)==loan.read(),'tracked_recipe');fixed_write(s,context/name,loan.read())
@@ -248,12 +263,13 @@ def execute(args):
    Loan(s,r.path,H.OLD_ZIP_PIN if False else RUNTIME_PIN,owners=(1001,),modes=(0o600,));r.close()
   fixed_write(s,context/'context-manifest.json',H.encoded({'schema':'coreutils_acl_allowlisted_context/1','files':{n:{'bytes':v[0],'sha256':v[1]}for n,v in H.PINS.items()}}),0o600);allow='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+n+'\n'for n in H.PINS if not n.startswith('inputs/'))+'!inputs/\n'+''.join('!'+n+'\n'for n in H.PINS if n.startswith('inputs/'));fixed_write(s,context/'.dockerignore',allow.encode(),0o600);H.context_inventory(context)
   workspace=H.create_native_workspace(root,command);workspace_binding=(workspace,workspace.fd,flags(workspace.fd),workspace.before);s.workspace=workspace;nonce=os.urandom(16).hex()
-  def guard():
-   s.check();need((workspace,workspace.fd,flags(workspace.fd),workspace.before)==workspace_binding,'workspace_actual_fd_alias');workspace.check()
   def cli(argv,maximum=65536,seconds=60):guard();value=command([H.DOCKER,'--host',H.HOST,*argv],maximum,seconds);guard();return value
   def inspect():
    value=json.loads(cli(['container','inspect','--format',H.INSPECT,cid]));H.validate_inspect(value,nonce,cid,context,workspace.path,offline=offline,running=value['running'],paused=value['paused']);return value
-  cid=command(H.create_argv(nonce,context,workspace.path),maximum=128).decode().strip();need(re.fullmatch('[a-f0-9]{64}',cid),'container_id');cli(['container','start',cid]);inspect();copies=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.stage_code(context,False)]));H.validate_copies(copies);cli(['container','cp',str(own),cid+':/build/recovery-controller.py'])
+  docker_root=Path(cli(['info','--format','{{.DockerRootDir}}']).decode().strip());need(docker_root==H.DOCKER_ROOT and docker_root.resolve(strict=True)==docker_root and docker_root.lstat().st_dev==Path('/').lstat().st_dev,'docker_root');docker_root_frame=frame(docker_root.lstat())[:5];need(stat.S_ISDIR(docker_root_frame[2])and docker_root_frame[3:5]==(0,0)and not docker_root_frame[2]&0o022,'docker_root_metadata');guard()
+  pull_log=admit_public_base(cli,H);fixed_write(s,logs/'pull-base.log',pull_log,0o600,maximum=OUTPUT_MAX)
+  create_requested=True
+  cid=command(H.create_argv(nonce,context,workspace.path),maximum=128).decode().strip();need(re.fullmatch('[a-f0-9]{64}',cid),'container_id');cli(['container','start',cid]);inspect();copies=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.stage_code(context,False)]));H.validate_copies(copies);observation=json.loads(cli(['container','exec',cid,'/usr/local/bin/python3','-I','-S','-B','-c',H.WORKSPACE_OBSERVATION]));mount_identity=H.validate_workspace_observation(observation,workspace);fixed_write(s,logs/'native-workspace-mount.json',encode(mount_identity),0o600);cli(['container','cp',str(own),cid+':/build/recovery-controller.py'])
   for phase in('prepare','configure'):
    if phase=='configure':cli(['network','disconnect','bridge',cid]);offline=True;inspect()
    raw=cli(['container','exec','--workdir','/build',cid,'/usr/local/bin/python3','-I','-S','-B','/build/recovery-controller.py','--inner-phase',phase,'--controller-sha256',args.controller_sha256],maximum=16*1024**2,seconds=1500);fixed_write(s,logs/(phase+'.log'),raw,0o600,maximum=OUTPUT_MAX)
@@ -272,7 +288,7 @@ def execute(args):
     H.run([H.DOCKER,'--host',H.HOST,'container','stop','--time','10',cid],env=env,deadline=min(s.end,time.monotonic()+30),maximum=65536,guard=s.check);after=json.loads(H.run([H.DOCKER,'--host',H.HOST,'container','inspect','--format',H.INSPECT,cid],env=env,deadline=min(s.end,time.monotonic()+30),maximum=65536,guard=s.check));H.validate_inspect(after,nonce,cid,context,workspace.path,offline=offline,running=False,paused=False);stopped=True
    except BaseException as cleanup:s.note(cleanup)
  finally:
-  if workspace is not None and(cid is None or stopped):
+  if workspace is not None and(not create_requested or stopped):
    try:
     need((workspace,workspace.fd,flags(workspace.fd),workspace.before)==workspace_binding,'workspace_close_alias');original_fd=workspace_binding[1];workspace.close()
     try:os.fstat(original_fd)
@@ -283,9 +299,11 @@ def execute(args):
  if s.errors and 'logs'in locals():
   public=State()
   try:
-   captured=getattr(getattr(s,'failure_object',None),'public_command_failure',{}).get('captured_output',b'')
-   if captured:fixed_write(public,logs/'failed-command.log',captured,0o600,maximum=OUTPUT_MAX)
-   fixed_write(public,logs/'failure.json',encode({'schema':'configure_only_failed_scope_observation/1','error_classes':[type(e).__name__ for e in s.errors],'container_id':cid,'container_stopped_and_verified':stopped,'workspace_held':workspace is not None and not stopped,'original_scope_restored_or_retried':False,'security_accepted':False}),0o600);finish(public)
+   observation=getattr(getattr(s,'failure_object',None),'public_command_failure',{})
+   for key in('captured_output','prefix','tail'):
+    captured=observation.get(key,b'')
+    if type(captured)is bytes and captured:fixed_write(public,logs/('failed-command-'+key+'.log'),captured,0o600,maximum=OUTPUT_MAX)
+   fixed_write(public,logs/'failure.json',encode({'schema':'configure_only_failed_scope_observation/1','error_classes':[type(e).__name__ for e in s.errors],'container_id':cid,'container_stopped_and_verified':stopped,'workspace_held':workspace is not None and create_requested and not stopped,'create_requested':create_requested,'create_outcome_unknown':create_requested and cid is None,'public_command_observation':{k:observation.get(k)for k in('actual_returncode','observed_output_bytes','actual_pipe_closed','stdout_eof_observed','maximum_output_bytes')},'original_scope_restored_or_retried':False,'security_accepted':False}),0o600);finish(public)
   except BaseException as publishing:s.note(publishing)
  finish(s);return result
 

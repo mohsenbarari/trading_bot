@@ -60,7 +60,7 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_acl_build/configure_recovery.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/coreutils-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --controller-sha256 81a389fd3298a0238dbae8f1ad40808dbda43de3cdf7e3da0a056b5800720fc3 \
+            --controller-sha256 e4591dd07aee6015258f60e89a16d8652d0c70c7d625158f544e8b94024ab8fe \
             --execute-configure-only \
             --confirm ROOT-COREUTILS-CONFIGURE-ONLY-EXACT-HEADER-20261029-01
 
