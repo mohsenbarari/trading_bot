@@ -9,6 +9,12 @@ on:
         type: boolean
         default: false
 
+      configure_only:
+        description: Recover only exact generated configure sources; never build packages or run vendor suites
+        required: true
+        type: boolean
+        default: false
+
 permissions:
   contents: read
   actions: read
@@ -32,6 +38,7 @@ jobs:
 
       - name: Build and test only the reviewed Coreutils package
         id: build
+        if: inputs.configure_only != true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -42,6 +49,20 @@ jobs:
             --source-sha256 fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82 \
             --execute-hosted-build \
             --confirm BUILD-ONLY-HOSTED-COREUTILS-DESCRIPTOR-ACL-PACKAGE-20261027-01
+
+      - name: Recover only the reviewed generated configuration
+        id: recover
+        if: inputs.configure_only == true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_acl_build/configure_recovery.py \
+            --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
+            --root "$RUNNER_TEMP/coreutils-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --controller-sha256 81a389fd3298a0238dbae8f1ad40808dbda43de3cdf7e3da0a056b5800720fc3 \
+            --execute-configure-only \
+            --confirm ROOT-COREUTILS-CONFIGURE-ONLY-EXACT-HEADER-20261029-01
 
       - name: Retain only the complete Coreutils package and provenance outputs
         if: success() && steps.build.outcome == 'success'
@@ -85,3 +106,18 @@ jobs:
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/hosted-failure.json
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.json
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.log
+
+      - name: Retain configure-only outputs and bounded failure evidence
+        if: always() && inputs.configure_only == true && steps.recover.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coreutils-configure-only-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/configure-output/*
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/*.log
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/reports/failure.json
