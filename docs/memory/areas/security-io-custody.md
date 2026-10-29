@@ -1,6 +1,6 @@
 # Security I/O and custody
 
-- QA: preflight schemas/APIs/returns/counts/modes/fixtures/bounds/DAG. Preserve assertions/other limits/siblings; report gaps. Capture bounded B.run failure logs before call. Empty .raw: bounded pread+hash. Scoped attribute patches preserve context; GNU patch before CI. Freeze modes before admission; receipts never retouch inputs.
+- QA: preflight schemas/APIs/returns/counts/modes/fixtures/bounds/DAG; retain assertions/limits/siblings; report gaps. Bound B.run logs beforehand. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes before admission; never retouch inputs/receipts. Profilers compare precomputed filenames/code; no pathlib/I/O per call.
 - Readers/modes are typed: Root source0644, UID10001 extracted build sources,
   private controls0600. Preserve original owners/modes; new boundaries need
   genuine UID/GID tests.
