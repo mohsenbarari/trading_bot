@@ -1,6 +1,6 @@
 # Security proof inputs
 
-- QA: preflight schemas/APIs/returns/counts/modes/fixtures/bounds/DAG. Preserve assertions/other limits/siblings; report gaps. Capture bounded B.run failure logs before call. Empty .raw: bounded pread+hash. Scoped attribute patches preserve context; GNU patch before CI. Freeze modes before admission; receipts never retouch inputs.
+For source/collector APIs and FD/pipe custody also load `security-io-custody.md`.
 - Size actual namespaces: thread FDs and owner/source/cgroup topology. Predictions/stable PIDs never prove HOST/cost. Fix measured Request windows; never extend active scans. OWNED LIVE may skip optional sizing, never bounded census. Failed sizing needs fresh scope without relabeling.
 - Scanner loans outlive proc reads/physical closes. Retirement/failure stay separate from telemetry; profiles/exits never heal errors. After source close, final checks open no proc loans; failed-only disposal stays usable.
 - Pilot actual constructors/I/O and decorated/generated code; DATA proves no operation. Bind original receivers/code/globals/closures before callbacks. Mutate private test copies only; fresh checks retain immutable originals.
