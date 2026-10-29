@@ -24,9 +24,10 @@
   their own verified effective source; never migrate them implicitly to F79.
   Library compatibility, model behavior, real backup/new-old restore and normal
   role/runtime gates remain mandatory.
-- Backup inventory may report exactly Root-approved restart-policy drift with
-  normal configuration parity false; every other check and actual runtime CAS
-  stays strict. This grants no stop, restore, release or security authority.
+- Backup inventory admits only exact Root-approved restart drift from a fresh
+  complete-role audit. Normal parity remains false; every other check and
+  current CAS stay strict. Historical PID/StartedAt are constraints, not current
+  proof. This grants no stop, restore, release or security authority.
 - Host-library maintenance fences the complete service/timer activation graph,
   including inactive periodic consumers and watchdogs. Pause exact timers,
   await successful natural job completion, then restart only admitted daemons.
