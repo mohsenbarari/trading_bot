@@ -331,10 +331,10 @@ def cache_inputs(release,receipt):
   'source':{key:tar['source'][key]for key in('recipe_sha256','production_patch_sha256')},'runtime_payload':tar['outputs']['runtime-payload.json']})
  add(CACHE_ROOTS[2]+'/manifest.json',{'bytes':len(meta),'sha256':sha256(meta).hexdigest()})
  core=values[COREUTILS_LOCK];need(core.get('schema')=='coreutils_acl_image_package_lock/1'and core.get('armed')is True and type(core.get('package'))is dict,'coreutils_lock')
- package=core['package'];need(package.get('name')=='coreutils'and package.get('version')=='9.7-3+gold1'and package.get('path')=='coreutils_9.7-3+gold1_amd64.deb','coreutils_lock')
+ package=core['package'];need(package.get('name')=='coreutils'and package.get('version')=='9.7-3+gold2'and package.get('path')=='coreutils_9.7-3+gold2_amd64.deb','coreutils_lock')
  add(CACHE_ROOTS[3]+'/'+package['path'],core['outputs'][package['path']])
  meta=encoded({'schema':'coreutils_acl_image_package_cache/1','package':package,'binding':core['outputs'][package['path']],
-  'source':{key:core['source'][key]for key in('recipe_sha256','production_patch_sha256')},'runtime_payload':core['outputs']['runtime-payload.json']})
+  'source':{key:core['source'][key]for key in('recipe_sha256','production_patch_sha256','parent_patch_sha256','parent_cp')},'runtime_payload':core['outputs']['runtime-payload.json']})
  add(CACHE_ROOTS[3]+'/manifest.json',{'bytes':len(meta),'sha256':sha256(meta).hexdigest()})
  for path in ('pip_packages/.security-os-capsule.lock','pip_packages/.sqlite-wal-capsule.lock','pip_packages/.tar-acl-capsule.lock','pip_packages/.coreutils-acl-capsule.lock'):
   expected[path]={'bytes':0,'sha256':sha256(b'').hexdigest()}

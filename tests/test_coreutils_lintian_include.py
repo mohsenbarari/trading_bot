@@ -21,8 +21,9 @@ def cache03_bytes():
  # Historical reconstruction is allowed only after authenticating the REAL
  # current companion lock through the complete production reader/validator.
  with M.Held()as held:actual=M.load_lock(held)
- if M.LOCK_SHA!='c9f287289d6bdcec280b0e49bb615f4df01856bc21b84ca2398543b0e57484d6'or actual['armed']is not True:raise AssertionError('actual Root lock stage required')
- raw=SOURCE.read_bytes();armed=b"LOCK_SHA='c9f287289d6bdcec280b0e49bb615f4df01856bc21b84ca2398543b0e57484d6'";historical=b"LOCK_SHA='77c9f3af5db1492c5cabec52c3791c61bc6f44e92ba419ec50bfa52844176803'"
+ if M.LOCK_SHA!='987cb4cea875bcf103c5f85a53b5e990bf646fd55cf3f26b2f832c7d217765b6'or actual['armed']is not True:raise AssertionError('actual Root lock stage required')
+ spec=importlib.util.spec_from_file_location('owned_historical_coreutils_fixture',ROOT/'tests/market_security_source_fixtures.py');fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+ raw=fixture.historical_gold1_coreutils_helper(ROOT);armed=b"LOCK_SHA='c9f287289d6bdcec280b0e49bb615f4df01856bc21b84ca2398543b0e57484d6'";historical=b"LOCK_SHA='77c9f3af5db1492c5cabec52c3791c61bc6f44e92ba419ec50bfa52844176803'"
  if raw.count(armed)!=1:raise AssertionError('actual Root lock pin source required')
  # Reverse only the explicitly reviewed closed-diagnostic function/catch.
  # Real companion-lock authentication above precedes historical reconstruction.

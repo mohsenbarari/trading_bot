@@ -15,10 +15,10 @@ class IntegrationTests(unittest.TestCase):
   temp=tempfile.TemporaryDirectory(prefix='.owned-market-integration-',dir=Path(__file__).parent);self.addCleanup(temp.cleanup);return Path(temp.name)
  def write(self,p,raw):p.parent.mkdir(mode=0o755,parents=True,exist_ok=True);p.write_bytes(raw);p.chmod(0o644)
  def pin(self,raw):return{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
- def test_explicit_17_release_30_controller_inventory_and_old_product_stays93(self):
-  self.assertEqual(len(S.RELEASE_FILES),17);self.assertEqual(len(M.CONTROLLER_FILES),30);self.assertEqual(len(set(M.CONTROLLER_FILES)),30)
+ def test_explicit_20_release_30_controller_inventory_and_old_product_stays93(self):
+  self.assertEqual(len(S.RELEASE_FILES),20);self.assertEqual(len(M.CONTROLLER_FILES),30);self.assertEqual(len(set(M.CONTROLLER_FILES)),30)
   self.assertIn('scripts/prepare_tar_acl_os_cache.py',S.RELEASE_FILES);self.assertIn(M.TAR_LOCK,S.RELEASE_FILES)
-  self.assertEqual(len(S.PRODUCT_COPY_LINES),5);self.assertEqual(len(S.PRODUCT_COPY_LINES|S.RELEASE_COPY_LINES),15)
+  self.assertEqual(len(S.PRODUCT_COPY_LINES),5);self.assertEqual(len(S.PRODUCT_COPY_LINES|S.RELEASE_COPY_LINES),17)
   self.assertEqual(M.MAX_SOURCE,131072);self.assertEqual(M.MAX_CONTROLLER_SOURCE,262144)
   self.assertTrue(any(name.endswith('audit_production_market_catchup.py')for name in M.CONTROLLER_FILES))
  def test_fixed_capture2_recipe_isolated_from_ordinary_main_callers(self):
@@ -49,7 +49,7 @@ class IntegrationTests(unittest.TestCase):
     self.write(cache/'owned',b'OWNED CACHE');expected[(cache/'owned').relative_to(context).as_posix()]=self.pin(b'OWNED CACHE')
    options['guard']();return b''
   with patch.dict(M.os.environ,{'GH_TOKEN':'OWNED_SYNTHETIC_NOT_SENT'}),patch.object(M,'command',side_effect=command):M.prepare_checked_caches(root,context,{'release_files':rows},lambda:None)
-  self.assertEqual(calls,[False,False,False,True,True,True]);M.restamp(context,expected,1792972800);snap=M.ContextSnapshot(context,expected);snap.check()
+  self.assertEqual(calls,[False,False,False,False,True,True,True,True]);M.restamp(context,expected,1792972800);snap=M.ContextSnapshot(context,expected);snap.check()
   with tempfile.TemporaryDirectory(prefix='.late-owned-cache-temp-',dir=context/'pip_packages'):pass
   with self.assertRaisesRegex(RuntimeError,'context_changed'):snap.check()
   with self.assertRaisesRegex(RuntimeError,'context_changed'):snap.close()
@@ -58,17 +58,20 @@ class IntegrationTests(unittest.TestCase):
   for node in ast.walk(function):
    if isinstance(node,ast.Call)and isinstance(node.func,ast.Name)and node.func.id in('prepare_checked_caches','restamp','ContextSnapshot'):order.setdefault(node.func.id,node.lineno)
   self.assertLess(order['prepare_checked_caches'],order['restamp']);self.assertLess(order['restamp'],order['ContextSnapshot'])
- def test_three_actual_public_locks_derive23_cache_entries(self):
+ def test_four_actual_public_locks_derive26_cache_entries(self):
   root=self.own();rows=[]
-  for name in(M.APT_LOCK,M.SQLITE_LOCK,M.TAR_LOCK):
+  for name in(M.APT_LOCK,M.SQLITE_LOCK,M.TAR_LOCK,M.COREUTILS_LOCK):
    raw=(ROOT/name).read_bytes();self.write(root/name,raw);rows.append({'path':name,**self.pin(raw)})
   expected,sqlite=M.cache_inputs(root,{'release_files':rows})
-  self.assertEqual(len(expected),23);self.assertEqual(sum(n.endswith('.deb')for n in expected),17)
+  self.assertEqual(len(expected),26);self.assertEqual(sum(n.endswith('.deb')for n in expected),18)
   tar=json.loads((ROOT/M.TAR_LOCK).read_bytes());helper=load('owned_tar_definition',ROOT/'scripts/prepare_tar_acl_os_cache.py')
   self.assertEqual(expected[M.CACHE_ROOTS[2]+'/manifest.json'],self.pin(helper.cache_manifest(tar)))
   self.assertEqual(expected['pip_packages/.tar-acl-capsule.lock'],self.pin(b''))
   changed=deepcopy(tar);changed['artifact']['id']+=1
   self.assertEqual(helper.cache_manifest(tar),helper.cache_manifest(changed))
+  core=json.loads((ROOT/M.COREUTILS_LOCK).read_bytes());core_helper=load('owned_coreutils_definition',ROOT/'scripts/prepare_coreutils_acl_os_cache.py')
+  self.assertEqual(expected[M.CACHE_ROOTS[3]+'/manifest.json'],self.pin(core_helper.cache_manifest(core)))
+  self.assertEqual(core['package']['version'],'9.7-3+gold2')
  def fixture(self):
   root=self.own();rows=[];controllers=[];products=[];cache={}
   def row(prefix,name,raw):
@@ -76,18 +79,18 @@ class IntegrationTests(unittest.TestCase):
   for name in S.RELEASE_FILES:rows.append(row('sealed/release',name,('OWNED RELEASE:'+name).encode()))
   for i in range(93):products.append(row('sealed/product','owned/public-'+str(i)+'.py',('OWNED PRODUCT:'+str(i)).encode()))
   for name in M.CONTROLLER_FILES:controllers.append(row('controller-source',name,('OWNED CONTROLLER:'+name).encode()))
-  for i in range(23):
+  for i in range(26):
    name='pip_packages/owned-cache-'+str(i);raw=('OWNED CACHE:'+str(i)).encode();self.write(root/'sealed/release'/name,raw);cache[name]=self.pin(raw)
   receipt={'release_commit':'a'*40,'release_tree':'b'*40,'business_commit':'c'*40,'business_tree':'d'*40,'release_files':rows,'product_files':products}
   return root,receipt,controllers,cache
  def test_full_declared_controller_parcel_roundtrip_no_extract_or_authority(self):
   root,receipt,controllers,cache=self.fixture();value=M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None)
-  self.assertEqual((value['sources'],value['members']),(163,164));self.assertTrue(value['complete_ci_controller_payload'])
+  self.assertEqual((value['sources'],value['members']),(169,170));self.assertTrue(value['complete_ci_controller_payload'])
   self.assertFalse(value['complete_deployment_control_payload']);self.assertFalse(value['activation_authority']);self.assertFalse(value['security_accepted'])
   with tarfile.open(root/'controller-sources.tar.gz','r:gz')as archive:
-   items=archive.getmembers();self.assertEqual(len(items),164);self.assertEqual(len({x.name for x in items}),164)
+   items=archive.getmembers();self.assertEqual(len(items),170);self.assertEqual(len({x.name for x in items}),170)
    self.assertTrue(all(x.isfile()and x.uid==x.gid==0 and not x.pax_headers for x in items));self.assertTrue(any(len(x.name)>100 for x in items))
-   index=json.load(archive.extractfile('controller-manifest.json'));self.assertEqual(len(index['files']),163)
+   index=json.load(archive.extractfile('controller-manifest.json'));self.assertEqual(len(index['files']),169)
  def test_missing_duplicate_unknown_binding_and_hardlink_refuse(self):
   root,receipt,controllers,cache=self.fixture()
   with self.assertRaisesRegex(RuntimeError,'controller_parcel_inventory'):M.controller_parcel_inputs(root,{**receipt,'release_files':receipt['release_files'][:-1]},controllers,cache)

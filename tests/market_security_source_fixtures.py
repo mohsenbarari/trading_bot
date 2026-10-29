@@ -45,6 +45,15 @@ def assert_actual_coreutils_stage(test,H):
   return'PENDING_UNARMED_NOT_ADMITTED'
  with H.Held()as held:observed=H.load_lock(held)
  test.assertEqual(observed,value);return'ARMED_STATIC_VALIDATOR_PASSED_NOT_ACTIVATED'
+def historical_gold1_coreutils_helper(root):
+ """Exact prior PUBLIC source for historical delta checks, never execution.
+
+ Gold2 adds its own admission contract. Historical one-line-delta assertions
+ continue to authenticate their original gold1 source rather than the successor.
+ """
+ raw=(root/'tests/fixtures/coreutils-gold1-cache-helper.original.py.txt').read_bytes()
+ if binding(raw)!={'bytes':37882,'sha256':'b9aea27a7400837c85ebc3da8c71ac6833662af86b8c8d8f5eef94182fc42e48'}:raise AssertionError('historical gold1 source pin')
+ return raw
 def assert_actual_assertion_stage(test,M,raws):
  """The actual current pin-bound preflight always runs, at its declared stage."""
  key=M.BUSINESS_DIR+'/python31118-root-assertion-approval.json';value=json.loads(raws[key]);test.assertIs(type(value.get('approved')),bool)

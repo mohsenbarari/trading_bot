@@ -48,11 +48,11 @@ class Tests(unittest.TestCase):
   raw=(TREE/'scripts/prepare_market_capture2_image.py').read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),O.NORMAL_PIN)
   self.assertEqual(M.closed_failure(RuntimeError('coreutils_lock'))['code'],'coreutils_lock')
  def test_coreutils_only_package_family_fourteen_actual_recipe_outputs(self):
-  self.assertEqual(len(H.OUTPUT_LIMITS),14);self.assertEqual([n for n in H.OUTPUT_LIMITS if n.endswith('.deb')],['coreutils_9.7-3+gold1_amd64.deb'])
+  self.assertEqual(len(H.OUTPUT_LIMITS),14);self.assertEqual([n for n in H.OUTPUT_LIMITS if n.endswith('.deb')],['coreutils_9.7-3+gold2_amd64.deb'])
   self.assertIn('vendor-suite.json',H.OUTPUT_LIMITS);self.assertIn('generated-build-proof.json',H.OUTPUT_LIMITS)
   self.assertEqual(H.CAPSULE,Path('/coreutils-capsule'));self.assertEqual(H.BASE_VERSION,'9.7-3')
  def test_only_coreutils_inventory_transition_preserves_library_and_other_packages(self):
-  before={'coreutils':('9.7-3','installed'),'libacl1:amd64':('2.4.0-1~trixie+gold1','installed'),'tar':('1.35+dfsg-5~trixie+gold2','installed')};after={**before,'coreutils':('9.7-3+gold1','installed')};H.verify_transition(before,after)
+  before={'coreutils':('9.7-3','installed'),'libacl1:amd64':('2.4.0-1~trixie+gold1','installed'),'tar':('1.35+dfsg-5~trixie+gold2','installed')};after={**before,'coreutils':('9.7-3+gold2','installed')};H.verify_transition(before,after)
   for changed in({**after,'libacl1:amd64':('SDK_WRONG','installed')},{**after,'new-package':('1','installed')},{**after,'tar':('OLD','installed')}):
    with self.assertRaisesRegex(RuntimeError,'package_inventory'):H.verify_transition(before,changed)
   lock={'approved_libacl':{'version':'2.4.0-1~trixie+gold1'}};H.baseline_inventory(before,lock)
@@ -67,7 +67,7 @@ class Tests(unittest.TestCase):
   for bad in({**rows,'CapBnd':hex(mask|1<<21)},{**rows,'CapAmb':'1'},{**rows,'NoNewPrivs':'0'}):
    with self.assertRaisesRegex(RuntimeError,'image_boundary'):H.capability_contract(bad)
  def cache(self):
-  cache=self.root/'coreutils-acl-capsule';cache.mkdir();cache.chmod(0o755);raw=b'OWNED SYNTHETIC PACKAGE; NOT DEB';lock={'package':{'name':'coreutils','path':H.PACKAGE,'version':H.VERSION},'outputs':{H.PACKAGE:self.pin(raw),'runtime-payload.json':self.pin(b'OWNED SYNTHETIC PAYLOAD')},'source':{'recipe_sha256':'a'*64,'production_patch_sha256':'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'}}
+  cache=self.root/'coreutils-acl-capsule';cache.mkdir();cache.chmod(0o755);raw=b'OWNED SYNTHETIC PACKAGE; NOT DEB';lock={'package':{'name':'coreutils','path':H.PACKAGE,'version':H.VERSION},'outputs':{H.PACKAGE:self.pin(raw),'runtime-payload.json':self.pin(b'OWNED SYNTHETIC PAYLOAD')},'source':{'recipe_sha256':'a'*64,'production_patch_sha256':'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d','parent_patch_sha256':H.PARENT_PATCH['sha256'],'parent_cp':dict(H.PARENT_CP)}}
   (cache/H.PACKAGE).write_bytes(raw);(cache/H.PACKAGE).chmod(0o644);(cache/'manifest.json').write_bytes(H.cache_manifest(lock));(cache/'manifest.json').chmod(0o644);return cache,lock
  def test_actual_owned_two_member_cache_admission_and_unknown_member_refusal(self):
   cache,lock=self.cache()
@@ -126,7 +126,7 @@ class Tests(unittest.TestCase):
   receipt=self.lock_context()
   with self.assertRaisesRegex(RuntimeError,'coreutils_lock'):M.cache_inputs(self.root,receipt)
  def test_owned_metadata_cache_join_exact26_entries_without_real_artifact_claim(self):
-  receipt=self.lock_context();path=self.root/M.COREUTILS_LOCK;lock=json.loads(path.read_bytes());lock.update(armed=True,outputs={H.PACKAGE:self.pin(b'OWNED SYNTHETIC NOT DEB'),'runtime-payload.json':self.pin(b'OWNED SYNTHETIC NOT PROOF')},source={'recipe_sha256':'a'*64,'production_patch_sha256':'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'})
+  receipt=self.lock_context();path=self.root/M.COREUTILS_LOCK;lock=json.loads(path.read_bytes());lock.update(armed=True,outputs={H.PACKAGE:self.pin(b'OWNED SYNTHETIC NOT DEB'),'runtime-payload.json':self.pin(b'OWNED SYNTHETIC NOT PROOF')},source={'recipe_sha256':'a'*64,'production_patch_sha256':'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d','parent_patch_sha256':H.PARENT_PATCH['sha256'],'parent_cp':dict(H.PARENT_CP)})
   # Explicitly tests only the metadata join, NOT validate_lock/admission or any
   # real artifact. Only the owned fixture lock changes.
   raw=M.encoded(lock);path.write_bytes(raw)
@@ -135,6 +135,17 @@ class Tests(unittest.TestCase):
   entries,sqlite=M.cache_inputs(self.root,receipt);self.assertEqual(len(entries),26)
   self.assertEqual(entries['pip_packages/coreutils-acl-capsule/'+H.PACKAGE],self.pin(b'OWNED SYNTHETIC NOT DEB'));self.assertEqual(entries['pip_packages/.coreutils-acl-capsule.lock'],self.pin(b''))
   self.assertEqual(entries['pip_packages/coreutils-acl-capsule/manifest.json'],self.pin(H.cache_manifest(lock)))
+ def test_current_market_metadata_join_authenticates_gold2_and_refuses_gold1(self):
+  receipt=self.lock_context();path=self.root/M.COREUTILS_LOCK
+  raw=(TREE/M.COREUTILS_LOCK).read_bytes();path.write_bytes(raw)
+  selected=next(row for row in receipt['release_files']if row['path']==M.COREUTILS_LOCK);selected.update(self.pin(raw))
+  lock=json.loads(raw);entries,_=M.cache_inputs(self.root,receipt)
+  self.assertEqual(entries['pip_packages/coreutils-acl-capsule/'+H.PACKAGE],lock['outputs'][H.PACKAGE])
+  self.assertEqual(entries['pip_packages/coreutils-acl-capsule/manifest.json'],self.pin(H.cache_manifest(lock)))
+  # Only this owned metadata DTO is changed; it is never an actual gold1 proof.
+  lock['package'].update(version='9.7-3+gold1',path='coreutils_9.7-3+gold1_amd64.deb')
+  raw=M.encoded(lock);path.write_bytes(raw);selected.update(self.pin(raw))
+  with self.assertRaisesRegex(RuntimeError,'^coreutils_lock$'):M.cache_inputs(self.root,receipt)
  def test_actual_app_public_inventory_refuses_unarmed_lock_and_all_prior_lock_bytes_bound(self):
   receipt=self.lock_context();rows=[]
   for row in receipt['release_files']:
@@ -160,17 +171,18 @@ class Tests(unittest.TestCase):
   regular=[{**r,'canonical_path':r['path'],'mode':0o100755,'uid':0,'gid':0}for r in callers.values()]
   librow={**library,'canonical_path':library['path'],'mode':0o100644,'uid':0,'gid':0}
   payload={'schema':'coreutils_acl_runtime_payload/1','coreutils':group('coreutils',H.VERSION,sha256(package).hexdigest(),regular),'approved_libacl':group('libacl1',lock['approved_libacl']['version'],'bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1',[librow]),'security_accepted':False};lock['runtime_payload']=payload
-  native={'private_fd':{'actual_uid':10001,'actual_gid':10001,'actual_returncode':0,'skip_count':0,'NFSv4_real_filesystem_exercised':False,'actual_assertions':20},'gnu_fd0':{'schema':'ordinary_gnulib_regular_fd0/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'actual_gnulib_qcopy_acl_called':True,'source_fd_zero':True}}
-  cli={'schema':'coreutils_owned_cli_compatibility/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'skip_count':0,'security_accepted':False,'actual_installed_candidate_binaries':{n:{k:r[k]for k in('path','sha256')}for n,r in callers.items()}};required=['acl_delete_def_file_at','acl_set_file_at']
+  native={'private_fd':{'actual_uid':10001,'actual_gid':10001,'actual_returncode':0,'skip_count':0,'NFSv4_real_filesystem_exercised':False,'actual_assertions':20},'gnu_fd0':{'schema':'ordinary_gnulib_regular_fd0/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'actual_gnulib_qcopy_acl_called':True,'source_fd_zero':True},'parent_frontend':{'schema':'ordinary_cp_parent_frontend/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'actual_case_count':4,'actual_EMFILE_partial_prefixes':2,'actual_assertions':223,'skip_count':0,'actual_frontend_and_copy_called':True,'actual_OPATH_pairs':True,'source_fd_zero':True,'physical_pair_cleanup_verified':True,'owned_cleanup_complete':True,'security_accepted':False}}
+  for row in native.values():row['actual_fixture_binary']=self.pin(b'OWNED SYNTHETIC FIXTURE; NOT ELF')
+  cli={'schema':'coreutils_owned_cli_compatibility/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'skip_count':0,'security_accepted':False,'actual_case_count':23,'legacy_case_count':14,'parent_case_count':9,'cases':list(H.CLI_CASES),'all_commands_actual_zero_and_pipes_closed':True,'owned_cleanup_complete':True,'parent_ownership_and_timestamp_path_semantics_retained':True,'production_data_accessed':False,'exploit_or_race_reproduction_performed':False,'actual_installed_candidate_binaries':{n:{k:r[k]for k in('path','sha256')}for n,r in callers.items()}};required=['acl_delete_def_file_at','acl_set_file_at']
   abirows={n:{'path':r['path'],'candidate_binary':{k:r[k]for k in('bytes','sha256')},'libacl':library,'dynamic_approved_libacl_not_static_sdk':True,'actual_ldd_acl_target':library['path'],'security_accepted':False,'required_private_at_imports':required,'actual_versioned_acl_bindings':{k:'ACL_2.4'for k in required}}for n,r in callers.items()}
-  source={'commit':'a'*40,**{k:'b'*64 for k in('recipe_sha256','controller_sha256','root_artifact_admission_sha256','root_static_verification_sha256','ci_result_sha256','ci_source_identity_sha256')},'production_patch_sha256':'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'};lock['source']=source
+  source={'commit':'a'*40,**{k:'b'*64 for k in('recipe_sha256','controller_sha256','root_artifact_admission_sha256','root_static_verification_sha256','ci_result_sha256','ci_source_identity_sha256')},'production_patch_sha256':'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d','parent_patch_sha256':H.PARENT_PATCH['sha256'],'parent_cp':dict(H.PARENT_CP)};lock['source']=source
   counts={'TOTAL':1,'PASS':1,'SKIP':0,'XFAIL':0,'FAIL':0,'XPASS':0,'ERROR':0}
   proof={
    'runtime-payload.json':payload,'ordinary-compatibility.json':{'schema':'coreutils_acl_ordinary_compatibility/1','required_owned_c_fixtures':native,'actual_cli':cli,'all_required_owned_cases_skip_count':0,'security_accepted':False},
-   'caller-proof.json':{'schema':'coreutils_descriptor_caller_build/1','source_patch_sha256':source['production_patch_sha256'],'ordinary_coreutils_compatibility_passed':True,'whole_image_other_callers_assessed':False,'all_cves_attested':False,'security_accepted':False,'required_owned_fixtures':native,'compiled_caller_contract':abirows},
+   'caller-proof.json':{'schema':'coreutils_descriptor_caller_build/1','source_patch_sha256':source['production_patch_sha256'],'parent_source_patch_sha256':source['parent_patch_sha256'],'ordinary_coreutils_compatibility_passed':True,'whole_image_other_callers_assessed':False,'all_cves_attested':False,'security_accepted':False,'required_owned_fixtures':native,'compiled_caller_contract':abirows},
    'abi-contract.json':{'schema':'coreutils_dynamic_approved_acl_abi/1','security_accepted':False,'callers':abirows},
    'vendor-suite.json':{'schema':'coreutils_unfiltered_vendor_command/1','actual_command':['/usr/bin/dh_auto_test'],'actual_returncode':0,'actual_uid':10001,'actual_gid':10001,'actual_pipe_closed':True,'configured_default_selections_captured_before_test':True,'test_filter_override_used':False,'test_bodies_modified':False,'security_accepted':False,'observation':{'scopes':{n:{'actual_summary':dict(counts),'actual_configured_test_count':1}for n in('coreutils','gnulib')},'failed_unexpected_or_error_results':0,'security_accepted':False}},
-   'source-proof.json':{'schema':'coreutils_acl_source_build/1','maintainer_dsc_signatures_authenticated':True,'patch':{'sha256':source['production_patch_sha256']},'security_accepted':False},
+   'source-proof.json':{'schema':'coreutils_acl_source_build/1','maintainer_dsc_signatures_authenticated':True,'patch':{'sha256':source['production_patch_sha256']},'actual_source_contract':{'parent_acl_patch':dict(H.PARENT_PATCH),'parent_cp_actual':dict(H.PARENT_CP)},'source_manifest':{'package_version':H.VERSION,'parent_acl_patch':dict(H.PARENT_PATCH),'files':{'src/cp.c':{'after':dict(H.PARENT_CP)}}},'security_accepted':False},
    'sdk-proof.json':{'schema':'coreutils_acl_compiler_sdk/1','compiler_only':True,'runtime_replacement_exported':False,'actual_approved_runtime_after_reinstall':library,'security_accepted':False},
    'generated-build-proof.json':{'schema':'coreutils_actual_generated_build_provenance/1','configured_descriptor_acl_feature':True,'debian_dh_autoreconf_noop_removed':True,'security_accepted':False},
    'provenance.json':{'schema':'coreutils_acl_package_provenance/1','normal_package_version':H.VERSION,'full_unfiltered_gnu_test_hook_actual_returncode':0,'vendor_test_selection':'configured_default_unchanged','vendor_zero_skip_coverage_claimed':False,'runtime_loader_override_used':False,'vendor_build_only_loader_mechanics_not_disabled':True,'uid10001_children_gone':True,'only_new_coreutils_runtime_exported':True,'production_installed':False,'security_accepted':False}}
@@ -184,6 +196,44 @@ class Tests(unittest.TestCase):
   production_before=(TREE/'scripts/coreutils_acl_package.lock.json').read_bytes()
   lock,proof,package=self.archive_fixture();raw=self.encode_archive(lock,proof,package);H.validate_lock(lock);self.assertEqual(H.admit_archive(raw,lock),package)
   self.assertEqual((TREE/'scripts/coreutils_acl_package.lock.json').read_bytes(),production_before)
+ def test_gold2_source_bindings_are_required_in_lock_and_cache_manifest(self):
+  actual=json.loads((TREE/'scripts/coreutils_acl_package.lock.json').read_bytes());H.validate_lock(actual)
+  self.assertEqual(actual['artifact']['run_id'],40835548335);self.assertEqual(actual['artifact']['id'],12880159950)
+  self.assertEqual(actual['source']['root_artifact_admission_sha256'],'d5b2792d3504a1c712e63b511e0a5857dd1d4a2b497f8c1c704fbda0ad7fa8cc')
+  self.assertEqual(actual['source']['root_static_verification_sha256'],'3e657ea52961d9c6b5249b3bb242767be3acd99613dbbe85b7d130e10ae467af')
+  self.assertEqual(json.loads(H.cache_manifest(actual))['source'],{k:actual['source'][k]for k in('recipe_sha256','production_patch_sha256','parent_patch_sha256','parent_cp')})
+  for field in('parent_patch_sha256','parent_cp'):
+   with self.subTest(field=field):
+    wrong=deepcopy(actual);wrong['source'].pop(field)
+    with self.assertRaisesRegex(RuntimeError,'lock_contract'):H.validate_lock(wrong)
+  wrong=deepcopy(actual);wrong['source']['parent_patch_sha256']='0'*64
+  with self.assertRaisesRegex(RuntimeError,'lock_contract'):H.validate_lock(wrong)
+ def test_synthetic_negative_gold2_parent_admission_cannot_be_waived_by_rebinding(self):
+  # These mutations rebind invented ZIP metadata only. They are NOT new actual
+  # CI reports and cannot change the authentic, source-pinned production lock.
+  parent=lambda p:p['ordinary-compatibility.json']['required_owned_c_fixtures']['parent_frontend']
+  cli=lambda p:p['ordinary-compatibility.json']['actual_cli']
+  mutations={
+   'missing_parent_fixture':lambda p:p['ordinary-compatibility.json']['required_owned_c_fixtures'].pop('parent_frontend'),
+   'old_fourteen_cli':lambda p:cli(p).update(actual_case_count=14,parent_case_count=0,cases=list(H.CLI_CASES[:14])),
+   'wrong_cli_order':lambda p:cli(p).update(cases=list(reversed(H.CLI_CASES))),
+   'wrong_caller_parent_patch':lambda p:p['caller-proof.json'].update(parent_source_patch_sha256='0'*64),
+   'wrong_source_parent_patch':lambda p:p['source-proof.json']['actual_source_contract']['parent_acl_patch'].update(sha256='0'*64),
+   'wrong_manifest_parent_patch':lambda p:p['source-proof.json']['source_manifest']['parent_acl_patch'].update(sha256='0'*64),
+   'wrong_actual_cp':lambda p:p['source-proof.json']['actual_source_contract']['parent_cp_actual'].update(sha256='0'*64),
+   'wrong_manifest_cp':lambda p:p['source-proof.json']['source_manifest']['files']['src/cp.c']['after'].update(sha256='0'*64),
+   'physical_cleanup_false':lambda p:parent(p).update(physical_pair_cleanup_verified=False),
+   'owned_cleanup_false':lambda p:parent(p).update(owned_cleanup_complete=False),
+   'source_fd_zero_false':lambda p:parent(p).update(source_fd_zero=False),
+   'pressure_missing':lambda p:parent(p).update(actual_EMFILE_partial_prefixes=0),
+   'pressure_boolean':lambda p:parent(p).update(actual_EMFILE_partial_prefixes=True),
+   'partial_case_count':lambda p:parent(p).update(actual_case_count=3),
+   'cli_cleanup_false':lambda p:cli(p).update(owned_cleanup_complete=False),
+  }
+  for name,mutate in mutations.items():
+   with self.subTest(mutation=name):
+    lock,proof,package=self.archive_fixture();mutate(proof);raw=self.encode_archive(lock,proof,package);H.validate_lock(lock)
+    with self.assertRaisesRegex(RuntimeError,'archive_contract'):H.admit_archive(raw,lock)
  def test_rebound_synthetic_transcripts_cannot_waive_gnu_native_or_abi_contract(self):
   mutations=(lambda p:p['vendor-suite.json'].update(actual_returncode=1),lambda p:p['vendor-suite.json'].update(actual_returncode=False),lambda p:p['vendor-suite.json']['observation']['scopes']['coreutils']['actual_summary'].update(FAIL=1),lambda p:p['ordinary-compatibility.json']['required_owned_c_fixtures']['private_fd'].update(skip_count=1),lambda p:p['ordinary-compatibility.json']['required_owned_c_fixtures']['private_fd'].update(skip_count=False),lambda p:p['abi-contract.json']['callers']['cp'].update(dynamic_approved_libacl_not_static_sdk=False),lambda p:p['sdk-proof.json'].update(runtime_replacement_exported=True))
   for mutate in mutations:

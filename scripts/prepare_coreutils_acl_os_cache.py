@@ -12,12 +12,15 @@ import argparse,ctypes,errno,fcntl,io,json,math,os,platform,re,resource,selector
 
 ROOT=Path(__file__).resolve().parent
 LOCK_NAME='coreutils_acl_package.lock.json'
-LOCK_SHA='c9f287289d6bdcec280b0e49bb615f4df01856bc21b84ca2398543b0e57484d6'
-BASE_VERSION='9.7-3';VERSION='9.7-3+gold1'
+LOCK_SHA='987cb4cea875bcf103c5f85a53b5e990bf646fd55cf3f26b2f832c7d217765b6'
+BASE_VERSION='9.7-3';VERSION='9.7-3+gold2'
 PACKAGE='coreutils_'+VERSION+'_amd64.deb'
 CAPSULE=Path('/coreutils-capsule')
 DOC_INCLUDES=tuple(flag for root in('/usr/share/doc/coreutils','/usr/share/locale','/usr/share/man','/usr/share/info')for flag in('--path-include='+root,'--path-include='+root+'/*'))+('--path-include=/usr/share/lintian/overrides/coreutils',)
-OUTPUT_LIMITS={'coreutils_9.7-3+gold1_amd64.deb': 67108864, 'coreutils_9.7-3+gold1_amd64.changes': 4194304, 'coreutils_9.7-3+gold1_amd64.buildinfo': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.changes': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.buildinfo': 4194304, 'source-proof.json': 4194304, 'sdk-proof.json': 4194304, 'abi-contract.json': 4194304, 'ordinary-compatibility.json': 4194304, 'provenance.json': 4194304, 'runtime-payload.json': 4194304, 'caller-proof.json': 4194304, 'vendor-suite.json': 4194304, 'generated-build-proof.json': 4194304}
+OUTPUT_LIMITS={'coreutils_9.7-3+gold2_amd64.deb': 67108864, 'coreutils_9.7-3+gold2_amd64.changes': 4194304, 'coreutils_9.7-3+gold2_amd64.buildinfo': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.changes': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.buildinfo': 4194304, 'source-proof.json': 4194304, 'sdk-proof.json': 4194304, 'abi-contract.json': 4194304, 'ordinary-compatibility.json': 4194304, 'provenance.json': 4194304, 'runtime-payload.json': 4194304, 'caller-proof.json': 4194304, 'vendor-suite.json': 4194304, 'generated-build-proof.json': 4194304}
+PARENT_PATCH={'bytes':7024,'sha256':'b2d25168d84d8bd85fbf7af852e09634b446ff640570bb8009d6a7c09886a005'}
+PARENT_CP={'bytes':46515,'sha256':'480b19ee4e3c73e1d3e65420520e064843167095b4abe2742a5e46dd0ce11c82'}
+CLI_CASES=('regular_acl_mode_xattr','cp_P_command_line_symlink','cp_H_command_line_dereference','recursive_P_nested_symlink','recursive_H_nested_symlink','recursive_L_nested_symlink','cp_s_intended_symlink_destination','directory_default_acl_general_xattr','directory_no_preserve_mode','fifo_no_payload_open','mv_same_filesystem_rename','mv_cross_device_default_acl','install_regular_mode','install_directory_mode','parents_new_acl_mode','parents_existing_metadata','parents_existing_fast_path','parents_source_alias_P','parents_source_alias_H','parents_source_alias_L','parents_destination_alias','parents_search_without_read','parents_no_preserve_mode')
 MAX_ZIP=64*1024**2;MAX_OUTPUT=2*1024**2
 INVENTORY=('/usr/bin/dpkg-query','-W','-f=${binary:Package}\t${Version}\t${db:Status-Status}\n')
 CODES=frozenset(('lock_unarmed','lock_contract','path','parent','parent_changed','file_metadata','file_bound','file_pin',
@@ -55,9 +58,10 @@ def validate_lock(value):
  artifact=value['artifact'];need(type(artifact)is dict and set(artifact)=={'id','run_id','bytes','sha256','members'}
   and all(type(artifact[k])is int and artifact[k]>0 for k in('id','run_id','members'))and artifact['members']==len(outputs),'lock_contract')
  binding({k:artifact[k]for k in('bytes','sha256')},MAX_ZIP)
- source=value['source'];need(type(source)is dict and set(source)=={'commit','recipe_sha256','production_patch_sha256','controller_sha256','root_artifact_admission_sha256','root_static_verification_sha256','ci_result_sha256','ci_source_identity_sha256'},'lock_contract')
- need(type(source['commit'])is str and re.fullmatch('[a-f0-9]{40}',source['commit'])and all(type(source[k])is str and re.fullmatch('[a-f0-9]{64}',source[k])for k in set(source)-{'commit'})
-  and source['production_patch_sha256']=='3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d','lock_contract')
+ source=value['source'];need(type(source)is dict and set(source)=={'commit','recipe_sha256','production_patch_sha256','parent_patch_sha256','parent_cp','controller_sha256','root_artifact_admission_sha256','root_static_verification_sha256','ci_result_sha256','ci_source_identity_sha256'},'lock_contract')
+ need(type(source['commit'])is str and re.fullmatch('[a-f0-9]{40}',source['commit'])and all(type(source[k])is str and re.fullmatch('[a-f0-9]{64}',source[k])for k in set(source)-{'commit','parent_cp'})
+  and source['production_patch_sha256']=='3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'
+  and source['parent_patch_sha256']==PARENT_PATCH['sha256']and source['parent_cp']==PARENT_CP,'lock_contract')
  library=value['approved_libacl'];need(library=={'version':'2.4.0-1~trixie+gold1','path':'/usr/lib/x86_64-linux-gnu/libacl.so.1.2.2400','bytes':42928,'sha256':'32d112de5fb4ec3124c7a4b859b738b45e4c4a9db3b3115f167625f082909dd1'},'lock_contract')
  payload=value['runtime_payload'];need(type(payload)is dict and set(payload)=={'schema','coreutils','approved_libacl','security_accepted'}and payload['schema']=='coreutils_acl_runtime_payload/1'and payload['security_accepted']is False,'lock_contract')
  need({'bytes':len(encoded(payload)),'sha256':sha256(encoded(payload)).hexdigest()}==outputs['runtime-payload.json'],'lock_contract')
@@ -155,7 +159,7 @@ def inventory(path,expected):
   for row in stream:rows.append(row.name);need(len(rows)<=len(expected),'cache_inventory')
  need(set(rows)==set(expected) and len(rows)==len(expected),'cache_inventory')
 def cache_manifest(lock):return encoded({'schema':'coreutils_acl_image_package_cache/1','package':lock['package'],'binding':lock['outputs'][PACKAGE],
- 'source':{key:lock['source'][key]for key in('recipe_sha256','production_patch_sha256')},'runtime_payload':lock['outputs']['runtime-payload.json']})
+ 'source':{key:lock['source'][key]for key in('recipe_sha256','production_patch_sha256','parent_patch_sha256','parent_cp')},'runtime_payload':lock['outputs']['runtime-payload.json']})
 def verify_cache(cache,lock,held,owner=None):
  cache=Path(cache).absolute();ancestors=parents(cache);before=identity(cache.lstat())
  need(cache.resolve(strict=True)==cache and stat.S_ISDIR(before[2]) and stat.S_IMODE(before[2])==0o755
@@ -230,12 +234,22 @@ def admit_archive(raw,lock):
   and all(caller.get(k)is False for k in('whole_image_other_callers_assessed','all_cves_attested','security_accepted')),'archive_contract')
  native=ordinary.get('required_owned_c_fixtures');cli=ordinary.get('actual_cli')
  need(ordinary.get('schema')=='coreutils_acl_ordinary_compatibility/1'and exact_int(ordinary.get('all_required_owned_cases_skip_count'),0)and ordinary.get('security_accepted')is False
-  and type(native)is dict and set(native)=={'private_fd','gnu_fd0'}and caller.get('required_owned_fixtures')==native and type(cli)is dict
+  and type(native)is dict and set(native)=={'private_fd','gnu_fd0','parent_frontend'}and caller.get('required_owned_fixtures')==native and type(cli)is dict
   and cli.get('schema')=='coreutils_owned_cli_compatibility/1'and cli.get('status')=='PASS'and cli.get('actual_uid')==cli.get('actual_gid')==10001 and exact_int(cli.get('skip_count'),0)and cli.get('security_accepted')is False,'archive_contract')
  need(all(exact_int(native['private_fd'].get(k),v)for k,v in{'actual_uid':10001,'actual_gid':10001,'actual_returncode':0,'skip_count':0}.items())and native['private_fd'].get('NFSv4_real_filesystem_exercised')is False
   and type(native['private_fd'].get('actual_assertions'))is int and native['private_fd']['actual_assertions']>=20
   and native['gnu_fd0'].get('schema')=='ordinary_gnulib_regular_fd0/1'and native['gnu_fd0'].get('status')=='PASS'
   and native['gnu_fd0'].get('actual_uid')==native['gnu_fd0'].get('actual_gid')==10001 and native['gnu_fd0'].get('actual_gnulib_qcopy_acl_called')is True and native['gnu_fd0'].get('source_fd_zero')is True,'archive_contract')
+ parent=native['parent_frontend']
+ need(parent.get('schema')=='ordinary_cp_parent_frontend/1'and parent.get('status')=='PASS'
+  and all(exact_int(parent.get(k),v)for k,v in{'actual_uid':10001,'actual_gid':10001,'actual_case_count':4,'actual_EMFILE_partial_prefixes':2,'actual_assertions':223,'skip_count':0}.items())
+  and all(parent.get(k)is True for k in('actual_frontend_and_copy_called','actual_OPATH_pairs','source_fd_zero','physical_pair_cleanup_verified','owned_cleanup_complete'))and parent.get('security_accepted')is False,'archive_contract')
+ for fixture in native.values():
+  binding(fixture.get('actual_fixture_binary'),16*1024**2)
+ need(all(exact_int(cli.get(k),v)for k,v in{'actual_case_count':23,'legacy_case_count':14,'parent_case_count':9}.items())
+  and cli.get('cases')==list(CLI_CASES)and all(cli.get(k)is True for k in('all_commands_actual_zero_and_pipes_closed','owned_cleanup_complete','parent_ownership_and_timestamp_path_semantics_retained'))
+  and cli.get('production_data_accessed')is False and cli.get('exploit_or_race_reproduction_performed')is False
+  and caller.get('parent_source_patch_sha256')==lock['source']['parent_patch_sha256'],'archive_contract')
  need(abi.get('schema')=='coreutils_dynamic_approved_acl_abi/1'and abi.get('security_accepted')is False and type(abi.get('callers'))is dict and set(abi['callers'])=={'cp','mv','install'}and caller.get('compiled_caller_contract')==abi['callers'],'archive_contract')
  library={k:lock['approved_libacl'][k]for k in('path','bytes','sha256')}
  for name,row in abi['callers'].items():
@@ -254,6 +268,11 @@ def admit_archive(raw,lock):
  need(source.get('schema')=='coreutils_acl_source_build/1'and source.get('maintainer_dsc_signatures_authenticated')is True and source.get('patch',{}).get('sha256')==lock['source']['production_patch_sha256']and source.get('security_accepted')is False
   and sdk.get('schema')=='coreutils_acl_compiler_sdk/1'and sdk.get('compiler_only')is True and sdk.get('runtime_replacement_exported')is False and sdk.get('actual_approved_runtime_after_reinstall')==library and sdk.get('security_accepted')is False
   and generated.get('schema')=='coreutils_actual_generated_build_provenance/1'and generated.get('configured_descriptor_acl_feature')is True and generated.get('debian_dh_autoreconf_noop_removed')is True and generated.get('security_accepted')is False,'archive_contract')
+ contract=source.get('actual_source_contract');manifest=source.get('source_manifest')
+ need(type(contract)is dict and contract.get('parent_acl_patch')==PARENT_PATCH
+  and contract.get('parent_cp_actual')==lock['source']['parent_cp']and type(manifest)is dict
+  and manifest.get('package_version')==VERSION and manifest.get('parent_acl_patch')==PARENT_PATCH
+  and manifest.get('files',{}).get('src/cp.c',{}).get('after')==lock['source']['parent_cp'],'archive_contract')
  need(provenance.get('schema')=='coreutils_acl_package_provenance/1'and provenance.get('normal_package_version')==VERSION and exact_int(provenance.get('full_unfiltered_gnu_test_hook_actual_returncode'),0)
   and provenance.get('vendor_test_selection')=='configured_default_unchanged'and provenance.get('vendor_zero_skip_coverage_claimed')is False and provenance.get('runtime_loader_override_used')is False
   and provenance.get('vendor_build_only_loader_mechanics_not_disabled')is True and provenance.get('uid10001_children_gone')is True and provenance.get('only_new_coreutils_runtime_exported')is True and provenance.get('production_installed')is False and provenance.get('security_accepted')is False,'archive_contract')
