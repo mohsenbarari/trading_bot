@@ -1,0 +1,60 @@
+name: Exact current Coreutils candidate provider compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_provider:
+        description: Run only the reviewed public 2389 provider and owned-fixture capsule; no deployment or security acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-coreutils-provider-candidate
+  cancel-in-progress: false
+
+jobs:
+  provider:
+    if: github.repository == 'mohsenbarari/trading_bot' && github.ref == 'refs/heads/main' && inputs.run_provider
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out the exact controller commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Finite source and owned Python fixture QA only
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_provider_smoke/test_provider.py
+
+      - name: Seal sources and run the separate reviewed provider capsule
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_provider_smoke/seal_and_run.py \
+            --root "$RUNNER_TEMP/security-app-ci-smoke-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 ab108fd81e03340b291de1e66414c0bb0a3c62bfe98d2199f578d479e5b7667c \
+            --execute-reviewed-provider-smoke
+
+      - name: Preserve bounded evidence and all finalizer outcomes
+        if: always() && steps.run.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: coreutils-provider-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ steps.run.outputs.root }}/reports/*.json
+            ${{ steps.run.outputs.root }}/reports/*.log
+            ${{ steps.run.outputs.root }}/evidence/public-evidence.zip
