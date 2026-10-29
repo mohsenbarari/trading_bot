@@ -53,7 +53,10 @@ class Owned(unittest.TestCase):
         for name in ('controller.py','intake.json','source-manifest.json'):
             raw=(HERE/name).read_bytes()
             self.assertEqual(S.SOURCES[name],(len(raw),sha256(raw).hexdigest()))
-        self.assertEqual(len(S.SOURCES),18)
+        self.assertEqual(len(S.SOURCES),19)
+        raw=(HERE/'export_controller_gold2.py').read_bytes()
+        self.assertEqual(S.SOURCES['export_controller_gold2.py'],(len(raw),sha256(raw).hexdigest()))
+        self.assertEqual(Q.GOLD2_EXPORT_PIN,S.SOURCES['export_controller_gold2.py'])
         self.assertTrue(all(S.SOURCE_PATHS[n].startswith('deploy/maintenance/app_gold2_smoke/')for n in ('controller.py','intake.json','source-manifest.json')))
 
     def test_default_unarmed_without_source_or_host_operation(self):

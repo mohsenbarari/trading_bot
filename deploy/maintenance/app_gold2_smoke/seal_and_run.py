@@ -11,10 +11,12 @@ import argparse,errno,fcntl,json,os,re,stat,sys,time
 ROOT_PREFIX = 'security-app-ci-smoke-gold2-'
 TRACKED=Path('deploy/maintenance/app_gold2_smoke')
 REPOSITORY='mohsenbarari/trading_bot'
-CONFIRM = 'RUN-ONLY-GOLD2-2389-FLAT-INVENTORY-AND-UNCHANGED32-20261029-01'
+CONFIRM = 'RUN-ONLY-GOLD2-2389-FLAT-INVENTORY-AND-UNCHANGED32-20261029-04'
 # Exact public source hashes are generated once before this source cohort freezes.
-SOURCES = {'admit_security_component_image_reuse.py': (27518, '9adddae3d6966443f33040f54a57ce597a1816af918e8c606557801d27bf4025'), 'archive_inventory.py': (16581, '05780cb0566e7e9c77395eaef84c039190fa610befc46437ea1daf5204bddd23'), 'compose_app_mountpoint_image.py': (49042, '14849bd8c616b27ade1c8488b8e6f276b369480456d0acc1a8c8eb4284f40226'), 'compose_market_security_os_candidate.py': (52231, 'c53cfd7ae4570314ef7f13d43ecd73de26436cf56407676ac2fe24d19dc1caa9'), 'compose_security_os_candidate.py': (60894, '4156ad042885bc7104c5a9ce537193adf2211ade8447e77676ad29d520e7633d'), 'datastore_candidate_contract.py': (38383, '253f234f2ba68dea6929e16128d8dcb48021cda7bf71ffd004ecb8e709c575ee'), 'export_controller.py': (15009, '965c335b56b852ccb9d1aa512e0d19fb91d0198a431c0e685aaa8c4c037f380e'), 'inventory.py': (27509, 'e8171fb6d28a5b3e938e0136dab230c13a9e864f66aad4c2727878e22a3ea73f'), 'prepare_canonical_app_image.py': (33828, '403e95c4f59a4f22c6154f5ebddfd8d6f77b1b3a9c84fff4f7ab84a10ae698f3'), 'producer02_controller.py': (57553, '9de2b86dedbb773351b042bcd3177ebb41a88272cfd76e13f24de5ece6d49a25'), 'run_app_image_ci_smoke.py': (68163, 'b2c958060d176c0098b86a44d0dc225d4494023120b3253239bef9e2f3f2acb2'), 'runtime_image_archive_transport.py': (35148, '20c4b90f1c719d4cdee69df8ad1c31c2bcd663b99619b1d58dcbafa1eafecad2'), 'test_security_form_parser.py': (3910, 'de0090351837742ba6b0be747f0b586d4943590831215a4b4ea2619ebd5149fb'), 'test_stage6_otp_delivery_redis.py': (25543, 'b1e59ad7285a3c1f034aa269e024e091fe331cbdb446ac5e82f85de64530bd50'), 'test_telegram_otp_ephemeral_queue_redis.py': (8024, 'cbe02df0618239e4affa1f8e51b2e69cdfe13f332a44d46e8b4626b21d80e22e'), 'controller.py': (25621, '069164e75aba3a9ba78518e4f337ad539b395ca9c9af994f8b0663e8f1adaba7'), 'intake.json': (5840, '9cf7ac4c0670b66797fa4961d391896ffdaa5ba41baf6538efdaf2421539767a'), 'source-manifest.json': (3594, '8db473c668f50a3ab4c8da6f19debd01e42ba886911a0e598c028faad1718e48')}
+SOURCES = {'admit_security_component_image_reuse.py': (27518, '9adddae3d6966443f33040f54a57ce597a1816af918e8c606557801d27bf4025'), 'archive_inventory.py': (16581, '05780cb0566e7e9c77395eaef84c039190fa610befc46437ea1daf5204bddd23'), 'compose_app_mountpoint_image.py': (49042, '14849bd8c616b27ade1c8488b8e6f276b369480456d0acc1a8c8eb4284f40226'), 'compose_market_security_os_candidate.py': (52231, 'c53cfd7ae4570314ef7f13d43ecd73de26436cf56407676ac2fe24d19dc1caa9'), 'compose_security_os_candidate.py': (60894, '4156ad042885bc7104c5a9ce537193adf2211ade8447e77676ad29d520e7633d'), 'datastore_candidate_contract.py': (38383, '253f234f2ba68dea6929e16128d8dcb48021cda7bf71ffd004ecb8e709c575ee'), 'export_controller.py': (15009, '965c335b56b852ccb9d1aa512e0d19fb91d0198a431c0e685aaa8c4c037f380e'), 'inventory.py': (27509, 'e8171fb6d28a5b3e938e0136dab230c13a9e864f66aad4c2727878e22a3ea73f'), 'prepare_canonical_app_image.py': (33828, '403e95c4f59a4f22c6154f5ebddfd8d6f77b1b3a9c84fff4f7ab84a10ae698f3'), 'producer02_controller.py': (57553, '9de2b86dedbb773351b042bcd3177ebb41a88272cfd76e13f24de5ece6d49a25'), 'run_app_image_ci_smoke.py': (68163, 'b2c958060d176c0098b86a44d0dc225d4494023120b3253239bef9e2f3f2acb2'), 'runtime_image_archive_transport.py': (35148, '20c4b90f1c719d4cdee69df8ad1c31c2bcd663b99619b1d58dcbafa1eafecad2'), 'test_security_form_parser.py': (3910, 'de0090351837742ba6b0be747f0b586d4943590831215a4b4ea2619ebd5149fb'), 'test_stage6_otp_delivery_redis.py': (25543, 'b1e59ad7285a3c1f034aa269e024e091fe331cbdb446ac5e82f85de64530bd50'), 'test_telegram_otp_ephemeral_queue_redis.py': (8024, 'cbe02df0618239e4affa1f8e51b2e69cdfe13f332a44d46e8b4626b21d80e22e'), 'controller.py': (25797, '1063467ec0a24b9342e2cdb8cbb96213872e03043044e8a7e10943570231f475'), 'intake.json': (5840, '9cf7ac4c0670b66797fa4961d391896ffdaa5ba41baf6538efdaf2421539767a'), 'source-manifest.json': (3594, '8db473c668f50a3ab4c8da6f19debd01e42ba886911a0e598c028faad1718e48')}
 SOURCE_PATHS = {'admit_security_component_image_reuse.py': 'deploy/maintenance/app_r2_observe02/admit_security_component_image_reuse.py', 'archive_inventory.py': 'deploy/maintenance/app_r2_observe02/archive_inventory.py', 'compose_app_mountpoint_image.py': 'deploy/maintenance/app_r2_observe02/compose_app_mountpoint_image.py', 'compose_market_security_os_candidate.py': 'deploy/maintenance/app_r2_observe02/compose_market_security_os_candidate.py', 'compose_security_os_candidate.py': 'deploy/maintenance/app_r2_observe02/compose_security_os_candidate.py', 'datastore_candidate_contract.py': 'deploy/maintenance/app_r2_observe02/datastore_candidate_contract.py', 'export_controller.py': 'deploy/maintenance/app_r2_observe02/export_controller.py', 'inventory.py': 'deploy/maintenance/app_r2_observe02/inventory.py', 'prepare_canonical_app_image.py': 'scripts/prepare_canonical_app_image.py', 'producer02_controller.py': 'deploy/maintenance/app_r2_observe02/producer02_controller.py', 'run_app_image_ci_smoke.py': 'deploy/maintenance/app_r2_observe02/run_app_image_ci_smoke.py', 'runtime_image_archive_transport.py': 'deploy/maintenance/app_r2_observe02/runtime_image_archive_transport.py', 'test_security_form_parser.py': 'tests/test_security_form_parser.py', 'test_stage6_otp_delivery_redis.py': 'tests/test_stage6_otp_delivery_redis.py', 'test_telegram_otp_ephemeral_queue_redis.py': 'tests/test_telegram_otp_ephemeral_queue_redis.py', 'controller.py': 'deploy/maintenance/app_gold2_smoke/controller.py', 'intake.json': 'deploy/maintenance/app_gold2_smoke/intake.json', 'source-manifest.json': 'deploy/maintenance/app_gold2_smoke/source-manifest.json'}
+SOURCES['export_controller_gold2.py']=(27863, '5480efd9fb0a5443e19262323821f917c57e2168f4aec6151bc44c27ecae95ad')
+SOURCE_PATHS['export_controller_gold2.py']='deploy/maintenance/app_gold2_smoke/export_controller_gold2.py'
 EXECUTION_ARMED=False  # CLI default only; explicit reviewed workflow action is required.
 IMAGE_SOURCE_COMMIT='4df2fed29859c0b82367666521f1a345f269f58a'
 IMAGE_ID='sha256:2389c900dbbf520bd7d7f723e8c48a5c258f1612c43e80d2b66c6d046f9f8434'
@@ -52,6 +54,52 @@ def fail(errors):
     if len(errors)==1:raise errors[0]
     raise IOFailure(errors)from errors[0]
 
+class MetadataPass:
+    """One guard-only observation pass; never shared across payload operations.
+
+    Names/parent facts are deduplicated within this pass only, then freshly
+    rechecked at pass retirement. Original held FD/full9/flags are never cached.
+    Every callback creates a new pass; no current pass is globally published.
+    """
+    def __init__(self,clocks):
+        self.clocks=clocks;self.rows={};self.closed=False;self.clocks()
+    def match(self,path,expected,code):
+        need(not self.closed and type(expected)is tuple and len(expected)in(5,9),'sealed_changed')
+        if path not in self.rows:
+            need(len(self.rows)<512,'sealed_metadata')
+            self.rows[path]=[path.resolve(strict=True),ident(path.lstat()),len(expected)]
+        row=self.rows[path];row[2]=max(row[2],len(expected))
+        need(row[0]==path and row[1][:len(expected)]==expected,code)
+    def finish(self):
+        need(not self.closed,'sealed_changed');self.closed=True;errors=[]
+        try:
+            try:self.clocks()
+            except BaseException as error:errors.extend(causes(error))
+            for path,(resolved,before,count)in self.rows.items():
+                try:need(path.resolve(strict=True)==resolved==path and ident(path.lstat())[:count]==before[:count],'sealed_changed')
+                except BaseException as error:errors.extend(causes(error))
+            try:self.clocks()
+            except BaseException as error:errors.extend(causes(error))
+        finally:self.rows.clear()
+        if errors:fail(errors)
+
+
+def metadata_check(held,saved,keeper,clocks):
+    observation=MetadataPass(clocks);errors=[]
+    try:
+        for item in held:
+            if item.fd is None:item.named(observation)
+            else:item.check(observation)
+        for item in saved:
+            if item.original_fd is not None:item.check(observation)
+        if keeper is not None:keeper.check()
+    except BaseException as error:errors.extend(causes(error))
+    finally:
+        try:observation.finish()
+        except BaseException as error:errors.extend(causes(error))
+    if errors:fail(errors)
+
+
 class Held:
     def __init__(self,path,pin,*,owner,mode,maximum=131072,scope=lambda:None):
         self.path=path;self.fd=None;self.original_fd=None;self.flags=None;self.close_attempted=False;self.close_errors=[];self.io_errors=[];self.scope=scope
@@ -75,11 +123,15 @@ class Held:
             # The outer capture list already owns this constructor prefix.
             # It alone performs the one-shot physical finalizer.
             raise
-    def named(self):
-        need(self.path.resolve(strict=True)==self.path and ident(self.path.lstat())==self.before
-            and all(p.resolve(strict=True)==p and ident(p.lstat())[:5]==old for p,old in self.parents),'sealed_changed')
-    def check(self):
-        self.named();need(self.fd==self.original_fd and ident(os.fstat(self.original_fd))==self.before and(fcntl.fcntl(self.original_fd,fcntl.F_GETFL),fcntl.fcntl(self.original_fd,fcntl.F_GETFD))==self.flags,'sealed_changed')
+    def named(self,observation=None):
+        if observation is None:
+            need(self.path.resolve(strict=True)==self.path and ident(self.path.lstat())==self.before
+                and all(p.resolve(strict=True)==p and ident(p.lstat())[:5]==old for p,old in self.parents),'sealed_changed')
+        else:
+            observation.match(self.path,self.before,'sealed_changed')
+            for p,old in self.parents:observation.match(p,old,'sealed_changed')
+    def check(self,observation=None):
+        self.named(observation);need(self.fd==self.original_fd and ident(os.fstat(self.original_fd))==self.before and(fcntl.fcntl(self.original_fd,fcntl.F_GETFL),fcntl.fcntl(self.original_fd,fcntl.F_GETFD))==self.flags,'sealed_changed')
     def read(self,size):
         if self.io_errors:fail(self.io_errors)
         errors=[];raw=None
@@ -162,11 +214,15 @@ class Saved:
     def note(self,error):
         for cause in causes(error):
             if all(cause is not old for old in self.errors):self.errors.append(cause)
-    def named(self):
-        need(self.before is not None and self.path.resolve(strict=True)==self.path and ident(self.path.lstat())==self.before,'saved_changed')
-        need(all(p.resolve(strict=True)==p and ident(p.lstat())[:5]==before for p,before in self.parents),'sealed_parent')
-    def check(self):
-        self.named()
+    def named(self,observation=None):
+        if observation is None:
+            need(self.before is not None and self.path.resolve(strict=True)==self.path and ident(self.path.lstat())==self.before,'saved_changed')
+            need(all(p.resolve(strict=True)==p and ident(p.lstat())[:5]==before for p,before in self.parents),'sealed_parent')
+        else:
+            need(self.before is not None,'saved_changed');observation.match(self.path,self.before,'saved_changed')
+            for p,before in self.parents:observation.match(p,before,'sealed_parent')
+    def check(self,observation=None):
+        self.named(observation)
         if self.original_fd is not None and not self.writer_closed:
             need(self.fd==self.original_fd and ident(os.fstat(self.original_fd))==self.before and(fcntl.fcntl(self.original_fd,fcntl.F_GETFL),fcntl.fcntl(self.original_fd,fcntl.F_GETFD))==self.flags and os.lseek(self.original_fd,0,os.SEEK_CUR)==self.count,'saved_changed')
         if self.original_reader is not None and not self.reader_closed:
@@ -334,13 +390,7 @@ def run(args):
     def capture(path,pin,**kwargs):
         item=Held.__new__(Held);held.append(item);item.__init__(path,pin,scope=check,**kwargs);return item
     def check():
-        clocks()
-        for item in held:
-            if item.fd is None:item.named()
-            else:item.check()
-        for item in saved:
-            if item.original_fd is not None:item.check()
-        if keeper is not None:keeper.check()
+        metadata_check(held,saved,keeper,clocks)
     try:
         own=capture(Path(__file__).absolute(),(Path(__file__).lstat().st_size,args.source_sha256),owner=1001,mode=0o644)
         # Source files must be genuinely tracked in THIS controller commit;

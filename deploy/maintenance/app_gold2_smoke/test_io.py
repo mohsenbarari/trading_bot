@@ -175,8 +175,8 @@ class IO(unittest.TestCase):
             self.assertGreater(len(events[events.index('replaced')+1:]),0);self.assertEqual(events[-1],'clock')
             self.assert_closed(item.original_reader)
 
-    def test_all18_owned_source_copies_retain_readers_through_finalization(self):
-        with tempfile.TemporaryDirectory(dir=HERE,prefix='owned18-')as td:
+    def test_all19_owned_source_copies_retain_readers_through_finalization(self):
+        with tempfile.TemporaryDirectory(dir=HERE,prefix='owned19-')as td:
             root=Path(td);held=[];saved=[]
             def check():
                 for item in held:
@@ -192,7 +192,7 @@ class IO(unittest.TestCase):
                 output=S.save(root/name,original.raw,owned=saved,check=check)
                 copy=S.Held(root/name,pin,owner=os.geteuid(),mode=0o600,scope=check);held.append(copy)
                 self.assertTrue(output.writer_closed);os.fstat(output.original_reader)
-            self.assertEqual(len(saved),18);self.assertEqual(len(held),36)
+            self.assertEqual(len(saved),19);self.assertEqual(len(held),38)
             S.finalize(held,saved=saved)
             for item in saved:self.assertTrue(item.writer_closed and item.reader_closed)
             for item in held:self.assertIsNone(item.fd)

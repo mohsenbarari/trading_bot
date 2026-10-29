@@ -8,7 +8,8 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
 import argparse,errno,fcntl,json,os,re,stat,time
-CONFIRM='RUN-ONLY-GOLD2-2389-FLAT-INVENTORY-AND-UNCHANGED32-20261029-01'
+CONFIRM='RUN-ONLY-GOLD2-2389-FLAT-INVENTORY-AND-UNCHANGED32-20261029-04'
+GOLD2_EXPORT_PIN=(27863, '5480efd9fb0a5443e19262323821f917c57e2168f4aec6151bc44c27ecae95ad')
 PHASE='unarmed'
 LAST_FAILURE_RECORD=None
 PINS={'admit_security_component_image_reuse.py': (27518, '9adddae3d6966443f33040f54a57ce597a1816af918e8c606557801d27bf4025'), 'archive_inventory.py': (16581, '05780cb0566e7e9c77395eaef84c039190fa610befc46437ea1daf5204bddd23'), 'compose_app_mountpoint_image.py': (49042, '14849bd8c616b27ade1c8488b8e6f276b369480456d0acc1a8c8eb4284f40226'), 'compose_market_security_os_candidate.py': (52231, 'c53cfd7ae4570314ef7f13d43ecd73de26436cf56407676ac2fe24d19dc1caa9'), 'compose_security_os_candidate.py': (60894, '4156ad042885bc7104c5a9ce537193adf2211ade8447e77676ad29d520e7633d'), 'datastore_candidate_contract.py': (38383, '253f234f2ba68dea6929e16128d8dcb48021cda7bf71ffd004ecb8e709c575ee'), 'export_controller.py': (15009, '965c335b56b852ccb9d1aa512e0d19fb91d0198a431c0e685aaa8c4c037f380e'), 'inventory.py': (27509, 'e8171fb6d28a5b3e938e0136dab230c13a9e864f66aad4c2727878e22a3ea73f'), 'prepare_canonical_app_image.py': (33828, '403e95c4f59a4f22c6154f5ebddfd8d6f77b1b3a9c84fff4f7ab84a10ae698f3'), 'producer02_controller.py': (57553, '9de2b86dedbb773351b042bcd3177ebb41a88272cfd76e13f24de5ece6d49a25'), 'run_app_image_ci_smoke.py': (68163, 'b2c958060d176c0098b86a44d0dc225d4494023120b3253239bef9e2f3f2acb2'), 'runtime_image_archive_transport.py': (35148, '20c4b90f1c719d4cdee69df8ad1c31c2bcd663b99619b1d58dcbafa1eafecad2'), 'test_security_form_parser.py': (3910, 'de0090351837742ba6b0be747f0b586d4943590831215a4b4ea2619ebd5149fb'), 'test_stage6_otp_delivery_redis.py': (25543, 'b1e59ad7285a3c1f034aa269e024e091fe331cbdb446ac5e82f85de64530bd50'), 'test_telegram_otp_ephemeral_queue_redis.py': (8024, 'cbe02df0618239e4affa1f8e51b2e69cdfe13f332a44d46e8b4626b21d80e22e')}
@@ -135,7 +136,7 @@ class ObservationSources:
 
 EVIDENCE_NAMES=frozenset(('source-identity.json','input-manifest.json','image-build.json','prepare.json','finalize.json','reports/vulnerabilities.json','reports/sbom.cdx.json','reports/docker-build-output.json'))
 MAX_JSON=2*1024**2
-PUBLIC_CLASSES=frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError','PermissionError','TimeoutError','ValueError','TypeError','KeyError','JSONDecodeError','BootstrapFailure'))
+PUBLIC_CLASSES=frozenset(('RuntimeError','Refusal','AssertionError','OSError','FileNotFoundError','PermissionError','TimeoutError','ValueError','TypeError','KeyError','JSONDecodeError','BootstrapFailure','ExportIOFailure'))
 CODES=frozenset(('bootstrap_io_finality','bootstrap_flags_or_source','bootstrap_close_unknown','explicit_action','outer_keeper_required','source_pin','source_manifest','intake_shape','evidence_shape','evidence_identity','evidence_signature','evidence_reports','inventory_receipt','inventory_cardinality_changed','source_identity','hosted_ci_only','owned_cleanup_unproven','unexpected_failure','inner_source_callback_bound','inner_clock'))
 
 def same(a,b):
@@ -259,8 +260,8 @@ def main(argv=None,*,outer_keeper=None,outer_check=None):
   ctx=old.Controller(args.root,sources);ctx.C.PROOF_KEEPER=outer_keeper;ctx.checks.extend((old_check,outer_keeper.check))
   if outer_check is not None:ctx.checks.append(outer_check)
   def load(name):
-   pin=PINS[name];raw=source(old,args.root,sources,ctx.checks,name,pin);module=ModuleType('_gold2_'+name[:-3]);module.__file__=str(args.root/'source'/name);exec(compile(raw,module.__file__,'exec'),module.__dict__);ctx.modules[name]=module;return module
-  P=load('producer02_controller.py');builder=load('prepare_canonical_app_image.py');E=load('export_controller.py');A=load('archive_inventory.py');I=load('inventory.py')
+   pin=GOLD2_EXPORT_PIN if name=='export_controller_gold2.py'else PINS[name];raw=source(old,args.root,sources,ctx.checks,name,pin);module=ModuleType('_gold2_'+name[:-3]);module.__file__=str(args.root/'source'/name);exec(compile(raw,module.__file__,'exec'),module.__dict__);ctx.modules[name]=module;return module
+  P=load('producer02_controller.py');builder=load('prepare_canonical_app_image.py');E=load('export_controller_gold2.py');A=load('archive_inventory.py');I=load('inventory.py')
   intake_raw=source(old,args.root,sources,ctx.checks,'intake.json',INTAKE_PIN);manifest_raw=source(old,args.root,sources,ctx.checks,'source-manifest.json',MANIFEST_PIN)
   intake=checked_document(intake_raw,INTAKE_PIN);manifest=checked_document(manifest_raw,MANIFEST_PIN);validate_inputs(intake,manifest)
   execute(ctx,old,P,builder,E,A,I,intake)
