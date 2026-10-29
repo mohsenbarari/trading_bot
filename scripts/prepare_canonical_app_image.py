@@ -205,8 +205,8 @@ def public_input_names(repo,source):
     need(core_metadata==core_expected['identity']and sha256(core_raw).hexdigest()==core_expected['sha256'],'source_changed')
     core=document(core_raw)
     need(type(core)is dict and core.get('schema')=='coreutils_acl_image_package_lock/1'and core.get('armed')is True
-        and core.get('package',{}).get('name')=='coreutils'and core['package'].get('version')=='9.7-3+gold1'
-        and core['package'].get('path')=='coreutils_9.7-3+gold1_amd64.deb','input_inventory')
+        and core.get('package',{}).get('name')=='coreutils'and core['package'].get('version')=='9.7-3+gold2'
+        and core['package'].get('path')=='coreutils_9.7-3+gold2_amd64.deb','input_inventory')
     names|={'pip_packages/.coreutils-acl-capsule.lock','pip_packages/coreutils-acl-capsule/manifest.json',
         'pip_packages/coreutils-acl-capsule/'+core['package']['path']}
     return names

@@ -18,3 +18,5 @@
 /deploy/maintenance/coreutils_acl_build/0002-coreutils-unfiltered-vendor-tests.patch whitespace=-blank-at-eol,-space-before-tab
 /deploy/maintenance/coreutils_acl_build/0003-preserve-imported-gnulib-infrastructure.patch whitespace=-blank-at-eol,-space-before-tab
 /deploy/maintenance/coreutils_acl_build/0004-declare-fchownat-in-configure-probe.patch whitespace=-blank-at-eol,-space-before-tab
+# Preserve GNU unified-patch context; actual added C lines and application are tested.
+/deploy/maintenance/coreutils_acl_build/0006-cp-parents-bound-acl.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

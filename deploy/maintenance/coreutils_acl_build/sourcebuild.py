@@ -8,14 +8,14 @@ import argparse,io,json,os,re,select,selectors,signal,stat,subprocess,sys,tarfil
 from types import ModuleType
 
 RECIPE=Path('/recipe');INPUTS=Path('/inputs');WORK=Path('/build/coreutils-acl');OUT=Path('/out')
-VERSION='9.7-3+gold1'
+VERSION='9.7-3+gold2'
 SDK_VERSION='2.4.0-1~trixie+gold1'
 SOURCE_EPOCH=1793059200
 SOURCE_FILES={'acl_2.4.0-1.dsc': (2624, 'b987ebbeb3d498794bad29cd65301b77384978493d8765c94dba8bad8fa325b6'), 'acl_2.4.0.orig.tar.xz': (384828, 'e661131456d2708a01c614a0f400e11d7d1bfaeb6f3e74b75bb980b72f0161a3'), 'acl_2.4.0.orig.tar.xz.asc': (833, '5f4f0b9b78821764fe6b88e32aef6ec519628522c211c36706bcb78d6f3f036b'), 'acl_2.4.0-1.debian.tar.xz': (47932, '65931c2fb3e821bda67f8d8d72d77e99ac61502748dcdf38b6805fe89339085e'), 'coreutils_9.7-3.dsc': (2122, 'c3a207e3aaad165765c7a6fab89045f5fd20035fea6830b9f9ebbb92ebfbff89'), 'coreutils_9.7.orig.tar.xz': (6158960, 'e8bb26ad0293f9b5a1fc43fb42ba970e312c66ce92c1b0b16713d7500db251bf'), 'coreutils_9.7.orig.tar.xz.asc': (833, '5070e9428bd372a7fa1f66b395b81092bb40c98f9f56a2e2bc55c47fd387e901'), 'coreutils_9.7-3.debian.tar.xz': (26820, '483f77876a080577f63da1d004cc1cf17d16df65d6925aefdd3294c6101eccfb'), 'attr-2.6.0.tar.xz': (343608, '6c8a2148a7b85043b68492bce43316b0e2e214fc4e628c7ede078e76e216330b')}
 OLD_PACKAGES={'libacl1_2.4.0-1~trixie+gold1_amd64.deb': (37076, 'bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1')}
 PATCH='0001-coreutils-bound-acl-callers.patch';PATCH_PIN=(60929,'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d')
 CHANGELOG='0002-coreutils-unfiltered-vendor-tests.patch';CHANGELOG_PIN=(304,'aac49190579f7b17df5d9cd6cb0d622a1b7ebe78950e3b8e27aeb1825441541d')
-SOURCE_MANIFEST_PIN=(12344,'572665dc9ca67f4ce9a45c184cc842e1123dc55bc1517162ed7b16b8542de356')
+SOURCE_MANIFEST_PIN=(13045, '8e1dcd124814503895bbcb5762efadb500e59b0a65c9a5eea15f3c5366149784')
 REGEN_PATCH='0003-preserve-imported-gnulib-infrastructure.patch'
 REGEN_PIN=(486,'d69eb7cb24de5f9cfbe3a88eb8b2bc4c28040fa3e7030d6b971f6936f59fef8a')
 PROBE_PATCH='0004-declare-fchownat-in-configure-probe.patch'
@@ -24,12 +24,17 @@ LINK_PATCH='0005-qcopy-acl-transitive-link-dependencies.patch'
 LINK_PIN=(538,'053f1359be9a14f54c642523f4360fffd796b73582a21f2d2d687b9b55fab17e')
 LINK_M4_BEFORE=(8723,'fc2bbf5d7927bc85a8f91913903b23b5d3195bdbc4f98bcd9698e01dc618bbe2')
 LINK_M4_AFTER=(8955,'5ad6011fd819277a636e4b03bc4ffaf2932d812c791c48153ddbb56b497e3da7')
+PARENT_PATCH='0006-cp-parents-bound-acl.patch'
+PARENT_PIN=(7024, 'b2d25168d84d8bd85fbf7af852e09634b446ff640570bb8009d6a7c09886a005')
+PARENT_APPROVAL_PIN=(1553, '06ffe0a1604bafffb1abfa60dc80b3eab4982c7740326ac2fd9f0f2af9e98475')
+PARENT_VARIANT_PIN=(2430, '26a3ccf0c4c7c4ef20f93c87d73921e2acb2552c693aae5a54ed057b83299345')
 FIXTURE_PIN=(9979, '5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936')
 CA_PIN=(222073,'e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7')
 RECIPE_FILES={'ordinary_fd_acl.c', 'local-source-packet.json', 'root-source-approval.json', 'sourcebuild.py', 'owned-fixture.mk', 'Dockerfile', 'ordinary_gnulib_fd0.c', 'print-vendor-selection.mk', 'verify_ordinary.py', 'gnulib-fd0-fixture.mk', 'verify_vendor_suite.py', '0002-coreutils-unfiltered-vendor-tests.patch', 'source-manifest.json', '0001-coreutils-bound-acl-callers.patch'}
 RECIPE_FILES.add(REGEN_PATCH)
 RECIPE_FILES.add(PROBE_PATCH)
 RECIPE_FILES.add(LINK_PATCH)
+RECIPE_FILES.update({PARENT_PATCH,'parent-source-approval.json','parent-source-variant.json','ordinary_parent_acl.c','parent-fixture.mk'})
 ENV={'PATH':'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','HOME':'/work/home','LC_ALL':'C.UTF-8','LANG':'C.UTF-8',
  'DEBIAN_FRONTEND':'noninteractive','SOURCE_DATE_EPOCH':str(SOURCE_EPOCH),
  'DEB_BUILD_OPTIONS':'parallel=2','DEB_BUILD_PROFILES':'noudeb','QUILT_PATCHES':'debian/patches','QUILT_PATCH_OPTS':'--fuzz=0'}
@@ -48,7 +53,7 @@ def read(path,maximum):
 profile=read('/proc/self/attr/current',256)
 print(json.dumps({'uid':os.getuid(),'euid':os.geteuid(),'gid':os.getgid(),'egid':os.getegid(),'apparmor':profile},sort_keys=True))
 '''
-OUTPUTS={'coreutils_9.7-3+gold1_amd64.deb': 67108864, 'coreutils_9.7-3+gold1_amd64.changes': 4194304, 'coreutils_9.7-3+gold1_amd64.buildinfo': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.changes': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.buildinfo': 4194304, 'source-proof.json': 4194304, 'sdk-proof.json': 4194304, 'abi-contract.json': 4194304, 'ordinary-compatibility.json': 4194304, 'provenance.json': 4194304, 'runtime-payload.json': 4194304, 'caller-proof.json': 4194304, 'vendor-suite.json': 4194304, 'generated-build-proof.json': 4194304}
+OUTPUTS={'coreutils_9.7-3+gold2_amd64.deb': 67108864, 'coreutils_9.7-3+gold2_amd64.changes': 4194304, 'coreutils_9.7-3+gold2_amd64.buildinfo': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.changes': 4194304, 'acl_2.4.0-1~trixie+gold1_amd64.buildinfo': 4194304, 'source-proof.json': 4194304, 'sdk-proof.json': 4194304, 'abi-contract.json': 4194304, 'ordinary-compatibility.json': 4194304, 'provenance.json': 4194304, 'runtime-payload.json': 4194304, 'caller-proof.json': 4194304, 'vendor-suite.json': 4194304, 'generated-build-proof.json': 4194304}
 
 
 def require(ok,code):
@@ -250,7 +255,7 @@ def builder_context():
    and type(pin['sha256'])is str and re.fullmatch('[a-f0-9]{64}',pin['sha256']),'context_binding')
   digest(RECIPE/name,(pin['bytes'],pin['sha256']))
  for name,pin in OLD_PACKAGES.items():digest(INPUTS/name,pin)
- for name,pin in ((PATCH,PATCH_PIN),(CHANGELOG,CHANGELOG_PIN),(REGEN_PATCH,REGEN_PIN),(PROBE_PATCH,PROBE_PIN),(LINK_PATCH,LINK_PIN),('source-manifest.json',SOURCE_MANIFEST_PIN),('ordinary_fd_acl.c',FIXTURE_PIN)):digest(RECIPE/name,pin)
+ for name,pin in ((PATCH,PATCH_PIN),(CHANGELOG,CHANGELOG_PIN),(REGEN_PATCH,REGEN_PIN),(PROBE_PATCH,PROBE_PIN),(LINK_PATCH,LINK_PIN),(PARENT_PATCH,PARENT_PIN),('parent-source-approval.json',PARENT_APPROVAL_PIN),('parent-source-variant.json',PARENT_VARIANT_PIN),('source-manifest.json',SOURCE_MANIFEST_PIN),('ordinary_fd_acl.c',FIXTURE_PIN)):digest(RECIPE/name,pin)
  return ctx
 
 def source_signature(path):
@@ -471,7 +476,7 @@ def build_vendor(kind):
   manifest=json.loads(bytes_at(RECIPE/'source-manifest.json',SOURCE_MANIFEST_PIN));source_contract(source,manifest,'before')
   original_bindings=original_source_bindings(source);test_sources=test_source_inventory(source);configure_before=observed(source/'configure')
   require(observed(source/'m4/acl.m4',maximum=LINK_M4_BEFORE[0])=={'bytes':LINK_M4_BEFORE[0],'sha256':LINK_M4_BEFORE[1]},'qcopy_m4_original_pin')
-  for patch in (PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
+  for patch in (PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH,PARENT_PATCH):command(['/usr/bin/patch','-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(WORK/'public-inputs'/patch)],cwd=source,timeout=30,user=10001)
   require(observed(source/'m4/acl.m4',maximum=LINK_M4_AFTER[0])=={'bytes':LINK_M4_AFTER[0],'sha256':LINK_M4_AFTER[1]},'qcopy_m4_declared_patch_pin')
   source_contract(source,manifest,'after')
   regeneration_before=regeneration_inputs(source)
@@ -492,7 +497,7 @@ def build_vendor(kind):
   publish(directory/'source-contract.json',encoded({'schema':'coreutils_authenticated_source_contract/1','original_pinned_source_files':original_bindings,
    'unchanged_original_vendor_tests':test_sources,'unchanged_imported_m4_and_po_infrastructure':regeneration_before,
    'regeneration_guard_patch':{'bytes':REGEN_PIN[0],'sha256':REGEN_PIN[1]},'configure_probe_header_patch':{'bytes':PROBE_PIN[0],'sha256':PROBE_PIN[1]},'only_test_hook_delta':{'bytes':CHANGELOG_PIN[0],'sha256':CHANGELOG_PIN[1]},
-   'qcopy_acl_transitive_link_patch':{'bytes':LINK_PIN[0],'sha256':LINK_PIN[1],'original_m4_acl':{'bytes':LINK_M4_BEFORE[0],'sha256':LINK_M4_BEFORE[1]},'declared_m4_acl_after_patch':{'bytes':LINK_M4_AFTER[0],'sha256':LINK_M4_AFTER[1]},'C_and_test_bodies_changed_by_this_patch':False},'security_accepted':False}))
+   'qcopy_acl_transitive_link_patch':{'bytes':LINK_PIN[0],'sha256':LINK_PIN[1],'original_m4_acl':{'bytes':LINK_M4_BEFORE[0],'sha256':LINK_M4_BEFORE[1]},'declared_m4_acl_after_patch':{'bytes':LINK_M4_AFTER[0],'sha256':LINK_M4_AFTER[1]},'C_and_test_bodies_changed_by_this_patch':False},'parent_acl_patch':{'bytes':PARENT_PIN[0],'sha256':PARENT_PIN[1]},'parent_cp_actual':observed(source/'src/cp.c'),'parent_source_approval':json.loads(bytes_at(WORK/'public-inputs/parent-source-approval.json',PARENT_APPROVAL_PIN)),'parent_source_variant':json.loads(bytes_at(WORK/'public-inputs/parent-source-variant.json',PARENT_VARIANT_PIN)),'security_accepted':False}))
   publish(directory/'generated-build-proof.json',encoded(generated_proof(source,configure_before)))
   receipt=json.loads(owned_read(directory/'vendor-suite.json'));require(receipt['schema']=='coreutils_unfiltered_vendor_command/1'and receipt['actual_returncode']==0 and receipt['actual_uid']==receipt['actual_gid']==10001,'actual_vendor_suite_required')
  return source,rows,records,packaging
@@ -592,7 +597,9 @@ def original_source_bindings(source):
  for row in packet['files']:
   if row['path'].startswith(prefix):
    name=row['path'][len(prefix):];pin=observed(source/name);require(pin=={'bytes':row['bytes'],'sha256':row['sha256']},'full_source_original_pin');rows.append({'path':name,**pin})
- require(len(rows)>=20,'original_source_contract');return rows
+ rows.append({'path':'src/cp.c',**observed(source/'src/cp.c')})
+ require(rows[-1]=={'path':'src/cp.c','bytes':42619,'sha256':'bd80e7765ca45d675d8bb0e32d208e4e91a89f1c432e297395376ee728ca7436'},'parent_cp_original')
+ require(len(rows)>=21,'original_source_contract');return rows
 
 def attr_lineage(manifest):
  path=WORK/'public-inputs/attr-2.6.0.tar.xz';raw=bytes_at(path,SOURCE_FILES[path.name],maximum=1024**2);expected={r['original']:r for r in manifest['attr26_lineage']};found={};total=0;count=0
@@ -662,6 +669,25 @@ def generated_proof(source,configure_before):
  return {'schema':'coreutils_actual_generated_build_provenance/1','original_configure':configure_before,'actual_generated_files':rows,'actual_acl_link_metadata':configured_acl_linkage(source),
   'configured_descriptor_acl_feature':True,'debian_dh_autoreconf_noop_removed':True,'security_accepted':False}
 
+def validate_ordinary_cli(ordinary,expected_cases):
+ require(ordinary['schema']=='coreutils_owned_cli_compatibility/1'and ordinary['status']=='PASS'and ordinary['actual_uid']==ordinary['actual_gid']==10001
+  and ordinary['skip_count']==0 and ordinary['security_accepted']is False and ordinary['cases']==expected_cases
+  and type(ordinary['actual_case_count'])is int and ordinary['actual_case_count']==23
+  and type(ordinary['legacy_case_count'])is int and ordinary['legacy_case_count']==14
+  and type(ordinary['parent_case_count'])is int and ordinary['parent_case_count']==9
+  and ordinary['all_commands_actual_zero_and_pipes_closed']is True and ordinary['owned_cleanup_complete']is True,'ordinary_cli_receipt');return ordinary
+
+def parse_parent_fixture(raw):
+ require(type(raw)is bytes and 0<len(raw)<=65536,'parent_fixture_output_bound')
+ lines=raw.splitlines();require(len(lines)==4 and all(line.startswith(b'gold-owned-parent-acl-fixture:')for line in lines[:-1]),'parent_expected_failure_diagnostics')
+ value=json.loads(lines[-1]);require(value['schema']=='ordinary_cp_parent_frontend/1'and value['status']=='PASS'
+  and value['actual_uid']==value['actual_gid']==10001 and type(value['actual_assertions'])is int and 40<=value['actual_assertions']<=512
+  and type(value['actual_case_count'])is int and value['actual_case_count']==4 and value['actual_frontend_and_copy_called']is True and value['actual_OPATH_pairs']is True
+  and value['source_fd_zero']is True and type(value['actual_EMFILE_partial_prefixes'])is int and value['actual_EMFILE_partial_prefixes']==2 and value['physical_pair_cleanup_verified']is True
+  and value['owned_cleanup_complete']is True and type(value['skip_count'])is int and value['skip_count']==0 and value['security_accepted']is False,'parent_frontend_receipt')
+ value['expected_failure_diagnostics']=[line.decode('ascii')for line in lines[:-1]];value['raw_stdout_sha256']=sha256(raw).hexdigest();return value
+
+
 def build():
  context=builder_context();require(not WORK.exists()and not OUT.exists(),'fresh_build_required')
  prep=bytes_at(Path('/build/preparation.json'),maximum=MAX_METADATA);preparation=json.loads(prep)
@@ -676,6 +702,13 @@ def build():
  guard=public_guards();sources={name:digest(public/name,pin)for name,pin in SOURCE_FILES.items()}
  manifest=json.loads(bytes_at(public/'source-manifest.json',SOURCE_MANIFEST_PIN));lineage=attr_lineage(manifest)
  approval=json.loads(bytes_at(public/'root-source-approval.json',(1963,'39f1ddaffbe9f22ffad55edbe07556a62238e606b7a1f05685a6c712592444fa')));require(approval['source_only_approval_for_isolated_vendor_ci']is True and approval['security_accepted']is False,'isolated_source_approval')
+ parent_approval=json.loads(bytes_at(public/'parent-source-approval.json',PARENT_APPROVAL_PIN));parent_variant=json.loads(bytes_at(public/'parent-source-variant.json',PARENT_VARIANT_PIN))
+ require(parent_approval['schema']=='Root_cp_parent_ACL_source_approval/1'and parent_approval['source_only_approval_for_isolated_vendor_ci']is True
+  and parent_approval['CVE_or_runtime_or_deployment_or_global_security_accepted']is False and parent_approval['patch']=={'bytes':PARENT_PIN[0],'sha256':PARENT_PIN[1]}
+  and parent_approval['original_cp']==manifest['files']['src/cp.c']['before']and parent_approval['new_cp']==manifest['files']['src/cp.c']['after'],'parent_patch_source_approval')
+ require(parent_variant['schema']=='coreutils_parent_ACL_source_variant/1'and parent_variant['package_version']==VERSION
+  and parent_variant['Root_new_recipe_and_fixture_integration_accepted']is False and parent_variant['native_parent_fixtures_executed']is False
+  and parent_variant['original_cli_case_count']==14 and parent_variant['additional_parent_cli_case_count']==9,'parent_source_variant')
  _,sdk_rows,sdk_records,sdk_packaging=build_vendor('sdk');guard()
  sdk={r['name']:r for r in sdk_rows};install_packages([Path(sdk[n]['path'])for n in ('libacl1','libacl1-dev')],documentation=('libacl1','libacl1-dev'))
  fresh_sdk_library=digest(Path('/usr/lib/x86_64-linux-gnu/libacl.so.1').resolve());sdk_headers={n:digest(Path(n))for n in ('/usr/include/sys/acl.h','/usr/include/acl/libacl.h')}
@@ -694,20 +727,21 @@ def build():
  # Compile actual frozen private helper fixture using actual generated GNU flags,
  # and a separate companion invoking the real GNU qcopy_acl regular-FD0 fix.
  native={}
- for name,fragment,variable,fixture,target in [('private_fd','owned-fixture.mk','GOLD_OWNED_FIXTURE','ordinary_fd_acl.c','gold-owned-fd-acl-fixture'),('gnu_fd0','gnulib-fd0-fixture.mk','GOLD_GNULIB_FD0_FIXTURE','ordinary_gnulib_fd0.c','gold-owned-gnulib-fd0-fixture')]:
+ for name,fragment,variable,fixture,target in [('private_fd','owned-fixture.mk','GOLD_OWNED_FIXTURE','ordinary_fd_acl.c','gold-owned-fd-acl-fixture'),('gnu_fd0','gnulib-fd0-fixture.mk','GOLD_GNULIB_FD0_FIXTURE','ordinary_gnulib_fd0.c','gold-owned-gnulib-fd0-fixture'),('parent_frontend','parent-fixture.mk','GOLD_PARENT_FIXTURE','ordinary_parent_acl.c','gold-owned-parent-acl-fixture')]:
   command(['/usr/bin/make','--no-print-directory','-f','Makefile','-f',str(public/fragment),variable+'='+str(public/fixture),target],cwd=source,user=10001,timeout=120)
-  flag='--run-owned-fd-acl'if name=='private_fd'else'--run-owned-gnulib-fd0'
+  flag={'private_fd':'--run-owned-fd-acl','gnu_fd0':'--run-owned-gnulib-fd0','parent_frontend':'--run-owned-parent-acl'}[name]
   code,raw=run([str(source/target),flag],cwd=Path('/work'),user=10001,with_code=True,timeout=60,maximum=65536);uid_idle();require(code==0,'required_owned_c_fixture_failed')
   if name=='private_fd':
    match=re.fullmatch(rb'owned_fd_acl_fixture_passed;NFSv4_real_filesystem_NOT_EXERCISED;security_accepted=false\nactual_assertions=([0-9]+)\n',raw);require(match is not None and int(match[1])>=20,'private_fixture_receipt')
    native[name]={'actual_assertions':int(match[1]),'actual_uid':10001,'actual_gid':10001,'actual_returncode':0,'skip_count':0,'NFSv4_real_filesystem_exercised':False,'raw_stdout_sha256':sha256(raw).hexdigest()}
-  else:
+  elif name=='gnu_fd0':
    value=json.loads(raw);require(value['schema']=='ordinary_gnulib_regular_fd0/1'and value['status']=='PASS'and value['actual_uid']==value['actual_gid']==10001
     and value['actual_gnulib_qcopy_acl_called']is True and value['source_fd_zero']is True,'gnu_fd0_receipt');native[name]=value
+  else:
+   native[name]=parse_parent_fixture(raw)
   guard();native[name]['actual_fixture_binary']=observed(source/target)
  code,raw=run(['/usr/local/bin/python3','-I','-S','-B',str(public/'verify_ordinary.py'),'--run-owned-compatibility'],cwd=Path('/work'),user=10001,with_code=True,timeout=240,maximum=MAX_METADATA);uid_idle();require(code==0,'ordinary_coreutils_compatibility');ordinary=json.loads(raw)
- require(ordinary['schema']=='coreutils_owned_cli_compatibility/1'and ordinary['status']=='PASS'and ordinary['actual_uid']==ordinary['actual_gid']==10001
-  and ordinary['skip_count']==0 and ordinary['security_accepted']is False,'ordinary_cli_receipt');guard()
+ validate_ordinary_cli(ordinary,parent_variant['ordinary_cli_cases']);guard()
  require(all(ordinary['actual_installed_candidate_binaries'][n]['sha256']==abi[n]['candidate_binary']['sha256']for n in abi),'ordinary_candidate_binary_binding')
  suite_raw=owned_read(WORK/'coreutils/vendor-suite.json');suite=json.loads(suite_raw);require(suite['actual_returncode']==0,'vendor_tests_required');os.chown(WORK/'coreutils/vendor-suite.json',0,0)
  sourceproof=json.loads(bytes_at(WORK/'coreutils/source-contract.json',maximum=MAX_METADATA));verify_test_sources(source,sourceproof['unchanged_original_vendor_tests']);source_contract(source,manifest,'after');generated=json.loads(bytes_at(WORK/'coreutils/generated-build-proof.json',maximum=MAX_METADATA))
@@ -721,7 +755,7 @@ def build():
  'sdk-proof.json':sdk_proof,'abi-contract.json':{'schema':'coreutils_dynamic_approved_acl_abi/1','callers':abi,'security_accepted':False},
  'ordinary-compatibility.json':{'schema':'coreutils_acl_ordinary_compatibility/1','required_owned_c_fixtures':native,'actual_cli':ordinary,'all_required_owned_cases_skip_count':0,'security_accepted':False},
  'runtime-payload.json':{'schema':'coreutils_acl_runtime_payload/1','approved_libacl':lib_payload,'coreutils':payload,'security_accepted':False},
- 'caller-proof.json':{'schema':'coreutils_descriptor_caller_build/1','source_patch_sha256':PATCH_PIN[1],'compiled_caller_contract':abi,'required_owned_fixtures':native,
+ 'caller-proof.json':{'schema':'coreutils_descriptor_caller_build/1','source_patch_sha256':PATCH_PIN[1],'parent_source_patch_sha256':PARENT_PIN[1],'compiled_caller_contract':abi,'required_owned_fixtures':native,
   'ordinary_coreutils_compatibility_passed':True,'whole_image_other_callers_assessed':False,'all_cves_attested':False,'security_accepted':False},
  'vendor-suite.json':suite,'generated-build-proof.json':generated,
  'provenance.json':{'schema':'coreutils_acl_package_provenance/1','context':context,'preparation_sha256':sha256(prep).hexdigest(),'preparation':preparation,

@@ -29,9 +29,9 @@ class SourceTests(unittest.TestCase):
    if not name.startswith('inputs/'):
     raw=(ROOT/name).read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),pin,name)
   self.assertEqual(self.host.OUTPUTS,self.source.OUTPUTS)
-  self.assertEqual([n for n in self.host.OUTPUTS if n.endswith('.deb')],['coreutils_9.7-3+gold1_amd64.deb'])
+  self.assertEqual([n for n in self.host.OUTPUTS if n.endswith('.deb')],['coreutils_9.7-3+gold2_amd64.deb'])
  def test_immutable_historical_patch_and_fixtures(self):
-  expected={'0001-coreutils-bound-acl-callers.patch':(60929,'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'),'ordinary_fd_acl.c':(9979,'5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936')}
+  expected={'0001-coreutils-bound-acl-callers.patch': (60929, '3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d'), '0002-coreutils-unfiltered-vendor-tests.patch': (304, 'aac49190579f7b17df5d9cd6cb0d622a1b7ebe78950e3b8e27aeb1825441541d'), '0003-preserve-imported-gnulib-infrastructure.patch': (486, 'd69eb7cb24de5f9cfbe3a88eb8b2bc4c28040fa3e7030d6b971f6936f59fef8a'), '0004-declare-fchownat-in-configure-probe.patch': (279, '778a40348081f8ce9a99041174fce50bfc84de3a1740e8cb2d6661e0cb9eaf3d'), '0005-qcopy-acl-transitive-link-dependencies.patch': (538, '053f1359be9a14f54c642523f4360fffd796b73582a21f2d2d687b9b55fab17e'), 'ordinary_fd_acl.c': (9979, '5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936'), 'ordinary_gnulib_fd0.c': (5384, '17055155d7adb365afdafa5ac7e6e6bf017081f285796cc2770296621818127d'), 'owned-fixture.mk': (671, 'a47139700d07f4dda166c52c63acc8f980dbd28790bcfc91e5280fb82bcfefa0'), 'gnulib-fd0-fixture.mk': (495, '9baaa4fa20576ae80793dba2f39362ccc313a7da7e6bf5336267130194ee23f7'), 'print-vendor-selection.mk': (464, '4b086c290fbd7ed55cce405882c22c14e14fa5e397cf34f1aa3476363891317a'), 'verify_vendor_suite.py': (14431, '6c2d5036dcc88ae3ec04bd9f9cee5c2e8a398f462db1ad50e3415edae61bb2a0')}
   for name,pin in expected.items():raw=(ROOT/name).read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),pin)
  def test_bound_encoder_before_append(self):
   for module in (self.source,self.host):
@@ -40,7 +40,7 @@ class SourceTests(unittest.TestCase):
  def test_source_manifest_contract(self):
   raw=(ROOT/'source-manifest.json').read_bytes();manifest=json.loads(raw)
   self.assertEqual((len(raw),sha256(raw).hexdigest()),self.source.SOURCE_MANIFEST_PIN)
-  self.assertEqual(len(manifest['files']),23);self.assertEqual(len(manifest['attr26_lineage']),13)
+  self.assertEqual(len(manifest['files']),24);self.assertEqual(len(manifest['attr26_lineage']),13)
   self.assertTrue(all(r['before']is None or type(r['before']['bytes'])is int for r in manifest['files'].values()))
   self.assertIn('after_test_hook',manifest['files']['debian/rules'])
   packet=json.loads((ROOT/'local-source-packet.json').read_bytes());self.assertEqual(len(packet['files']),76)
@@ -475,7 +475,7 @@ class SourceTests(unittest.TestCase):
   manifest=json.loads((ROOT/'source-manifest.json').read_text());self.assertEqual(manifest['files']['configure.ac']['after']['bytes'],33382);self.assertEqual(manifest['files']['configure.ac']['after_probe_header']['bytes'],33402)
   self.assertIn(self.source.PROBE_PATCH,self.source.RECIPE_FILES)
  def test_probe_header_contract_does_not_bypass_actual_compile_or_feature_gates(self):
-  text=(ROOT/'sourcebuild.py').read_text();self.assertTrue('(PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH)'in text,'all five declared patches remain required');self.assertIn("pins.get('after_probe_header'",text)
+  text=(ROOT/'sourcebuild.py').read_text();self.assertTrue('(PATCH,CHANGELOG,REGEN_PATCH,PROBE_PATCH,LINK_PATCH,PARENT_PATCH)'in text,'all six declared patches remain required');self.assertIn("pins.get('after_probe_header'",text)
   self.assertIn("#define GOLD_DESCRIPTOR_ACL 1",text);self.assertIn("real_autotools_regeneration",text);self.assertNotIn('m4_pattern_allow',text);self.assertNotIn('ac_cv_',text)
  def test_actual_parser_refusal_retains_complete_public_selection_before_failure(self):
   raw=b'GOLD_VENDOR_SELECTION_V2\nsuite_log=test-suite.log\ncollect_skipped_logs=no\ntest=../owned-outside\nlog=../owned-outside.log\n'
@@ -590,4 +590,78 @@ class SourceTests(unittest.TestCase):
  def test_observed_candidate_metadata_cannot_change_before_semantic_contract(self):
   path,library,value=self.abi_parsing_fixture();before=path.stat();os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns+1000000000))
   with self.assertRaisesRegex(RuntimeError,'caller_observation_changed'):self.source.caller_binary_contract(path,library,value)
+ def parent_patch_result(self):
+  original=(TREE/'tests/fixtures/coreutils97_cp.c').read_text();lines=(ROOT/self.source.PARENT_PATCH).read_text().splitlines(keepends=True)
+  baseline=original.splitlines(keepends=True);result=[];position=0;index=2
+  while index<len(lines):
+   match=re.match(r'@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@',lines[index]);self.assertIsNotNone(match);index+=1
+   start=int(match[1])-1;result+=baseline[position:start];position=start
+   while index<len(lines)and not lines[index].startswith('@@ '):
+    line=lines[index];index+=1
+    if line.startswith((' ','-')):self.assertEqual(baseline[position],line[1:]);position+=1
+    if line.startswith((' ','+')):result.append(line[1:])
+  return original,''.join(result+baseline[position:])
+ def test_parent_patch_exact_current_source_and_original_owner_time_policy(self):
+  original,current=self.parent_patch_result();manifest=json.loads((ROOT/'source-manifest.json').read_bytes());binding=manifest['files']['src/cp.c']
+  for text,key in((original,'before'),(current,'after')):
+   raw=text.encode();self.assertEqual({'bytes':len(raw),'sha256':sha256(raw).hexdigest()},binding[key])
+  def block(text,start,end):return text[text.index(start):text.index(end,text.index(start))]
+  owner='      if (x->preserve_ownership)\n';mode='      if (x->preserve_mode)\n        {\n          '
+  self.assertEqual(block(original,'      if (x->preserve_timestamps)\n',owner),block(current,'      if (x->preserve_timestamps)\n',owner))
+  self.assertEqual(block(original,owner,mode),block(current,owner,mode))
+  self.assertNotIn('xcopy_acl (src_name, -1, dst_name, -1',current)
+  self.assertIn('if (x->preserve_mode && ! S_ISDIR (stats.st_mode))',current)
+ def test_parent_patch_applies_with_real_GNU_patch_to_owned_public_source(self):
+  original=(TREE/'tests/fixtures/coreutils97_cp.c').read_bytes()
+  patch_path=ROOT/self.source.PARENT_PATCH
+  for line in patch_path.read_bytes().splitlines():
+   if line.startswith(b'+')and not line.startswith(b'+++'):
+    self.assertEqual(line[1:],line[1:].rstrip(b' \t'))
+  with tempfile.TemporaryDirectory(prefix='owned-parent-patch-',dir=TREE)as directory:
+   work=Path(directory);(work/'src').mkdir();target=work/'src/cp.c';target.write_bytes(original)
+   raw=self.host.run(['/usr/bin/patch','--directory',str(work),'-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(patch_path)],env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},deadline=time.monotonic()+10,maximum=65536)
+   self.assertNotIn(b'FAILED',raw);self.assertFalse((work/'src/cp.c.rej').exists())
+   actual=target.read_bytes();expected=json.loads((ROOT/'source-manifest.json').read_bytes())['files']['src/cp.c']['after']
+   self.assertEqual({'bytes':len(actual),'sha256':sha256(actual).hexdigest()},expected)
+ def test_gold2_parent_approval_does_not_promote_sdk_or_claim_new_recipe_accepted(self):
+  self.assertEqual(self.source.VERSION,self.host.VERSION);self.assertEqual(self.source.VERSION,'9.7-3+gold2')
+  self.assertEqual(self.source.SDK_VERSION,'2.4.0-1~trixie+gold1')
+  approval=json.loads((ROOT/'parent-source-approval.json').read_bytes());variant=json.loads((ROOT/'parent-source-variant.json').read_bytes())
+  self.assertTrue(approval['source_only_approval_for_isolated_vendor_ci']);self.assertFalse(approval['CVE_or_runtime_or_deployment_or_global_security_accepted'])
+  self.assertEqual(approval['patch'],variant['parent_patch']);self.assertEqual(approval['new_cp'],variant['new_cp'])
+  self.assertFalse(variant['Root_new_recipe_and_fixture_integration_accepted']);self.assertFalse(variant['native_parent_fixtures_executed'])
+  for name,pin in variant['fixture_sources'].items():
+   raw=(ROOT/name).read_bytes();self.assertEqual({'bytes':len(raw),'sha256':sha256(raw).hexdigest()},pin)
+ def test_parent_companion_invokes_real_frontend_and_retains_all_native_predecessors(self):
+  text=(ROOT/'ordinary_parent_acl.c').read_text();fragment=(ROOT/'parent-fixture.mk').read_text()
+  self.assertIn('#include "src/cp.c"',text)
+  for call in('make_dir_parents_private (','copy (','re_protect (','parent_acl_handle_matches (','gold_acl_close_handles (','setrlimit (RLIMIT_NOFILE','fcntl (source_fd, F_GETFD)'):
+   self.assertIn(call,text)
+  self.assertNotRegex(text,r'#\s*define\s+(open|openat|fstat|close|copy|re_protect)\b')
+  self.assertIn('$(src_cp_SOURCES)',fragment);self.assertIn('$(src_cp_LDADD)',fragment);self.assertIn('filter-out src/cp.c',fragment)
+  build=(ROOT/'sourcebuild.py').read_text()
+  for fixture in('ordinary_fd_acl.c','ordinary_gnulib_fd0.c','ordinary_parent_acl.c'):self.assertIn(fixture,build)
+  self.assertIn("command(['/usr/bin/dh_auto_test']",build);self.assertNotIn('TESTS=',fragment)
+ def parent_receipt(self):
+  return {'schema':'ordinary_cp_parent_frontend/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'actual_assertions':100,'actual_case_count':4,'actual_frontend_and_copy_called':True,'actual_OPATH_pairs':True,'source_fd_zero':True,'actual_EMFILE_partial_prefixes':2,'physical_pair_cleanup_verified':True,'owned_cleanup_complete':True,'skip_count':0,'security_accepted':False}
+ def parent_raw(self,value):
+  return b'gold-owned-parent-acl-fixture: owned expected failure\n'*3+json.dumps(value).encode()+b'\n'
+ def test_parent_receipt_parser_requires_real_case_inventory_and_physical_closure_fields(self):
+  value=self.parent_receipt();result=self.source.parse_parent_fixture(self.parent_raw(value));self.assertEqual(result['actual_case_count'],4);self.assertEqual(len(result['expected_failure_diagnostics']),3)
+  for key,bad in(('actual_assertions',True),('actual_case_count',4.0),('actual_EMFILE_partial_prefixes',2.0),('physical_pair_cleanup_verified',False),('actual_frontend_and_copy_called',False),('source_fd_zero',False),('skip_count',False),('security_accepted',True)):
+   with self.subTest(key=key),self.assertRaisesRegex(RuntimeError,'parent_frontend_receipt'):self.source.parse_parent_fixture(self.parent_raw({**value,key:bad}))
+  for raw in(b'',b'x'*65537,self.parent_raw(value).replace(b'gold-owned-parent-acl-fixture:',b'unknown:')):
+   with self.assertRaises(RuntimeError):self.source.parse_parent_fixture(raw)
+ def test_all14_cli_predecessors_and9_parent_cases_remain_mandatory(self):
+  self.assertEqual(len(self.cli.LEGACY_CASES),14);self.assertEqual(len(self.cli.PARENT_CASES),9)
+  expected=list(self.cli.LEGACY_CASES+self.cli.PARENT_CASES);self.assertEqual(len(set(expected)),23)
+  variant=json.loads((ROOT/'parent-source-variant.json').read_bytes());self.assertEqual(variant['ordinary_cli_cases'],expected)
+  value={'schema':'coreutils_owned_cli_compatibility/1','status':'PASS','actual_uid':10001,'actual_gid':10001,'skip_count':0,'security_accepted':False,'cases':expected,'actual_case_count':23,'legacy_case_count':14,'parent_case_count':9,'all_commands_actual_zero_and_pipes_closed':True,'owned_cleanup_complete':True}
+  self.assertEqual(self.source.validate_ordinary_cli(value,expected),value)
+  for change in({'cases':expected[:-1]},{'actual_case_count':23.0},{'legacy_case_count':13},{'parent_case_count':8},{'owned_cleanup_complete':False}):
+   with self.assertRaisesRegex(RuntimeError,'ordinary_cli_receipt'):self.source.validate_ordinary_cli({**value,**change},expected)
+ def test_parent_workflow_keeps_original_dispatch_branch_scope(self):
+  workflow=(TREE/'.github/workflows/coreutils-acl-descriptor-package.yml').read_text()
+  self.assertIn("github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'",workflow)
+  self.assertNotIn('refs/heads/security/coreutils-parent',workflow)
 if __name__=='__main__':unittest.main()

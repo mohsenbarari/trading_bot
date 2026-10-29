@@ -41,7 +41,8 @@ class BuildIntegrationTests(unittest.TestCase):
  def inputs(self,root):
   values={'scripts/app_security_os_packages.lock.json':(FIXTURES/'baseline-app-security-lock.json').read_bytes(),
    'scripts/sqlite_wal_package.lock.json':(FIXTURES/'baseline-sqlite-lock.json').read_bytes(),
-   'scripts/tar_acl_package.lock.json':(ROOT/'scripts/tar_acl_package.lock.json').read_bytes()}
+   'scripts/tar_acl_package.lock.json':(ROOT/'scripts/tar_acl_package.lock.json').read_bytes(),
+   'scripts/coreutils_acl_package.lock.json':(ROOT/'scripts/coreutils_acl_package.lock.json').read_bytes()}
   rows=[]
   for name,raw in values.items():
    path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw);rows.append({'path':name,'identity':C.identity(path.lstat()),'sha256':sha256(raw).hexdigest()})

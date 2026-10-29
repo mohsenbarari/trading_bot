@@ -39,7 +39,7 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/coreutils_acl_build/build_hosted.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/coreutils-acl-package-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 c82606d353b5a0b4d45c9e29c70c7786bf81368c34f3284723f92c23bf0424fd \
+            --source-sha256 fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82 \
             --execute-hosted-build \
             --confirm BUILD-ONLY-HOSTED-COREUTILS-DESCRIPTOR-ACL-PACKAGE-20261027-01
 
@@ -54,9 +54,9 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold1_amd64.deb
-            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold1_amd64.changes
-            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold1_amd64.buildinfo
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold2_amd64.deb
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold2_amd64.changes
+            ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/coreutils_9.7-3+gold2_amd64.buildinfo
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/acl_2.4.0-1~trixie+gold1_amd64.changes
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/acl_2.4.0-1~trixie+gold1_amd64.buildinfo
             ${{ runner.temp }}/coreutils-acl-package-${{ github.run_id }}-${{ github.run_attempt }}/package-output/source-proof.json
