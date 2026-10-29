@@ -17,9 +17,10 @@
   were released after fresh canonical parity; history and active rollback
   override remain. Capture identity conflicts stay OPEN; generated endpoint
   changes require stable observation and strict persistent policy.
-- Preserve candidate scans and rollback
-  images/receipts. ba938/new6de raw44HIGH/eight IDs remain; ACL and full functional
-  gates OPEN. Conditional component assessments never imply globally FIXED.
+- Current2389: Core106 source bridge/15-site ordinary caller property, four owned
+  CI provider cases and GCV165 own-local property passed. Whole835, production
+  kernel/providers and backup/restore/activation remain OPEN. Preserve raw44HIGH/
+  eight IDs and rollback/failures; scoped proofs never imply globally FIXED.
 - PG49a8/Redis98c4 built/scanned, not activated; PG Windows-only UNKNOWN retains
   Linux code-absence proof. E46 2c6 and nine exact Market overlays exported;
   raw44HIGH remain. Preserve F79's two source overrides and failed evidence.
