@@ -2,8 +2,8 @@
   "CVE_runtime_deployment_or_global_security_accepted": false,
   "Root_new_recipe_and_fixture_integration_accepted": false,
   "Root_parent_patch_source_only_approval": {
-    "bytes": 2036,
-    "sha256": "cb3c55b5d5814ba5f7d7f9b35c258eca461b3e920542aeaa176196daef48af38"
+    "bytes": 1553,
+    "sha256": "06ffe0a1604bafffb1abfa60dc80b3eab4982c7740326ac2fd9f0f2af9e98475"
   },
   "additional_parent_cli_case_count": 9,
   "fixture_sources": {
@@ -59,8 +59,8 @@
   "parent_C_companion_cases": 4,
   "parent_C_real_EMFILE_partial_prefixes": 2,
   "parent_patch": {
-    "bytes": 7052,
-    "sha256": "3aa37c907b7ec19b2d3c070dc713120e4f60bd3db034926f6ec25887a6425ff3"
+    "bytes": 7024,
+    "sha256": "b2d25168d84d8bd85fbf7af852e09634b446ff640570bb8009d6a7c09886a005"
   },
   "schema": "coreutils_parent_ACL_source_variant/1",
   "source_scope": "Exact parent ACL handle/identity/transfer/temporary-chmod/cleanup patch; original ownership and timestamp pathname semantics preserved. Root source approval covers that patch only; this producer/fixture integration is pending Root review."

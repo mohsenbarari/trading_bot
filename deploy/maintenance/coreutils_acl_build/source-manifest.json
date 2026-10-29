@@ -331,8 +331,8 @@
   },
   "package_version": "9.7-3+gold2",
   "parent_acl_patch": {
-    "bytes": 7052,
-    "sha256": "3aa37c907b7ec19b2d3c070dc713120e4f60bd3db034926f6ec25887a6425ff3"
+    "bytes": 7024,
+    "sha256": "b2d25168d84d8bd85fbf7af852e09634b446ff640570bb8009d6a7c09886a005"
   },
   "parent_acl_source_approval": {
     "bytes": 1553,

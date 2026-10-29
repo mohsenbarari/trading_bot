@@ -6,12 +6,10 @@
  #include "utimens.h"
  #include "acl.h"
 +#include "gold-acl-fd.h"
--
-+
+ 
  /* The official name of this program (e.g., no 'g' prefix).  */
  #define PROGRAM_NAME "cp"
--
-+
+ 
 @@ -49,8 +50,11 @@
     need to be fixed after copying. */
  struct dir_attr
@@ -28,8 +26,7 @@
      }
    exit (status);
  }
--
-+
+ 
 +/* Recheck retained parent objects after copying and before restoring selected
 +   metadata.  Mutable mode/owner/time values are not object identity.  */
 +static bool
@@ -56,11 +53,9 @@
  /* Ensure that parents of CONST_DST_NAME have correct protections, for
     the --parents option.  This is done after all copying has been
     completed, to allow permissions that don't include user write/execute.
--
-+
+ 
 @@ -323,8 +350,25 @@
--
-+
+ 
    for (p = attr_list; p; p = p->next)
      {
        dst_name[p->slash_offset] = '\0';
@@ -81,15 +76,13 @@
 +              return false;
 +            }
 +        }
--
-+
+ 
        /* Adjust the times (and if possible, ownership) for the copy.
           chown turns off set[ug]id bits for non-root,
           so do the chmod last.  */
 @@ -362,9 +406,19 @@
          }
--
-+
+ 
        if (x->preserve_mode)
          {
 -          if (xcopy_acl (src_name, -1, dst_name, -1, p->st.st_mode) != 0)
@@ -110,8 +103,7 @@
          {
 @@ -472,12 +526,26 @@
                  }
--
-+
+ 
                new = xmalloc (sizeof *new);
                new->st = src_st;
 +              new->handles = (struct gold_acl_handles) { -1, -1 };
@@ -133,17 +125,14 @@
 +                    }
 +                }
              }
--
-+
+ 
            /* If required set the default context for created dirs.  */
            if (! set_process_security_ctx (src, dir,
 @@ -538,8 +606,26 @@
                    return false;
                  }
--
-+
--
-+
+ 
+ 
 +              if (x->preserve_mode && ! S_ISDIR (stats.st_mode))
 +                {
 +                  error (0, ESTALE, _("failed to get attributes of %s"),
@@ -170,8 +159,7 @@
                  {
                    /* Make the new directory searchable and writable.
                       The original permissions will be restored later.  */
--
-+
+ 
 -                  if (lchmodat (dst_dirfd, dst_reldir, accessible) != 0)
 +                  if ((x->preserve_mode
 +                       ? gold_acl_chmod_fd (new->handles.destination, accessible)
@@ -201,8 +189,7 @@
 +                    }
 +                }
 +            }
--
-+
+ 
            /* For existing dirs, set the security context as per that already
               set for the process global context.  */
            if (! *new_dst
@@ -215,5 +202,4 @@
                    free (p);
                  }
              }
--
-+
+ 

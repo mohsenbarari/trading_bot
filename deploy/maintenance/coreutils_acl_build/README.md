@@ -35,6 +35,9 @@ then `sourcebuild.py`'s variant pin, the hosted producer's changed recipe pins,
 and finally the workflow's hosted-source SHA. Check this entire dependency
 chain before running QA. The no-preserve CLI case compares with an ordinary
 new directory under the actual umask; it must not expect the source's mode.
+Keep the reviewed GNU patch bytes intact. Its existing file-type whitespace
+rule preserves mandatory context prefixes; an owned-source test runs the real
+GNU patch tool with zero fuzz and checks the exact resulting C hash before CI.
 
 This is a SOURCE-only, default-unarmed recipe for one isolated Coreutils
 9.7-3+gold1 Debian runtime package. It does not build or activate a product

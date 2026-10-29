@@ -15,7 +15,7 @@ SOURCE_FILES={'acl_2.4.0-1.dsc': (2624, 'b987ebbeb3d498794bad29cd65301b773849784
 OLD_PACKAGES={'libacl1_2.4.0-1~trixie+gold1_amd64.deb': (37076, 'bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1')}
 PATCH='0001-coreutils-bound-acl-callers.patch';PATCH_PIN=(60929,'3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d')
 CHANGELOG='0002-coreutils-unfiltered-vendor-tests.patch';CHANGELOG_PIN=(304,'aac49190579f7b17df5d9cd6cb0d622a1b7ebe78950e3b8e27aeb1825441541d')
-SOURCE_MANIFEST_PIN=(13045, 'f03743298a8a805c2345ddd3f7acfd647d556c98da1c24edf014b7a8fb4a471f')
+SOURCE_MANIFEST_PIN=(13045, '8e1dcd124814503895bbcb5762efadb500e59b0a65c9a5eea15f3c5366149784')
 REGEN_PATCH='0003-preserve-imported-gnulib-infrastructure.patch'
 REGEN_PIN=(486,'d69eb7cb24de5f9cfbe3a88eb8b2bc4c28040fa3e7030d6b971f6936f59fef8a')
 PROBE_PATCH='0004-declare-fchownat-in-configure-probe.patch'
@@ -25,9 +25,9 @@ LINK_PIN=(538,'053f1359be9a14f54c642523f4360fffd796b73582a21f2d2d687b9b55fab17e'
 LINK_M4_BEFORE=(8723,'fc2bbf5d7927bc85a8f91913903b23b5d3195bdbc4f98bcd9698e01dc618bbe2')
 LINK_M4_AFTER=(8955,'5ad6011fd819277a636e4b03bc4ffaf2932d812c791c48153ddbb56b497e3da7')
 PARENT_PATCH='0006-cp-parents-bound-acl.patch'
-PARENT_PIN=(7052, '3aa37c907b7ec19b2d3c070dc713120e4f60bd3db034926f6ec25887a6425ff3')
-PARENT_APPROVAL_PIN=(2036, 'cb3c55b5d5814ba5f7d7f9b35c258eca461b3e920542aeaa176196daef48af38')
-PARENT_VARIANT_PIN=(2430, 'a0733f03c7e38b891035099ab68ca62409efdbee07ffba309cf6ca124b232882')
+PARENT_PIN=(7024, 'b2d25168d84d8bd85fbf7af852e09634b446ff640570bb8009d6a7c09886a005')
+PARENT_APPROVAL_PIN=(1553, '06ffe0a1604bafffb1abfa60dc80b3eab4982c7740326ac2fd9f0f2af9e98475')
+PARENT_VARIANT_PIN=(2430, '26a3ccf0c4c7c4ef20f93c87d73921e2acb2552c693aae5a54ed057b83299345')
 FIXTURE_PIN=(9979, '5a716da021e7c0e72058f4bf1537b44fae28a5c15fa445d5d99905d9f6025936')
 CA_PIN=(222073,'e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7')
 RECIPE_FILES={'ordinary_fd_acl.c', 'local-source-packet.json', 'root-source-approval.json', 'sourcebuild.py', 'owned-fixture.mk', 'Dockerfile', 'ordinary_gnulib_fd0.c', 'print-vendor-selection.mk', 'verify_ordinary.py', 'gnulib-fd0-fixture.mk', 'verify_vendor_suite.py', '0002-coreutils-unfiltered-vendor-tests.patch', 'source-manifest.json', '0001-coreutils-bound-acl-callers.patch'}

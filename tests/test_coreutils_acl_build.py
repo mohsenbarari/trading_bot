@@ -611,6 +611,18 @@ class SourceTests(unittest.TestCase):
   self.assertEqual(block(original,owner,mode),block(current,owner,mode))
   self.assertNotIn('xcopy_acl (src_name, -1, dst_name, -1',current)
   self.assertIn('if (x->preserve_mode && ! S_ISDIR (stats.st_mode))',current)
+ def test_parent_patch_applies_with_real_GNU_patch_to_owned_public_source(self):
+  original=(TREE/'tests/fixtures/coreutils97_cp.c').read_bytes()
+  patch_path=ROOT/self.source.PARENT_PATCH
+  for line in patch_path.read_bytes().splitlines():
+   if line.startswith(b'+')and not line.startswith(b'+++'):
+    self.assertEqual(line[1:],line[1:].rstrip(b' \t'))
+  with tempfile.TemporaryDirectory(prefix='owned-parent-patch-',dir=TREE)as directory:
+   work=Path(directory);(work/'src').mkdir();target=work/'src/cp.c';target.write_bytes(original)
+   raw=self.host.run(['/usr/bin/patch','--directory',str(work),'-p1','--batch','--fuzz=0','--no-backup-if-mismatch','-i',str(patch_path)],env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},deadline=time.monotonic()+10,maximum=65536)
+   self.assertNotIn(b'FAILED',raw);self.assertFalse((work/'src/cp.c.rej').exists())
+   actual=target.read_bytes();expected=json.loads((ROOT/'source-manifest.json').read_bytes())['files']['src/cp.c']['after']
+   self.assertEqual({'bytes':len(actual),'sha256':sha256(actual).hexdigest()},expected)
  def test_gold2_parent_approval_does_not_promote_sdk_or_claim_new_recipe_accepted(self):
   self.assertEqual(self.source.VERSION,self.host.VERSION);self.assertEqual(self.source.VERSION,'9.7-3+gold2')
   self.assertEqual(self.source.SDK_VERSION,'2.4.0-1~trixie+gold1')
