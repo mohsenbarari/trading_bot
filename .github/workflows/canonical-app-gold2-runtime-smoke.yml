@@ -1,0 +1,60 @@
+name: Exact gold2 App public inventory and unchanged32 runtime proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_proof:
+        description: Run only the reviewed2389 public image inventory and32 assertions; no security or deployment acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-canonical-app-gold2-runtime-smoke
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    if: github.repository == 'mohsenbarari/trading_bot' && github.ref == 'refs/heads/main' && inputs.run_proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exactly the reviewed proof controller commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify owned source and PUBLIC input contracts
+        run: |
+          APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/test_hosted.py
+          APP_ENV_FILE=config/unit-test.env.example /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/test_io.py
+
+      - name: Seal current source and run exact gold2 disposable proofs
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/app_gold2_smoke/seal_and_run.py \
+            --root "$RUNNER_TEMP/security-app-ci-smoke-gold2-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 188631729d438f1012b6aa678491411ed78a0abda0d874e6e0ad1956b0df8494 \
+            --execute-reviewed-gold2-proof
+
+      - name: Preserve complete inventory, raw evidence, actual assertions and finalizers
+        if: always() && steps.run.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canonical-app-gold2-runtime-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ steps.run.outputs.root }}/reports/*.json
+            ${{ steps.run.outputs.root }}/evidence/public-evidence.zip
