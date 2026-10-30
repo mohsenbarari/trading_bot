@@ -1,5 +1,10 @@
 # Infrastructure
 
+- 2026-10-30 | Web `/tmp` tmpfs limit temporarily4GiB, previously4058132480B.
+  In-place remount preserved identity/fsid/1777/flags/existing entries; no disk
+  resize, billing or persistent config. Restore old limit after scoped image
+  operations if usage fits. Resource source/guards unchanged.
+
 - 2026-10-30 | HOST/CAS cleanup freed~8.8GiB:16 venvs,3 IDE installs,
   obsolete/duplicate tools and caches,152 superseded App archives,one completed
   builder. Preserve canonical/rollback tools,worktrees/history,build exports,
@@ -16,10 +21,11 @@
 - 2026-10-25 | Native dashboard TLS verified independently from Web on existing
   coin.362514.ir/30486; backend is loopback30487. No Writer/DNS/auth-code change.
 
-- 2026-10-24 | Final Finland SSH uses existing `id_ed25519_finland_primary` explicitly;
-  default identities omit it. Strict pinned-host access passed; root free303.6GB.
-  Security maintenance may stage only scoped ciphertext backups there; no App,
-  Writer/DNS or production-stack migration is implied.
+- 2026-10-24 | Unprovisioned Finland65.109.214.203:16vCPU/31.3GiBRAM; root free303.6GB.
+  SSH passed using explicit `id_ed25519_finland_primary` (defaults omit it), pinned
+  ED25519 `SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs`. Only scoped
+  ciphertext-backup staging is authorized; no App/Writer/DNS/migration. Firewall,
+  SSH hardening, updates, swap, monitoring and backups remain provisioning gates.
 
 - 2026-09-03 | Initial provisioning and later infrastructure maintenance use version-controlled, idempotent Ansible against verified inventory; no operator shell execution is required. This neither automates Writer/DNS transfer nor authorizes server work before the refactor plan enters its explicitly approved execution phase.
 
@@ -33,9 +39,3 @@
 - 2026-09-01 | Arvan API is approved only for explicitly human-triggered DNS and
   required storage operations. Validate and least-privilege the existing local
   credentials, then move them from quarantine to a secure mount without exposure.
-- 2026-09-01 | Read-only SSH access to the unprovisioned Finland Primary
-  `65.109.214.203` is established and its ED25519 fingerprint is verified as
-  `SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs`. It has 16 vCPU, 31.3 GiB
-  RAM and about 286 GiB free disk, but no container/application stack; firewall,
-  SSH hardening, update, swap, monitoring and backup policy remain provisioning
-  gates. Access and raw capacity do not authorize deploy or production use.
