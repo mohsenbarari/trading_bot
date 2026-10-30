@@ -16,11 +16,11 @@
   were released after fresh canonical parity; history and active rollback
   override remain. Capture identity conflicts stay OPEN; generated endpoint
   changes require stable observation and strict persistent policy.
-- Current2389: CI41027633348 passed four App security gates; native23 packages/
+- Current2389: CI41027633348 passed four App security gates;23 packages/
   284 files/30 aliases, two exact doc absences and xattr policy verified.
-  Raw44HIGH/eight IDs unresolved. Core106/GCV165/31,
-  exact143 prior-body properties, glibc283 and51 source roles accepted under
-  original premises. Source/CVE/backup/restore/activation OPEN. Require applicable
+  Raw44HIGH/eight IDs unresolved. Core106/GCV165/31, exact143 prior-body
+  properties and glibc283/51/80/15/74/systemd2 source roles accepted with original
+  premises. Source/CVE/backup/restore/activation OPEN. Require applicable
   whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
   Parking never grants mount admission; no stopped/RO waiver.
@@ -40,8 +40,7 @@
   may consume protected inputs; public image Config comparison stays in RAM.
   Retain archive FD through the operation's final checkpoint; scoped closure
   detaches only its own checker before final validation/close.
-- Historical ed59 smokes passed8runtime+24components; each new ordinary build
-  needs separate evidence. Host-idleness needs host-visible processes; shared
+- Each ordinary build needs own evidence. Host-idleness needs host-visible processes; shared
   image sizes never prove reclaim.
 - Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not
   adopt working-layer cache/code changes. No Go address-space inheritance; bound
