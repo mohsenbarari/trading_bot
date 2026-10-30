@@ -5,7 +5,7 @@ from types import ModuleType
 import argparse,ast,bz2,fnmatch,json,lzma,os,re,resource,ssl,sys,tarfile,time,urllib.request,urllib.error,zlib
 from source_io import Scope,need,publish
 HERE=Path(__file__).absolute().parent
-PROFILE_PIN=(174072,'99389b6bd9e15f237a8365175636b13f70517efd7ea2788e9d32b9fbc534a433')
+PROFILE_PIN=(174348,'3e06db314d0995a34139cc71761fd953f826f0f5cf3bffd93a92ef0c36781756')
 SELECTION_PIN=(87842,'201f624fa69b3f3efb44b06047725ccc92d91e40e0d8db2596582f58677582b6')
 def enc(v):return(json.dumps(v,sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode()
 def unique(raw):
@@ -56,7 +56,9 @@ def download(scope,row,directory,official_url,no_redirect):
   raise error if error is not None else closing_error
  ref=w.seal((row['bytes'],row['sha256']));r=scope.open(Path(ref['path']),(row['bytes'],row['sha256']),row['exact_compressed_max']);w.close();return r,ref
 def canonical(name):
- need(type(name)is str and len(name.encode())<=4096 and'\\'not in name and'\x00'not in name,'member_name')
+ # Read-only POSIX TAR metadata, never a host/extraction path. Backslash is
+ # a literal filename byte here; do not unescape or treat it as a separator.
+ need(type(name)is str and len(name.encode())<=4096 and'\x00'not in name,'member_name')
  while name.startswith('./'):name=name[2:]
  name=name.rstrip('/')
  if name in{'','.'}:return''
@@ -198,6 +200,11 @@ def verify_DSC(raw,g):
  while i<len(lines)and lines[i].startswith(' '):
   fields=lines[i].split();need(len(fields)==3 and fields[1].isdigit(),'DSC_row');actual.append((fields[2],int(fields[1]),fields[0]));i+=1
  expected=[(m['name'],m['bytes'],m['sha256'])for m in g['profiles']if m['kind']!='descriptor'];need(sorted(actual)==sorted(expected),'complete_DSC_signed_member_binding')
+def group_seconds(index):
+ need(type(index)is int and 0<=index<43,'fixed_group_index')
+ # The new scope is declared before loading any source/selection original.
+ # Only Root-selected index10 has a new larger metadata census to finish.
+ return 1800 if index==10 else 900
 def collect(scope,g,out,cache,official_url=None,no_redirect=None,fixtures=None):
  census=Census(scope,out,g,fixtures is not None);downloaded=[];dsc=None
  for row in g['profiles']:
@@ -221,12 +228,12 @@ def main(argv=None):
   if args.owned_fixture_plan is not None:
    need(re.fullmatch('[0-9a-f]{64}',args.fixture_plan_sha256 or'')is not None,'fixture_plan_pin');scope=Scope(60)
   else:
-   need(os.getuid()==os.geteuid()==1001 and os.getgid()==os.getegid(),'hosted_SOURCE_UID1001');scope=Scope(900)
+   need(os.getuid()==os.geteuid()==1001 and os.getgid()==os.getegid(),'hosted_SOURCE_UID1001');scope=Scope(group_seconds(args.collect_group))
   for path,digest in[(Path(__file__).absolute(),args.collector_sha256),(HERE/'source_io.py',args.source_io_sha256)]:need(re.fullmatch('[0-9a-f]{64}',digest or'')is not None,'own_source_pin');scope.open(path,(path.stat().st_size,digest),131072)
   if args.owned_fixture_plan is not None:
    p=args.owned_fixture_plan.absolute();g=small(scope,p,(p.stat().st_size,args.fixture_plan_sha256));need(g['schema']=='EXPLICITLY_OWNED_SYNTHETIC_SOURCE_PROTOCOL_FIXTURE/1','fixture_schema');result=collect(scope,g,output,cache,fixtures=p.parent)
   else:
-   profiles,official_url,no_redirect=load_bundle(scope);need(type(args.collect_group)is int and 0<=args.collect_group<43,'fixed_group_index');g=profiles['groups'][args.collect_group];need(g['seconds_max']==900,'declared_scope_before_first_open');result=collect(scope,g,output,cache,official_url,no_redirect)
+   profiles,official_url,no_redirect=load_bundle(scope);g=profiles['groups'][args.collect_group];need(g['seconds_max']==group_seconds(args.collect_group)and((g['index']==10 and g['source_package']=='gcc-14'and g['source_version']=='14.2.0-19')or(g['index']!=10 and g['source_package']!='gcc-14')),'declared_scope_before_first_open');result=collect(scope,g,output,cache,official_url,no_redirect)
   finals=scope.finish();print(enc({'status':'SOURCE_DATA_COLLECTED_NOT_ACCEPTED','review':result,'actual_group_index':args.collect_group,'explicitly_owned_fixture':args.owned_fixture_plan is not None,'physical_original_and_publication_finalizers':finals,'physical_errors':[],'security_accepted':False}).decode(),end='');need(time.monotonic()<scope.end and(scope.started,scope.end)==scope.original_clock,'actual_return_original_deadline');return 0
  except BaseException as e:
   # Failed prefixes stay held and the owned CI child exits. Do not retry

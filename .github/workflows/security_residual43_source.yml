@@ -2,12 +2,47 @@ name: Security residual43 public source collection
 
 on:
   workflow_dispatch:
+    inputs:
+      groups_json:
+        description: JSON array of unique group indices0..42; default retains all nine batches
+        type: string
+        required: true
+        default: '[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42]'
 
 permissions:
   contents: read
 
 jobs:
+  select-groups:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: groups
+        name: Parse bounded group JSON as data
+        shell: bash
+        env:
+          REQUESTED_GROUPS_JSON: ${{ inputs.groups_json }}
+        run: |
+          set -euo pipefail
+          python3 -B deploy/maintenance/residual43_source_ci/select_groups.py \
+            --groups-json "$REQUESTED_GROUPS_JSON" > "$RUNNER_TEMP/residual43-selected-matrix.json"
+          python3 - <<'PY_OUTPUT'
+          from pathlib import Path
+          import json, os
+          raw = (Path(os.environ['RUNNER_TEMP']) / 'residual43-selected-matrix.json').read_bytes()
+          assert 0 < len(raw) <= 2048
+          matrix = json.dumps(json.loads(raw), sort_keys=True, separators=(',', ':'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('matrix=' + matrix + '\n')
+          PY_OUTPUT
+
   owned-protocol-qa:
+    needs: select-groups
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -32,32 +67,13 @@ jobs:
           retention-days: 10
 
   collect:
-    needs: owned-protocol-qa
+    needs: [select-groups, owned-protocol-qa]
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     strategy:
       fail-fast: false
       max-parallel: 4
-      matrix:
-        include:
-          - batch: small-a
-            indices: '0 1 2 3 4'
-          - batch: small-b
-            indices: '5 6 7 8 9'
-          - batch: gcc
-            indices: '10'
-          - batch: middle-a
-            indices: '11 12 13 14 15 16'
-          - batch: middle-b
-            indices: '17 18 19 20 21 22'
-          - batch: middle-c
-            indices: '23 24 25 26 27 28 29'
-          - batch: crypto
-            indices: '30 31 32 33'
-          - batch: perl
-            indices: '34'
-          - batch: remaining
-            indices: '35 36 37 38 39 40 41 42'
+      matrix: ${{ fromJSON(needs.select-groups.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -67,7 +83,7 @@ jobs:
         env:
           GROUP_INDICES: ${{ matrix.indices }}
           SOURCE_OUTPUT: ${{ runner.temp }}/security-residual43-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.batch }}
-          COLLECTOR_SHA256: 28f766b9b70ca3ac2d118fbd7eb56510cf6721d74e55b2d2014344cdd71ad90e
+          COLLECTOR_SHA256: 96c7511dd47816ff80def3e99e5c36f8a32a896843df16d5060ebbe523e60f03
           SOURCE_IO_SHA256: b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568
         run: |
           set -euo pipefail
