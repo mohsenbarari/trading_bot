@@ -2,11 +2,14 @@
 
 For source/collector APIs and FD/pipe custody also load `security-io-custody.md`.
 
-- Docker Health is optional (null is unknown). An empty AppArmorProfile before
-  first START is not an applied policy; verify it after actual START.
-  Public Env deltas need literal-byte writers and real serialization tests.
-- Docker cp cannot target tmpfs. Stage public CA bytes under /build and verify
-  before HTTPS; never read private PKI for this purpose.
+- Root COPY: separate init, tar.umask0022, disjoint IDs, original multiplicity.
+  No waivers/evidence deletion/hostdata/UID-mode masks. Per-case mocks restore
+  globals; set fixture modes.
+
+- Health null is unknown; pre-START empty AppArmorProfile proves no policy.
+  Verify after START. Public Env deltas need literal writers and real serialization.
+- Docker cp cannot target tmpfs. Verify public CA under /build before HTTPS;
+  never read private PKI.
 - Ubuntu probes use -I -S -B to exclude sitecustomize. Keep loader guards and
   separate output/payload bounds; never inherit small-receipt RLIMIT_AS into Go.
 - Removed cgroup directories may retain nlink2. Prove closure with held

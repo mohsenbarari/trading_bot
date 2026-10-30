@@ -19,8 +19,10 @@
 - Current2389: Core106 source/15 callers/21 callbacks/four CI and GCV165/31 local
   proofs passed; raw44HIGH/eight IDs unresolved. Assessor requires source/payload
   and complete whole-image ACL caller/ABI/compatibility gates, not universal GLIBC
-  semantics. Preserve rollback/failures; provenance157, production context and
-  backup/restore/activation remain OPEN.
+  semantics. Current157 payload identities are joined, not build/ABI closure.
+  Preserve rollback/failures; runtime/CVE/backup/restore/activation remain OPEN.
+- Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
+  Parking never grants mount admission; no stopped/RO waiver.
 - PG49a8/Redis98c4 candidates built/scanned, unactivated; PG's Windows UNKNOWN
   retains Linux absence proof. E46 2c6/nine Market overlays exported. Preserve
   F79's two source overrides/failures.
@@ -37,9 +39,6 @@
   may consume protected inputs; public image Config comparison stays in RAM.
   Retain archive FD through the operation's final checkpoint; scoped closure
   detaches only its own checker before final validation/close.
-- No waiver/deletion/hostdata fixtures or UID/mode masks. Required Root COPY
-  tests use separate init, tar.umask0022, disjoint IDs and original multiplicity.
-  Scope mocks per case, restore globals and set fixture modes explicitly.
 - Historical ed59 smokes passed8runtime+24components; each new ordinary build
   needs separate evidence. Host-idleness needs host-visible processes; shared
   image sizes never prove reclaim.
