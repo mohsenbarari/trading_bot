@@ -16,11 +16,12 @@
   were released after fresh canonical parity; history and active rollback
   override remain. Capture identity conflicts stay OPEN; generated endpoint
   changes require stable observation and strict persistent policy.
-- Current2389: Core106 source/15 callers/21 callbacks/four CI and GCV165/31 local
-  proofs passed; raw44HIGH/eight IDs unresolved. Assessor requires source/payload
-  and complete whole-image ACL caller/ABI/compatibility gates, not universal GLIBC
-  semantics. Current157 payload identities are joined, not build/ABI closure.
-  Preserve rollback/failures; runtime/CVE/backup/restore/activation remain OPEN.
+- Current2389: CI41027633348 passed four App security gates; native23 packages/
+  284 files/30 aliases, two exact doc absences and xattr policy verified.
+  Raw44HIGH/eight IDs unresolved. Core106/GCV165/31,
+  exact143 prior-body properties, glibc283 and51 source roles accepted under
+  original premises. Source/CVE/backup/restore/activation OPEN. Require applicable
+  whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
   Parking never grants mount admission; no stopped/RO waiver.
 - PG49a8/Redis98c4 candidates built/scanned, unactivated; PG's Windows UNKNOWN
