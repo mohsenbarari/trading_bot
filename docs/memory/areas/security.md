@@ -18,7 +18,7 @@
   remains unchanged. Whole835/ordinary12 qualification passed. Core106,
   GCV165/31 subsets, prior143, glibc283,
   51/80/15/74/systemd2/GCC2/static3/wheel76 source roles accepted with
-  original premises. Root/Source03 public review PASS;
+  original premises. Root/Source03 colocated review PASS;
   backup/restore/activation OPEN. Require applicable
   whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
