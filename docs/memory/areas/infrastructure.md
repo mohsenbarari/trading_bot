@@ -1,8 +1,10 @@
 # Infrastructure
 
-- 2026-10-30 | HOST/CAS-checked cleanup removed16 obsolete generated venvs and
-  three inactive IDE installations; kept worktrees/history/current/rollback tools.
-  Root free~4.2GiB, SDB~9.1GiB; these measurements grant no restore admission.
+- 2026-10-30 | HOST/CAS cleanup freed~8.8GiB:16 venvs,3 IDE installs,
+  obsolete/duplicate tools and caches,152 superseded App archives,one completed
+  builder. Preserve canonical/rollback tools,worktrees/history,build exports,
+  latest8 restore-tested backups and Market data. Root free~4.5GiB,SDB~10.7GiB;
+  these measurements grant no restore admission.
 
 - 2026-10-25 | Security maintenance: Native engine/kernel/Brotli completed,
  15 containers; bind Brotli evidence to current boot/PID/unit. Web OP08 has
