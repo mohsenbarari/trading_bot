@@ -34,8 +34,6 @@ Also load `security-io-custody.md` and `security-operation-recovery.md`.
 - Pilot every distinct frozen business/fixture API before dispatching all roles;
   one successful Capture2 pilot does not cover schema9/min_id or older replay APIs.
   Preserve historical assertions and business bytes when adapting fixtures.
-- Test exact Docker/systemd wire serialization and omitted-field behavior;
-  valid hand-built dictionaries cannot verify the CLI template that produces them.
 - systemd can remove a stopped timer from its oneshot's After and TriggeredBy.
   Admit only that measured pair through the same context's completed-stop receipt;
   preserve the original policy and every unrelated dependency.
