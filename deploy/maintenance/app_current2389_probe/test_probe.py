@@ -4,7 +4,7 @@ from types import ModuleType,SimpleNamespace
 from hashlib import sha256
 from unittest.mock import patch
 from contextlib import contextmanager
-import ast,builtins,copy,errno,gzip,inspect,io,json,os,stat,symtable,tarfile,tempfile,time,unittest,zipfile
+import ast,builtins,copy,errno,fcntl,gzip,inspect,io,json,os,select,signal,stat,symtable,sys,tarfile,tempfile,time,unittest,zipfile
 HERE=Path(__file__).resolve().parent
 REPO=next(p for p in HERE.parents if (p/'scripts/prepare_canonical_app_image.py').is_file())
 def module(p):
@@ -25,6 +25,86 @@ def actual_native_fixture():
   positive=[r for r in e['expected_files']if r['path']!=omit];value['packages'].append({**copy.deepcopy(e),'actual_files':copy.deepcopy(positive)});value['bytes_hashed']+=sum(r['bytes']for r in positive)
  return value
 class Tests(unittest.TestCase):
+ def test_actual_legacy_ci_and_Controller_genuine_UID1001_namespace(self):
+  # This is an OWNED hosted-protocol fixture. UID, owners, modes, old ci(),
+  # constructor and six sealed helper bodies are genuine, without host masks.
+  legacy_path=REPO/'deploy/maintenance/app_r2_observe02/run_app_image_ci_smoke.py';raw=legacy_path.read_bytes()
+  self.assertEqual((len(raw),sha256(raw).hexdigest()),(68163,'b2c958060d176c0098b86a44d0dc225d4494023120b3253239bef9e2f3f2acb2'))
+  legacy=module(legacy_path);self.assertIn(os.geteuid(),(0,1001));self.assertEqual(S.ROOT_PREFIX,'security-app-ci-smoke-probe2389-')
+  workflow=(HERE.parents[2]/'.github/workflows/canonical-app-current2389-probes.yml')
+  if not workflow.is_file():workflow=REPO/'.github/workflows/canonical-app-current2389-probes.yml'
+  self.assertIn('security-app-ci-smoke-probe2389-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT',workflow.read_text())
+  with tempfile.TemporaryDirectory(prefix='OWNED-probe2389-legacy-')as directory:
+   parent=Path(directory);good=parent/(S.ROOT_PREFIX+'1-1');bad=parent/'security-app-ci-probe2389-1-1';good.mkdir(mode=0o700);bad.mkdir(mode=0o700);(good/'source').mkdir(mode=0o700)
+   for name,(relative,pin)in legacy.HELPERS.items():
+    body=(REPO/S.SOURCE_PATHS[name]).read_bytes();self.assertEqual((len(body),sha256(body).hexdigest()),S.SOURCES[name]);self.assertEqual(sha256(body).hexdigest(),pin);p=good/'source'/name;p.write_bytes(body);p.chmod(0o600)
+   if os.geteuid()==0:
+    for p in sorted(parent.rglob('*'),reverse=True):os.chown(p,1001,1001)
+    os.chown(parent,1001,1001)
+   def physical_absent(n):
+    try:os.fstat(n)
+    except OSError as error:return error.errno==errno.EBADF
+    return False
+   r,w=os.pipe2(os.O_CLOEXEC);pid=os.fork()
+   if pid==0:
+    os.close(r);assert physical_absent(r);result={'passed':False};code=1
+    try:
+     if os.geteuid()==0:os.setgroups([]);os.setgid(1001);os.setuid(1001)
+     assert os.getuid()==os.geteuid()==1001
+     os.environ.clear();os.environ.update({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','GITHUB_REPOSITORY':'mohsenbarari/trading_bot','GITHUB_REF':'refs/heads/main','GITHUB_SHA':'1'*40,'GITHUB_RUN_ID':'1','GITHUB_RUN_ATTEMPT':'1','RUNNER_TEMP':str(parent),'APP_ENV_FILE':'config/unit-test.env.example'})
+     forbidden=[]
+     def audit(event,args):
+      if event.startswith(('subprocess.','socket.','ctypes.','os.exec','os.spawn'))or event in('os.system','os.fork','os.forkpty'):
+       forbidden.append(event);raise AssertionError('OWNED_NO_RPC_OR_NATIVE')
+     sys.addaudithook(audit)
+     rejected=[]
+     for name,call in(('ci',lambda:legacy.ci(bad)),('Controller',lambda:legacy.Controller(bad,legacy.ExitStack()))):
+      try:call()
+      except RuntimeError as error:assert str(error)=='ci_root';rejected.append(name)
+      else:raise AssertionError('legacy_wrong_prefix_admitted')
+     Q.hosted(good);legacy.ci(good)
+     class OriginalStack(legacy.ExitStack):
+      def __init__(self):super().__init__();self.originals=[]
+      def callback(self,function,*args,**kwargs):
+       if function is os.close:self.originals.append(args[0])
+       return super().callback(function,*args,**kwargs)
+     stack=OriginalStack();originals=[]
+     try:
+      controller=legacy.Controller(good,stack);controller.check();originals=list(stack.originals)
+      assert len(originals)==len(set(originals))==len(controller.modules)==6
+      assert controller.created==[]and controller.network is None
+      captured=[(n,legacy.identity(os.fstat(n)),fcntl.fcntl(n,fcntl.F_GETFL),fcntl.fcntl(n,fcntl.F_GETFD))for n in originals]
+      controller.check()
+      assert all(legacy.identity(os.fstat(n))==identity and fcntl.fcntl(n,fcntl.F_GETFL)==fl and fcntl.fcntl(n,fcntl.F_GETFD)==df and os.lseek(n,0,os.SEEK_CUR)==0 for n,identity,fl,df in captured)
+     finally:stack.close()
+     physical=[]
+     for n in originals:
+      try:os.fstat(n)
+      except OSError as error:assert error.errno==errno.EBADF;physical.append(n)
+      else:raise AssertionError('legacy_original_not_EBADF')
+     assert len(physical)==6 and not forbidden
+     result={'passed':True,'genuine_uid':os.getuid(),'genuine_euid':os.geteuid(),'wrong_prefix_refused_by':rejected,'actual_ci_correct_prefix_passed':True,'actual_Controller_constructor_passed':True,'actual_new_controller_hosted_passed':True,'sealed_helpers':6,'original_helper_FDs_physical_EBADF':len(physical),'created':controller.created,'network':controller.network,'forbidden_operations':forbidden};code=0
+    except BaseException as error:result={'passed':False,'error_class':type(error).__name__,'error':str(error)[:160]}
+    data=(json.dumps(result,sort_keys=True)+'\n').encode();assert len(data)<=4096
+    assert os.write(w,data)==len(data);os.close(w);assert physical_absent(w);os._exit(code)
+   os.close(w);self.assertTrue(physical_absent(w));data=b'';end=time.monotonic()+20;status=None
+   try:
+    while True:
+     self.assertLess(time.monotonic(),end,'OWNED child original20s deadline')
+     ready,_,_=select.select([r],[],[],min(.1,end-time.monotonic()))
+     if ready:
+      part=os.read(r,4097-len(data));data+=part;self.assertLessEqual(len(data),4096)
+      if not part:break
+    while status is None:
+     child,value=os.waitpid(pid,os.WNOHANG)
+     if child:status=value
+     else:self.assertLess(time.monotonic(),end);select.select([],[],[],.01)
+    result=json.loads(data);self.assertEqual(status,0,result);self.assertTrue(result['passed'],result);self.assertEqual(result['original_helper_FDs_physical_EBADF'],6)
+    sys.stderr.write('OWNED_LEGACY_UID1001 '+json.dumps(result,sort_keys=True)+'\n')
+   finally:
+    os.close(r);self.assertTrue(physical_absent(r))
+    if status is None:
+     os.kill(pid,signal.SIGKILL);os.waitpid(pid,0)
  def test_default_unarmed_zero_host_or_source_operation(self):
   with patch.object(Q,'hosted',side_effect=AssertionError('OWNED_NO_HOST')):self.assertEqual(Q.main(['--root','/OWNED_NOT_OPENED']),0)
   with patch.object(S,'host',side_effect=AssertionError('OWNED_NO_HOST')):self.assertEqual(S.main([]),0)

@@ -160,7 +160,7 @@ def checked_document(raw,pin):
 def hosted(root):
  need(os.getuid()==os.geteuid()==1001 and os.environ.get('GITHUB_ACTIONS')=='true'and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'and os.environ.get('GITHUB_REPOSITORY')=='mohsenbarari/trading_bot'and os.environ.get('GITHUB_REF')=='refs/heads/main','hosted_ci_only')
  parent=Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
- need(root.is_absolute()and root.resolve(strict=True)==root and root.parent==parent and root.name=='security-app-ci-probe2389-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']and root.stat().st_uid==1001 and stat.S_IMODE(root.stat().st_mode)==0o700 and not parent.stat().st_mode&0o022,'hosted_ci_only')
+ need(root.is_absolute()and root.resolve(strict=True)==root and root.parent==parent and root.name=='security-app-ci-smoke-probe2389-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']and root.stat().st_uid==1001 and stat.S_IMODE(root.stat().st_mode)==0o700 and not parent.stat().st_mode&0o022,'hosted_ci_only')
 
 def validate_inputs(intake,manifest):
  need(type(manifest)is dict and manifest.get('schema')=='canonical_gold2_hosted_source_dependencies/1'and manifest.get('total_files')==15 and manifest.get('code_limit')==131072 and manifest.get('data_limit')==2097152,'source_manifest')
