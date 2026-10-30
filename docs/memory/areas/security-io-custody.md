@@ -1,6 +1,6 @@
 # Security I/O and custody
 
-- QA: preflight HOST/entry, document roles/schemas/APIs/types/counts/modes/fixtures/bounds/DAG. Templates aren't decisions; refresh inherited QA assertions. Retain assertions/limits/siblings and driver __file__. Survey roles before exceptions. Bound B.run logs first. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes; preserve inputs/receipts. Profilers precompute filenames/code; no per-call pathlib/I/O.
+- QA: preflight HOST/entry, roles/schemas/APIs/types/counts/modes/fixtures/bounds/DAG. Templates aren't decisions; refresh inherited QA assertions. Retain assertions/limits/siblings and driver __file__. Survey roles before exceptions; test extracted helpers' globals and actual calls. Bound B.run logs first. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes; preserve inputs/receipts. Profilers precompute filenames/code; no per-call pathlib/I/O.
 - Typed modes: Root sources0644, receipts0600/0644, UID10001 build sources,
   private controls0600. Preserve original owners/modes; test real UID/GID.
 - Keep bounded responses in RAM through collector closure. Streaming outputs
