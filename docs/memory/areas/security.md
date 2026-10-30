@@ -16,10 +16,11 @@
   conflicts OPEN; endpoint changes require stable observation/strict persistent policy.
 - Current2389: CI41027633348 passed four App security gates;23 packages/
   284 files/30 aliases, two exact doc absences and xattr policy verified.
-  Genuine partial11 assessment:31fixed+12absent+1ACL unresolved; raw44HIGH
-  remains unchanged. CurrentCore106, GCV165/31 subsets, prior143, glibc283,
+  Genuine final13 assessment PASS:32fixed+12absent/0unresolved; raw44HIGH
+  remains unchanged. Whole835/ordinary12 qualification passed. Core106,
+  GCV165/31 subsets, prior143, glibc283,
   51/80/15/74/systemd2/GCC2/static3/wheel76 source roles accepted with
-  original premises. Whole835/caller assembly/CVE/backup/restore/activation OPEN. Require applicable
+  original premises. Normal review bundle/backup/restore/activation OPEN. Require applicable
   whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
   Parking never grants mount admission; no stopped/RO waiver.

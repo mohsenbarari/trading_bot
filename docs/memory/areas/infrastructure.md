@@ -1,5 +1,9 @@
 # Infrastructure
 
+- 2026-10-30 | HOST/CAS-checked cleanup removed16 obsolete generated venvs and
+  three inactive IDE installations; kept worktrees/history/current/rollback tools.
+  Root free~4.2GiB, SDB~9.1GiB; these measurements grant no restore admission.
+
 - 2026-10-25 | Security maintenance: Native engine/kernel/Brotli completed,
  15 containers; bind Brotli evidence to current boot/PID/unit. Web OP08 has
  Docker29.9.2/containerd2.4.2/runc1.5.2/kernel38,27 containers/16 running/six
