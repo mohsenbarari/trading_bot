@@ -1,0 +1,98 @@
+name: Security residual43 public source collection
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owned-protocol-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Exercise real source CLI with owned protocol fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B deploy/maintenance/residual43_source_ci/test_owned.py \
+            --qa-root "$RUNNER_TEMP/security-residual43-owned-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --require-hosted-owner
+      - name: Preserve owned protocol results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: security-residual43-owned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-residual43-owned-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          archive: true
+          retention-days: 10
+
+  collect:
+    needs: owned-protocol-qa
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - batch: small-a
+            indices: '0 1 2 3 4'
+          - batch: small-b
+            indices: '5 6 7 8 9'
+          - batch: gcc
+            indices: '10'
+          - batch: middle-a
+            indices: '11 12 13 14 15 16'
+          - batch: middle-b
+            indices: '17 18 19 20 21 22'
+          - batch: middle-c
+            indices: '23 24 25 26 27 28 29'
+          - batch: crypto
+            indices: '30 31 32 33'
+          - batch: perl
+            indices: '34'
+          - batch: remaining
+            indices: '35 36 37 38 39 40 41 42'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Collect exact selected source groups
+        shell: bash
+        env:
+          GROUP_INDICES: ${{ matrix.indices }}
+          SOURCE_OUTPUT: ${{ runner.temp }}/security-residual43-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.batch }}
+          COLLECTOR_SHA256: 28f766b9b70ca3ac2d118fbd7eb56510cf6721d74e55b2d2014344cdd71ad90e
+          SOURCE_IO_SHA256: b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$SOURCE_OUTPUT"
+          failed=0
+          for index in $GROUP_INDICES; do
+            if python3 -B deploy/maintenance/residual43_source_ci/collector.py \
+              --collect-group "$index" --collector-sha256 "$COLLECTOR_SHA256" \
+              --source-io-sha256 "$SOURCE_IO_SHA256" \
+              --output "$SOURCE_OUTPUT/group-$index" \
+              | tee "$SOURCE_OUTPUT/group-$index-actual-stdout.json"; then
+              :
+            else
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Preserve source DATA and actual child stdout
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: security-residual43-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.batch }}
+          path: |
+            ${{ runner.temp }}/security-residual43-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.batch }}
+            !${{ runner.temp }}/security-residual43-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.batch }}/**/compressed-inputs/**
+          if-no-files-found: error
+          archive: true
+          retention-days: 10
