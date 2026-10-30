@@ -5,12 +5,10 @@
   accepted clean units; polls/tests never count. Failures reset streak; keep history/counters.
 - Preserve product/Market behavior, single capture ownership and user changes.
   Necessary maintenance needs no routine approval; Writer/DNS remain human.
-- Native/Web/Final maintenance/backups completed; see infrastructure scope.
-  No Final App provisioning/migration
-  authority.
+- Native/Web/Final maintenance/backups completed (infrastructure scope);
+  no Final App provisioning/migration authority.
 - Both host SQLite gold1 backports are active; compatibility and old-inode
-  absence passed. Native four daemons/seven timers and Web fail2ban are stable;
-  global closure remains open.
+  absence passed. Native four daemons/seven timers and Web fail2ban are stable.
 - Failed App COW restored old Web/API200. Owned temporary fences released after
   fresh canonical parity; history/active rollback override remain. Capture identity
   conflicts OPEN; endpoint changes require stable observation/strict persistent policy.
@@ -20,7 +18,8 @@
   remains unchanged. Whole835/ordinary12 qualification passed. Core106,
   GCV165/31 subsets, prior143, glibc283,
   51/80/15/74/systemd2/GCC2/static3/wheel76 source roles accepted with
-  original premises. Normal review bundle/backup/restore/activation OPEN. Require applicable
+  original premises. Root/Source03 public review PASS;
+  backup/restore/activation OPEN. Require applicable
   whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
   Parking never grants mount admission; no stopped/RO waiver.
