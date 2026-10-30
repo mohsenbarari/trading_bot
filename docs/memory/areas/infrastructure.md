@@ -5,11 +5,11 @@
   resize, billing or persistent config. Restore old limit after scoped image
   operations if usage fits. Resource source/guards unchanged.
 
-- 2026-10-30 | HOST/CAS cleanup freed~8.8GiB:16 venvs,3 IDE installs,
-  obsolete/duplicate tools and caches,152 superseded App archives,one completed
-  builder. Preserve canonical/rollback tools,worktrees/history,build exports,
-  latest8 restore-tested backups and Market data. Root free~4.5GiB,SDB~10.7GiB;
-  these measurements grant no restore admission.
+- 2026-10-30 | Cleanup freed~8.8GiB from expired tools/backups/caches and one
+ completed builder; another206729216B from52 APT indexes under APT's own lock.
+ Preserve active/rollback tools,worktrees/IDE history,build exports,last8 tested
+ backups and Market data. APT needs fresh indexes before installation;
+ fresh capacity remains mandatory for every operation.
 
 - 2026-10-25 | Security maintenance: Native engine/kernel/Brotli completed,
  15 containers; bind Brotli evidence to current boot/PID/unit. Web OP08 has

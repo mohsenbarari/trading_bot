@@ -70,6 +70,8 @@ Discover optional memory without loading it. Entries here are not default loads.
   source joins, proof-data bounds, or installed-wheel provenance.
 - `areas/security-io-custody.md` — also load for security helper/API adaptations,
   reader/writer/pipe guards, constructor prefixes, FD aliases, or close finality.
+- `areas/security-operation-recovery.md` — also load for operation invocation,
+  worker/caller deadlines, client timeout, or failed-attempt reconciliation.
 - `areas/two-server-refactor.md` — load for the two-server master plan, Finland
   consolidation/runtime/data merge, human Writer handover, or its cutover gates.
 - `areas/documentation-execution.md` — load for developer onboarding,

@@ -1,6 +1,6 @@
 # Security runtime verification guards
 
-For source/collector APIs and FD/pipe custody also load `security-io-custody.md`.
+Also load `security-io-custody.md` and `security-operation-recovery.md`.
 
 - Root COPY: separate init, tar.umask0022, disjoint IDs, original multiplicity.
   No waivers/evidence deletion/hostdata/UID-mode masks. Per-case mocks restore
