@@ -5,22 +5,21 @@
   accepted clean units; polls/tests never count. Failures reset streak; keep history/counters.
 - Preserve product/Market behavior, single capture ownership and user changes.
   Necessary maintenance needs no routine approval; Writer/DNS remain human.
-  Build/test receipts never imply activation or acceptance.
-- Native/Web/Final host maintenance and authenticated backups completed;
-  infrastructure memory records exact scope. No Final App provisioning/migration
+- Native/Web/Final maintenance/backups completed; see infrastructure scope.
+  No Final App provisioning/migration
   authority.
 - Both host SQLite gold1 backports are active; compatibility and old-inode
   absence passed. Native four daemons/seven timers and Web fail2ban are stable;
   global closure remains open.
-- Failed App COW attempt restored old Web/API200. Exact owned temporary fences
-  were released after fresh canonical parity; history and active rollback
-  override remain. Capture identity conflicts stay OPEN; generated endpoint
-  changes require stable observation and strict persistent policy.
+- Failed App COW restored old Web/API200. Owned temporary fences released after
+  fresh canonical parity; history/active rollback override remain. Capture identity
+  conflicts OPEN; endpoint changes require stable observation/strict persistent policy.
 - Current2389: CI41027633348 passed four App security gates;23 packages/
   284 files/30 aliases, two exact doc absences and xattr policy verified.
-  Raw44HIGH/eight IDs unresolved. Core106/GCV165/31, exact143 prior-body
-  properties and glibc283/51/80/15/74/systemd2 source roles accepted with original
-  premises. Source/CVE/backup/restore/activation OPEN. Require applicable
+  Genuine partial11 assessment:31fixed+12absent+1ACL unresolved; raw44HIGH
+  remains unchanged. CurrentCore106, GCV165/31 subsets, prior143, glibc283,
+  51/80/15/74/systemd2/GCC2/static3 and Pillow18 source roles accepted with
+  original premises. Wheel76 aggregate and CVE/backup/restore/activation OPEN. Require applicable
   whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
   Parking never grants mount admission; no stopped/RO waiver.
@@ -40,7 +39,7 @@
   may consume protected inputs; public image Config comparison stays in RAM.
   Retain archive FD through the operation's final checkpoint; scoped closure
   detaches only its own checker before final validation/close.
-- Each ordinary build needs own evidence. Host-idleness needs host-visible processes; shared
+- Each build needs evidence. Host-idleness requires host-visible processes; shared
   image sizes never prove reclaim.
 - Candidate App uses only explicit PYTHONDONTWRITEBYTECODE=1 Env delta; do not
   adopt working-layer cache/code changes. No Go address-space inheritance; bound

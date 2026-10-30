@@ -1,17 +1,18 @@
 # Security release decisions
 
-- Main remains the release/recipe authority. Market security builds select an
-  explicit immutable Git business component, preserving the accepted complete
-  per-role file inventory; release commit/tree and business commit/tree are
-  distinct, truthfully bound identities. Never activate unaccepted Main business
-  changes, use a moving ref/Main fallback, transplant image layers, or repoint
-  historical profile/COW producers. Component locks stay unarmed until actual
-  product Git identities and exact manifests are verified/published.
+- Main is release/recipe authority. Market security builds select
+  immutable Git business components and retain accepted full per-role inventories.
+  Bind distinct release and business commit/tree identities. Never activate
+  unaccepted Main business changes, use moving refs/Main fallback, transplant
+  layers or repoint historical profile/COW producers. Locks stay unarmed until
+  actual product Git identities and exact manifests are verified/published.
 - The new evidence-aware vulnerability assessment preserves original raw reports
   and failed gates. Only source-proven `fixed` or same-image
   `component_not_present` may resolve an exactly enumerated finding. Require
   current payload hashes, authentic package/build/source receipts, actual fresh
-  probes and a decision no older than24h. Unknown, duplicate, extra, missing or
+  probes and a decision no older than24h. Review time is actual Root review;
+  expiry honors original proof completion+24h, never retimestamped observations.
+  Unknown, duplicate, extra, missing or
   mismatched rows/proofs, unresolved ACL callers and failed compatibility or
   cleanup block acceptance. No accepted-risk, inactivity or unreachable waiver.
   Zero unresolved findings never grants deployment/global security by itself.
