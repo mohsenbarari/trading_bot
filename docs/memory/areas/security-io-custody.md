@@ -15,9 +15,9 @@
   Closure needs all original closes and final names for that invocation;
   earlier success, JSON or timing alone prove none. Budget guards/hashing
   within the original deadline.
-- Constructor cleanup must handle the actual acquired prefix and preserve the
-  original error. Do not call full-context guards before their fields exist;
-  include a real constructor-prefix regression, beyond import/AST checks.
+- Test each acquisition prefix through actual failed cleanup, beyond constructor
+  raises/AST. Preserve the first error; use initialized prefix guards. Require
+  all captured originals physically closed or retained HELD; flags alone prove none.
 - Source sealing requires an actual clean Main checkout. Use a registered
   temporary checkout; preserve the sealer's branch checks. Use full9 without
   atime and the actual host interpreter rather than a container Python path.
@@ -26,5 +26,5 @@
 - S.Reader.raw_binding is None without a pin. Supply the exact pin or guarded hash. Test actual admission before payload/spawn, beyond stubs.
 - Operations need bounded durable sanitized status before entry. Lost output proves neither closure nor retry eligibility; retain UNKNOWN.
 - Test acquisition prefixes, FD/flag drift, same-inode reopen even at offset0, restoration, no-op close and non-EBADF final-stat. Lock custody needs original OFD and current own-lock proof; re-locking can heal a lost lock. Latch close-entry and close failures across check/named. Uncertain ownership stays HELD; fixture disposal is separate evidence.
-- Capture original receivers and close-target aliases (fd/original_fd/pidfd). Deduplicate metadata reads, never alias bindings. Incomplete cohorts cannot prove closure. Retain actual body errors before postguards and JSON summaries.
+- Capture original receivers, FD aliases and witness/metadata registries. Mutable aliases cannot decide owned-FD existence. Deduplicate metadata reads, never bindings. Incomplete cohorts prove no closure. Retain body errors before postguards and JSON.
 - Pipe tests need post-admission writes across a clock tick; same-jiffy tests miss timestamp changes. Preserve regular-file full9 and both FD flags.
