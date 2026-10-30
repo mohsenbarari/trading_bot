@@ -1,6 +1,6 @@
 # Security I/O and custody
 
-- QA: preflight HOST/entry, schemas/APIs/types/counts/modes/fixtures/bounds/DAG. Retain assertions/limits/siblings. Interactive drivers retain module __file__. Survey every role before exceptions. Bound B.run logs first. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes before admission; preserve inputs/receipts. Profilers use precomputed filenames/code, never pathlib/I/O per call.
+- QA: preflight HOST/entry, document roles/schemas/APIs/types/counts/modes/fixtures/bounds/DAG. Templates aren't decisions; refresh inherited QA assertions. Retain assertions/limits/siblings and driver __file__. Survey roles before exceptions. Bound B.run logs first. .raw: bounded pread/hash. Scoped patches preserve context; GNU patch before CI. Freeze modes; preserve inputs/receipts. Profilers precompute filenames/code; no per-call pathlib/I/O.
 - Typed modes: Root sources0644, receipts0600/0644, UID10001 build sources,
   private controls0600. Preserve original owners/modes; test real UID/GID.
 - Keep bounded responses in RAM through collector closure. Streaming outputs
@@ -10,17 +10,15 @@
 - Pipe/FIFO writes naturally change mtime/ctime. Bind original dev/inode/mode/uid/gid/
   nlink/size and fd flags, plus exact stream length/hash/EOF; timestamps are
   observations. Keep every regular-file full9 guard unchanged.
-- Refusal maps cover new adapter codes; unknown operands stay
-  private. Physical-finalizer errors outrank earlier errors; preserve both.
-  Closure needs all original closes and final names for that invocation;
-  earlier success, JSON or timing alone prove none. Budget guards/hashing
+- Map new refusal codes; unknown operands stay private. Preserve physical-finalizer
+  and earlier errors, prioritizing the former. Closure requires original closes
+  and final names for this invocation; earlier success, JSON or timing proves none. Budget guards/hashing
   within the original deadline.
 - Test prefixes through failed cleanup, beyond raises/AST. Keep
   first errors and initialized guards. New typed roles need latched checks/close,
   EBADF and complete original-or-HELD accounting; legacy close/flags prove none.
-- Source sealing requires an actual clean Main checkout. Use a registered
-  temporary checkout; preserve the sealer's branch checks. Use full9 without
-  atime and the actual host interpreter rather than a container Python path.
+- Source sealing needs clean Main in a registered temporary checkout with branch
+  checks intact. Use full9 without atime and the host interpreter.
 - Run report-writing verifiers from fresh packet copies. Preserve author and
   Root receipts separately; do not overwrite frozen QA metadata.
 - S.Reader.raw_binding is None without a pin. Supply the exact pin or guarded hash. Test actual admission before payload/spawn, beyond stubs.

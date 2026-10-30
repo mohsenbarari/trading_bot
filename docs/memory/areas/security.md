@@ -1,9 +1,8 @@
 # Security remediation
 
-- Global acceptance false: patched App/Market/datastores are not activated;
-  refactor STOP, streak0. After verified activation require30 consecutive
-  completed accepted clean units; polls/tests never count. Failure resets streak
-  with history/counters retained.
+- Global acceptance false: candidate App/Market/datastores unactivated;
+  refactor STOP/streak0. Verified activation precedes30 consecutive completed
+  accepted clean units; polls/tests never count. Failures reset streak; keep history/counters.
 - Preserve product/Market behavior, single capture ownership and user changes.
   Necessary maintenance needs no routine approval; Writer/DNS remain human.
   Build/test receipts never imply activation or acceptance.
@@ -17,13 +16,14 @@
   were released after fresh canonical parity; history and active rollback
   override remain. Capture identity conflicts stay OPEN; generated endpoint
   changes require stable observation and strict persistent policy.
-- Current2389: Core106 source bridge/15-site ordinary caller property, four owned
-  CI provider cases and GCV165 own-local property passed. Whole835, production
-  kernel/providers and backup/restore/activation remain OPEN. Preserve raw44HIGH/
-  eight IDs and rollback/failures; scoped proofs never imply globally FIXED.
-- PG49a8/Redis98c4 built/scanned, not activated; PG Windows-only UNKNOWN retains
-  Linux code-absence proof. E46 2c6 and nine exact Market overlays exported;
-  raw44HIGH remain. Preserve F79's two source overrides and failed evidence.
+- Current2389: Core106 source/15 callers/21 callbacks/four CI and GCV165/31 local
+  proofs passed; raw44HIGH/eight IDs unresolved. Assessor requires source/payload
+  and complete whole-image ACL caller/ABI/compatibility gates, not universal GLIBC
+  semantics. Preserve rollback/failures; provenance157, production context and
+  backup/restore/activation remain OPEN.
+- PG49a8/Redis98c4 candidates built/scanned, unactivated; PG's Windows UNKNOWN
+  retains Linux absence proof. E46 2c6/nine Market overlays exported. Preserve
+  F79's two source overrides/failures.
 - f365 receive failed before Web LOAD; retain failed intents/guards, never retry.
   Canonical ordinary App/Market build/export/activation gates remain OPEN.
 - Expired windows/receipts grant no future authority. Unknown RPC never implies
