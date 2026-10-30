@@ -9,6 +9,7 @@ For source/collector APIs and FD/pipe custody also load `security-io-custody.md`
 - Foreign group exit needs original pidfd, not leader Z. Thread exit needs original birth custody/kernel absence; UID0 cannot erase live holders. Retain holders, source-owned exit proofs and proc-container metadata; test real UID/thread changes without global PID/TID-set equality.
 - FIRST-stat ENOENT then foreign FD reappearance is fresh bounded work; closure needs two proven absences. Known-target drift is fatal.
 - Failed-only disposal accounts for retained Pair prefixes before releasing context fences. Unknown close keeps fences; known closure never heals errors.
+- Profile-bound business directories need stable5 at preparation CAS, initial/repeated Core and G FD checks. Namespace size/link counts/timestamps are mutable, not identity. Keep regular/model/credential/fence/generic-parent contracts strict.
 - After finalizers, recheck names and original client/request/decision/global deadlines without retired callbacks; retain errors. Only proven post-last-close namespaces use exact stable7 plus nondecreasing times; held namespace FDs and regular files keep full9.
 - Select exact binary name/full version/Epoch/BinNMU/arch. Signed Source-Version may differ from provider +bN. Source limit=1 is insufficient. Keep duplicates; metadata pointers prove no product hashes/signatures/installed ELF equivalence or sibling variants.
 - Reject failed/closed forward scopes before acquisition/mutation. Failed cleanup needs separate typed authority, never healthy guards. Latch errors.

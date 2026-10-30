@@ -15,9 +15,9 @@
   Closure needs all original closes and final names for that invocation;
   earlier success, JSON or timing alone prove none. Budget guards/hashing
   within the original deadline.
-- Test each acquisition prefix through actual failed cleanup, beyond constructor
-  raises/AST. Preserve the first error; use initialized prefix guards. Require
-  all captured originals physically closed or retained HELD; flags alone prove none.
+- Test prefixes through failed cleanup, beyond raises/AST. Keep
+  first errors and initialized guards. New typed roles need latched checks/close,
+  EBADF and complete original-or-HELD accounting; legacy close/flags prove none.
 - Source sealing requires an actual clean Main checkout. Use a registered
   temporary checkout; preserve the sealer's branch checks. Use full9 without
   atime and the actual host interpreter rather than a container Python path.
