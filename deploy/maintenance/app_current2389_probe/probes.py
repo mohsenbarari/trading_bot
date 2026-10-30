@@ -31,9 +31,51 @@ def same(a, b):
     if type(a) is list: return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
     return a == b
 
+PYTHON_RUNTIME_IMAGE='sha256:2389c900dbbf520bd7d7f723e8c48a5c258f1612c43e80d2b66c6d046f9f8434'
+PYTHON_RUNTIME_SOURCE='4df2fed29859c0b82367666521f1a345f269f58a'
+PYTHON_RUNTIME_PIN='1c984804bedc8eb2b52fb77add484a53ba9df8e65420f0e3f8a2e754255627f3'
+# This fixed CI invocation admits the unchanged, default-UNARMED verifier into
+# a NEW module. Keep the mounted original FD through its real main() return.
+PYTHON_RUNTIME_ENTRY=r'''import errno,fcntl,os,stat,sys
+from pathlib import Path
+from hashlib import sha256
+from types import ModuleType
+image='sha256:2389c900dbbf520bd7d7f723e8c48a5c258f1612c43e80d2b66c6d046f9f8434'
+source='4df2fed29859c0b82367666521f1a345f269f58a'
+pin='1c984804bedc8eb2b52fb77add484a53ba9df8e65420f0e3f8a2e754255627f3'
+def need(ok,code):
+ if not ok:raise RuntimeError(code)
+def identity(s):return(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+def flags(fd):return(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))
+need(sys.argv[1:]==['--image-id',image,'--source-commit',source,'--verifier-sha256',pin],'python_entry_scope')
+path=Path('/proof/verify_python_runtime.py');fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK)
+before=None
+try:
+ before=identity(os.fstat(fd));fl=flags(fd)
+ need(path.resolve(strict=True)==path and before[2]==stat.S_IFREG|0o444 and before[3]==1001 and before[5:7]==(1,7504),'python_entry_metadata')
+ def check():need(identity(os.fstat(fd))==before==identity(path.lstat())and flags(fd)==fl and os.lseek(fd,0,os.SEEK_CUR)==0,'python_entry_changed')
+ raw=os.pread(fd,7505,0);need(len(raw)==7504 and sha256(raw).hexdigest()==pin,'python_entry_pin');check()
+ module=ModuleType('_current2389_python_presence');module.__file__=str(path);exec(compile(raw,str(path),'exec'),module.__dict__)
+ need(module.EXECUTION_ARMED is False and module.EXPECTED_IMAGE_ID is None and module.EXPECTED_SOURCE_COMMIT is None,'python_entry_defaults')
+ module.EXPECTED_IMAGE_ID=image;module.EXPECTED_SOURCE_COMMIT=source;module.EXECUTION_ARMED=True
+ check();code=module.main();check();need(type(code)is int,'python_entry_return')
+finally:
+ os.close(fd)
+ try:os.fstat(fd)
+ except OSError as error:need(error.errno==errno.EBADF,'python_entry_close')
+ else:raise RuntimeError('python_entry_close')
+ if before is not None:need(identity(path.lstat())==before,'python_entry_changed')
+raise SystemExit(code)
+'''
+
+def python_runtime_command(image,source,pin):
+    need((image,source,pin)==(PYTHON_RUNTIME_IMAGE,PYTHON_RUNTIME_SOURCE,PYTHON_RUNTIME_PIN),'python_entry_scope')
+    return ['/usr/local/bin/python3','-I','-B','-c',PYTHON_RUNTIME_ENTRY,'--image-id',image,'--source-commit',source,'--verifier-sha256',pin]
+
 def presence_args(old, ctx, name, image, proof, filename, pin, control):
     command = ['/usr/local/bin/python3','-I','-B','/proof/'+filename,'--image-id',image,
         '--source-commit',control['source_commit'],'--verifier-sha256',pin]
+    if filename=='verify_python_runtime.py':command=python_runtime_command(image,control['source_commit'],pin)
     return ['create','--name',name,'--label',old.LABEL+'='+old.owner(),'--pull=never','--network=none','--read-only',
         '--cap-drop=ALL','--security-opt=no-new-privileges','--user=0:0','--memory=512m','--memory-swap=512m',
         '--cpus=1','--pids-limit=64','--ulimit','core=0','--ulimit','fsize=2097153:2097153',

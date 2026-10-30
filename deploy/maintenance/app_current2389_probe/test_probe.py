@@ -3,7 +3,7 @@ from pathlib import Path
 from types import ModuleType,SimpleNamespace
 from hashlib import sha256
 from unittest.mock import patch
-from contextlib import contextmanager
+from contextlib import contextmanager,redirect_stdout,ExitStack
 import ast,builtins,copy,errno,fcntl,gzip,inspect,io,json,os,select,signal,stat,symtable,sys,tarfile,tempfile,time,unittest,zipfile
 HERE=Path(__file__).resolve().parent
 REPO=next(p for p in HERE.parents if (p/'scripts/prepare_canonical_app_image.py').is_file())
@@ -124,7 +124,10 @@ class Tests(unittest.TestCase):
   expected={'pax': '9108abd5503be521891e4dd86331321034282c2f9e83b1d9550df85169862c28', 'scan_layer': '0b8e9f9d67b5526bf2cd543604e9ca3d5b2f823f1e229930268773a080822565', 'Slice': '4aeba051f3ce8e2b7229596a8109faa2ade4f767a040d934aad9da67683d5076'}
   for name,digest in expected.items():self.assertEqual(sha256(signature((HERE/'archive_metadata.py').read_bytes(),name).encode()).hexdigest(),digest)
   source=(REPO/'deploy/maintenance/app_r2_observe02/producer02_controller.py').read_bytes()
-  for name in('presence_args','public_probe_start'):self.assertEqual(signature((HERE/'probes.py').read_bytes(),name),signature(source,name))
+  self.assertEqual(signature((HERE/'probes.py').read_bytes(),'public_probe_start'),signature(source,'public_probe_start'))
+  old=SimpleNamespace(LABEL='OWNED',owner=lambda:'1-1')
+  for name,pin in(('verify_image_component_presence.py',V.VERIFIERS['verify_image_component_presence.py'][0]),('probe_native_payload.py',V.NATIVE_PAYLOAD_PROBE_SHA256),('probe_native_extra.py',V.EXTRA_NATIVE_PAYLOAD_PROBE_SHA256)):
+   self.assertEqual(V.presence_args(old,None,'OWNED',V.PYTHON_RUNTIME_IMAGE,Path('/OWNED'),name,pin,I['control']),P.presence_args(old,None,'OWNED',V.PYTHON_RUNTIME_IMAGE,Path('/OWNED'),name,pin,I['control']))
  def test_current20_DEB_full_scope_and_real_gold2_versions(self):
   self.assertEqual(len(N['packages']),20);self.assertEqual(N['scope']['image_id'],I['control']['image_id']);self.assertEqual((N['native_file_count'],N['historical_native_file_count'],N['alias_count']),(259,260,28))
   rows={p['package']:p for p in N['packages']};self.assertEqual(rows['coreutils']['installed_version'],'9.7-3+gold2');self.assertEqual(rows['coreutils']['deb_sha256'],'dc169c5e7223af3b0001403400e4c6ae5be4b089a52ee50c6b3d7d4049dc5ed1');self.assertEqual(rows['tar']['installed_version'],'1.35+dfsg-5~trixie+gold2');self.assertEqual(sum(len(p['expected_files'])for p in rows.values()),260)
@@ -316,4 +319,137 @@ class Tests(unittest.TestCase):
    # The fixed final stream bound refuses after every genuine layer scan.
    with patch.object(A,'scan_layer',side_effect=counted),self.assertRaises(RuntimeError):A.collect(ctx,f,476681728,config,{'archive_sha256':'5f98cb3c408e8b58e8ed576ac8cf459e25cb409a87f4c559fed9e890ea708194','manifest_id':'sha256:'+digest},I['control'],expected)
    self.assertEqual(len(count),37);self.assertTrue(all(c['entries']==1 for c in count))
+ def test_actual_sealed_python_main_exact_invocation_and_prefix_finality(self):
+  body=(HERE/'verify_python_runtime.py').read_bytes();self.assertEqual((len(body),sha256(body).hexdigest()),(7504,V.PYTHON_RUNTIME_PIN))
+  original=module(HERE/'verify_python_runtime.py');self.assertFalse(original.EXECUTION_ARMED);self.assertIsNone(original.EXPECTED_IMAGE_ID);self.assertIsNone(original.EXPECTED_SOURCE_COMMIT)
+  with patch.object(original,'collect',side_effect=AssertionError('OWNED_NO_ACTUAL_RUNTIME')),redirect_stdout(io.StringIO()):self.assertEqual(original.main([]),0)
+  command=V.python_runtime_command(I['control']['image_id'],I['control']['source_commit'],V.PYTHON_RUNTIME_PIN)
+  self.assertEqual(command[:4],['/usr/local/bin/python3','-I','-B','-c']);self.assertEqual(command[4],V.PYTHON_RUNTIME_ENTRY)
+  for mode in('image','source','pin'):
+   args=[I['control']['image_id'],I['control']['source_commit'],V.PYTHON_RUNTIME_PIN];args[('image','source','pin').index(mode)]='wrong'
+   with self.subTest(builder=mode),self.assertRaisesRegex(RuntimeError,'python_entry_scope'):V.python_runtime_command(*args)
+  actual_exec=builtins.exec;actual_import=builtins.__import__;actual_open=os.open;actual_stat=os.fstat;outcomes=[]
+  for mode in('valid','body_hash','source','collect_refuses','first_fstat'):
+   with self.subTest(mode=mode),tempfile.TemporaryDirectory()as directory:
+    path=Path(directory)/'verify_python_runtime.py';path.write_bytes(body if mode!='body_hash'else body[:-1]+b' ')
+    if os.geteuid()==0:os.chown(path,1001,1001)
+    self.assertEqual(path.stat().st_uid,1001);path.chmod(0o444);opened=[];calls=[];namespace={};first=[]
+    def owned_path(value):
+     self.assertEqual(value,'/proof/verify_python_runtime.py');return path
+    def imports(name,*args,**kwargs):
+     return SimpleNamespace(Path=owned_path)if name=='pathlib'else actual_import(name,*args,**kwargs)
+    def opened_original(value,*args,**kwargs):
+     n=actual_open(value,*args,**kwargs)
+     if value==path:opened.append(n)
+     return n
+    def first_stat(n):
+     if mode=='first_fstat'and opened and n==opened[0]and not first:first.append(True);raise OSError(errno.EIO,'OWNED first metadata failure')
+     return actual_stat(n)
+    def load(code,globals=None,locals=None):
+     actual_exec(code,globals,locals)
+     if globals is not None and globals.get('__name__')=='_current2389_python_presence':
+      self.assertFalse(globals['EXECUTION_ARMED']);self.assertIsNone(globals['EXPECTED_IMAGE_ID']);self.assertIsNone(globals['EXPECTED_SOURCE_COMMIT']);namespace.update(globals)
+      def owned_collect(image,source,pin):
+       self.assertTrue(globals['EXECUTION_ARMED']);self.assertEqual((globals['EXPECTED_IMAGE_ID'],globals['EXPECTED_SOURCE_COMMIT']),(I['control']['image_id'],I['control']['source_commit']));self.assertEqual((image,source,pin),(I['control']['image_id'],I['control']['source_commit'],V.PYTHON_RUNTIME_PIN));calls.append((image,source,pin))
+       if mode=='collect_refuses':raise RuntimeError('actual_python_mapping')
+       return {'schema':'OWNED_exact_python_main_binding/1','security_accepted':False,'actual_native_proof':False}
+      globals['collect']=owned_collect
+    argv=['-c',*command[5:]]
+    if mode=='source':argv[argv.index('--source-commit')+1]='f'*40
+    stdout=io.StringIO()
+    with patch.object(builtins,'__import__',side_effect=imports),patch.object(builtins,'exec',side_effect=load),patch.object(os,'open',side_effect=opened_original),patch.object(os,'fstat',side_effect=first_stat),patch.object(sys,'argv',argv),redirect_stdout(stdout):
+     if mode in('valid','collect_refuses'):
+      with self.assertRaises(SystemExit)as done:actual_exec(compile(command[4],'<exact-reviewed-python-bootstrap>','exec'),{'__name__':'__main__'})
+      self.assertEqual(done.exception.code,0 if mode=='valid'else 1);self.assertEqual(len(calls),1);self.assertEqual(namespace['main'].__code__.co_filename,str(path))
+     elif mode=='first_fstat':
+      with self.assertRaises(OSError)as refused:actual_exec(compile(command[4],'<exact-reviewed-python-bootstrap>','exec'),{'__name__':'__main__'})
+      self.assertEqual(refused.exception.errno,errno.EIO);self.assertEqual(calls,[])
+     else:
+      with self.assertRaisesRegex(RuntimeError,'python_entry_pin'if mode=='body_hash'else'python_entry_scope'):actual_exec(compile(command[4],'<exact-reviewed-python-bootstrap>','exec'),{'__name__':'__main__'})
+      self.assertEqual(calls,[])
+    self.assertEqual(len(opened),0 if mode=='source'else 1)
+    for n in opened:
+     with self.assertRaises(OSError)as closed:actual_stat(n)
+     self.assertEqual(closed.exception.errno,errno.EBADF)
+    outcomes.append({'case':mode,'original_FDs_EBADF':len(opened)})
+  sys.stderr.write('OWNED_PYTHON_ENTRY '+json.dumps({'cases':outcomes,'actual_native_proof':False},sort_keys=True)+'\n')
+ def test_actual_both_native_CLI_entries_explicit_flag_and_exact_scope(self):
+  old=SimpleNamespace(LABEL='OWNED',owner=lambda:'1-1');proof=Path('/OWNED_NOT_OPENED');events=[]
+  for script,expectation,flag in(('probe_native_payload.py','native-expectation.json',False),('probe_native_extra.py','native-extra-expectation.json',True)):
+   native=module(HERE/script);pin=sha256((HERE/script).read_bytes()).hexdigest();raw=(HERE/expectation).read_bytes();expect=sha256(raw).hexdigest();created=[]
+   # These are the exact argv constructed by the actual native function before
+   # its first container RPC. All file metadata below is real OWNED metadata.
+   ctx=SimpleNamespace(root=Path('/OWNED_NOT_OPENED'),stack=None,checks=[],C=None)
+   code=V.native_extra if flag else V.native_payload
+   src=inspect.getsource(code);self.assertIn("['--collect-expected-native-payload','--expectation-sha256'",src)
+   args=V.presence_args(old,ctx,'OWNED',I['control']['image_id'],proof,script,pin,I['control']);args=args[args.index(I['control']['image_id'])+1:]
+   self.assertEqual(args[:3],['-I','-B','/proof/'+script]);argv=args[3:]+['--collect-expected-native-payload','--expectation-sha256',expect,'--expectation-gid','1001']
+   with redirect_stdout(io.StringIO()):self.assertEqual(native.main([]),0)
+   if os.geteuid()!=0:
+    with self.assertRaisesRegex(ValueError,'actual_container_root_required'):native.main(argv)
+    events.append({'script':script,'actual_nonroot_guard_refused':True});continue
+   with tempfile.TemporaryDirectory()as directory:
+    path=Path(directory)/expectation;path.write_bytes(raw);os.chown(path,1001,1001);path.chmod(0o444);original_open=os.open;observed=[]
+    def observe(payload,**kwargs):
+     self.assertEqual(payload,raw);self.assertEqual(kwargs,{'image':I['control']['image_id'],'commit':I['control']['source_commit'],'verifier':pin});observed.append(kwargs);return {'schema':'OWNED_native_CLI_binding/1','security_accepted':False,'actual_native_proof':False}
+    def opened(value,*args,**kwargs):
+     fd=original_open(value,*args,**kwargs)
+     if value==path:created.append(fd)
+     return fd
+    def mounted(value):self.assertEqual(value,'/proof/'+expectation);return path
+    with patch.object(native,'Path',side_effect=mounted),patch.object(native,'observe',side_effect=observe),patch.object(os,'open',side_effect=opened),redirect_stdout(io.StringIO()):self.assertEqual(native.main(argv),0)
+    self.assertEqual(len(observed),1);self.assertEqual(len(created),1)
+    for n in created:
+     with self.assertRaises(OSError)as closed:os.fstat(n)
+     self.assertEqual(closed.exception.errno,errno.EBADF)
+   for field in('image','commit'):
+    kwargs={'image':I['control']['image_id'],'commit':I['control']['source_commit'],'verifier':pin};kwargs[field]='wrong'
+    with patch.object(native,'file_hold',side_effect=AssertionError('OWNED_NO_PAYLOAD_READ')),self.assertRaisesRegex(ValueError,'manifest_identity'):native.observe(raw,**kwargs)
+   events.append({'script':script,'actual_root_main_called_owned_observe':True,'expectation_original_EBADF':True})
+  sys.stderr.write('OWNED_NATIVE_ENTRIES '+json.dumps({'events':events,'actual_native_proof':False},sort_keys=True)+'\n')
+ def test_actual_AUX_observe_reaches_exact_post_fileloop(self):
+  native=module(HERE/'probe_native_extra.py');seen=[];reads=[];original_need=native.need
+  class AfterLoopReached(Exception):pass
+  class OwnedAbsent:
+   def __init__(self,path):pass
+   def observation(self,root):return {'OWNED':True}
+   def cleanup(self):pass
+  def file(path,spec,held,end,total):reads.append(spec);total[0]+=spec['bytes'];return dict(spec)
+  def checked(ok,code):
+   original_need(ok,code);frame=inspect.currentframe().f_back
+   if frame.f_code is native.observe.__code__ and code=='manifest_package'and'count'in frame.f_locals and frame.f_locals['historical_count']==26:
+    seen.append((frame.f_locals['count'],frame.f_locals['historical_count'],len(frame.f_locals['packages'])));raise AfterLoopReached()
+  with patch.object(native,'file_hold',side_effect=file),patch.object(native,'Absent',OwnedAbsent),patch.object(native,'need',new=checked),self.assertRaises(AfterLoopReached):native.observe((HERE/'native-extra-expectation.json').read_bytes(),image=I['control']['image_id'],commit=I['control']['source_commit'],verifier=V.EXTRA_NATIVE_PAYLOAD_PROBE_SHA256,root=Path('/OWNED_NOT_OPENED'))
+  self.assertEqual(seen,[(25,26,3)]);self.assertEqual(len(reads),27)
+ def test_actual_execute_orchestration_reaches_SQLite_join_unchanged32_and_collection(self):
+  old=module(REPO/'deploy/maintenance/app_r2_observe02/run_app_image_ci_smoke.py');order=[];writes={};retained={**RET,'source_bindings_complete':False};retained_raw=Q.encoded(retained);pointer_raw=(HERE/'retained-inventory-pointer.json').read_bytes();pointer=json.loads(pointer_raw);original_checked=Q.checked_document
+  native=actual_native_fixture();native.update(native_files_verified=259,aliases_verified=28,scope=N['scope']);extra={'scope':E['scope'],'packages':[{**copy.deepcopy(p),'actual_files':[copy.deepcopy(r)for r in p['expected_files']if r['path']!=E['distribution_filtered_absences'][0]['original_deb_file']['path']]}for p in E['packages']],'native_files_verified':25,'aliases_verified':2}
+  sqlite=next(p for p in native['packages']if p['package']=='libsqlite3-0')['actual_files'][0];present={'verify_image_component_presence.py':{'OWNED':True},'verify_python_runtime.py':{'actual_sqlite_runtime':'3.46.1','actual_native_libraries':[{**sqlite,'actual_mapped_device_inode_bound':True}]}}
+  def checked(raw,pin):
+   if raw==retained_raw and pin==(pointer['member_bytes'],pointer['member_sha256']):return copy.deepcopy(retained)
+   return original_checked(raw,pin)
+  with tempfile.TemporaryDirectory()as directory,ExitStack()as stack:
+   root=Path(directory);(root/'source').mkdir();(root/'reports').mkdir()
+   for leaf in('native-expectation.json','native-extra-expectation.json','required-caller-payload.json','retained-inventory-pointer.json'):
+    path=root/'source'/leaf;path.write_bytes((HERE/leaf).read_bytes());path.chmod(0o600)
+   fixture=(REPO/'deploy/maintenance/app_gold2_smoke/fixtures/public-evidence.zip').read_bytes()
+   def emit(path,raw):writes[path.name]=json.loads(raw);path.write_bytes(raw)
+   @contextmanager
+   def pinned(path,size):
+    with open(path,'rb')as stream:
+     fd=stream.fileno();yield stream,path.stat().st_size
+    with self.assertRaises(OSError)as closed:os.fstat(fd)
+    self.assertEqual(closed.exception.errno,errno.EBADF)
+   def downloaded(identifier,path,size,pin):self.assertEqual((identifier,size,pin),(I['control']['evidence_artifact_id'],len(fixture),sha256(fixture).hexdigest()));path.write_bytes(fixture);order.append('evidence')
+   def collected(*args):order.append('retained');return retained_raw
+   def admitted(*args):order.append('admit_app');return I['control']['image_id']
+   def presence(*args):self.assertEqual(args[2:],(I['control']['image_id'],I['control']));order.append('presence');return present
+   def main(*args):order.append('main_native');return native,N
+   def aux(*args):order.append('aux_native');return extra,E
+   def smoke(*args):order.append('unchanged32');return {'runtime':8,'components':24,'migration':{'OWNED':True}}
+   ctx=SimpleNamespace(root=root,stack=stack,checks=[],modules={'caller_payload.py':COVER,'retained_inventory.py':SimpleNamespace(collect=collected),'probes.py':V},C=SimpleNamespace(write=emit,pinned=pinned,stream_digest=lambda stream,size:sha256(stream.read(size+1)).hexdigest()),check=lambda:None,download=downloaded,write=lambda path,value:emit(path,Q.encoded(value)))
+   protocol=SimpleNamespace(read_zip=P.read_zip,image_scope=P.image_scope,run_smoke=smoke)
+   with patch.object(Q,'checked_document',side_effect=checked),patch.object(Q,'admit_app',side_effect=admitted),patch.object(V,'presence',side_effect=presence),patch.object(V,'native_payload',side_effect=main),patch.object(V,'native_extra',side_effect=aux),patch.dict(os.environ,{'GITHUB_SHA':'1'*40}):result=Q.execute(ctx,old,protocol,BUILDER,None,None,None,I)
+   self.assertEqual(order,['retained','evidence','admit_app','presence','main_native','aux_native','unchanged32']);self.assertEqual(result['runtime'],8);self.assertEqual(result['components'],24);self.assertTrue(writes['fresh-installed-sqlite-native.json']['same_image_native_payload_and_actual_mapped_library_joined']);self.assertEqual(len(writes['required12-actual-payload-coverage.json']['rows']),12);self.assertFalse(writes['collection.json']['actual_current_CVE_or_caller_fix_or_security_accepted']);self.assertFalse(writes['collection.json']['fresh_inventory_executed'])
+  sys.stderr.write('OWNED_EXECUTE_ORCHESTRATION '+json.dumps({'events':order,'actual_native_proof':False},sort_keys=True)+'\n')
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -41,7 +41,7 @@ jobs:
         run: |
           /usr/bin/python3 -I -S -B deploy/maintenance/app_current2389_probe/seal_and_run.py \
             --root "$RUNNER_TEMP/security-app-ci-smoke-probe2389-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 98da45f8beb2997ed39a2023487ba6aa8006d1c0a6ad13ae59e1948ed920c451 \
+            --source-sha256 fa1bd13edc4456479331a704462cd816c0fef1424084d8733de6e83a5565e68c \
             --execute-reviewed-current2389-probes
 
       - name: Preserve complete inventory, raw evidence, actual assertions and finalizers
