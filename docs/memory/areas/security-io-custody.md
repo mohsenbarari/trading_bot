@@ -17,12 +17,12 @@
 - Test prefixes through failed cleanup, beyond raises/AST. Keep
   first errors and initialized guards. New typed roles need latched checks/close,
   EBADF and complete original-or-HELD accounting; legacy close/flags prove none.
-- Source sealing needs clean Main in a registered temporary checkout with branch
-  checks intact. Use full9 without atime and the host interpreter.
+- Source sealing needs clean Main/registered temporary checkout/intact branch
+  checks and host interpreter. Use explicit full9, never whole os.stat_result/atime.
 - Run report-writing verifiers from fresh packet copies. Preserve author and
   Root receipts separately; do not overwrite frozen QA metadata.
 - S.Reader.raw_binding is None without a pin. Supply the exact pin or guarded hash. Test actual admission before payload/spawn, beyond stubs.
 - Operations need bounded durable sanitized status before entry. Lost output proves neither closure nor retry eligibility; retain UNKNOWN.
 - Test acquisition prefixes, FD/flag drift, same-inode reopen even at offset0, restoration, no-op close and non-EBADF final-stat. Lock custody needs original OFD and current own-lock proof; re-locking can heal a lost lock. Latch close-entry and close failures across check/named. Uncertain ownership stays HELD; fixture disposal is separate evidence.
 - Capture original receivers, FD aliases and witness/metadata registries. Mutable aliases cannot decide owned-FD existence. Deduplicate metadata reads, never bindings. Incomplete cohorts prove no closure. Retain body errors before postguards and JSON.
-- Pipe tests need post-admission writes across a clock tick; same-jiffy tests miss timestamp changes. Preserve regular-file full9 and both FD flags.
+- Pipe tests write after admission across clock ticks; same-jiffy tests miss drift. Preserve regular-file full9/both FD flags.

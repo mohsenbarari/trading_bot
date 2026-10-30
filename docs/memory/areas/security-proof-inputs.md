@@ -1,11 +1,11 @@
 # Security proof inputs
 
-For source/collector APIs and FD/pipe custody also load `security-io-custody.md`.
+For source/FD APIs also load `security-io-custody.md`.
 - Size actual namespaces: thread FDs and owner/source/cgroup topology. Predictions/stable PIDs never prove HOST/cost. Fix measured Request windows; never extend active scans. OWNED LIVE may skip optional sizing, never bounded census. Failed sizing needs fresh scope without relabeling.
 - Scanner loans outlive proc reads/physical closes. Retirement/failure stay separate from telemetry; profiles/exits never heal errors. After source close, final checks open no proc loans; failed-only disposal stays usable.
 - Pilot actual constructors/I/O and decorated/generated code; DATA proves no operation. Bind original receivers/code/globals/closures before callbacks. Mutate private test copies only; fresh checks retain immutable originals.
 - ELF joins bind path/hash/owner/variant and section/symbol boundaries; linear load-byte coverage proves no control flow. Classify writes: TEST/CMP don't write registers. Approve decoded bodies, catalogue metadata and match LTO tools. Imports/old Python prove no LTO closure; current bodies grant no historical-flags/future-link claim.
-- Wheel identity needs exact RECORD path/hash/size, bundled DSOs, published artifacts and source/build joins; versions/prefixes/deleted wheelhouses prove none.
+- Wheel identity binds RECORD path/hash/size, bundled DSOs, published artifacts and source/build. Versions/prefixes/deleted wheelhouses prove none; DATA placeholders are not SOURCE.
 - Group exit needs original pidfd and task/proc absence; wait for reaping within the original deadline. Keep thread birth/holder custody and source exit/proc-container proofs. Leader Z/UID0 cannot erase holders. Test UID/thread changes without global PID/TID-set equality.
 - FIRST-stat ENOENT then foreign FD reappearance is fresh bounded work; closure needs two proven absences. Known-target drift is fatal.
 - Failed-only disposal accounts for retained Pair prefixes before releasing context fences. Unknown close keeps fences; known closure never heals errors.

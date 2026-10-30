@@ -18,8 +18,8 @@
   284 files/30 aliases, two exact doc absences and xattr policy verified.
   Genuine partial11 assessment:31fixed+12absent+1ACL unresolved; raw44HIGH
   remains unchanged. CurrentCore106, GCV165/31 subsets, prior143, glibc283,
-  51/80/15/74/systemd2/GCC2/static3 and Pillow18 source roles accepted with
-  original premises. Wheel76 aggregate and CVE/backup/restore/activation OPEN. Require applicable
+  51/80/15/74/systemd2/GCC2/static3/wheel76 source roles accepted with
+  original premises. Whole835/caller assembly/CVE/backup/restore/activation OPEN. Require applicable
   whole-image ACL callers, not universal flags/instruction semantics.
 - Sequence: App backup/restore, post-App legacy parking, Market cold backup/release.
   Parking never grants mount admission; no stopped/RO waiver.
