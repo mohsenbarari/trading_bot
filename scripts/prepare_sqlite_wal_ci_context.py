@@ -11,7 +11,7 @@ from types import ModuleType
 import argparse,json,os,re,signal,stat,sys,threading,time
 
 TRACKED=Path('deploy/security/sqlite-wal-backport')
-PINS={'sourcebuild.py': (34676, 'e0d54934914f0440e07b548020888b8cd495bf6cc49645f09b82678fd3f255b9'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
+PINS={'sourcebuild.py': (45343, '3af29a6eda56bc6dadaedba4e238591ea7c2ab8b3b697bc7ce487e2327bc62ba'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
 VERSION='3.46.1-7+deb13u2+gold2';BASE='3.46.1-7+deb13u2'
 PACKAGE='libsqlite3-0_'+VERSION+'_amd64.deb'
 CHANGES='sqlite3_'+VERSION+'_amd64.changes';BUILDINFO='sqlite3_'+VERSION+'_amd64.buildinfo'
@@ -183,11 +183,13 @@ def verify_artifacts(R,rows,proofs):
  for key in ('source_maintainer_signature_verified','compile_options_equal','elf_soname_exports_dependencies_equal','python_binary_unchanged','sqlite_stdlib_extension_unchanged','mapped_installed_libraries_verified','full_sqlite_documentation_restored','app_ci_restore_gate_required'):need(p.get(key)is True,'provenance_proof')
  for key in ('upstream_fault_suites_run','wal_reset_reproduction_performed','full_upstream_suite_pass_claimed','local_build_metadata_signed','runtime_loader_override_used','production_data_accessed','security_accepted'):need(p.get(key)is False,'provenance_claims')
  need(p.get('source_files')=={name:{'bytes':pin[0],'sha256':pin[1]}for name,pin in R.SOURCE_FILES.items()},'source_provenance')
- vendor=p['vendor_tests'];need(type(vendor)is dict and set(vendor)=={'same_configured_source','standard_and_official_regression','standard_scope','no_new_filters_or_exclusions','full_all_permutations_claimed','default_omissions_are_not_waivers'},'vendor_provenance')
+ vendor=p['vendor_tests'];need(type(vendor)is dict and set(vendor)=={'same_configured_source','standard_and_official_regression','standard_scope','no_new_filters_or_exclusions','no_new_filters_or_exclusions_scope','testfixture_source_deduplication','full_all_permutations_claimed','default_omissions_are_not_waivers'},'vendor_provenance')
  need(type(vendor['standard_scope'])is dict and encoded(vendor['standard_scope'])==encoded(R.VENDOR_STANDARD_SCOPE),'vendor_standard_scope')
- need(vendor['no_new_filters_or_exclusions']is True and vendor['full_all_permutations_claimed']is False and vendor['default_omissions_are_not_waivers']is True,'vendor_claims')
+ need(vendor['no_new_filters_or_exclusions']is True and vendor['no_new_filters_or_exclusions_scope']=='test_selection_only'and vendor['full_all_permutations_claimed']is False and vendor['default_omissions_are_not_waivers']is True,'vendor_claims')
+ harness=R.testfixture_harness_contract(vendor['testfixture_source_deduplication'])
  watched=vendor['same_configured_source'];need(type(watched)is dict and set(watched)=={'Makefile','debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*R.VENDOR_HELPERS},'vendor_same_source')
  for value in watched.values():binding(value)
+ need(watched['Makefile']=={key:harness['generated_after'][key]for key in('bytes','sha256')},'testfixture_generated_source_changed')
  need(all(watched[name]=={'bytes':pin[0],'sha256':pin[1]}for name,pin in R.VENDOR_HELPERS.items()),'vendor_naming_helper_changed')
  need(watched['debian/rules']==p['debian_rules']and watched['src/wal.c']==p['wal_after']and watched['ext/fts5/fts5_index.c']==p['fts5_source_after']and watched['ext/fts5/test/fts5prefix2.test']==p['fts5_regression_after'],'vendor_same_source')
  need(type(vendor['standard_and_official_regression'])is dict and set(vendor['standard_and_official_regression'])==set(R.VENDOR_COMMANDS),'vendor_inventory')

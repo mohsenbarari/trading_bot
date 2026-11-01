@@ -32,6 +32,9 @@ class Gold2SourceTests(unittest.TestCase):
  def source_fixture(self):
   for n in ('Makefile','debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*R.VENDOR_HELPERS):
    p=self.root/n;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(('OWNED PUBLIC UNIT SOURCE '+n).encode());p.chmod(0o600)
+  harness=F.fixture_harness()
+  (self.root/'Makefile').write_bytes(R.testfixture_decode(harness['generated_after'],131072))
+  (self.root/'Makefile.in').write_bytes(R.testfixture_decode(harness['generated_before'],131072))
   # Explicit UNIT source admission seam; production requires exact signed-vendor helper bytes.
   self.stack.enter_context(patch.dict(R.VENDOR_HELPERS,{n:(len((self.root/n).read_bytes()),sha256((self.root/n).read_bytes()).hexdigest())for n in R.VENDOR_HELPERS},clear=True))
   return self.root
@@ -95,7 +98,7 @@ class Gold2SourceTests(unittest.TestCase):
   src=self.source_fixture();calls=[]
   def command(argv,**kw):
    calls.append((argv,kw));return 0,standard()if argv[0]=='/usr/bin/make'else regression()
-  with patch.object(R,'bounded_command',side_effect=command):facts,logs=R.vendor_tests(src)
+  with patch.object(R,'bounded_command',side_effect=command):facts,logs=R.vendor_tests(src,F.fixture_harness())
   self.assertEqual(len(calls),2);self.assertEqual(set(logs),set(R.VENDOR_COMMANDS))
   for argv,kw in calls:
    self.assertEqual(kw['cwd'],src);self.assertIs(kw['capture'],True);self.assertIs(kw['with_code'],True);self.assertIs(kw['tee'],True)
@@ -105,7 +108,7 @@ class Gold2SourceTests(unittest.TestCase):
  def test_vendor_primary_nonzero_refuses_before_any_fake_log_acceptance(self):
   src=self.source_fixture()
   with patch.object(R,'bounded_command',return_value=(7,standard())),patch.object(R,'vendor_log_contract',side_effect=AssertionError('must refuse first')):
-   with self.assertRaisesRegex(RuntimeError,'vendor_test_command_refused'):R.vendor_tests(src)
+   with self.assertRaisesRegex(RuntimeError,'vendor_test_command_refused'):R.vendor_tests(src,F.fixture_harness())
  def test_real_public_child_stdout_is_captured_and_teed_before_nonzero_returns(self):
   emitted=[]
   # Actual owned Python/pipe transport, fixed public bytes only; no vendor binary.
@@ -124,7 +127,7 @@ class Gold2SourceTests(unittest.TestCase):
    if argv[0]=='./testfixture':(src/'src/wal.c').write_bytes(b'OWNED MUTATED SOURCE')
    return 0,standard()if argv[0]=='/usr/bin/make'else regression()
   with patch.object(R,'bounded_command',side_effect=command):
-   with self.assertRaisesRegex(RuntimeError,'vendor_source_or_flags_changed'):R.vendor_tests(src)
+   with self.assertRaisesRegex(RuntimeError,'vendor_source_or_flags_changed'):R.vendor_tests(src,F.fixture_harness())
  def test_vendor_standard_summary_and_default_omissions_are_observations(self):
   row=R.vendor_log_contract('vendor-standard.log',standard()+b'Omitted test cases:\n.  capability_default compiled feature absent\n')
   self.assertEqual(row['zero_error_summaries'],[{'errors':0,'tests':15000}])

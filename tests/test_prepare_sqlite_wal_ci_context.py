@@ -12,6 +12,8 @@ def load(path):
  m=ModuleType('_owned_ci_'+path.stem);m.__file__=str(path);exec(compile(path.read_bytes(),str(path),'exec'),m.__dict__);return m
 A=load(MAIN/'scripts/prepare_sqlite_wal_ci_context.py')
 R=load(MAIN/'deploy/security/sqlite-wal-backport/sourcebuild.py')
+def fixture_harness():
+ return deepcopy(json.loads((HERE/'fixtures/sqlite_testfixture_harness.json').read_bytes())['receipt'])
 def proof(raw):return {'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
 def positive(version):
  options=['ENABLE_FTS5','THREADSAFE=1'];mapped={'path':'/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6','bytes':1024,'sha256':'a'*64,'mapped_inode_verified':True}
@@ -49,6 +51,9 @@ def fixtures():
  provenance['vendor_tests']={'same_configured_source':{'Makefile':{'bytes':42,'sha256':'e'*64},'debian/rules':dict(provenance['debian_rules']),'src/wal.c':dict(provenance['wal_after']),'ext/fts5/fts5_index.c':dict(provenance['fts5_source_after']),'ext/fts5/test/fts5prefix2.test':dict(provenance['fts5_regression_after'])},'standard_and_official_regression':{n:R.vendor_log_contract(n,rows[n])for n in R.VENDOR_COMMANDS},'no_new_filters_or_exclusions':True,'full_all_permutations_claimed':False,'default_omissions_are_not_waivers':True}
  provenance['vendor_tests']['same_configured_source'].update({name:{'bytes':pin[0],'sha256':pin[1]}for name,pin in R.VENDOR_HELPERS.items()})
  provenance['vendor_tests']['standard_scope']=deepcopy(R.VENDOR_STANDARD_SCOPE)
+ harness=fixture_harness();provenance['vendor_tests']['testfixture_source_deduplication']=harness
+ provenance['vendor_tests']['no_new_filters_or_exclusions_scope']='test_selection_only'
+ provenance['vendor_tests']['same_configured_source']['Makefile']={key:harness['generated_after'][key]for key in('bytes','sha256')}
  rows['provenance.json']=provenance;proofs['provenance.json']=proof(A.encoded(provenance));return rows,proofs
 
 class DriverTests(unittest.TestCase):
