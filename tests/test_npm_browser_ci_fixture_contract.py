@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse,urlsplit
 import unittest
 from unittest.mock import patch
 import yaml
@@ -120,13 +120,28 @@ class BrowserFixtureContractTests(unittest.TestCase):
   steps=browser_steps();names=[s.get('name')for s in steps]
   self.assertLess(names.index('Verify browser CI backend surface'),names.index('Existing complete browser gate'))
   self.assertLess(names.index('Verify browser CI backend surface'),names.index('Collect complete browser identities without executing tests'))
-  raw=C.public_bytes(ROOT/WORKFLOW,32768).decode();self.assertIn('--max-failures=3',raw)
+  raw=C.public_bytes(ROOT/WORKFLOW,32768).decode();self.assertIn('--max-failures=6',raw)
   for bad in('ignoreHTTPSErrors','NODE_TLS_REJECT_UNAUTHORIZED','curl -k','test.skip','test.only'):self.assertNotIn(bad,raw)
   imports=[n.module for n in preflight().body if isinstance(n,ast.ImportFrom)]
   self.assertEqual(imports,['core.config','core.public_webapp_url','hashlib','pathlib'])
   self.assertEqual([(n.module,[(a.name,a.asname)for a in n.names])for n in preflight().body if isinstance(n,ast.ImportFrom)],
    [('core.config',[('settings',None)]),('core.public_webapp_url',[('public_webapp_url_for_links',None)]),('hashlib',[('sha256',None)]),('pathlib',[('Path',None)])])
   self.assertEqual([[(a.name,a.asname)for a in n.names]for n in preflight().body if isinstance(n,ast.Import)],[[('json',None)],[('magic',None)]])
+ def test_same_origin_fixture_requires_explicit_browser_only_authority_and_relative_client(self):
+  value=workflow();job=value['jobs']['browsers'];self.assertEqual(job['env']['CI'],'true');self.assertEqual(job['env']['NPM_SECURITY_ISOLATED_BROWSER_FIXTURE'],'1')
+  for name in('upstream','frontend'):self.assertNotIn('NPM_SECURITY_ISOLATED_BROWSER_FIXTURE',value['jobs'][name].get('env',{}))
+  step=next(x for x in browser_steps()if x.get('name')=='Disposable local-only CI environment (existing merge-gate pattern)')
+  block=re.search(r"cat > frontend/\.env\.local <<'EOF'\n(.*?)\nEOF",step['run'],re.S);self.assertIsNotNone(block);frontend=dict(line.split('=',1)for line in block[1].splitlines());self.assertEqual(frontend['VITE_API_BASE_URL'],'');self.assertEqual(frontend['VITE_STAGING_DEV_LOGIN'],'true')
+ def test_genuine_same_origin_registration_guard_still_rejects_foreign_and_cross_site(self):
+  # Execute only the real public function AST. No application/config import.
+  raw=C.public_bytes(ROOT/'api/routers/auth.py',262144);tree=ast.parse(raw);node=next(x for x in tree.body if isinstance(x,ast.FunctionDef)and x.name=='_assert_registration_context_same_origin')
+  class OwnedHTTPError(Exception):
+   def __init__(self,*,status_code,detail):self.status_code=status_code
+  ns={'Request':object,'HTTPException':OwnedHTTPError,'urlsplit':urlsplit};exec(compile(ast.Module(body=[node],type_ignores=[]),'owned_public_registration_guard','exec'),ns);guard=ns[node.name]
+  guard(SimpleNamespace(headers={'origin':'http://127.0.0.1:4173','host':'127.0.0.1:4173'},url=SimpleNamespace(scheme='http')))
+  for headers in({'origin':'http://127.0.0.1:4173','host':'127.0.0.1:8000'},{'origin':'http://foreign.invalid','host':'127.0.0.1:4173'},{'origin':'http://127.0.0.1:4173','host':'127.0.0.1:4173','sec-fetch-site':'cross-site'}):
+   with self.subTest(headers=headers),self.assertRaises(OwnedHTTPError)as failure:guard(SimpleNamespace(headers=headers,url=SimpleNamespace(scheme='http')))
+   self.assertEqual(failure.exception.status_code,403)
  def test_complete_actual_preflight_reads_one_owned_path_and_exact_full12MiB_magic_buffer(self):
   ns=run_preflight(fixture_env());self.assertEqual(ns['_owned_public_calls'],[('public_fixture_read',132),('owned_magic_full_fixture',12582912)])
   self.assertEqual((len(ns['document']),sha256(ns['document']).hexdigest()),(12582912,'b24434d88423fe82a69c5e4a8d30d52ced4d5f22a8073310f04da1e89ded21c4'));self.assertTrue(ns['_owned_mime_version_is_mock'])
@@ -164,7 +179,12 @@ class BrowserFixtureContractTests(unittest.TestCase):
   self.assertIn('return `${url.pathname}${url.search}`',customer)
   self.assertIn('await page.goto(toRelativeRegistrationPath(registrationLink))',customer)
   self.assertNotRegex(customer,r'page\.goto\(registrationLink\)')
-  self.assertIn("expect(pendingRelation?.registration_link).toContain('/register')",accountant)
+  self.assertIn("const pendingRegistrationUrl = new URL(pendingRelation?.registration_link ?? '')",accountant)
+  self.assertIn('pathname: `/i/${pendingRelation?.short_code}`',accountant)
+  for field in('search','hash','username','password'):self.assertIn(field+": ''",accountant)
+  self.assertNotIn('reg_verified:',customer);self.assertNotIn('/api/auth/register-complete',customer);self.assertNotIn('/register\\?token=',customer)
+  self.assertIn('reg_otp:${token}',customer);self.assertIn('/api/auth/registration-context/complete',customer)
+  self.assertIn('page.context().request.post',customer);self.assertIn('headers: { Origin: origin }',customer)
   self.assertNotRegex(accountant,r'page\.goto\([^\n]*(?:registration_link|registrationLink)')
   paths=re.findall(r"page\.goto\('([^']+)'\)",stage);self.assertTrue(paths);self.assertTrue(all(p.startswith('/')for p in paths))
   self.assertIn("page.route('**/api/invitations/lookup/",stage)

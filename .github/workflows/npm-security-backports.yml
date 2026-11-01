@@ -121,6 +121,7 @@ jobs:
         shard: [1, 2, 3, 4]
     env:
       CI: 'true'
+      NPM_SECURITY_ISOLATED_BROWSER_FIXTURE: '1'
       CERTS_HOST_PATH: /tmp/trading-ci-certs
       PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR: /tmp/trading-ci-models/coin
       PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR: /tmp/trading-ci-models/product
@@ -166,7 +167,7 @@ jobs:
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
           cat > frontend/.env.local <<'EOF'
-          VITE_API_BASE_URL=http://127.0.0.1:8000
+          VITE_API_BASE_URL=
           VITE_STAGING_DEV_LOGIN=true
           EOF
           mkdir -p "$CERTS_HOST_PATH" "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
@@ -245,6 +246,7 @@ jobs:
           E2E_REDIS_CONTAINER_NAME: trading_bot_redis
         run: |
           mkdir -p "$RUNNER_TEMP/npm-browser-summary"
+          # Temporary diagnostic budget: collect up to six failed cases; every failure still rejects.
           case "$BROWSER" in
             chromium) npm run test:e2e -- --list --reporter=json ;;
             firefox) npm run test:e2e:firefox -- --list --reporter=json ;;
@@ -273,9 +275,9 @@ jobs:
           E2E_REDIS_CONTAINER_NAME: trading_bot_redis
         run: |
           case "$BROWSER" in
-            chromium) npm run test:e2e -- --shard="$SHARD/4" --max-failures=3 --reporter=github,json,html ;;
-            firefox) npm run test:e2e:firefox -- --shard="$SHARD/4" --max-failures=3 --reporter=github,json,html ;;
-            webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --max-failures=3 --reporter=github,json,html ;;
+            chromium) npm run test:e2e -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
+            firefox) npm run test:e2e:firefox -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
+            webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
             *) exit 2 ;;
           esac
       - name: Observe public backend state after browser gate

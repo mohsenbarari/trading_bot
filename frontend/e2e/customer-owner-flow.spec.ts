@@ -34,13 +34,13 @@ interface OwnerCustomerRelationPayload {
   max_daily_trades?: number | null
   max_daily_commodity_volume?: number | null
   status: 'pending' | 'active' | 'expired' | 'revoked' | 'deleted'
-  invitation_token?: string | null
+  short_code?: string | null
   registration_link?: string | null
 }
 
 type PendingOwnerCustomerRelation = OwnerCustomerRelationPayload & {
   status: 'pending'
-  invitation_token: string
+  short_code: string
   registration_link: string
 }
 
@@ -747,10 +747,12 @@ function toRelativeRegistrationPath(registrationLink: string): string {
   }
 }
 
-function seedRegistrationVerified(token: string) {
+function seedRegistrationOtpDelivery(token: string) {
+  // The isolated fixture supplies only the SMS challenge, never verified/context proof.
+  // Real context request/verify endpoints must consume this challenge themselves.
   runRedisCli(
-    ['SETEX', `reg_verified:${token}`, '600', '1'],
-    'customer registration Redis verification helper',
+    ['SETEX', `reg_otp:${token}`, '600', '12345'],
+    'customer registration isolated OTP delivery fixture',
   )
 }
 
@@ -770,16 +772,13 @@ async function waitForBackendReady(request: APIRequestContext) {
     .toBe(true)
 }
 
-async function completeRegistrationViaApi(
-  request: APIRequestContext,
-  token: string,
-  address: string,
-) {
-  const response = await request.post(`${BACKEND_BASE_URL}/api/auth/register-complete`, {
-    data: {
-      token,
-      address,
-    },
+async function completeRegistrationViaApi(page: Page, address: string) {
+  const origin = new URL(page.url()).origin
+  // This context shares the genuine browser HttpOnly registration cookie.
+  // Same-origin proxy and Origin checks remain active; no raw bearer is submitted.
+  const response = await page.context().request.post(`${origin}/api/auth/registration-context/complete`, {
+    headers: { Origin: origin },
+    data: { address },
   })
 
   expect(response.ok()).toBeTruthy()
@@ -828,16 +827,27 @@ async function findOwnerCustomerRelation(
   return (await fetchOwnerCustomerRelations(request, accessToken)).find(predicate)
 }
 
+function isCanonicalPendingRegistrationLink(link: string, shortCode: string): boolean {
+  try {
+    const url = new URL(link)
+    return /^https?:$/.test(url.protocol)
+      && url.pathname === `/i/${shortCode}`
+      && !url.search && !url.hash && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
+
 function isPendingOwnerCustomerRelation(
   relation: OwnerCustomerRelationPayload | null | undefined,
 ): relation is PendingOwnerCustomerRelation {
   return Boolean(
     relation &&
       relation.status === 'pending' &&
-      typeof relation.invitation_token === 'string' &&
-      relation.invitation_token.length > 0 &&
+      typeof relation.short_code === 'string' &&
+      /^[A-Za-z0-9]{8}$/.test(relation.short_code) &&
       typeof relation.registration_link === 'string' &&
-      relation.registration_link.length > 0,
+      isCanonicalPendingRegistrationLink(relation.registration_link, relation.short_code),
   )
 }
 
@@ -1001,26 +1011,33 @@ test.describe('customer owner lifecycle', () => {
       (relation) => relation.management_name === managementName,
     )
     const pendingRelationId = confirmedPendingRelation.id
-    const registrationToken = confirmedPendingRelation.invitation_token
     const registrationLink = confirmedPendingRelation.registration_link
-
-    expect(registrationLink).toContain('/register')
+    const invitationShortCode = confirmedPendingRelation.short_code
+    expect(isCanonicalPendingRegistrationLink(registrationLink, invitationShortCode)).toBe(true)
     await expect(
       workspace.locator('.customer-pending-card').filter({ hasText: managementName }),
     ).toContainText('دعوت')
 
-    seedRegistrationVerified(registrationToken)
+    const lookup = await request.get(
+      `${BACKEND_BASE_URL}/api/invitations/lookup/${encodeURIComponent(invitationShortCode)}`,
+    )
+    expect(lookup.ok()).toBeTruthy()
+    const invitation = await lookup.json() as { token?: string }
+    expect(typeof invitation.token).toBe('string')
+    expect(invitation.token?.length).toBeGreaterThan(0)
+    seedRegistrationOtpDelivery(requireValue(invitation.token, 'Pending invitation lookup has no token'))
 
     await page.goto(toRelativeRegistrationPath(registrationLink))
-    await expect(page).toHaveURL(new RegExp(`/register\\?token=${registrationToken}$`))
+    await page.getByRole('button', { name: /^(ثبت‌نام از طریق وب|ادامه ثبت‌نام در وب‌اپ)$/ }).click()
+    await expect(page).toHaveURL((url) => url.pathname === '/register' && !url.search && !url.hash)
     await expect(page.getByText(customerAccountName)).toBeVisible()
-    await expect(page.getByText(mobileNumber).first()).toBeVisible()
+    await expect(page.getByText(`${mobileNumber.slice(0, 4)}****${mobileNumber.slice(-3)}`).first()).toBeVisible()
 
-    await completeRegistrationViaApi(
-      request,
-      registrationToken,
-      'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴',
-    )
+    await page.getByRole('button', { name: 'دریافت کد تأیید', exact: true }).click()
+    await page.getByLabel('کد تأیید پنج‌رقمی').fill('12345')
+    await page.getByRole('button', { name: 'تأیید و ادامه', exact: true }).click()
+    await expect(page.getByLabel('نشانی دقیق پستی')).toBeVisible()
+    await completeRegistrationViaApi(page, 'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴')
 
     await setAuthTokens(page, owner)
     await page.goto('/operations/customers')

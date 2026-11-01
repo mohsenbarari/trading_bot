@@ -7,6 +7,11 @@ const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET?.trim()
   || process.env.E2E_BACKEND_BASE_URL?.trim()
   || 'http://127.0.0.1:8000'
 
+// Only the explicitly isolated NPM browser fixture preserves its incoming Host.
+// Normal development, other CI and product builds retain the existing proxy behavior.
+const isolatedNpmBrowserFixture = process.env.CI === 'true'
+  && process.env.NPM_SECURITY_ISOLATED_BROWSER_FIXTURE === '1'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -116,7 +121,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: devProxyTarget,
-        changeOrigin: true,
+        changeOrigin: !isolatedNpmBrowserFixture,
         ws: true,
       },
     },

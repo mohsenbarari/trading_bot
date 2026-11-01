@@ -23,6 +23,7 @@ interface OwnerRelationPayload {
   duty_description?: string | null
   mobile_number: string
   status: 'pending' | 'active' | 'expired' | 'revoked' | 'deleted'
+  short_code?: string | null
   registration_link?: string | null
   accountant_user_id?: number | null
   accountant_account_name?: string | null
@@ -603,7 +604,21 @@ test.describe('accountant owner lifecycle', () => {
       )
       .toBe('pending')
 
-    expect(pendingRelation?.registration_link).toContain('/register')
+    expect(pendingRelation?.short_code).toMatch(/^[A-Za-z0-9]{8}$/)
+    const pendingRegistrationUrl = new URL(pendingRelation?.registration_link ?? '')
+    expect({
+      pathname: pendingRegistrationUrl.pathname,
+      search: pendingRegistrationUrl.search,
+      hash: pendingRegistrationUrl.hash,
+      username: pendingRegistrationUrl.username,
+      password: pendingRegistrationUrl.password,
+    }).toEqual({
+      pathname: `/i/${pendingRelation?.short_code}`,
+      search: '',
+      hash: '',
+      username: '',
+      password: '',
+    })
     await expect(workspace).toContainText(relationDisplayName, { timeout: 30000 })
     await expect(workspace).toContainText('دعوت', { timeout: 30000 })
 
