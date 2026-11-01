@@ -30,14 +30,32 @@ def no_policy():
     else:need(False,'policy_suppression_or_unknown')
 def solver(raw,names,version):
     installs={};configured=set()
+    def record(line,kind,code):
+        # APT may append one transient broken-dependency status list after the
+        # closing parenthesis. It is metadata, never another install action.
+        head=(r'Inst ([A-Za-z0-9+.-]+)(?::amd64)?(?: \[[^\]\n]+\])? \('
+              if kind=='Inst' else r'Conf ([A-Za-z0-9+.-]+)(?::amd64)? \(')
+        match=re.fullmatch(head+r'([^ )]+)([^()\[\]\n]*)(?: \[([a-z0-9]+)\])?\)(?: \[([^\[\]\n]*)\])?',line)
+        need(match is not None and match[1]in names and match[2]==version,code)
+        arch=match[4]
+        need(arch is None or arch==('all'if match[1]=='locales'else'amd64'),code)
+        annotation=match[5]
+        if annotation:
+            need(re.fullmatch(r'[A-Za-z0-9+.-]+:(?:amd64|all)(?: [A-Za-z0-9+.-]+:(?:amd64|all))* ?',annotation)is not None,code)
+            tokens=annotation.rstrip(' ').split(' ')
+            need(len(tokens)==len(set(tokens)),code)
+            for token in tokens:
+                name,status_arch=token.split(':')
+                need(name in names and status_arch==('all'if name=='locales'else'amd64'),code)
+        return match[1],match[2]
     for line in raw.decode('utf8','strict').splitlines():
         need(not line.startswith(('Remv ','Purg ')),'solver_removal')
         if line.startswith('Inst '):
-            match=re.fullmatch(r'Inst ([A-Za-z0-9+.-]+)(?::amd64)?(?: \[[^\]]+\])? \(([^ )]+)[^\n]*\)',line)
-            need(match is not None and match[1]in names and match[1]not in installs and match[2]==version,'solver_nonfamily_or_version');installs[match[1]]=match[2]
+            name,target=record(line,'Inst','solver_nonfamily_or_version')
+            need(name not in installs,'solver_nonfamily_or_version');installs[name]=target
         if line.startswith('Conf '):
-            match=re.fullmatch(r'Conf ([A-Za-z0-9+.-]+)(?::amd64)? \(([^ )]+)[^\n]*\)',line)
-            need(match is not None and match[1]in names and match[1]not in configured and match[2]==version,'solver_configuration');configured.add(match[1])
+            name,target=record(line,'Conf','solver_configuration')
+            need(name not in configured,'solver_configuration');configured.add(name)
     need(set(installs)==set(names)==configured,'solver_incomplete_family');return installs
 def simulation_evidence(raw,command_record,phase,diagnostic=False):
     """Retain exact bounded successful stdout before interpreting its plan."""

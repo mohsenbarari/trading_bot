@@ -1,0 +1,19 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Solving dependencies...
+The following packages will be upgraded:
+  libc-bin libc-dev-bin libc-gconv-modules-extra libc6 libc6-dev locales
+6 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Inst libc-dev-bin [2.43-2ubuntu2.4] (2.43-2ubuntu2.4+gold1 local-deb [amd64]) [libc6-dev:amd64 ]
+Inst libc6-dev [2.43-2ubuntu2.4] (2.43-2ubuntu2.4+gold1 local-deb [amd64]) []
+Inst libc-gconv-modules-extra [2.43-2ubuntu2.4] (2.43-2ubuntu2.4+gold1 local-deb [amd64]) [libc6:amd64 ]
+Conf libc-gconv-modules-extra (2.43-2ubuntu2.4+gold1 local-deb [amd64]) [libc6:amd64 ]
+Inst libc6 [2.43-2ubuntu2.4] (2.43-2ubuntu2.4+gold1 local-deb [amd64])
+Conf libc6 (2.43-2ubuntu2.4+gold1 local-deb [amd64])
+Inst libc-bin [2.43-2ubuntu2.4] (2.43-2ubuntu2.4+gold1 local-deb [amd64])
+Conf libc-bin (2.43-2ubuntu2.4+gold1 local-deb [amd64])
+Inst locales [2.43-2ubuntu2.4] (2.43-2ubuntu2.4+gold1 local-deb [all])
+Conf libc-dev-bin (2.43-2ubuntu2.4+gold1 local-deb [amd64])
+Conf libc6-dev (2.43-2ubuntu2.4+gold1 local-deb [amd64])
+Conf locales (2.43-2ubuntu2.4+gold1 local-deb [all])
