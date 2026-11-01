@@ -655,14 +655,15 @@ def historical81_sources(raws,release,receipt,image,signature,context):
  return B,O,contents,manifest,plans
 
 
-def actual_business81(root,raws,controllers,receipt,signature,controller_signature,image,context,guard):
+def actual_business81(root,raws,controllers,receipt,signature,controller_signature,image,context,guard,*,glibc_runtime):
  """Only this genuine producer can emit the historical81 completion proof."""
+ glibc_runtime_record(glibc_runtime,root)
  B,O,contents,manifest,plans=historical81_sources(raws,root/'controller-source',receipt,image,signature,context)
  source_paths=business81_source_paths(root,controllers)
  approval_paths={k:root/'controller-source'/BUSINESS_DIR/v for k,v in [('approval','python31118-root-assertion-approval.json'),('proposal','python31118-security-base-assertion-proposal.json'),('patch','python31118-security-base-assertion.patch')]}
  api=ModuleType('_current_authenticated_normal_market');api.__dict__.update(globals())
  value=O.produce(api,B,root=root,repo=Path(os.environ['GITHUB_WORKSPACE']),image=image,receipt=receipt,signature=signature,
-  controller_signature=controller_signature,contents=contents,manifest=manifest,plans=plans,source_paths=source_paths,approval_paths=approval_paths,guard=guard)
+  controller_signature=controller_signature,contents=contents,manifest=manifest,plans=plans,source_paths=source_paths,approval_paths=approval_paths,guard=guard,glibc_runtime=glibc_runtime)
  need(type(value)is dict and value.get('schema')==business_schema(receipt)and value.get('tests')==81
   and value.get('actual_profile_containers_removed')==3 and value.get('actual_outer_authentication_and_cleanup_still_required')is False
   and value.get('source_and_output_finalizers_completed')is True and value.get('image_id')==image
@@ -1160,7 +1161,7 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
   finally:
    if role is None:evidence.append(proof)
   publish_known(root/('reports/actual-source-role.json'if role is not None else'reports/actual-source93.json'),encoded(actual_source),retained=evidence,final_checks=evidence_checks);publish_known(root/'reports/actual-sqlite.json',encoded(actual_sqlite),retained=evidence,final_checks=evidence_checks)
-  PHASE='actual_historical81';actual81=actual_business81(root,raws,controllers,receipt,signature,controller_signature,image,context,check)
+  PHASE='actual_historical81';actual81=actual_business81(root,raws,controllers,receipt,signature,controller_signature,image,context,check,glibc_runtime=runtime)
   business_root=Path(actual81['run_directory']);need(business_root.parent==root and re.fullmatch('business81-[a-f0-9]{32}',business_root.name),'business81_actual')
   needed=[(business_root/'completed.json',{'bytes':len(encoded(actual81)),'sha256':sha256(encoded(actual81)).hexdigest()},False)]
   for name,pin in actual81['profile_outputs'].items():

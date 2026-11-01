@@ -78,18 +78,21 @@ class DriverTests(unittest.TestCase):
    'source':{key:lock['source'][key]for key in ('recipe_sha256','production_patch_sha256')}})
   self.assertEqual(manifest(old),manifest(changed));self.assertNotEqual(M.encoded(old),M.encoded(changed))
  def test_candidate_image_config_preserves_final_user_entrypoint_and_two_sources(self):
+  runtime=F.owned_glibc_runtime(self,M,self.owned())
   receipt={'release_commit':'a'*40,'release_tree':'b'*40,'business_commit':'c'*40,'business_tree':'d'*40}
   labels={'org.opencontainers.image.revision':'a'*40,'io.gold-trade.release.tree':'b'*40,'io.gold-trade.release.input-signature':'e'*64,
-   'io.gold-trade.release.controller-input-signature':'f'*64,'io.gold-trade.business.source-revision':'c'*40,'io.gold-trade.business.source-tree':'d'*40,'io.gold-trade.business.source-manifest':M.MANIFEST_SHA}
+   'io.gold-trade.release.controller-input-signature':'f'*64,'io.gold-trade.business.source-revision':'c'*40,'io.gold-trade.business.source-tree':'d'*40,'io.gold-trade.business.source-manifest':M.MANIFEST_SHA,
+   'io.gold-trade.glibc.named-context':runtime['context_signature'],'io.gold-trade.glibc.Root-qualification':M.GLIBC_ROOT_PIN['sha256']}
   value={'Id':'sha256:'+'1'*64,'Os':'linux','Architecture':'amd64','Config':{'User':'10001:10001','WorkingDir':'/app',
    'Entrypoint':['python','-m','core.market_intelligence.private_pipeline_foundation'],'Cmd':['service','--role','market-processor'],'Labels':labels},'RootFS':{'Type':'layers','Layers':['sha256:'+'2'*64]}}
-  M.image_contract(value,receipt,'e'*64,'f'*64)
+  M.image_contract(value,receipt,'e'*64,'f'*64,runtime)
+  with self.assertRaisesRegex(RuntimeError,'^glibc_runtime_record$'):M.image_contract(value,receipt,'e'*64,'f'*64)
   for kind in ('user','entrypoint','business'):
    changed=deepcopy(value)
    if kind=='user':changed['Config']['User']='0:0'
    elif kind=='entrypoint':changed['Config']['Entrypoint']=['python','OTHER']
    else:changed['Config']['Labels']['io.gold-trade.business.source-revision']='9'*40
-   with self.assertRaises(RuntimeError):M.image_contract(changed,receipt,'e'*64,'f'*64)
+   with self.assertRaises(RuntimeError):M.image_contract(changed,receipt,'e'*64,'f'*64,runtime)
  def test_raw_reports_join_same_image_and_preserve_high_rows(self):
   root=self.owned();(root/'reports').mkdir();image='sha256:'+'a'*64
   scan={'Metadata':{'ImageID':image},'Results':[{'Vulnerabilities':[{'Severity':'HIGH'},{'Severity':'CRITICAL'}]}]}

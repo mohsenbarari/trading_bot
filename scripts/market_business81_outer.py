@@ -8,12 +8,12 @@ dispatcher or global completion gate is changed by this proposal.
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
-import json,os,re,selectors,subprocess,time
+import inspect,json,os,re,selectors,subprocess,time
 
 PROFILES=('base-nonroot','base-root','added-replay')
 OWNER='io.gold-trade.normal-business81-owner'
 PROFILE='io.gold-trade.normal-business81-profile'
-NORMAL_PIN=(122707, '49a2a5f0066d816c551d25793ff92cb8d5b231c59badfc58a7523494ceb21e9f')
+NORMAL_PIN=(122815, '2ceab68cfc7830a4a59ba46acb4b0a3bccf9995142c9cc73350d5addc6884909')
 APPROVAL_PIN={'bytes': 1031, 'sha256': '3bbc244f4e044975a8f3e9761e8690a4f48f8051454134e66ef26332c3d2627f'}
 PROPOSAL_PIN={'bytes': 771, 'sha256': '18b59cbdf722a15de894f50fca1170072c0b6ac278582575cadb68b6e3446415'}
 PATCH_PIN={'bytes': 333, 'sha256': '88d5b46f2726fb570bb6727fe7955f9b5c399f370bf61fc81601c26c40f8da8c'}
@@ -172,15 +172,19 @@ def source_contract(M,B,source_paths):
  need(source_paths['normal']['binding']=={'bytes':NORMAL_PIN[0],'sha256':NORMAL_PIN[1]}
   and Path(M.__file__).resolve()==source_paths['normal']['path']and Path(B.__file__).resolve()==source_paths['business']['path']
   and Path(__file__).resolve()==source_paths['outer']['path'],'business81_source')
+ for target in(M.actual_business81,produce):
+  parameter=inspect.signature(target).parameters.get('glibc_runtime')
+  need(parameter is not None and parameter.kind is inspect.Parameter.KEYWORD_ONLY and parameter.default is inspect.Parameter.empty,'business81_source')
 
 
-def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,contents,manifest,plans,source_paths,approval_paths,guard):
+def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,contents,manifest,plans,source_paths,approval_paths,guard,glibc_runtime):
  """Called only by the reviewed normal controller; no JSON flag arms it.
 
  source_paths binds THIS module, business81.py and the normal driver's exact
  reviewed source bytes. The normal caller independently authenticates their
  Git blobs/controller signature and the two-Git receipt before this API.
  """
+ M.glibc_runtime_record(glibc_runtime,root)
  M.hosted(root,repo)
  need(type(source_paths)is dict and set(source_paths)=={'outer','business','normal'}and isinstance(root,Path),'business81_source')
  candidate=None
@@ -206,7 +210,7 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
   return M.command([*M.DOCKER,*argv],environment=M.environment(root),seconds=seconds,maximum=maximum,guard=bounded if enforce else lambda:None)
  def image_frame():
   raw=cli(['image','inspect','--format','{{json .}}',image]);actual=M.document(raw)
-  need(actual.get('Id')==image,'business81_image');frame=M.image_contract(actual,receipt,signature,controller_signature)
+  need(actual.get('Id')==image,'business81_image');frame=M.image_contract(actual,receipt,signature,controller_signature,glibc_runtime)
   inherited=actual['Config'].get('Env');need(inherited is None or type(inherited)is list and all(type(v)is str for v in inherited),'business81_image')
   return(frame,inherited) # Public-image defaults in RAM only; never serialize/hash.
  try:
