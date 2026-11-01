@@ -373,6 +373,16 @@ def portable_overrides(lock,forkpaths):
  # context. Exact root fallbacks cover only the two declared target versions.
  result['minimatch@9.0.9 || 9.0.9-project.security.1']=forkpaths['mm9']
  result['minimatch@10.2.5 || 10.2.5-project.security.1']=forkpaths['mm10']
+ # Replacing the resolver by a FILE fork must preserve its already-locked
+ # non-target closure, not refresh the two compatible registry ranges.
+ for name,versions,path,edge in(
+  ('@rollup/plugin-node-resolve',{'15.3.1','15.3.1-project.security.1'},'node_modules/@rollup/plugin-node-resolve',('@rollup/pluginutils','^5.0.1')),
+  ('@rollup/pluginutils',{'5.3.0'},'node_modules/@rollup/pluginutils',('picomatch','^4.0.2')),
+  ('picomatch',{'4.0.4'},'node_modules/@rollup/pluginutils/node_modules/picomatch',None)):
+  row=lock['packages'].get(path);need(type(row)is dict and package_identity(path,row)[:2]in{(name,version)for version in versions},'fixed_resolver_consumer')
+  if edge is not None:need(type(row.get('dependencies'))is dict and row['dependencies'].get(edge[0])==edge[1],'fixed_resolver_dependency_edge')
+ resolver='@rollup/plugin-node-resolve@15.3.1 || 15.3.1-project.security.1'
+ result['workbox-build@7.4.0'][resolver]={'.':result['workbox-build@7.4.0'].pop('@rollup/plugin-node-resolve'),'@rollup/pluginutils':{'.':'5.3.0','picomatch':'4.0.4'}}
  return result
 
 def frontend(spec,repo,artifacts,node,out,env):
