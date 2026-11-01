@@ -30,7 +30,7 @@ class Gold2SourceTests(unittest.TestCase):
  def reject(self,rows,proofs):
   with self.assertRaises(RuntimeError):A.verify_artifacts(R,rows,proofs)
  def source_fixture(self):
-  for n in ('Makefile','debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*R.VENDOR_HELPERS):
+  for n in ('Makefile','libtool','debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*R.VENDOR_HELPERS):
    p=self.root/n;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(('OWNED PUBLIC UNIT SOURCE '+n).encode());p.chmod(0o600)
   harness=F.fixture_harness()
   (self.root/'Makefile').write_bytes(R.testfixture_decode(harness['generated_after'],131072))
@@ -50,7 +50,7 @@ class Gold2SourceTests(unittest.TestCase):
   self.assertNotEqual(A.VERSION,lock['package']['version'])
  def test_original_WAL_patch_and_ABI_verifier_stay_pinned(self):
   self.assertEqual(R.PATCH_PIN,(6746,'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'))
-  self.assertEqual(R.VERIFY_PIN,(16377,'623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'))
+  self.assertEqual(R.VERIFY_PIN,(16402, '53a1a5f9b2742910ef7bad0ccd5c5199d1b66fbeb83252e9e8dcc3d1583eec24'))
   self.assertEqual(R.SOURCE_FILES['sqlite3_3.46.1.orig.tar.xz'],(8456776,'d0cdd2ece271b29e7ce18095745d892517ee26d0f270065b3a25c2e9eb11639c'))
  def test_only_official_three_production_statements_in_FTS_patch(self):
   p=ROOT/'deploy/security/sqlite-wal-backport'/R.FTS_PATCH;raw=p.read_text()
@@ -99,7 +99,8 @@ class Gold2SourceTests(unittest.TestCase):
   privilege=F.fixture_vendor_privilege()
   with patch.object(R,'vendor_unprivileged_commands',return_value=(logs,privilege))as phase:
    facts,actual=R.vendor_tests(src,F.fixture_harness())
-  phase.assert_called_once_with(src);self.assertEqual(actual,logs)
+  launcher=(src/'libtool').read_bytes()
+  phase.assert_called_once_with(src,{'bytes':len(launcher),'sha256':sha256(launcher).hexdigest()});self.assertEqual(actual,logs)
   self.assertEqual(facts['unprivileged_execution'],privilege)
   self.assertEqual(facts['standard_and_official_regression'],{n:R.vendor_log_contract(n,logs[n])for n in R.VENDOR_COMMANDS})
   self.assertTrue(facts['no_new_filters_or_exclusions']);self.assertFalse(facts['full_all_permutations_claimed'])
@@ -122,7 +123,8 @@ class Gold2SourceTests(unittest.TestCase):
   self.assertEqual(emitted,[])
  def test_vendor_same_source_mutation_refuses(self):
   src=self.source_fixture()
-  def phase(_):
+  def phase(_,diagnostic_libtool):
+   self.assertEqual(diagnostic_libtool,{'bytes':(src/'libtool').stat().st_size,'sha256':sha256((src/'libtool').read_bytes()).hexdigest()})
    (src/'Makefile').write_bytes((src/'Makefile').read_bytes()+b'\nOWNED MUTATION')
    return {'vendor-standard.log':standard(),'vendor-fts5-regression.log':regression()},F.fixture_vendor_privilege()
   with patch.object(R,'vendor_unprivileged_commands',side_effect=phase):

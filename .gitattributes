@@ -45,3 +45,6 @@
 # Preserve the authenticated public source signer armor bytes.
 /deploy/security/sqlite-ubuntu-gold2/noble/source-signer.asc whitespace=-blank-at-eol
 /deploy/security/sqlite-ubuntu-gold2/resolute/source-signer.asc whitespace=-blank-at-eol
+
+# Preserve authentic upstream Noble rowid-core patch context whitespace.
+deploy/security/sqlite-ubuntu-gold2/noble/0004-rowid-in-view-nested-join-core.patch whitespace=-blank-at-eol,-blank-at-eof

@@ -155,6 +155,12 @@ class CompatibilityTests(unittest.TestCase):
 class FailureDiagnosticTests(unittest.TestCase):
  def run_diagnostic(self,raw,*,remaining=200,result=(0,b'OWNED PUBLIC BACKTRACE ONLY\n'),available=True,retire_error=None):
   r=RECIPES['Noble'];calls=[];retired=[];output=io.StringIO();scope={'retire_end':remaining}
+  owned=ExitStack();self.addCleanup(owned.close);src=Path('/OWNED/source')
+  if b'tcltest] Segmentation fault'in raw:
+   src=Path(owned.enter_context(tempfile.TemporaryDirectory(prefix='.owned-libtool-diagnostic-',dir=ROOT/'tests')))
+   for name in('libtool','testfixture'):
+    path=src/name;path.write_bytes(b'#!/bin/sh\n# OWNED SYNTHETIC LAUNCHER; NEVER EXECUTED\n');path.chmod(0o755);os.chown(path,10001,10001)
+   scope['diagnostic_libtool']={'bytes':(src/'libtool').stat().st_size,'sha256':sha256((src/'libtool').read_bytes()).hexdigest()}
   def command(argv,**kw):
    calls.append((argv,kw))
    if isinstance(result,BaseException):raise result
@@ -164,7 +170,7 @@ class FailureDiagnosticTests(unittest.TestCase):
    if retire_error:raise retire_error
    return {'owned_unit_fixture_only':True}
   with patch.object(r.time,'monotonic',return_value=100),patch.object(Path,'is_file',return_value=available),patch.object(r,'bounded_command',side_effect=command),patch.object(r,'vendor_process_retire',side_effect=retire),redirect_stdout(output):
-   try:r.vendor_failure_diagnostic(Path('/OWNED/source'),raw,scope)
+   try:r.vendor_failure_diagnostic(src,raw,scope)
    except BaseException as e:error=e
    else:error=None
   return calls,retired,[json.loads(line)for line in output.getvalue().splitlines()],error
@@ -184,7 +190,9 @@ class FailureDiagnosticTests(unittest.TestCase):
  def test_tcl_startup_trace_has_separate_diagnostic_owned_output(self):
   calls,_,rows,error=self.run_diagnostic(b'make: *** [Makefile:1364: tcltest] Segmentation fault (core dumped)\n',remaining=130)
   self.assertIsNone(error);argv,kw=calls[0]
-  self.assertEqual(argv[-4:],['./testfixture','/OWNED/source/test/veryquick.test','--verbose=file','--output=diagnostic-test-out.txt'])
+  self.assertEqual(argv[:3],['./libtool','--mode=execute','/usr/bin/gdb'])
+  self.assertEqual(argv[-4],'./testfixture');self.assertEqual(Path(argv[-3]).name,'veryquick.test')
+  self.assertEqual(argv[-2:],['--verbose=file','--output=diagnostic-test-out.txt'])
   self.assertEqual(kw['timeout'],25);self.assertTrue(rows[-1]['completed_output_available'])
 
  def test_unavailable_expired_unrecognized_or_ambiguous_diagnostics_never_spawn(self):

@@ -1,0 +1,201 @@
+Description: Fix the SQLITE_ALLOW_ROWID_IN_VIEW bug-compatibility option
+ When SQLite is built with SQLITE_ALLOW_ROWID_IN_VIEW, a subquery keeps a
+ visible rowid, so selectExpander() adds one more result column for a
+ nested parenthesized join than the subquery's result list holds. It then
+ copies the name of that column from past the end of the list, and name
+ resolution dereferences the garbage pointer in sqlite3MatchEName().
+ .
+ This backport of upstream check-in 7a3d0027f8 leaves out the new
+ SQLITE_CONFIG_ROWID_IN_VIEW sqlite3_config() verb, the -no-rowid-in-view
+ shell option and the ALLOW_ROWID_IN_VIEW entry in PRAGMA compile_options.
+ Without the verb, ViewCanHaveRowid is always true under
+ SQLITE_ALLOW_ROWID_IN_VIEW, which is the upstream default.
+Origin: backport, https://sqlite.org/src/info/7a3d0027f81e8def
+Author: drh <drh@sqlite.org>
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/sqlite3/+bug/2087772
+Applied-Upstream: 3.45.3, https://github.com/sqlite/sqlite/commit/74851f66811854c772a9b2d0a13f1e9e82b69c25
+Forwarded: not-needed
+Last-Update: 2026-09-23
+
+Index: sqlite3-3.45.1/src/expr.c
+===================================================================
+--- sqlite3-3.45.1.orig/src/expr.c
++++ sqlite3-3.45.1/src/expr.c
+@@ -2739,9 +2739,12 @@ int sqlite3ExprCanBeNull(const Expr *p){
+       return 0;
+     case TK_COLUMN:
+       assert( ExprUseYTab(p) );
+-      return ExprHasProperty(p, EP_CanBeNull) ||
+-             NEVER(p->y.pTab==0) ||  /* Reference to column of index on expr */
+-             (p->iColumn>=0
++      return ExprHasProperty(p, EP_CanBeNull)
++          || NEVER(p->y.pTab==0) /* Reference to column of index on expr */
++#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
++          || (p->iColumn==XN_ROWID && IsView(p->y.pTab))
++#endif
++          || (p->iColumn>=0
+               && p->y.pTab->aCol!=0 /* Possible due to prior error */
+               && ALWAYS(p->iColumn<p->y.pTab->nCol)
+               && p->y.pTab->aCol[p->iColumn].notNull==0);
+Index: sqlite3-3.45.1/src/resolve.c
+===================================================================
+--- sqlite3-3.45.1.orig/src/resolve.c
++++ sqlite3-3.45.1/src/resolve.c
+@@ -466,8 +466,37 @@ static int lookupName(
+           }
+         }
+         if( 0==cnt && VisibleRowid(pTab) ){
++          /* pTab is a potential ROWID match.  Keep track of it and match
++          ** the ROWID later if that seems appropriate.  (Search for "cntTab"
++          ** to find related code.)  Only allow a ROWID match if there is
++          ** a single ROWID match candidate.
++          */
++#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
++          /* In SQLITE_ALLOW_ROWID_IN_VIEW mode, allow a ROWID match
++          ** if there is a single VIEW candidate or if there is a single
++          ** non-VIEW candidate plus multiple VIEW candidates.  In other
++          ** words non-VIEW candidate terms take precedence over VIEWs.
++          */
++          if( cntTab==0
++           || (cntTab==1
++               && ALWAYS(pMatch!=0)
++               && ALWAYS(pMatch->pTab!=0)
++               && (pMatch->pTab->tabFlags & TF_Ephemeral)!=0
++               && (pTab->tabFlags & TF_Ephemeral)==0)
++          ){
++            cntTab = 1;
++            pMatch = pItem;
++          }else{
++            cntTab++;
++          }
++#else
++          /* The (much more common) non-SQLITE_ALLOW_ROWID_IN_VIEW case is
++          ** simpler since we require exactly one candidate, which will
++          ** always be a non-VIEW
++          */
+           cntTab++;
+           pMatch = pItem;
++#endif
+         }
+       }
+       if( pMatch ){
+@@ -593,13 +622,13 @@ static int lookupName(
+     ** Perhaps the name is a reference to the ROWID
+     */
+     if( cnt==0
+-     && cntTab==1
++     && cntTab>=1
+      && pMatch
+      && (pNC->ncFlags & (NC_IdxExpr|NC_GenCol))==0
+      && sqlite3IsRowid(zCol)
+      && ALWAYS(VisibleRowid(pMatch->pTab) || pMatch->fg.isNestedFrom)
+     ){
+-      cnt = 1;
++      cnt = cntTab;
+       if( pMatch->fg.isNestedFrom==0 ) pExpr->iColumn = -1;
+       pExpr->affExpr = SQLITE_AFF_INTEGER;
+     }
+Index: sqlite3-3.45.1/src/select.c
+===================================================================
+--- sqlite3-3.45.1.orig/src/select.c
++++ sqlite3-3.45.1/src/select.c
+@@ -1953,11 +1953,7 @@ static const char *columnTypeImpl(
+         ** data for the result-set column of the sub-select.
+         */
+         if( iCol<pS->pEList->nExpr
+-#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
+-         && iCol>=0
+-#else
+-         && ALWAYS(iCol>=0)
+-#endif
++         && (!ViewCanHaveRowid || iCol>=0)
+         ){
+           /* If iCol is less than zero, then the expression requests the
+           ** rowid of the sub-select or view. This expression is legal (see
+@@ -5132,6 +5128,10 @@ static int pushDownWindowCheck(Parse *pP
+ **
+ **  (11) The subquery is not a VALUES clause
+ **
++**  (12) The WHERE clause is not "rowid ISNULL" or the equivalent.  This
++**       case only comes up if SQLite is compiled using
++**       SQLITE_ALLOW_ROWID_IN_VIEW.
++**
+ ** Return 0 if no changes are made and non-zero if one or more WHERE clause
+ ** terms are duplicated into the subquery.
+ */
+@@ -5242,6 +5242,18 @@ static int pushDownWhereTerms(
+   }
+ #endif
+ 
++#ifdef SQLITE_ALLOW_ROWID_IN_VIEW
++  if( ViewCanHaveRowid && (pWhere->op==TK_ISNULL || pWhere->op==TK_NOTNULL) ){
++    Expr *pLeft = pWhere->pLeft;
++    if( ALWAYS(pLeft) 
++     && pLeft->op==TK_COLUMN
++     && pLeft->iColumn < 0
++    ){
++      return 0;  /* Restriction (12) */
++    }
++  }
++#endif
++
+   if( sqlite3ExprIsSingleTableConstraint(pWhere, pSrcList, iSrc) ){
+     nChng++;
+     pSubq->selFlags |= SF_PushDown;
+@@ -5869,6 +5881,7 @@ int sqlite3ExpandSubquery(Parse *pParse,
+   while( pSel->pPrior ){ pSel = pSel->pPrior; }
+   sqlite3ColumnsFromExprList(pParse, pSel->pEList,&pTab->nCol,&pTab->aCol);
+   pTab->iPKey = -1;
++  pTab->eTabType = TABTYP_VIEW;
+   pTab->nRowLogEst = 200; assert( 200==sqlite3LogEst(1048576) );
+ #ifndef SQLITE_ALLOW_ROWID_IN_VIEW
+   /* The usual case - do not allow ROWID on a subquery */
+@@ -6142,7 +6155,7 @@ static int selectExpander(Walker *pWalke
+             pNestedFrom = pFrom->pSelect->pEList;
+             assert( pNestedFrom!=0 );
+             assert( pNestedFrom->nExpr==pTab->nCol );
+-            assert( VisibleRowid(pTab)==0 );
++            assert( VisibleRowid(pTab)==0 || ViewCanHaveRowid );
+           }else{
+             if( zTName && sqlite3StrICmp(zTName, zTabName)!=0 ){
+               continue;
+@@ -6174,7 +6187,8 @@ static int selectExpander(Walker *pWalke
+             pUsing = 0;
+           }
+ 
+-          nAdd = pTab->nCol + (VisibleRowid(pTab) && (selFlags&SF_NestedFrom));
++          nAdd = pTab->nCol;
++          if( VisibleRowid(pTab) && (selFlags & SF_NestedFrom)!=0 ) nAdd++;
+           for(j=0; j<nAdd; j++){
+             const char *zName; 
+             struct ExprList_item *pX; /* Newly added ExprList term */
+@@ -6256,7 +6270,8 @@ static int selectExpander(Walker *pWalke
+             pX = &pNew->a[pNew->nExpr-1];
+             assert( pX->zEName==0 );
+             if( (selFlags & SF_NestedFrom)!=0 && !IN_RENAME_OBJECT ){
+-              if( pNestedFrom ){
++              if( pNestedFrom && (!ViewCanHaveRowid || j<pNestedFrom->nExpr) ){
++                assert( j<pNestedFrom->nExpr );
+                 pX->zEName = sqlite3DbStrDup(db, pNestedFrom->a[j].zEName);
+                 testcase( pX->zEName==0 );
+               }else{
+Index: sqlite3-3.45.1/src/sqliteInt.h
+===================================================================
+--- sqlite3-3.45.1.orig/src/sqliteInt.h
++++ sqlite3-3.45.1/src/sqliteInt.h
+@@ -2537,6 +2537,15 @@ struct Table {
+ #define HasRowid(X)     (((X)->tabFlags & TF_WithoutRowid)==0)
+ #define VisibleRowid(X) (((X)->tabFlags & TF_NoVisibleRowid)==0)
+ 
++/* Macro is true if the SQLITE_ALLOW_ROWID_IN_VIEW (mis-)feature is
++** available.  By default, this macro is false
++*/
++#ifndef SQLITE_ALLOW_ROWID_IN_VIEW
++# define ViewCanHaveRowid     0
++#else
++# define ViewCanHaveRowid     1
++#endif
++
+ /*
+ ** Each foreign key constraint is an instance of the following structure.
+ **

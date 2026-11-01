@@ -744,7 +744,7 @@ def vendor_process_contract(value):
   require(set(initial)<={event['pid']for event in events},'vendor_process_unaccounted_child')
  return value
 
-def vendor_unprivileged_commands(src):
+def vendor_unprivileged_commands(src,diagnostic_libtool=None):
  """Loan the owned tree only inside a process-local, proven descendant scope."""
  global VENDOR_RETIREMENT_UNPROVEN
  require(os.geteuid()==os.getegid()==0 and src==WORK/'source'and src.resolve(strict=True)==src and WORK.resolve(strict=True)==WORK,'vendor_phase_scope')
@@ -757,6 +757,7 @@ def vendor_unprivileged_commands(src):
  try:
   require(identity(os.fstat(workfd))==identity(work),'vendor_work_fd')
   scope=vendor_process_begin(end)
+  scope['diagnostic_libtool']=diagnostic_libtool
   os.fchmod(workfd,0o711)
   vendor_tree(src,{(0,0)},end,change=(VENDOR_UID,VENDOR_GID),reference=original)
   vendor_tree(home,{(0,0)},end,change=(VENDOR_UID,VENDOR_GID),reference=home_initial)
@@ -817,6 +818,7 @@ def vendor_unprivileged_commands(src):
   'private_home_root_restored':True,'phase_seconds_limit':VENDOR_PHASE_SECONDS,'restore_reserve_seconds':VENDOR_RESTORE_SECONDS,
   'process_tree':process_proof,'security_accepted':False}
  return logs,vendor_privilege_contract(receipt)
+
 
 
 VENDOR_TEST_COMPAT={'orig_archive': 'sqlite3_3.45.1.orig.tar.xz', 'distro_patch': 'debian/patches/31-increase_SQLITE_MAX_DEFAULT_PAGE_SIZE_to_32k.patch', 'distro_patch_pin': (779, '27af1c41614efba22f9eb1f1b4f46d49e3ac37a6087668a186ff2bc1bc4dcb75'), 'io_before': (18788, '941b60a0ca67ee9ace46b73deecb31998c5fca9944e1405637257ef4503e7f35'), 'io_after': (18788, 'b7ae8d3def6ab27074b21cf51df2e50dd50d34eb00ca671f32882f7033ce559e'), 'production': {'src/pager.c': (301475, '8b371bfcd459dc73415cb0d92232bf2962ad5fda0fdf4ea762d54e2247e7e474'), 'src/sqliteLimit.h': (6699, 'f5bffc74f8d25a88f173b9b6d5559985091299d3b362674294fda32660e9cd61')}, 'fuzzcheck': {'before': (81518, 'c8fa9f37b70d07cb4445c0910f079da6ce497f4095eeacec9d6e512fcd930704'), 'after': (81560, '982bb4a2f4f6e0e75a841081c7e282a3102d7916dd1a59f85c7a8e5bd249ca75'), 'implementations': {'test/vt02.c': (33516, '1685ac0e174719c33a075a3eaa367c8903ac6866047515b1c6996afc6a766116'), 'ext/misc/randomjson.c': (7430, '3ec3b5424c3cd86a7b2fcd9454a4cbc873614e152396ff388f1f4ac8a8af94ea')}}}
@@ -942,16 +944,54 @@ def vendor_failure_diagnostic(src,failed_output,scope):
   '-ex','set startup-with-shell off','-ex','set disable-randomization off',
   '-ex','set pagination off','-ex','set confirm off','-ex','set print frame-arguments none',
   '-ex','handle SIGSEGV stop print nopass','-ex','run','-ex','thread apply all backtrace 24','--args',*target]
+ if target[0]=='./testfixture':argv=['./libtool','--mode=execute',*argv]
  row.update({'status':'ATTEMPTED','argv':argv,'seconds_limit':remaining,'absolute_end':absolute_end,
   'original_scope_retire_end':scope['retire_end']});print(encoded(row).decode(),end='',flush=True)
- errors=[];result=None
+ errors=[];result=None;readers=[]
+ def check(reader):
+  path,fd,before,flags,offset,parent=reader
+  require(identity(os.fstat(fd))==identity(path.lstat())==before
+   and(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))==flags
+   and os.lseek(fd,0,os.SEEK_CUR)==offset and identity(path.parent.lstat())[:5]==parent,
+   'vendor_diagnostic_launcher_changed')
  try:
+  if target[0]=='./testfixture':
+   require(type(scope.get('diagnostic_libtool'))is dict,'vendor_diagnostic_libtool_binding')
+   proofs={}
+   for name in('libtool','testfixture'):
+    path=src/name;before=identity(path.lstat());parent=identity(src.lstat())[:5]
+    require(path.resolve(strict=True)==path and stat.S_ISREG(before[2])and before[3:5]==(VENDOR_UID,VENDOR_GID)
+     and before[5]==1 and not before[2]&0o022 and 0<before[6]<=MAX_METADATA,'vendor_diagnostic_launcher_identity')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+    # Register the original immediately, before fcntl/read can fail.
+    reader=[path,fd,before,None,0,parent];readers.append(reader)
+    reader[3]=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL));check(reader)
+    h=sha256();count=0
+    while True:
+     require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
+     part=os.read(fd,min(65536,MAX_METADATA-count+1));reader[4]+=len(part)
+     require(reader[4]<=MAX_METADATA,'vendor_diagnostic_launcher_bound')
+     if not part:break
+     h.update(part);count+=len(part)
+    require(count==before[6],'vendor_diagnostic_launcher_short');check(reader)
+    proofs[name]={'bytes':count,'sha256':h.hexdigest()}
+   require(proofs['libtool']==scope['diagnostic_libtool'],'vendor_diagnostic_libtool_binding')
+   row['configured_launcher_inputs']=proofs
   require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
   result=bounded_command(argv,cwd=src,timeout=remaining,maximum=65536,capture=True,with_code=True,tee=True,unprivileged=True,absolute_end=absolute_end)
   require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
  except BaseException as e:errors.append(e)
  try:row['owned_descendant_retirement']=vendor_process_retire(scope,'failure-diagnostic',argv)
  except BaseException as e:errors.append(e)
+ finally:
+  for reader in reversed(readers):
+   path,fd,before,flags,offset,parent=reader
+   try:check(reader)
+   except BaseException as e:errors.append(e)
+   try:vendor_close_fd(fd)
+   except BaseException as e:errors.append(e)
+   try:require(identity(path.lstat())==before and identity(src.lstat())[:5]==parent,'vendor_diagnostic_launcher_postclose')
+   except BaseException as e:errors.append(e)
  row.update({'status':'RETURNED'if result is not None else'FAILED_OR_UNAVAILABLE',
   'actual_returncode':None if result is None else result[0],
   'actual_public_output':None if result is None else result[1].decode('utf-8','replace'),
@@ -959,6 +999,29 @@ def vendor_failure_diagnostic(src,failed_output,scope):
   'errors':[type(e).__name__ for e in errors]})
  print(encoded(row).decode(),end='',flush=True)
  if errors:raise BaseExceptionGroup('failure-only diagnostic and retirement failures',errors)
+
+ROWID_NESTED_JOIN={'name': '0004-rowid-in-view-nested-join-core.patch', 'patch': (8073, 'fc7990f7375b8e8d63abc04a5c2fd66a2a6ed880e53342d37a370526e11ff018'), 'before': {'src/expr.c': (244563, 'e6ae8883c62acecba6e6a75de01f2595714255f127ad725dba2f11321466c2f4'), 'src/resolve.c': (80769, '57440d1d06e2162a874aac1601885230d571a64e60e61093ab19fa6f02b3fc5f'), 'src/select.c': (318873, '15da5248dbead64ed650bbb635fa61029fd9e8b761ac7d07cf78d225d4764d17'), 'src/sqliteInt.h': (250967, 'cacfce588fffd11c99a5170c2c510a850c5265a6188b79ad9f71c76485eafbf8')}, 'after': {'src/expr.c': (244654, '9d2f54df15a7d5648d1683f990709641c516282224389e597c6b5e460435c565'), 'src/resolve.c': (81957, '80be1b1e58ab3687e3e03534ba7ee32dc7fb3019c89b64775ce85bb8d9530158'), 'src/select.c': (319452, '1a041fb73b37734b665481791b02a06a7a43bf006ab11ed8021ea548df4a26ce'), 'src/sqliteInt.h': (251198, '412b1723163e538cb6cd1962ce15cdcd9fe504937ccb493b0d66dc52d0113601')}}
+def rowid_nested_join_expected():
+ bound=lambda p:{'bytes':p[0],'sha256':p[1]}
+ return {'schema':'sqlite_noble_nested_join_core_backport/1',
+  'upstream_git':'74851f66811854c772a9b2d0a13f1e9e82b69c25',
+  'upstream_fossil':'7a3d0027f81e8def49e2a665c9202b966c37f066b1298476e4d7d72e56323f85',
+  'primary_ubuntu_debdiff':{'bytes':20365,'sha256':'4f765815acc14094e94e3c1c5eef14b8be2ec65ca475272ebff29b817fe45c6f'},
+  'patch':bound(ROWID_NESTED_JOIN['patch']),
+  'before':{n:bound(p)for n,p in ROWID_NESTED_JOIN['before'].items()},
+  'after':{n:bound(p)for n,p in ROWID_NESTED_JOIN['after'].items()},
+  'core_files_only':True,'new_public_config_api':False,'vendor_test_bodies_changed':False,
+  'test_selection_changed':False,'production_flags_changed':False,
+  'actual_sql874_resolution_claimed_from_source_only':False,'security_accepted':False}
+
+def rowid_nested_join_contract(value):
+ require(type(value)is dict and encoded(value)==encoded(rowid_nested_join_expected()),'rowid_nested_join_contract')
+ return value
+
+def verify_rowid_nested_join_source(src):
+ digest(RECIPE/ROWID_NESTED_JOIN['name'],ROWID_NESTED_JOIN['patch'])
+ for name,pin in ROWID_NESTED_JOIN['after'].items():digest(src/name,pin)
+ return rowid_nested_join_contract(rowid_nested_join_expected())
 
 def vendor_tests(src):
  # Debian has already configured/built this exact source with its unchanged
@@ -969,7 +1032,8 @@ def vendor_tests(src):
  require(not any(k in current_environment()for k in('TESTOPTS','TESTS','EXTRA_QUICKTEST','SQLITE_TEST_PREFIX')),'vendor_test_filter')
  harness=prepare_vendor_testfixture(src)
  before['Makefile']=digest(src/'Makefile',maximum=4*1024**2)
- logs,privilege=vendor_unprivileged_commands(src)
+ diagnostic_libtool=digest(src/'libtool',maximum=MAX_METADATA)
+ logs,privilege=vendor_unprivileged_commands(src,diagnostic_libtool)
  facts={name:vendor_log_contract(name,logs[name])for name in VENDOR_COMMANDS}
  require({name:digest(src/name,maximum=4*1024**2)for name in watched}==before,'vendor_source_or_flags_changed')
  return {'same_configured_source':before,'standard_and_official_regression':facts,
@@ -977,6 +1041,7 @@ def vendor_tests(src):
   'no_new_filters_or_exclusions':True,'no_new_filters_or_exclusions_scope':'test_selection_only',
   'testfixture_harness':harness,'full_all_permutations_claimed':False,
   'default_omissions_are_not_waivers':True,'unprivileged_execution':privilege},logs
+
 
 def build():
  builder_context();configure_repository();proofs=inputs(INPUTS,RECIPE);require(not WORK.exists() and not OUT.exists(),'build_once')
@@ -1008,14 +1073,17 @@ def build():
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_BEFORE)
  for name,pin in VENDOR_HELPERS.items():digest(src/name,pin)
  digest(src/'ext/fts5/fts5_index.c',FTS_BEFORE);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_BEFORE)
+ for name,pin in ROWID_NESTED_JOIN['before'].items():digest(src/name,pin)
  series=src/'debian/patches/series';previous=bytes_at(series,maximum=65536)
  patches=[('trading-bot-production-wal-reset.patch',PATCH,PATCH_PIN),
   ('trading-bot-fts5-detail-none-merge.patch',FTS_PATCH,FTS_PATCH_PIN),
-  ('trading-bot-fts5-upstream-regression.patch',FTS_TEST_PATCH,FTS_TEST_PATCH_PIN)]
+  ('trading-bot-fts5-upstream-regression.patch',FTS_TEST_PATCH,FTS_TEST_PATCH_PIN),
+  ('trading-bot-rowid-nested-join-core.patch',ROWID_NESTED_JOIN['name'],ROWID_NESTED_JOIN['patch'])]
  require(all(name.encode()not in previous for name,_,_ in patches),'patch_once')
  for name,leaf,pin in patches:publish(src/'debian/patches'/name,bytes_at(RECIPE/leaf,pin))
  series.write_bytes(previous+(b''if previous.endswith(b'\n')else b'\n')+b''.join(name.encode()+b'\n'for name,_,_ in patches))
  command(['/usr/bin/quilt','--quiltrc','/dev/null','push','-a'],cwd=src,timeout=30)
+ nested_join=verify_rowid_nested_join_source(src)
  digest(src/'src/wal.c',WAL_AFTER);digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  changelog=src/'debian/changelog';original=changelog.read_bytes();require(original.startswith(('sqlite3 ('+BASE_VERSION+')').encode()),'changelog_base')
  date=email.utils.format_datetime(datetime.datetime.fromtimestamp(SOURCE_EPOCH,datetime.timezone.utc))
@@ -1027,9 +1095,11 @@ def build():
  changelog.write_bytes(entry+original)
  require(metadata(['/usr/bin/dpkg-parsechangelog','-S','Version'],cwd=src).decode().strip()==VERSION,'local_package_version')
  command(['/usr/bin/dpkg-buildpackage','-B','-uc','-us','-j2'],cwd=src,timeout=1800)
+ verify_rowid_nested_join_source(src)
  compatibility=prepare_vendor_test_compatibility(src)
  vendor,vendor_logs=vendor_tests(src)
  verify_vendor_test_compatibility(src,compatibility)
+ verify_rowid_nested_join_source(src)
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_AFTER)
  digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  packages=list(WORK.glob('libsqlite3-0_'+VERSION+'_amd64.deb'));require(len(packages)==1,'runtime_package_inventory');package=packages[0]
@@ -1069,7 +1139,7 @@ def build():
   'production_patch':{'bytes':PATCH_PIN[0],'sha256':PATCH_PIN[1]},
   'fts5_merge_patch':{'bytes':FTS_PATCH_PIN[0],'sha256':FTS_PATCH_PIN[1]},'fts5_upstream_regression_patch':{'bytes':FTS_TEST_PATCH_PIN[0],'sha256':FTS_TEST_PATCH_PIN[1]},
   'official_fts5_commit':UPSTREAM_FTS_COMMIT,'fts5_before':{'bytes':FTS_BEFORE[0],'sha256':FTS_BEFORE[1]},'fts5_after':{'bytes':FTS_AFTER[0],'sha256':FTS_AFTER[1]},
-  'vendor_tests':vendor,'test_only_compatibility':compatibility,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
+  'vendor_tests':vendor,'test_only_compatibility':compatibility,'rowid_nested_join_backport':nested_join,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
   'wal_after':{'bytes':WAL_AFTER[0],'sha256':WAL_AFTER[1]},'positive_verifier':{'bytes':VERIFY_PIN[0],'sha256':VERIFY_PIN[1]},
   'source_date_epoch':SOURCE_EPOCH,'build_options':ENV['DEB_BUILD_OPTIONS'],'upstream_fault_suites_run':False,
   'wal_reset_reproduction_performed':False,'full_upstream_suite_pass_claimed':False,
@@ -1085,6 +1155,7 @@ def build():
  for name,value in (('provenance.json',report),('positive-baseline.json',baseline),('positive-candidate.json',candidate),('abi-contract.json',new_elf)):
   publish(OUT/name,encoded(value));(OUT/name).chmod(0o644)
  return report
+
 
 def main(argv=None):
  parser=argparse.ArgumentParser();parser.add_argument('--fetch-public-inputs',action='store_true');parser.add_argument('--stage-context');parser.add_argument('--configure-build-repository',action='store_true');parser.add_argument('--build',action='store_true');args=parser.parse_args(argv)

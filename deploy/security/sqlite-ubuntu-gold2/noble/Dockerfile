@@ -6,7 +6,7 @@ FROM --platform=linux/amd64 ubuntu:24.04@sha256:a2d43bffc46670d7108bb3c0468c67c5
 ENV PYTHONDONTWRITEBYTECODE=1 LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive
 WORKDIR /build
 COPY --from=public-ca /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY sourcebuild.py Dockerfile context-manifest.json verify_positive.py consumer-profile.json source-signer.asc 0001-wal-reset-production-only.patch 0002-fts5-detail-none-merge-bound.patch 0003-fts5-detail-none-upstream-regression.patch /recipe/
+COPY sourcebuild.py Dockerfile context-manifest.json verify_positive.py consumer-profile.json source-signer.asc 0001-wal-reset-production-only.patch 0002-fts5-detail-none-merge-bound.patch 0003-fts5-detail-none-upstream-regression.patch 0004-rowid-in-view-nested-join-core.patch /recipe/
 COPY inputs/sqlite3_3.45.1-1ubuntu2.8.debian.tar.xz inputs/sqlite3_3.45.1-1ubuntu2.8.dsc inputs/sqlite3_3.45.1.orig-www.tar.xz inputs/sqlite3_3.45.1.orig.tar.xz /inputs/
 # Minimal Ubuntu has no Python. Its native signed APT bootstrap verifies EVERY
 # immutable release hash before installing Python or any build dependency.

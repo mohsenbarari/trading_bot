@@ -18,8 +18,8 @@ import sys
 import tempfile
 
 BASE_PACKAGE = '3.46.1-7+deb13u2'
-FIXED_PACKAGE = BASE_PACKAGE + '+gold1'
-ALLOWED_PACKAGES = (BASE_PACKAGE, FIXED_PACKAGE)
+FIXED_PACKAGE = BASE_PACKAGE + '+gold2'
+ALLOWED_PACKAGES = (BASE_PACKAGE, BASE_PACKAGE + '+gold1', FIXED_PACKAGE)
 PUBLIC_FAILURE_CODES = frozenset(('backup_integrity', 'backup_query_drift', 'binary_bound', 'binary_changed', 'binary_identity', 'binary_mapping', 'binary_parent', 'compile_options_bound', 'fts_contract', 'isolated_python_required', 'json_contract', 'loader_override', 'lookup_index_not_used', 'mapping_bound', 'non_system_library', 'os_metadata', 'os_metadata_bound', 'package_library_path', 'package_metadata_bound', 'package_paths_bound', 'package_payload_changed', 'package_scope', 'package_version', 'package_version_changed', 'python_customization', 'python_version_changed', 'readonly_reopen_drift', 'scratch_not_private', 'sqlite_runtime_package_mismatch', 'stdlib_extension_required', 'stdlib_sqlite_required', 'system_library_missing_or_ambiguous', 'transaction_or_query_drift', 'trixie_required', 'wal_mode', 'wal_reader', 'wal_refresh', 'wal_snapshot_drift'))
 QUERY = ('SELECT source,event_id,commodity,price FROM quotes WHERE commodity=? '
          'ORDER BY seen_at DESC,event_id DESC,source')

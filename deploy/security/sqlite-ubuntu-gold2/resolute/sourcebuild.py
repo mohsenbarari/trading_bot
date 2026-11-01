@@ -744,7 +744,7 @@ def vendor_process_contract(value):
   require(set(initial)<={event['pid']for event in events},'vendor_process_unaccounted_child')
  return value
 
-def vendor_unprivileged_commands(src):
+def vendor_unprivileged_commands(src,diagnostic_libtool=None):
  """Loan the owned tree only inside a process-local, proven descendant scope."""
  global VENDOR_RETIREMENT_UNPROVEN
  require(os.geteuid()==os.getegid()==0 and src==WORK/'source'and src.resolve(strict=True)==src and WORK.resolve(strict=True)==WORK,'vendor_phase_scope')
@@ -757,6 +757,7 @@ def vendor_unprivileged_commands(src):
  try:
   require(identity(os.fstat(workfd))==identity(work),'vendor_work_fd')
   scope=vendor_process_begin(end)
+  scope['diagnostic_libtool']=diagnostic_libtool
   os.fchmod(workfd,0o711)
   vendor_tree(src,{(0,0)},end,change=(VENDOR_UID,VENDOR_GID),reference=original)
   vendor_tree(home,{(0,0)},end,change=(VENDOR_UID,VENDOR_GID),reference=home_initial)
@@ -817,6 +818,7 @@ def vendor_unprivileged_commands(src):
   'private_home_root_restored':True,'phase_seconds_limit':VENDOR_PHASE_SECONDS,'restore_reserve_seconds':VENDOR_RESTORE_SECONDS,
   'process_tree':process_proof,'security_accepted':False}
  return logs,vendor_privilege_contract(receipt)
+
 
 
 VENDOR_TEST_COMPAT={'orig_archive': 'sqlite3_3.46.1.orig.tar.xz', 'distro_patch': 'debian/patches/31-increase_SQLITE_MAX_DEFAULT_PAGE_SIZE_to_32k.patch', 'distro_patch_pin': (779, '27af1c41614efba22f9eb1f1b4f46d49e3ac37a6087668a186ff2bc1bc4dcb75'), 'io_before': (18788, '941b60a0ca67ee9ace46b73deecb31998c5fca9944e1405637257ef4503e7f35'), 'io_after': (18788, 'b7ae8d3def6ab27074b21cf51df2e50dd50d34eb00ca671f32882f7033ce559e'), 'production': {'src/pager.c': (301478, 'fe9f99091954927153daa559435e8ce5ca4b34f681c315c7cddbadf9ad135772'), 'src/sqliteLimit.h': (6699, 'f5bffc74f8d25a88f173b9b6d5559985091299d3b362674294fda32660e9cd61')}, 'fuzzcheck': None}
@@ -942,16 +944,54 @@ def vendor_failure_diagnostic(src,failed_output,scope):
   '-ex','set startup-with-shell off','-ex','set disable-randomization off',
   '-ex','set pagination off','-ex','set confirm off','-ex','set print frame-arguments none',
   '-ex','handle SIGSEGV stop print nopass','-ex','run','-ex','thread apply all backtrace 24','--args',*target]
+ if target[0]=='./testfixture':argv=['./libtool','--mode=execute',*argv]
  row.update({'status':'ATTEMPTED','argv':argv,'seconds_limit':remaining,'absolute_end':absolute_end,
   'original_scope_retire_end':scope['retire_end']});print(encoded(row).decode(),end='',flush=True)
- errors=[];result=None
+ errors=[];result=None;readers=[]
+ def check(reader):
+  path,fd,before,flags,offset,parent=reader
+  require(identity(os.fstat(fd))==identity(path.lstat())==before
+   and(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))==flags
+   and os.lseek(fd,0,os.SEEK_CUR)==offset and identity(path.parent.lstat())[:5]==parent,
+   'vendor_diagnostic_launcher_changed')
  try:
+  if target[0]=='./testfixture':
+   require(type(scope.get('diagnostic_libtool'))is dict,'vendor_diagnostic_libtool_binding')
+   proofs={}
+   for name in('libtool','testfixture'):
+    path=src/name;before=identity(path.lstat());parent=identity(src.lstat())[:5]
+    require(path.resolve(strict=True)==path and stat.S_ISREG(before[2])and before[3:5]==(VENDOR_UID,VENDOR_GID)
+     and before[5]==1 and not before[2]&0o022 and 0<before[6]<=MAX_METADATA,'vendor_diagnostic_launcher_identity')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+    # Register the original immediately, before fcntl/read can fail.
+    reader=[path,fd,before,None,0,parent];readers.append(reader)
+    reader[3]=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL));check(reader)
+    h=sha256();count=0
+    while True:
+     require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
+     part=os.read(fd,min(65536,MAX_METADATA-count+1));reader[4]+=len(part)
+     require(reader[4]<=MAX_METADATA,'vendor_diagnostic_launcher_bound')
+     if not part:break
+     h.update(part);count+=len(part)
+    require(count==before[6],'vendor_diagnostic_launcher_short');check(reader)
+    proofs[name]={'bytes':count,'sha256':h.hexdigest()}
+   require(proofs['libtool']==scope['diagnostic_libtool'],'vendor_diagnostic_libtool_binding')
+   row['configured_launcher_inputs']=proofs
   require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
   result=bounded_command(argv,cwd=src,timeout=remaining,maximum=65536,capture=True,with_code=True,tee=True,unprivileged=True,absolute_end=absolute_end)
   require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
  except BaseException as e:errors.append(e)
  try:row['owned_descendant_retirement']=vendor_process_retire(scope,'failure-diagnostic',argv)
  except BaseException as e:errors.append(e)
+ finally:
+  for reader in reversed(readers):
+   path,fd,before,flags,offset,parent=reader
+   try:check(reader)
+   except BaseException as e:errors.append(e)
+   try:vendor_close_fd(fd)
+   except BaseException as e:errors.append(e)
+   try:require(identity(path.lstat())==before and identity(src.lstat())[:5]==parent,'vendor_diagnostic_launcher_postclose')
+   except BaseException as e:errors.append(e)
  row.update({'status':'RETURNED'if result is not None else'FAILED_OR_UNAVAILABLE',
   'actual_returncode':None if result is None else result[0],
   'actual_public_output':None if result is None else result[1].decode('utf-8','replace'),
@@ -969,7 +1009,8 @@ def vendor_tests(src):
  require(not any(k in current_environment()for k in('TESTOPTS','TESTS','EXTRA_QUICKTEST','SQLITE_TEST_PREFIX')),'vendor_test_filter')
  harness=prepare_vendor_testfixture(src)
  before['Makefile']=digest(src/'Makefile',maximum=4*1024**2)
- logs,privilege=vendor_unprivileged_commands(src)
+ diagnostic_libtool=digest(src/'libtool',maximum=MAX_METADATA)
+ logs,privilege=vendor_unprivileged_commands(src,diagnostic_libtool)
  facts={name:vendor_log_contract(name,logs[name])for name in VENDOR_COMMANDS}
  require({name:digest(src/name,maximum=4*1024**2)for name in watched}==before,'vendor_source_or_flags_changed')
  return {'same_configured_source':before,'standard_and_official_regression':facts,
@@ -977,6 +1018,7 @@ def vendor_tests(src):
   'no_new_filters_or_exclusions':True,'no_new_filters_or_exclusions_scope':'test_selection_only',
   'testfixture_harness':harness,'full_all_permutations_claimed':False,
   'default_omissions_are_not_waivers':True,'unprivileged_execution':privilege},logs
+
 
 def build():
  builder_context();configure_repository();proofs=inputs(INPUTS,RECIPE);require(not WORK.exists() and not OUT.exists(),'build_once')

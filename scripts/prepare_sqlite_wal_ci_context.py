@@ -11,7 +11,7 @@ from types import ModuleType
 import argparse,errno,fcntl,json,os,re,signal,stat,sys,threading,time
 
 TRACKED=Path('deploy/security/sqlite-wal-backport')
-PINS={'sourcebuild.py': (79508, '9dfca6080a813f2b7f36e5d1bd158674505d7a958bf7f8465f529813c1f73af4'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
+PINS={'sourcebuild.py': (81869, '270dfe615e39f6fbb0eca3ffc62f35cbf9362dcff2d431ff274cb0a00b0b783d'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16402, '53a1a5f9b2742910ef7bad0ccd5c5199d1b66fbeb83252e9e8dcc3d1583eec24'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
 VERSION='3.46.1-7+deb13u2+gold2';BASE='3.46.1-7+deb13u2'
 PACKAGE='libsqlite3-0_'+VERSION+'_amd64.deb'
 CHANGES='sqlite3_'+VERSION+'_amd64.changes';BUILDINFO='sqlite3_'+VERSION+'_amd64.buildinfo'
