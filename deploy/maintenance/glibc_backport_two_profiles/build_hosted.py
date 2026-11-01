@@ -123,30 +123,53 @@ def manifest_script():
 
 
 
-def preserve_two_profile_raw_failure(command,cid,nonce,destination,expected_directory,codec):
- """Fixed read-only export under the original owned failure reserve, before stop."""
- docker=['/usr/bin/docker','--host','unix:///var/run/docker.sock']
- row=json.loads(command([*docker,'container','inspect','--format',INSPECT,cid],maximum=65536,seconds=15))
- need(row['id']==cid and row['owner']==nonce and row['name']=='/glibc84243-'+nonce and row['image']==BASE,'failure_export_owner')
+def preserve_two_profile_raw_failure(command,cid,nonce,destination,expected_directory,codec,export_guard):
+ """Profile-declared fixed failed-only leaves, within the ORIGINAL cleanup end minus45s."""
+ contract=codec.quarantine_contract(PROFILE_NAME);names=contract['names'];debs=contract['debs']
+ docker=['/usr/bin/docker','--host','unix:///var/run/docker.sock'];captured={};rows={}
+ receipt={'schema':'Two_profile_failed_only_quarantine_evidence_export/1','original_container_id':cid,'original_nonce':nonce,
+  'disposition':'QUARANTINED_NOT_QUALIFIED','outputs':captured,'missing_fixed_leaves':sorted(names),
+  'raw_only_not_vendor_or_security_qualified':True,'same_failed_forward_operation_resumed':False,'security_accepted':False,
+  'manifest_admitted':False,'complete':False,'secondary_codes':[]}
  before=frame(destination.lstat())[:6]
- need(before==expected_directory and destination.resolve(strict=True)==destination and stat.S_ISDIR(before[2])and stat.S_IMODE(before[2])==0o700
-  and before[3]==os.geteuid(),'failure_export_directory')
- rows=json.loads(command([*docker,'container','exec',cid,PYTHON,'-I','-S','-B','-c',codec.failure_manifest_script()],maximum=4096,seconds=15))
- need(type(rows)is dict and set(rows)<=set(codec.RAW_NAMES),'failure_export_scope')
- captured={}
- for name,value in rows.items():
-  need(type(value)is dict and set(value)=={'bytes','sha256'}and type(value['bytes'])is int and (0 if name in codec.EMPTY_RAW_NAMES else 1)<=value['bytes']<=codec.RAW_NAMES[name]
-   and re.fullmatch('[a-f0-9]{64}',value['sha256'])is not None,'failure_export_bound')
-  target=destination/name;need(not target.exists()and not target.is_symlink()and frame(destination.lstat())[:6]==before,'failure_export_exclusive')
-  command([*docker,'container','cp',cid+':/out/'+name,str(target)],maximum=65536,seconds=15)
-  raw=codec.read_regular(target,codec.RAW_NAMES[name],empty=name in codec.EMPTY_RAW_NAMES);need(codec.pin(raw)==value,'failure_export_changed');captured[name]=value
- again=json.loads(command([*docker,'container','exec',cid,PYTHON,'-I','-S','-B','-c',codec.failure_manifest_script()],maximum=4096,seconds=15))
- need(rows==again and frame(destination.lstat())[:6]==before,'failure_export_changed')
- receipt={'schema':'Two_profile_failed_only_raw_evidence_export/1','original_container_id':cid,'original_nonce':nonce,
-  'outputs':captured,'missing_fixed_leaves':sorted(set(codec.RAW_NAMES)-set(captured)),'raw_only_not_vendor_or_security_qualified':True,
-  'same_failed_forward_operation_resumed':False,'security_accepted':False}
- codec.write_new(destination/'failure-export.json',enc(receipt),131072)
- return receipt
+ def check():
+  export_guard()
+  need(before==expected_directory and destination.resolve(strict=True)==destination and stat.S_ISDIR(before[2])and stat.S_IMODE(before[2])==0o700
+   and before[3]==os.geteuid() and frame(destination.lstat())[:6]==before,'failure_export_directory')
+ def owner():
+  check();row=json.loads(command([*docker,'container','inspect','--format',INSPECT,cid],maximum=65536,seconds=10))
+  need(row['id']==cid and row['owner']==nonce and row['name']=='/glibc84243-'+nonce and row['image']==BASE,'failure_export_owner');check()
+ def manifest():
+  check();value=json.loads(command([*docker,'container','exec',cid,PYTHON,'-I','-S','-B','-c',codec.failure_manifest_script(PROFILE_NAME)],maximum=16384,seconds=10));check()
+  need(type(value)is dict and set(value)<=set(names),'failure_export_scope')
+  for name,row in value.items():
+   need(type(row)is dict and set(row)=={'bytes','sha256','full9'}and type(row['bytes'])is int and (0 if name in codec.EMPTY_RAW_NAMES else 1)<=row['bytes']<=names[name]
+    and type(row['full9'])is list and len(row['full9'])==9 and all(type(item)is int for item in row['full9'])
+    and row['full9'][6]==row['bytes'] and stat.S_ISREG(row['full9'][2])and stat.S_IMODE(row['full9'][2])==0o644
+    and row['full9'][3:6]==[0,0,1]and re.fullmatch('[a-f0-9]{64}',row['sha256'])is not None,'failure_export_bound')
+  need(sum(row['bytes']for row in value.values())<=codec.QUARANTINE_MAX
+   and sum(value[name]['bytes']for name in debs if name in value)<=codec.QUARANTINE_DEBS_MAX
+   and sum(value[name]['bytes']for name in codec.QUARANTINE_PROOFS if name in value)<=codec.QUARANTINE_METADATA_MAX,'failure_export_aggregate')
+  return value
+ try:
+  owner();rows=manifest();receipt['manifest_admitted']=True;receipt['admitted_sources']=rows
+  # Full fixed aggregate admission above precedes the first Docker copy.
+  for name,value in rows.items():
+   check();target=destination/name;need(not target.exists()and not target.is_symlink(),'failure_export_exclusive')
+   receipt['active_copy']={'name':name,'command_completed':False,'verified':False}
+   command([*docker,'container','cp',cid+':/out/'+name,str(target)],maximum=65536,seconds=5);receipt['active_copy']['command_completed']=True;check()
+   raw=codec.read_regular(target,names[name],empty=name in codec.EMPTY_RAW_NAMES,guard=check)
+   need(codec.pin(raw)=={key:value[key]for key in('bytes','sha256')},'failure_export_changed');captured[name]=codec.pin(raw);receipt['active_copy']['verified']=True;receipt['active_copy']=None
+  need(rows==manifest(),'failure_export_changed');owner();receipt['complete']=True
+  receipt['missing_fixed_leaves']=sorted(set(names)-set(captured));check()
+  codec.write_new(destination/'failure-export.json',enc(receipt),131072);check();return receipt
+ except BaseException as primary:
+  receipt['secondary_codes']=getattr(primary,'two_profile_secondary_codes',[])
+  receipt['missing_fixed_leaves']=sorted(set(names)-set(captured))
+  primary.public_quarantine_export=receipt
+  # The caller retains this prefix in hosted-failure.json; do not spend the
+  # reserved final45s on a separate receipt write after the cutoff.
+  raise
 
 def execute(args):
  need((PROFILE_NAME=='trixie241'and _PROFILE_CONFIGURED is False)or(PROFILE_NAME=='ubuntu243'and _PROFILE_CONFIGURED is True),'two_profile_only');repo,root=hosted(args);M,mcheck,mstate=bootstrap('host_io_original.py',HOST_IO)
@@ -179,6 +202,10 @@ def execute(args):
   for offset in range(0,len(raw),65536):w.append(raw[offset:offset+65536])
   w.seal();w.close()
  def command(argv,maximum=65536,seconds=60):return M.run(argv,env=env,deadline=min(forward_end,time.monotonic()+seconds),maximum=maximum,guard=guard)
+ def export_guard():
+  need(time.monotonic()<end-45,'hosted_export_deadline');mcheck();scheck()
+ def export_command(argv,maximum=65536,seconds=5):
+  export_guard();return M.run(argv,env=env,deadline=min(end-45,time.monotonic()+seconds),maximum=maximum,guard=export_guard)
  def cleanup_command(argv,maximum=65536,seconds=30):
   # Exact-owned failure stop needs no new allocation or healthy forward Scope.
   # Its finite reserve was declared above before any source/workspace loans.
@@ -198,7 +225,7 @@ def execute(args):
   try:facts=M.host_facts(root.parent)
   finally:M.validate_host=original_validate
   need(min(initial.values())>=GROWTH+RESERVE,'capacity_floor')
-  root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o755);reports=root/'reports';reports.mkdir(mode=0o700);raw_failure_dir=reports/'two-profile-raw-failure';raw_failure_dir.mkdir(mode=0o700);raw_failure_identity=frame(raw_failure_dir.lstat())[:6];out=root/'package-output';out.mkdir(mode=0o700)
+  root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o755);context.chmod(0o755);reports=root/'reports';reports.mkdir(mode=0o700);raw_failure_dir=reports/'two-profile-raw-failure';raw_failure_dir.mkdir(mode=0o700);raw_failure_identity=frame(raw_failure_dir.lstat())[:6];out=root/'package-output';out.mkdir(mode=0o700)
   config=root/'docker-client';config.mkdir(mode=0o700);env['DOCKER_CONFIG']=str(config)
   scope=S.Scope(18000);own=scope.open(ENTRY,(ENTRY.stat().st_size,args.source_sha256),131072)
   # Manifest itself is a tracked Git blob; no self-referential hash cycle.
@@ -257,8 +284,9 @@ print('PUBLIC_COPIES_VERIFIED')'''
    try:public_log(reports/(phase+'-partial-failure.log'),observed['captured_output'])
    except BaseException:pass
   if phase=='full_Debian_build'and cid is not None and raw_codec is not None:
-   try:raw_failure=preserve_two_profile_raw_failure(cleanup_command,cid,nonce,raw_failure_dir,raw_failure_identity,raw_codec)
+   try:raw_failure=preserve_two_profile_raw_failure(export_command,cid,nonce,raw_failure_dir,raw_failure_identity,raw_codec,export_guard)
    except BaseException as error:
+    raw_failure=getattr(error,'public_quarantine_export',None)
     raw_export_codes.append(str(error)if type(error)is RuntimeError and re.fullmatch('[A-Za-z0-9_]{1,80}',str(error))else'failure_export_unknown')
     final.append(type(error).__name__)
  finally:

@@ -1,12 +1,6 @@
 """Fixed exact Ubuntu 2.39-0ubuntu8.9 installed-family6 data; local candidate only."""
 HOST = {'base': 'ubuntu:24.04@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d',
- 'bootstrap_prepare': ['/bin/sh',
-                       '-c',
-                       'set -eu; export DEBIAN_FRONTEND=noninteractive; apt-get -o Acquire::Retries=0 -o '
-                       'APT::Update::Error-Mode=any -o Acquire::AllowInsecureRepositories=false -o '
-                       'APT::Get::AllowUnauthenticated=false update; apt-get -o Acquire::Retries=0 -o '
-                       'Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false -y '
-                       '--no-install-recommends install python3 ca-certificates ubuntu-keyring'],
+ 'bootstrap_prepare': ['/bin/sh', '-c', 'set -eu; export DEBIAN_FRONTEND=noninteractive; test ! -L /etc/apt/sources.list; if test -e /etc/apt/sources.list; then test -f /etc/apt/sources.list; fi; test -f /etc/apt/sources.list.d/ubuntu.sources; test ! -L /etc/apt/sources.list.d/ubuntu.sources; for source in /etc/apt/sources.list.d/*; do test "$source" = /etc/apt/sources.list.d/ubuntu.sources; done; printf \'%s  %s\\n\' 22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1 /public-context/snapshot-public-isrg-root-x1.crt | sha256sum -c -; printf \'%s\' \'Types: deb\nURIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\nSuites: noble noble-updates noble-backports noble-security\nComponents: main restricted universe multiverse\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n\' > /etc/apt/sources.list.d/ubuntu.sources; : > /etc/apt/sources.list; apt-get -o Acquire::https::CaInfo=/public-context/snapshot-public-isrg-root-x1.crt -o Acquire::Retries=0 -o APT::Update::Error-Mode=any -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false update; apt-get -o Acquire::https::CaInfo=/public-context/snapshot-public-isrg-root-x1.crt -o Acquire::Retries=0 -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false -y --no-install-recommends install python3 ca-certificates ubuntu-keyring'],
  'confirm': 'BUILD-ONLY-DISPOSABLE-CI-UBUNTU239-GLIBC-84243-FULL-PACKAGES-20261101-01',
  'idle_argv': ['/usr/bin/sleep', '19800'],
  'name': 'ubuntu239',
@@ -19,17 +13,7 @@ WORKER = {'after': {'intl/Makefile': (5991, 'b2b8ef3015ed8c238a6af29ce4e56ac0521
            'intl/dcigettext.c': (47398, '66b9794760d03d48a7fd0d118f85fa01ac0d0ed4b6d13e03d359a42834debd9e'),
            'intl/tst-gettext-path-traversal.c': (3336,
                                                  'c732e301bbe037a6aa612f1452d7768d0bb3efd893f4fbf1d4d02e4651e2d3f6')},
- 'apt_sources': 'Types: deb deb-src\n'
-                'URIs: https://archive.ubuntu.com/ubuntu/\n'
-                'Suites: noble noble-updates\n'
-                'Components: main universe\n'
-                'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'
-                '\n'
-                'Types: deb deb-src\n'
-                'URIs: https://security.ubuntu.com/ubuntu/\n'
-                'Suites: noble-security\n'
-                'Components: main universe\n'
-                'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n',
+ 'apt_sources': 'Types: deb deb-src\nURIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\nSuites: noble noble-updates\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n\nTypes: deb deb-src\nURIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\nSuites: noble-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n',
  'baseline_debs': {'libc-bin_2.39-0ubuntu8.9_amd64.deb': (682164,
                                                           '066398a06ef1a218d4109461d4c636eafe83322ad19b179de9ef7af42b3fec58'),
                    'libc-dev-bin_2.39-0ubuntu8.9_amd64.deb': (20402,

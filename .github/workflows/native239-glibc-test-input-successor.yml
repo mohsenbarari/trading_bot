@@ -32,7 +32,7 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/glibc_backport_native239/host_ubuntu239.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/glibc84243-ubuntu239-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 56d7a5484f348bb45029150d41dd6c67b797171536f97aa76214ddebb008d4ad \
+            --source-sha256 017f32b9b026b50203791d4bfeec3174e997fd36dd46013efc3c6c3472da673a \
             --execute-hosted-build --confirm BUILD-ONLY-DISPOSABLE-CI-UBUNTU239-GLIBC-84243-FULL-PACKAGES-20261101-01
       - name: Preserve only completed candidate packages and public proofs
         if: success() && steps.build.outcome == 'success'

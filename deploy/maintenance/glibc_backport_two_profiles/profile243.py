@@ -1,12 +1,36 @@
 """Fixed exact Ubuntu 2.43-2ubuntu2.4 installed-family6 data; local candidate only."""
 HOST = {'base': 'ubuntu:26.04@sha256:157dc3d6e4a3e4f2c68d12df9df9ed6e808b59af6d4c3757b432b4f519916725',
  'bootstrap_prepare': ['/bin/sh',
-                       '-c',
-                       'set -eu; export DEBIAN_FRONTEND=noninteractive; apt-get -o Acquire::Retries=0 -o '
-                       'APT::Update::Error-Mode=any -o Acquire::AllowInsecureRepositories=false -o '
-                       'APT::Get::AllowUnauthenticated=false update; apt-get -o Acquire::Retries=0 -o '
-                       'Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false -y '
-                       '--no-install-recommends install python3 ca-certificates ubuntu-keyring'],
+ '-c',
+ 'set -eu\n'
+ 'export DEBIAN_FRONTEND=noninteractive\n'
+ '# The reviewed public ISRG root is in the existing read-only recipe context.\n'
+ '# This bootstraps normal CA packages without disabling TLS or APT signatures.\n'
+ 'test -f /public-context/snapshot-public-isrg-root-x1.crt\n'
+ 'test ! -L /public-context/snapshot-public-isrg-root-x1.crt\n'
+ "printf '%s  %s\\n' '22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1' "
+ "'/public-context/snapshot-public-isrg-root-x1.crt' | sha256sum -c -\n"
+ 'test ! -L /etc/apt/sources.list\n'
+ 'for snapshot_source in /etc/apt/sources.list.d/*; do\n'
+ ' [ -e "$snapshot_source" ] || [ -L "$snapshot_source" ] || continue\n'
+ ' test -f "$snapshot_source"; test ! -L "$snapshot_source"\n'
+ ' rm -- "$snapshot_source"\n'
+ 'done\n'
+ ': > /etc/apt/sources.list\n'
+ "cat > /etc/apt/sources.list.d/locked-snapshot-bootstrap.sources <<'SNAPSHOT_BOOTSTRAP_SOURCES'\n"
+ 'Types: deb\n'
+ 'URIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\n'
+ 'Suites: resolute resolute-updates resolute-security\n'
+ 'Components: main universe\n'
+ 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'
+ 'SNAPSHOT_BOOTSTRAP_SOURCES\n'
+ 'apt-get -o Acquire::Retries=0 -o APT::Update::Error-Mode=any -o '
+ 'Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false -o '
+ 'Acquire::https::CaInfo=/public-context/snapshot-public-isrg-root-x1.crt update\n'
+ 'apt-get -o Acquire::Retries=0 -o Acquire::AllowInsecureRepositories=false -o '
+ 'APT::Get::AllowUnauthenticated=false -o '
+ 'Acquire::https::CaInfo=/public-context/snapshot-public-isrg-root-x1.crt -y '
+ '--no-install-recommends install python3 ca-certificates ubuntu-keyring\n'],
  'confirm': 'BUILD-ONLY-DISPOSABLE-CI-TWO-UBUNTU243-GLIBC-84243-FULL-PACKAGES-20261101-01',
  'idle_argv': ['/usr/bin/sleep', '19800'],
  'name': 'ubuntu243',
@@ -24,17 +48,17 @@ WORKER = {'after': {'intl/Makefile': (6024, 'f43a1c91aaf1a3a22e359415eb5011df714
            'intl/dcigettext.c': (46515, 'f2ab262a35ca2207f16241f99c11ac324b13bba987227114886a06a046fb62f3'),
            'intl/tst-gettext-path-traversal.c': (3336,
                                                  'c732e301bbe037a6aa612f1452d7768d0bb3efd893f4fbf1d4d02e4651e2d3f6')},
- 'apt_sources': 'Types: deb deb-src\n'
-                'URIs: https://archive.ubuntu.com/ubuntu/\n'
-                'Suites: resolute resolute-updates\n'
-                'Components: main universe\n'
-                'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'
-                '\n'
-                'Types: deb deb-src\n'
-                'URIs: https://security.ubuntu.com/ubuntu/\n'
-                'Suites: resolute-security\n'
-                'Components: main universe\n'
-                'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n',
+ 'apt_sources': ('Types: deb deb-src\n'
+ 'URIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\n'
+ 'Suites: resolute resolute-updates\n'
+ 'Components: main universe\n'
+ 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'
+ '\n'
+ 'Types: deb deb-src\n'
+ 'URIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\n'
+ 'Suites: resolute-security\n'
+ 'Components: main universe\n'
+ 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n'),
  'baseline_debs': {'libc-bin_2.43-2ubuntu2.4_amd64.deb': (700954,
                                                           'bc4f50a0aebbb348598749c291a3742f9485d94b044715d382388607b9159a1b'),
                    'libc-dev-bin_2.43-2ubuntu2.4_amd64.deb': (23328,

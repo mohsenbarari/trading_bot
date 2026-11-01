@@ -172,8 +172,9 @@ def apt_snapshot(phase):
  for line in targets.decode('utf-8').splitlines():
   values=line.split('\t');need(len(values)==6 and '$('not in line,'apt_target_shape')
   path,uri,meta,repo,trusted,identifier=values;parsed=urlsplit(repo)
+  repository_ok=(repo=='https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/')if PROFILE_NAME=='ubuntu239'else(parsed.scheme in{'http','https'}and parsed.hostname in{'archive.ubuntu.com','security.ubuntu.com','snapshot.debian.org'})
   need(Path(path).parent==Path('/var/lib/apt/lists')and Path(path).name in files and identifier=='Packages'and trusted=='yes'
-   and parsed.scheme in{'http','https'}and parsed.hostname in{'archive.ubuntu.com','security.ubuntu.com','snapshot.debian.org'}
+   and repository_ok
    and parsed.port is None and not parsed.query and not parsed.fragment and parsed.username is None and parsed.password is None
    and uri.startswith(repo)and re.fullmatch('[A-Za-z0-9+./_-]+/Packages',meta)is not None,'apt_target_untrusted')
   need(any(repo in text.split()for text in sources.values()),'apt_target_repository')

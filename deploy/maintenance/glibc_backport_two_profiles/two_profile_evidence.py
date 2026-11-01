@@ -14,6 +14,57 @@ RAW_NAMES={'two-profile-raw-tests.json':131072,'two-profile-raw-tests.tar.xz':16
 EMPTY_RAW_NAMES=frozenset('two-profile-raw-'+flavour+'.sum'for flavour in FLAVOURS)
 STATES={'PASS','FAIL','XFAIL','XPASS','UNSUPPORTED'}
 FORMAT=None
+FAMILIES={'trixie241':('libc6','libc-bin'),'ubuntu243':('libc6','libc-bin','libc-dev-bin','libc-gconv-modules-extra','libc6-dev','locales')}
+QUARANTINE_PROOFS=('source-proof.json','vendor-suite.json','old-counterfactual.json','old-counterfactual.log','preparation.json','provenance.json')
+QUARANTINE_MAX=192*1024**2;QUARANTINE_DEBS_MAX=128*1024**2;QUARANTINE_METADATA_MAX=16*1024**2
+ABI_OBSERVATION_BYTES=0
+# The original classification remains immutable. Ordinary authenticated Debian
+# git-updates.diff changes this Makefile before our candidate patch is applied.
+EFFECTIVE_SOURCE_REFS={'trixie241':{'sysdeps/x86/Makefile':{'bytes':5463,'sha256':'0b043149cdd1bc4d7ae88a536657025f715f8c1e734a83f43add2362cbe67968'}},'ubuntu243':{}}
+def quarantine_contract(profile):
+ need(profile in FAMILIES and profile in PROFILES,'two_profile_quarantine_profile')
+ version=PROFILES[profile]['old_version']+'+gold1'
+ debs=tuple(name+'_'+version+'_'+('all'if name=='locales'else'amd64')+'.deb'for name in FAMILIES[profile])
+ return {'debs':debs,'names':{**RAW_NAMES,'two-profile-payload-layout.json':4*1024**2,**{name:32*1024**2 for name in debs},**{name:16*1024**2 for name in QUARANTINE_PROOFS}}}
+
+def payload_layout(root):
+ """Same five metadata values as the original guard, with stable bounded reads."""
+ root=Path(root);before=frame(root.lstat());result={};originals=[];total=0
+ for path in root.rglob('*'):
+  need(len(result)<32768,'payload_layout_bound');relative=str(path.relative_to(root));s=path.lstat();initial=frame(s)
+  row={'type':stat.S_IFMT(s.st_mode),'mode':stat.S_IMODE(s.st_mode),'uid':s.st_uid,'gid':s.st_gid,'link':os.readlink(path)if stat.S_ISLNK(s.st_mode)else None}
+  size=len(enc({relative:row}));need(total+size<=1024**2,'payload_layout_bound');total+=size
+  need(frame(path.lstat())==initial,'payload_layout_changed');result[relative]=row;originals.append((path,initial,row['link']))
+ need(frame(root.lstat())==before,'payload_layout_changed')
+ for path,initial,link in originals:
+  need(frame(path.lstat())==initial and(link is None or os.readlink(path)==link),'payload_layout_changed')
+ return result
+
+def capture_layout(out,old,new,old_packages,new_packages,context,profile):
+ contract=quarantine_contract(profile);OLD_VERSION=PROFILES[profile]['old_version'];FAMILY=FAMILIES[profile];QUARANTINE_DEBS=contract['debs'];QUARANTINE_NAMES=contract['names']
+ need(type(old)is dict and type(new)is dict,'payload_layout_shape')
+ expected_old={name+'_'+OLD_VERSION+'_'+('all'if name=='locales'else'amd64')+'.deb'for name in FAMILY}
+ need(set(old_packages)==expected_old and set(new_packages)==set(QUARANTINE_DEBS),'payload_layout_family')
+ for collection in(old_packages,new_packages):
+  for filename,row in collection.items():
+   need(type(row)is dict and type(row.get('bytes'))is int and 0<row['bytes']<=32*1024**2 and re.fullmatch('[a-f0-9]{64}',row.get('sha256',''))is not None,'payload_layout_package_pin')
+ need(sum(row['bytes']for row in new_packages.values())<=QUARANTINE_DEBS_MAX,'payload_layout_package_bound')
+ differences=[]
+ for name in sorted(set(old)|set(new)):
+  if old.get(name)!=new.get(name):differences.append({'path':name,'old':{'status':'PRESENT','metadata':old[name]}if name in old else{'status':'ABSENT'},'new':{'status':'PRESENT','metadata':new[name]}if name in new else{'status':'ABSENT'},'fields':sorted(k for k in set(old.get(name,{}))|set(new.get(name,{}))if old.get(name,{}).get(k)!=new.get(name,{}).get(k))})
+ refs={}
+ for name in QUARANTINE_PROOFS:
+  try:refs[name]={'status':'PRESENT',**pin(read_regular(Path(out)/name,QUARANTINE_NAMES[name]))}
+  except FileNotFoundError:refs[name]={'status':'ABSENT'}
+ document={'schema':'Two_profile_quarantined_payload_layout/1','disposition':'QUARANTINED_NOT_QUALIFIED','old':old,'new':new,'delta':differences,'counts':{'old':len(old),'new':len(new),'changed_paths':len(differences)},'old_packages':old_packages,'new_packages':new_packages,'source_context':context,'profile':profile,'preexisting_proofs':refs,'layout_equal':old==new,'vendor_qualification':False,'Host_packages_eligible':False,'security_accepted':False}
+ raw=enc(document);write_new(Path(out)/'two-profile-payload-layout.json',raw,QUARANTINE_NAMES['two-profile-payload-layout.json']);return document
+
+def abi_observation(phase,path,facts):
+ """Finite public operand prefixes in the existing bounded full-build log."""
+ global ABI_OBSERVATION_BYTES
+ need(phase in{'headers','properties','dynsym','inventory'}and type(path)is str and len(path)<=4096 and not path.startswith('/')and'..'not in Path(path).parts,'ABI_observation_scope')
+ raw=enc({'schema':'Two_profile_public_ABI_operand/1','phase':phase,'path':path,'facts':facts,'disposition':'QUARANTINED_NOT_QUALIFIED','security_accepted':False})
+ need(len(raw)<=1024**2 and ABI_OBSERVATION_BYTES+len(raw)<=32*1024**2,'ABI_observation_bound');ABI_OBSERVATION_BYTES+=len(raw);print(raw.decode(),end='',flush=True)
 def need(ok,code):
  if ok is not True:raise RuntimeError(code)
 def frame(s):return(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
@@ -25,8 +76,8 @@ def close_owned(fd):
  try:os.fstat(fd)
  except OSError as error:need(error.errno==errno.EBADF,'two_profile_close_unknown')
  else:need(False,'two_profile_close_unknown')
-def read_regular(path,maximum,*,empty=False):
- path=Path(path);parents=[(p,frame(p.lstat())[:5])for p in path.parents]
+def read_regular(path,maximum,*,empty=False,guard=lambda:None):
+ guard();path=Path(path);parents=[(p,frame(p.lstat())[:5])for p in path.parents]
  need(path.resolve(strict=True)==path and all(p.resolve(strict=True)==p and stat.S_ISDIR(value[2])for p,value in parents),'two_profile_file_changed')
  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
  primary=None;answer=None;secondary=[]
@@ -36,19 +87,19 @@ def read_regular(path,maximum,*,empty=False):
   need(flags[1]==fcntl.FD_CLOEXEC and os.lseek(fd,0,os.SEEK_CUR)==0,'two_profile_OFD')
   raw=bytearray();offset=0
   while offset<before[6]:
-   block=os.pread(fd,min(65536,before[6]-offset),offset);need(len(block)>0 and len(raw)+len(block)<=maximum,'two_profile_read_bound');raw.extend(block);offset+=len(block)
+   guard();block=os.pread(fd,min(65536,before[6]-offset),offset);need(len(block)>0 and len(raw)+len(block)<=maximum,'two_profile_read_bound');raw.extend(block);offset+=len(block)
   need(os.pread(fd,1,offset)==b''and frame(os.fstat(fd))==frame(path.lstat())==before
    and(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))==flags and os.lseek(fd,0,os.SEEK_CUR)==0
    and path.resolve(strict=True)==path
    and all(p.resolve(strict=True)==p and frame(p.lstat())[:5]==value and stat.S_ISDIR(value[2])for p,value in parents),'two_profile_file_changed')
-  answer=bytes(raw)
+  guard();answer=bytes(raw)
  except BaseException as error:primary=error
  try:close_owned(fd)
  except BaseException:
   secondary.append('two_profile_close_unknown')
  if primary is not None:
   primary.two_profile_secondary_codes=secondary;raise primary
- need(not secondary,'two_profile_close_unknown');return answer
+ need(not secondary,'two_profile_close_unknown');guard();return answer
 def rows(raw):
  need(FORMAT is not None,'two_profile_vendor_format_unbound')
  parsed=FORMAT.parse_merge_ledger(raw);result={name:state for state,name in parsed['rows']}
@@ -103,6 +154,22 @@ def subject(classification):
  need(len(matches)==1,'two_profile_classification_pin');profile=matches[0];table=json.loads(classification)
  need(tuple(row['test']for row in table['rows'])==profile['cases'],'two_profile_case_table')
  return profile,table
+
+def preflight_sources(source,classification):
+ """Cheap exact effective-source joins before the mandatory expensive full build."""
+ source=Path(source);profile,table=subject(classification)
+ refs={key:{field:value[field]for field in('bytes','sha256')}for key,value in table.get('additional_source_refs',{}).items()}
+ refs.update(EFFECTIVE_SOURCE_REFS[profile['name']])
+ for relative,expected in refs.items():
+  need(not relative.startswith('/')and'..'not in Path(relative).parts,'two_profile_source_path')
+  need(pin(read_regular(source/relative,1024**2))==expected,'two_profile_case_source_changed')
+ for row in table['rows']:
+  member=row['source']['member'];need(member.startswith(profile['source_prefix'])and'..'not in Path(member).parts,'two_profile_source_path')
+  need(pin(read_regular(source/member.removeprefix(profile['source_prefix']),1024**2))=={key:row['source'][key]for key in('bytes','sha256')},'two_profile_case_source_changed')
+ for relative,key in(('scripts/evaluate-test.sh','evaluator'),('debian/testsuite-xfail-debian.mk','expectations'),('scripts/merge-test-results.sh','merge_producer')):
+  same_pin(read_regular(source/relative,65536),profile[key])
+ same_pin(read_regular(source/(REGRESSION+'.c'),65536),REGRESSION_SOURCE)
+ return {'schema':'Two_profile_effective_source_preflight/1','profile':profile['name'],'fixed_cases':len(table['rows']),'additional_refs':len(refs),'source_inputs_verified_only':True,'vendor_qualification':False,'security_accepted':False}
 
 def capture(source,out,build_code,classification):
  """Retain every fixed raw sum and case output before semantic acceptance."""
@@ -178,6 +245,7 @@ def review(raw,document,classification):
  need(all(state!='FAIL'for state in parsed.values()),'vendor_regression_failed');xpass={name for name,state in parsed.items()if state=='XPASS'};need(xpass<=set(profile['cases']),'two_profile_unknown_XPASS')
  need(parsed.get('intl/tst-gettext-path-traversal')=='PASS','new_regression_not_executed')
  refs={key:{field:value[field]for field in('bytes','sha256')}for key,value in table.get('additional_source_refs',{}).items()}
+ refs.update(EFFECTIVE_SOURCE_REFS[profile['name']])
  need(document.get('additional_source_refs_actual')==refs,'two_profile_case_source_changed')
  for row in document['cases']:
   case=row['test'];need(all(row['files'].get(suffix,{}).get('status')=='CAPTURED'for suffix in('.out','.test-result'))and'result_refusal'not in row,'two_profile_case_file_missing')
@@ -191,27 +259,44 @@ def review(raw,document,classification):
   'disposition':'ROOT_REVIEW_PENDING','Root_review':'PENDING','body_extent_unqualified_cases':[case for case in EARLY if case in profile['cases']],
   'vendor_qualification':False,'Host_packages_eligible':False,'security_accepted':False}
 
-def failure_manifest_script():
- """Only these three public fixed leaves; no recursive or package export."""
+def failure_manifest_script(profile):
+ """Only fixed profile-declared quarantine leaves; no directory/glob/export authority."""
+ contract=quarantine_contract(profile)
  return r'''from pathlib import Path
 from hashlib import sha256
-import os,stat,json
-limits='''+repr(RAW_NAMES)+r'''
-empty='''+repr(sorted({'two-profile-raw-'+flavour+'.sum'for flavour in('libc','i386','x32')}))+r'''
+import os,stat,json,fcntl,errno
+limits='''+repr(contract['names'])+r'''
+empty='''+repr(sorted(EMPTY_RAW_NAMES))+r'''
 rows={}
+sizes={}
+for name,limit in limits.items():
+ try:s=(Path('/out')/name).lstat()
+ except FileNotFoundError:continue
+ assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
+ sizes[name]=(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+assert sum(row[6]for row in sizes.values())<='''+str(QUARANTINE_MAX)+r'''
+assert sum(sizes[name][6]for name in '''+repr(contract['debs'])+r''' if name in sizes)<='''+str(QUARANTINE_DEBS_MAX)+r'''
+assert sum(sizes[name][6]for name in '''+repr(QUARANTINE_PROOFS)+r''' if name in sizes)<='''+str(QUARANTINE_METADATA_MAX)+r'''
 for name,limit in limits.items():
  p=Path('/out')/name
  try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
- except FileNotFoundError:continue
+ except FileNotFoundError:
+  assert name not in sizes;continue
  try:
   s=os.fstat(fd);key=lambda t:(t.st_dev,t.st_ino,t.st_mode,t.st_uid,t.st_gid,t.st_nlink,t.st_size,t.st_mtime_ns,t.st_ctime_ns)
-  before=key(s);assert stat.S_ISREG(s.st_mode)and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
+  before=key(s);flags=(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD));assert flags[1]==fcntl.FD_CLOEXEC and os.lseek(fd,0,os.SEEK_CUR)==0
+  assert name in sizes and key(s)==sizes[name] and stat.S_ISREG(s.st_mode)and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
   h=sha256();n=0
   while True:
-   b=os.read(fd,min(65536,limit-n+1))
+   b=os.pread(fd,min(65536,limit-n+1),n)
    if not b:break
    n+=len(b);assert n<=limit;h.update(b)
-  assert n==s.st_size and key(os.fstat(fd))==key(p.lstat())==before
-  rows[name]={'bytes':n,'sha256':h.hexdigest()}
+  assert n==s.st_size and key(os.fstat(fd))==key(p.lstat())==before and (fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))==flags and os.lseek(fd,0,os.SEEK_CUR)==0
+  rows[name]={'bytes':n,'sha256':h.hexdigest(),'full9':list(before)}
  finally:os.close(fd)
+ try:os.fstat(fd)
+ except OSError as error:assert error.errno==errno.EBADF
+ else:raise AssertionError('two_profile_close_unknown')
+ assert key(p.lstat())==before
+assert set(rows)==set(sizes)
 print(json.dumps(rows,sort_keys=True))'''

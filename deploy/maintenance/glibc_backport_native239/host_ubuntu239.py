@@ -5,9 +5,9 @@ from types import ModuleType
 import errno,fcntl,json,os,re,stat,sys
 HERE=Path(__file__).absolute().parent
 SHARED_NAME='build_hosted.py'
-SHARED_PIN=(28213, 'a135c3699d0f772e546896f7a3d7deaa92c15eab3ef58a01310437089a2f08bb')
+SHARED_PIN=(28234, 'cd9d282caa63f4049e1d182ddb9a277df8008d87c48d65176221c0dbdf63ac22')
 PROFILE_NAME='profile239.py'
-PROFILE_PIN=(4624, 'd0bcc60624c2cce4a582939bbe991c9bfbffdd33e56ce21dae676987e834743e')
+PROFILE_PIN=(5262, '420c3b55567fd93d200386b4572dfc143da1df8b5bc2114409babf2209c9f767')
 PROFILE_KEY='HOST'
 ACTION_FLAGS=('--execute-hosted-build',)
 

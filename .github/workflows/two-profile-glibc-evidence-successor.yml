@@ -24,12 +24,12 @@ jobs:
         include:
           - profile: trixie241
             entry: build_hosted.py
-            source_sha256: 8ac5595c7c6a53b55fe2a7bd532cb06db8f350a746f21888ae82ebc021a73dad
+            source_sha256: 36cca7a4a0fdbab0e64b4e5bc74d7603abd5556a168716985dd56b225b2f1694
             root_prefix: glibc84243-two-trixie241
             confirm: BUILD-ONLY-DISPOSABLE-CI-TWO-TRIXIE241-GLIBC-84243-FULL-PACKAGES-20261101-01
           - profile: ubuntu243
             entry: host_ubuntu243.py
-            source_sha256: 0b2cad73090cdc07542d489d859f97bdbc0f571f6dfa4d4471b0856a75cf9b3f
+            source_sha256: 1ddf506260957578998fef2d96f7bcde4ce083083d04195e37dc894cf678c204
             root_prefix: glibc84243-two-ubuntu243
             confirm: BUILD-ONLY-DISPOSABLE-CI-TWO-UBUNTU243-GLIBC-84243-FULL-PACKAGES-20261101-01
     steps:

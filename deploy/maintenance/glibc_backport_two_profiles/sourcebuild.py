@@ -172,7 +172,7 @@ def apt_snapshot(phase):
   values=line.split('\t');need(len(values)==6 and '$('not in line,'apt_target_shape')
   path,uri,meta,repo,trusted,identifier=values;parsed=urlsplit(repo)
   need(Path(path).parent==Path('/var/lib/apt/lists')and Path(path).name in files and identifier=='Packages'and trusted=='yes'
-   and parsed.scheme in{'http','https'}and parsed.hostname in{'archive.ubuntu.com','security.ubuntu.com','snapshot.debian.org'}
+   and parsed.scheme in{'http','https'}and (repo=='https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/'if PROFILE_NAME=='ubuntu243'else parsed.hostname in{'archive.ubuntu.com','security.ubuntu.com','snapshot.debian.org'})
    and parsed.port is None and not parsed.query and not parsed.fragment and parsed.username is None and parsed.password is None
    and uri.startswith(repo)and re.fullmatch('[A-Za-z0-9+./_-]+/Packages',meta)is not None,'apt_target_untrusted')
   need(any(repo in text.split()for text in sources.values()),'apt_target_repository')
@@ -324,6 +324,8 @@ def build():
  run(['/usr/bin/patch','--batch','--fuzz=0','--forward','--dry-run','-p1','-i',str(target)],cwd=SOURCE)
  run(['/usr/bin/quilt','--quiltrc','/dev/null','push'],cwd=SOURCE)
  for name,pin in AFTER.items():digest(SOURCE/name,pin)
+ classification=read(RECIPE/(PROFILE_NAME+'-original-XPASS-classification.json'),131072)
+ print(json.dumps(N.preflight_sources(SOURCE,classification),sort_keys=True),flush=True)
  changelog=SOURCE/'debian/changelog';old_changelog=read(changelog,2*1024**2)
  header=('glibc ('+VERSION+') '+TARGET_DIST+'; urgency=high\n\n  * Local source backport of proposed upstream v7 CVE-2026-84243 fix.\n    Not an official Debian or upstream fixed-version claim.\n\n -- Trading Bot Security Build <noreply@gold-trade.invalid>  Sun, 01 Nov 2026 00:00:00 +0000\n\n').encode()
  changelog.write_bytes(header+old_changelog)
@@ -370,12 +372,9 @@ def build():
  need(required<={v['name']for v in products},'runtime_packages_missing')
  candidate=ROOT/'candidate-payload';candidate.mkdir(mode=0o755)
  for name in sorted(required):run(['/usr/bin/dpkg-deb','-x',str(OUT/name),str(candidate)])
- def layout(root):
-  result={}
-  for p in root.rglob('*'):
-   st=p.lstat();result[str(p.relative_to(root))]={'type':stat.S_IFMT(st.st_mode),'mode':stat.S_IMODE(st.st_mode),'uid':st.st_uid,'gid':st.st_gid,'link':os.readlink(p)if p.is_symlink()else None}
-  return result
- need(layout(base)==layout(candidate),'runtime_payload_structure_changed')
+ old_layout=N.payload_layout(base);new_layout=N.payload_layout(candidate)
+ N.capture_layout(OUT,old_layout,new_layout,{name:{'bytes':value[0],'sha256':value[1]}for name,value in BASELINE.items()},{row['name']:{key:row[key]for key in('bytes','sha256','control')}for row in products if row['name']in required},ctx,PROFILE_NAME)
+ need(old_layout==new_layout,'runtime_payload_structure_changed')
  ABI={}
  for old in sorted(base.rglob('*')):
   if not old.is_file()or old.is_symlink():continue
@@ -383,11 +382,16 @@ def build():
   if not elf:continue
   new=candidate/old.relative_to(base);need(new.is_file()and not new.is_symlink(),'ABI_path_missing')
   headers=[run(['/usr/bin/readelf','--file-header','--program-headers','--dynamic','--wide',str(p)])for p in(old,new)]
+  relative=str(old.relative_to(base));file_refs={'old':digest(old),'new':digest(new)}
+  N.abi_observation('headers',relative,{'files':file_refs,'old_raw':N.pin(headers[0]),'new_raw':N.pin(headers[1])})
   def properties(raw):
    text=raw.decode();return {'class':re.findall(r'Class:\s+(\S+)',text),'machine':re.findall(r'Machine:\s+(.+)',text),'interpreter':re.findall(r'\[Requesting program interpreter: ([^\]]+)\]',text),'SONAME':re.findall(r'\(SONAME\).*\[(.+)\]',text),'NEEDED':re.findall(r'\(NEEDED\).*\[(.+)\]',text)}
-  need(properties(headers[0])==properties(headers[1]),'ABI_loader_contract_changed')
+  old_properties=properties(headers[0]);new_properties=properties(headers[1]);N.abi_observation('properties',relative,{'old':old_properties,'new':new_properties})
+  need(old_properties==new_properties,'ABI_loader_contract_changed')
   symbols=[run(['/usr/bin/readelf','--dyn-syms','--wide',str(p)])for p in(old,new)]
+  N.abi_observation('dynsym',relative,{'files':file_refs,'old_raw':N.pin(symbols[0]),'new_raw':N.pin(symbols[1])})
   ABI[str(old.relative_to(base))]={'old':digest(old),'new':digest(new),'ELF_loader_properties':properties(headers[1]),'exports':V.ABI_equal(*symbols,allow_empty=not properties(headers[0])['SONAME'] and not properties(headers[0])['NEEDED'])}
+ N.abi_observation('inventory','.',{'ELF_paths':sorted(ABI),'count':len(ABI)})
  need(len(ABI)>10,'ABI_inventory_incomplete');save(OUT/'abi-contract.json',enc({'schema':'glibc84243_selected_family_ELF_ABI_and_layout/1','packages':RUNTIME_PACKAGES,'ELFs':ABI,'complete_selected_file_symlink_layout_equal':True,'static_archive_member_ABI_separately_qualified':False,'old_binary_byte_identity_required':False,'all_new_payloads_recorded':True,'security_accepted':False}))
  for p in BUILD_AREA.glob('*.changes'):
   if VERSION in p.name:save(OUT/p.name,read(p,4*1024**2))

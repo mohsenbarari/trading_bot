@@ -9,8 +9,8 @@
       "sha256": "b242ad410ae54c64cd77fd95a7813a6e1ea6367a6d81af56a9dc6318d4b0c76b"
     },
     "build_hosted.py": {
-      "bytes": 26314,
-      "sha256": "8ac5595c7c6a53b55fe2a7bd532cb06db8f350a746f21888ae82ebc021a73dad"
+      "bytes": 28352,
+      "sha256": "36cca7a4a0fdbab0e64b4e5bc74d7603abd5556a168716985dd56b225b2f1694"
     },
     "host_io_original.py": {
       "bytes": 53351,
@@ -18,27 +18,31 @@
     },
     "host_ubuntu243.py": {
       "bytes": 3751,
-      "sha256": "0b2cad73090cdc07542d489d859f97bdbc0f571f6dfa4d4471b0856a75cf9b3f"
+      "sha256": "1ddf506260957578998fef2d96f7bcde4ce083083d04195e37dc894cf678c204"
     },
     "profile243.py": {
-      "bytes": 4910,
-      "sha256": "9b8dd9d0ab540a8955720979c30fa26e93e4d66aa8d211615986b88ef21e0670"
+      "bytes": 5953,
+      "sha256": "202ee45a680e100056abe167a916fa56f71bcdfdc68e866527ba1e1ce3c29d14"
+    },
+    "snapshot-public-isrg-root-x1.crt": {
+      "bytes": 1939,
+      "sha256": "22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1"
     },
     "source_io.py": {
       "bytes": 8831,
       "sha256": "b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568"
     },
     "sourcebuild.py": {
-      "bytes": 34224,
-      "sha256": "384e4f16b35f9605db073e5ed4115ff70385d73f2800fd688f0d832f4dcde903"
+      "bytes": 35088,
+      "sha256": "8677b402fbd82c617a7f8c77f02596266b39d21de591963bdc5f09857117f4b0"
     },
     "trixie241-original-XPASS-classification.json": {
       "bytes": 12385,
       "sha256": "29a094e9626537e10345d1c66c20cf8a232ea89507fdfbe5d19387c16fc3256c"
     },
     "two_profile_evidence.py": {
-      "bytes": 16699,
-      "sha256": "ee10c7274bf90872eaef4b3dcab43ec891b845fcb5a0390173a897f99ef2d435"
+      "bytes": 24457,
+      "sha256": "3cc28884b73c98332765ad008174fcf5dcd8d6da0e94ad5adf028b2af58448f4"
     },
     "ubuntu243-original-XPASS-classification.json": {
       "bytes": 19644,
@@ -58,7 +62,7 @@
     },
     "worker_ubuntu243.py": {
       "bytes": 3751,
-      "sha256": "8a73a30165c8140463a10a02ae9184eed2615f5ad28a84d7cdb87ae0e625a4aa"
+      "sha256": "bd048a31bef26a762a75b6e57d340135b22cdf724fc280c764ecece41097f2db"
     }
   },
   "schema": "glibc84243_source_recipe/1"

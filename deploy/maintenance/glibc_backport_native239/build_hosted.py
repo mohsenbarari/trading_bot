@@ -225,7 +225,7 @@ def execute(args):
   try:facts=M.host_facts(root.parent)
   finally:M.validate_host=original_validate
   need(min(initial.values())>=GROWTH+RESERVE,'capacity_floor')
-  root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o755);reports=root/'reports';reports.mkdir(mode=0o700);raw_failure_dir=reports/'native239-raw-failure';raw_failure_dir.mkdir(mode=0o700);raw_failure_identity=frame(raw_failure_dir.lstat())[:6];out=root/'package-output';out.mkdir(mode=0o700)
+  root.mkdir(mode=0o700);context=root/'context';context.mkdir(mode=0o755);context.chmod(0o755);reports=root/'reports';reports.mkdir(mode=0o700);raw_failure_dir=reports/'native239-raw-failure';raw_failure_dir.mkdir(mode=0o700);raw_failure_identity=frame(raw_failure_dir.lstat())[:6];out=root/'package-output';out.mkdir(mode=0o700)
   config=root/'docker-client';config.mkdir(mode=0o700);env['DOCKER_CONFIG']=str(config)
   scope=S.Scope(18000);own=scope.open(ENTRY,(ENTRY.stat().st_size,args.source_sha256),131072)
   # Manifest itself is a tracked Git blob; no self-referential hash cycle.

@@ -10,8 +10,8 @@
       "sha256": "af67420d44cedbbbc0e36940545326ae87c28875deda19e962d731d360a46e58"
     },
     "build_hosted.py": {
-      "bytes": 28213,
-      "sha256": "a135c3699d0f772e546896f7a3d7deaa92c15eab3ef58a01310437089a2f08bb"
+      "bytes": 28234,
+      "sha256": "cd9d282caa63f4049e1d182ddb9a277df8008d87c48d65176221c0dbdf63ac22"
     },
     "host_io_original.py": {
       "bytes": 53351,
@@ -19,7 +19,7 @@
     },
     "host_ubuntu239.py": {
       "bytes": 3751,
-      "sha256": "56d7a5484f348bb45029150d41dd6c67b797171536f97aa76214ddebb008d4ad"
+      "sha256": "017f32b9b026b50203791d4bfeec3174e997fd36dd46013efc3c6c3472da673a"
     },
     "native239-original-XPASS-classification.json": {
       "bytes": 15662,
@@ -30,16 +30,20 @@
       "sha256": "77498de9a46d5b605bc67bf1700db68accb2c60d35a9df47e549f0e6f2fcfdfb"
     },
     "profile239.py": {
-      "bytes": 4624,
-      "sha256": "d0bcc60624c2cce4a582939bbe991c9bfbffdd33e56ce21dae676987e834743e"
+      "bytes": 5262,
+      "sha256": "420c3b55567fd93d200386b4572dfc143da1df8b5bc2114409babf2209c9f767"
+    },
+    "snapshot-public-isrg-root-x1.crt": {
+      "bytes": 1939,
+      "sha256": "22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1"
     },
     "source_io.py": {
       "bytes": 8831,
       "sha256": "b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568"
     },
     "sourcebuild.py": {
-      "bytes": 36113,
-      "sha256": "3fd481b11ea8f95b2dbb35d5f7e563993cfb61ce3eec1cf81548220c67b5a380"
+      "bytes": 36239,
+      "sha256": "625922e422080cd91e113fae531bcbfd420005299cd5a9d7b3a5d4bbe7aa575b"
     },
     "vendor-tst-gettext-path-traversal.c": {
       "bytes": 3336,
@@ -55,7 +59,7 @@
     },
     "worker_ubuntu239.py": {
       "bytes": 3751,
-      "sha256": "34be3139f9325b116ad9a4cb474dcee63561fe9f946952b4761e6c2cb9b5897d"
+      "sha256": "988f438acbe0cf4e3ed439d889bfa3bc0557ffc148e38841c6b0768205e4c819"
     }
   }
 }
