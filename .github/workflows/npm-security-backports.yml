@@ -244,9 +244,9 @@ jobs:
           E2E_REDIS_CONTAINER_NAME: trading_bot_redis
         run: |
           case "$BROWSER" in
-            chromium) npm run test:e2e -- --shard="$SHARD/4" --reporter=github,json,html ;;
-            firefox) npm run test:e2e:firefox -- --shard="$SHARD/4" --reporter=github,json,html ;;
-            webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --reporter=github,json,html ;;
+            chromium) npm run test:e2e -- --shard="$SHARD/4" --max-failures=3 --reporter=github,json,html ;;
+            firefox) npm run test:e2e:firefox -- --shard="$SHARD/4" --max-failures=3 --reporter=github,json,html ;;
+            webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --max-failures=3 --reporter=github,json,html ;;
             *) exit 2 ;;
           esac
       - name: Observe public backend state after browser gate
