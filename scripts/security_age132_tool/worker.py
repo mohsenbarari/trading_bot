@@ -6,7 +6,7 @@ from uuid import uuid4
 import argparse,base64,errno,fcntl,io,json,os,re,shutil,stat,sys,tarfile,time,urllib.request
 HERE=Path(__file__).absolute().parent
 IO_PIN=(8831,'b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568')
-PINS={'source_io.py': (8831, 'b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568'), 'host_io_original.py': (53351, 'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82'), 'contracts.py': (18954, '4b6bad304bd6bac16ebcf1079ee61728ef2d32f7258ae87d75b7b7c81f13aa4b'), 'inputs.json': (14758, '9cfa5c3dd9e3faa6c85201c1337933aa77a2115e6b44823daf4f36d4488ad642'), 'age.go.mod': (619, '53e9fdd9fd328e14aab3eebe759c5ab048c1a7a8bbacbb8a853556b26efedc9c'), 'age.go.sum': (2823, '1f504fde4a3f8cbc4c159ac4e75f17cee7015b1d74d555feb79e06a34365eb75'), 'scanner.go.mod': (624, '5c3d2dd42ed9e7fa9d0025334c7edcf8bcf5fff788b0a836cbd746f444690b2c'), 'scanner.go.sum': (2625, '11a4fa1753df1bb15e5bc4fba3192eeab54764274f213c77f034c916217d7bdb')}
+PINS={'source_io.py': (8831, 'b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568'), 'host_io_original.py': (53351, 'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82'), 'contracts.py': (22660, 'a5ae855750c67e83b7349919b0450a5094212797cab1bee904f191475846dd41'), 'inputs.json': (14758, '9cfa5c3dd9e3faa6c85201c1337933aa77a2115e6b44823daf4f36d4488ad642'), 'age.go.mod': (619, '53e9fdd9fd328e14aab3eebe759c5ab048c1a7a8bbacbb8a853556b26efedc9c'), 'age.go.sum': (2823, '1f504fde4a3f8cbc4c159ac4e75f17cee7015b1d74d555feb79e06a34365eb75'), 'scanner.go.mod': (624, '5c3d2dd42ed9e7fa9d0025334c7edcf8bcf5fff788b0a836cbd746f444690b2c'), 'scanner.go.sum': (2625, '11a4fa1753df1bb15e5bc4fba3192eeab54764274f213c77f034c916217d7bdb'), 'public-x25519-test-fixture.txt': (823, '3048a68cb0a94f2fd0d33bef64288364ccc16adcc2321018f3a2036aa92923d9')}
 REPOSITORY='mohsenbarari/trading_bot'
 def need(v,c):
  if v is not True:raise RuntimeError(c)
@@ -207,9 +207,52 @@ def publish_result(M,path,result,source_rows,deadline):
  truth={'writer_acquired':fd is not None,'writer_original_physical_EBADF':writer_closed,'writer_HELD':writer_held,'reader_acquired':reader is not None and getattr(reader,'original',None)is not None,'reader_original_physical_EBADF':reader is not None and getattr(reader,'physical_EBADF',False),'reader_unknown':reader is not None and getattr(reader,'unknown',True),'finalizer_codes':errors,'provisional_file_never_acceptance':True}
  if primary is not None:primary.age_result_publication_truth=truth;raise primary
  need(writer_closed and reader is not None and reader.closed and reader.physical_EBADF and not reader.unknown and not errors,'result_finality');return truth
+def public_packaged_roundtrip(C,root,staged,binaries,fixture,command,save,held_product,guard,deadline):
+ """Only exact staged payload bytes and the pinned public upstream test key.
+
+ The caller later binds these same hashes into the actual DEB. No existing
+ cipher, backup, key, plugin, installed command or stdout identity is used.
+ Successful process returns inherit the original finite command's zero/EOF/
+ physical-pipe-close contract; outer product/Source finalizers remain required.
+ """
+ def check():guard();need(time.monotonic()<deadline,'public_CLI_deadline')
+ check();need(set(staged)==set(binaries)=={'age','age-keygen'},'public_CLI_binary_inventory')
+ for name in('age','age-keygen'):
+  need(type(staged[name])is ProductHeld and type(binaries[name])is ProductHeld
+   and staged[name].path==root/'package/usr/bin'/name and binaries[name].path==root/'age-output'/name,'public_CLI_binary_owner')
+  staged[name].check();binaries[name].check();need(staged[name].pin==binaries[name].pin,'public_CLI_delivered_binary_pin')
+ identity,recipient=C.public_cli_fixture(fixture)
+ identity_path=root/'PUBLIC-UPSTREAM-TEST-IDENTITY.txt';plain=root/'PUBLIC-PACKAGED-PLAINTEXT.txt'
+ derived=root/'PUBLIC-PACKAGED-RECIPIENT.txt';cipher=root/'PUBLIC-PACKAGED-CIPHERTEXT.age';restored=root/'PUBLIC-PACKAGED-RESTORED.txt'
+ # lstat catches broken aliases too. No named file from an earlier run is used.
+ for path in(identity_path,plain,derived,cipher,restored):
+  check()
+  try:path.lstat()
+  except FileNotFoundError:pass
+  else:raise RuntimeError('public_CLI_path_preexists')
+ save(identity_path,identity);save(plain,C.PUBLIC_CLI_PAYLOAD);check();facts=[]
+ def run(argv,name):
+  check();out=command(argv,name,4096);need(type(out)is bytes and not out,'public_CLI_unexpected_stdout');check()
+  facts.append({'name':name,'actual_returncode':0,'stdout_eof_observed':True,'actual_pipe_closed':True,'stdout_bytes':0})
+ run([str(staged['age-keygen'].path),'-y','-o',str(derived),str(identity_path)],'packaged-public-keygen-derive')
+ recipient_reader=held_product(derived,256);need(recipient_reader.body()==recipient,'public_CLI_recipient_equality');check()
+ run([str(staged['age'].path),'--encrypt','--recipient',recipient.strip().decode('ascii'),'--output',str(cipher),str(plain)],'packaged-public-encrypt')
+ cipher_reader=held_product(cipher,65536);C.native_format(cipher_reader.body());check()
+ run([str(staged['age'].path),'--decrypt','--identity',str(identity_path),'--output',str(restored),str(cipher)],'packaged-public-decrypt')
+ restored_reader=held_product(restored,65536);need(restored_reader.body()==C.PUBLIC_CLI_PAYLOAD,'public_CLI_plaintext_equality');check()
+ def pin(row):return{'bytes':row.pin[0],'sha256':row.pin[1]}
+ files={name:pin(row)for name,row in staged.items()}
+ value={'schema':'age132_public_packaged_CLI_roundtrip/1','public_fixture':{'member':C.PUBLIC_CLI_FIXTURE_MEMBER,'bytes':C.PUBLIC_CLI_FIXTURE_PIN[0],'sha256':C.PUBLIC_CLI_FIXTURE_PIN[1]},
+  'CLI_files':files,'plaintext':{'bytes':len(C.PUBLIC_CLI_PAYLOAD),'sha256':sha256(C.PUBLIC_CLI_PAYLOAD).hexdigest()},
+  'ciphertext':pin(cipher_reader),'restored':pin(restored_reader),'derived_recipient':pin(recipient_reader),'commands':facts,
+  'CLI_keygen_public_recipient_proven':True,'CLI_decrypt_roundtrip_proven':True,'owned_current_run_ciphertext_only':True,
+  'operational_key_generated_or_read':False,'existing_backup_or_data_used':False,'raw_identity_exported':False,
+  'provisional_until_outer_Source_and_product_finality':True,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
+ check();return C.public_packaged_cli_roundtrip(value,files)
+
 def execute(source_sha):
  hosted()
- need(set(PINS)=={'source_io.py','host_io_original.py','contracts.py','inputs.json','age.go.mod','age.go.sum','scanner.go.mod','scanner.go.sum'},'source_inventory')
+ need(set(PINS)=={'source_io.py','host_io_original.py','contracts.py','inputs.json','age.go.mod','age.go.sum','scanner.go.mod','scanner.go.sum','public-x25519-test-fixture.txt'},'source_inventory')
  IO=bootstrap();scope=IO.Scope(3720);primary=None;final=[];phase='source';exports=None;result=None;products=[];failure_fact=None;failure_output=None;workspaces={};mutable_kind=None;workspace_truth={}
  started=time.monotonic();end=started+3600;payload_end=end-90
  try:
@@ -324,7 +367,7 @@ def execute(source_sha):
   for id in unresolved:
    osv=next(s['all_OSV'][id]for s in all_sca.values()if id in s['all_OSV']);paths=sorted({i['path']for a in osv.get('affected',[])for i in a.get('ecosystem_specific',{}).get('imports',[])})
    proposals.append({'id':id,'affected_packages':paths,'both_CLI_package_and_symbol_observations':{name:{p:{'package_in_actual_build_graph':p in graphs[name],'linked_symbol_prefix_observed':p.encode()+b'.'in symbols[name]}for p in paths}for name in binaries},'Root_assessment_required':True,'component_not_present_accepted':False})
-  provenance={'schema':'age132_managed_tool_build_provenance/1','upstream_commit':lock['age']['origin']['Hash'],'upstream_module_checksum':lock['age']['module_sum'],'go':lock['go'],'module_versions':{r['path']:r['version']for r in lock['age_modules']},'resolved_managed_workspaces':workspace_truth,'authenticated_package_profiles':package_profiles,'complete_selected_module_advisory_queries':{name:{'requested_subjects':value['requested_subjects'],'observed_subjects':value['observed_subjects'],'unresolved_ids':value['unresolved_ids'],'coverage_kind':value['coverage_kind']}for name,value in module_queries.items()},'source_package_tests_included':False,'all_SCA_unresolved':unresolved,'Root_component_absence_proposals':proposals,'tests':tests,'native_format':native,'SDK_archive':archive_truth,'ELF':elfs,'CLI_files':{n:{'bytes':r.before[6],'sha256':r.pin[1],'original_full9':list(r.before)}for n,r in binaries.items()},'held_original_go_source_files':source_files,'no_operational_key_generation_or_private_data_access':True,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False};save(exports/'BUILD-PROVENANCE.json',C.encoded(provenance))
+  provenance={'schema':'age132_managed_tool_build_provenance/1','upstream_commit':lock['age']['origin']['Hash'],'upstream_module_checksum':lock['age']['module_sum'],'go':lock['go'],'module_versions':{r['path']:r['version']for r in lock['age_modules']},'resolved_managed_workspaces':workspace_truth,'authenticated_package_profiles':package_profiles,'complete_selected_module_advisory_queries':{name:{'requested_subjects':value['requested_subjects'],'observed_subjects':value['observed_subjects'],'unresolved_ids':value['unresolved_ids'],'coverage_kind':value['coverage_kind']}for name,value in module_queries.items()},'source_package_tests_included':False,'all_SCA_unresolved':unresolved,'Root_component_absence_proposals':proposals,'tests':tests,'native_format':native,'SDK_archive':archive_truth,'ELF':elfs,'CLI_files':{n:{'bytes':r.before[6],'sha256':r.pin[1],'original_full9':list(r.before)}for n,r in binaries.items()},'held_original_go_source_files':source_files,'no_operational_key_generation_or_private_data_access':True,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
   phase='managed_deb_no_hooks';stage=root/'package';owned_directory(stage,0o755,guard)
   for path in('DEBIAN','usr','usr/bin','usr/share','usr/share/doc','usr/share/doc/age'):owned_directory(stage/path,0o755,guard)
   save(stage/'DEBIAN/control',b'Package: age\nVersion: 1.3.2+gold1\nArchitecture: amd64\nMaintainer: Trading Bot Operations <operations@localhost>\nSection: utils\nPriority: optional\nDescription: Managed standalone age security tool; Root qualification required\n',0o644);expected_files={}
@@ -332,12 +375,23 @@ def execute(source_sha):
   for path in [projects['age']/'LICENSE',root/'sdk/go/LICENSE',*sorted((projects['age']/'vendor').rglob('LICENSE*')),*sorted((projects['age']/'vendor').rglob('COPYING*'))]:
    if not path.is_file():continue
    item=held_product(path,65536);body=item.body();license_bytes+=len(body);need(license_bytes<=2*1024**2,'license_bound');licenses.append(body)
+  staged={}
+  for name,r in binaries.items():
+   body=b''.join(r.read(min(65536,r.before[6]-i),i)for i in range(0,r.before[6],65536));staged[name]=save(stage/'usr/bin'/name,body,C.PACKAGE_FILES['usr/bin/'+name]);expected_files['usr/bin/'+name]=(len(body),sha256(body).hexdigest())
+  phase='public_packaged_CLI_roundtrip'
+  public_roundtrip=public_packaged_roundtrip(C,root,staged,binaries,raw('public-x25519-test-fixture.txt'),command,save,held_product,guard,payload_end)
+  provenance['initial_encrypt_only_native_format_observation']=native
+  provenance['native_format']={**native,'CLI_decrypt_roundtrip_proven':public_roundtrip['CLI_decrypt_roundtrip_proven'],'public_packaged_CLI_roundtrip':public_roundtrip}
+  save(exports/'BUILD-PROVENANCE.json',C.encoded(provenance))
   docs={'usr/share/doc/age/copyright':b'\n\n'.join(licenses),'usr/share/doc/age/README.Debian':b'Upstream age1.3.2, fixed Go/dependency build. No daemons, maintainer scripts, hooks or dependencies. Runtime/backup qualification is separate.\n','usr/share/doc/age/build-provenance.json':C.encoded(provenance)}
-  for name,r in binaries.items():docs['usr/bin/'+name]=b''.join(r.read(min(65536,r.before[6]-i),i)for i in range(0,r.before[6],65536))
   for name,body in docs.items():save(stage/name,body,C.PACKAGE_FILES[name]);expected_files[name]=(len(body),sha256(body).hexdigest())
+  phase='managed_deb_no_hooks'
   package=exports/'age_1.3.2+gold1_amd64.deb';command(['/usr/bin/dpkg-deb','--build','--root-owner-group',str(stage),str(package)],'deb-build',65536);control=C.deb_control(command(['/usr/bin/dpkg-deb','--ctrl-tarfile',str(package)],'deb-control-tar',65536));payload_files=C.deb_data(command(['/usr/bin/dpkg-deb','--fsys-tarfile',str(package)],'deb-data-tar',64*1024**2),expected_files)
   package_reader=held_product(package,64*1024**2)
-  result={'schema':'age132_managed_tool_SOURCE_build_result/1','status':'BUILT_QUARANTINED_PENDING_ROOT_REVIEW'if unresolved or any(x['skips']for x in tests.values())else'BUILT_TESTED_REQUIRES_ROOT_QUALIFICATION','phase':phase,'package':{'path':package.name,'bytes':package_reader.pin[0],'sha256':package_reader.pin[1],'control':control,'exact_payload_files':payload_files},'unresolved_module_findings':unresolved,'upstream_skip_events':sum(len(x['skips'])for x in tests.values()),'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
+  C.public_packaged_cli_roundtrip(public_roundtrip,{name:{'bytes':expected_files['usr/bin/'+name][0],'sha256':expected_files['usr/bin/'+name][1]}for name in('age','age-keygen')})
+  qualification={'schema':'age132_actual_DEB_public_CLI_roundtrip_binding/1','package':{'bytes':package_reader.pin[0],'sha256':package_reader.pin[1]},'actual_DEB_payload_verified':True,'public_packaged_CLI_roundtrip':public_roundtrip,'provisional_until_outer_Source_and_product_finality':True,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
+  qualification_reader=save(exports/'PACKAGED-CLI-QUALIFICATION.json',C.encoded(qualification))
+  result={'schema':'age132_managed_tool_SOURCE_build_result/1','status':'BUILT_QUARANTINED_PENDING_ROOT_REVIEW'if unresolved or any(x['skips']for x in tests.values())else'BUILT_TESTED_REQUIRES_ROOT_QUALIFICATION','phase':phase,'public_packaged_CLI_qualification':{'path':'PACKAGED-CLI-QUALIFICATION.json','bytes':qualification_reader.pin[0],'sha256':qualification_reader.pin[1]},'packaged_CLI_decrypt_roundtrip_proven':True,'package':{'path':package.name,'bytes':package_reader.pin[0],'sha256':package_reader.pin[1],'control':control,'exact_payload_files':payload_files},'unresolved_module_findings':unresolved,'upstream_skip_events':sum(len(x['skips'])for x in tests.values()),'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
  except BaseException as e:primary=e
  finally:
   for item in reversed(products):

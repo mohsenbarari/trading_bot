@@ -193,3 +193,39 @@ def native_format(raw):
  need(type(raw)is bytes and 100<len(raw)<=65536 and raw.startswith(b'age-encryption.org/v1\n-> X25519 '),'native_format')
  need(b'\n--- 'in raw,'native_format')
  return {'age_v1_X25519_header':True,'CLI_encrypted_benign_payload':True,'CLI_decrypt_roundtrip_proven':False,'operational_key_generated_or_read':False}
+
+# Exact published upstream test fixture; not an operational/backup identity.
+PUBLIC_CLI_FIXTURE_PIN=(823,'3048a68cb0a94f2fd0d33bef64288364ccc16adcc2321018f3a2036aa92923d9')
+PUBLIC_CLI_FIXTURE_MEMBER='./cmd/age/testdata/x25519.txt'
+PUBLIC_CLI_PAYLOAD=b'Trading Bot managed age public packaged CLI round-trip fixture\n'
+def public_cli_fixture(raw):
+ need(type(raw)is bytes and(len(raw),sha256(raw).hexdigest())==PUBLIC_CLI_FIXTURE_PIN,'public_CLI_fixture_pin')
+ marker=b'-- key.txt --\n';need(raw.count(marker)==1,'public_CLI_fixture_shape');identity=raw.split(marker)[1]
+ recipients=re.findall(rb'^# public key: (age1[a-z0-9]+)$',identity,re.MULTILINE)
+ keys=re.findall(rb'^AGE-SECRET-KEY-1[A-Z0-9]+$',identity,re.MULTILINE)
+ need(len(recipients)==len(keys)==1 and raw.startswith(b'# encrypt and decrypt a file with -r\nage -r '+recipients[0]+b' -o test.age input\n'),'public_CLI_fixture_pair')
+ return identity,recipients[0]+b'\n'
+def public_packaged_cli_roundtrip(value,expected_CLI_files):
+ keys={'schema','public_fixture','CLI_files','plaintext','ciphertext','restored','derived_recipient','commands',
+  'CLI_keygen_public_recipient_proven','CLI_decrypt_roundtrip_proven','owned_current_run_ciphertext_only',
+  'operational_key_generated_or_read','existing_backup_or_data_used','raw_identity_exported',
+  'provisional_until_outer_Source_and_product_finality','runtime_install_allowed','backup_eligibility','security_accepted'}
+ need(type(value)is dict and set(value)==keys and value['schema']=='age132_public_packaged_CLI_roundtrip/1','public_CLI_receipt_shape')
+ need(type(expected_CLI_files)is dict and set(expected_CLI_files)=={'age','age-keygen'}and value['CLI_files']==expected_CLI_files,'public_CLI_delivered_binary_pin')
+ def pin(row,maximum):
+  return type(row)is dict and set(row)=={'bytes','sha256'}and type(row['bytes'])is int and 0<row['bytes']<=maximum and type(row['sha256'])is str and re.fullmatch('[a-f0-9]{64}',row['sha256'])is not None
+ need(all(pin(p,32*1024**2)for p in expected_CLI_files.values()),'public_CLI_delivered_binary_pin')
+ need(value['public_fixture']=={'member':PUBLIC_CLI_FIXTURE_MEMBER,'bytes':PUBLIC_CLI_FIXTURE_PIN[0],'sha256':PUBLIC_CLI_FIXTURE_PIN[1]},'public_CLI_fixture_receipt')
+ payload={'bytes':len(PUBLIC_CLI_PAYLOAD),'sha256':sha256(PUBLIC_CLI_PAYLOAD).hexdigest()}
+ need(value['plaintext']==value['restored']==payload and pin(value['ciphertext'],65536),'public_CLI_plaintext_equality')
+ recipient=b'age1xmwwc06ly3ee5rytxm9mflaz2u56jjj36s0mypdrwsvlul66mv4q47ryef\n'
+ need(value['derived_recipient']=={'bytes':len(recipient),'sha256':sha256(recipient).hexdigest()},'public_CLI_recipient_equality')
+ names=['packaged-public-keygen-derive','packaged-public-encrypt','packaged-public-decrypt']
+ need(type(value['commands'])is list and len(value['commands'])==3,'public_CLI_command_truth')
+ for name,row in zip(names,value['commands']):
+  need(type(row)is dict and set(row)=={'name','actual_returncode','stdout_eof_observed','actual_pipe_closed','stdout_bytes'}
+   and row['name']==name and type(row['actual_returncode'])is int and row['actual_returncode']==0
+   and row['stdout_eof_observed']is True and row['actual_pipe_closed']is True and type(row['stdout_bytes'])is int and row['stdout_bytes']==0,'public_CLI_command_truth')
+ need(all(value[k]is True for k in('CLI_keygen_public_recipient_proven','CLI_decrypt_roundtrip_proven','owned_current_run_ciphertext_only','provisional_until_outer_Source_and_product_finality'))
+  and all(value[k]is False for k in('operational_key_generated_or_read','existing_backup_or_data_used','raw_identity_exported','runtime_install_allowed','backup_eligibility','security_accepted')),'public_CLI_no_authority')
+ return value
