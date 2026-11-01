@@ -46,6 +46,27 @@
       "node_resolve_defaults_source": "https://github.com/rollup/plugins/blob/master/packages/node-resolve/src/index.js"
     },
     "schema": "public_npm_maintainer_backport_original_anchors/1",
+    "snapshot_vendor_sources": {
+      "glob10": {
+        "self_link_git_blob": "93d9d7a75f2502a6dc37befa38d2153d9531c53f",
+        "tshy_version": "1.18.0"
+      },
+      "glob11": {
+        "build_git_blob": "82bdad3983558d1bdafdf11244760dc5dbe37173",
+        "self_link_git_blob": "93d9d7a75f2502a6dc37befa38d2153d9531c53f",
+        "tshy_version": "3.0.3"
+      },
+      "mm10": {
+        "package_tshy_selfLink": false,
+        "self_link_git_blob": "318dbd5f0880587145e422b34d6e57f9ac43bd52",
+        "tshy_version": "4.0.0"
+      },
+      "mm9": {
+        "self_link_git_blob": "551af436efa131996e622f7ed804cb0711baa651",
+        "tshy_version": "3.3.2"
+      },
+      "permitted_link_only": "dist/node_modules/<own unscoped package name> -> ../..; omitted from no-follow original package runtime snapshot; all other links/types refused"
+    },
     "tar_acquisition_or_tar_preimage_comparison_by_child": false,
     "tar_anchors": {
       "node_modules/@eslint/config-array/node_modules/minimatch": {
@@ -97,6 +118,10 @@
           "bytes": 12869,
           "sha256": "1138ced9d5429681a1740af32d13391a38184a3376d1d9d56eea64b7a43274a1"
         },
+        "dist/esm/bin.mjs": {
+          "bytes": 12645,
+          "sha256": "eb77a6b359958f341aa9cca28270b1f73939c7e698d38fa6ea8b494c562cf021"
+        },
         "dist/esm/walker.js": {
           "bytes": 12569,
           "sha256": "3e15af549ecc74d8691982d571168fd4b0e38b494c2cbb3edcfb8f97d4036ac6"
@@ -107,6 +132,11 @@
       "repo": "https://github.com/isaacs/node-glob.git",
       "source": "src/walker.ts",
       "source_git_blob": "495e0a700e3c8a603ab2ba58a23b7c7be16015ee",
+      "type_only_compatibility": {
+        "runtime_effect": "Four non-null type assertions erase; dist/esm/bin.mjs strict original publisher equality remains mandatory.",
+        "source": "src/bin.mts",
+        "source_git_blob": "e360dce3e564f9093be93e30aef5789ee570b831"
+      },
       "version": "10.5.0"
     },
     {
@@ -215,9 +245,9 @@
   "require_full_upstream_tests": true,
   "require_two_fresh_installs": true,
   "runtime_helper": {
-    "bytes": 4561,
+    "bytes": 4572,
     "path": "runtime_checks.cjs",
-    "sha256": "a85e3f93d1aadf56b8715272705b1256799292cb91783bd17537c89600afebfd"
+    "sha256": "8e0e238b42557f84a5aad4180c9105b9e80bbc642cc0c4fa8b8a9fb0635c73bb"
   },
   "schema": "finite_npm_security_ci/1"
 }

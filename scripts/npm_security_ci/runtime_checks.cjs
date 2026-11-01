@@ -15,7 +15,7 @@ const entries = kind === 'glob' ? ['commonjs/walker.js', 'esm/walker.js'] :
 let matches = 0, aborts = 0, guards = 0, parents = 0;
 (async () => {
  for (const [i, entry] of entries.entries()) {
-  const oldPath = path.join(root, '.security-original-dist', entry);
+  const oldPath = path.join(root, '.security-original-package', 'dist', entry);
   const newPath = path.join(root, 'dist', entry);
   assert.ok(fs.statSync(oldPath).isFile() && fs.statSync(newPath).isFile());
   const original = i === 0 ? require(oldPath) : await import(pathToFileURL(oldPath).href);
