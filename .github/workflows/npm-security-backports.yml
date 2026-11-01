@@ -106,6 +106,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   browsers:
+    name: browsers (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
     needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -117,6 +118,7 @@ jobs:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
+        shard: [1, 2, 3, 4]
     env:
       CI: 'true'
       CERTS_HOST_PATH: /tmp/trading-ci-certs
@@ -182,10 +184,51 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash ./scripts/bootstrap_ci_backend.sh
-      - name: Existing complete browser gate
+      - name: Verify browser CI backend surface
+        shell: bash
+        run: |
+          docker compose exec -T app python - <<'PY'
+          from core.config import settings
+
+          environment = (settings.environment or "").strip().lower()
+          server_mode = (settings.server_mode or "").strip().lower()
+          if environment != "staging":
+              raise SystemExit(f"unexpected environment={environment!r}")
+          if server_mode != "iran":
+              raise SystemExit(f"unexpected server_mode={server_mode!r}")
+          PY
+          curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
+            -H 'Content-Type: application/json'
+          curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
+            -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
+            -H 'Origin: http://127.0.0.1:4173' \
+            -H 'Access-Control-Request-Method: POST'
+          grep -qi '^access-control-allow-origin: http://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+      - name: Collect complete browser identities without executing tests
         working-directory: frontend
         env:
           BROWSER: ${{ matrix.browser }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/npm-browser-whole.json
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+          E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+          E2E_APP_CONTAINER_NAME: trading_bot_app
+          E2E_REDIS_CONTAINER_NAME: trading_bot_redis
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-browser-summary"
+          case "$BROWSER" in
+            chromium) npm run test:e2e -- --list --reporter=json ;;
+            firefox) npm run test:e2e:firefox -- --list --reporter=json ;;
+            webkit) npm run test:e2e:webkit -- --list --reporter=json ;;
+            *) exit 2 ;;
+          esac
+      - name: Existing complete browser gate
+        id: browser_gate
+        working-directory: frontend
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/npm-browser-results.json
           PLAYWRIGHT_HTML_OPEN: never
           E2E_TARGET_ENV: local
           E2E_ALLOW_LOCAL_MUTATION: local-dev-only
@@ -194,15 +237,32 @@ jobs:
           E2E_REDIS_CONTAINER_NAME: trading_bot_redis
         run: |
           case "$BROWSER" in
-            chromium) npm run test:e2e ;;
-            firefox) npm run test:e2e:firefox ;;
-            webkit) npm run test:e2e:webkit ;;
+            chromium) npm run test:e2e -- --shard="$SHARD/4" --reporter=github,json,html ;;
+            firefox) npm run test:e2e:firefox -- --shard="$SHARD/4" --reporter=github,json,html ;;
+            webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --reporter=github,json,html ;;
             *) exit 2 ;;
           esac
+      - name: Preserve bounded actual shard evidence
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          GATE_OUTCOME: ${{ steps.browser_gate.outcome }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/browser_evidence.py summarize --collection "$RUNNER_TEMP/npm-browser-whole.json" --report "$RUNNER_TEMP/npm-browser-results.json" --browser "$BROWSER" --shard "$SHARD" --outcome "$GATE_OUTCOME" --head "$PROJECT_COMMIT" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/npm-browser-summary/$BROWSER-$SHARD.json"
+      - name: Upload small shard evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-browser-summary-${{ matrix.browser }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/npm-browser-summary/${{ matrix.browser }}-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: npm-browser-${{ matrix.browser }}
+          name: npm-browser-${{ matrix.browser }}-shard-${{ matrix.shard }}
           path: |
             frontend/playwright-report
             frontend/test-results
@@ -210,3 +270,34 @@ jobs:
       - name: Dispose only this runner's backend
         if: always()
         run: docker compose down --volumes --remove-orphans
+  browser-evidence:
+    name: Verify complete browser shard coverage
+    needs: [frontend, browsers]
+    if: always() && needs.frontend.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-browser-summary-*
+          path: ${{ runner.temp }}/npm-browser-shards
+          merge-multiple: true
+      - name: Check same-subject complete disjoint shard unions
+        env:
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/browser_evidence.py aggregate --reports "$RUNNER_TEMP/npm-browser-shards" --head "$PROJECT_COMMIT" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/npm-browser-matrix.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-browser-matrix-evidence
+          path: ${{ runner.temp }}/npm-browser-matrix.json
+          if-no-files-found: warn
+          retention-days: 7
