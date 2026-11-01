@@ -66,6 +66,7 @@ def fixtures():
   'production_data_accessed':False,'app_ci_restore_gate_required':True,'security_accepted':False}
  for key,constant in [('fts5_patch',R.FTS_PATCH_PIN),('fts5_regression_patch',R.FTS_TEST_PATCH_PIN),('fts5_source_before',R.FTS_BEFORE),('fts5_source_after',R.FTS_AFTER),('fts5_regression_before',R.FTS_TEST_BEFORE),('fts5_regression_after',R.FTS_TEST_AFTER)]:provenance[key]={'bytes':constant[0],'sha256':constant[1]}
  provenance['official_fts5_commit']=R.UPSTREAM_FTS_COMMIT
+ provenance['test_only_compatibility']=R.vendor_test_compatibility_expected()
  provenance['vendor_tests']={'same_configured_source':{'Makefile':{'bytes':42,'sha256':'e'*64},'debian/rules':dict(provenance['debian_rules']),'src/wal.c':dict(provenance['wal_after']),'ext/fts5/fts5_index.c':dict(provenance['fts5_source_after']),'ext/fts5/test/fts5prefix2.test':dict(provenance['fts5_regression_after'])},'standard_and_official_regression':{n:R.vendor_log_contract(n,rows[n])for n in R.VENDOR_COMMANDS},'no_new_filters_or_exclusions':True,'full_all_permutations_claimed':False,'default_omissions_are_not_waivers':True}
  provenance['vendor_tests']['same_configured_source'].update({name:{'bytes':pin[0],'sha256':pin[1]}for name,pin in R.VENDOR_HELPERS.items()})
  provenance['vendor_tests']['standard_scope']=deepcopy(R.VENDOR_STANDARD_SCOPE)

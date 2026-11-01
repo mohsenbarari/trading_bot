@@ -24,7 +24,7 @@ RUN test -f /etc/ssl/certs/ca-certificates.crt && test ! -L /etc/ssl/certs/ca-ce
     && set -- /var/lib/apt/lists/*_dists_noble_InRelease && test "$#" -eq 1 && printf '%s  %s\n' 'cdb2f31d809f589719a53c6ad15f255b27569c4059542ada282aaa21b8e164b0' "$1" | sha256sum --check --strict \
     && set -- /var/lib/apt/lists/*_dists_noble-updates_InRelease && test "$#" -eq 1 && printf '%s  %s\n' 'c053de67f316159b441e167f3f29b3f00751b71409dc1537bb90cb86d58b2024' "$1" | sha256sum --check --strict \
     && set -- /var/lib/apt/lists/*_dists_noble-security_InRelease && test "$#" -eq 1 && printf '%s  %s\n' 'd53de120a213d4e17ede2854718ed8eedfc04f3ea2e263994d7f21317f7b851b' "$1" | sha256sum --check --strict \
-    && apt-get -y --no-install-recommends install build-essential dpkg-dev debhelper autoconf libtool automake pkgconf chrpath lynx libreadline-dev tcl8.6-dev libicu-dev quilt ubuntu-keyring gnupg gpgv binutils python3 ca-certificates \
+    && apt-get -y --no-install-recommends install build-essential dpkg-dev debhelper autoconf libtool automake pkgconf chrpath lynx libreadline-dev tcl8.6-dev libicu-dev quilt ubuntu-keyring gnupg gpgv binutils gdb python3 ca-certificates \
     && apt-get -y --no-install-recommends --reinstall \
        -o 'Dpkg::Options::=--path-include=/usr/share/doc/libsqlite3-0' \
        -o 'Dpkg::Options::=--path-include=/usr/share/doc/libsqlite3-0/*' \

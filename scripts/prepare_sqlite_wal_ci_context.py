@@ -11,7 +11,7 @@ from types import ModuleType
 import argparse,errno,fcntl,json,os,re,signal,stat,sys,threading,time
 
 TRACKED=Path('deploy/security/sqlite-wal-backport')
-PINS={'sourcebuild.py': (68872, '845f3dd52cf5bb8b2acef941fb2f508705e7a22f89dbaa9fa7e04ae59cf09e5b'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
+PINS={'sourcebuild.py': (79508, '9dfca6080a813f2b7f36e5d1bd158674505d7a958bf7f8465f529813c1f73af4'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
 VERSION='3.46.1-7+deb13u2+gold2';BASE='3.46.1-7+deb13u2'
 PACKAGE='libsqlite3-0_'+VERSION+'_amd64.deb'
 CHANGES='sqlite3_'+VERSION+'_amd64.changes';BUILDINFO='sqlite3_'+VERSION+'_amd64.buildinfo'
@@ -20,15 +20,7 @@ OUTPUTS={PACKAGE:32*1024**2,CHANGES:4*1024**2,BUILDINFO:4*1024**2,
 PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 DISK_RESERVE=2*1024**3;DISK_GROWTH=8*1024**3
 GLOBAL_SECONDS=5000;BUILD_SECONDS=4800;LOG_MAX=64*1024**2
-PROVENANCE_FIELDS={'schema','package','base_package_version','local_package_version','upstream_version_unchanged','architecture',
- 'repository_snapshot','repository_release','source_files','source_maintainer_signature_verified','debian_rules','production_patch','wal_before',
- 'wal_after','positive_verifier','source_date_epoch','build_options','upstream_fault_suites_run','wal_reset_reproduction_performed',
- 'full_upstream_suite_pass_claimed','baseline_library','candidate_library','package_file','local_build_metadata','local_build_metadata_signed',
- 'compile_options_equal','elf_soname_exports_dependencies_equal','python_binary_unchanged','sqlite_stdlib_extension_unchanged',
- 'mapped_installed_libraries_verified','build_toolchain_packages','full_sqlite_documentation_restored','dpkg_path_includes',
- 'runtime_loader_override_used','production_data_accessed','app_ci_restore_gate_required','security_accepted',
- 'fts5_patch','fts5_regression_patch','fts5_source_before','fts5_source_after',
- 'fts5_regression_before','fts5_regression_after','official_fts5_commit','vendor_tests'}
+PROVENANCE_FIELDS={'upstream_fault_suites_run', 'repository_release', 'candidate_library', 'fts5_regression_after', 'full_sqlite_documentation_restored', 'schema', 'full_upstream_suite_pass_claimed', 'base_package_version', 'fts5_patch', 'fts5_source_after', 'production_patch', 'fts5_regression_patch', 'source_files', 'debian_rules', 'package_file', 'vendor_tests', 'elf_soname_exports_dependencies_equal', 'wal_after', 'package', 'baseline_library', 'fts5_source_before', 'python_binary_unchanged', 'runtime_loader_override_used', 'source_maintainer_signature_verified', 'local_package_version', 'wal_before', 'source_date_epoch', 'app_ci_restore_gate_required', 'wal_reset_reproduction_performed', 'architecture', 'production_data_accessed', 'upstream_version_unchanged', 'build_options', 'sqlite_stdlib_extension_unchanged', 'mapped_installed_libraries_verified', 'build_toolchain_packages', 'test_only_compatibility', 'local_build_metadata_signed', 'official_fts5_commit', 'local_build_metadata', 'security_accepted', 'compile_options_equal', 'repository_snapshot', 'positive_verifier', 'fts5_regression_before', 'dpkg_path_includes'}
 
 def need(value,code):
  if not value:raise RuntimeError(code)
@@ -220,6 +212,7 @@ def verify_artifacts(R,rows,proofs):
  for key in ('source_maintainer_signature_verified','compile_options_equal','elf_soname_exports_dependencies_equal','python_binary_unchanged','sqlite_stdlib_extension_unchanged','mapped_installed_libraries_verified','full_sqlite_documentation_restored','app_ci_restore_gate_required'):need(p.get(key)is True,'provenance_proof')
  for key in ('upstream_fault_suites_run','wal_reset_reproduction_performed','full_upstream_suite_pass_claimed','local_build_metadata_signed','runtime_loader_override_used','production_data_accessed','security_accepted'):need(p.get(key)is False,'provenance_claims')
  need(p.get('source_files')=={name:{'bytes':pin[0],'sha256':pin[1]}for name,pin in R.SOURCE_FILES.items()},'source_provenance')
+ R.vendor_test_compatibility_contract(p['test_only_compatibility'])
  vendor=p['vendor_tests'];need(type(vendor)is dict and set(vendor)=={'same_configured_source','standard_and_official_regression','standard_scope','no_new_filters_or_exclusions','no_new_filters_or_exclusions_scope','testfixture_source_deduplication','full_all_permutations_claimed','default_omissions_are_not_waivers','unprivileged_execution'},'vendor_provenance')
  need(type(vendor['standard_scope'])is dict and encoded(vendor['standard_scope'])==encoded(R.VENDOR_STANDARD_SCOPE),'vendor_standard_scope')
  need(vendor['no_new_filters_or_exclusions']is True and vendor['no_new_filters_or_exclusions_scope']=='test_selection_only'and vendor['full_all_permutations_claimed']is False and vendor['default_omissions_are_not_waivers']is True,'vendor_claims')

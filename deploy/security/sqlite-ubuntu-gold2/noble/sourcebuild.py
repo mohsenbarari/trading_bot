@@ -160,19 +160,23 @@ def forward(raw,end):
   ready=select.select([], [fd], [], min(1,left))[1]
   if not ready:continue
   count=os.write(fd,view[:4096]);require(count>0,'output_write');view=view[count:]
-def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False,unprivileged=False):
+def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False,unprivileged=False,absolute_end=None):
  global VENDOR_RETIREMENT_UNPROVEN
  """Bound bytes BEFORE accumulation/forwarding; no payload file-size limit."""
  require(type(unprivileged)is bool,'vendor_credentials_type')
+ require(absolute_end is None or(type(absolute_end)in(int,float)and 0<absolute_end<float('inf')),'command_absolute_end_type')
  env=current_environment();credentials={}
  if unprivileged:
   require(VENDOR_PROCESS_SCOPE is not None and VENDOR_PROCESS_SCOPE['armed']and not VENDOR_PROCESS_SCOPE['fault']and VENDOR_PROCESS_SCOPE['controller_pid']==os.getpid(),'vendor_process_scope_required')
   env['HOME']=str(WORK/'vendor-test-home');credentials={'user':VENDOR_UID,'group':VENDOR_GID,'extra_groups':[],'umask':0o077}
+ if absolute_end is not None:require(unprivileged and time.monotonic()<absolute_end,'command_absolute_deadline')
  child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
   env=env,cwd=cwd,close_fds=True,start_new_session=True,**credentials)
  if unprivileged:VENDOR_RETIREMENT_UNPROVEN=True
  parts=[];count=0;end=time.monotonic()+timeout
  try:
+  if absolute_end is not None:
+   end=min(end,absolute_end);require(time.monotonic()<absolute_end,'command_absolute_deadline')
   with selectors.DefaultSelector() as selector:
    fd=child.stdout.fileno();os.set_blocking(fd,False);selector.register(fd,selectors.EVENT_READ)
    while True:
@@ -184,6 +188,7 @@ def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False
     if capture:parts.append(raw)
     if not capture or tee:forward(raw,end)
   code=child.wait(timeout=max(.1,end-time.monotonic()))
+  if absolute_end is not None:require(time.monotonic()<absolute_end,'command_absolute_deadline')
   if with_code:
    require(capture,'capture_contract');return code,b''.join(parts)
   require(code==0,'build_command_refused')
@@ -196,6 +201,7 @@ def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False
   raise
  finally:
   child.stdout.close()
+
 
 
 def metadata(argv,*,cwd=None,maximum=MAX_METADATA):
@@ -766,6 +772,9 @@ def vendor_unprivileged_commands(src):
     failures.append(RuntimeError('vendor_identity_command_refused'if label=='identity'else'vendor_test_command_refused',result[0]))
    if retirement is not None and any(event['signal']!=0 or event['wait']['si_code']!=os.CLD_EXITED or event['wait']['si_status']!=0 for event in retirement['retired']):
     failures.append(RuntimeError('vendor_descendant_outlived_or_failed_command'))
+   if label=='vendor-standard.log'and result is not None and result[0]!=0 and retirement is not None and len(failures)==1 and not scope['fault']:
+    try:vendor_failure_diagnostic(src,result[1],scope)
+    except BaseException as e:failures.append(e)
    if failures:
     if len(failures)==1:raise failures[0]
     raise BaseExceptionGroup('vendor command and descendant retirement failures',failures)
@@ -808,6 +817,148 @@ def vendor_unprivileged_commands(src):
   'private_home_root_restored':True,'phase_seconds_limit':VENDOR_PHASE_SECONDS,'restore_reserve_seconds':VENDOR_RESTORE_SECONDS,
   'process_tree':process_proof,'security_accepted':False}
  return logs,vendor_privilege_contract(receipt)
+
+
+VENDOR_TEST_COMPAT={'orig_archive': 'sqlite3_3.45.1.orig.tar.xz', 'distro_patch': 'debian/patches/31-increase_SQLITE_MAX_DEFAULT_PAGE_SIZE_to_32k.patch', 'distro_patch_pin': (779, '27af1c41614efba22f9eb1f1b4f46d49e3ac37a6087668a186ff2bc1bc4dcb75'), 'io_before': (18788, '941b60a0ca67ee9ace46b73deecb31998c5fca9944e1405637257ef4503e7f35'), 'io_after': (18788, 'b7ae8d3def6ab27074b21cf51df2e50dd50d34eb00ca671f32882f7033ce559e'), 'production': {'src/pager.c': (301475, '8b371bfcd459dc73415cb0d92232bf2962ad5fda0fdf4ea762d54e2247e7e474'), 'src/sqliteLimit.h': (6699, 'f5bffc74f8d25a88f173b9b6d5559985091299d3b362674294fda32660e9cd61')}, 'fuzzcheck': {'before': (81518, 'c8fa9f37b70d07cb4445c0910f079da6ce497f4095eeacec9d6e512fcd930704'), 'after': (81560, '982bb4a2f4f6e0e75a841081c7e282a3102d7916dd1a59f85c7a8e5bd249ca75'), 'implementations': {'test/vt02.c': (33516, '1685ac0e174719c33a075a3eaa367c8903ac6866047515b1c6996afc6a766116'), 'ext/misc/randomjson.c': (7430, '3ec3b5424c3cd86a7b2fcd9454a4cbc873614e152396ff388f1f4ac8a8af94ea')}}}
+# Embedded unchanged into the three signed-source recipes; no operation on import.
+IO_ORACLE_BEFORE = b'         {}                   16384      8192\n'
+IO_ORACLE_AFTER = b'         {}                   16384     16384\n'
+
+def vendor_test_compatibility_expected():
+ """Exact test-only record, never a native-suite or security verdict."""
+ def binding(pin):return {'bytes':pin[0],'sha256':pin[1]}
+ spec=VENDOR_TEST_COMPAT
+ fuzz=None
+ if spec['fuzzcheck'] is not None:
+  f=spec['fuzzcheck']
+  fuzz={'upstream_checkin':'803481f250','file':'test/fuzzcheck.c',
+   'before':binding(f['before']),'after':binding(f['after']),
+   'implementations':{name:binding(pin)for name,pin in f['implementations'].items()},
+   'exact_declarations_changed':2,'test_only':True,'crash_resolution_proven':False}
+ return {'schema':'sqlite_test_only_vendor_compatibility/1',
+  'phase':'AFTER_SUCCESSFUL_PACKAGE_BUILD_BEFORE_UNFILTERED_VENDOR_TESTS',
+  'original_source_archive':binding(SOURCE_FILES[spec['orig_archive']]),
+  'signed_distro_archive':binding(SOURCE_FILES['sqlite3_'+BASE_VERSION+'.debian.tar.xz']),
+  'distro31_patch':{'path':spec['distro_patch'],'binding':binding(spec['distro_patch_pin'])},
+  'unchanged_production_inputs':{name:binding(pin)for name,pin in spec['production'].items()},
+  'io_oracle':{'file':'test/io.test','before':binding(spec['io_before']),'after':binding(spec['io_after']),
+   'case':'io-5.5','simulated_sector_size':16384,'production_max_default_page_size':32768,
+   'expected_before':8192,'expected_after':16384,'exact_rows_changed':1,'test_ids_removed':0},
+  'fuzzcheck_prototypes':fuzz,'production_flags_changed':False,'test_selection_changed':False,
+  'official_security_or_production_fix':False,'Ubuntu_crashes_resolved':False,'security_accepted':False}
+
+def vendor_test_compatibility_contract(value):
+ require(type(value)is dict and encoded(value)==encoded(vendor_test_compatibility_expected()),'vendor_test_compatibility_contract')
+ return value
+
+def rewrite_owned_vendor_test(path,before_pin,after_pin,replacements):
+ """Rewrite this owned regular test inode only; retain partial/error truth."""
+ path=Path(path);initial=identity(path.lstat());old=bytes_at(path,before_pin,maximum=131072)
+ require(identity(path.lstat())==initial and initial[3:6]==(0,0,1),'vendor_test_rewrite_identity')
+ new=old
+ for before,after in replacements:
+  require(type(before)is bytes and type(after)is bytes and before!=after and new.count(before)==1,'vendor_test_rewrite_once')
+  new=new.replace(before,after,1)
+ require((len(new),sha256(new).hexdigest())==after_pin,'vendor_test_rewrite_pin')
+ fd=None;errors=[];after=None
+ try:
+  fd=os.open(path,os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC)
+  require(identity(os.fstat(fd))==identity(path.lstat())==initial,'vendor_test_rewrite_identity')
+  flags=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL));written=0;expected=initial
+  while written<len(new):
+   require(identity(os.fstat(fd))==identity(path.lstat())==expected
+    and (fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))==flags,'vendor_test_rewrite_changed')
+   count=os.pwrite(fd,new[written:],written);require(count>0,'vendor_test_rewrite_short');written+=count
+   expected=identity(os.fstat(fd));require(expected[:6]==initial[:6]and identity(path.lstat())==expected,'vendor_test_rewrite_changed')
+  require(identity(os.fstat(fd))==identity(path.lstat())==expected,'vendor_test_rewrite_changed')
+  os.ftruncate(fd,len(new));expected=identity(os.fstat(fd))
+  require(expected[:6]==initial[:6]and identity(path.lstat())==expected,'vendor_test_rewrite_changed')
+  os.fsync(fd);after=identity(os.fstat(fd));require(after==expected,'vendor_test_rewrite_changed')
+  require(after[:6]==initial[:6]and after[6]==len(new)and identity(path.lstat())==after
+   and os.pread(fd,len(new)+1,0)==new and os.lseek(fd,0,os.SEEK_CUR)==0
+   and (fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))==flags,'vendor_test_rewrite_final')
+ except BaseException as e:errors.append(e)
+ finally:
+  if fd is not None:
+   try:vendor_close_fd(fd)
+   except BaseException as e:errors.append(e)
+ if errors:
+  if len(errors)==1:raise errors[0]
+  raise BaseExceptionGroup('vendor test rewrite and close failures',errors)
+ require(identity(path.lstat())==after and bytes_at(path,after_pin,maximum=131072)==new
+  and identity(path.lstat())==after,'vendor_test_rewrite_readback')
+
+def verify_vendor_test_compatibility(src,receipt):
+ vendor_test_compatibility_contract(receipt);spec=VENDOR_TEST_COMPAT
+ for name,pin in spec['production'].items():digest(src/name,pin,maximum=1024**2)
+ digest(src/spec['distro_patch'],spec['distro_patch_pin'],maximum=4096)
+ digest(src/'test/io.test',spec['io_after'],maximum=131072)
+ if spec['fuzzcheck'] is not None:
+  digest(src/'test/fuzzcheck.c',spec['fuzzcheck']['after'],maximum=131072)
+  for name,pin in spec['fuzzcheck']['implementations'].items():digest(src/name,pin,maximum=131072)
+ return receipt
+
+def prepare_vendor_test_compatibility(src):
+ # Exact full-file pins were derived from the already authenticated public
+ # orig/distro archives. The distro patch changes only the production cap.
+ spec=VENDOR_TEST_COMPAT
+ for name,pin in spec['production'].items():digest(src/name,pin,maximum=1024**2)
+ digest(src/spec['distro_patch'],spec['distro_patch_pin'],maximum=4096)
+ digest(src/'test/io.test',spec['io_before'],maximum=131072)
+ f=spec['fuzzcheck']
+ if f is not None:
+  digest(src/'test/fuzzcheck.c',f['before'],maximum=131072)
+  for name,pin in f['implementations'].items():digest(src/name,pin,maximum=131072)
+ rewrite_owned_vendor_test(src/'test/io.test',spec['io_before'],spec['io_after'],[(IO_ORACLE_BEFORE,IO_ORACLE_AFTER)])
+ if f is not None:
+  replacements=[(('extern int '+name+'(sqlite3*,char***,void*);').encode(),
+   ('extern int '+name+'(sqlite3*,char**,const sqlite3_api_routines*);').encode())
+   for name in('sqlite3_vt02_init','sqlite3_randomjson_init')]
+  rewrite_owned_vendor_test(src/'test/fuzzcheck.c',f['before'],f['after'],replacements)
+ return verify_vendor_test_compatibility(src,vendor_test_compatibility_expected())
+
+def vendor_failure_diagnostic(src,failed_output,scope):
+ """Failure-only public own-child trace; never heals the original make result."""
+ require(type(failed_output)is bytes and len(failed_output)<=VENDOR_LOG_LIMITS['vendor-standard.log'],
+  'vendor_diagnostic_input')
+ target=None;cases=[]
+ for n in range(1,9):
+  corpus=str(src/'test'/('fuzzdata'+str(n)+'.db'))
+  for sqlid,dbid in re.findall(re.escape(corpus.encode())+rb' \(sqlid=([0-9]{1,9}),dbid=([0-9]{1,9})\): segfault',failed_output):
+   cases.append((corpus,int(sqlid),int(dbid)))
+ if len(cases)==1:
+  corpus,sqlid,dbid=cases[0];target=['./fuzzcheck','--dbid',str(dbid),'--sqlid',str(sqlid),corpus]
+ elif b'tcltest] Segmentation fault'in failed_output:
+  target=['./testfixture',str(src/'test/veryquick.test'),'--verbose=file','--output=diagnostic-test-out.txt']
+ row={'schema':'sqlite_failed_vendor_diagnostic/1','diagnostic_only':True,'original_make_failure_retained':True,
+  'security_accepted':False,'status':'NOT_APPLICABLE','seconds_limit':60,'output_limit':65536}
+ if target is None:
+  print(encoded(row).decode(),end='',flush=True);return
+ started=time.monotonic();absolute_end=min(started+60,scope['retire_end']-5);remaining=absolute_end-started
+ if remaining<=0 or not Path('/usr/bin/gdb').is_file():
+  row['status']='UNAVAILABLE_DEADLINE_OR_GDB';print(encoded(row).decode(),end='',flush=True);return
+ argv=['/usr/bin/gdb','--batch','--nx','--nh','--return-child-result',
+  '-iex','set debuginfod enabled off','-iex','set auto-load off',
+  '-ex','set startup-with-shell off','-ex','set disable-randomization off',
+  '-ex','set pagination off','-ex','set confirm off','-ex','set print frame-arguments none',
+  '-ex','handle SIGSEGV stop print nopass','-ex','run','-ex','thread apply all backtrace 24','--args',*target]
+ row.update({'status':'ATTEMPTED','argv':argv,'seconds_limit':remaining,'absolute_end':absolute_end,
+  'original_scope_retire_end':scope['retire_end']});print(encoded(row).decode(),end='',flush=True)
+ errors=[];result=None
+ try:
+  require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
+  result=bounded_command(argv,cwd=src,timeout=remaining,maximum=65536,capture=True,with_code=True,tee=True,unprivileged=True,absolute_end=absolute_end)
+  require(time.monotonic()<absolute_end,'vendor_diagnostic_original_clock')
+ except BaseException as e:errors.append(e)
+ try:row['owned_descendant_retirement']=vendor_process_retire(scope,'failure-diagnostic',argv)
+ except BaseException as e:errors.append(e)
+ row.update({'status':'RETURNED'if result is not None else'FAILED_OR_UNAVAILABLE',
+  'actual_returncode':None if result is None else result[0],
+  'actual_public_output':None if result is None else result[1].decode('utf-8','replace'),
+  'completed_output_available':result is not None,'bounded_prefix_tee_to_CI_log':True,
+  'errors':[type(e).__name__ for e in errors]})
+ print(encoded(row).decode(),end='',flush=True)
+ if errors:raise BaseExceptionGroup('failure-only diagnostic and retirement failures',errors)
 
 def vendor_tests(src):
  # Debian has already configured/built this exact source with its unchanged
@@ -876,7 +1027,9 @@ def build():
  changelog.write_bytes(entry+original)
  require(metadata(['/usr/bin/dpkg-parsechangelog','-S','Version'],cwd=src).decode().strip()==VERSION,'local_package_version')
  command(['/usr/bin/dpkg-buildpackage','-B','-uc','-us','-j2'],cwd=src,timeout=1800)
+ compatibility=prepare_vendor_test_compatibility(src)
  vendor,vendor_logs=vendor_tests(src)
+ verify_vendor_test_compatibility(src,compatibility)
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_AFTER)
  digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  packages=list(WORK.glob('libsqlite3-0_'+VERSION+'_amd64.deb'));require(len(packages)==1,'runtime_package_inventory');package=packages[0]
@@ -916,7 +1069,7 @@ def build():
   'production_patch':{'bytes':PATCH_PIN[0],'sha256':PATCH_PIN[1]},
   'fts5_merge_patch':{'bytes':FTS_PATCH_PIN[0],'sha256':FTS_PATCH_PIN[1]},'fts5_upstream_regression_patch':{'bytes':FTS_TEST_PATCH_PIN[0],'sha256':FTS_TEST_PATCH_PIN[1]},
   'official_fts5_commit':UPSTREAM_FTS_COMMIT,'fts5_before':{'bytes':FTS_BEFORE[0],'sha256':FTS_BEFORE[1]},'fts5_after':{'bytes':FTS_AFTER[0],'sha256':FTS_AFTER[1]},
-  'vendor_tests':vendor,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
+  'vendor_tests':vendor,'test_only_compatibility':compatibility,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
   'wal_after':{'bytes':WAL_AFTER[0],'sha256':WAL_AFTER[1]},'positive_verifier':{'bytes':VERIFY_PIN[0],'sha256':VERIFY_PIN[1]},
   'source_date_epoch':SOURCE_EPOCH,'build_options':ENV['DEB_BUILD_OPTIONS'],'upstream_fault_suites_run':False,
   'wal_reset_reproduction_performed':False,'full_upstream_suite_pass_claimed':False,
@@ -927,11 +1080,12 @@ def build():
   'compile_options_equal':True,'elf_soname_exports_dependencies_equal':True,'python_binary_unchanged':True,
   'sqlite_stdlib_extension_unchanged':True,'mapped_installed_libraries_verified':True,
   'build_toolchain_packages':metadata(['/usr/bin/dpkg-query','-W','-f=${binary:Package} ${Version}\n',
-   'gcc','g++','libc6','libc6-dev','binutils','dpkg-dev','debhelper','libtool','autoconf','automake']).decode('ascii').splitlines(),
+   'gcc','g++','libc6','libc6-dev','binutils','dpkg-dev','debhelper','libtool','autoconf','automake','gdb']).decode('ascii').splitlines(),
   'runtime_loader_override_used':False,'production_data_accessed':False,'app_ci_restore_gate_required':True,'security_accepted':False}
  for name,value in (('provenance.json',report),('positive-baseline.json',baseline),('positive-candidate.json',candidate),('abi-contract.json',new_elf)):
   publish(OUT/name,encoded(value));(OUT/name).chmod(0o644)
  return report
+
 def main(argv=None):
  parser=argparse.ArgumentParser();parser.add_argument('--fetch-public-inputs',action='store_true');parser.add_argument('--stage-context');parser.add_argument('--configure-build-repository',action='store_true');parser.add_argument('--build',action='store_true');args=parser.parse_args(argv)
  require(sum((args.fetch_public_inputs,args.stage_context is not None,args.configure_build_repository,args.build))<=1,'action_scope')

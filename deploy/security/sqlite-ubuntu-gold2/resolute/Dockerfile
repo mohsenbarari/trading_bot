@@ -24,7 +24,7 @@ RUN test -f /etc/ssl/certs/ca-certificates.crt && test ! -L /etc/ssl/certs/ca-ce
     && set -- /var/lib/apt/lists/*_dists_resolute_InRelease && test "$#" -eq 1 && printf '%s  %s\n' '45f95ce276cdba3e41870516a130e03c58b8b7a79e9546b0efe9e526d255740c' "$1" | sha256sum --check --strict \
     && set -- /var/lib/apt/lists/*_dists_resolute-updates_InRelease && test "$#" -eq 1 && printf '%s  %s\n' 'ad66a058fbac078de33de5f589f6da0f9274be80fb891a7ee60ab05945ef096f' "$1" | sha256sum --check --strict \
     && set -- /var/lib/apt/lists/*_dists_resolute-security_InRelease && test "$#" -eq 1 && printf '%s  %s\n' '66bf17a6b779051e7fb05ef23d886aa7e0274f642e2a7f0cfd8cfc9aa2361515' "$1" | sha256sum --check --strict \
-    && apt-get -o Acquire::https::CaInfo=/etc/ssl/certs/ca-certificates.crt -y --no-install-recommends install build-essential dpkg-dev debhelper autoconf libtool automake pkgconf chrpath lynx libreadline-dev tcl8.6-dev libicu-dev quilt ubuntu-keyring gnupg gpgv binutils python3 ca-certificates \
+    && apt-get -o Acquire::https::CaInfo=/etc/ssl/certs/ca-certificates.crt -y --no-install-recommends install build-essential dpkg-dev debhelper autoconf libtool automake pkgconf chrpath lynx libreadline-dev tcl8.6-dev libicu-dev quilt ubuntu-keyring gnupg gpgv binutils gdb python3 ca-certificates \
     && apt-get -o Acquire::https::CaInfo=/etc/ssl/certs/ca-certificates.crt -y --no-install-recommends --reinstall \
        -o 'Dpkg::Options::=--path-include=/usr/share/doc/libsqlite3-0' \
        -o 'Dpkg::Options::=--path-include=/usr/share/doc/libsqlite3-0/*' \

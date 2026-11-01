@@ -130,9 +130,25 @@ class CacheSourceTests(unittest.TestCase):
 class OwnedProcessTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
-  # Only this short-lived test process becomes a subreaper. It never loads an
-  # artifact, invokes package tools, changes privileges or touches the daemon.
-  if ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)!=0:raise AssertionError('owned subreaper unavailable')
+  # Borrow only this test process's subreaper state; a shared discovery run
+  # must leave the original setting for the following vendor privilege tests.
+  call=ctypes.CDLL(None,use_errno=True).prctl
+  call.argtypes=[ctypes.c_int,ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong]
+  call.restype=ctypes.c_int
+  def current():
+   value=ctypes.c_int()
+   if call(37,ctypes.addressof(value),0,0,0)!=0 or value.value not in(0,1):
+    raise AssertionError('owned subreaper state unavailable')
+   return value.value
+  original=current()
+  if M.children():raise AssertionError('preexisting children outside owned fixture')
+  def restore():
+   if M.children():raise AssertionError('owned fixture children remain')
+   if call(36,original,0,0,0)!=0 or current()!=original:
+    raise AssertionError('owned subreaper restoration unavailable')
+  cls.addClassCleanup(restore)
+  if call(36,1,0,0,0)!=0 or current()!=1:
+   raise AssertionError('owned subreaper unavailable')
  def inert(self,code,seconds=3,interrupted_wait=False):
   argv=['/usr/bin/python3','-I','-B','-c',code];children=[];signals=[];real=subprocess.Popen;killpg=os.killpg
   def spawn(*args,**kwargs):
