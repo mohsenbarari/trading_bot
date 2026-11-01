@@ -346,9 +346,10 @@ test.describe('Customer chat privacy regressions', () => {
     const channelManager = page.locator('.channel-admin-shell')
     await expect(channelManager).toBeVisible({ timeout: 30000 })
     await channelManager.getByRole('button', { name: 'کانال جدید' }).click()
+    await expect(channelManager.getByRole('heading', { name: 'ساخت کانال', exact: true })).toBeVisible({ timeout: 30000 })
 
-    await channelManager.locator('#channel-title').fill(`Playwright Customer Channel ${suffix}`)
-    await channelManager.locator('#channel-description').fill('Customer channel restriction browser flow')
+    await channelManager.getByLabel('نام کانال', { exact: true }).fill(`Playwright Customer Channel ${suffix}`)
+    await channelManager.getByLabel('توضیحات کانال', { exact: true }).fill('Customer channel restriction browser flow')
     await channelManager.getByRole('button', { name: 'ساخت کانال' }).click()
 
     await expect(channelManager.getByText('کانال ساخته شد. حالا اعضا و ادمین‌ها را مدیریت کنید.')).toBeVisible({ timeout: 30000 })

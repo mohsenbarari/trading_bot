@@ -224,7 +224,7 @@ function activeAttachButton(page: Page) {
 }
 
 function activeComposerTextbox(page: Page) {
-  return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
+  return activeComposerContainer(page).getByRole('textbox', { name: 'متن پیام', exact: true })
 }
 
 async function clickVisibleChatBackButton(page: Page) {
@@ -270,12 +270,18 @@ async function navigateFromMessengerToMarket(page: Page) {
     // Ignore when the sheet was never mounted or has already been removed.
   }
 
-  const fabButton = page.locator('.fab-btn').first()
-  await expect(fabButton).toBeVisible({ timeout: 30000 })
-  await fabButton.evaluate((node: HTMLElement) => node.click())
-  const marketLink = page.locator('.fab-item').filter({ hasText: 'بازار' }).first()
+  // Messenger is immersive: use its Back flow, then the dashboard's normal
+  // navigation. Keep the SPA alive so pending uploads continue across routes.
+  const backButton = page.locator('.chat-header .back-btn:visible')
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click()
+  await expect(page.locator('.chat-header .header-title:visible')).toContainText('پیام‌ها', { timeout: 30000 })
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click()
+  await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
+  const marketLink = page.getByRole('navigation', { name: 'ناوبری اصلی', exact: true }).getByRole('link', { name: /بازار/ })
   await expect(marketLink).toBeVisible({ timeout: 30000 })
-  await marketLink.evaluate((node: HTMLElement) => node.click())
+  await marketLink.click()
   await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 

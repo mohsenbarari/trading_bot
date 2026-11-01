@@ -222,6 +222,13 @@ jobs:
             webkit) npm run test:e2e:webkit -- --list --reporter=json ;;
             *) exit 2 ;;
           esac
+      - name: Observe public backend state before browser gate
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+        run: python3 -I -B scripts/npm_security_ci/backend_diagnostics.py before --browser "$BROWSER" --shard "$SHARD" --head "$PROJECT_COMMIT"
       - name: Existing complete browser gate
         id: browser_gate
         working-directory: frontend
@@ -242,6 +249,22 @@ jobs:
             webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --reporter=github,json,html ;;
             *) exit 2 ;;
           esac
+      - name: Observe public backend state after browser gate
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          GATE_OUTCOME: ${{ steps.browser_gate.outcome }}
+        run: python3 -I -B scripts/npm_security_ci/backend_diagnostics.py after --browser "$BROWSER" --shard "$SHARD" --head "$PROJECT_COMMIT" --outcome "$GATE_OUTCOME"
+      - name: Upload small public backend diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-backend-diagnostics-${{ matrix.browser }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/npm-browser-backend-diagnostics/${{ matrix.browser }}-${{ matrix.shard }}-*.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Preserve bounded actual shard evidence
         if: always()
         env:

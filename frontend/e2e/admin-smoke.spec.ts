@@ -107,7 +107,7 @@ test.describe('Admin smoke regressions', () => {
     const channelShell = page.locator('.channel-admin-shell:visible').last()
     await expect(channelShell).toBeVisible()
     await expect(
-      channelShell.getByRole('heading', { name: 'ساخت کانال جدید' }).first(),
+      channelShell.getByText('ساخت کانال جدید', { exact: true }),
     ).toBeVisible()
     await expect(channelShell.getByRole('button', { name: /کانال جدید/ }).first()).toBeVisible()
   })

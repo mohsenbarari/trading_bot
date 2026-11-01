@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { loadEnv } from 'vite'
 import {
   ACCOUNTANT_RELATION,
   CURRENT_USER,
@@ -46,6 +47,13 @@ import {
 assertMatrixCoverage()
 
 const AUTH_DISABLE_KEY = 'native-v2-auth-disabled'
+
+// Match the preview/dev server's Vite mode and explicit public build flag.
+// Production-hidden is separately exercised against the real LoginView with
+// VITE_STAGING_DEV_LOGIN=false; a staging fixture must assert the shortcut shown.
+const authBuildMode = process.env.CI || process.env.NATIVE_APP_V2_PREVIEW === '1' ? 'production' : 'development'
+const stagingDevLoginFlag = String(loadEnv(authBuildMode, process.cwd(), 'VITE_STAGING_DEV_LOGIN').VITE_STAGING_DEV_LOGIN ?? '').trim().toLowerCase()
+const expectsStagingDevLogin = stagingDevLoginFlag === 'true' || stagingDevLoginFlag === '1'
 
 function createJwt(userId = CURRENT_USER.id) {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
@@ -429,7 +437,7 @@ test.describe('Native App V2 Firefox/WebKit sensitive families', () => {
 test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
 
-  test('login stays keyboard-usable and hides developer shortcut', async ({ page }) => {
+  test('login stays keyboard-usable and enforces the explicit build flag for developer shortcut', async ({ page }) => {
     const { diagnostics, diagnosticContext } = await preparePage(page, ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
     await gotoRouteWithNavigationRetry(page, '/login', diagnosticContext)
@@ -442,7 +450,7 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     await page.keyboard.type('09120000000')
     await page.keyboard.press('Tab')
     const submit = page.getByRole('button', { name: 'دریافت کد تأیید' })
-    await expect(page.getByRole('button', { name: 'ورود سریع ۱ ساله' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'ورود سریع ۱ ساله', exact: true })).toHaveCount(expectsStagingDevLogin ? 1 : 0)
     await expect(submit).toBeFocused()
     expectCleanDiagnostics(diagnostics, 'login-keyboard')
   })
