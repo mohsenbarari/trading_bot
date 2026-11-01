@@ -1,0 +1,20 @@
+{
+  "codename": "resolute",
+  "future_build_proven": false,
+  "installed_package": "3.46.1-9ubuntu0.3",
+  "mapped_library": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+  "production_database_accessed": false,
+  "python_executable": "/usr/bin/python3.14",
+  "python_version": [
+    3,
+    14,
+    4
+  ],
+  "runtime_changed": false,
+  "schema": "ubuntu_sqlite_root_observed_consumer/1",
+  "source": "Root actual isolated metadata-only probe reported 2026-10-26",
+  "sqlite_runtime": "3.46.1",
+  "stdlib_directory": "/usr/lib/python3.14",
+  "stdlib_extension": "/usr/lib/python3.14/lib-dynload/_sqlite3.cpython-314-x86_64-linux-gnu.so",
+  "version_id": "26.04"
+}

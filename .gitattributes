@@ -33,3 +33,15 @@
 # Preserve the same exact patch context for the Debian/Web successor.
 /deploy/maintenance/glibc_backport_two_profiles/CVE-2026-84243-glibc-2.41.patch whitespace=-blank-at-eol,-space-before-tab
 /deploy/maintenance/glibc_backport_two_profiles/CVE-2026-84243-Ubuntu-Web-2.43-2ubuntu2.4-CANDIDATE.patch whitespace=-blank-at-eol,-space-before-tab
+
+# Preserve the authenticated Ubuntu SQLite patch context bytes.
+/deploy/security/sqlite-ubuntu-gold2/noble/0001-wal-reset-production-only.patch whitespace=-blank-at-eol,-blank-at-eof
+/deploy/security/sqlite-ubuntu-gold2/noble/0002-fts5-detail-none-merge-bound.patch whitespace=-blank-at-eol,-blank-at-eof
+/deploy/security/sqlite-ubuntu-gold2/noble/0003-fts5-detail-none-upstream-regression.patch whitespace=-blank-at-eol,-blank-at-eof
+/deploy/security/sqlite-ubuntu-gold2/resolute/0001-wal-reset-production-only.patch whitespace=-blank-at-eol,-blank-at-eof
+/deploy/security/sqlite-ubuntu-gold2/resolute/0002-fts5-detail-none-merge-bound.patch whitespace=-blank-at-eol,-blank-at-eof
+/deploy/security/sqlite-ubuntu-gold2/resolute/0003-fts5-detail-none-upstream-regression.patch whitespace=-blank-at-eol,-blank-at-eof
+
+# Preserve the authenticated public source signer armor bytes.
+/deploy/security/sqlite-ubuntu-gold2/noble/source-signer.asc whitespace=-blank-at-eol
+/deploy/security/sqlite-ubuntu-gold2/resolute/source-signer.asc whitespace=-blank-at-eol

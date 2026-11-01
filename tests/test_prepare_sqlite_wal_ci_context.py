@@ -23,6 +23,24 @@ def positive(version):
   'compile_options':options,'compile_options_sha256':sha256((json.dumps(options,separators=(',',':'))+'\n').encode()).hexdigest(),
   'compatibility':{'wal_snapshot':True,'rollback_upsert':True,'json_fts':True,'backup_readonly_reopen':True,'lookup_index':True,
    'query_result_sha256':'c'*64,'query_plan':['USING INDEX quote_lookup']},'production_data_accessed':False,'wal_reset_reproduction_performed':False,'all_cves_attested':False,'security_accepted':False}
+def fixture_vendor_process_tree():
+ commands={'identity':R.vendor_identity_argv(),**R.VENDOR_COMMANDS,'phase-finalizer':[]}
+ return {'schema':'sqlite_vendor_process_tree/1','controller_pid':12345,'initial_thread_ids':[12345],
+  'initial_child_pids':[],'original_subreaper':0,'armed_subreaper':1,'final_subreaper':0,'final_child_pids':[],
+  'final_wait_errno':10,'discovery_scope':'proc_self_task_children_only','signal_scope':'original_adopted_child_pidfd_only',
+  'commands':{name:{'argv':argv,'initial_child_pids':[],'retired':[],'final_child_pids':[],'no_children_wait_errno':10}for name,argv in commands.items()},'security_accepted':False}
+
+def fixture_vendor_privilege():
+ observed={'uid':10001,'euid':10001,'gid':10001,'egid':10001,'groups':[],'home':str(R.WORK/'vendor-test-home'),
+  'home_mode':0o700,'home_uid':10001,'home_gid':10001,'home_writable':True,'source_writable':True}
+ r=R;raw=r.encoded(observed);inventory=b'OWNED SYNTHETIC UNIT TREE ONLY\n'
+ bound={'bytes':len(inventory),'sha256':sha256(inventory).hexdigest()}
+ return{'schema':'sqlite_vendor_unprivileged_phase/1','identity_probe':{'argv':r.vendor_identity_argv(),'actual_returncode':0,'observed':observed,'raw_output':{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}},
+  'initial_tree':dict(bound),'restored_tree':dict(bound),'initial_entries':1,'final_entries':1,'all_original_bindings_and_modes_restored':True,
+  'all_final_owners_root':True,'no_symlink_targets_followed':True,'work_mode_before':0o700,'work_mode_during':0o711,'work_mode_restored':0o700,
+  'private_home_root_restored':True,'phase_seconds_limit':1560,'restore_reserve_seconds':60,'process_tree':fixture_vendor_process_tree(),'security_accepted':False}
+
+
 def fixtures():
  package=b'OWNED SYNTHETIC PACKAGE ONLY';p=proof(package)
  buildinfo=('Format: 1.0\nChecksums-Sha256:\n '+p['sha256']+' '+str(p['bytes'])+' '+A.PACKAGE+'\n').encode();b=proof(buildinfo)
@@ -53,6 +71,7 @@ def fixtures():
  provenance['vendor_tests']['standard_scope']=deepcopy(R.VENDOR_STANDARD_SCOPE)
  harness=fixture_harness();provenance['vendor_tests']['testfixture_source_deduplication']=harness
  provenance['vendor_tests']['no_new_filters_or_exclusions_scope']='test_selection_only'
+ provenance['vendor_tests']['unprivileged_execution']=fixture_vendor_privilege()
  provenance['vendor_tests']['same_configured_source']['Makefile']={key:harness['generated_after'][key]for key in('bytes','sha256')}
  rows['provenance.json']=provenance;proofs['provenance.json']=proof(A.encoded(provenance));return rows,proofs
 

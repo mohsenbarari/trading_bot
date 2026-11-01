@@ -8,10 +8,10 @@ from contextlib import ExitStack,redirect_stderr
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
-import argparse,json,os,re,signal,stat,sys,threading,time
+import argparse,errno,fcntl,json,os,re,signal,stat,sys,threading,time
 
 TRACKED=Path('deploy/security/sqlite-wal-backport')
-PINS={'sourcebuild.py': (45343, '3af29a6eda56bc6dadaedba4e238591ea7c2ab8b3b697bc7ce487e2327bc62ba'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
+PINS={'sourcebuild.py': (68872, '845f3dd52cf5bb8b2acef941fb2f508705e7a22f89dbaa9fa7e04ae59cf09e5b'), 'Dockerfile': (1351, '8be0212305e614ddddc9de96a6e6899cf74e10938bd6204511b428e75d7c93cd'), 'verify_positive.py': (16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab'), '0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), '0002-fts5-detail-none-merge-bound.patch': (1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'), '0003-fts5-detail-none-upstream-regression.patch': (968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')}
 VERSION='3.46.1-7+deb13u2+gold2';BASE='3.46.1-7+deb13u2'
 PACKAGE='libsqlite3-0_'+VERSION+'_amd64.deb'
 CHANGES='sqlite3_'+VERSION+'_amd64.changes';BUILDINFO='sqlite3_'+VERSION+'_amd64.buildinfo'
@@ -50,21 +50,58 @@ def named(frames):
  for path,before,chain in frames:
   need(path.resolve(strict=True)==path and identity(path.lstat())==before,'named_source_changed')
   need(all(p.resolve(strict=True)==p and identity(p.lstat())[:5]==old for p,old in chain),'parent_changed')
-def held(path,stack,frames,*,uid,pin=None,maximum=32*1024**2):
+FINALIZED=[]
+def held(path,stack,frames,*,uid,pin=None,maximum=32*1024**2,mode=None):
  path=Path(path);chain=parents(path,uid);before=identity(path.lstat())
- need(path.is_absolute() and path.resolve(strict=True)==path and stat.S_ISREG(before[2]) and before[3]in{0,uid}
-  and before[5]==1 and not before[2]&0o022 and 0<before[6]<=maximum,'file_identity')
+ need(path.is_absolute()and path.resolve(strict=True)==path and stat.S_ISREG(before[2])and before[3]in{0,uid}
+  and before[4]in{0,uid}and before[5]==1 and not before[2]&0o022 and 0<before[6]<=maximum,'file_identity')
+ need(mode is None or stat.S_IMODE(before[2])==mode,'file_mode')
  if pin is not None:need(before[6]==pin[0],'file_size')
- fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC);stack.callback(os.close,fd)
- need(identity(os.fstat(fd))==before,'opened_file_identity');parts=[];count=0;h=sha256()
- while True:
-  raw=os.read(fd,min(65536,maximum-count+1))
-  if not raw:break
-  count+=len(raw);need(count<=maximum,'file_bound');h.update(raw);parts.append(raw)
- need(count==before[6] and (pin is None or (count,h.hexdigest())==pin),'file_pin')
+ frame=(path,before,chain);flags=None;offset=0;latched=[];attempted=False;confirmed=False;failure=None;framed=False
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
  def check():
-  need(identity(os.fstat(fd))==before,'file_changed');named([(path,before,chain)])
- check();stack.callback(check);frames.append((path,before,chain));return b''.join(parts),check
+  try:
+   need(not latched,'prior_source_failure');named([frame])
+   need(identity(os.fstat(fd))==before and os.lseek(fd,0,os.SEEK_CUR)==offset,'file_fd_changed')
+   if flags is not None:need((fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))==flags,'file_fd_flags_changed')
+  except BaseException as e:latched.append(type(e).__name__);raise
+ def close():
+  nonlocal attempted,confirmed,failure
+  if attempted:
+   if failure is not None:raise failure
+   need(confirmed,'source_close_unproven');named([frame]);return
+  # Latch BEFORE the syscall. A raised close may already have closed the OFD;
+  # no later callback may retry that numeric descriptor or inspect its reuse.
+  attempted=True;errors=[]
+  try:check()
+  except BaseException as e:errors.append(e)
+  try:
+   os.close(fd)
+   try:os.fstat(fd)
+   except OSError as e:need(e.errno==errno.EBADF,'original_fd_close');confirmed=True
+   else:raise RuntimeError('original_fd_still_open')
+  except BaseException as e:errors.append(e)
+  try:named([frame])
+  except BaseException as e:errors.append(e)
+  if errors:
+   failure=errors[0]if len(errors)==1 else BaseExceptionGroup('source finalizer failures',errors)
+   raise failure
+  need(confirmed,'source_close_unproven')
+  if framed:FINALIZED.append(frame)
+ try:
+  flags=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))
+  frames.append(frame);framed=True;stack.callback(close)
+ except BaseException as primary:
+  try:close()
+  except BaseException as cleanup:raise BaseExceptionGroup('source acquisition and finalizer failures',[primary,cleanup])
+  raise
+ check();parts=[];h=sha256()
+ while True:
+  raw=os.read(fd,min(65536,maximum-offset+1))
+  if not raw:break
+  offset+=len(raw);need(offset<=maximum,'file_bound');h.update(raw);parts.append(raw)
+ need(offset==before[6]and(pin is None or(offset,h.hexdigest())==pin),'file_pin');check()
+ return b''.join(parts),check
 def publish(path,raw,uid):
  need(type(raw)is bytes and 0<len(raw)<=32*1024**2,'write_bound');chain=parents(path,uid)
  fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
@@ -183,9 +220,10 @@ def verify_artifacts(R,rows,proofs):
  for key in ('source_maintainer_signature_verified','compile_options_equal','elf_soname_exports_dependencies_equal','python_binary_unchanged','sqlite_stdlib_extension_unchanged','mapped_installed_libraries_verified','full_sqlite_documentation_restored','app_ci_restore_gate_required'):need(p.get(key)is True,'provenance_proof')
  for key in ('upstream_fault_suites_run','wal_reset_reproduction_performed','full_upstream_suite_pass_claimed','local_build_metadata_signed','runtime_loader_override_used','production_data_accessed','security_accepted'):need(p.get(key)is False,'provenance_claims')
  need(p.get('source_files')=={name:{'bytes':pin[0],'sha256':pin[1]}for name,pin in R.SOURCE_FILES.items()},'source_provenance')
- vendor=p['vendor_tests'];need(type(vendor)is dict and set(vendor)=={'same_configured_source','standard_and_official_regression','standard_scope','no_new_filters_or_exclusions','no_new_filters_or_exclusions_scope','testfixture_source_deduplication','full_all_permutations_claimed','default_omissions_are_not_waivers'},'vendor_provenance')
+ vendor=p['vendor_tests'];need(type(vendor)is dict and set(vendor)=={'same_configured_source','standard_and_official_regression','standard_scope','no_new_filters_or_exclusions','no_new_filters_or_exclusions_scope','testfixture_source_deduplication','full_all_permutations_claimed','default_omissions_are_not_waivers','unprivileged_execution'},'vendor_provenance')
  need(type(vendor['standard_scope'])is dict and encoded(vendor['standard_scope'])==encoded(R.VENDOR_STANDARD_SCOPE),'vendor_standard_scope')
  need(vendor['no_new_filters_or_exclusions']is True and vendor['no_new_filters_or_exclusions_scope']=='test_selection_only'and vendor['full_all_permutations_claimed']is False and vendor['default_omissions_are_not_waivers']is True,'vendor_claims')
+ R.vendor_privilege_contract(vendor['unprivileged_execution'])
  harness=R.testfixture_harness_contract(vendor['testfixture_source_deduplication'])
  watched=vendor['same_configured_source'];need(type(watched)is dict and set(watched)=={'Makefile','debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*R.VENDOR_HELPERS},'vendor_same_source')
  for value in watched.values():binding(value)

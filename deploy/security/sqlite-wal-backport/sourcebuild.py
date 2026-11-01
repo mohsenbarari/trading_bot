@@ -8,7 +8,7 @@ official FTS5 regression. No actual test/build is performed by importing this fi
 """
 from hashlib import sha256
 from pathlib import Path
-import argparse,base64,datetime,email.utils,json,os,re,select,selectors,shutil,signal,stat,subprocess,sys,tarfile,time,uuid
+import argparse,base64,ctypes,errno,fcntl,datetime,email.utils,json,os,re,select,selectors,shutil,signal,stat,subprocess,sys,tarfile,time,uuid
 from urllib.parse import urlsplit
 from urllib.request import build_opener,HTTPSHandler,ProxyHandler,Request
 
@@ -167,10 +167,17 @@ def forward(raw,end):
   ready=select.select([], [fd], [], min(1,left))[1]
   if not ready:continue
   count=os.write(fd,view[:4096]);require(count>0,'output_write');view=view[count:]
-def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False):
+def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False,unprivileged=False):
+ global VENDOR_RETIREMENT_UNPROVEN
  """Bound bytes BEFORE accumulation/forwarding; no payload file-size limit."""
+ require(type(unprivileged)is bool,'vendor_credentials_type')
+ env=current_environment();credentials={}
+ if unprivileged:
+  require(VENDOR_PROCESS_SCOPE is not None and VENDOR_PROCESS_SCOPE['armed']and not VENDOR_PROCESS_SCOPE['fault']and VENDOR_PROCESS_SCOPE['controller_pid']==os.getpid(),'vendor_process_scope_required')
+  env['HOME']=str(WORK/'vendor-test-home');credentials={'user':VENDOR_UID,'group':VENDOR_GID,'extra_groups':[],'umask':0o077}
  child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
-  env=current_environment(),cwd=cwd,close_fds=True,start_new_session=True)
+  env=env,cwd=cwd,close_fds=True,start_new_session=True,**credentials)
+ if unprivileged:VENDOR_RETIREMENT_UNPROVEN=True
  parts=[];count=0;end=time.monotonic()+timeout
  try:
   with selectors.DefaultSelector() as selector:
@@ -188,11 +195,16 @@ def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False
    require(capture,'capture_contract');return code,b''.join(parts)
   require(code==0,'build_command_refused')
   return b''.join(parts) if capture else None
- except BaseException:
+ except BaseException as primary:
   try:cleanup_owned(child)
-  except BaseException:pass  # CI tears down the disposable builder cgroup.
+  except BaseException as cleanup:
+   if unprivileged:raise BaseExceptionGroup('dropped vendor child and cleanup failures',[primary,cleanup])
+   pass  # CI tears down the disposable builder cgroup.
   raise
- finally:child.stdout.close()
+ finally:
+  child.stdout.close()
+
+
 def metadata(argv,*,cwd=None,maximum=MAX_METADATA):
  return bounded_command(argv,cwd=cwd,timeout=30,maximum=maximum,capture=True)
 def command(argv,*,cwd=None,timeout=1800):
@@ -490,6 +502,315 @@ def prepare_vendor_testfixture(src):
         'gnu_make': probes, 'official_or_production_fix': False, 'test_selection_changed': False, 'security_accepted': False}
     return testfixture_harness_contract(receipt)
 
+VENDOR_UID=10001;VENDOR_GID=10001
+VENDOR_RETIREMENT_UNPROVEN=False
+VENDOR_PHASE_SECONDS=1560;VENDOR_RESTORE_SECONDS=60
+VENDOR_IDENTITY_PROGRAM=r'''import json,os,stat
+home=os.environ['HOME'];s=os.stat(home,follow_symlinks=False)
+assert stat.S_ISDIR(s.st_mode) and s.st_uid==s.st_gid==10001 and stat.S_IMODE(s.st_mode)==0o700
+def writable(directory):
+ p=os.path.join(directory,'.sqlite-vendor-owned-write-proof')
+ fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+ try:
+  assert os.write(fd,b'owned vendor identity only\n')==27
+  row=os.fstat(fd);assert row.st_uid==row.st_gid==10001
+  os.fsync(fd)
+ finally:os.close(fd)
+ os.unlink(p);return True
+value={'uid':os.getuid(),'euid':os.geteuid(),'gid':os.getgid(),'egid':os.getegid(),'groups':os.getgroups(),
+ 'home':home,'home_mode':stat.S_IMODE(s.st_mode),'home_uid':s.st_uid,'home_gid':s.st_gid,
+ 'home_writable':writable(home),'source_writable':writable(os.getcwd())}
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'''
+def vendor_identity_argv():
+ return [PYTHON if 'PYTHON'in globals()else'/usr/local/bin/python3','-I','-B','-c',VENDOR_IDENTITY_PROGRAM]
+def vendor_privilege_contract(value):
+ require(type(value)is dict and set(value)=={'schema','identity_probe','initial_tree','restored_tree','initial_entries','final_entries',
+  'all_original_bindings_and_modes_restored','all_final_owners_root','no_symlink_targets_followed','work_mode_before','work_mode_during',
+  'work_mode_restored','private_home_root_restored','phase_seconds_limit','restore_reserve_seconds','process_tree','security_accepted'},'vendor_privilege_fields')
+ require(value['schema']=='sqlite_vendor_unprivileged_phase/1'and value['phase_seconds_limit']==VENDOR_PHASE_SECONDS
+  and value['restore_reserve_seconds']==VENDOR_RESTORE_SECONDS,'vendor_privilege_scope')
+ for k in('all_original_bindings_and_modes_restored','all_final_owners_root','no_symlink_targets_followed','private_home_root_restored'):require(value[k]is True,'vendor_privilege_restore')
+ require(value['security_accepted']is False and value['work_mode_before']==value['work_mode_restored']==0o700 and value['work_mode_during']==0o711,'vendor_privilege_modes')
+ for k in('initial_tree','restored_tree'):
+  p=value[k];require(type(p)is dict and set(p)=={'bytes','sha256'}and type(p['bytes'])is int and 0<p['bytes']<=16*1024**2
+   and type(p['sha256'])is str and re.fullmatch('[a-f0-9]{64}',p['sha256']),'vendor_tree_binding')
+ require(type(value['initial_entries'])is int and type(value['final_entries'])is int and 0<value['initial_entries']<=value['final_entries']<=50000,'vendor_tree_count')
+ probe=value['identity_probe'];require(type(probe)is dict and set(probe)=={'argv','actual_returncode','observed','raw_output'}
+  and probe['argv']==vendor_identity_argv()and type(probe['actual_returncode'])is int and probe['actual_returncode']==0,'vendor_identity_probe')
+ observed=probe['observed'];expected={'uid':10001,'euid':10001,'gid':10001,'egid':10001,'groups':[],
+  'home':str(WORK/'vendor-test-home'),'home_mode':0o700,'home_uid':10001,'home_gid':10001,'home_writable':True,'source_writable':True}
+ require(type(observed)is dict and set(observed)==set(expected)and all(type(observed[k])is type(v)and observed[k]==v for k,v in expected.items()),'vendor_actual_identity')
+ raw=encoded(observed);require(probe['raw_output']=={'bytes':len(raw),'sha256':sha256(raw).hexdigest()},'vendor_identity_output_binding')
+ vendor_process_contract(value['process_tree'])
+ return value
+
+def vendor_close_fd(fd):
+ os.close(fd)
+ try:os.fstat(fd)
+ except OSError as e:require(e.errno==errno.EBADF,'vendor_original_fd_close')
+ else:raise RuntimeError('vendor_original_fd_still_open')
+def vendor_tree(root,owners,end,*,change=None,reference=None):
+ """Metadata-only traversal. Every chown uses the admitted directory FD and nofollow."""
+ rows={};name_bytes=0;opened=closed=0
+ def visit(fd,relative,depth):
+  nonlocal name_bytes,opened,closed
+  require(time.monotonic()<end and depth<=64,'vendor_tree_deadline_or_depth')
+  s=os.fstat(fd);require(stat.S_ISDIR(s.st_mode),'vendor_directory_fd')
+  def record(name,row,dirfd=None):
+   nonlocal name_bytes
+   require(time.monotonic()<end,'vendor_tree_deadline')
+   require((row.st_uid,row.st_gid)in owners and (stat.S_ISDIR(row.st_mode)or stat.S_ISREG(row.st_mode)or stat.S_ISLNK(row.st_mode)),'vendor_tree_owner_or_type')
+   require(stat.S_ISDIR(row.st_mode)or row.st_nlink==1,'vendor_tree_hardlink')
+   key=relative if name is None else(relative+'/'+name if relative else name)
+   require(len(key)<=1024 and key not in rows and len(rows)<50000,'vendor_tree_inventory')
+   name_bytes+=len(key);require(name_bytes<=4*1024**2,'vendor_tree_names_bound')
+   prior=None if reference is None else reference.get(key)
+   links=0 if stat.S_ISDIR(row.st_mode)else row.st_nlink
+   before=[row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid,links]
+   if prior is not None:require(before[:3]==prior[:3]and before[5]==prior[5],'vendor_original_mode_or_inode_changed')
+   if change is not None:
+    if name is None:os.fchown(fd,*change);after=os.fstat(fd)
+    else:os.chown(name,*change,dir_fd=dirfd,follow_symlinks=False);after=os.stat(name,dir_fd=dirfd,follow_symlinks=False)
+    require((after.st_dev,after.st_ino,after.st_mode,after.st_nlink)==(row.st_dev,row.st_ino,row.st_mode,row.st_nlink)
+     and(after.st_uid,after.st_gid)==change,'vendor_chown_changed_identity_or_mode')
+    row=after
+   rows[key]=[row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid,0 if stat.S_ISDIR(row.st_mode)else row.st_nlink]
+  # Open every child directory without following links, then operate relative to
+  # that held FD. Symlinks themselves may be owned; their targets are never read.
+  with os.scandir(fd)as stream:
+   names=[]
+   for entry in stream:names.append(entry.name);require(len(names)<=50000,'vendor_directory_bound')
+  for name in sorted(names):
+   row=os.stat(name,dir_fd=fd,follow_symlinks=False)
+   if stat.S_ISDIR(row.st_mode):
+    child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd);opened+=1
+    try:
+     require((os.fstat(child).st_dev,os.fstat(child).st_ino)==(row.st_dev,row.st_ino),'vendor_child_directory_changed')
+     visit(child,relative+'/'+name if relative else name,depth+1)
+    finally:
+     vendor_close_fd(child);closed+=1
+   else:record(name,row,fd)
+  record(None,s)
+ fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);opened+=1
+ try:visit(fd,'',0)
+ finally:vendor_close_fd(fd);closed+=1
+ require(opened==closed and(reference is None or set(reference)<=set(rows)),'vendor_tree_finality_or_missing_original')
+ return rows
+VENDOR_PROCESS_SCOPE=None
+def vendor_subreaper(value=None):
+ # linux/prctl.h: SET_CHILD_SUBREAPER36, GET_CHILD_SUBREAPER37. x86_64
+ # uses unsigned long for all four variadic arguments; pointer width matches.
+ libc=ctypes.CDLL(None,use_errno=True);call=libc.prctl
+ call.argtypes=[ctypes.c_int,ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong];call.restype=ctypes.c_int
+ if value is not None:
+  require(type(value)is int and value in(0,1),'vendor_subreaper_value')
+  if call(36,value,0,0,0)!=0:raise OSError(ctypes.get_errno(),'vendor process-local subreaper set')
+ actual=ctypes.c_int()
+ if call(37,ctypes.addressof(actual),0,0,0)!=0:raise OSError(ctypes.get_errno(),'vendor process-local subreaper get')
+ require(actual.value in(0,1)and(value is None or actual.value==value),'vendor_subreaper_state');return actual.value
+def vendor_process_bytes(path,maximum):
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+ try:
+  raw=os.read(fd,maximum+1);require(len(raw)<=maximum,'vendor_proc_bound');return raw
+ finally:vendor_close_fd(fd)
+def vendor_process_children():
+ raw=vendor_process_bytes('/proc/self/task/'+str(os.getpid())+'/children',65536)
+ words=raw.split();require(len(words)<=4096 and all(re.fullmatch(b'[1-9][0-9]{0,9}',p)for p in words),'vendor_child_inventory')
+ values=[int(p)for p in words];require(len(values)==len(set(values)),'vendor_child_duplicate');return sorted(values)
+def vendor_process_empty():
+ require(vendor_process_children()==[],'vendor_children_remain')
+ try:os.waitid(os.P_ALL,0,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+ except ChildProcessError as e:require(e.errno==errno.ECHILD,'vendor_no_child_wait');return errno.ECHILD
+ raise RuntimeError('vendor_unexpected_waitable_or_running_child')
+def vendor_process_begin(end):
+ global VENDOR_PROCESS_SCOPE,VENDOR_RETIREMENT_UNPROVEN
+ require(VENDOR_PROCESS_SCOPE is None and not VENDOR_RETIREMENT_UNPROVEN,'prior_vendor_process_scope_unproven')
+ VENDOR_RETIREMENT_UNPROVEN=True
+ require(signal.getsignal(signal.SIGCHLD)==signal.SIG_DFL,'vendor_SIGCHLD_scope')
+ with os.scandir('/proc/self/task')as stream:
+  tasks=[]
+  for row in stream:tasks.append(row.name);require(len(tasks)<=2,'vendor_controller_threads')
+ require(tasks==[str(os.getpid())],'vendor_controller_single_thread');vendor_process_empty()
+ require(vendor_subreaper()==0,'vendor_borrowed_subreaper_refused')
+ scope={'controller_pid':os.getpid(),'end':end,'retire_end':end-VENDOR_RESTORE_SECONDS,'fault':False,'commands':{},'armed':False}
+ VENDOR_PROCESS_SCOPE=scope
+ try:require(time.monotonic()<scope['retire_end']and vendor_subreaper(1)==1,'vendor_subreaper_arm');scope['armed']=True
+ except BaseException:
+  scope['fault']=True
+  # No vendor child has been started. Restore only our process-local mutation
+  # after proving the original child set is still empty; retain failed status.
+  vendor_process_empty();vendor_subreaper(0);VENDOR_PROCESS_SCOPE=None
+  raise
+ return scope
+def vendor_process_retire(scope,label,argv):
+ global VENDOR_RETIREMENT_UNPROVEN
+ require(scope is VENDOR_PROCESS_SCOPE and scope['armed']and not scope['fault']and os.getpid()==scope['controller_pid'],'vendor_process_scope_identity')
+ require(label not in scope['commands']and type(argv)is list,'vendor_process_command_once')
+ events=[];initial=None
+ try:
+  while True:
+   require(time.monotonic()<scope['retire_end']and len(events)<4096,'vendor_process_retire_deadline_or_bound')
+   children=vendor_process_children()
+   if initial is None:initial=list(children)
+   if not children:vendor_process_empty();break
+   for pid in children:
+    require(time.monotonic()<scope['retire_end'],'vendor_process_retire_deadline')
+    fd=os.pidfd_open(pid,0)
+    try:
+     before=identity(os.fstat(fd));flags=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))
+     require(flags[0]&fcntl.FD_CLOEXEC,'vendor_pidfd_cloexec')
+     raw=vendor_process_bytes('/proc/'+str(pid)+'/status',16384)
+     fields={line.split(b':',1)[0]:line.split(b':',1)[1].split()for line in raw.splitlines()if b':'in line}
+     ppid=fields.get(b'PPid');uids=fields.get(b'Uid');gids=fields.get(b'Gid')
+     require(ppid==[str(scope['controller_pid']).encode()]and uids==[b'10001']*4 and gids==[b'10001']*4,'vendor_adopted_child_identity')
+     rawstat=vendor_process_bytes('/proc/'+str(pid)+'/stat',4096);split=rawstat.rfind(b') ')
+     require(rawstat.split(b' ',1)[0]==str(pid).encode()and split>0,'vendor_child_stat')
+     statfields=rawstat[split+2:].split();require(len(statfields)>19 and statfields[1]==str(scope['controller_pid']).encode()and statfields[19].isdigit(),'vendor_child_start_identity')
+     start_ticks=int(statfields[19]);require(start_ticks>0,'vendor_child_start_identity')
+     # P_PIDFD3 is provided by Linux wait.h and native Python; WNOWAIT retains
+     # this original child's identity until our final wait, even across setsid.
+     require(os.P_PIDFD==3,'vendor_pidfd_wait_api')
+     ready=os.waitid(os.P_PIDFD,fd,os.WEXITED|os.WNOHANG|os.WNOWAIT);sent=0
+     if ready is None:
+      signal.pidfd_send_signal(fd,signal.SIGKILL,None,0);sent=int(signal.SIGKILL)
+     while ready is None:
+      require(time.monotonic()<scope['retire_end'],'vendor_pidfd_wait_deadline')
+      ready=os.waitid(os.P_PIDFD,fd,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+      if ready is None:time.sleep(min(.005,max(0,scope['retire_end']-time.monotonic())))
+     require(ready.si_pid==pid and ready.si_uid==10001,'vendor_pidfd_wait_identity')
+     result=os.waitid(os.P_PIDFD,fd,os.WEXITED)
+     require(result==ready,'vendor_pidfd_final_wait_changed')
+     require(identity(os.fstat(fd))==before and(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))==flags,'vendor_pidfd_changed')
+     event={'pid':pid,'ppid':scope['controller_pid'],'uid':[10001]*4,'gid':[10001]*4,'start_ticks':start_ticks,
+      'pidfd_identity':list(before),'pidfd_flags':list(flags),'signal':sent,
+      'wait':{'si_pid':result.si_pid,'si_uid':result.si_uid,'si_code':result.si_code,'si_status':result.si_status},'pidfd_closed':False}
+    finally:
+     # One close attempt only; an uncertain close is never retried by this
+     # routine or a later phase callback. Any exception latches the scope fault.
+     vendor_close_fd(fd)
+    event['pidfd_closed']=True;events.append(event)
+  row={'argv':argv,'initial_child_pids':initial,'retired':events,'final_child_pids':[],'no_children_wait_errno':errno.ECHILD}
+  scope['commands'][label]=row;VENDOR_RETIREMENT_UNPROVEN=False;return row
+ except BaseException:
+  scope['fault']=True;VENDOR_RETIREMENT_UNPROVEN=True;raise
+def vendor_process_end(scope):
+ global VENDOR_PROCESS_SCOPE,VENDOR_RETIREMENT_UNPROVEN
+ require(scope is VENDOR_PROCESS_SCOPE and not scope['fault'],'vendor_process_retirement_unproven')
+ vendor_process_retire(scope,'phase-finalizer',[])
+ try:
+  require(time.monotonic()<scope['end']and vendor_process_empty()==errno.ECHILD,'vendor_process_final_empty')
+  require(vendor_subreaper(0)==0,'vendor_subreaper_restore')
+  proof={'schema':'sqlite_vendor_process_tree/1','controller_pid':scope['controller_pid'],'initial_thread_ids':[scope['controller_pid']],
+   'initial_child_pids':[],'original_subreaper':0,'armed_subreaper':1,'final_subreaper':0,'final_child_pids':[],
+   'final_wait_errno':errno.ECHILD,'discovery_scope':'proc_self_task_children_only','signal_scope':'original_adopted_child_pidfd_only',
+   'commands':scope['commands'],'security_accepted':False}
+  VENDOR_PROCESS_SCOPE=None;VENDOR_RETIREMENT_UNPROVEN=False;return proof
+ except BaseException:scope['fault']=True;VENDOR_RETIREMENT_UNPROVEN=True;raise
+def vendor_process_contract(value):
+ keys={'schema','controller_pid','initial_thread_ids','initial_child_pids','original_subreaper','armed_subreaper','final_subreaper',
+  'final_child_pids','final_wait_errno','discovery_scope','signal_scope','commands','security_accepted'}
+ require(type(value)is dict and set(value)==keys and value['schema']=='sqlite_vendor_process_tree/1','vendor_process_fields')
+ pid=value['controller_pid'];require(type(pid)is int and 0<pid<2**31 and type(value['initial_thread_ids'])is list and all(type(p)is int for p in value['initial_thread_ids'])and value['initial_thread_ids']==[pid]
+  and value['initial_child_pids']==value['final_child_pids']==[],'vendor_process_initial_scope')
+ require(type(value['original_subreaper'])is int and type(value['final_subreaper'])is int and value['original_subreaper']==value['final_subreaper']==0
+  and type(value['armed_subreaper'])is int and value['armed_subreaper']==1 and type(value['final_wait_errno'])is int
+  and value['final_wait_errno']==errno.ECHILD and value['security_accepted']is False,'vendor_process_finality')
+ require(value['discovery_scope']=='proc_self_task_children_only'and value['signal_scope']=='original_adopted_child_pidfd_only','vendor_process_authority')
+ commands=value['commands'];expected={'identity':vendor_identity_argv(),**VENDOR_COMMANDS,'phase-finalizer':[]}
+ require(type(commands)is dict and set(commands)==set(expected),'vendor_process_command_inventory')
+ for name,argv in expected.items():
+  row=commands[name];require(type(row)is dict and set(row)=={'argv','initial_child_pids','retired','final_child_pids','no_children_wait_errno'}
+   and row['argv']==argv and row['final_child_pids']==[]and type(row['no_children_wait_errno'])is int and row['no_children_wait_errno']==errno.ECHILD,'vendor_process_command_finality')
+  initial=row['initial_child_pids'];events=row['retired']
+  require(type(initial)is list and len(initial)<=4096 and all(type(p)is int and 0<p<2**31 for p in initial)
+   and initial==sorted(set(initial))and type(events)is list and len(events)<=4096,'vendor_process_event_bound')
+  seen=set()
+  for event in events:
+   require(type(event)is dict and set(event)=={'pid','ppid','uid','gid','start_ticks','pidfd_identity','pidfd_flags','signal','wait','pidfd_closed'},'vendor_process_event_fields')
+   child=event['pid'];start=event['start_ticks'];require(type(child)is int and 0<child<2**31 and type(start)is int and start>0
+    and type(event['ppid'])is int and event['ppid']==pid and event['uid']==event['gid']==[10001]*4,'vendor_process_owned_event')
+   require((child,start)not in seen,'vendor_process_duplicate_event');seen.add((child,start))
+   frame=event['pidfd_identity'];flags=event['pidfd_flags']
+   require(type(frame)is list and len(frame)==9 and all(type(n)is int for n in frame)
+    and type(flags)is list and len(flags)==2 and all(type(n)is int for n in flags)and flags[0]&fcntl.FD_CLOEXEC
+    and event['pidfd_closed']is True and type(event['signal'])is int and event['signal']==0,'vendor_process_pidfd_finality')
+   wait=event['wait'];require(type(wait)is dict and set(wait)=={'si_pid','si_uid','si_code','si_status'}
+    and all(type(v)is int for v in wait.values())and wait=={'si_pid':child,'si_uid':10001,'si_code':os.CLD_EXITED,'si_status':0},'vendor_process_descendant_failed')
+  require(set(initial)<={event['pid']for event in events},'vendor_process_unaccounted_child')
+ return value
+
+def vendor_unprivileged_commands(src):
+ """Loan the owned tree only inside a process-local, proven descendant scope."""
+ global VENDOR_RETIREMENT_UNPROVEN
+ require(os.geteuid()==os.getegid()==0 and src==WORK/'source'and src.resolve(strict=True)==src and WORK.resolve(strict=True)==WORK,'vendor_phase_scope')
+ work=WORK.lstat();require(stat.S_ISDIR(work.st_mode)and work.st_uid==work.st_gid==0 and stat.S_IMODE(work.st_mode)==0o700,'vendor_work_scope')
+ end=time.monotonic()+VENDOR_PHASE_SECONDS;home=WORK/'vendor-test-home';require(not os.path.lexists(home),'vendor_home_fresh')
+ original=vendor_tree(src,{(0,0)},end);home.mkdir(mode=0o700);home_initial=vendor_tree(home,{(0,0)},end)
+ current=WORK.lstat();require(identity(current)[:5]==identity(work)[:5],'vendor_work_changed_before_loan');work=current
+ errors=[];logs={};probe=None;restored=None;home_restored=None;scope=None;process_proof=None
+ workfd=os.open(WORK,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+ try:
+  require(identity(os.fstat(workfd))==identity(work),'vendor_work_fd')
+  scope=vendor_process_begin(end)
+  os.fchmod(workfd,0o711)
+  vendor_tree(src,{(0,0)},end,change=(VENDOR_UID,VENDOR_GID),reference=original)
+  vendor_tree(home,{(0,0)},end,change=(VENDOR_UID,VENDOR_GID),reference=home_initial)
+  def timeout(limit):
+   remaining=min(limit,end-time.monotonic()-VENDOR_RESTORE_SECONDS);require(remaining>0,'vendor_phase_deadline');return remaining
+  def run(label,argv,limit,maximum,tee=False):
+   failures=[];result=None;retirement=None
+   try:result=bounded_command(argv,cwd=src,timeout=timeout(limit),maximum=maximum,capture=True,with_code=True,tee=tee,unprivileged=True)
+   except BaseException as e:failures.append(e)
+   try:retirement=vendor_process_retire(scope,label,argv)
+   except BaseException as e:failures.append(e)
+   if result is not None and result[0]!=0:
+    failures.append(RuntimeError('vendor_identity_command_refused'if label=='identity'else'vendor_test_command_refused',result[0]))
+   if retirement is not None and any(event['signal']!=0 or event['wait']['si_code']!=os.CLD_EXITED or event['wait']['si_status']!=0 for event in retirement['retired']):
+    failures.append(RuntimeError('vendor_descendant_outlived_or_failed_command'))
+   if failures:
+    if len(failures)==1:raise failures[0]
+    raise BaseExceptionGroup('vendor command and descendant retirement failures',failures)
+   return result
+  code,raw=run('identity',vendor_identity_argv(),30,4096)
+  require(code==0,'vendor_identity_command_refused');observed=json.loads(raw)
+  probe={'argv':vendor_identity_argv(),'actual_returncode':code,'observed':observed,'raw_output':{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}}
+  expected={'uid':10001,'euid':10001,'gid':10001,'egid':10001,'groups':[],'home':str(home),'home_mode':0o700,
+   'home_uid':10001,'home_gid':10001,'home_writable':True,'source_writable':True}
+  require(type(observed)is dict and set(observed)==set(expected)and all(type(observed[k])is type(v)and observed[k]==v for k,v in expected.items())and raw==encoded(observed),'vendor_actual_identity')
+  for name,limit in(('vendor-standard.log',1200),('vendor-fts5-regression.log',180)):
+   code,raw=run(name,VENDOR_COMMANDS[name],limit,VENDOR_LOG_LIMITS[name],True)
+   require(code==0,'vendor_test_command_refused');logs[name]=raw
+ except BaseException as e:errors.append(e)
+ finally:
+  if scope is not None:
+   try:process_proof=vendor_process_end(scope)
+   except BaseException as e:VENDOR_RETIREMENT_UNPROVEN=True;errors.append(e)
+  if VENDOR_RETIREMENT_UNPROVEN:errors.append(RuntimeError('vendor_process_retirement_unproven'))
+  for path,reference in(()if VENDOR_RETIREMENT_UNPROVEN else((src,original),(home,home_initial))):
+   try:
+    result=vendor_tree(path,{(0,0),(VENDOR_UID,VENDOR_GID)},end,change=(0,0),reference=reference)
+    require({n:result[n]for n in reference}==reference,'vendor_original_bindings_not_restored')
+    if path==src:restored=result
+    else:home_restored=result
+   except BaseException as e:errors.append(e)
+  try:
+   require((os.fstat(workfd).st_dev,os.fstat(workfd).st_ino)==(work.st_dev,work.st_ino),'vendor_work_changed')
+   os.fchmod(workfd,0o700);require(os.fstat(workfd).st_uid==os.fstat(workfd).st_gid==0 and stat.S_IMODE(os.fstat(workfd).st_mode)==0o700,'vendor_work_restore')
+  except BaseException as e:errors.append(e)
+  finally:vendor_close_fd(workfd)
+ if errors:
+  if len(errors)==1:raise errors[0]
+  raise BaseExceptionGroup('vendor phase and restoration failures',errors)
+ require(time.monotonic()<end and restored is not None and home_restored is not None and process_proof is not None,'vendor_phase_finality')
+ bound=lambda rows:{'bytes':len(encoded(rows)),'sha256':sha256(encoded(rows)).hexdigest()}
+ receipt={'schema':'sqlite_vendor_unprivileged_phase/1','identity_probe':probe,'initial_tree':bound(original),'restored_tree':bound(restored),
+  'initial_entries':len(original),'final_entries':len(restored),'all_original_bindings_and_modes_restored':True,'all_final_owners_root':True,
+  'no_symlink_targets_followed':True,'work_mode_before':0o700,'work_mode_during':0o711,'work_mode_restored':0o700,
+  'private_home_root_restored':True,'phase_seconds_limit':VENDOR_PHASE_SECONDS,'restore_reserve_seconds':VENDOR_RESTORE_SECONDS,
+  'process_tree':process_proof,'security_accepted':False}
+ return logs,vendor_privilege_contract(receipt)
+
 def vendor_tests(src,harness):
  testfixture_harness_contract(harness)
  # Debian has already configured/built this exact source with its unchanged
@@ -499,18 +820,15 @@ def vendor_tests(src,harness):
  require(before['Makefile']=={key:harness['generated_after'][key]for key in('bytes','sha256')},'testfixture_generated_source_changed')
  require(all(before[name]=={'bytes':pin[0],'sha256':pin[1]}for name,pin in VENDOR_HELPERS.items()),'vendor_naming_helper_changed')
  require(not any(k in current_environment()for k in('TESTOPTS','TESTS','EXTRA_QUICKTEST','SQLITE_TEST_PREFIX')),'vendor_test_filter')
- logs={};facts={}
- for name,timeout in(('vendor-standard.log',1200),('vendor-fts5-regression.log',180)):
-  code,raw=bounded_command(VENDOR_COMMANDS[name],cwd=src,timeout=timeout,
-   maximum=VENDOR_LOG_LIMITS[name],capture=True,with_code=True,tee=True)
-  require(code==0,'vendor_test_command_refused')
-  facts[name]=vendor_log_contract(name,raw);logs[name]=raw
+ logs,privilege=vendor_unprivileged_commands(src)
+ facts={name:vendor_log_contract(name,logs[name])for name in VENDOR_COMMANDS}
  require({name:digest(src/name,maximum=4*1024**2)for name in watched}==before,'vendor_source_or_flags_changed')
  return {'same_configured_source':before,'standard_and_official_regression':facts,
   'standard_scope':dict(VENDOR_STANDARD_SCOPE),
   'no_new_filters_or_exclusions':True,'no_new_filters_or_exclusions_scope':'test_selection_only',
   'testfixture_source_deduplication':harness,'full_all_permutations_claimed':False,
-  'default_omissions_are_not_waivers':True},logs
+  'default_omissions_are_not_waivers':True,'unprivileged_execution':privilege},logs
+
 def build():
  builder_context();proofs=inputs(INPUTS,RECIPE);require(not WORK.exists() and not OUT.exists(),'build_once')
  WORK.mkdir(mode=0o700);Path(ENV['HOME']).mkdir(mode=0o700,exist_ok=True)

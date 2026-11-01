@@ -95,19 +95,18 @@ class Gold2SourceTests(unittest.TestCase):
   fault=next(v for k,v in zip(report.keys,report.values)if isinstance(k,ast.Constant)and k.value=='upstream_fault_suites_run')
   self.assertIsInstance(fault,ast.Constant);self.assertIs(fault.value,False)
  def test_actual_vendor_boundary_same_source_no_flags_filter_and_bounded_tee(self):
-  src=self.source_fixture();calls=[]
-  def command(argv,**kw):
-   calls.append((argv,kw));return 0,standard()if argv[0]=='/usr/bin/make'else regression()
-  with patch.object(R,'bounded_command',side_effect=command):facts,logs=R.vendor_tests(src,F.fixture_harness())
-  self.assertEqual(len(calls),2);self.assertEqual(set(logs),set(R.VENDOR_COMMANDS))
-  for argv,kw in calls:
-   self.assertEqual(kw['cwd'],src);self.assertIs(kw['capture'],True);self.assertIs(kw['with_code'],True);self.assertIs(kw['tee'],True)
+  src=self.source_fixture();logs={'vendor-standard.log':standard(),'vendor-fts5-regression.log':regression()}
+  privilege=F.fixture_vendor_privilege()
+  with patch.object(R,'vendor_unprivileged_commands',return_value=(logs,privilege))as phase:
+   facts,actual=R.vendor_tests(src,F.fixture_harness())
+  phase.assert_called_once_with(src);self.assertEqual(actual,logs)
+  self.assertEqual(facts['unprivileged_execution'],privilege)
+  self.assertEqual(facts['standard_and_official_regression'],{n:R.vendor_log_contract(n,logs[n])for n in R.VENDOR_COMMANDS})
   self.assertTrue(facts['no_new_filters_or_exclusions']);self.assertFalse(facts['full_all_permutations_claimed'])
   self.assertEqual(facts['standard_scope'],R.VENDOR_STANDARD_SCOPE)
-  self.assertIs(facts['standard_scope']['all_fault_permutations_run'],False)
  def test_vendor_primary_nonzero_refuses_before_any_fake_log_acceptance(self):
   src=self.source_fixture()
-  with patch.object(R,'bounded_command',return_value=(7,standard())),patch.object(R,'vendor_log_contract',side_effect=AssertionError('must refuse first')):
+  with patch.object(R,'vendor_unprivileged_commands',side_effect=RuntimeError('vendor_test_command_refused')),patch.object(R,'vendor_log_contract',side_effect=AssertionError('must refuse first')):
    with self.assertRaisesRegex(RuntimeError,'vendor_test_command_refused'):R.vendor_tests(src,F.fixture_harness())
  def test_real_public_child_stdout_is_captured_and_teed_before_nonzero_returns(self):
   emitted=[]
@@ -123,10 +122,10 @@ class Gold2SourceTests(unittest.TestCase):
   self.assertEqual(emitted,[])
  def test_vendor_same_source_mutation_refuses(self):
   src=self.source_fixture()
-  def command(argv,**kw):
-   if argv[0]=='./testfixture':(src/'src/wal.c').write_bytes(b'OWNED MUTATED SOURCE')
-   return 0,standard()if argv[0]=='/usr/bin/make'else regression()
-  with patch.object(R,'bounded_command',side_effect=command):
+  def phase(_):
+   (src/'Makefile').write_bytes((src/'Makefile').read_bytes()+b'\nOWNED MUTATION')
+   return {'vendor-standard.log':standard(),'vendor-fts5-regression.log':regression()},F.fixture_vendor_privilege()
+  with patch.object(R,'vendor_unprivileged_commands',side_effect=phase):
    with self.assertRaisesRegex(RuntimeError,'vendor_source_or_flags_changed'):R.vendor_tests(src,F.fixture_harness())
  def test_vendor_standard_summary_and_default_omissions_are_observations(self):
   row=R.vendor_log_contract('vendor-standard.log',standard()+b'Omitted test cases:\n.  capability_default compiled feature absent\n')
