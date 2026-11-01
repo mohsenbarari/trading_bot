@@ -35,13 +35,13 @@ jobs:
           git diff --quiet
           git diff --cached --quiet
           test "$(git ls-files --others --exclude-standard -z | wc -c)" = 0
-          printf '%s  %s\n' a7c3aa44d8522e1afb6d50c718f761eeee2cb0a961a7af55a6ec81af2f1df4d6 scripts/security_age132_tool/worker.py | sha256sum -c -
+          printf '%s  %s\n' 215c75c4a8142bb01b84e3c44e9ba64396e027496370534dfe6063f22d78f615 scripts/security_age132_tool/worker.py | sha256sum -c -
       - name: Finite candidate build; unresolved findings quarantine
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          python3 -I -S -B scripts/security_age132_tool/worker.py --build-managed-age132 a7c3aa44d8522e1afb6d50c718f761eeee2cb0a961a7af55a6ec81af2f1df4d6
+          python3 -I -S -B scripts/security_age132_tool/worker.py --build-managed-age132 215c75c4a8142bb01b84e3c44e9ba64396e027496370534dfe6063f22d78f615
       - name: Retain only public candidate, vendor Source and raw evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

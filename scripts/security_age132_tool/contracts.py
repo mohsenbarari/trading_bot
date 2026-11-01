@@ -40,9 +40,12 @@ def validate_lock(v):
   need(names==sorted(set(names)),'module_inventory')
   versions={r['path']:r['version']for r in rows};need(versions['golang.org/x/crypto']=='v0.58.0'and versions['golang.org/x/net']=='v0.62.0'and versions['github.com/yuin/goldmark']=='v1.7.17','fixed_dependency_versions')
  return v
-def download_record(raw,pin):
- r=document(raw);need(r.get('Path')==pin['path']and r.get('Version')==pin['version']and r.get('Sum')==pin['module_sum']and r.get('GoModSum')==pin['gomod_sum']and'Error'not in r,'module_download_pin')
- if pin['origin']is not None:need(r.get('Origin',{}).get('Hash')==pin['origin']['Hash'],'module_origin_pin')
+def download_record(raw,pin,*,origin_required=True):
+ r=document(raw);need(type(origin_required)is bool and type(r)is dict and r.get('Path')==pin['path']and r.get('Version')==pin['version']and r.get('Sum')==pin['module_sum']and r.get('GoModSum')==pin['gomod_sum']and'Error'not in r and'Replace'not in r,'module_download_pin')
+ # Go1.27.3's dependency wire may omit this optional provenance pointer.
+ # Root source calls retain the stricter default; never invent missing VCS data.
+ if'Origin'in r:need(type(r['Origin'])is dict and type(pin['origin'])is dict and r['Origin']==pin['origin'],'module_origin_pin')
+ else:need(not origin_required,'module_origin_pin')
  return r
 def graph(raw,main,expected):
  rows=documents(raw);actual={};mains=[]
