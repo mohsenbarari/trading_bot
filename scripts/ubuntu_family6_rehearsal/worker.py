@@ -8,6 +8,7 @@ FAMILIES={'ubuntu239':('libc-bin','libc-dev-bin','libc-devtools','libc6','libc6-
           'ubuntu243':('libc-bin','libc-dev-bin','libc-gconv-modules-extra','libc6','libc6-dev','locales')}
 VERSIONS={'ubuntu239':'2.39-0ubuntu8.9','ubuntu243':'2.43-2ubuntu2.4'}
 M_PIN=(53351,'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82')
+CONFIGURATION_PATHS=('/etc/locale.gen','/etc/default/locale','/etc/locale.conf','/etc/ld.so.conf')
 def need(value,code):
     if not value:raise RuntimeError(code)
 def encoded(value):
@@ -73,6 +74,14 @@ def checked_solver(raw,names,version,evidence,all_evidence):
     except BaseException as error:
         error.family6_solver_phase=evidence['phase'];error.family6_simulation_evidence=all_evidence;raise
     evidence['strict_solver_accepted']=True;evidence['accepted_for_install']=True;return result
+def apply_evidence(raw,command_record,phase):
+    """Completed apply stdout is diagnostic evidence, not rehearsal acceptance."""
+    need(type(raw)is bytes and 0<=len(raw)<=256*1024 and phase in {'forward_apply','rollback_apply'},'apply_evidence_scope')
+    need(type(command_record)is dict and type(command_record.get('actual_returncode'))is int and command_record['actual_returncode']==0
+         and command_record.get('bytes')==len(raw)and command_record.get('sha256')==sha256(raw).hexdigest(),'successful_apply_identity')
+    return {'phase':phase,'argv':command_record['argv'],'actual_returncode':0,'raw_output_bytes':len(raw),
+            'raw_output_sha256':sha256(raw).hexdigest(),'raw_output_base64':base64.b64encode(raw).decode('ascii'),
+            'rehearsal_accepted':False}
 def package_state(raw):
     result={}
     for line in raw.decode('utf8','strict').splitlines():
@@ -119,6 +128,7 @@ def apt_snapshot(profile):
 
 def _execute(stage,expected_input,failure_context):
     simulation_records=failure_context['successful_simulation_evidence']
+    config_records=failure_context['configuration_evidence'];apply_records=failure_context['successful_apply_evidence']
     need(os.getuid()==os.geteuid()==0 and re.fullmatch('[a-f0-9]{32}',os.environ.get('FAMILY6_NONCE',''))and Path('/.dockerenv').is_file(),'owned_disposable_only')
     cfg=json.loads(read_pin('/inputs/input.json',expected_input,65536));profile=cfg['profile'];need(profile in FAMILIES,'profile')
     names=FAMILIES[profile];old=VERSIONS[profile];new=old+'+gold1'
@@ -196,7 +206,9 @@ def _execute(stage,expected_input,failure_context):
     else:
         need(stage=='exercise','stage')
         failure_context['phase']='baseline_verification'
-        baseline=verify(old);before=configuration();apt_before=apt_snapshot(profile)
+        baseline=verify(old);before=configuration();config_records['before']=before
+        apt_before=apt_snapshot(profile)
+        report['configuration_evidence']=config_records
         report['baseline_snapshot_sha256']=sha256(encoded({'packages':baseline,'configuration':before,'apt':apt_before})).hexdigest()
         failure_context['phase']='forward_archives'
         forward=archives('new');report['successful_simulation_evidence']=simulation_records
@@ -207,13 +219,14 @@ def _execute(stage,expected_input,failure_context):
         failure_context['phase']='forward_solver_validation'
         report['forward_solver']=checked_solver(forward_raw,names,new,forward_evidence,simulation_records)
         failure_context['phase']='forward_apply'
-        apt(forward)
+        forward_apply=apt(forward);apply_records.append(apply_evidence(forward_apply,commands[-1],'forward_apply'))
         failure_context['phase']='forward_verification'
         after=verify(new)
         failure_context['phase']='forward_nonfamily_validation'
         unchanged_nonfamily(baseline,after,names)
         failure_context['phase']='forward_configuration'
         report['forward_configuration']=configuration()
+        config_records['forward']=report['forward_configuration']
         failure_context['phase']='rollback_archives'
         rollback=archives('old')
         failure_context['phase']='corrected_rollback'
@@ -221,13 +234,15 @@ def _execute(stage,expected_input,failure_context):
         failure_context['phase']='rollback_solver_validation'
         report['rollback_solver']=checked_solver(rollback_raw,names,old,rollback_evidence,simulation_records)
         failure_context['phase']='rollback_apply'
-        apt(rollback,rollback=True)
+        rollback_apply=apt(rollback,rollback=True);apply_records.append(apply_evidence(rollback_apply,commands[-1],'rollback_apply'))
         failure_context['phase']='rollback_verification'
         restored=verify(old)
         failure_context['phase']='rollback_package_state'
         need(restored==baseline,'rollback_package_state')
         failure_context['phase']='rollback_configuration'
-        need(configuration()==before,'rollback_configuration_drift')
+        restored_configuration=configuration();config_records['rollback']=restored_configuration
+        config_records['changed_files']=[name for name in CONFIGURATION_PATHS if restored_configuration.get(name)!=before.get(name)]
+        need(restored_configuration==before,'rollback_configuration_drift')
         failure_context['phase']='rollback_APT_snapshot'
         need(apt_snapshot(profile)==apt_before,'offline_APT_sources_changed')
         report.update(forward_exact_six=True,rollback_exact_six=True,nonfamily_packages_unchanged=True,configuration_restored_exactly=True)
@@ -239,11 +254,14 @@ def _execute(stage,expected_input,failure_context):
 def execute(stage,expected_input):
     # One bounded list owns every completed simulation across the whole worker.
     # Preserve the original exception and its command/finality attributes.
-    context={'phase':'worker_admission','successful_simulation_evidence':[]}
+    context={'phase':'worker_admission','successful_simulation_evidence':[],
+             'configuration_evidence':{'before':None,'forward':None,'rollback':None,'changed_files':None},'successful_apply_evidence':[]}
     try:return _execute(stage,expected_input,context)
     except BaseException as error:
         error.family6_worker_phase=context['phase']
         error.family6_simulation_evidence=context['successful_simulation_evidence']
+        error.family6_configuration_evidence=context['configuration_evidence']
+        error.family6_apply_evidence=context['successful_apply_evidence']
         raise
 def main(argv=None):
     argv=sys.argv[1:]if argv is None else argv
@@ -252,6 +270,6 @@ def main(argv=None):
     try:execute(argv[1],argv[2]);return 0
     except BaseException as error:
         text=str(error);code=text if type(error)is RuntimeError and re.fullmatch('[A-Za-z0-9_]{1,80}',text)else'rehearsal_refused'
-        value={'status':'FAILED','code':code,'failed_public_command':getattr(error,'family6_failed_command',None),'worker_phase':getattr(error,'family6_worker_phase',None),'solver_validation_phase':getattr(error,'family6_solver_phase',None),'successful_simulation_evidence':getattr(error,'family6_simulation_evidence',None),'automatic_retry':False,'Host_install_allowed':False,'security_accepted':False}
+        value={'status':'FAILED','code':code,'failed_public_command':getattr(error,'family6_failed_command',None),'worker_phase':getattr(error,'family6_worker_phase',None),'solver_validation_phase':getattr(error,'family6_solver_phase',None),'successful_simulation_evidence':getattr(error,'family6_simulation_evidence',None),'configuration_evidence':getattr(error,'family6_configuration_evidence',None),'successful_apply_evidence':getattr(error,'family6_apply_evidence',None),'automatic_retry':False,'Host_install_allowed':False,'security_accepted':False}
         sys.stdout.write(encoded(value).decode());return 1
 if __name__=='__main__':raise SystemExit(main())
