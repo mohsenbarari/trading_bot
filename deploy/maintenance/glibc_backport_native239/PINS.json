@@ -1,0 +1,61 @@
+{
+  "schema": "glibc84243_source_recipe/1",
+  "files": {
+    "CVE-2026-84243-Ubuntu-Native-2.39-0ubuntu8.9-CANDIDATE.patch": {
+      "bytes": 5601,
+      "sha256": "acb5cc224712e831787ff641750a96e5b278607d699f7bac0df513403250eca6"
+    },
+    "TESTONLY-invalid-flags-58a31b43.patch": {
+      "bytes": 891,
+      "sha256": "af67420d44cedbbbc0e36940545326ae87c28875deda19e962d731d360a46e58"
+    },
+    "build_hosted.py": {
+      "bytes": 26196,
+      "sha256": "74e235cbebf82fcc9350f11e22073383e5244333a253030ba66c21939c36fc68"
+    },
+    "host_io_original.py": {
+      "bytes": 53351,
+      "sha256": "fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82"
+    },
+    "host_ubuntu239.py": {
+      "bytes": 3751,
+      "sha256": "ea928740c736c0d0e12486f487425700d4ec4101d42ada14240fd042171c720e"
+    },
+    "native239-original-XPASS-classification.json": {
+      "bytes": 15662,
+      "sha256": "e275c91e7e983fad217ccef6406f4a12bb95b90ac9508b94ace5e051f69be09f"
+    },
+    "native239_evidence.py": {
+      "bytes": 13012,
+      "sha256": "87695b542171c1a5a8f488320b4504afc3b1e3ae37f6fa4e490f899403714300"
+    },
+    "profile239.py": {
+      "bytes": 4624,
+      "sha256": "d0bcc60624c2cce4a582939bbe991c9bfbffdd33e56ce21dae676987e834743e"
+    },
+    "source_io.py": {
+      "bytes": 8831,
+      "sha256": "b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568"
+    },
+    "sourcebuild.py": {
+      "bytes": 35315,
+      "sha256": "5960cea11a178a7aa813141f5b02fa9b07fd11735cf0abd364a8de120af340a7"
+    },
+    "vendor-tst-gettext-path-traversal.c": {
+      "bytes": 3336,
+      "sha256": "c732e301bbe037a6aa612f1452d7768d0bb3efd893f4fbf1d4d02e4651e2d3f6"
+    },
+    "vendor_merge_ledger.py": {
+      "bytes": 3279,
+      "sha256": "196aa4ffff91679f3cebf4537ed210387d38aa0226b27472a4ae1ee2758fd55d"
+    },
+    "verify_build.py": {
+      "bytes": 7275,
+      "sha256": "26140d57fb5aa6a02625199641eb32f793597d558d0b9fecab5582e522589ae8"
+    },
+    "worker_ubuntu239.py": {
+      "bytes": 3751,
+      "sha256": "aaf69c55b06092ed9d2c8f5d6ed851bf0be3700458aea143aa6610f76fd05fb3"
+    }
+  }
+}

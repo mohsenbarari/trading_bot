@@ -1,0 +1,414 @@
+{
+  "artifact": {
+    "bytes": 2611963,
+    "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-run-41260482968-ubuntu239-diagnostics-20261101-01/ubuntu239-evidence.zip",
+    "sha256": "a6f3464901b54eef3092e9590c8674a56abf5ed4868e89f2e0da18daa530dd73"
+  },
+  "evaluator_semantics": "rc77 => UNSUPPORTED first; only rc0+xfail=true => XPASS; nonzero+xfail=true => XFAIL. All13 authentic original exit statuses are0.",
+  "next_evidence": "Next already-required corrected full build should retain exact .out and .test-result for robust8/cpuclock2/cputimer1, tied to build/source. Original XPASS labels remain raw; check skip/failure messages instead of assuming all assertions ran. No extra current rerun or expectation edits.",
+  "packaging_expectations": {
+    "bytes": 29265,
+    "member": "debian/testsuite-xfail-debian.mk",
+    "sha256": "786d5a8142cf0994b92c2ee7e85870757e83eb6505271f9fe17ba565ce72650e"
+  },
+  "packaging_inclusion": "debian/rules.d/build.mk83-84 includes testsuite-xfail-debian.mk into configparms.",
+  "raw_artifact_members": [
+    "reports/Python-bootstrap.log",
+    "reports/full_Debian_build-partial-failure.log",
+    "hosted-failure.json",
+    "reports/prepare.log",
+    "reports/pull.log"
+  ],
+  "raw_log": {
+    "bytes": 120825303,
+    "member": "reports/full_Debian_build-partial-failure.log",
+    "sha256": "5bfc90342b04824b85d221ad0dd357cf63cb73978417f02f286356eb5b4b1df0"
+  },
+  "rows": [
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 128725,
+        "source_argument": "../sysdeps/x86/tst-cpu-features-cpuinfo.c"
+      },
+      "evaluation_line": 134380,
+      "expectation": "debian:175-177",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "CPU-info feature consistency, historical prodstack5 LP2041678",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 10572,
+        "member": "glibc-2.39/sysdeps/x86/tst-cpu-features-cpuinfo.c",
+        "sha256": "00d27489c3361243bcf1d78713447b8ed772e0dba48ea54c4a3cecd881badd27"
+      },
+      "summary_line": 135869,
+      "test": "elf/tst-cpu-features-cpuinfo"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 128726,
+        "source_argument": "../sysdeps/x86/tst-cpu-features-cpuinfo-static.c"
+      },
+      "evaluation_line": 134382,
+      "expectation": "debian:175-177",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Same test, static linking",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 38,
+        "member": "glibc-2.39/sysdeps/x86/tst-cpu-features-cpuinfo-static.c",
+        "sha256": "7d67e83e8060de71e9e0296b57559109501e601a9aa1e76fac4d4ae82c1ef7f6"
+      },
+      "summary_line": 135870,
+      "test": "elf/tst-cpu-features-cpuinfo-static"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 128730,
+        "source_argument": "../sysdeps/x86/tst-ifunc-isa-1.c"
+      },
+      "evaluation_line": 134390,
+      "expectation": "sysdeps/x86/Makefile:40",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Runtime IFUNC result equals selected ISA",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 1070,
+        "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-1.c",
+        "sha256": "d04aa9be1931bed8532e82ab0a0bfe78242e49053ce7189b776e6934b6dc6ec4"
+      },
+      "summary_line": 135879,
+      "test": "elf/tst-ifunc-isa-1"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 128731,
+        "source_argument": "../sysdeps/x86/tst-ifunc-isa-1-static.c"
+      },
+      "evaluation_line": 134392,
+      "expectation": "sysdeps/x86/Makefile:41",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Same ISA1 assertions, static linking",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 29,
+        "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-1-static.c",
+        "sha256": "477aee3b0cb81643d408a3663a5125b39d9e79a502f0dc5e4ac5b1199cbd4ebc"
+      },
+      "summary_line": 135880,
+      "test": "elf/tst-ifunc-isa-1-static"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 128732,
+        "source_argument": "../sysdeps/x86/tst-ifunc-isa-2.c"
+      },
+      "evaluation_line": 134394,
+      "expectation": "sysdeps/x86/Makefile:49",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Masked ISA returns SSE2; explicit unsupported is77",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 1234,
+        "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-2.c",
+        "sha256": "de78ee530e773af314748ffd94e39b2cfd3335eabea5ee705e18152f7cd964b1"
+      },
+      "summary_line": 135881,
+      "test": "elf/tst-ifunc-isa-2"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 128733,
+        "source_argument": "../sysdeps/x86/tst-ifunc-isa-2-static.c"
+      },
+      "evaluation_line": 134396,
+      "expectation": "sysdeps/x86/Makefile:50",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Same ISA2 assertions, static linking",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 29,
+        "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-2-static.c",
+        "sha256": "330d3178e694901dcb8c99acfae10fdb38bbe1eafcc3dc52f92a241b828113d4"
+      },
+      "summary_line": 135882,
+      "test": "elf/tst-ifunc-isa-2-static"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 96734,
+        "source_argument": "../sysdeps/pthread/tst-create-detached.c"
+      },
+      "evaluation_line": 96737,
+      "expectation": "debian:9-12",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "100000 detached creations; load-sensitive expectation",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 4441,
+        "member": "glibc-2.39/sysdeps/pthread/tst-create-detached.c",
+        "sha256": "b549282b500eacee0ffc645df480ae154901135e5f9a88e9df66b43189f8c2b0"
+      },
+      "summary_line": 135912,
+      "test": "nptl/tst-create-detached"
+    },
+    {
+      "classification": "vendor_exit0_body_extent_unresolved",
+      "compile": {
+        "line": 97543,
+        "source_argument": "../sysdeps/pthread/tst-robust8.c"
+      },
+      "evaluation_line": 97546,
+      "expectation": "debian:170-173",
+      "limitations": [
+        "lines161-165: attr_init failure prints thenreturns0",
+        "lines188-197: ENOTSUP prints thenreturns0"
+      ],
+      "original_exit_status": 0,
+      "purpose": "Robust shared mutex death/recovery, intermittent BZ19004",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 5301,
+        "member": "glibc-2.39/sysdeps/pthread/tst-robust8.c",
+        "sha256": "c61f6659307f57951e6f1a9faf6fcea753d2f8e29abccb70f8e57936e85cc946"
+      },
+      "summary_line": 135916,
+      "test": "nptl/tst-robust8"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 95919,
+        "source_argument": "tst-stack4.c"
+      },
+      "evaluation_line": 96322,
+      "expectation": "debian:22-24",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Concurrent stack/TLS/DSO stress, flapping BZ19329",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 3908,
+        "member": "glibc-2.39/nptl/tst-stack4.c",
+        "sha256": "d5b74b0331541d01a96369fde02dee5e0921f1d8bf489c09bc62b7fa7f5a2e4e"
+      },
+      "summary_line": 135917,
+      "test": "nptl/tst-stack4"
+    },
+    {
+      "classification": "vendor_exit0_body_extent_unresolved",
+      "compile": {
+        "line": 97665,
+        "source_argument": "tst-cpuclock2.c"
+      },
+      "evaluation_line": 97779,
+      "expectation": "debian:4-5",
+      "limitations": [
+        "lines155-160: timer_create failure prints skipping test thenreturns0",
+        "lines73-77: unsupported clock_nanosleep subcheck returns without failure"
+      ],
+      "original_exit_status": 0,
+      "purpose": "CPU clocks, load/VM-sensitive expectation",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 7575,
+        "member": "glibc-2.39/rt/tst-cpuclock2.c",
+        "sha256": "837a0674a92f38b9071dfbefaddefb476a1ac58096121ce9f8314e7a50a31503"
+      },
+      "summary_line": 135949,
+      "test": "rt/tst-cpuclock2"
+    },
+    {
+      "classification": "vendor_exit0_body_extent_unresolved",
+      "compile": {
+        "line": 97666,
+        "source_argument": "tst-cputimer1.c"
+      },
+      "evaluation_line": 97781,
+      "expectation": "debian:4-6",
+      "limitations": [
+        "includes rt/tst-timer4.c",
+        "included lines186-192: TEST_CLOCK_MISSING prints skipping test thenreturns0"
+      ],
+      "original_exit_status": 0,
+      "purpose": "Process CPU timers via rt/tst-timer4.c, load/VM sensitivity",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 1518,
+        "member": "glibc-2.39/rt/tst-cputimer1.c",
+        "sha256": "891ee9b6c3772faaf07fd8a079adfc96922970d9858315c46c8c44347c817070"
+      },
+      "summary_line": 135950,
+      "test": "rt/tst-cputimer1"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 97639,
+        "source_argument": "../sysdeps/pthread/tst-timer.c"
+      },
+      "evaluation_line": 97727,
+      "expectation": "debian:4-7",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Real pthread POSIX timers implementation; NOT rt dummy",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 4024,
+        "member": "glibc-2.39/sysdeps/pthread/tst-timer.c",
+        "sha256": "7e4dd560b60f1d5347d5e084592e32ee255bb7748ca4edcc17a08695329d3002"
+      },
+      "summary_line": 135951,
+      "test": "rt/tst-timer"
+    },
+    {
+      "classification": "original_vendor_success_no_identified_early_success_gap",
+      "compile": {
+        "line": 93990,
+        "source_argument": "tst-getrandom.c"
+      },
+      "evaluation_line": 94286,
+      "expectation": "debian:26-27",
+      "limitations": [],
+      "original_exit_status": 0,
+      "purpose": "Randomness/getentropy checks, entropy issue LP1891403",
+      "raw_status": "XPASS",
+      "source": {
+        "bytes": 6682,
+        "member": "glibc-2.39/stdlib/tst-getrandom.c",
+        "sha256": "d1de48491a9229b80f67effb2796d0bea37b638c688939360ee2d9ab56889b26"
+      },
+      "summary_line": 135953,
+      "test": "stdlib/tst-getrandom"
+    }
+  ],
+  "run_id": 41260482968,
+  "schema": "exact_ubuntu239_xpass_source_classification/1",
+  "selected_patch_headers_to_review": [],
+  "source_archives": [
+    {
+      "bytes": 18520988,
+      "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-glibc_2.39.orig.tar.xz",
+      "sha256": "f77bd47cf8170c57365ae7bf86696c118adb3b120d3259c64c502d3dc1e2d926"
+    },
+    {
+      "bytes": 491440,
+      "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-glibc_2.39-0ubuntu8.9.debian.tar.xz",
+      "sha256": "d6114f2302896a3c8612453e1bf1d0e61603e3029ba4a7c246fbb1ab4c48d2b0"
+    }
+  ],
+  "source_refs": {
+    "nptl/tst-stack4.c": {
+      "bytes": 3908,
+      "member": "glibc-2.39/nptl/tst-stack4.c",
+      "sha256": "d5b74b0331541d01a96369fde02dee5e0921f1d8bf489c09bc62b7fa7f5a2e4e"
+    },
+    "rt/tst-cpuclock2.c": {
+      "bytes": 7575,
+      "member": "glibc-2.39/rt/tst-cpuclock2.c",
+      "sha256": "837a0674a92f38b9071dfbefaddefb476a1ac58096121ce9f8314e7a50a31503"
+    },
+    "rt/tst-cputimer1.c": {
+      "bytes": 1518,
+      "member": "glibc-2.39/rt/tst-cputimer1.c",
+      "sha256": "891ee9b6c3772faaf07fd8a079adfc96922970d9858315c46c8c44347c817070"
+    },
+    "rt/tst-timer4.c": {
+      "bytes": 16776,
+      "member": "glibc-2.39/rt/tst-timer4.c",
+      "sha256": "87ab440c8dec3862a6ea47a2d8bdbad970eec36d750eb04e39405464c50c36b6"
+    },
+    "scripts/evaluate-test.sh": {
+      "bytes": 1243,
+      "member": "glibc-2.39/scripts/evaluate-test.sh",
+      "sha256": "fefaba26b61c19d6ca76ad00826ebe2c1bea9c5d345be3bccf489ef996b812ed"
+    },
+    "stdlib/tst-getrandom.c": {
+      "bytes": 6682,
+      "member": "glibc-2.39/stdlib/tst-getrandom.c",
+      "sha256": "d1de48491a9229b80f67effb2796d0bea37b638c688939360ee2d9ab56889b26"
+    },
+    "sysdeps/pthread/tst-create-detached.c": {
+      "bytes": 4441,
+      "member": "glibc-2.39/sysdeps/pthread/tst-create-detached.c",
+      "sha256": "b549282b500eacee0ffc645df480ae154901135e5f9a88e9df66b43189f8c2b0"
+    },
+    "sysdeps/pthread/tst-robust8.c": {
+      "bytes": 5301,
+      "member": "glibc-2.39/sysdeps/pthread/tst-robust8.c",
+      "sha256": "c61f6659307f57951e6f1a9faf6fcea753d2f8e29abccb70f8e57936e85cc946"
+    },
+    "sysdeps/pthread/tst-timer.c": {
+      "bytes": 4024,
+      "member": "glibc-2.39/sysdeps/pthread/tst-timer.c",
+      "sha256": "7e4dd560b60f1d5347d5e084592e32ee255bb7748ca4edcc17a08695329d3002"
+    },
+    "sysdeps/x86/Makefile": {
+      "bytes": 3736,
+      "member": "glibc-2.39/sysdeps/x86/Makefile",
+      "sha256": "29f95b87ad982d5391aa9bc2791e54f3e10b5c09a7b7edabda3e96e586b3954b"
+    },
+    "sysdeps/x86/tst-cpu-features-cpuinfo-static.c": {
+      "bytes": 38,
+      "member": "glibc-2.39/sysdeps/x86/tst-cpu-features-cpuinfo-static.c",
+      "sha256": "7d67e83e8060de71e9e0296b57559109501e601a9aa1e76fac4d4ae82c1ef7f6"
+    },
+    "sysdeps/x86/tst-cpu-features-cpuinfo.c": {
+      "bytes": 10572,
+      "member": "glibc-2.39/sysdeps/x86/tst-cpu-features-cpuinfo.c",
+      "sha256": "00d27489c3361243bcf1d78713447b8ed772e0dba48ea54c4a3cecd881badd27"
+    },
+    "sysdeps/x86/tst-ifunc-isa-1-static.c": {
+      "bytes": 29,
+      "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-1-static.c",
+      "sha256": "477aee3b0cb81643d408a3663a5125b39d9e79a502f0dc5e4ac5b1199cbd4ebc"
+    },
+    "sysdeps/x86/tst-ifunc-isa-1.c": {
+      "bytes": 1070,
+      "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-1.c",
+      "sha256": "d04aa9be1931bed8532e82ab0a0bfe78242e49053ce7189b776e6934b6dc6ec4"
+    },
+    "sysdeps/x86/tst-ifunc-isa-2-static.c": {
+      "bytes": 29,
+      "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-2-static.c",
+      "sha256": "330d3178e694901dcb8c99acfae10fdb38bbe1eafcc3dc52f92a241b828113d4"
+    },
+    "sysdeps/x86/tst-ifunc-isa-2.c": {
+      "bytes": 1234,
+      "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa-2.c",
+      "sha256": "de78ee530e773af314748ffd94e39b2cfd3335eabea5ee705e18152f7cd964b1"
+    },
+    "sysdeps/x86/tst-ifunc-isa.h": {
+      "bytes": 1994,
+      "member": "glibc-2.39/sysdeps/x86/tst-ifunc-isa.h",
+      "sha256": "87ba10e212327dc1081737d795657f00b9f7f635c45f2aab1a0de7c761939fcb"
+    }
+  },
+  "summary": {
+    "actual_FAIL_rows_added_by_this_audit": 0,
+    "authentic_vendor_exit0": 13,
+    "body_extent_unresolved_due_missing_individual_output": 3,
+    "full_build_security_or_installation_acceptance": false,
+    "global_XPASS_waiver": false,
+    "no_identified_early_success_gap": 10,
+    "raw_reports_or_expectations_edited": false
+  },
+  "vendor_evaluator": {
+    "bytes": 1243,
+    "member": "glibc-2.39/scripts/evaluate-test.sh",
+    "sha256": "fefaba26b61c19d6ca76ad00826ebe2c1bea9c5d345be3bccf489ef996b812ed"
+  }
+}

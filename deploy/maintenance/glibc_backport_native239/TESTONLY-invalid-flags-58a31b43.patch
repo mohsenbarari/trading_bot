@@ -1,0 +1,18 @@
+Description: Backport upstream invalid-flags regression input fix only
+Origin: upstream, https://sourceware.org/git/?p=glibc.git;a=commit;h=58a31b4316f1f687184eb147ffa1c676bc6a190e
+Forwarded: not-needed
+X-Local-Scope: Ubuntu2.39 proposed test-only correction; no runtime/headers or assertion removal
+--- a/misc/tst-preadvwritev2-common.c
++++ b/misc/tst-preadvwritev2-common.c
+@@ -103,9 +103,8 @@ do_test_with_invalid_iov (void)
+ static void
+ do_test_with_invalid_flags (void)
+ {
+-  /* Set the next bit from the mask of all supported flags.  */
+-  int invalid_flag = RWF_SUPPORTED != 0 ? __builtin_clz (RWF_SUPPORTED) : 2;
+-  invalid_flag = 0x1 << ((sizeof (int) * CHAR_BIT) - invalid_flag);
++  /* Set all the bits that are not used by the supported flags.  */
++  int invalid_flag = ~RWF_SUPPORTED;
+ 
+   char buf[32];
+   const struct iovec vec = { .iov_base = buf, .iov_len = sizeof (buf) };
