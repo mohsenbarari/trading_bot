@@ -93,11 +93,37 @@ def validate_owned(row,cid,nonce,base,iid,inputs,running,offline=False):
     need(row['Privileged']is False and row['Memory']==row['MemorySwap']==4*1024**3 and row['NanoCpus']==2*10**9 and row['PidsLimit']==512 and row['Restart']=='no','owned_resources')
     mounts=row['Mounts'];need(type(mounts)is list and len(mounts)==1 and mounts[0]['Type']=='bind'and mounts[0]['Source']==str(inputs)and mounts[0]['Destination']=='/inputs'and mounts[0]['RW']is False,'owned_readonly_inputs')
     need(type(row['Networks'])is dict and set(row['Networks'])==(set()if offline else{'bridge'}),'owned_network_scope')
+def public_directory(path,scope):
+    # mkdir is exclusive: borrowed paths never reach fchmod. Admit no child
+    # Source until this exact newly owned original directory FD has closed.
+    scope.check();parent=path.parent;parent_before=frame(parent.lstat())[:5]
+    need(parent.resolve(strict=True)==parent and stat.S_ISDIR(parent_before[2])and parent_before[3:5]==(scope.owner,scope.gid)and not parent_before[2]&0o022,'public_directory_parent')
+    path.mkdir(mode=0o755);before=frame(path.lstat());fd=None;primary=None;after=None
+    try:
+        need(stat.S_ISDIR(before[2])and before[3:5]==(scope.owner,scope.gid)and path.resolve(strict=True)==path,'public_directory_owner')
+        fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+        need(frame(os.fstat(fd))==frame(path.lstat())==before,'public_directory_identity');scope.check();os.fchmod(fd,0o755);after=frame(os.fstat(fd))
+        need(after[:2]==before[:2]and after[2]==stat.S_IFDIR|0o755 and after[3:8]==before[3:8]and after[8]>=before[8]and frame(path.lstat())==after,'public_directory_chmod_identity');scope.check()
+    except BaseException as error:primary=error
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+                try:os.fstat(fd)
+                except OSError as error:need(error.errno==errno.EBADF,'public_directory_close_unknown')
+                else:need(False,'public_directory_close_unknown')
+                need(after is not None and path.resolve(strict=True)==path and frame(path.lstat())==after and frame(parent.lstat())[:5]==parent_before,'public_directory_postclose_identity');scope.check()
+            except BaseException as error:
+                if primary is None:primary=error
+                primary.public_directory_finality_failed=True
+    if primary is not None:raise primary
+    return {'name':path.name,'before':before,'after':after,'original_directory_FD_physically_closed':True}
+
 def execute(args):
     need(os.getuid()==os.geteuid()==1001 and all(os.environ.get(k)==v for k,v in {'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64','GITHUB_REPOSITORY':'mohsenbarari/trading_bot','GITHUB_REPOSITORY_ID':'1065680631','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_REF':'refs/heads/main'}.items()),'hosted_UID1001_only')
     workspace=Path(os.environ['GITHUB_WORKSPACE']);need(workspace.is_absolute()and workspace.resolve(strict=True)==workspace and HERE.resolve(strict=True)==HERE and HERE.is_relative_to(workspace),'hosted_source_workspace')
     need(args.profile in SUBJECTS and re.fullmatch('[a-f0-9]{64}',args.source_sha256),'source_confirmation')
-    IO=bootstrap();scope=IO.Scope(3600);held={};primary=None;final=[];cid=None;closure='NO_CONTAINER';work=None;phase='source';result=None;create_requested=False;expected_name=None;prefix_lookup_attempted=False;prefix_qualified=False;empty_outputs=[];public_api_request=None;failure_output=None
+    IO=bootstrap();scope=IO.Scope(3600);held={};primary=None;final=[];cid=None;closure='NO_CONTAINER';work=None;phase='source';result=None;create_requested=False;expected_name=None;prefix_lookup_attempted=False;prefix_qualified=False;empty_outputs=[];public_api_request=None;failure_output=None;public_directories=[]
     try:
         held['self']=scope.open(Path(__file__).absolute(),(Path(__file__).stat().st_size,args.source_sha256),131072)
         for name,pin in PINS.items():held[name]=scope.open(HERE/name,pin,131072)
@@ -107,7 +133,7 @@ def execute(args):
         old=document(raw('old-signed-family6.json'));prior=next(x for x in old['records']if x['site']==p['site'])
         temp=Path(os.environ['RUNNER_TEMP']);need(temp.resolve(strict=True)==temp and temp.is_dir(),'runner_temp')
         need(os.statvfs(temp).f_bavail*os.statvfs(temp).f_frsize>=8*1024**3,'rehearsal_disk_floor')
-        nonce=uuid4().hex;isolated=False;closing=False;work=Path(tempfile.mkdtemp(prefix='family6-'+nonce+'-',dir=temp));inputs=work/'inputs';inputs.mkdir(mode=0o755);client=work/'empty-docker-client';client.mkdir(mode=0o700)
+        nonce=uuid4().hex;isolated=False;closing=False;work=Path(tempfile.mkdtemp(prefix='family6-'+nonce+'-',dir=temp));inputs=work/'inputs';public_directories.append(public_directory(inputs,scope));client=work/'empty-docker-client';client.mkdir(mode=0o700)
         end=time.monotonic()+3300;environment={'PATH':'/usr/bin:/bin','HOME':str(client),'DOCKER_CONFIG':str(client),'DOCKER_HOST':'unix:///var/run/docker.sock','LANG':'C.UTF-8','LC_ALL':'C.UTF-8'}
         def command(argv,maximum=4*1024**2,auth=False):
             env={**environment,**({'GH_TOKEN':os.environ['GH_TOKEN']}if auth else{})}
@@ -140,7 +166,7 @@ def execute(args):
             with zipfile.ZipFile(io.BytesIO(archive))as z:
                 infos=z.infolist();need(0<len(infos)<=1024 and len({x.filename for x in infos})==len(infos)and sum(x.file_size for x in infos)<=512*1024**2,'ZIP_inventory')
                 need(all(not x.flag_bits&1 and not x.filename.startswith('/')and '..'not in PurePosixPath(x.filename).parts for x in infos),'ZIP_paths')
-                (inputs/'new').mkdir(mode=0o755);(inputs/'old').mkdir(mode=0o755)
+                public_directories.append(public_directory(inputs/'new',scope));public_directories.append(public_directory(inputs/'old',scope))
                 for record in p['product_ZIP_members']:
                     need(0<record['bytes']<=8*1024**2 and z.getinfo(record['member']).file_size==record['bytes'],'ZIP_product_bound')
                     with z.open(record['member'])as source:body=source.read(record['bytes']+1)
@@ -181,6 +207,7 @@ def execute(args):
         phase='stop_owned';closing=True;inspect();command(DOCKER+['container','stop','--timeout','10',cid],4096);inspect(False);closure='STOPPED'
     except BaseException as error:
         primary=error
+        if getattr(error,'public_directory_finality_failed',False)is True:final.append('public_directory_finality_unknown')
         truth=getattr(error,'public_command_failure',None)
         if type(truth)is dict and phase in {'original_artifact_admission','signed_disposable_helper_preparation','ordinary_old_six_baseline','offline_exact_six_forward_rollback'}:
             captured=truth.get('captured_output')
@@ -205,7 +232,7 @@ def execute(args):
     if primary is not None or final:
         text=str(primary);code=text if type(primary)is RuntimeError and re.fullmatch('[A-Za-z0-9_]{1,100}',text)else'rehearsal_refused'
         result={'status':'FAILED','phase':phase,'code':code,'finalizer_codes':final,'owned_container_closure':closure,'create_request_prefix_retained':create_requested,'expected_owned_name':expected_name,'automatic_retry':False,'failed_public_api_request':public_api_request if phase=='original_artifact_admission'else None,'failure_output_retention':failure_output,'failed_command_truth':({k:getattr(primary,'public_command_failure')[k]for k in ('actual_returncode','observed_output_bytes','actual_pipe_closed','stdout_eof_observed','maximum_output_bytes')}if type(getattr(primary,'public_command_failure',None))is dict else None)}
-    result.update(create_request_prefix_retained=create_requested,expected_owned_name=expected_name,expected_owner_nonce=nonce if expected_name else None,qualified_prefix_lookup_attempted=prefix_lookup_attempted,owned_prefix_qualified=prefix_qualified,empty_public_outputs=empty_outputs,profile=args.profile,owned_container_closure=closure,source_sha256=args.source_sha256,schema='Root_Ubuntu_family6_disposable_ordinary_rehearsal/1',source_original_FDs_physically_closed=len(scope.rows)if scope.finished and not final else None,source_finality_proven=scope.finished and not final,Host_install_allowed=False,real_Host_PID1_reexec_proven=False,activation_authority=False,security_accepted=False)
+    result.update(create_request_prefix_retained=create_requested,expected_owned_name=expected_name,expected_owner_nonce=nonce if expected_name else None,qualified_prefix_lookup_attempted=prefix_lookup_attempted,owned_prefix_qualified=prefix_qualified,empty_public_outputs=empty_outputs,new_public_directory_proofs=public_directories,profile=args.profile,owned_container_closure=closure,source_sha256=args.source_sha256,schema='Root_Ubuntu_family6_disposable_ordinary_rehearsal/1',source_original_FDs_physically_closed=len(scope.rows)if scope.finished and not final else None,source_finality_proven=scope.finished and not final,Host_install_allowed=False,real_Host_PID1_reexec_proven=False,activation_authority=False,security_accepted=False)
     sys.stdout.write(encoded(result).decode());return 0 if result['status']in{'POLICY_PREFLIGHT_ONLY','PASS_DISPOSABLE_FORWARD_ROLLBACK_ONLY'}else 1
 def main(argv=None):
     argv=list(sys.argv[1:]if argv is None else argv)
