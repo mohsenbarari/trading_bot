@@ -15,6 +15,20 @@
     "sha256": "12a5706ff937b5bcbc44d59ed193fccda7479b8ea6b0ea4026226d88edb2f48a"
   },
   "lock_sha256": "634b6706b16c74b7630e85b81b4413d8d3aa7a21d881dc946fe8e245d75a7608",
+  "maintainer_test_node": {
+    "binary_bytes": 124902584,
+    "binary_sha256": "94efd062ed066c1a0b332e18249859c905e920eeada5df55d24c99b919629a90",
+    "intake": {
+      "Root_actual": "3a8aa9/SID19781 ->2c190e/0",
+      "archive_bytes": 31029996,
+      "counterpart_scope": "Main RPC reply and IMPORT_RETURNED genuine0 in0.185s; no current06 stack or fullTAP success claim",
+      "official_archive_sha256": "1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce",
+      "official_security_release": "2026-10-21",
+      "same_three_file_Node24_counterpart_Root_actual": "1210df/0"
+    },
+    "scope": "glob10/glob11 full unchanged vendor TAP suite including pre/post hooks ONLY; all compile/preimage/runtime/project/browser stages remain exact Node24.22.1",
+    "version": "v22.23.4"
+  },
   "no_security_or_serving_acceptance": true,
   "node_binary_sha256": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
   "node_version": "v24.22.1",

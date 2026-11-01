@@ -40,6 +40,11 @@ jobs:
         with:
           ref: ${{ inputs.project_commit }}
           persist-credentials: false
+      - name: Provision official test-only Node22 for the two glob harnesses
+        if: matrix.profile == 'glob10' || matrix.profile == 'glob11'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'

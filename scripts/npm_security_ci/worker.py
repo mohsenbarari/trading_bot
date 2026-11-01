@@ -2,7 +2,7 @@
 from pathlib import Path
 from hashlib import sha256,sha512
 from collections import Counter
-import argparse,base64,gzip,hashlib,io,json,os,re,selectors,shutil,signal,stat,subprocess,tarfile,time,traceback
+import argparse,base64,gzip,hashlib,io,json,os,re,selectors,shlex,shutil,signal,stat,subprocess,tarfile,time,traceback
 from pathlib import PurePosixPath
 from types import ModuleType
 from copy import deepcopy
@@ -34,6 +34,13 @@ def write(path,body):
 def environment(node,home):
  home.mkdir(parents=True,exist_ok=True)
  return{'PATH':str(node.parent)+':/usr/local/bin:/usr/bin:/bin','HOME':str(home),'LANG':'C.UTF-8','LC_ALL':'C.UTF-8','CI':'true','SHELL':'/bin/bash','COREPACK_ENABLE_PROJECT_SPEC':'1','COREPACK_DEFAULT_TO_LATEST':'0','GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','npm_config_registry':'https://registry.npmjs.org/','npm_config_audit':'false','npm_config_fund':'false'}
+def qualified_test_node(spec,phase,profile):
+ if phase!='upstream'or profile not in('glob10','glob11'):return None
+ ref=spec['maintainer_test_node'];need(ref['version']=='v22.23.4'and type(ref['binary_sha256'])is str and re.fullmatch('[a-f0-9]{64}',ref['binary_sha256']),'test_Node22_binding_required')
+ cache=Path(os.environ.get('RUNNER_TOOL_CACHE',''));need(cache.is_absolute()and cache.is_dir(),'test_Node_toolcache');node=(cache/'node/22.23.4/x64/bin/node').resolve(strict=True);need(node.is_relative_to(cache.resolve()),'test_Node_toolcache_scope');need(node.stat().st_size==ref['binary_bytes'],'exact_test_Node22_binary_size');need(digest(node)==ref['binary_sha256'],'exact_test_Node22_binary');need(subprocess.check_output([node,'--version'],text=True,timeout=10).strip()==ref['version'],'test_Node22_version');return node
+def test_environment(node,test_node,workspace,env):
+ shim=workspace/'maintainer-test-bin';shim.mkdir();npm_cli=node.parent.parent/'lib/node_modules/npm/bin/npm-cli.js';body=('#!/bin/sh\nexec '+shlex.join([str(test_node),str(npm_cli)])+' "$@"\n').encode();write(shim/'npm',body);os.chmod(shim/'npm',0o755)
+ return{**env,'PATH':str(shim)+':'+str(test_node.parent)+':'+env['PATH']}
 def run(argv,cwd,out,env,seconds=1800):
  """Stream directly to bounded evidence, never accumulate command output."""
  out=Path(out);need(not out.exists(),'new_log_required');out.parent.mkdir(parents=True,exist_ok=True)
@@ -185,11 +192,12 @@ def qualify_tar(path,profile,package):
  if profile['kind']=='resolve':need('deepmerge'not in metadata.get('dependencies',{}),'fork_deepmerge_dependency_present')
  return{'physical_members':len(seen),'regular_targets':len(canonical),'retained_exact_aliases':{k:v for k,v in aliases.items()if len(v)>1},'sha512':'sha512-'+base64.b64encode(sha512(path.read_bytes()).digest()).decode()}
 
-def upstream(spec,profile,node,workspace,out,env):
+def upstream(spec,profile,node,workspace,out,env,*,test_node=None):
  p=next(x for x in spec['profiles']if x['id']==profile);need(p['repo']in ALLOWED_REPOS and re.fullmatch('[a-f0-9]{40}',p['commit']),'upstream_identity')
+ if p['kind']=='glob':need(test_node is not None,'test_Node22_binding_required')
  root=workspace/p['id'];root.mkdir();log=out/p['id'];log.mkdir(parents=True);records=[]
- def command(args,cwd=root,name='stage',timeout=1800):
-  stage(profile,name,'start');result=run(args,cwd,log/(f'{len(records):02}-{name}.log'),env,timeout);records.append(result);stage(profile,name,'complete');return result
+ def command(args,cwd=root,name='stage',timeout=1800,environment_override=None):
+  stage(profile,name,'start');result=run(args,cwd,log/(f'{len(records):02}-{name}.log'),env if environment_override is None else environment_override,timeout);records.append(result);stage(profile,name,'complete');return result
  command(['git','init','.'],name='git-init');command(['git','remote','add','origin',p['repo']],name='git-remote');command(['git','fetch','--depth','1','origin',p['commit']],name='git-fetch');command(['git','checkout','--detach','FETCH_HEAD'],name='git-checkout')
  command(['git','diff','--exit-code'],name='clean-source');actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,env=env,text=True).strip();need(actual==p['commit'],'upstream_commit')
  source=root/p['source'];raw=source.read_bytes();need(len(raw)<=1024*1024,'upstream_source_bound')
@@ -221,7 +229,11 @@ def upstream(spec,profile,node,workspace,out,env):
  (package/'package.json').write_bytes(encode(metadata))
  if p['kind']=='resolve':
   command(corepack+['-r','--filter','@rollup/plugin-node-resolve...','run','build'],name='maintainer-build',timeout=2400);command(corepack+['--dir',str(package),'test'],name='maintainer-full-tests',timeout=2400)
- else:command(npm+['run','prepare'],name='maintainer-build',timeout=1800);command(npm+['test']+(['--','-c','-t0']if p['kind']=='glob'else[]),name='maintainer-full-tests',timeout=2400)
+ else:
+  command(npm+['run','prepare'],name='maintainer-build',timeout=1800)
+  if p['kind']=='glob':
+   node24_tree=dist_hashes(package,p);test_env=test_environment(node,test_node,workspace,env);command([test_node,npm[1],'test','--','-c','-t0'],name='maintainer-full-tests',timeout=2400,environment_override=test_env);need(dist_hashes(package,p)==node24_tree,'test_hooks_changed_Node24_compiler_output')
+  else:command(npm+['test'],name='maintainer-full-tests',timeout=2400)
  # Test-only lifecycle hooks may not silently alter reviewed source.
  need(source.read_bytes()==patched,'maintainer_lifecycle_changed_source')
  rebuilt=dist_hashes(package,p)
@@ -237,7 +249,7 @@ def upstream(spec,profile,node,workspace,out,env):
   target=log/f'pack-{trial}';target.mkdir();command(npm+['pack','--ignore-scripts','--json','--pack-destination',str(target)],cwd=package,name='pack');items=list(target.glob('*.tgz'));need(len(items)==1,'single_package');packs.append(items[0])
  need(digest(packs[0])==digest(packs[1]),'npm_pack_not_deterministic')
  artifact=log/(p['id']+'.tgz');shutil.copyfile(packs[0],artifact);archive_proof=qualify_tar(artifact,p,package)
- return{'schema':'qualified_upstream_fork/1','profile':p['id'],'original_commit':p['commit'],'original_version':p['version'],'fork_version':p['fork_version'],'source_preimage_sha256':sha256(raw).hexdigest(),'source_postimage_sha256':sha256(patched).hexdigest(),'type_only_compatibility':compatibility,'bounded_maintainer_regression':regression,'original_runtime_snapshot':snapshot,'archive_proof':archive_proof,'full_upstream_tests_passed':True,'two_builds_and_packages_identical':True,'tar':{'name':artifact.name,'bytes':artifact.stat().st_size,'sha256':digest(artifact)},'records':records,'security_accepted':False}
+ return{'schema':'qualified_upstream_fork/1','profile':p['id'],'original_commit':p['commit'],'original_version':p['version'],'fork_version':p['fork_version'],'source_preimage_sha256':sha256(raw).hexdigest(),'source_postimage_sha256':sha256(patched).hexdigest(),'type_only_compatibility':compatibility,'bounded_maintainer_regression':regression,'maintainer_test_node_version':spec['maintainer_test_node']['version']if p['kind']=='glob'else spec['node_version'],'Node24_compiler_output_unchanged_through_test_hooks':True if p['kind']=='glob'else None,'original_runtime_snapshot':snapshot,'archive_proof':archive_proof,'full_upstream_tests_passed':True,'two_builds_and_packages_identical':True,'tar':{'name':artifact.name,'bytes':artifact.stat().st_size,'sha256':digest(artifact)},'records':records,'security_accepted':False}
 
 def frontend(spec,repo,artifacts,node,out,env):
  front=repo/'frontend';original=(front/'package-lock.json').read_bytes();need(sha256(original).hexdigest()==spec['lock_sha256'],'project_lock_changed');baseline=read_json(front/'package-lock.json');records=[]
@@ -280,7 +292,7 @@ def main(argv=None):
  spec=read_json(a.spec)
  if not a.execute or spec.get('armed')is not True:print(json.dumps({'status':'UNARMED','Host_or_network_or_source_mutation':False}));return 0
  need(os.environ.get('GITHUB_ACTIONS')=='true'and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'and os.geteuid()!=0,'disposable_nonroot_GitHub_runner_required');need(digest(Path(__file__))==a.self_sha256 and digest(a.spec)==a.spec_sha256,'Source_pins');need(a.workspace.is_absolute()and a.out.is_absolute()and not a.workspace.exists()and not a.out.exists(),'new_ci_namespace');need(a.repo.is_absolute()and re.fullmatch('[a-f0-9]{40}',a.expected_project_commit),'project_scope')
- node=Path(shutil.which('node')).resolve();need(digest(node)==spec['node_binary_sha256'],'exact_Node_binary');need(subprocess.check_output([node,'--version'],text=True).strip()==spec['node_version'],'Node_version');need(subprocess.check_output(['git','rev-parse','HEAD'],cwd=a.repo,text=True).strip()==a.expected_project_commit,'project_commit')
+ node=Path(shutil.which('node')).resolve();need(digest(node)==spec['node_binary_sha256'],'exact_Node_binary');need(subprocess.check_output([node,'--version'],text=True).strip()==spec['node_version'],'Node_version');test_node=qualified_test_node(spec,a.phase,a.profile);need(subprocess.check_output(['git','rev-parse','HEAD'],cwd=a.repo,text=True).strip()==a.expected_project_commit,'project_commit')
  # All public authenticated prerequisites must be verified before any network.
  for key in('official_preimage_auth','legacy_exact_decision','advisory_helper','runtime_helper'):
   r=spec[key];p=a.spec.parent/r['path'];need(p.stat().st_size==r['bytes']and digest(p)==r['sha256'],'Root_source_auth')
@@ -289,7 +301,7 @@ def main(argv=None):
  need(shutil.disk_usage(a.workspace.parent).free>=8*1024**3,'CI_free_space_reserve')
  a.workspace.mkdir(parents=True);a.out.mkdir(parents=True);env=environment(node,a.workspace/'home');result=None;error=None
  try:
-  if a.phase=='upstream':result=upstream(spec,a.profile,node,a.workspace,a.out,env);destination=a.out/a.profile/'RESULT.json'
+  if a.phase=='upstream':result=upstream(spec,a.profile,node,a.workspace,a.out,env,test_node=test_node);destination=a.out/a.profile/'RESULT.json'
   else:result=frontend(spec,a.repo,a.artifacts,node,a.out,env);destination=a.out/'RESULT.json'
   write(destination,encode(result));print(json.dumps({'status':'COMPLETE','phase':a.phase,'result':str(destination),'security_accepted':False}));return 0
  except BaseException as exc:
