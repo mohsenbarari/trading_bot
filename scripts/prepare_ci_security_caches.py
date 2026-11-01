@@ -1,6 +1,6 @@
 # Fixed public CI cache bytes, explicitly approved and independently read back.
 # No rebuild, mutable tag fallback, cache healing or deployment authorization.
-import os,runpy,tempfile
+import argparse,errno,json,os,re,runpy,stat,sys,tempfile
 from contextlib import ExitStack
 from hashlib import sha256
 from pathlib import Path
@@ -21,8 +21,84 @@ LINEAGE = {
 REPO = 'mohsenbarari/trading_bot'
 ROOT = Path(__file__).resolve().parents[1]
 
-def main():
-    helper=runpy.run_path(str(ROOT/'scripts/prepare_app_security_os_cache.py'))
+def context_root(value):
+    # NPM's no-argument path stays anchored to this script, never cwd.
+    if value is None:return ROOT
+    def require(ok,code):
+        if ok is not True:raise RuntimeError(code)
+    require(os.getuid()==os.geteuid()==1001 and os.getgid()==os.getegid()
+        and sys.flags.isolated==sys.flags.no_site==sys.flags.dont_write_bytecode==1
+        and os.environ.get('GITHUB_ACTIONS')=='true'
+        and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'
+        and os.environ.get('GITHUB_REPOSITORY')==REPO
+        and os.environ.get('GITHUB_REF')=='refs/heads/main','release_context_hosted')
+    root=Path(value);temporary=Path(os.environ.get('RUNNER_TEMP',''))
+    workspace=Path(os.environ.get('GITHUB_WORKSPACE',''));source=Path(__file__).absolute()
+    runroot=source.parents[2]
+    require(all(p.is_absolute()and p.resolve(strict=True)==p for p in(root,temporary,workspace,source,runroot))
+        and source==runroot/'controller-source/scripts/prepare_ci_security_caches.py'
+        and root==runroot/'sealed/release'and runroot.is_relative_to(temporary)
+        and runroot!=temporary and not runroot.is_relative_to(workspace),'release_context_path')
+    for path in(root,root.parent,runroot,runroot/'controller-source',source.parent,temporary,workspace):
+        before=path.lstat()
+        require(stat.S_ISDIR(before.st_mode)and (before.st_uid,before.st_gid)==(1001,os.getegid())
+            and not before.st_mode&0o022,'release_context_directory')
+    require(stat.S_IMODE(runroot.stat().st_mode)==0o700,'release_context_directory')
+    def read(path,maximum,expected=None):
+        require(path.resolve(strict=True)==path,'release_context_source')
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+        primary=None;before=None
+        frame=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+        try:
+            before=frame(os.fstat(fd));require(stat.S_ISREG(before[2])and before[3:6]==(1001,os.getegid(),1)
+                and not before[2]&0o022 and 0<before[6]<=maximum,'release_context_source')
+            raw=os.pread(fd,before[6]+1,0)
+            require(len(raw)==before[6]and frame(os.fstat(fd))==frame(path.lstat())==before,'release_context_source')
+            require(expected is None or {'bytes':len(raw),'sha256':sha256(raw).hexdigest()}==expected,'release_context_pin')
+        except BaseException as error:
+            primary=error;raise
+        finally:
+            try:
+                os.close(fd)
+                try:os.fstat(fd)
+                except OSError as error:require(error.errno==errno.EBADF,'release_context_close')
+                else:require(False,'release_context_close')
+                if before is not None:require(frame(path.lstat())==before,'release_context_source')
+            except BaseException as error:
+                if primary is not None:
+                    primary.release_context_finality_failed=True;raise primary from error
+                raise
+        return raw
+    def unique(rows):
+        result={}
+        for key,item in rows:require(key not in result,'release_context_receipt');result[key]=item
+        return result
+    sealed=json.loads(read(root.parent/'source-inputs.json',4*1024**2),object_pairs_hook=unique,
+        parse_constant=lambda _:require(False,'release_context_receipt'))
+    receipt=sealed['inputs'];signature=sealed['input_signature'];head=os.environ.get('GITHUB_SHA','')
+    canonical=(json.dumps(receipt,sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode()
+    require(type(head)is str and re.fullmatch('[a-f0-9]{40}',head)is not None
+        and receipt['release_commit']==head and receipt['repository_identity']=={'host':'github.com','repository':REPO}
+        and receipt['schema']in{'normal_market_git_component_inputs/1','normal_market_git_component_inputs/2'}
+        and receipt['signature_format']=='normal-market-two-git-sources-v1'
+        and sha256(canonical).hexdigest()==signature
+        and sealed['sealed_source_only']is True and sealed['build_performed']is False
+        and sealed['deployment_eligible']is False,'release_context_receipt')
+    names=('prepare_app_security_os_cache.py','compose_security_os_candidate.py','app_security_os_packages.lock.json',
+        'prepare_sqlite_wal_os_cache.py','sqlite_wal_package.lock.json','prepare_tar_acl_os_cache.py','tar_acl_package.lock.json',
+        'prepare_coreutils_acl_os_cache.py','coreutils_acl_package.lock.json')
+    entries=receipt['release_files'];require(type(entries)is list and len(entries)in{20,21}
+        and all(type(row)is dict and type(row.get('path'))is str for row in entries)
+        and len({row['path']for row in entries})==len(entries),'release_context_receipt')
+    indexed={row['path']:row for row in entries}
+    for name in names:
+        row=indexed['scripts/'+name];pin={key:row[key]for key in('bytes','sha256')}
+        read(root/'scripts'/name,1024**2,pin)
+    return root
+
+def main(context=None):
+    root=context_root(context)
+    helper=runpy.run_path(str(root/'scripts/prepare_app_security_os_cache.py'))
     need=helper['need'];document=helper['document']
     need(type(RELEASE_ID) is int and RELEASE_ID>0 and set(ASSET_IDS)==set(LINEAGE)
          and all(type(v) is int and v>0 for v in ASSET_IDS.values())
@@ -31,10 +107,10 @@ def main():
         held=helper['Held'](stack);recipe=helper['load_recipe'](held)
         specs=dict(recipe.lock['artifacts']);extras={}
         for group,name in EXTRA_HELPERS.items():
-            extra=runpy.run_path(str(ROOT/('scripts/prepare_'+name+'_os_cache.py')))
+            extra=runpy.run_path(str(root/('scripts/prepare_'+name+'_os_cache.py')))
             gate=stack.enter_context(extra['Held']());lock=extra['load_lock'](gate)
             specs[group]=lock['artifact'];extras[group]=(extra,gate)
-        cache=ROOT/'pip_packages/security-os-capsule'
+        cache=root/'pip_packages/security-os-capsule'
         present=[]
         for group in ('security-os',*extras):
             path=cache.parent/(group+'-capsule')
@@ -101,4 +177,7 @@ def main():
                      and result.get('security_accepted') is False,'release_cache_admission')
     print('Exact retained security release assets admitted; security acceptance remains false.')
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description='Admit only the exact public shared CI cache assets.')
+    parser.add_argument('--context-root',type=Path)
+    main(parser.parse_args().context_root)

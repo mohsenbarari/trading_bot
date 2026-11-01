@@ -83,6 +83,7 @@ GLIBC_ADAPTER='scripts/glibc_runtime_adapter.py'
 GLIBC_INSTALLER='scripts/prepare_glibc_security_os_cache.py'
 GLIBC_IO='scripts/glibc_image_io.py'
 GLIBC_ROOT='deploy/maintenance/glibc_backport_two_profiles/Root-TrixieSelected01-qualification.json'
+SHARED_CACHE='scripts/prepare_ci_security_caches.py'
 GLIBC_HELPERS={GLIBC_ADAPTER:{'bytes':6105,'sha256':'17a0435b954f54596212daeed5d59a7affd0a5a0f696a5618f3e1e9a5257b43b'},
  GLIBC_INSTALLER:{'bytes':29419,'sha256':'ec8cfbf83dc1edb96fb4e6604d3e86fdbf2c7b7a0bec648550c897651a8d79f3'},
  GLIBC_IO:{'bytes':40590,'sha256':'e5a1587af0db34acfb5ab04434754cf75b9ad0aa43c0550f7ec7fedf5dd8a65f'}}
@@ -97,7 +98,7 @@ GLIBC_ARTIFACT={'id':13077600231,'run':41286801923,'attempt':1,'head':'a80b91ecc
  'name':'trixie241-glibc84243-candidates-PENDING-ROOT-REVIEW-41286801923-1','bytes':35878836,'sha256':'bb5dc6aef44629d0f72cdf095832c4e7ec523eea06902c57121c983f4fb06f22'}
 GLIBC_RECIPE_PIN={'bytes':7308,'sha256':'09f57f4d846f4d6f85bb6fa412b237bdc40b6840743dfb9796facdabc5ee3dcc'}
 CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT),
- GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT)
+ GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT,SHARED_CACHE)
 DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 MANIFEST_SHA='fef6305b1d7e6db851d1d0b77f3aa9910aad535e83f64f012790165a3d62c81b'
 ROWS_SHA='75d7d2cfb2c20fd036501e7aac198cb5567fb82c53301fb3972f8c81b935e57f'
@@ -848,6 +849,13 @@ def prepare_checked_caches(root,context,receipt,source_guard,*,retained=None,fin
  release=Inputs([(context/r['path'],{k:r[k]for k in('bytes','sha256')},False)for r in receipt['release_files']])
  def check():source_guard();release.check()
  try:
+  PHASE='normal_cache_prepare';fd=os.open(root/'cache-shared-security-prepare.log',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+  try:
+   env=environment(root,token=True)
+   env.update({key:os.environ[key]for key in('GITHUB_ACTIONS','RUNNER_ENVIRONMENT','GITHUB_REPOSITORY','GITHUB_REF','RUNNER_TEMP','GITHUB_WORKSPACE','GITHUB_SHA')})
+   command([sys.executable,'-I','-S','-B',str(root/'controller-source'/SHARED_CACHE),'--context-root',str(context)],
+    environment=env,seconds=900,maximum=MAX_JSON,guard=check,target=fd)
+  finally:os.fsync(fd);os.close(fd)
   for name,cache in [('prepare_app_security_os_cache.py',CACHE_ROOTS[0]),('prepare_sqlite_wal_os_cache.py',CACHE_ROOTS[1]),('prepare_tar_acl_os_cache.py',CACHE_ROOTS[2]),('prepare_coreutils_acl_os_cache.py',CACHE_ROOTS[3])]:
    PHASE='normal_cache_prepare';fd=os.open(root/('cache-'+name+'-prepare.log'),os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
    try:command([sys.executable,'-I','-B',str(context/'scripts'/name),'--cache-dir',str(context/cache)],
