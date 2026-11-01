@@ -73,10 +73,10 @@ class PhysicalTests(unittest.TestCase):
  def test_each_outer_call_resets_prior_error_snapshot_and_completion(self):
   first=self.run_owned(primary=True);first_error=first['error'];second=self.run_owned();self.assertIsNone(second['error']);self.assertIsNone(M.OUTER_FAILURE);self.assertIs(M.OUTER_PHYSICAL_FINALIZERS_COMPLETED,True);self.assertIs(M.closed_failure(first_error)['outer_physical_finalizers_completed'],False)
  def test_strict_gates_evidence_finalizers_and_workflow_are_unchanged_and_pin_exact(self):
-  wanted=dict({'finish_evidence': 'bdd938f18d63ee068701a788689ae85dee7ea0e40fe8e70cc442e80ffa26e8ce', 'raw_gate': 'fe4d54b4a825a405e8967706fc1d78e0050b6479b49589eb5a72390dbff98181', 'complete_evidence': '62fee48da4f736de16509df3e32e9e4a8678b4dcdf79fba2573c49b4b8b41e02', 'complete_gate': '4455dc1931d65ab324d6127011643a185009676f1c44906a94dfb06cb24f9225'})
+  wanted=dict({'finish_evidence': 'bdd938f18d63ee068701a788689ae85dee7ea0e40fe8e70cc442e80ffa26e8ce', 'raw_gate': '60eb15ef3c676ddd94be6ae0114f357e91ef767a82ed8fa9747fc49653421f95', 'complete_evidence': 'd745a68f559808bbb84c902686e91dd48dd29cfd1be4fe5c5cb2edd3a270a624', 'complete_gate': '4455dc1931d65ab324d6127011643a185009676f1c44906a94dfb06cb24f9225'})
   for n in ast.parse(PATH.read_bytes()).body:
    if isinstance(n,ast.FunctionDef)and n.name in wanted:self.assertEqual(sha256(ast.dump(n,include_attributes=False).encode()).hexdigest(),wanted.pop(n.name))
   self.assertEqual(wanted,{})
-  raw=(ROOT/'.github/workflows/market-capture2-image.yml').read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),(18917,'e5571608e28b57484c8c541ed70664c619b33178a1832bc9819422a04a6bc3d7'))
+  raw=(ROOT/'.github/workflows/market-capture2-image.yml').read_bytes();self.assertEqual((len(raw),sha256(raw).hexdigest()),(19224, 'cb1667b3c7c2c04503b94ac472ec5e962987eb92818568b049d4e93530ea57c7'))
   tree=ast.parse((ROOT/'scripts/market_business81_outer.py').read_bytes());pin=next(ast.literal_eval(n.value)for n in tree.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='NORMAL_PIN'for t in n.targets));raw=PATH.read_bytes();self.assertEqual(pin,(len(raw),sha256(raw).hexdigest()))
 if __name__=='__main__':unittest.main()

@@ -3,6 +3,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
 import json
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,12 +49,12 @@ class CoherentSourceTests(unittest.TestCase):
 
     def test_default_and_all_role_release_cache_and_controller_counts_are_coherent(self):
         self.assertEqual(len(self.S.RELEASE_FILES), 20)
-        self.assertEqual(len(self.M.CONTROLLER_FILES), 30)
+        self.assertEqual(len(self.M.CONTROLLER_FILES), 35)
         self.assertEqual(len(self.M.CACHE_ROOTS), 4)
         self.assertTrue(self.S.copy_contract((ROOT / 'deploy/market-data/Dockerfile.capture2').read_bytes()))
         for role in self.M.ROLE_MAP:
             self.assertEqual(len(self.S.release_files(role)), 21)
-            self.assertEqual(len(self.M.controller_files(role)), 33)
+            self.assertEqual(len(self.M.controller_files(role)), 38)
 
     def test_all_three_exact_role_parcel_sizes_have_one_extra_index(self):
         helper = load('tests/test_market_role_normal_builder.py')
@@ -68,12 +69,13 @@ class CoherentSourceTests(unittest.TestCase):
         for role, spec in self.M.ROLE_MAP.items():
             receipt, signature = fixture.receipt(role)
             controllers = [fixture.row(name) for name in sorted(self.M.controller_files(role))]
-            self.M.receipt_contract(receipt, signature, controllers, cache, 1793085646)
-            values = self.M.controller_parcel_inputs(Path('/OWNED-NOT-OPENED'),
-                                                      receipt, controllers, cache)
-            self.assertEqual(len(values), {93: 173, 94: 174, 95: 175}[spec['count']])
+            with tempfile.TemporaryDirectory(prefix='.owned-role-parcel-runtime-', dir=ROOT/'tests') as tmp:
+                runtime = self.F.owned_glibc_runtime(self,self.M, Path(tmp))
+                self.M.receipt_contract(receipt, signature, controllers, cache, 1793085646, runtime)
+                values = self.M.controller_parcel_inputs(Path(tmp), receipt, controllers, cache, runtime)
+            self.assertEqual(len(values), {93: 184, 94: 185, 95: 186}[spec['count']])
             sizes.add((len(values), len(values) + 1))
-        self.assertEqual(sizes, {(173, 174), (174, 175), (175, 176)})
+        self.assertEqual(sizes, {(184, 185), (185, 186), (186, 187)})
 
 
 if __name__ == '__main__':

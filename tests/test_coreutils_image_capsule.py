@@ -38,7 +38,7 @@ class Tests(unittest.TestCase):
  def test_exact_four_python18_recipes_add_one_offline_same_capsule_mask(self):
   for name in('Dockerfile','Dockerfile.iran','deploy/market-data/Dockerfile','deploy/market-data/Dockerfile.capture2'):
    text=(TREE/name).read_text();self.assertEqual(text.count('source=pip_packages/coreutils-acl-capsule,target=/coreutils-capsule,ro'),1)
-   self.assertEqual(text.count('"--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid"'),4)
+   self.assertEqual(text.count('"--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid"'),5 if name=='deploy/market-data/Dockerfile.capture2'else 4)
    self.assertIn('python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac',text)
    self.assertLess(text.index('"/tar-capsule"]'),text.index('"/coreutils-capsule"]'));self.assertIn('probe_python_micro_release.py --image-self-check',text)
    for existing in('security-os-capsule','sqlite-wal-capsule','tar-acl-capsule','verify_image_trust.py','remove_runtime_pip.py','verify_psycopg2_runtime.py','verify_sqlite_runtime.py'):self.assertIn(existing,text)
@@ -159,8 +159,8 @@ class Tests(unittest.TestCase):
  def test_actual_controller_receipt_joins26_and_refuses_old23(self):
   receipt={'schema':'normal_market_git_component_inputs/1','signature_format':'normal-market-two-git-sources-v1','accepted_manifest_sha256':M.MANIFEST_SHA,'repository_identity':{'host':'github.com','repository':M.REPOSITORY},'release_commit':'a'*40,'release_tree':'b'*40,'business_commit':'c'*40,'business_tree':'d'*40}
   controllers=[{'path':n,'mode':'100644','git_blob':'e'*40,'bytes':1,'sha256':'f'*64}for n in sorted(M.CONTROLLER_FILES)];cache={'pip_packages/OWNED-'+str(i):self.pin(b'OWNED')for i in range(26)};signature=sha256(M.encoded(receipt)).hexdigest()
-  value,digest=M.receipt_contract(receipt,signature,controllers,cache,1793059200);self.assertEqual(len(value['normal_cache_files']),26);self.assertFalse(value['security_accepted'])
-  with self.assertRaisesRegex(RuntimeError,'controller_inventory'):M.receipt_contract(receipt,signature,controllers,dict(list(cache.items())[:23]),1793059200)
+  runtime=F.owned_glibc_runtime(self,M,self.root);value,digest=M.receipt_contract(receipt,signature,controllers,cache,1793059200,runtime);self.assertEqual(len(value['normal_cache_files']),26);self.assertFalse(value['security_accepted'])
+  with self.assertRaisesRegex(RuntimeError,'controller_inventory'):M.receipt_contract(receipt,signature,controllers,dict(list(cache.items())[:23]),1793059200,runtime)
  def archive_fixture(self):
   # Entirely owned fabricated transcripts exercise the bounded codec and
   # joins, never a DEB or actual compile/vendor/native acceptance. Production

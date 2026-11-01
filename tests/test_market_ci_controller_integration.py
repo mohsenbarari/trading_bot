@@ -10,13 +10,14 @@ def load(name,path):
  m=ModuleType(name);m.__file__=str(path);exec(compile(path.read_bytes(),str(path),'exec'),m.__dict__);return m
 M=load('owned_integrated_market',ROOT/'scripts/prepare_market_capture2_image.py')
 S=load('owned_integrated_sealer',ROOT/'scripts/prepare_market_product_source.py')
+F=load('owned_integrated_public_fixtures',ROOT/'tests/market_security_source_fixtures.py')
 class IntegrationTests(unittest.TestCase):
  def own(self):
   temp=tempfile.TemporaryDirectory(prefix='.owned-market-integration-',dir=Path(__file__).parent);self.addCleanup(temp.cleanup);return Path(temp.name)
  def write(self,p,raw):p.parent.mkdir(mode=0o755,parents=True,exist_ok=True);p.write_bytes(raw);p.chmod(0o644)
  def pin(self,raw):return{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
  def test_explicit_20_release_30_controller_inventory_and_old_product_stays93(self):
-  self.assertEqual(len(S.RELEASE_FILES),20);self.assertEqual(len(M.CONTROLLER_FILES),30);self.assertEqual(len(set(M.CONTROLLER_FILES)),30)
+  self.assertEqual(len(S.RELEASE_FILES),20);self.assertEqual(len(M.CONTROLLER_FILES),35);self.assertEqual(len(set(M.CONTROLLER_FILES)),35)
   self.assertIn('scripts/prepare_tar_acl_os_cache.py',S.RELEASE_FILES);self.assertIn(M.TAR_LOCK,S.RELEASE_FILES)
   self.assertEqual(len(S.PRODUCT_COPY_LINES),5);self.assertEqual(len(S.PRODUCT_COPY_LINES|S.RELEASE_COPY_LINES),17)
   self.assertEqual(M.MAX_SOURCE,131072);self.assertEqual(M.MAX_CONTROLLER_SOURCE,262144)
@@ -43,13 +44,16 @@ class IntegrationTests(unittest.TestCase):
   for name in S.RELEASE_FILES:
    raw=('OWNED RELEASE:'+name).encode();self.write(context/name,raw);pin=self.pin(raw);rows.append({'path':name,**pin});expected[name]=pin
   def command(argv,**options):
-   options['guard']();cache=Path(argv[argv.index('--cache-dir')+1]);calls.append('--check'in argv)
+   options['guard']()
+   if '--context-root'in argv:
+    self.assertEqual(argv[-2:],['--context-root',str(context)]);calls.append('shared');options['guard']();return b''
+   cache=Path(argv[argv.index('--cache-dir')+1]);calls.append('--check'in argv)
    with tempfile.TemporaryDirectory(prefix='.owned-cache-temp-',dir=cache.parent):options['guard']()
    if '--check'not in argv:
     self.write(cache/'owned',b'OWNED CACHE');expected[(cache/'owned').relative_to(context).as_posix()]=self.pin(b'OWNED CACHE')
    options['guard']();return b''
-  with patch.dict(M.os.environ,{'GH_TOKEN':'OWNED_SYNTHETIC_NOT_SENT'}),patch.object(M,'command',side_effect=command):M.prepare_checked_caches(root,context,{'release_files':rows},lambda:None)
-  self.assertEqual(calls,[False,False,False,False,True,True,True,True]);M.restamp(context,expected,1792972800);snap=M.ContextSnapshot(context,expected);snap.check()
+  with patch.dict(M.os.environ,{'GH_TOKEN':'OWNED_SYNTHETIC_NOT_SENT','GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','GITHUB_REPOSITORY':M.REPOSITORY,'GITHUB_REF':'refs/heads/main','RUNNER_TEMP':'/OWNED-NOT-OPENED','GITHUB_WORKSPACE':'/OWNED-NOT-OPENED','GITHUB_SHA':'b'*40}),patch.object(M,'command',side_effect=command):M.prepare_checked_caches(root,context,{'release_files':rows},lambda:None)
+  self.assertEqual(calls,['shared',False,False,False,False,True,True,True,True]);M.restamp(context,expected,1792972800);snap=M.ContextSnapshot(context,expected);snap.check()
   with tempfile.TemporaryDirectory(prefix='.late-owned-cache-temp-',dir=context/'pip_packages'):pass
   with self.assertRaisesRegex(RuntimeError,'context_changed'):snap.check()
   with self.assertRaisesRegex(RuntimeError,'context_changed'):snap.close()
@@ -73,33 +77,33 @@ class IntegrationTests(unittest.TestCase):
   self.assertEqual(expected[M.CACHE_ROOTS[3]+'/manifest.json'],self.pin(core_helper.cache_manifest(core)))
   self.assertEqual(core['package']['version'],'9.7-3+gold2')
  def fixture(self):
-  root=self.own();rows=[];controllers=[];products=[];cache={}
+  root=self.own();rows=[];controllers=[];products=[];cache={};self.runtime=F.owned_glibc_runtime(self,M,root);public=F.owned_glibc_inputs(M)
   def row(prefix,name,raw):
    self.write(root/prefix/name,raw);return{'path':name,'mode':'100644','git_blob':sha256(raw).hexdigest()[:40],**self.pin(raw)}
   for name in S.RELEASE_FILES:rows.append(row('sealed/release',name,('OWNED RELEASE:'+name).encode()))
   for i in range(93):products.append(row('sealed/product','owned/public-'+str(i)+'.py',('OWNED PRODUCT:'+str(i)).encode()))
-  for name in M.CONTROLLER_FILES:controllers.append(row('controller-source',name,('OWNED CONTROLLER:'+name).encode()))
+  for name in M.CONTROLLER_FILES:controllers.append(row('controller-source',name,public['Root-TrixieSelected01-qualification.json']if name==M.GLIBC_ROOT else('OWNED CONTROLLER:'+name).encode()))
   for i in range(26):
    name='pip_packages/owned-cache-'+str(i);raw=('OWNED CACHE:'+str(i)).encode();self.write(root/'sealed/release'/name,raw);cache[name]=self.pin(raw)
   receipt={'release_commit':'a'*40,'release_tree':'b'*40,'business_commit':'c'*40,'business_tree':'d'*40,'release_files':rows,'product_files':products}
   return root,receipt,controllers,cache
  def test_full_declared_controller_parcel_roundtrip_no_extract_or_authority(self):
-  root,receipt,controllers,cache=self.fixture();value=M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None)
-  self.assertEqual((value['sources'],value['members']),(169,170));self.assertTrue(value['complete_ci_controller_payload'])
+  root,receipt,controllers,cache=self.fixture();value=M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,glibc_runtime=self.runtime)
+  self.assertEqual((value['sources'],value['members']),(180,181));self.assertTrue(value['complete_ci_controller_payload'])
   self.assertFalse(value['complete_deployment_control_payload']);self.assertFalse(value['activation_authority']);self.assertFalse(value['security_accepted'])
   with tarfile.open(root/'controller-sources.tar.gz','r:gz')as archive:
-   items=archive.getmembers();self.assertEqual(len(items),170);self.assertEqual(len({x.name for x in items}),170)
+   items=archive.getmembers();self.assertEqual(len(items),181);self.assertEqual(len({x.name for x in items}),181)
    self.assertTrue(all(x.isfile()and x.uid==x.gid==0 and not x.pax_headers for x in items));self.assertTrue(any(len(x.name)>100 for x in items))
-   index=json.load(archive.extractfile('controller-manifest.json'));self.assertEqual(len(index['files']),169)
+   index=json.load(archive.extractfile('controller-manifest.json'));self.assertEqual(len(index['files']),180)
  def test_missing_duplicate_unknown_binding_and_hardlink_refuse(self):
   root,receipt,controllers,cache=self.fixture()
-  with self.assertRaisesRegex(RuntimeError,'controller_parcel_inventory'):M.controller_parcel_inputs(root,{**receipt,'release_files':receipt['release_files'][:-1]},controllers,cache)
-  with self.assertRaisesRegex(RuntimeError,'controller_parcel_inventory'):M.controller_parcel_inputs(root,{**receipt,'product_files':[receipt['product_files'][0]]*93},controllers,cache)
+  with self.assertRaisesRegex(RuntimeError,'controller_parcel_inventory'):M.controller_parcel_inputs(root,{**receipt,'release_files':receipt['release_files'][:-1]},controllers,cache,self.runtime)
+  with self.assertRaisesRegex(RuntimeError,'controller_parcel_inventory'):M.controller_parcel_inputs(root,{**receipt,'product_files':[receipt['product_files'][0]]*93},controllers,cache,self.runtime)
   first=root/'sealed/product'/receipt['product_files'][0]['path'];os.link(first,root/'OWNED-HARDLINK')
-  with self.assertRaisesRegex(RuntimeError,'source_file'):M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None)
+  with self.assertRaisesRegex(RuntimeError,'source_file'):M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,glibc_runtime=self.runtime)
  def test_payload_drift_before_write_or_during_physical_closes_cannot_complete(self):
   root,receipt,controllers,cache=self.fixture();first=root/'sealed/product'/receipt['product_files'][0]['path'];first.write_bytes(b'OWNED CHANGED')
-  with self.assertRaisesRegex(RuntimeError,'source_binding'):M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None)
+  with self.assertRaisesRegex(RuntimeError,'source_binding'):M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,glibc_runtime=self.runtime)
   self.assertFalse((root/'controller-sources.json').exists())
  def test_parcel_original_writer_close_append_cannot_be_adopted(self):
   root,receipt,controllers,cache=self.fixture();target=root/'controller-sources.tar.gz';actual=os.close;changed=[]
@@ -109,7 +113,7 @@ class IntegrationTests(unittest.TestCase):
     changed.append(True)
     with target.open('ab')as out:out.write(b'OWNED_NOT_ADMITTED_TRAILING_BYTES')
   with patch.object(os,'close',side_effect=close),self.assertRaisesRegex(RuntimeError,'source_binding'):
-   M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None)
+   M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,glibc_runtime=self.runtime)
   self.assertTrue(changed);self.assertFalse((root/'controller-sources.json').exists())
  def test_completion_writer_checks_earlier_named_files_after_physical_close(self):
   root=self.own();old=root/'source';old.write_bytes(b'OWNED SOURCE');old.chmod(0o644);held=M.Held(old);held.close();proof=root/'proof';actual=os.close;changed=[]

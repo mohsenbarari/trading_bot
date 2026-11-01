@@ -45,8 +45,8 @@ class Tests(unittest.TestCase):
   for unknown in('deploy/market-data/business81/OWNED-UNKNOWN.py',helper+'/extra','/absolute/'+helper):
    with patch.object(M,'git',side_effect=AssertionError('unknown source must stop before Git')):
     with self.assertRaisesRegex(RuntimeError,'controller_source'):M.git_source(Path('/OWNED-NOT-OPENED'),'b'*40,unknown)
-  self.assertEqual(len(M.controller_files(None)),30)
-  for role in M.ROLE_MAP:self.assertEqual(len(M.controller_files(role)),33)
+  self.assertEqual(len(M.controller_files(None)),35)
+  for role in M.ROLE_MAP:self.assertEqual(len(M.controller_files(role)),38)
  def test_wrong_helper_unknown_component_and_method_drift_refuse(self):
   with self.assertRaisesRegex(RuntimeError,'role_fixture_helper_pin'):B.role_fixture_helper(b'OWNED_UNKNOWN_HELPER')
   with self.assertRaisesRegex(ValueError,'role_fixture_component'):C.propose(self.fixture('base'),'OWNED_UNKNOWN_COMPONENT',fixture='base')

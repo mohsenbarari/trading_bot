@@ -3,7 +3,7 @@
 Mutable production approval state is never inferred from a fixture. Actual
 published stage checks invoke the unchanged authentic source validators.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
@@ -13,6 +13,34 @@ import json
 NULL_COREUTILS_FIELDS=('artifact','outputs','source','runtime_payload','installed_callers')
 def encoded(value):return(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
 def binding(raw):return{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
+def owned_glibc_inputs(M):
+ """Explicit inert UNIT payloads; never DEBs, helpers or qualification."""
+ values={name:('OWNED UNIT MOCK ONLY; NOT PACKAGE OR QUALIFIED RUNTIME:'+name+'\n').encode()
+         for name in M.GLIBC_FILES}
+ values['Root-TrixieSelected01-qualification.json']=encoded({'owned_unit_fixture_only':True,'security_accepted':False})
+ return values
+def owned_glibc_runtime(test,M,root):
+ """Private unittest M only; real file/FD/parcel guards, no runtime claim.
+
+ The real unpatched module refuses these bytes. Patches are registered with
+ the test cleanup and never modify Source files, global modules or approvals.
+ """
+ if not M.__name__.startswith(('owned_','_owned_')):
+  raise AssertionError('owned_private_unit_module_required')
+ values=owned_glibc_inputs(M);files={name:binding(values[name])for name in M.GLIBC_FILES}
+ stack=ExitStack();test.addCleanup(stack.close)
+ stack.enter_context(patch.object(M,'GLIBC_FILES',files))
+ stack.enter_context(patch.object(M,'GLIBC_ROOT_PIN',binding(values['Root-TrixieSelected01-qualification.json'])))
+ stack.enter_context(patch.object(M,'GLIBC_NAMED',{'schema':'glibc84243_exact_runtime_named_context/1','files':files,'security_accepted':False}))
+ capsule=root/'glibc-capsule';capsule.mkdir(mode=0o755)
+ for name in files:M.save(capsule/name,values[name],mode=0o644)
+ originals=M.Inputs([(capsule/name,pin,False)for name,pin in sorted(files.items())]);cap=None
+ try:
+  M.restamp(capsule,files,1793491200,source_rows=originals.files)
+  cap=M.RuntimeCapsule(capsule,inputs=originals);return cap.record()
+ finally:
+  if cap is not None:cap.close()
+  else:originals.close()
 def unarmed_lock(template):
  value=deepcopy(json.loads(template)if type(template)is bytes else template)
  value['armed']=False

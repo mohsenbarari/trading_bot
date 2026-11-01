@@ -13,7 +13,7 @@ import json,os,re,selectors,subprocess,time
 PROFILES=('base-nonroot','base-root','added-replay')
 OWNER='io.gold-trade.normal-business81-owner'
 PROFILE='io.gold-trade.normal-business81-profile'
-NORMAL_PIN=(101762, '65ec5e1957cdb066971cccf130348b8a87dc5e106b825baa867781e1fa888049')
+NORMAL_PIN=(122707, '49a2a5f0066d816c551d25793ff92cb8d5b231c59badfc58a7523494ceb21e9f')
 APPROVAL_PIN={'bytes': 1031, 'sha256': '3bbc244f4e044975a8f3e9761e8690a4f48f8051454134e66ef26332c3d2627f'}
 PROPOSAL_PIN={'bytes': 771, 'sha256': '18b59cbdf722a15de894f50fca1170072c0b6ac278582575cadb68b6e3446415'}
 PATCH_PIN={'bytes': 333, 'sha256': '88d5b46f2726fb570bb6727fe7955f9b5c399f370bf61fc81601c26c40f8da8c'}
@@ -165,6 +165,15 @@ def public_evidence_directory(M,evidence,path,owned):
   and M.identity(parent.lstat())[:5]==before_parent[:5],'source_changed');owned[path]=after[:5]
 
 
+def source_contract(M,B,source_paths):
+ # The normal caller holds these exact authenticated sources before this join.
+ # This pure guard never grants build, fixture, image or completion authority.
+ need(type(source_paths)is dict and set(source_paths)=={'outer','business','normal'},'business81_source')
+ need(source_paths['normal']['binding']=={'bytes':NORMAL_PIN[0],'sha256':NORMAL_PIN[1]}
+  and Path(M.__file__).resolve()==source_paths['normal']['path']and Path(B.__file__).resolve()==source_paths['business']['path']
+  and Path(__file__).resolve()==source_paths['outer']['path'],'business81_source')
+
+
 def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,contents,manifest,plans,source_paths,approval_paths,guard):
  """Called only by the reviewed normal controller; no JSON flag arms it.
 
@@ -185,9 +194,7 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
  need(manifest['image_id']==image and manifest['release_commit']==receipt['release_commit']and manifest['two_git_input_signature']==signature
   and set(plans)==set(PROFILES)and contents['suite-manifest.json']==B.encode(manifest),'business81_bundle')
  # This caller cannot supply an unsealed alternate primitive module.
- need(source_paths['normal']['binding']=={'bytes':NORMAL_PIN[0],'sha256':NORMAL_PIN[1]}
-  and Path(M.__file__).resolve()==source_paths['normal']['path']and Path(B.__file__).resolve()==source_paths['business']['path']
-  and Path(__file__).resolve()==source_paths['outer']['path'],'business81_source')
+ source_contract(M,B,source_paths)
  rows=[];value=None;begun=time.monotonic();nonce=uuid4().hex;owner=signature+':'+nonce
  work=root/('business81-'+nonce);work.mkdir(mode=0o700);evidence=work/'evidence';evidence_dirs={}
  public_evidence_directory(M,evidence,evidence,evidence_dirs)

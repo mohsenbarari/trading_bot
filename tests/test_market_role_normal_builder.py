@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import tempfile
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -161,11 +162,13 @@ class RoleBuilderTests(unittest.TestCase):
             # authentic Coreutils lock independently gates actual preparation.
             cache = {'pip_packages/OWNED-DTO-ONLY/cache-' + str(i):
                      {'bytes': 1, 'sha256': sha256(b'X').hexdigest()} for i in range(26)}
-            value, _ = self.M.receipt_contract(receipt, signature, controllers, cache, 1793085646)
-            parcel = self.M.controller_parcel_inputs(Path('/OWNED-NOT-OPENED'), receipt,
-                                                     controllers, cache)
+            with tempfile.TemporaryDirectory(prefix='.owned-role-codec-runtime-', dir=ROOT/'tests') as tmp:
+                runtime = self.F.owned_glibc_runtime(self,self.M, Path(tmp))
+                value, _ = self.M.receipt_contract(receipt, signature, controllers, cache, 1793085646, runtime)
+                parcel = self.M.controller_parcel_inputs(Path(tmp), receipt,
+                                                         controllers, cache, runtime)
             self.assertFalse(value['activation_authority'])
-            self.assertEqual(len(parcel), 21 + spec['count'] + len(controllers) + 26)
+            self.assertEqual(len(parcel), 21 + spec['count'] + len(controllers) + 26 + 6)
             self.assertIn('controller/' + self.M.ROLE_READER, parcel)
             self.assertIn('release/' + self.M.ROLE_CATALOG_PATH, parcel)
 

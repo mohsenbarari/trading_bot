@@ -615,6 +615,23 @@ class ContextSnapshot:
    try:need(identity(path.lstat())==before,'context_changed')
    except BaseException as e:error=e
   if error is not None:raise error
+def business81_source_paths(root,controllers):
+ bindings={r['path']:{k:r[k]for k in('bytes','sha256')}for r in controllers}
+ self_path=Path(__file__).resolve()
+ return {'outer':{'path':root/'controller-source'/OUTER,'binding':bindings[OUTER]},
+  'business':{'path':root/'controller-source'/BUSINESS,'binding':bindings[BUSINESS]},
+  'normal':{'path':self_path,'binding':bindings[SELF]}}
+
+
+def preflight_business81_sources(root,raws,controllers):
+ # Reuse the genuine producer's exact fixed source predicate while original
+ # driver/controller FDs are held, before seal/cache/image work can start.
+ release=root/'controller-source'
+ B=module(raws[BUSINESS],release/BUSINESS);O=module(raws[OUTER],release/OUTER)
+ api=ModuleType('_current_authenticated_normal_market');api.__dict__.update(globals())
+ O.source_contract(api,B,business81_source_paths(root,controllers))
+
+
 def historical81_sources(raws,release,receipt,image,signature,context):
  B=module(raws[BUSINESS],release/BUSINESS);O=module(raws[OUTER],release/OUTER)
  role=receipt.get('schema')=='normal_market_git_component_inputs/2'
@@ -641,11 +658,7 @@ def historical81_sources(raws,release,receipt,image,signature,context):
 def actual_business81(root,raws,controllers,receipt,signature,controller_signature,image,context,guard):
  """Only this genuine producer can emit the historical81 completion proof."""
  B,O,contents,manifest,plans=historical81_sources(raws,root/'controller-source',receipt,image,signature,context)
- bindings={r['path']:{k:r[k]for k in('bytes','sha256')}for r in controllers}
- self_path=Path(__file__).resolve()
- source_paths={'outer':{'path':root/'controller-source'/OUTER,'binding':bindings[OUTER]},
-  'business':{'path':root/'controller-source'/BUSINESS,'binding':bindings[BUSINESS]},
-  'normal':{'path':self_path,'binding':bindings[SELF]}}
+ source_paths=business81_source_paths(root,controllers)
  approval_paths={k:root/'controller-source'/BUSINESS_DIR/v for k,v in [('approval','python31118-root-assertion-approval.json'),('proposal','python31118-security-base-assertion-proposal.json'),('patch','python31118-security-base-assertion.patch')]}
  api=ModuleType('_current_authenticated_normal_market');api.__dict__.update(globals())
  value=O.produce(api,B,root=root,repo=Path(os.environ['GITHUB_WORKSPACE']),image=image,receipt=receipt,signature=signature,
@@ -1085,6 +1098,9 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
  controller_hold=None;snapshots=[];published=None;business_hold=None;evidence=[];evidence_checks=[]
  try:
   controller_hold=Inputs([(root/'controller-source'/row['path'],{k:row[k]for k in ('bytes','sha256')},False)for row in controllers])
+  PHASE='business81_source_preflight';original.check();controller_hold.check()
+  preflight_business81_sources(root,raws,controllers)
+  original.check();controller_hold.check();PHASE='controller_source'
   preflight_assertion_sources(raws)
   PHASE='git_product_seal';sealer.seal(sealer.GitRepository(repo),release,root/'sealed',role=role)
   source=Held(root/'sealed/source-inputs.json',maximum=MAX_JSON);evidence.append(source);sealed=document(source.raw())
@@ -1439,7 +1455,7 @@ def closed_failure(error):
   return code,kind
  code,kind=fields(error)
  history=OUTER_FAILURE if OUTER_FAILURE is not None and OUTER_FAILURE[0]is error else None
- return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','git_product_seal','glibc_runtime_prepare','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
+ return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','business81_source_preflight','git_product_seal','glibc_runtime_prepare','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
   'code':code,'exception_class':kind,'outer_physical_finalizers_completed':bool(history is not None and OUTER_PHYSICAL_FINALIZERS_COMPLETED),
   'original_failure_code':fields(history[1])[0]if history is not None and history[1]is not None else None,
   'physical_finalizer_failures':[{'stage':stage,'code':fields(exc)[0],'exception_class':fields(exc)[1]}for stage,exc in history[2]]if history is not None else[],
