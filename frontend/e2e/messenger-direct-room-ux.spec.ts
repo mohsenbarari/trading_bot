@@ -661,7 +661,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await page.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
     await injectDocument(page)
 
     await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })
@@ -711,7 +711,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
       await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await senderPage.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
       await injectDocument(senderPage, { sizeBytes: largeDocumentSizeBytes })
 
       await expect(receiverPage.locator('.chat-header:visible').last()).toContainText('در حال ارسال فایل...', { timeout: 30000 })
@@ -782,7 +782,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
       await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await senderPage.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
       await injectDocument(senderPage)
 
       await heldUploadSeen
@@ -855,7 +855,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await page.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
     await injectDocument(page)
 
     await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })

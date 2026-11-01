@@ -434,6 +434,15 @@ test.describe('Native App V2 Firefox/WebKit sensitive families', () => {
   }
 })
 
+async function assertLoginShortcutKeyboardStop(page: Page, expectsShortcut: boolean) {
+  const quickLogin = page.getByRole('button', { name: 'ورود سریع ۱ ساله', exact: true })
+  await expect(quickLogin).toHaveCount(expectsShortcut ? 1 : 0)
+  if (expectsShortcut) {
+    await expect(quickLogin).toBeFocused()
+    await page.keyboard.press('Tab')
+  }
+}
+
 test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
 
@@ -450,7 +459,7 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     await page.keyboard.type('09120000000')
     await page.keyboard.press('Tab')
     const submit = page.getByRole('button', { name: 'دریافت کد تأیید' })
-    await expect(page.getByRole('button', { name: 'ورود سریع ۱ ساله', exact: true })).toHaveCount(expectsStagingDevLogin ? 1 : 0)
+    await assertLoginShortcutKeyboardStop(page, expectsStagingDevLogin)
     await expect(submit).toBeFocused()
     expectCleanDiagnostics(diagnostics, 'login-keyboard')
   })

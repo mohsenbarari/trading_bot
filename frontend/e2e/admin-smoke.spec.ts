@@ -54,7 +54,7 @@ test.describe('Admin smoke regressions', () => {
     await expect(accountNameInput).toBeVisible()
     await expect(mobileInput).toBeVisible()
     await expect(roleSelect).toBeVisible()
-    await expect(page.getByRole('region', { name: 'دعوت‌نامه‌های pending' }).first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'دعوت‌نامه‌های در انتظار' }).first()).toBeVisible()
   })
 
   test('admin can open the user management panel', async ({ page, request }) => {

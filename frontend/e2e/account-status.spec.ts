@@ -244,16 +244,14 @@ async function openAdminUserProfile(page: Page, user: SessionUser) {
 }
 
 async function toggleAccountStatusFromAdminProfile(page: any) {
-  const settingsHeading = page.getByRole('heading', { name: 'مدیریت کاربر' })
-  if (!(await settingsHeading.isVisible())) {
-    await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
-    await expect(settingsHeading).toBeVisible()
-  }
   const toggleButton = page.getByRole('button', { name: /تغییر وضعیت حساب/ }).first()
   if (!(await toggleButton.isVisible().catch(() => false))) {
+    const managementTitle = page.locator('.main-actions .ui-inset-group__title')
+    await expect(managementTitle).toHaveText('مدیریت کاربر')
     await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
-    await expect(toggleButton).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.settings-menu .ui-inset-group__title')).toHaveText('تنظیمات کاربر')
   }
+  await expect(toggleButton).toBeVisible({ timeout: 30000 })
   const playwrightPage = page as any
   const dialogHandler: any = async (dialog: any) => {
     await dialog.accept()
