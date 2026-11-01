@@ -2,7 +2,7 @@
 from pathlib import Path
 from types import ModuleType
 from hashlib import sha256
-import argparse,errno,json,os,re,shutil,sys,time
+import argparse,base64,errno,json,os,re,shutil,sys,time
 
 FAMILIES={'ubuntu239':('libc-bin','libc-dev-bin','libc-devtools','libc6','libc6-dev','locales'),
           'ubuntu243':('libc-bin','libc-dev-bin','libc-gconv-modules-extra','libc6','libc6-dev','locales')}
@@ -39,6 +39,22 @@ def solver(raw,names,version):
             match=re.fullmatch(r'Conf ([A-Za-z0-9+.-]+)(?::amd64)? \(([^ )]+)[^\n]*\)',line)
             need(match is not None and match[1]in names and match[1]not in configured and match[2]==version,'solver_configuration');configured.add(match[1])
     need(set(installs)==set(names)==configured,'solver_incomplete_family');return installs
+def simulation_evidence(raw,command_record,phase,diagnostic=False):
+    """Retain exact bounded successful stdout before interpreting its plan."""
+    need(type(raw)is bytes and 0<=len(raw)<=256*1024 and phase in {'legacy_default_forward','corrected_forward','corrected_rollback'}
+         and type(diagnostic)is bool and diagnostic==(phase=='legacy_default_forward'),'simulation_evidence_scope')
+    need(type(command_record)is dict and command_record.get('actual_returncode')==0
+         and type(command_record.get('actual_returncode'))is int and type(command_record.get('bytes'))is int and command_record.get('bytes')==len(raw)
+         and command_record.get('sha256')==sha256(raw).hexdigest(),'successful_simulation_identity')
+    return {'phase':phase,'argv':command_record['argv'],'actual_returncode':0,'raw_output_bytes':len(raw),
+            'raw_output_sha256':sha256(raw).hexdigest(),'raw_output_base64':base64.b64encode(raw).decode('ascii'),
+            'diagnostic_only':diagnostic,'strict_solver_accepted':False,'accepted_for_install':False}
+def checked_solver(raw,names,version,evidence,all_evidence):
+    need(evidence.get('diagnostic_only')is False and evidence.get('phase')in {'corrected_forward','corrected_rollback'},'diagnostic_not_install_authority')
+    try:result=solver(raw,names,version)
+    except BaseException as error:
+        error.family6_solver_phase=evidence['phase'];error.family6_simulation_evidence=all_evidence;raise
+    evidence['strict_solver_accepted']=True;evidence['accepted_for_install']=True;return result
 def package_state(raw):
     result={}
     for line in raw.decode('utf8','strict').splitlines():
@@ -83,7 +99,8 @@ def apt_snapshot(profile):
         records[p.name]={'bytes':len(body),'sha256':sha256(body).hexdigest()}
     need(set(records)==expected_names,'APT_InRelease_count');return{'sources':raw.decode(),'authenticated_by_normal_APT_update':True,'InRelease':records}
 
-def execute(stage,expected_input):
+def _execute(stage,expected_input,failure_context):
+    simulation_records=failure_context['successful_simulation_evidence']
     need(os.getuid()==os.geteuid()==0 and re.fullmatch('[a-f0-9]{32}',os.environ.get('FAMILY6_NONCE',''))and Path('/.dockerenv').is_file(),'owned_disposable_only')
     cfg=json.loads(read_pin('/inputs/input.json',expected_input,65536));profile=cfg['profile'];need(profile in FAMILIES,'profile')
     names=FAMILIES[profile];old=VERSIONS[profile];new=old+'+gold1'
@@ -135,13 +152,20 @@ def execute(stage,expected_input):
             shutil.copyfile(source,target);target.chmod(0o644);need(len(read_pin(target,record['sha256'],8*1024**2))==record['bytes'],'cache_copy')
             paths.append(str(target))
         return paths
-    def apt(paths,rollback=False,simulate=False):
+    def apt(paths,rollback=False,simulate=False,legacy_default=False):
+        need(not legacy_default or(simulate and not rollback),'legacy_diagnostic_simulation_only')
         args=['/usr/bin/apt-get','--no-download','--no-remove']
+        if not legacy_default:args.append('--no-install-recommends')
         if rollback:args.append('--allow-downgrades')
         args+=['--simulate']if simulate else['-y']
-        return command(args+['install',*paths])
+        try:return command(args+['install',*paths])
+        except BaseException as error:
+            if simulate:error.family6_solver_phase='legacy_default_forward'if legacy_default else'corrected_rollback'if rollback else'corrected_forward'
+            error.family6_simulation_evidence=simulation_records;raise
+    failure_context['phase']='owned_policy_admission'
     no_policy();report={'schema':'disposable_exact_family6_worker/1','profile':profile,'stage':stage,'Host_install_allowed':False,'real_Host_PID1_reexec_proven':False,'security_accepted':False}
     if stage=='prepare':
+        failure_context['phase']='signed_old_six_preparation'
         # Signed network preparation is done by the outer fixed bootstrap.
         # No build/multilib cohort is added to the ordinary six-family baseline.
         preparation=['/usr/bin/apt-get','--no-remove','--no-install-recommends']
@@ -153,15 +177,56 @@ def execute(stage,expected_input):
         report['baseline_snapshot_sha256']=sha256(encoded({'packages':report['baseline'],'configuration':report['configuration'],'apt':report['signed_APT']})).hexdigest()
     else:
         need(stage=='exercise','stage')
+        failure_context['phase']='baseline_verification'
         baseline=verify(old);before=configuration();apt_before=apt_snapshot(profile)
         report['baseline_snapshot_sha256']=sha256(encoded({'packages':baseline,'configuration':before,'apt':apt_before})).hexdigest()
-        forward=archives('new');report['forward_solver']=solver(apt(forward,simulate=True),names,new)
-        apt(forward);after=verify(new);unchanged_nonfamily(baseline,after,names);report['forward_configuration']=configuration()
-        rollback=archives('old');report['rollback_solver']=solver(apt(rollback,rollback=True,simulate=True),names,old)
-        apt(rollback,rollback=True);restored=verify(old);need(restored==baseline,'rollback_package_state');need(configuration()==before,'rollback_configuration_drift');need(apt_snapshot(profile)==apt_before,'offline_APT_sources_changed')
+        failure_context['phase']='forward_archives'
+        forward=archives('new');report['successful_simulation_evidence']=simulation_records
+        failure_context['phase']='legacy_default_forward'
+        legacy=apt(forward,simulate=True,legacy_default=True);simulation_records.append(simulation_evidence(legacy,commands[-1],'legacy_default_forward',True))
+        failure_context['phase']='corrected_forward'
+        forward_raw=apt(forward,simulate=True);forward_evidence=simulation_evidence(forward_raw,commands[-1],'corrected_forward');simulation_records.append(forward_evidence)
+        failure_context['phase']='forward_solver_validation'
+        report['forward_solver']=checked_solver(forward_raw,names,new,forward_evidence,simulation_records)
+        failure_context['phase']='forward_apply'
+        apt(forward)
+        failure_context['phase']='forward_verification'
+        after=verify(new)
+        failure_context['phase']='forward_nonfamily_validation'
+        unchanged_nonfamily(baseline,after,names)
+        failure_context['phase']='forward_configuration'
+        report['forward_configuration']=configuration()
+        failure_context['phase']='rollback_archives'
+        rollback=archives('old')
+        failure_context['phase']='corrected_rollback'
+        rollback_raw=apt(rollback,rollback=True,simulate=True);rollback_evidence=simulation_evidence(rollback_raw,commands[-1],'corrected_rollback');simulation_records.append(rollback_evidence)
+        failure_context['phase']='rollback_solver_validation'
+        report['rollback_solver']=checked_solver(rollback_raw,names,old,rollback_evidence,simulation_records)
+        failure_context['phase']='rollback_apply'
+        apt(rollback,rollback=True)
+        failure_context['phase']='rollback_verification'
+        restored=verify(old)
+        failure_context['phase']='rollback_package_state'
+        need(restored==baseline,'rollback_package_state')
+        failure_context['phase']='rollback_configuration'
+        need(configuration()==before,'rollback_configuration_drift')
+        failure_context['phase']='rollback_APT_snapshot'
+        need(apt_snapshot(profile)==apt_before,'offline_APT_sources_changed')
         report.update(forward_exact_six=True,rollback_exact_six=True,nonfamily_packages_unchanged=True,configuration_restored_exactly=True)
     report['commands']=commands;report['status']='PASS_DISPOSABLE_ONLY'
-    raw=encoded(report);need(len(raw)<=4*1024**2,'report_bound');sys.stdout.write(raw.decode());return report
+    failure_context['phase']='final_report_encoding'
+    raw=encoded(report);need(len(raw)<=4*1024**2,'report_bound')
+    failure_context['phase']='final_report_publication'
+    sys.stdout.write(raw.decode());return report
+def execute(stage,expected_input):
+    # One bounded list owns every completed simulation across the whole worker.
+    # Preserve the original exception and its command/finality attributes.
+    context={'phase':'worker_admission','successful_simulation_evidence':[]}
+    try:return _execute(stage,expected_input,context)
+    except BaseException as error:
+        error.family6_worker_phase=context['phase']
+        error.family6_simulation_evidence=context['successful_simulation_evidence']
+        raise
 def main(argv=None):
     argv=sys.argv[1:]if argv is None else argv
     if len(argv)!=3 or argv[0]!='--owned-family6' or argv[1]not in{'prepare','exercise'}or re.fullmatch('[a-f0-9]{64}',argv[2])is None:
@@ -169,6 +234,6 @@ def main(argv=None):
     try:execute(argv[1],argv[2]);return 0
     except BaseException as error:
         text=str(error);code=text if type(error)is RuntimeError and re.fullmatch('[A-Za-z0-9_]{1,80}',text)else'rehearsal_refused'
-        value={'status':'FAILED','code':code,'failed_public_command':getattr(error,'family6_failed_command',None),'automatic_retry':False,'Host_install_allowed':False,'security_accepted':False}
-        print(json.dumps(value,sort_keys=True));return 1
+        value={'status':'FAILED','code':code,'failed_public_command':getattr(error,'family6_failed_command',None),'worker_phase':getattr(error,'family6_worker_phase',None),'solver_validation_phase':getattr(error,'family6_solver_phase',None),'successful_simulation_evidence':getattr(error,'family6_simulation_evidence',None),'automatic_retry':False,'Host_install_allowed':False,'security_accepted':False}
+        sys.stdout.write(encoded(value).decode());return 1
 if __name__=='__main__':raise SystemExit(main())
