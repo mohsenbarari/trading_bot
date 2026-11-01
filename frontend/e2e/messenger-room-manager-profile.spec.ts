@@ -816,7 +816,7 @@ test.describe('Messenger room manager and public profile flows', () => {
       .poll(async () => (await fetchGroupDetailPayload(request, owner.accessToken, group.id)).members.find((member) => member.user_id === candidateOne.userId)?.role, { timeout: 30000 })
       .toBe('admin')
 
-    await groupManager.locator('.header-icon-btn').first().click()
+    await clickManagerBack(groupManager)
     await groupManager.locator('.telegram-row').filter({ hasText: 'اعضای گروه' }).click()
 
     const removableRow = groupManager.locator('.chat-user-row').filter({ hasText: candidateTwo.accountName }).first()
@@ -826,7 +826,7 @@ test.describe('Messenger room manager and public profile flows', () => {
       .poll(async () => (await fetchGroupDetailPayload(request, owner.accessToken, group.id)).members.some((member) => member.user_id === candidateTwo.userId), { timeout: 30000 })
       .toBe(false)
 
-    await groupManager.locator('.header-icon-btn').first().click()
+    await clickManagerBack(groupManager)
     await groupManager.locator('.telegram-row.nav.danger').click()
 
     await expect
@@ -870,7 +870,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     const clickChannelMemberProfile = async () => {
       const currentMemberRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
       await expect(currentMemberRow).toBeVisible({ timeout: 30000 })
-      const profileButton = currentMemberRow.locator('.chat-user-row__action-btn').filter({ hasText: 'پروفایل' })
+      const profileButton = currentMemberRow.getByRole('button', { name: 'پروفایل', exact: true })
       await profileButton.scrollIntoViewIfNeeded().catch(() => {})
       await profileButton.click({ force: true })
     }
@@ -893,21 +893,21 @@ test.describe('Messenger room manager and public profile flows', () => {
     await clickManagerAction(channelManager, 'مدیریت ادمین‌ها')
 
     const promotableRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
-    await promotableRow.locator('.chat-user-row__action-btn--primary').filter({ hasText: 'ارتقا به ادمین' }).click()
+    await promotableRow.getByRole('button', { name: 'ارتقا به ادمین', exact: true }).click()
 
     await expect
       .poll(async () => (await fetchChannelMembers(request, owner.accessToken, channel.id)).find((member) => member.user_id === candidateOne.userId)?.role, { timeout: 30000 })
       .toBe('admin')
 
     const adminRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
-    await adminRow.locator('.chat-user-row__action-btn').filter({ hasText: 'حذف ادمین' }).click()
+    await adminRow.getByRole('button', { name: 'حذف ادمین', exact: true }).click()
 
     await expect
       .poll(async () => (await fetchChannelMembers(request, owner.accessToken, channel.id)).find((member) => member.user_id === candidateOne.userId)?.role, { timeout: 30000 })
       .toBe('member')
 
     const promotableAgainRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
-    await promotableAgainRow.locator('.chat-user-row__action-btn--primary').filter({ hasText: 'ارتقا به ادمین' }).click()
+    await promotableAgainRow.getByRole('button', { name: 'ارتقا به ادمین', exact: true }).click()
 
     await expect
       .poll(async () => (await fetchChannelMembers(request, owner.accessToken, channel.id)).find((member) => member.user_id === candidateOne.userId)?.role, { timeout: 30000 })
@@ -917,7 +917,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await clickManagerAction(channelManager, 'اعضای کانال')
 
     const removableRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateTwo.accountName }).first()
-    await removableRow.locator('.chat-user-row__action-btn--danger').filter({ hasText: 'حذف' }).click()
+    await removableRow.getByRole('button', { name: 'حذف', exact: true }).click()
 
     await expect
       .poll(async () => (await fetchChannelMembers(request, owner.accessToken, channel.id)).some((member) => member.user_id === candidateTwo.userId), { timeout: 30000 })

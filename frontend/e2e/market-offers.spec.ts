@@ -8,6 +8,7 @@ import {
   runPythonInApp as runPythonInConfiguredApp,
 } from './helpers/mutationRuntime'
 import { primeAuthSession } from './helpers/auth'
+import { observeMarketPreviewRequests } from './helpers/marketPreviewDiagnostics'
 
 const BACKEND_BASE_URL = getE2EBackendBaseUrl()
 
@@ -766,6 +767,18 @@ function uniquePrice(seed: number) {
 }
 
 test.describe('Market offer creation regressions', () => {
+  const previewObservers = new WeakMap<Page, NonNullable<ReturnType<typeof observeMarketPreviewRequests>>>()
+  test.beforeEach(({ page }, testInfo) => {
+    const observer = observeMarketPreviewRequests(page, testInfo.title)
+    if (observer) previewObservers.set(page, observer)
+  })
+  test.afterEach(({ page }) => {
+    const observer = previewObservers.get(page)
+    if (!observer) return
+    previewObservers.delete(page)
+    console.info('[market-preview-network]', JSON.stringify(observer.finish()))
+  })
+
   test('market page stays text-only and persists a new buy offer from text input', async ({ page, request }) => {
     const actor = seedIsolatedMarketSession('buy_text_offer')
     const price = uniquePrice(Date.now())
