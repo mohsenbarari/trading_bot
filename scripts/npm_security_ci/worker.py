@@ -107,6 +107,86 @@ t.test('project security backport bounded compiler guards', t => {
   t.end()
 })
 '''
+GLOB_GUARD_TEST=b'''import t from 'tap'
+import * as fs from 'node:fs'
+import { Glob } from '../dist/esm/glob.js'
+import { glob } from '../dist/esm/index.js'
+import { GlobWalker } from '../dist/esm/walker.js'
+
+const bounded = async (body: (ac: AbortController) => Promise<void>) => {
+  const ac = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      body(ac),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error('bounded security regression fixture timeout')
+          ac.abort(error)
+          reject(error)
+        }, 5000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+    ac.abort(new Error('owned fixture cleanup'))
+  }
+}
+
+t.test('active pause preserves work until resume and completes once', async t => {
+  await bounded(async ac => {
+    const cwd = t.testdir({ 'one.txt': '', 'two.txt': '' })
+    let reads = 0
+    const counted: any = { ...fs }
+    counted.readdir = (...args: any[]) => {
+      reads++
+      return (fs.readdir as any)(...args)
+    }
+    const g = new Glob('*.txt', { cwd, fs: counted })
+    g.scurry.cwd.lstatSync()
+    const walker = new GlobWalker(g.patterns, g.scurry.cwd, { posix: true, signal: ac.signal })
+    let completed = 0
+    let finish: () => void = () => {}
+    const done = new Promise<void>(resolve => { finish = resolve })
+    walker.pause()
+    walker.walkCB(g.scurry.cwd, g.patterns, () => { completed++; finish() })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    t.equal(reads, 0, 'no directory work starts while paused')
+    t.equal(completed, 0, 'completion is deferred until resume')
+    walker.resume()
+    await done
+    await new Promise<void>(resolve => setImmediate(resolve))
+    t.equal(reads, 1, 'resumed real directory read occurs once')
+    t.equal(completed, 1, 'real walk completion occurs exactly once')
+    t.same([...walker.matches].sort(), ['one.txt', 'two.txt'])
+  })
+})
+
+t.test('public abort starts no new directory work beyond the abort barrier', async t => {
+  await bounded(async ac => {
+    const cwd = t.testdir({ a: { 'one.txt': '' }, b: { 'two.txt': '' } })
+    const reason = new Error('owned deterministic abort barrier')
+    let started = 0, afterAbort = 0, pending = 0
+    let idle: () => void = () => {}
+    const counted: any = { ...fs }
+    counted.readdir = (...args: any[]) => {
+      started++
+      if (ac.signal.aborted) afterAbort++
+      pending++
+      const callback = args.pop()
+      return (fs.readdir as any)(...args, (...result: any[]) => {
+        if (!ac.signal.aborted) ac.abort(reason)
+        try { callback(...result) } finally { if (--pending === 0) idle() }
+      })
+    }
+    await t.rejects(glob('**/*', { cwd, fs: counted, signal: ac.signal }), reason)
+    if (pending) await new Promise<void>(resolve => { idle = resolve })
+    t.equal(started, 1, 'only the initiating directory read is issued')
+    t.equal(afterAbort, 0, 'in-flight completions are distinct from new reads')
+    t.equal(pending, 0, 'all owned filesystem callbacks have completed')
+  })
+})
+'''
 def dist_payloads(package,profile):
  """Bounded regular inventory; only frozen tshy's exact selflink omitted."""
  source=package/'dist'
@@ -224,6 +304,7 @@ def upstream(spec,profile,node,workspace,out,env,*,test_node=None):
  patched=patch_source(p['kind'],raw);source.write_bytes(patched)
  regression=None
  if p['kind']=='minimatch':regression=write(package/'test/project-security-compiler-guards.ts',MINIMATCH_GUARD_TEST)
+ elif p['kind']=='glob':regression=write(package/'test/project-security-cancellation-backpressure.ts',GLOB_GUARD_TEST)
  metadata['version']=p['fork_version']
  if p['kind']=='resolve':need(metadata['dependencies'].pop('deepmerge')=='^4.2.2','deepmerge_single_removal');metadata['engines']['node']='^22.23.4 || ^24.22.1 || ^26.12.1'
  (package/'package.json').write_bytes(encode(metadata))
