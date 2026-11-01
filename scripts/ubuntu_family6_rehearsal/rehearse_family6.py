@@ -97,7 +97,7 @@ def execute(args):
     need(os.getuid()==os.geteuid()==1001 and all(os.environ.get(k)==v for k,v in {'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64','GITHUB_REPOSITORY':'mohsenbarari/trading_bot','GITHUB_REPOSITORY_ID':'1065680631','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_REF':'refs/heads/main'}.items()),'hosted_UID1001_only')
     workspace=Path(os.environ['GITHUB_WORKSPACE']);need(workspace.is_absolute()and workspace.resolve(strict=True)==workspace and HERE.resolve(strict=True)==HERE and HERE.is_relative_to(workspace),'hosted_source_workspace')
     need(args.profile in SUBJECTS and re.fullmatch('[a-f0-9]{64}',args.source_sha256),'source_confirmation')
-    IO=bootstrap();scope=IO.Scope(3600);held={};primary=None;final=[];cid=None;closure='NO_CONTAINER';work=None;phase='source';result=None;create_requested=False;expected_name=None;prefix_lookup_attempted=False;prefix_qualified=False;empty_outputs=[]
+    IO=bootstrap();scope=IO.Scope(3600);held={};primary=None;final=[];cid=None;closure='NO_CONTAINER';work=None;phase='source';result=None;create_requested=False;expected_name=None;prefix_lookup_attempted=False;prefix_qualified=False;empty_outputs=[];public_api_request=None;failure_output=None
     try:
         held['self']=scope.open(Path(__file__).absolute(),(Path(__file__).stat().st_size,args.source_sha256),131072)
         for name,pin in PINS.items():held[name]=scope.open(HERE/name,pin,131072)
@@ -126,14 +126,17 @@ def execute(args):
             need(reader.before==writer.before,'publication_reader_writer_identity')
             writer.close();reader.check();need(reader.hash()==reference['sha256'],'publication_postwriter_readback');reader.close();reader.named();scope.check()
         def api(path,maximum=65536,accept='application/vnd.github+json'):
-            return command(['/usr/bin/gh','api','--method','GET','-H','Accept: '+accept,'repos/mohsenbarari/trading_bot/'+path],maximum,True)
+            nonlocal public_api_request
+            public_api_request={'endpoint':path,'accept':accept}
+            response=command(['/usr/bin/gh','api','--method','GET','-H','Accept: '+accept,'repos/mohsenbarari/trading_bot/'+path],maximum,True)
+            public_api_request=None;return response
         cfg={'profile':args.profile,'old_version':prior['version'],'new_version':prior['version']+'+gold1','old':{},'new':{}}
         if not args.inspect_inherited_policy:
             phase='original_artifact_admission';run=document(api('actions/runs/'+str(p['original_run'])+'/attempts/1'));job=document(api('actions/jobs/'+str(p['original_job'])));artifact=document(api('actions/artifacts/'+str(p['original_artifact']['id'])))
             need(all(type(run[k])is int for k in ('id','run_attempt'))and(run['id'],run['run_attempt'],run['head_sha'],run['status'],run['conclusion'],run['repository']['id'],run['head_repository']['id'])==(p['original_run'],1,p['head'],'completed','failure',1065680631,1065680631),'original_run_changed')
             need(all(type(job[k])is int for k in ('id','run_id'))and(job['id'],job['run_id'],job['head_sha'],job['status'],job['conclusion'])==(p['original_job'],p['original_run'],p['head'],'completed','failure'),'original_job_changed')
             need(type(artifact['id'])is type(artifact['size_in_bytes'])is int and artifact['id']==p['original_artifact']['id']and artifact['digest']=='sha256:'+p['original_ZIP']['sha256']and artifact['size_in_bytes']==p['original_ZIP']['bytes']and artifact['expired']is False and artifact['workflow_run']['id']==p['original_run']and artifact['workflow_run']['head_sha']==p['head'],'original_artifact_changed')
-            archive=api('actions/artifacts/'+str(artifact['id'])+'/zip',p['original_ZIP']['bytes'],'application/octet-stream');need((len(archive),sha256(archive).hexdigest())==(p['original_ZIP']['bytes'],p['original_ZIP']['sha256']),'original_ZIP_pin');save(work/'original-producer-evidence.zip',archive);save(work/'original-api-admission.json',encoded({'original_run':run['id'],'attempt':run['run_attempt'],'head':run['head_sha'],'original_job':job['id'],'run_conclusion':run['conclusion'],'job_conclusion':job['conclusion'],'artifact_id':artifact['id'],'artifact_bytes':artifact['size_in_bytes'],'artifact_digest':artifact['digest'],'original_wrapper_exit_code':1,'original_provenance_missing':True,'Root_receipt_sha256':RECEIPT_PIN[1],'security_accepted':False}))
+            archive=api('actions/artifacts/'+str(artifact['id'])+'/zip',p['original_ZIP']['bytes']);need((len(archive),sha256(archive).hexdigest())==(p['original_ZIP']['bytes'],p['original_ZIP']['sha256']),'original_ZIP_pin');save(work/'original-producer-evidence.zip',archive);save(work/'original-api-admission.json',encoded({'original_run':run['id'],'attempt':run['run_attempt'],'head':run['head_sha'],'original_job':job['id'],'run_conclusion':run['conclusion'],'job_conclusion':job['conclusion'],'artifact_id':artifact['id'],'artifact_bytes':artifact['size_in_bytes'],'artifact_digest':artifact['digest'],'original_wrapper_exit_code':1,'original_provenance_missing':True,'Root_receipt_sha256':RECEIPT_PIN[1],'security_accepted':False}))
             with zipfile.ZipFile(io.BytesIO(archive))as z:
                 infos=z.infolist();need(0<len(infos)<=1024 and len({x.filename for x in infos})==len(infos)and sum(x.file_size for x in infos)<=512*1024**2,'ZIP_inventory')
                 need(all(not x.flag_bits&1 and not x.filename.startswith('/')and '..'not in PurePosixPath(x.filename).parts for x in infos),'ZIP_paths')
@@ -179,11 +182,16 @@ def execute(args):
     except BaseException as error:
         primary=error
         truth=getattr(error,'public_command_failure',None)
-        if type(truth)is dict and phase in {'signed_disposable_helper_preparation','ordinary_old_six_baseline','offline_exact_six_forward_rollback'}:
-            captured=truth.get('captured_output',b'')
-            if type(captured)is bytes and len(captured)<=8*1024**2:
-                try:save(work/'failed-public-phase-output.bin',captured)
-                except BaseException:final.append('failure_output_retention_unknown')
+        if type(truth)is dict and phase in {'original_artifact_admission','signed_disposable_helper_preparation','ordinary_old_six_baseline','offline_exact_six_forward_rollback'}:
+            captured=truth.get('captured_output')
+            if type(captured)is bytes:
+                failure_output={'captured_bytes':len(captured),'raw_retention_limit_bytes':8*1024**2,'full_raw_output_retained':False,'raw_output_was_empty':not captured,'diagnostic_truncated':len(captured)>8*1024**2}
+                if len(captured)<=8*1024**2:
+                    try:save(work/'failed-public-phase-output.bin',captured);failure_output['full_raw_output_retained']=True
+                    except BaseException:final.append('failure_output_retention_unknown')
+                else:
+                    failure_output.update(prefix_hex=captured[:16384].hex(),tail_hex=captured[-16384:].hex(),prefix_tail_limit_each_bytes=16384)
+            else:final.append('failure_output_retention_unknown')
     finally:
         if create_requested and closure!='STOPPED':
             closing=True
@@ -196,7 +204,7 @@ def execute(args):
         except BaseException:final.append('source_finality_unknown')
     if primary is not None or final:
         text=str(primary);code=text if type(primary)is RuntimeError and re.fullmatch('[A-Za-z0-9_]{1,100}',text)else'rehearsal_refused'
-        result={'status':'FAILED','phase':phase,'code':code,'finalizer_codes':final,'owned_container_closure':closure,'create_request_prefix_retained':create_requested,'expected_owned_name':expected_name,'automatic_retry':False,'failed_command_truth':({k:getattr(primary,'public_command_failure')[k]for k in ('actual_returncode','observed_output_bytes','actual_pipe_closed','stdout_eof_observed','maximum_output_bytes')}if type(getattr(primary,'public_command_failure',None))is dict else None)}
+        result={'status':'FAILED','phase':phase,'code':code,'finalizer_codes':final,'owned_container_closure':closure,'create_request_prefix_retained':create_requested,'expected_owned_name':expected_name,'automatic_retry':False,'failed_public_api_request':public_api_request if phase=='original_artifact_admission'else None,'failure_output_retention':failure_output,'failed_command_truth':({k:getattr(primary,'public_command_failure')[k]for k in ('actual_returncode','observed_output_bytes','actual_pipe_closed','stdout_eof_observed','maximum_output_bytes')}if type(getattr(primary,'public_command_failure',None))is dict else None)}
     result.update(create_request_prefix_retained=create_requested,expected_owned_name=expected_name,expected_owner_nonce=nonce if expected_name else None,qualified_prefix_lookup_attempted=prefix_lookup_attempted,owned_prefix_qualified=prefix_qualified,empty_public_outputs=empty_outputs,profile=args.profile,owned_container_closure=closure,source_sha256=args.source_sha256,schema='Root_Ubuntu_family6_disposable_ordinary_rehearsal/1',source_original_FDs_physically_closed=len(scope.rows)if scope.finished and not final else None,source_finality_proven=scope.finished and not final,Host_install_allowed=False,real_Host_PID1_reexec_proven=False,activation_authority=False,security_accepted=False)
     sys.stdout.write(encoded(result).decode());return 0 if result['status']in{'POLICY_PREFLIGHT_ONLY','PASS_DISPOSABLE_FORWARD_ROLLBACK_ONLY'}else 1
 def main(argv=None):
