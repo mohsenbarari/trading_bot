@@ -34,6 +34,26 @@
       "verified_archive_sha256_marker": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
       "version_actual": "v24.22.1"
     },
+    "full_maintainer_Unix_CI": {
+      "glob10": {
+        "Unix_command": "npm test -- -c -t0",
+        "commit": "56774ef73b495eb0b17cdd0f42921f5ef62297c1",
+        "complete_coverage_thresholds_and_test_bodies_unchanged": true,
+        "git_blob": "676cc1981600b3d0705300d21b96d0ef6844e9d3",
+        "outer_command_timeout_seconds": 2400,
+        "path": ".github/workflows/ci.yml",
+        "shell": "bash"
+      },
+      "glob11": {
+        "Unix_command": "npm test -- -c -t0",
+        "commit": "2551fb51440d402fa2120457bf460e546ee9964d",
+        "complete_coverage_thresholds_and_test_bodies_unchanged": true,
+        "git_blob": "2eba1dbe6800839117737d9cf513794be5b8fb9a",
+        "outer_command_timeout_seconds": 2400,
+        "path": ".github/workflows/ci.yml",
+        "shell": "bash"
+      }
+    },
     "installed_preimage_SHA_bindings": "ROOT-OFFICIAL-PREIMAGE-VERIFICATION.json: genuine affabe/0 joins all seven official lock-integrity tar archives to nine installed instances and all 261 regular payloads; identity only, not automatic API/security acceptance",
     "lock": {
       "bytes": 446733,

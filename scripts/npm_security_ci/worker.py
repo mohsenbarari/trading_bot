@@ -33,7 +33,7 @@ def write(path,body):
  return{'path':str(path),'bytes':len(body),'sha256':sha256(body).hexdigest()}
 def environment(node,home):
  home.mkdir(parents=True,exist_ok=True)
- return{'PATH':str(node.parent)+':/usr/local/bin:/usr/bin:/bin','HOME':str(home),'LANG':'C.UTF-8','LC_ALL':'C.UTF-8','CI':'true','COREPACK_ENABLE_PROJECT_SPEC':'1','COREPACK_DEFAULT_TO_LATEST':'0','GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','npm_config_registry':'https://registry.npmjs.org/','npm_config_audit':'false','npm_config_fund':'false'}
+ return{'PATH':str(node.parent)+':/usr/local/bin:/usr/bin:/bin','HOME':str(home),'LANG':'C.UTF-8','LC_ALL':'C.UTF-8','CI':'true','SHELL':'/bin/bash','COREPACK_ENABLE_PROJECT_SPEC':'1','COREPACK_DEFAULT_TO_LATEST':'0','GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','npm_config_registry':'https://registry.npmjs.org/','npm_config_audit':'false','npm_config_fund':'false'}
 def run(argv,cwd,out,env,seconds=1800):
  """Stream directly to bounded evidence, never accumulate command output."""
  out=Path(out);need(not out.exists(),'new_log_required');out.parent.mkdir(parents=True,exist_ok=True)
@@ -221,7 +221,7 @@ def upstream(spec,profile,node,workspace,out,env):
  (package/'package.json').write_bytes(encode(metadata))
  if p['kind']=='resolve':
   command(corepack+['-r','--filter','@rollup/plugin-node-resolve...','run','build'],name='maintainer-build',timeout=2400);command(corepack+['--dir',str(package),'test'],name='maintainer-full-tests',timeout=2400)
- else:command(npm+['run','prepare'],name='maintainer-build',timeout=1800);command(npm+['test'],name='maintainer-full-tests',timeout=2400)
+ else:command(npm+['run','prepare'],name='maintainer-build',timeout=1800);command(npm+['test']+(['--','-c','-t0']if p['kind']=='glob'else[]),name='maintainer-full-tests',timeout=2400)
  # Test-only lifecycle hooks may not silently alter reviewed source.
  need(source.read_bytes()==patched,'maintainer_lifecycle_changed_source')
  rebuilt=dist_hashes(package,p)
