@@ -8,7 +8,7 @@ import { cacheCurrentUserSummary, clearCurrentUserSummary } from '../../utils/cu
 const chatMessageItemMocks = vi.hoisted(() => ({
   audioStore: null as {
     currentPlayingId: number | null
-    setCurrentPlaying: ReturnType<typeof vi.fn>
+    setCurrentPlaying: ReturnType<typeof vi.fn<(messageId: number | null) => void>>
   } | null,
   prewarmFileCacheMock: vi.fn(),
   observeVisibilityMock: vi.fn(() => () => {}),

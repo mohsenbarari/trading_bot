@@ -30,7 +30,7 @@ function makeBeforeInstallPromptEvent(
   const event = new Event('beforeinstallprompt') as Event & {
     prompt: ReturnType<typeof vi.fn>
     userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
-    preventDefault: ReturnType<typeof vi.fn>
+    preventDefault: ReturnType<typeof vi.fn<() => void>>
   }
   event.prompt = vi.fn(promptImplementation)
   event.userChoice = Promise.resolve({ outcome })

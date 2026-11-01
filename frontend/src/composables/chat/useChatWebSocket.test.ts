@@ -51,11 +51,11 @@ describe('useChatWebSocket', () => {
   let messages: Ref<any[]>
   let conversations: Ref<any[]>
   let isUserAtBottom: Ref<boolean>
-  let apiFetchMock: ReturnType<typeof vi.fn>
-  let loadConversationsMock: ReturnType<typeof vi.fn>
-  let loadMessagesMock: ReturnType<typeof vi.fn>
-  let scrollToBottomMock: ReturnType<typeof vi.fn>
-  let markAsReadMock: ReturnType<typeof vi.fn>
+  let apiFetchMock: ReturnType<typeof vi.fn<UseChatWebSocketOptions['apiFetch']>>
+  let loadConversationsMock: ReturnType<typeof vi.fn<UseChatWebSocketOptions['loadConversations']>>
+  let loadMessagesMock: ReturnType<typeof vi.fn<UseChatWebSocketOptions['loadMessages']>>
+  let scrollToBottomMock: ReturnType<typeof vi.fn<UseChatWebSocketOptions['scrollToBottom']>>
+  let markAsReadMock: ReturnType<typeof vi.fn<UseChatWebSocketOptions['markAsRead']>>
   let wrapper: ReturnType<typeof mount> | null
   let exposed: ReturnType<typeof useChatWebSocket>
 

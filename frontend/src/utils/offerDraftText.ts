@@ -3,7 +3,7 @@ import { offerDraftPrefix, type SettlementType } from './settlementType'
 export type OfferDraftPreviewLike = {
   trade_type: 'buy' | 'sell'
   settlement_type: SettlementType
-  commodity_name: string
+  commodity_name: string | null
   quantity: number
   price: number
   is_wholesale: boolean

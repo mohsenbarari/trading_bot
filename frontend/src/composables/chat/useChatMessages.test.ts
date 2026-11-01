@@ -44,7 +44,7 @@ vi.mock('../../services/chatUploadBackground', () => ({
   waitForChatUploadBackgroundReady: messageMocks.waitForChatUploadBackgroundReady,
 }))
 
-import { useChatMessages } from './useChatMessages'
+import { useChatMessages, type UseChatMessagesOptions } from './useChatMessages'
 
 describe('useChatMessages', () => {
   let scope: ReturnType<typeof effectScope> | null
@@ -67,12 +67,12 @@ describe('useChatMessages', () => {
   let swipedMessageId: ReturnType<typeof ref<number | null>>
   let isMobile: ReturnType<typeof ref<boolean>>
   let showStickerPicker: ReturnType<typeof ref<boolean>>
-  let scrollToBottomMock: ReturnType<typeof vi.fn>
-  let scrollToUnreadOrBottomMock: ReturnType<typeof vi.fn>
-  let scrollToMessageMock: ReturnType<typeof vi.fn>
-  let forceScrollToBottomMock: ReturnType<typeof vi.fn>
-  let focusMessageInputMock: ReturnType<typeof vi.fn>
-  let adjustTextareaHeightMock: ReturnType<typeof vi.fn>
+  let scrollToBottomMock: ReturnType<typeof vi.fn<UseChatMessagesOptions['scrollToBottom']>>
+  let scrollToUnreadOrBottomMock: ReturnType<typeof vi.fn<UseChatMessagesOptions['scrollToUnreadOrBottom']>>
+  let scrollToMessageMock: ReturnType<typeof vi.fn<NonNullable<UseChatMessagesOptions['scrollToMessage']>>>
+  let forceScrollToBottomMock: ReturnType<typeof vi.fn<UseChatMessagesOptions['forceScrollToBottom']>>
+  let focusMessageInputMock: ReturnType<typeof vi.fn<UseChatMessagesOptions['focusMessageInput']>>
+  let adjustTextareaHeightMock: ReturnType<typeof vi.fn<UseChatMessagesOptions['adjustTextareaHeight']>>
   let subject: ReturnType<typeof useChatMessages>
   let alertSpy: ReturnType<typeof vi.spyOn>
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>

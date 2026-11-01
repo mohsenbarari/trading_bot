@@ -115,7 +115,7 @@ describe('JalaliDatePicker.vue', () => {
   })
 
   it('safely ignores an already queued resize callback after the root ref unmounts', async () => {
-    const registered = vi.spyOn(window, 'addEventListener')
+    const registered = vi.spyOn(window as Window, 'addEventListener')
     const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali' } })
     await wrapper.get('.jalali-date-trigger').trigger('click')
     await nextTick()
@@ -167,7 +167,7 @@ describe('JalaliDatePicker.vue', () => {
     { viewport: 1280, left: 430, width: 170, panelWidth: 360 },
   ])('clamps a $viewport px popover using its actual anchor, including after resize', async (geometry) => {
     vi.stubGlobal('innerWidth', geometry.viewport)
-    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return this.classList.contains('jalali-date-picker')
         ? { left: geometry.left, width: geometry.width } as DOMRect
         : { width: geometry.panelWidth } as DOMRect
