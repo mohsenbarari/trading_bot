@@ -1,0 +1,223 @@
+{
+  "advisory_helper": {
+    "bytes": 11411,
+    "path": "refresh_npm_advisories.py",
+    "sha256": "f4fe1bb61f3222c574bccba8fb129eaaab315781109cd9c2b48921c45e122ddd"
+  },
+  "armed": true,
+  "expected_patched_advisory_ids": [
+    1244012,
+    1244013
+  ],
+  "legacy_exact_decision": {
+    "bytes": 1950,
+    "path": "Root-exact-four-decision.json",
+    "sha256": "12a5706ff937b5bcbc44d59ed193fccda7479b8ea6b0ea4026226d88edb2f48a"
+  },
+  "lock_sha256": "634b6706b16c74b7630e85b81b4413d8d3aa7a21d881dc946fe8e245d75a7608",
+  "no_security_or_serving_acceptance": true,
+  "node_binary_sha256": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
+  "node_version": "v24.22.1",
+  "official_preimage_auth": {
+    "bytes": 7176,
+    "path": "ROOT-OFFICIAL-PREIMAGE-VERIFICATION.json",
+    "sha256": "23c9d6d3adc8f79c1d352be2a2976fd6a6ab8fe8cf86252a05cac4a2db45c1c0"
+  },
+  "original_anchors": {
+    "Main_or_Host_mutation": false,
+    "Node": {
+      "CI_version_source": ".github/workflows/canonical-app-image.yml:83",
+      "baseline_guard_passed": true,
+      "bytes": 126879696,
+      "path": "/root/trading-bot/trading_bot/.local/tools/node-v24.22.1-linux-x64/bin/node",
+      "sha256": "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb",
+      "verified_archive_sha256_marker": "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6",
+      "version_actual": "v24.22.1"
+    },
+    "installed_preimage_SHA_bindings": "ROOT-OFFICIAL-PREIMAGE-VERIFICATION.json: genuine affabe/0 joins all seven official lock-integrity tar archives to nine installed instances and all 261 regular payloads; identity only, not automatic API/security acceptance",
+    "lock": {
+      "bytes": 446733,
+      "path": "/root/trading-bot/trading_bot/frontend/package-lock.json",
+      "sha256": "634b6706b16c74b7630e85b81b4413d8d3aa7a21d881dc946fe8e245d75a7608"
+    },
+    "official_patch_refs": {
+      "glob": "https://github.com/isaacs/node-glob/security/advisories/GHSA-3g3m-2fjr-6pw4",
+      "minimatch": "https://github.com/isaacs/minimatch/commit/77a0f5c4b80bdc641c3c930a1d9edf5ad2db57f8",
+      "node_resolve_defaults_source": "https://github.com/rollup/plugins/blob/master/packages/node-resolve/src/index.js"
+    },
+    "schema": "public_npm_maintainer_backport_original_anchors/1",
+    "tar_acquisition_or_tar_preimage_comparison_by_child": false,
+    "tar_anchors": {
+      "node_modules/@eslint/config-array/node_modules/minimatch": {
+        "integrity": "sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==",
+        "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz",
+        "version": "3.1.5"
+      },
+      "node_modules/@rollup/plugin-node-resolve": {
+        "integrity": "sha512-tgg6b91pAybXHJQMAAwW9VuWBO6Thi+q7BCNARLwSqlmsHz0XYURtGvh/AuwSADXSI4h/2uHbs7s4FzlZDGSGA==",
+        "resolved": "https://registry.npmjs.org/@rollup/plugin-node-resolve/-/plugin-node-resolve-15.3.1.tgz",
+        "version": "15.3.1"
+      },
+      "node_modules/filelist/node_modules/minimatch": {
+        "integrity": "sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==",
+        "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz",
+        "version": "5.1.9"
+      },
+      "node_modules/glob": {
+        "integrity": "sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==",
+        "resolved": "https://registry.npmjs.org/glob/-/glob-10.5.0.tgz",
+        "version": "10.5.0"
+      },
+      "node_modules/minimatch": {
+        "integrity": "sha512-OBwBN9AL4dqmETlpS2zasx+vTeWclWzkblfZk7KTA5j3jeOONz/tRCnZomUyvNg83wL5Zv9Ss6HMJXAgL8R2Yg==",
+        "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-9.0.9.tgz",
+        "version": "9.0.9"
+      },
+      "node_modules/workbox-build/node_modules/glob": {
+        "integrity": "sha512-vuNwKSaKiqm7g0THUBu2x7ckSs3XJLXE+2ssL7/MfTGPLLcrJQ/4Uq1CjPTtO5cCIiRxqvN6Twy1qOwhL0Xjcw==",
+        "resolved": "https://registry.npmjs.org/glob/-/glob-11.1.0.tgz",
+        "version": "11.1.0"
+      },
+      "node_modules/workbox-build/node_modules/minimatch": {
+        "integrity": "sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg==",
+        "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.5.tgz",
+        "version": "10.2.5"
+      }
+    }
+  },
+  "profiles": [
+    {
+      "commit": "56774ef73b495eb0b17cdd0f42921f5ef62297c1",
+      "fork_version": "10.5.0-project.security.1",
+      "id": "glob10",
+      "kind": "glob",
+      "name": "glob",
+      "original_dist_preimages": {
+        "dist/commonjs/walker.js": {
+          "bytes": 12869,
+          "sha256": "1138ced9d5429681a1740af32d13391a38184a3376d1d9d56eea64b7a43274a1"
+        },
+        "dist/esm/walker.js": {
+          "bytes": 12569,
+          "sha256": "3e15af549ecc74d8691982d571168fd4b0e38b494c2cbb3edcfb8f97d4036ac6"
+        }
+      },
+      "package_dir": ".",
+      "package_manager": "npm",
+      "repo": "https://github.com/isaacs/node-glob.git",
+      "source": "src/walker.ts",
+      "source_git_blob": "495e0a700e3c8a603ab2ba58a23b7c7be16015ee",
+      "version": "10.5.0"
+    },
+    {
+      "commit": "2551fb51440d402fa2120457bf460e546ee9964d",
+      "fork_version": "11.1.0-project.security.1",
+      "id": "glob11",
+      "kind": "glob",
+      "name": "glob",
+      "original_dist_preimages": {
+        "dist/commonjs/walker.js": {
+          "bytes": 12869,
+          "sha256": "1138ced9d5429681a1740af32d13391a38184a3376d1d9d56eea64b7a43274a1"
+        },
+        "dist/esm/walker.js": {
+          "bytes": 12569,
+          "sha256": "3e15af549ecc74d8691982d571168fd4b0e38b494c2cbb3edcfb8f97d4036ac6"
+        }
+      },
+      "package_dir": ".",
+      "package_manager": "npm",
+      "repo": "https://github.com/isaacs/node-glob.git",
+      "source": "src/walker.ts",
+      "source_git_blob": "495e0a700e3c8a603ab2ba58a23b7c7be16015ee",
+      "version": "11.1.0"
+    },
+    {
+      "commit": "8a10e473e2e0ff03c2d4de308f257093af2bce21",
+      "fork_version": "9.0.9-project.security.1",
+      "id": "mm9",
+      "kind": "minimatch",
+      "name": "minimatch",
+      "original_dist_preimages": {
+        "dist/commonjs/index.d.ts": {
+          "bytes": 4018,
+          "sha256": "213394807c8e4aac86127b2756b9e019e9c73e6dfd02299128b0cc375fdcdc3f"
+        },
+        "dist/commonjs/index.js": {
+          "bytes": 39853,
+          "sha256": "a958a41536f57484cc427a03a10a6a094eb062a004c58261add4dbb6dd77bbda"
+        },
+        "dist/esm/index.d.ts": {
+          "bytes": 4018,
+          "sha256": "213394807c8e4aac86127b2756b9e019e9c73e6dfd02299128b0cc375fdcdc3f"
+        },
+        "dist/esm/index.js": {
+          "bytes": 38362,
+          "sha256": "8772b7fc5d3c741723b3839a43f929d9d9262121c5a74535638fa40c92cc1e6d"
+        }
+      },
+      "package_dir": ".",
+      "package_manager": "npm",
+      "repo": "https://github.com/isaacs/minimatch.git",
+      "source": "src/index.ts",
+      "source_git_blob": "cfaa44d1267bc0384846bfb53e78f44fd1cca884",
+      "version": "9.0.9"
+    },
+    {
+      "commit": "693c82377d0948401be4c6d3220c9a74132ab112",
+      "fork_version": "10.2.5-project.security.1",
+      "id": "mm10",
+      "kind": "minimatch",
+      "name": "minimatch",
+      "original_dist_preimages": {
+        "dist/commonjs/index.js": {
+          "bytes": 45140,
+          "sha256": "d224f71f20d7c206fcc5b7e9f747324c7698345a0b2c28d717dd9cf698306783"
+        },
+        "dist/esm/index.js": {
+          "bytes": 43810,
+          "sha256": "59821ec2ce0d3df968292036e5c831ad322b33e9c33a949ecbc9dfe125d165be"
+        }
+      },
+      "package_dir": ".",
+      "package_manager": "npm",
+      "repo": "https://github.com/isaacs/minimatch.git",
+      "source": "src/index.ts",
+      "source_git_blob": "b20f34f7a0bfb71e81c82f1e50ed83ae48deba92",
+      "version": "10.2.5"
+    },
+    {
+      "commit": "f89ca92a1bab70277e91d9da66bede48d7a13bc2",
+      "fork_version": "15.3.1-project.security.1",
+      "id": "resolve",
+      "kind": "resolve",
+      "name": "@rollup/plugin-node-resolve",
+      "original_dist_preimages": {
+        "dist/cjs/index.js": {
+          "bytes": 45678,
+          "sha256": "ad72d8208522c6cac4d5ffdb64b380cbe1ad06059a3f0b20529581444851e506"
+        },
+        "dist/es/index.js": {
+          "bytes": 45461,
+          "sha256": "0a2bb2f93b205995ecc0dcda7722f170cef7fd71244ec9865b1ff1bc155a62b7"
+        }
+      },
+      "package_dir": "packages/node-resolve",
+      "package_manager": "pnpm@9.4.0",
+      "repo": "https://github.com/rollup/plugins.git",
+      "source": "packages/node-resolve/src/index.js",
+      "source_git_blob": "7e0614f58e23d8e7c7edc2b793c413c3847a9ebc",
+      "version": "15.3.1"
+    }
+  ],
+  "raw_npm_advisory_count_before": 3,
+  "require_baseline_identical_build": true,
+  "require_full_upstream_tests": true,
+  "require_two_fresh_installs": true,
+  "runtime_helper": {
+    "bytes": 4561,
+    "path": "runtime_checks.cjs",
+    "sha256": "a85e3f93d1aadf56b8715272705b1256799292cb91783bd17537c89600afebfd"
+  },
+  "schema": "finite_npm_security_ci/1"
+}

@@ -1,0 +1,202 @@
+name: Isolated npm security backport qualification
+on:
+  workflow_dispatch:
+    inputs:
+      project_commit:
+        description: Exact reviewed project commit (40 hex), never a mutable branch
+        required: true
+      worker_sha256:
+        description: SHA256 of scripts/npm_security_ci/worker.py
+        required: true
+      spec_sha256:
+        description: SHA256 of armed scripts/npm_security_ci/spec.json
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: npm-security-${{ inputs.project_commit }}
+  cancel-in-progress: false
+jobs:
+  upstream:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [glob10, glob11, mm9, mm10, resolve]
+    steps:
+      - name: Validate reviewed immutable inputs
+        env:
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          assert re.fullmatch('[a-f0-9]{40}',os.environ['PROJECT_COMMIT'])
+          assert all(re.fullmatch('[a-f0-9]{64}',os.environ[k]) for k in ('WORKER_SHA','SPEC_SHA'))
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - name: Exact worker and armed specification preflight
+        env:
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path('scripts/npm_security_ci')
+          assert hashlib.sha256((root/'worker.py').read_bytes()).hexdigest()==os.environ['WORKER_SHA']
+          assert hashlib.sha256((root/'spec.json').read_bytes()).hexdigest()==os.environ['SPEC_SHA']
+          assert json.loads((root/'spec.json').read_bytes())['armed'] is True
+          PY
+      - name: Build and test one maintained same-major fork
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/worker.py --execute --phase upstream --profile "$PROFILE" --spec scripts/npm_security_ci/spec.json --spec-sha256 "$SPEC_SHA" --self-sha256 "$WORKER_SHA" --repo "$GITHUB_WORKSPACE" --expected-project-commit "$PROJECT_COMMIT" --workspace "$RUNNER_TEMP/npm-upstream" --out "$RUNNER_TEMP/npm-result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-fork-${{ matrix.profile }}
+          path: ${{ runner.temp }}/npm-result
+          if-no-files-found: error
+          retention-days: 7
+  frontend:
+    needs: upstream
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-fork-*
+          path: ${{ runner.temp }}/npm-forks
+      - name: Preserve graph identity, fresh installs and all frontend source gates
+        env:
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/worker.py --execute --phase frontend --spec scripts/npm_security_ci/spec.json --spec-sha256 "$SPEC_SHA" --self-sha256 "$WORKER_SHA" --repo "$GITHUB_WORKSPACE" --expected-project-commit "$PROJECT_COMMIT" --workspace "$RUNNER_TEMP/npm-frontend" --out "$RUNNER_TEMP/npm-result" --artifacts "$RUNNER_TEMP/npm-forks"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-frontend-qualified-proposal
+          path: ${{ runner.temp }}/npm-result
+          if-no-files-found: error
+          retention-days: 7
+  browsers:
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      CI: 'true'
+      CERTS_HOST_PATH: /tmp/trading-ci-certs
+      PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR: /tmp/trading-ci-models/coin
+      PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR: /tmp/trading-ci-models/product
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-frontend-qualified-proposal
+          path: ${{ runner.temp }}/npm-proposal
+      - name: Admit proposal produced by the completed frontend job
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,shutil
+          source=pathlib.Path(os.environ['RUNNER_TEMP'])/'npm-proposal'
+          report=json.loads((source/'RESULT.json').read_bytes())
+          assert report['schema']=='qualified_frontend_source_proposal/1'
+          assert all(report[k] is True for k in ('two_fresh_npmci_passed','non_target_graph_identities_preserved','frontend_output_byte_identical_to_baseline','upstream_and_project_tests_passed'))
+          for name in ('package.json','package-lock.json'):shutil.copyfile(source/'proposal'/name,pathlib.Path('frontend')/name)
+          shutil.copytree(source/'proposal/vendor/security-backports','frontend/vendor/security-backports')
+          PY
+      - name: Disposable local-only CI environment (existing merge-gate pattern)
+        run: |
+          cat > .env <<'EOF'
+          ENVIRONMENT=staging
+          SERVER_MODE=iran
+          BOT_USERNAME=ci_test_bot
+          POSTGRES_DB=trading_bot_db
+          POSTGRES_USER=admin
+          POSTGRES_PASSWORD=strongpassword
+          DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
+          SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
+          REDIS_URL=redis://redis:6379/0
+          FRONTEND_URL=http://127.0.0.1:4173
+          DEV_API_KEY=REDACTED_DEV_API_KEY
+          JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+          EOF
+          cat > frontend/.env.local <<'EOF'
+          VITE_API_BASE_URL=http://127.0.0.1:8000
+          VITE_STAGING_DEV_LOGIN=true
+          EOF
+          mkdir -p "$CERTS_HOST_PATH" "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
+      - name: Install exact proposed lock and browser
+        working-directory: frontend
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          npm ci --audit=false --fund=false
+          npx --no-install playwright install --with-deps "$BROWSER"
+          npm run build
+      - name: Start only the runner's disposable backend fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ./scripts/bootstrap_ci_backend.sh
+      - name: Existing complete browser gate
+        working-directory: frontend
+        env:
+          BROWSER: ${{ matrix.browser }}
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+          E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+          E2E_APP_CONTAINER_NAME: trading_bot_app
+          E2E_REDIS_CONTAINER_NAME: trading_bot_redis
+        run: |
+          case "$BROWSER" in
+            chromium) npm run test:e2e ;;
+            firefox) npm run test:e2e:firefox ;;
+            webkit) npm run test:e2e:webkit ;;
+            *) exit 2 ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-browser-${{ matrix.browser }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+      - name: Dispose only this runner's backend
+        if: always()
+        run: docker compose down --volumes --remove-orphans

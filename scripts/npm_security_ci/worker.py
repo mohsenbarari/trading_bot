@@ -1,0 +1,222 @@
+"""Finite isolated CI repair qualification; default UNARMED, never deploys."""
+from pathlib import Path
+from hashlib import sha256,sha512
+from collections import Counter
+import argparse,base64,gzip,hashlib,io,json,os,re,selectors,shutil,signal,subprocess,tarfile,time
+from pathlib import PurePosixPath
+from types import ModuleType
+from copy import deepcopy
+MAX_LOG=32*1024**2
+ALLOWED_REPOS={'https://github.com/isaacs/node-glob.git','https://github.com/isaacs/minimatch.git','https://github.com/rollup/plugins.git'}
+def need(ok,code):
+ if not ok:raise RuntimeError(code)
+def encode(v):return(json.dumps(v,sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode()
+def read_json(path,maximum=1024*1024):
+ path=Path(path);before=path.lstat();need(before.st_mode&0o170000==0o100000 and before.st_nlink==1 and 0<before.st_size<=maximum,'json_bound')
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+ try:
+  initial=os.fstat(fd);need((initial.st_dev,initial.st_ino,initial.st_size)==(before.st_dev,before.st_ino,before.st_size),'json_changed');data=os.pread(fd,before.st_size+1,0);need(len(data)==before.st_size and path.lstat().st_ino==initial.st_ino and os.fstat(fd).st_size==before.st_size,'json_changed')
+ finally:os.close(fd)
+ return json.loads(data)
+def digest(path):
+ h=sha256()
+ with Path(path).open('rb')as source:
+  while block:=source.read(65536):h.update(block)
+ return h.hexdigest()
+def write(path,body):
+ path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
+ with path.open('xb')as out:out.write(body)
+ return{'path':str(path),'bytes':len(body),'sha256':sha256(body).hexdigest()}
+def environment(node,home):
+ home.mkdir(parents=True,exist_ok=True)
+ return{'PATH':str(node.parent)+':/usr/local/bin:/usr/bin:/bin','HOME':str(home),'LANG':'C.UTF-8','LC_ALL':'C.UTF-8','CI':'true','COREPACK_ENABLE_PROJECT_SPEC':'1','COREPACK_DEFAULT_TO_LATEST':'0','GIT_CONFIG_GLOBAL':'/dev/null','GIT_CONFIG_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','npm_config_registry':'https://registry.npmjs.org/','npm_config_audit':'false','npm_config_fund':'false'}
+def run(argv,cwd,out,env,seconds=1800):
+ """Stream directly to bounded evidence, never accumulate command output."""
+ out=Path(out);need(not out.exists(),'new_log_required');out.parent.mkdir(parents=True,exist_ok=True)
+ start=time.monotonic();count=0;p=subprocess.Popen([str(v)for v in argv],cwd=cwd,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True);sel=selectors.DefaultSelector();sel.register(p.stdout,selectors.EVENT_READ)
+ completed=False
+ try:
+  with out.open('xb')as target:
+   while sel.get_map():
+    need(time.monotonic()-start<seconds,'command_timeout')
+    for key,_ in sel.select(.5):
+     part=os.read(key.fileobj.fileno(),65536)
+     if not part:sel.unregister(key.fileobj);continue
+     need(len(part)<=MAX_LOG-count,'command_output_bound');target.write(part);count+=len(part)
+   remaining=seconds-(time.monotonic()-start);need(remaining>0,'command_timeout')
+   try:rc=p.wait(timeout=remaining)
+   except subprocess.TimeoutExpired:raise RuntimeError('command_timeout')from None
+   need(time.monotonic()-start<seconds,'command_timeout');need(rc==0,'command_nonzero')
+   # EOF and leader zero do not prove descendants closed: a child can close
+   # stdout/stderr and continue in our group. Allow a bounded reap interval,
+   # then refuse and clean up that original group rather than report success.
+   group_end=min(time.monotonic()+1,start+seconds)
+   while True:
+    try:os.killpg(p.pid,0)
+    except ProcessLookupError:break
+    need(time.monotonic()<group_end,'command_group_survived_leader');time.sleep(.01)
+   need(time.monotonic()-start<seconds,'command_timeout');completed=True
+ finally:
+  if not completed:
+   # The group can outlive its leader; never decide child cleanup from poll().
+   try:os.killpg(p.pid,signal.SIGTERM)
+   except ProcessLookupError:pass
+   try:p.wait(timeout=10)
+   except subprocess.TimeoutExpired:pass
+   try:os.killpg(p.pid,signal.SIGKILL)
+   except ProcessLookupError:pass
+   p.wait(timeout=10)
+  p.stdout.close();sel.close()
+ return{'argv':[str(v)for v in argv],'returncode':rc,'log':str(out),'bytes':count,'sha256':digest(out)}
+def patch_source(kind,raw):
+ text=raw.decode()
+ if kind=='glob':
+  old='if (this.signal?.aborted) cb()';need(text.count(old)==4,'glob_exact_four_sites');text=text.replace(old,'if (this.signal?.aborted) return cb()')
+ elif kind=='minimatch':
+  old='firstPhasePreProcess(globParts: string[][]) {';need(text.count(old)==1,'minimatch_first_phase');text=text.replace(old,old+'\n    const { braceExpandMax = 100_000 } = this.options')
+  old="p2 === '..'\n";need(text.count(old)==1,'minimatch_exact_split_guard');text=text.replace(old,"p2 === '..' ||\n            globParts.length >= braceExpandMax\n")
+  old='secondPhasePreProcess(globParts: string[][]): string[][] {';need(text.count(old)==1,'minimatch_second_phase');text=text.replace(old,old+'\n    if (globParts.length > 1000) return globParts')
+  if 'braceExpandMax?: number'not in text:
+   old='  optimizationLevel?: number';need(text.count(old)==1,'minimatch_option');text=text.replace(old,old+'\n  braceExpandMax?: number')
+ else:
+  need(text.count("import deepMerge from 'deepmerge';")==1 and text.count('deepMerge({}, defaults)')==1,'resolve_exact_known_clone');text=text.replace("import deepMerge from 'deepmerge';",'').replace('deepMerge({}, defaults)','structuredClone(defaults)')
+ return text.encode()
+def tree(root):return{str(p.relative_to(root)):digest(p)for p in sorted(root.rglob('*'))if p.is_file()}
+def package_identity(key,row):
+ name=row.get('name')or key.rsplit('node_modules/',1)[-1]
+ return name,row.get('version'),row.get('integrity'),row.get('resolved')
+def graph_gate(before,after,profiles):
+ targets={(p['name'],p['version'])for p in profiles};forks={(p['name'],p['fork_version'])for p in profiles}
+ def unchanged(doc):return Counter(package_identity(k,v)for k,v in doc['packages'].items()if k and (package_identity(k,v)[:2]not in targets|forks|{('deepmerge','4.3.1')}))
+ old,new=unchanged(before),unchanged(after);delta={'removed':[list(k)+[v]for k,v in(old-new).items()],'added':[list(k)+[v]for k,v in(new-old).items()]}
+ need(not delta['removed']and not delta['added'],'unexpected_non_target_version_integrity_or_multiplicity_delta')
+ identities={package_identity(k,v)[:2]for k,v in after['packages'].items()if k}
+ need(forks<=identities and not targets&identities and not any(n=='deepmerge'for n,_ in identities),'fork_graph_not_exact')
+ return delta
+
+def qualify_tar(path,profile,package):
+ need(path.stat().st_size<=8*1024**2,'fork_tar_bound')
+ with gzip.GzipFile(fileobj=io.BytesIO(path.read_bytes()))as source:raw=source.read(32*1024**2+1);need(len(raw)<=32*1024**2,'fork_expanded_bound')
+ seen=set();canonical={};aliases={};directories=set();metadata=None
+ with tarfile.open(fileobj=io.BytesIO(raw),mode='r:')as archive:
+  for i,member in enumerate(archive,1):
+   need(i<=4096 and member.name not in seen,'fork_physical_member');seen.add(member.name);parts=PurePosixPath(member.name);need(not parts.is_absolute()and '..'not in parts.parts and parts.parts[0]=='package','fork_member_path');relative='/'.join(parts.parts[1:])
+   need(not(member.issym()or member.islnk()or member.isdev()),'fork_member_type')
+   if member.isdir():
+    need(relative not in directories and relative not in canonical,'fork_directory_alias');directories.add(relative);continue
+   need(relative not in directories,'fork_cross_kind_alias')
+   need(member.isfile()and 0<=member.size<=1024*1024,'fork_regular_bound')
+   with archive.extractfile(member)as source:data=source.read(member.size+1)
+   need(len(data)==member.size,'fork_member_body');aliases.setdefault(relative,[]).append(member.name)
+   if relative in canonical:
+    need(profile['kind']=='resolve'and relative=='dist/cjs/index.js'and aliases[relative]==['package/./dist/cjs/index.js','package/dist/cjs/index.js']and canonical[relative]==data==(package/'dist/cjs/index.js').read_bytes(),'fork_unapproved_alias')
+   canonical[relative]=data
+   if relative=='package.json':metadata=json.loads(data)
+ need(metadata['name']==profile['name']and metadata['version']==profile['fork_version'],'fork_package_identity')
+ need(any(Path(name).name.lower().startswith(('license','licence'))for name in canonical),'fork_license_missing')
+ if profile['kind']=='resolve':need('deepmerge'not in metadata.get('dependencies',{}),'fork_deepmerge_dependency_present')
+ return{'physical_members':len(seen),'regular_targets':len(canonical),'retained_exact_aliases':{k:v for k,v in aliases.items()if len(v)>1},'sha512':'sha512-'+base64.b64encode(sha512(path.read_bytes()).digest()).decode()}
+
+def upstream(spec,profile,node,workspace,out,env):
+ p=next(x for x in spec['profiles']if x['id']==profile);need(p['repo']in ALLOWED_REPOS and re.fullmatch('[a-f0-9]{40}',p['commit']),'upstream_identity')
+ root=workspace/p['id'];root.mkdir();log=out/p['id'];log.mkdir(parents=True);records=[]
+ def command(args,cwd=root,name='stage',timeout=1800):
+  result=run(args,cwd,log/(f'{len(records):02}-{name}.log'),env,timeout);records.append(result);return result
+ command(['git','init','.'],name='git-init');command(['git','remote','add','origin',p['repo']],name='git-remote');command(['git','fetch','--depth','1','origin',p['commit']],name='git-fetch');command(['git','checkout','--detach','FETCH_HEAD'],name='git-checkout')
+ command(['git','diff','--exit-code'],name='clean-source');actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,env=env,text=True).strip();need(actual==p['commit'],'upstream_commit')
+ source=root/p['source'];raw=source.read_bytes();need(len(raw)<=1024*1024,'upstream_source_bound')
+ import hashlib
+ need(hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==p['source_git_blob'],'upstream_source_blob')
+ package=root/p['package_dir'];metadata=read_json(package/'package.json');need(metadata['name']==p['name']and metadata['version']==p['version'],'upstream_package')
+ npm=[str(node),str(node.parent.parent/'lib/node_modules/npm/bin/npm-cli.js')]
+ if p['kind']=='resolve':
+  manager=node.parent.parent/'lib/node_modules/corepack/dist/corepack.js';manager_bins=workspace/'package-manager-bin';manager_bins.mkdir()
+  command([node,manager,'enable','--install-directory',manager_bins,'pnpm'],name='isolated-pnpm-shims');env['PATH']=str(manager_bins)+':'+env['PATH']
+  corepack=[str(node),str(manager),'pnpm']
+  need(read_json(root/'package.json')['packageManager']==p['package_manager'],'pnpm_exact_manager');command(corepack+['install','--frozen-lockfile','--ignore-scripts'],name='maintainer-install',timeout=2400)
+ else:command(npm+['ci','--ignore-scripts','--audit=false','--fund=false'],name='maintainer-install',timeout=2400)
+ # First reproduce the publisher runtime before applying any repair. This joins
+ # pinned Git sources/build lock to Root-authenticated official tar preimages.
+ if p['kind']=='resolve':command(corepack+['-r','--filter','@rollup/plugin-node-resolve...','run','build'],name='original-source-build',timeout=2400)
+ else:command(npm+['run','prepare'],name='original-source-build',timeout=1800)
+ for relative,expected in p['original_dist_preimages'].items():
+  leaf=package/relative;need(leaf.stat().st_size==expected['bytes']and digest(leaf)==expected['sha256'],'original_git_build_not_equal_official_publisher')
+ shutil.copytree(package/'dist',package/'.security-original-dist')
+ patched=patch_source(p['kind'],raw);source.write_bytes(patched)
+ metadata['version']=p['fork_version']
+ if p['kind']=='resolve':need(metadata['dependencies'].pop('deepmerge')=='^4.2.2','deepmerge_single_removal');metadata['engines']['node']='^22.23.4 || ^24.22.1 || ^26.12.1'
+ (package/'package.json').write_bytes(encode(metadata))
+ if p['kind']=='resolve':
+  command(corepack+['-r','--filter','@rollup/plugin-node-resolve...','run','build'],name='maintainer-build',timeout=2400);command(corepack+['--dir',str(package),'test'],name='maintainer-full-tests',timeout=2400)
+ else:command(npm+['run','prepare'],name='maintainer-build',timeout=1800);command(npm+['test'],name='maintainer-full-tests',timeout=2400)
+ # Test-only lifecycle hooks may not silently alter reviewed source.
+ need(source.read_bytes()==patched,'maintainer_lifecycle_changed_source')
+ command([node,Path(__file__).absolute().parent/spec['runtime_helper']['path'],package,p['kind']],name='actual-cjs-esm-security-regressions',timeout=120)
+ # Preserve original license rather than silently omitting monorepo's root file.
+ if p['kind']=='resolve'and not any(x.name.lower().startswith(('license','licence'))for x in package.iterdir()):shutil.copyfile(root/'LICENSE',package/'LICENSE')
+ # Two clean compiler outputs and two npm pack bodies must be identical.
+ before=tree(package/'dist');packs=[]
+ for trial in(1,2):
+  if trial==2:
+   shutil.rmtree(package/'dist')
+   command(corepack+['--dir',str(package),'run','build']if p['kind']=='resolve'else npm+['run','prepare'],cwd=package,name='second-clean-build',timeout=1800);need(tree(package/'dist')==before,'compiler_output_not_deterministic')
+  target=log/f'pack-{trial}';target.mkdir();command(npm+['pack','--ignore-scripts','--json','--pack-destination',str(target)],cwd=package,name='pack');items=list(target.glob('*.tgz'));need(len(items)==1,'single_package');packs.append(items[0])
+ need(digest(packs[0])==digest(packs[1]),'npm_pack_not_deterministic')
+ artifact=log/(p['id']+'.tgz');shutil.copyfile(packs[0],artifact);archive_proof=qualify_tar(artifact,p,package)
+ return{'schema':'qualified_upstream_fork/1','profile':p['id'],'original_commit':p['commit'],'original_version':p['version'],'fork_version':p['fork_version'],'source_preimage_sha256':sha256(raw).hexdigest(),'source_postimage_sha256':sha256(patched).hexdigest(),'archive_proof':archive_proof,'full_upstream_tests_passed':True,'two_builds_and_packages_identical':True,'tar':{'name':artifact.name,'bytes':artifact.stat().st_size,'sha256':digest(artifact)},'records':records,'security_accepted':False}
+
+def frontend(spec,repo,artifacts,node,out,env):
+ front=repo/'frontend';original=(front/'package-lock.json').read_bytes();need(sha256(original).hexdigest()==spec['lock_sha256'],'project_lock_changed');baseline=read_json(front/'package-lock.json');records=[]
+ npm=[str(node),str(node.parent.parent/'lib/node_modules/npm/bin/npm-cli.js')]
+ def command(args,name,timeout=2400):result=run(args,front,out/(f'{len(records):02}-{name}.log'),env,timeout);records.append(result)
+ command(npm+['ci','--audit=false','--fund=false'],'baseline-frozen-install');build_env={**env,'FRONTEND_BUILD_OUT_DIR':str(out/'baseline-dist')};records.append(run(npm+['run','build'],front,out/'baseline-build.log',build_env,2400));baseline_dist=tree(out/'baseline-dist')
+ vendor=front/'vendor/security-backports';vendor.mkdir(parents=True);forkpaths={}
+ for p in spec['profiles']:
+  reports=list(artifacts.rglob(p['id']+'/RESULT.json'));need(len(reports)==1,'upstream_result_inventory');result=read_json(reports[0]);need(result['profile']==p['id']and result['original_commit']==p['commit']and result['fork_version']==p['fork_version']and result['full_upstream_tests_passed']is True and result['two_builds_and_packages_identical']is True,'upstream_success_required')
+  need(result['tar']['name']==p['id']+'.tgz','fixed_upstream_tar_name');tar=reports[0].parent/result['tar']['name'];need(digest(tar)==result['tar']['sha256'],'upstream_tar');target=vendor/(p['id']+'.tgz');shutil.copyfile(tar,target);forkpaths[p['id']]='file:vendor/security-backports/'+target.name
+ package=read_json(front/'package.json');overrides=package.setdefault('overrides',{})
+ for parent,children in{'workbox-build@7.4.0':{'@rollup/plugin-node-resolve':forkpaths['resolve'],'glob':forkpaths['glob11']},'js-beautify@1.15.4':{'glob':forkpaths['glob10']},'glob@10.5.0-project.security.1':{'minimatch':forkpaths['mm9']},'glob@11.1.0-project.security.1':{'minimatch':forkpaths['mm10']},'@typescript-eslint/typescript-estree@8.46.1':{'minimatch':forkpaths['mm9']},'editorconfig@1.0.7':{'minimatch':forkpaths['mm9']}}.items():need(parent not in overrides,'existing_override_collision');overrides[parent]=children
+ (front/'package.json').write_bytes(encode(package));command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-generation');updated=read_json(front/'package-lock.json');delta=graph_gate(baseline,updated,spec['profiles']);write(out/'GRAPH-DELTA.json',encode(delta))
+ # Fresh frozen npmci twice; no npm update or drift adoption between runs.
+ installed=[]
+ for trial in(1,2):
+  command(npm+['ci','--audit=false','--fund=false'],f'candidate-install-{trial}')
+  installed.append({k:package_identity(k,v)for k,v in read_json(front/'node_modules/.package-lock.json')['packages'].items()})
+ need(installed[0]==installed[1],'fresh_installs_differ')
+ command([node,'scripts/check-node-security-baseline.mjs'],'project-node-baseline');command(npm+['exec','--no','--','eslint','.'],'project-lint');command(npm+['exec','--no','--','vue-tsc','--noEmit','-p','tsconfig.app.json'],'project-types');command(npm+['run','test:unit:run'],'project-unit-tests',3600)
+ candidate_env={**env,'FRONTEND_BUILD_OUT_DIR':str(out/'candidate-dist')};records.append(run(npm+['run','build'],front,out/'candidate-build.log',candidate_env,2400));need(tree(out/'candidate-dist')==baseline_dist,'frontend_output_differs_from_baseline')
+ # Query only name/version data. Forks are explicitly mapped back to their
+ # authenticated publisher preimages, so prerelease/file specs cannot fake zero.
+ logical=deepcopy(updated);by_fork={(p['name'],p['fork_version']):p for p in spec['profiles']};query_map=[]
+ for key,row in logical['packages'].items():
+  if not key:continue
+  name=package_identity(key,row)[0];profile=by_fork.get((name,row.get('version')))
+  if profile:
+   query_map.append({'path':key,'actual_fork':row['version'],'publisher_preimage':profile['version']});row['version']=profile['version'];row.pop('resolved',None)
+ helper_ref=spec['advisory_helper'];helper=Path(__file__).parent/helper_ref['path'];need(digest(helper)==helper_ref['sha256'],'advisory_helper_source');module=ModuleType('_official_names_versions_only');module.__file__=str(helper);exec(compile(helper.read_bytes(),str(helper),'exec'),module.__dict__)
+ body,coverage=module.request_from_lock(encode(logical));need(not coverage['gaps'],'advisory_coverage_gap');write(out/'advisory-request-names-versions.json',body);started=time.time_ns();response=module.fetch(body);received=time.time_ns();response_ref=write(out/'advisory-raw-response.json',response)
+ advisory=json.loads(response);allowed=set(spec['expected_patched_advisory_ids']);need(all(type(rows)is list and all(row.get('id')in allowed for row in rows)for rows in advisory.values()),'new_unreviewed_npm_advisory')
+ write(out/'ADVISORY-PROVENANCE.json',encode({'actual_started_ns':started,'actual_received_ns':received,'query_uses_published_preimages_for_private_forks':True,'fork_mapping':query_map,'raw_response':response_ref,'raw_findings_not_suppressed':True,'security_accepted':False}))
+ proposal=out/'proposal';proposal.mkdir();shutil.copyfile(front/'package.json',proposal/'package.json');shutil.copyfile(front/'package-lock.json',proposal/'package-lock.json');shutil.copytree(vendor,proposal/'vendor/security-backports')
+ return{'schema':'qualified_frontend_source_proposal/1','two_fresh_npmci_passed':True,'non_target_graph_identities_preserved':True,'frontend_output_byte_identical_to_baseline':True,'upstream_and_project_tests_passed':True,'browser_matrix_still_required':True,'raw_advisory_baseline_count':3,'patched_forks_not_official_fixed_versions':True,'proposal':str(proposal),'records':records,'security_accepted':False}
+
+def main(argv=None):
+ parser=argparse.ArgumentParser();parser.add_argument('--execute',action='store_true');parser.add_argument('--spec',type=Path,default=Path(__file__).with_name('spec.UNARMED.json'));parser.add_argument('--spec-sha256');parser.add_argument('--self-sha256');parser.add_argument('--phase',choices=('upstream','frontend'));parser.add_argument('--profile');parser.add_argument('--repo',type=Path);parser.add_argument('--expected-project-commit');parser.add_argument('--workspace',type=Path);parser.add_argument('--out',type=Path);parser.add_argument('--artifacts',type=Path);a=parser.parse_args(argv)
+ spec=read_json(a.spec)
+ if not a.execute or spec.get('armed')is not True:print(json.dumps({'status':'UNARMED','Host_or_network_or_source_mutation':False}));return 0
+ need(os.environ.get('GITHUB_ACTIONS')=='true'and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'and os.geteuid()!=0,'disposable_nonroot_GitHub_runner_required');need(digest(Path(__file__))==a.self_sha256 and digest(a.spec)==a.spec_sha256,'Source_pins');need(a.workspace.is_absolute()and a.out.is_absolute()and not a.workspace.exists()and not a.out.exists(),'new_ci_namespace');need(a.repo.is_absolute()and re.fullmatch('[a-f0-9]{40}',a.expected_project_commit),'project_scope')
+ node=Path(shutil.which('node')).resolve();need(digest(node)==spec['node_binary_sha256'],'exact_Node_binary');need(subprocess.check_output([node,'--version'],text=True).strip()==spec['node_version'],'Node_version');need(subprocess.check_output(['git','rev-parse','HEAD'],cwd=a.repo,text=True).strip()==a.expected_project_commit,'project_commit')
+ # All public authenticated prerequisites must be verified before any network.
+ for key in('official_preimage_auth','legacy_exact_decision','advisory_helper','runtime_helper'):
+  r=spec[key];p=a.spec.parent/r['path'];need(p.stat().st_size==r['bytes']and digest(p)==r['sha256'],'Root_source_auth')
+ need(a.workspace.parent.is_dir()and a.out.parent.is_dir(),'ci_output_parents_required')
+ need(a.phase in('upstream','frontend')and(a.phase!='upstream'or a.profile in {p['id']for p in spec['profiles']}),'declared_phase_profile')
+ need(shutil.disk_usage(a.workspace.parent).free>=8*1024**3,'CI_free_space_reserve')
+ a.workspace.mkdir(parents=True);a.out.mkdir(parents=True);env=environment(node,a.workspace/'home');result=None;error=None
+ try:
+  if a.phase=='upstream':result=upstream(spec,a.profile,node,a.workspace,a.out,env);destination=a.out/a.profile/'RESULT.json'
+  else:result=frontend(spec,a.repo,a.artifacts,node,a.out,env);destination=a.out/'RESULT.json'
+  write(destination,encode(result));print(json.dumps({'status':'COMPLETE','phase':a.phase,'result':str(destination),'security_accepted':False}));return 0
+ except BaseException as exc:
+  error={'schema':'finite_npm_ci_refusal/1','status':'REFUSED_OR_UNKNOWN','phase':a.phase,'profile':a.profile,'error_class':type(exc).__name__,'code':exc.args[0]if type(exc)is RuntimeError and len(exc.args)==1 and type(exc.args[0])is str else None,'security_accepted':False};write(a.out/'REFUSAL.json',encode(error));print(json.dumps(error));return 1
+if __name__=='__main__':raise SystemExit(main())
