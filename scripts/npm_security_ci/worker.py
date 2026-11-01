@@ -239,14 +239,29 @@ def tree(root):return{str(p.relative_to(root)):digest(p)for p in sorted(root.rgl
 def package_identity(key,row):
  name=row.get('name')or key.rsplit('node_modules/',1)[-1]
  return name,row.get('version'),row.get('integrity'),row.get('resolved')
-def graph_gate(before,after,profiles):
+def graph_observation(before,after,profiles):
  targets={(p['name'],p['version'])for p in profiles};forks={(p['name'],p['fork_version'])for p in profiles}
  def unchanged(doc):return Counter(package_identity(k,v)for k,v in doc['packages'].items()if k and (package_identity(k,v)[:2]not in targets|forks|{('deepmerge','4.3.1')}))
- old,new=unchanged(before),unchanged(after);delta={'removed':[list(k)+[v]for k,v in(old-new).items()],'added':[list(k)+[v]for k,v in(new-old).items()]}
+ old,new=unchanged(before),unchanged(after)
+ return{'removed':[list(k)+[v]for k,v in(old-new).items()],'added':[list(k)+[v]for k,v in(new-old).items()]}
+def graph_gate(before,after,profiles):
+ targets={(p['name'],p['version'])for p in profiles};forks={(p['name'],p['fork_version'])for p in profiles};delta=graph_observation(before,after,profiles)
  need(not delta['removed']and not delta['added'],'unexpected_non_target_version_integrity_or_multiplicity_delta')
  identities={package_identity(k,v)[:2]for k,v in after['packages'].items()if k}
  need(forks<=identities and not targets&identities and not any(n=='deepmerge'for n,_ in identities),'fork_graph_not_exact')
  return delta
+
+def publish_graph_observation(before,profiles,lock,out,label):
+ # Preserve exact bounded npm output before parsing or eligibility predicates.
+ need(label in('FIRST-PASS','NORMALIZED'),'graph_observation_stage');lock=Path(lock);initial=lock.lstat();need(stat.S_ISREG(initial.st_mode)and initial.st_nlink==1 and 0<initial.st_size<=1024**2,'graph_lock_bound')
+ fd=os.open(lock,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+ try:
+  opened=os.fstat(fd);identity=lambda v:(v.st_dev,v.st_ino,v.st_mode,v.st_nlink,v.st_uid,v.st_gid,v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+  need(identity(initial)==identity(opened),'graph_lock_changed');raw=os.pread(fd,opened.st_size+1,0);need(len(raw)==opened.st_size and identity(os.fstat(fd))==identity(opened)==identity(lock.lstat()),'graph_lock_changed')
+ finally:os.close(fd)
+ raw_ref=write(out/(label+'-PROPOSED-LOCK.json'),raw);document=json.loads(raw);delta=graph_observation(before,document,profiles)
+ write(out/(label+'-GRAPH-OBSERVATION.json'),encode({'schema':'npm_proposed_graph_observation/1','stage':label,'raw_lock':raw_ref,'non_target_delta':delta,'transitional_metadata_only':label=='FIRST-PASS','eligibility_not_granted':True}))
+ return document,raw_ref['sha256']
 
 def qualify_tar(path,profile,package):
  need(path.stat().st_size<=8*1024**2,'fork_tar_bound')
@@ -372,11 +387,12 @@ def frontend(spec,repo,artifacts,node,out,env):
   need(result['tar']['name']==p['id']+'.tgz','fixed_upstream_tar_name');tar=reports[0].parent/result['tar']['name'];need(digest(tar)==result['tar']['sha256'],'upstream_tar');target=vendor/(p['id']+'.tgz');shutil.copyfile(tar,target);forkpaths[p['id']]='file:vendor/security-backports/'+target.name
  package=read_json(front/'package.json');overrides=package.setdefault('overrides',{})
  for parent,children in portable_overrides(baseline,forkpaths).items():need(parent not in overrides,'existing_override_collision');overrides[parent]=children
- (front/'package.json').write_bytes(encode(package));command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-generation');updated=read_json(front/'package-lock.json');need(portable_overrides(updated,forkpaths)==portable_overrides(baseline,forkpaths),'portable_override_placements_changed');graph_gate(baseline,updated,spec['profiles']);first_lock_sha256=digest(front/'package-lock.json')
+ (front/'package.json').write_bytes(encode(package));command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-generation');updated,first_lock_sha256=publish_graph_observation(baseline,spec['profiles'],front/'package-lock.json',out,'FIRST-PASS')
  # A separate, fixed ordinary lock-only pass reconstructs the new FILE graph:
  # npm's first replacement pass can retain a noncanonical target placement.
- # This is not a retry loop, and both graphs must pass the same strict gate.
- command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-normalization');updated=read_json(front/'package-lock.json');need(portable_overrides(updated,forkpaths)==portable_overrides(baseline,forkpaths),'portable_override_placements_changed');delta=graph_gate(baseline,updated,spec['profiles']);write(out/'GRAPH-DELTA.json',encode(delta));write(out/'LOCK-NORMALIZATION.json',encode({'schema':'fixed_npm_file_override_normalization/1','ordinary_lock_only_passes':2,'first_lock_sha256':first_lock_sha256,'normalized_lock_sha256':digest(front/'package-lock.json'),'strict_non_target_identity_and_multiplicity_gates_passed_both_times':True,'four_registry_parent_placements_unchanged':True,'upstream_tar_bytes_changed':False}))
+ # This is not a retry loop. First output is metadata only and never installed;
+ # final eligibility always requires the unchanged strict graph/placement gates.
+ command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-normalization');updated,normalized_lock_sha256=publish_graph_observation(baseline,spec['profiles'],front/'package-lock.json',out,'NORMALIZED');need(portable_overrides(updated,forkpaths)==portable_overrides(baseline,forkpaths),'portable_override_placements_changed');delta=graph_gate(baseline,updated,spec['profiles']);write(out/'GRAPH-DELTA.json',encode(delta));write(out/'LOCK-NORMALIZATION.json',encode({'schema':'fixed_npm_file_override_normalization/2','ordinary_lock_only_passes':2,'first_lock_sha256':first_lock_sha256,'normalized_lock_sha256':normalized_lock_sha256,'first_pass_transitional_metadata_only_never_installed':True,'final_strict_non_target_identity_and_multiplicity_gate_passed':True,'final_four_registry_parent_placements_unchanged':True,'upstream_tar_bytes_changed':False}))
  # Fresh frozen npmci twice; no npm update or drift adoption between runs.
  installed=[]
  for trial in(1,2):
