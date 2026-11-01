@@ -5,7 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
-import ast,io,json,os,tempfile,unittest
+import ast,base64,io,json,os,tempfile,unittest
 
 ROOT=Path(__file__).absolute().parent.parent
 def load(relative):
@@ -196,5 +196,79 @@ class Gold2SourceTests(unittest.TestCase):
  def test_same_configured_source_or_flags_drift_refuses(self):
   for key in('debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test'):
    rows,proofs=F.fixtures();rows['provenance.json']['vendor_tests']['same_configured_source'][key]['sha256']='0'*64;self.reject(rows,proofs)
+ def test_raw_upstream_Makefile_receipt_cannot_masquerade_as_post_Debian(self):
+  rows,proofs=F.fixtures()
+  rows['provenance.json']['vendor_tests']['same_configured_source']['Makefile.in']={'bytes':52641,'sha256':'78ebd7e89c5c95d9a8e30c39a5da99155e8d0d8cc901e36e74c4e6b20ddb0074'}
+  self.reject(rows,proofs)
+
+class DebianVendorStageTests(unittest.TestCase):
+ """Real public GNU-patch producer to unchanged production digest consumer.
+
+ These controls reconstruct only authenticated source bytes. They never run
+ make, compile, install, use Docker/network, or claim vendor/ABI qualification.
+ """
+ @classmethod
+ def setUpClass(cls):
+  cls.fixture=json.loads((ROOT/'tests/fixtures/sqlite_vendor_debian_stage.json').read_bytes())
+  cls.raw=cls.decode(cls.fixture['upstream_Makefile'])
+  cls.patches=[(row['name'],cls.decode(row))for row in cls.fixture['ordered_Debian_patches']]
+ @staticmethod
+ def decode(row):
+  raw=base64.b64decode(row['base64'],validate=True)
+  if (len(raw),sha256(raw).hexdigest())!=(row['bytes'],row['sha256']):raise AssertionError('authenticated fixture drift')
+  return raw
+ def setUp(self):
+  self.scratch=tempfile.TemporaryDirectory(prefix='.owned-Debian-stage-',dir=ROOT/'tests');self.addCleanup(self.scratch.cleanup);self.root=Path(self.scratch.name)
+ def derived(self,tag,order=None):
+  root=self.root/tag;root.mkdir(mode=0o700);target=root/'Makefile.in';target.write_bytes(self.raw);target.chmod(0o600)
+  for ordinal,(name,raw)in enumerate(self.patches if order is None else order):
+   patchfile=root/('input-'+str(ordinal)+'.patch');patchfile.write_bytes(raw);patchfile.chmod(0o600)
+   # Same quilt path strip and zero-fuzz policy, using exact signed-Debian files.
+   # Output is bounded by the existing production finite-command transport.
+   code,output=R.bounded_command(['/usr/bin/patch','--batch','--forward','--fuzz=0','--no-backup-if-mismatch','--reject-file=-','-p1','--input',str(patchfile)],cwd=root,timeout=10,maximum=16384,capture=True,with_code=True)
+   if code:return target,code
+  return target,0
+ @staticmethod
+ def stanza(raw,prefix):
+  lines=raw.splitlines(keepends=True);starts=[i for i,line in enumerate(lines)if line.startswith(prefix)]
+  if len(starts)!=1:raise AssertionError('vendor target ambiguous')
+  index=starts[0];end=next((i for i in range(index+1,len(lines))if not lines[i].strip()),len(lines))
+  return b''.join(lines[index:end])
+ def test_fixture_joins_exact_source_chain_and_changed_stage_pin(self):
+  self.assertEqual(self.fixture['schema'],'sqlite_public_Debian_Makefile_stage_fixture/1')
+  self.assertEqual({name:tuple(pin)for name,pin in self.fixture['source_archives'].items()},R.SOURCE_FILES)
+  self.assertEqual((len(self.raw),sha256(self.raw).hexdigest()),(52641,'78ebd7e89c5c95d9a8e30c39a5da99155e8d0d8cc901e36e74c4e6b20ddb0074'))
+  self.assertEqual([name for name,_ in self.patches],['10-520478-squash-bad-deps.patch','30-cross.patch','32-dynamic_link.patch'])
+  self.assertEqual(R.VENDOR_HELPERS['Makefile.in'],(53067,'28c0cd79217d77c89c0ca3ccd39ed3937285f006384f36737de26a1db4bdc7b7'))
+  self.assertEqual(self.fixture['actual_dpkg_source_post_Debian_Makefile'],{'bytes':53067,'sha256':'28c0cd79217d77c89c0ca3ccd39ed3937285f006384f36737de26a1db4bdc7b7'})
+ def test_real_Debian_producer_passes_consumer_and_old_raw_pin_fails(self):
+  path,code=self.derived('correct');self.assertEqual(code,0)
+  self.assertEqual(R.digest(path,R.VENDOR_HELPERS['Makefile.in']),{'bytes':53067,'sha256':'28c0cd79217d77c89c0ca3ccd39ed3937285f006384f36737de26a1db4bdc7b7'})
+  with self.assertRaisesRegex(RuntimeError,'input_pin'):R.digest(path,(52641,'78ebd7e89c5c95d9a8e30c39a5da99155e8d0d8cc901e36e74c4e6b20ddb0074'))
+ def test_raw_upstream_is_refused_at_real_post_Debian_digest_boundary(self):
+  path=self.root/'Makefile.in';path.write_bytes(self.raw);path.chmod(0o600)
+  with self.assertRaisesRegex(RuntimeError,'input_pin'):R.digest(path,R.VENDOR_HELPERS['Makefile.in'])
+ def test_missing_or_reordered_Debian_patch_stage_cannot_pass(self):
+  orders=[self.patches[:i]+self.patches[i+1:]for i in range(3)]+[list(reversed(self.patches))]
+  for i,order in enumerate(orders):
+   with self.subTest(order=[name for name,_ in order]):
+    path,code=self.derived('missing-or-order-'+str(i),order)
+    with self.assertRaisesRegex(RuntimeError,'input_pin'):R.digest(path,R.VENDOR_HELPERS['Makefile.in'])
+ def test_Debian_stage_preserves_exact_unfiltered_standard_test_stanzas(self):
+  path,code=self.derived('targets');self.assertEqual(code,0);post=path.read_bytes()
+  for prefix in(b'test:\t',b'tcltest:\t',b'fuzztest:\t',b'sourcetest:\t',b'srctree-check:\t',b'testfixture$(TEXE):\t',b'TESTPROGS =',b'TESTOPTS ='):
+   with self.subTest(prefix=prefix):self.assertEqual(self.stanza(self.raw,prefix),self.stanza(post,prefix))
+  self.assertIn(b'test:\tsrctree-check fuzztest sourcetest $(TESTPROGS) tcltest',post)
+  self.assertIn(b'./testfixture$(TEXE) $(TOP)/test/veryquick.test $(TESTOPTS)',post)
+ def test_changed_target_filter_or_even_comment_cannot_pass_consumer(self):
+  path,code=self.derived('mutations');self.assertEqual(code,0);post=path.read_bytes()
+  changed=[post.replace(b'test:\tsrctree-check',b'test:\t# omitted srctree-check',1),post.replace(b'TESTOPTS =',b'TESTOPTS = --match=fts5',1),post+b'\n# unadmitted source mutation\n']
+  for i,raw in enumerate(changed):
+   with self.subTest(mutation=i):
+    self.assertNotEqual(raw,post);path.write_bytes(raw)
+    with self.assertRaisesRegex(RuntimeError,'input_pin'):R.digest(path,R.VENDOR_HELPERS['Makefile.in'])
+ def test_fixture_byte_mutation_refuses_before_patch_execution(self):
+  row=deepcopy(self.fixture['ordered_Debian_patches'][0]);raw=base64.b64decode(row['base64']);row['base64']=base64.b64encode(raw+b'\n# drift\n').decode()
+  with self.assertRaisesRegex(AssertionError,'authenticated fixture drift'):self.decode(row)
 
 if __name__=='__main__':unittest.main()

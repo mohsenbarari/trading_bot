@@ -32,7 +32,9 @@ FTS_AFTER=(283845, '2a64009c24fd1194027d2383754545edf9a55c2134ce5588a22143d52bf1
 FTS_TEST_BEFORE=(2113, 'd4260474ddc5d374c5fc932c1251f695fcfac57c2ce2f43b3f2056e426ebab46')
 FTS_TEST_AFTER=(2598, 'b03372c1a4d9b112b09a75574fcff4414d2eab431ae4d9f3bd156a648fe8d58e')
 UPSTREAM_FTS_COMMIT='e1c9934f9f11a499029abb020ea715a08970da80'
-VENDOR_HELPERS={'test/tester.tcl': (78000, '5c4c2881737e9b5d488ad453be74630bc8209d3ee5cf1492dc08a9a1f6166aa7'), 'ext/fts5/test/fts5_common.tcl': (17586, '7600a7adf913e45113ea66d0395de96d18dff9b187599c01151de5dd61e26e80'), 'Makefile.in': (52641, '78ebd7e89c5c95d9a8e30c39a5da99155e8d0d8cc901e36e74c4e6b20ddb0074'), 'test/veryquick.test': (587, '814df9511e0412a654e721851613f9061bbd7557c688b50d7bd57c980e4ec773')}
+# Pins bind dpkg-source -x output after the authenticated Debian quilt series,
+# before our local patches. Debian's three Makefile patches are already applied.
+VENDOR_HELPERS={'test/tester.tcl': (78000, '5c4c2881737e9b5d488ad453be74630bc8209d3ee5cf1492dc08a9a1f6166aa7'), 'ext/fts5/test/fts5_common.tcl': (17586, '7600a7adf913e45113ea66d0395de96d18dff9b187599c01151de5dd61e26e80'), 'Makefile.in': (53067, '28c0cd79217d77c89c0ca3ccd39ed3937285f006384f36737de26a1db4bdc7b7'), 'test/veryquick.test': (587, '814df9511e0412a654e721851613f9061bbd7557c688b50d7bd57c980e4ec773')}
 VENDOR_STANDARD_SCOPE={'standard_target':'test',
  'standard_prerequisites':['srctree-check','fuzztest','sourcetest','$(TESTPROGS)','tcltest'],
  'executed_standard_subtargets':['srctree-check','fuzztest','sourcetest','tcltest'],
