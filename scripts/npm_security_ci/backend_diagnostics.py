@@ -20,7 +20,7 @@ PINS={
  'scripts/npm_security_ci/browser_evidence.py':(10369,'453153185f1bed7bbf88baea8dc6959c32042eb175e9c245c6df9138b0545327'),
  'deploy/maintenance/glibc_backport_native239/host_io_original.py':(53351,'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82'),
 }
-INSPECT='{"Name":{{json .Name}},"Id":{{json .Id}},"Running":{{json .State.Running}},"Pid":{{json .State.Pid}},"ExitCode":{{json .State.ExitCode}},"OOMKilled":{{json .State.OOMKilled}},"StartedAt":{{json .State.StartedAt}},"FinishedAt":{{json .State.FinishedAt}},"RestartCount":{{json .RestartCount}},"Memory":{{json .HostConfig.Memory}},"NanoCpus":{{json .HostConfig.NanoCpus}},"Health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}}'
+INSPECT='{"Name":{{json .Name}},"Id":{{json .Id}},"Running":{{json .State.Running}},"Pid":{{json .State.Pid}},"ExitCode":{{json .State.ExitCode}},"OOMKilled":{{json .State.OOMKilled}},"StartedAt":{{json .State.StartedAt}},"FinishedAt":{{json .State.FinishedAt}},"RestartCount":{{json .RestartCount}},"Memory":{{json .HostConfig.Memory}},"NanoCpus":{{json .HostConfig.NanoCpus}},"Health":{{with index .State "Health"}}{{json .Status}}{{else}}"none"{{end}}}'
 STATS='{"Name":{{json .Name}},"ID":{{json .ID}},"CPUPerc":{{json .CPUPerc}},"MemUsage":{{json .MemUsage}},"MemPerc":{{json .MemPerc}},"PIDs":{{json .PIDs}}}'
 def need(value,code):
     if not value:raise ValueError(code)
@@ -66,15 +66,26 @@ def stats_rows(raw,document,rows):
     return result
 def collect(run,document,env):
     rows={};errors=[];end=time.monotonic()+20
+    codes={'command':'bounded_command_unavailable','json':'bounded_json_invalid','validation':'bounded_metadata_invalid'}
     def command(argv,maximum):
         raw=run(['/usr/bin/docker','--host=unix:///var/run/docker.sock',*argv],env=env,deadline=end,maximum=maximum)
         need(type(raw)is bytes and len(raw)<=maximum,'command_bound');return raw
     for name in NAMES:
-        try:rows[name]=inspect_row(document(command(['container','inspect','--format',INSPECT,name],8192)),name)
-        except Exception:errors.append({'operation':'inspect','container':name,'code':'bounded_metadata_unavailable'})
+        stage='command'
+        try:
+            raw=command(['container','inspect','--format',INSPECT,name],8192)
+            stage='json';value=document(raw)
+            stage='validation';rows[name]=inspect_row(value,name)
+        except Exception:errors.append({'operation':'inspect','container':name,'stage':stage,'code':codes[stage]})
     stats={}
-    try:stats=stats_rows(command(['stats','--no-stream','--no-trunc','--format',STATS,*NAMES],16384),document,rows)
-    except Exception:errors.append({'operation':'stats','code':'bounded_metadata_unavailable'})
+    stage='command'
+    def stats_document(raw):
+        nonlocal stage
+        stage='json';value=document(raw);stage='validation';return value
+    try:
+        raw=command(['stats','--no-stream','--no-trunc','--format',STATS,*NAMES],16384)
+        stage='validation';stats=stats_rows(raw,stats_document,rows)
+    except Exception:errors.append({'operation':'stats','stage':stage,'code':codes[stage]})
     return {'status':'OBSERVED'if not errors else'PARTIAL_OR_UNAVAILABLE','states':rows,'stats':stats,'errors':errors}
 def main(argv=None):
     if not hosted(os.environ):
