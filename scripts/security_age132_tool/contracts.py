@@ -55,8 +55,48 @@ def graph(raw,main,expected):
   if r.get('Main')is True:need(name==main,'module_graph_main');mains.append(name)
   else:actual[name]=r['Version']
  need(mains==[main]and actual=={r['path']:r['version']for r in expected},'module_graph_exact');return actual
-def sca(raw,mode):
- rows=documents(raw);need(bool(rows)and set(rows[0])=={'config'},'sca_protocol');config=rows[0]['config'];need(config.get('protocol_version')=='v1.0.0'and config.get('scanner_name')=='govulncheck'and config.get('scan_level')=='module'and config.get('scan_mode')==mode and config.get('go_version')=='go1.27.3'and config.get('db')=='https://vuln.go.dev','sca_configuration')
+GO_PACKAGE_FIELDS='ImportPath,Name,Imports,ImportMap,Match,DepOnly,Standard,Module,Error,DepsErrors,Incomplete,ForTest'
+def package_projection(raw,main,expected,pattern,required_roots):
+ """Closed Linux/amd64/CGO0 production package profile; no test variants."""
+ rows=documents(raw,8*1024**2);need(0<len(rows)<=20000 and pattern in{'./...','./cmd/age','./cmd/age-keygen','./cmd/govulncheck'},'package_projection_bound')
+ packages={};owners={};roots=[];versions={r['path']:r['version']for r in expected};required=set(GO_PACKAGE_FIELDS.split(','))
+ def path(value):return type(value)is str and re.fullmatch(r'[A-Za-z0-9_./!-]+',value)is not None and not value.startswith('/')and'..'not in value.split('/')
+ need(type(required_roots)in{tuple,list}and 0<len(required_roots)<=3 and all(path(p)for p in required_roots),'package_projection_required_root')
+ for row in rows:
+  need(type(row)is dict and required<=set(row),'package_projection_fields');name=row['ImportPath']
+  need(path(name)and name not in packages and type(row['Name'])is str and re.fullmatch('[A-Za-z_][A-Za-z0-9_]*',row['Name'])is not None,'package_projection_package')
+  need(row['Error']is None and row['DepsErrors']in(None,[])and row['Incomplete']is False and row['ForTest']=='','package_projection_errors')
+  need(type(row['Standard'])is bool and type(row['DepOnly'])is bool,'package_projection_flags')
+  imports=row['Imports']if row['Imports']is not None else[];aliases=row['ImportMap']if row['ImportMap']is not None else{};matches=row['Match']if row['Match']is not None else[]
+  need(type(imports)is list and all(path(p)for p in imports)and len(imports)==len(set(imports))and type(aliases)is dict and all(path(k)and path(v)and v in imports for k,v in aliases.items()),'package_projection_imports')
+  need(type(matches)is list and all(type(p)is str for p in matches),'package_projection_matches')
+  if not row['DepOnly']:
+   need(pattern in matches and(name==main or name.startswith(main+'/')),'package_projection_root');roots.append(name)
+  module=row['Module']
+  if row['Standard']:
+   need(module is None,'package_projection_stdlib');owner='stdlib';version='v1.27.3'
+  else:
+   need(type(module)is dict and module.get('Error')is None and module.get('Replace')is None,'package_projection_module')
+   owner=module.get('Path');version=module.get('Version','')
+   need(type(owner)is str and type(version)is str,'package_projection_module_version')
+   if owner==main:need(module.get('Main')is True and version=='','package_projection_main')
+   else:need(owner in versions and versions[owner]==version and module.get('Main',False)is False,'package_projection_module_version')
+  need(owner not in owners or owners[owner]==version,'package_projection_module_conflict');owners[owner]=version;packages[name]={'imports':imports,'owner':owner,'name':row['Name']}
+ need(bool(roots)and len(roots)==len(set(roots))and set(required_roots)<=set(roots),'package_projection_required_root')
+ if pattern!='./...':need(set(roots)==set(required_roots)and all(packages[p]['name']=='main'for p in roots),'package_projection_entry')
+ reachable=set();pending=list(roots)
+ while pending:
+  name=pending.pop();need(name in packages,'package_projection_incomplete_closure')
+  if name in reachable:continue
+  reachable.add(name);pending.extend(packages[name]['imports'])
+ need(reachable==set(packages),'package_projection_unrelated_package');owners['stdlib']='v1.27.3';need(owners.get(main)=='','package_projection_main')
+ return{'schema':'age132_fixed_package_profile/1','pattern':pattern,'tests':False,'CGO_ENABLED':'0','GOOS':'linux','GOARCH':'amd64','roots':sorted(roots),'required_roots':sorted(required_roots),'modules':owners,'package_count':len(packages),'package_paths':sorted(packages),'complete_and_only_reachable_import_closure':True,'raw_bytes':len(raw),'raw_sha256':sha256(raw).hexdigest()}
+def source_arguments(directory,pattern,*,level='package',tests=False):
+ need(type(directory)is str and PurePosixPath(directory).is_absolute()and'..'not in PurePosixPath(directory).parts and pattern in{'./...','./cmd/age','./cmd/age-keygen','./cmd/govulncheck'}and level=='package'and tests is False,'source_sca_scope')
+ return['-C',directory,'-mode=source','-scan=package','-test=false','-json',pattern]
+def sca(raw,mode,level='module'):
+ rows=documents(raw);need(bool(rows)and set(rows[0])=={'config'},'sca_protocol');config=rows[0]['config'];need(type(config)is dict and mode in{'source','binary'}and level in{'module','package'}and config.get('protocol_version')=='v1.0.0'and config.get('scanner_name')=='govulncheck'and config.get('scan_level')==level and config.get('scan_mode')==mode and config.get('db')=='https://vuln.go.dev','sca_configuration')
+ need((config.get('go_version')=='go1.27.3'if mode=='source'else'go_version'not in config),'sca_configuration')
  osvs={};findings=[];sboms=[]
  for row in rows[1:]:
   need(type(row)is dict and len(row)==1,'sca_message');key=next(iter(row));need(key in{'progress','SBOM','osv','finding'},'sca_message')
@@ -64,36 +104,47 @@ def sca(raw,mode):
    osv=row[key];need(type(osv)is dict and re.fullmatch('GO-[0-9]{4}-[0-9]+',osv.get('id',''))is not None,'sca_osv');need(osv['id']not in osvs or osvs[osv['id']]==osv,'sca_osv_conflict');osvs[osv['id']]=osv
   elif key=='finding':findings.append(row[key])
   elif key=='SBOM':sboms.append(row[key])
- need(len(sboms)==1 and sboms[0].get('go_version')=='go1.27.3'and type(sboms[0].get('modules'))is list and bool(sboms[0]['modules']),'sca_sbom')
+ need(len(sboms)==1 and type(sboms[0])is dict and sboms[0].get('go_version')=='go1.27.3'and type(sboms[0].get('modules'))is list and bool(sboms[0]['modules']),'sca_sbom')
  for f in findings:need(type(f)is dict and f.get('osv')in osvs and type(f.get('trace'))is list and bool(f['trace']),'sca_finding')
  return {'config':config,'SBOM':sboms[0],'all_OSV':osvs,'all_findings':findings,'unresolved_ids':sorted({f['osv']for f in findings}),'Root_component_review_required':bool(findings),'security_accepted':False}
-def query_age(raw):
- rows=documents(raw);need(bool(rows)and set(rows[0])=={'config'},'query_protocol');c=rows[0]['config'];need(c.get('protocol_version')=='v1.0.0'and c.get('scanner_name')=='govulncheck'and c.get('scan_mode')=='query'and c.get('db')=='https://vuln.go.dev','query_configuration');osvs={};observed=False
+def query_modules(raw,subjects):
+ need(type(subjects)is dict and 0<len(subjects)<=20 and all(type(p)is str and re.fullmatch(r'[A-Za-z0-9_.!/-]+',p)is not None and type(v)is str and re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?',v)is not None for p,v in subjects.items()),'query_subjects')
+ rows=documents(raw);need(bool(rows)and set(rows[0])=={'config'},'query_protocol');c=rows[0]['config'];need(type(c)is dict and c.get('protocol_version')=='v1.0.0'and c.get('scanner_name')=='govulncheck'and c.get('scan_mode')=='query'and c.get('scan_level')=='symbol'and'go_version'not in c and c.get('db')=='https://vuln.go.dev','query_configuration');osvs={};observed=set();markers={'Looking up vulnerabilities in '+p+' at '+v+'...':p for p,v in subjects.items()}
  for row in rows[1:]:
   need(type(row)is dict and len(row)==1,'query_message');key=next(iter(row));need(key in{'progress','osv'},'query_message')
-  if key=='progress':observed=observed or row[key].get('message')=='Looking up vulnerabilities in filippo.io/age at v1.3.2...'
+  if key=='progress':
+   need(type(row[key])is dict and type(row[key].get('message',''))is str,'query_message');message=row[key].get('message','')
+   if message.startswith('Looking up vulnerabilities in '):need(message in markers and markers[message]not in observed,'query_subject_not_observed');observed.add(markers[message])
   else:
-   value=row[key];need(re.fullmatch('GO-[0-9]{4}-[0-9]+',value.get('id',''))is not None,'query_osv');osvs[value['id']]=value
- need(observed,'query_subject_not_observed');return {'config':c,'all_OSV':osvs,'all_findings':list(osvs.values()),'unresolved_ids':sorted(osvs),'security_accepted':False}
-def sca_subject(scan,expected,main):
+   value=row[key];need(type(value)is dict and re.fullmatch('GO-[0-9]{4}-[0-9]+',value.get('id',''))is not None,'query_osv');affected=value.get('affected');need(type(affected)is list and all(type(a)is dict and type(a.get('package',{}))is dict for a in affected)and any(a.get('package',{}).get('name')in subjects for a in affected),'query_osv_subject');need(value['id']not in osvs or osvs[value['id']]==value,'query_osv_conflict');osvs[value['id']]=value
+ need(observed==set(subjects),'query_subject_not_observed');return {'config':c,'requested_subjects':subjects,'observed_subjects':sorted(observed),'all_OSV':osvs,'all_findings':list(osvs.values()),'unresolved_ids':sorted(osvs),'coverage_kind':'full_selected_module_advisory_metadata_not_package_SBOM','security_accepted':False}
+def query_age(raw):return query_modules(raw,{'filippo.io/age':'v1.3.2'})
+def sca_subject(scan,expected,main,*,roots):
  actual={}
+ need(main not in expected and'stdlib'not in expected,'sca_projection_subject')
+ mode=scan['config']['scan_mode'];wanted={main:''if mode=='source'else'(devel)',**expected,'stdlib':'v1.27.3'if mode=='source'else'go1.27.3'}
  for row in scan['SBOM']['modules']:
-  name=row.get('path');version=row.get('version','');need(name not in actual,'sca_sbom_duplicate')
-  if name==main:need(version in{'','(devel)'},'sca_local_main_version')
-  elif name=='stdlib':need(version=='go1.27.3','sca_stdlib_version')
+  need(type(row)is dict and type(row.get('path'))is str and type(row.get('version',''))is str,'sca_subject_version');name=row.get('path');version=row.get('version','');need(name not in actual,'sca_sbom_duplicate')
+  if name==main:need(version==wanted[main],'sca_local_main_version')
+  elif name=='stdlib':need(version==wanted['stdlib'],'sca_stdlib_version')
   else:need(expected.get(name)==version,'sca_subject_version')
   actual[name]=version
- need(all(actual.get(p)==v for p,v in expected.items()),'sca_incomplete_module_subject');return actual
-def build_info(raw,main,lock):
- need(type(raw)is bytes and len(raw)<=65536 and raw.splitlines()[0].endswith(b': go1.27.3'),'CLI_build_info');mods={r['path']:r for r in lock};deps={};seen=False
+ need(actual==wanted,'sca_incomplete_module_subject');observed_roots=scan['SBOM'].get('roots');need(type(observed_roots)is list and all(type(p)is str for p in observed_roots)and len(observed_roots)==len(set(observed_roots))and set(observed_roots)==set(roots),'sca_roots_exact')
+ for finding in scan['all_findings']:
+  for item in finding['trace']:
+   need(type(item)is dict and type(item.get('module'))is str and type(item.get('version',''))is str,'sca_finding_subject');path=item.get('module');version=item.get('version','');need(path in wanted and version==('v1.27.3'if path=='stdlib'else wanted[path]),'sca_finding_subject')
+ return actual
+def build_info(raw,main,lock,*,entry,expected_modules):
+ need(type(raw)is bytes and 0<len(raw)<=65536 and raw.splitlines()[0].endswith(b': go1.27.3')and type(expected_modules)is dict and type(entry)is str,'CLI_build_info');mods={r['path']:r for r in lock};deps={};seen=False;entries=[]
  for line in raw.decode().splitlines()[1:]:
   fields=line.split()
   if not fields:continue
   need(fields[0]!='=>','build_info_replacement')
+  if fields[0]=='path':need(len(fields)==2,'build_info_entry');entries.append(fields[1])
   if fields[0]=='mod':need(len(fields)==3 and fields[1]==main and fields[2]=='(devel)'and not seen,'build_info_main');seen=True
   if fields[0]=='dep':
    need(len(fields)==4 and fields[1]in mods and fields[1]not in deps,'build_info_module');r=mods[fields[1]];need((fields[2],fields[3])==(r['version'],r['module_sum']),'build_info_module_pin');deps[fields[1]]=fields[2]
- need(seen and b'CGO_ENABLED=0'in raw and b'GOARCH=amd64'in raw and b'GOOS=linux'in raw,'CLI_build_info');return deps
+ need(seen and b'CGO_ENABLED=0'in raw and b'GOARCH=amd64'in raw and b'GOOS=linux'in raw,'CLI_build_info');need(entries==[entry]and deps==expected_modules,'build_info_package_projection');return deps
 def test_result(raw):
  rows=documents(raw);need(bool(rows),'empty_upstream_tests');passed=[];failed=[];skipped=[];packages=[]
  for r in rows:
