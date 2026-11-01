@@ -42,6 +42,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The exact Main driver admits only the existing authenticated Trixie ZIP,
+      # prepares its five-file named capsule as UID1001, and binds runtime-last
+      # context custody across the existing build/finalize/complete phases.
       - name: Seal the driver from the exact dispatched Main Git blob and build
         id: build
         env:
@@ -230,6 +233,7 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ steps.build.outputs.root }}/source-identity.json
+            ${{ steps.build.outputs.root }}/glibc-artifact-input.json
             ${{ steps.build.outputs.root }}/input-manifest.json
             ${{ steps.build.outputs.root }}/image-build.json
             ${{ steps.build.outputs.root }}/reports/*.json

@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from hashlib import sha1,sha256
 from pathlib import Path,PurePosixPath
 from types import ModuleType
-import argparse,ast,gzip,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time
+import argparse,ast,errno,fcntl,gzip,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time,zipfile
 
 
 # Closed published source expectations, never runtime-identity substitutes.
@@ -79,7 +79,25 @@ BUSINESS='scripts/market_business81.py'
 OUTER='scripts/market_business81_outer.py'
 BUSINESS_DIR='deploy/market-data/business81'
 BUSINESS_SUPPORT=('run_business81.py','test_guard_source.py','product_check_source.py','f79-business-test-selection.json','python31118-root-assertion-approval.json','python31118-security-base-assertion-proposal.json','python31118-security-base-assertion.patch','fixtures/base/tests/test_market_pipeline_stage3_foundation.py','fixtures/base/tests/test_market_pipeline_stage4_capture.py','fixtures/base/tests/test_market_pipeline_stage5_coin_processor.py','fixtures/base/tests/test_market_pipeline_stage6_channel_processor.py','fixtures/base/tests/test_market_private_pipeline_contracts.py','fixtures/base/tests/__init__.py','fixtures/base/scripts/manage_market_pipeline_stage3.py','fixtures/base/scripts/audit_production_market_catchup.py','fixtures/base/scripts/export_market_private_pipeline_schemas.py','fixtures/base/tests/fixtures/market_private_pipeline/capture_record.json','fixtures/base/tests/fixtures/market_private_pipeline/market_fact.json','fixtures/base/tests/fixtures/market_private_pipeline/market_fact_batch.json','fixtures/base/tests/fixtures/market_private_pipeline/estimator_snapshot.json','fixtures/base/deploy/market-data/compose.yml','fixtures/base/deploy/market-data/compose.web.yml','fixtures/base/deploy/market-data/compose.bot.yml','fixtures/replay/tests/test_market_pipeline_stage4_capture.py')
-CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT))
+GLIBC_ADAPTER='scripts/glibc_runtime_adapter.py'
+GLIBC_INSTALLER='scripts/prepare_glibc_security_os_cache.py'
+GLIBC_IO='scripts/glibc_image_io.py'
+GLIBC_ROOT='deploy/maintenance/glibc_backport_two_profiles/Root-TrixieSelected01-qualification.json'
+GLIBC_HELPERS={GLIBC_ADAPTER:{'bytes':6105,'sha256':'17a0435b954f54596212daeed5d59a7affd0a5a0f696a5618f3e1e9a5257b43b'},
+ GLIBC_INSTALLER:{'bytes':29419,'sha256':'ec8cfbf83dc1edb96fb4e6604d3e86fdbf2c7b7a0bec648550c897651a8d79f3'},
+ GLIBC_IO:{'bytes':40590,'sha256':'e5a1587af0db34acfb5ab04434754cf75b9ad0aa43c0550f7ec7fedf5dd8a65f'}}
+GLIBC_ROOT_PIN={'bytes':23392,'sha256':'7cacf5aaf2c03759343c4a355fe9e8f0e414412fae22ccce0d17eb22c7a2073d'}
+GLIBC_MANIFEST_PIN={'bytes':1245,'sha256':'d2b8bf088159575896f7924cda1f33036c4a257b640522055ae8adb1121b88aa'}
+GLIBC_DEBS={'libc6_2.41-12+deb13u4+gold1_amd64.deb':{'bytes':2850128,'sha256':'0fc62e67eade0c3759cd07b01098a4aba0cd2395bca0777a405d12dc5fa04687'},
+ 'libc-bin_2.41-12+deb13u4+gold1_amd64.deb':{'bytes':638572,'sha256':'15dabd6c7449929462845a58df6f07929cd31d64cad613a40ca7c4cd317e3da0'}}
+GLIBC_FILES={'manifest.json':GLIBC_MANIFEST_PIN,'prepare_glibc_security_os_cache.py':GLIBC_HELPERS[GLIBC_INSTALLER],
+ 'glibc_image_io.py':GLIBC_HELPERS[GLIBC_IO],**GLIBC_DEBS}
+GLIBC_NAMED={'schema':'glibc84243_exact_runtime_named_context/1','files':GLIBC_FILES,'security_accepted':False}
+GLIBC_ARTIFACT={'id':13077600231,'run':41286801923,'attempt':1,'head':'a80b91eccdcd0b981c3c08888937a739869b64cf',
+ 'name':'trixie241-glibc84243-candidates-PENDING-ROOT-REVIEW-41286801923-1','bytes':35878836,'sha256':'bb5dc6aef44629d0f72cdf095832c4e7ec523eea06902c57121c983f4fb06f22'}
+GLIBC_RECIPE_PIN={'bytes':7308,'sha256':'09f57f4d846f4d6f85bb6fa412b237bdc40b6840743dfb9796facdabc5ee3dcc'}
+CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT),
+ GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT)
 DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 MANIFEST_SHA='fef6305b1d7e6db851d1d0b77f3aa9910aad535e83f64f012790165a3d62c81b'
 ROWS_SHA='75d7d2cfb2c20fd036501e7aac198cb5567fb82c53301fb3972f8c81b935e57f'
@@ -392,7 +410,8 @@ def build_argv(root,contract,controller_signature,epoch,run,attempt,*,role=None)
  for name,value in sorted({**contract['build_args'],'SOURCE_DATE_EPOCH':str(epoch)}.items()):
   need(type(name)is str and re.fullmatch('[A-Z_][A-Z0-9_]*',name)and type(value)is str and '\n'not in value,'build_contract');args+=['--build-arg',name+'='+value]
  return args+['--file',str(root/'sealed/release/deploy/market-data/Dockerfile.capture2'),str(root/'sealed/release')]
-def image_contract(value,receipt,signature,controller_signature):
+def image_contract(value,receipt,signature,controller_signature,glibc_runtime=None):
+ glibc_runtime_record(glibc_runtime)
  need(type(value)is dict and type(value.get('Id'))is str and re.fullmatch('sha256:[a-f0-9]{64}',value['Id'])
   and value.get('Os')=='linux'and value.get('Architecture')=='amd64','image_identity')
  config=value.get('Config');need(type(config)is dict and config.get('User')=='10001:10001'and config.get('WorkingDir')=='/app'
@@ -401,7 +420,9 @@ def image_contract(value,receipt,signature,controller_signature):
  labels={'org.opencontainers.image.revision':receipt['release_commit'],'io.gold-trade.release.tree':receipt['release_tree'],
   'io.gold-trade.release.input-signature':signature,'io.gold-trade.release.controller-input-signature':controller_signature,
   'io.gold-trade.business.source-revision':receipt['business_commit'],'io.gold-trade.business.source-tree':receipt['business_tree'],
-  'io.gold-trade.business.source-manifest':source_parameters(receipt)['manifest_sha256']}
+  'io.gold-trade.business.source-manifest':source_parameters(receipt)['manifest_sha256'],
+  'io.gold-trade.glibc.named-context':glibc_runtime['context_signature'],
+  'io.gold-trade.glibc.Root-qualification':GLIBC_ROOT_PIN['sha256']}
  need(type(config.get('Labels'))is dict and all(config['Labels'].get(key)==item for key,item in labels.items()),'image_labels')
  layers=value.get('RootFS',{}).get('Layers');need(value.get('RootFS',{}).get('Type')=='layers'and type(layers)is list and 0<len(layers)<=128 and all(type(v)is str and re.fullmatch('sha256:[a-f0-9]{64}',v)for v in layers),'image_layers')
  return {'image_id':value['Id'],'rootfs':value['RootFS'],'expected_labels':labels,'public_config_retained_in_ram_only':True}
@@ -507,7 +528,7 @@ def run_owned_probe(root,image,signature,kind,plan,*,guard,role=None):
    if state['Running']:cli(['container','stop','--time','3',cid],maximum=128,seconds=15,enforce=False)
    state=inspect(False).get('State');need(state.get('Running')is False and state.get('Pid')==0,'probe_cleanup')
    cli(['container','rm',cid],maximum=128,seconds=15,enforce=False)
-def receipt_contract(receipt,signature,controllers,cache_rows,epoch):
+def receipt_contract(receipt,signature,controllers,cache_rows,epoch,glibc_runtime=None):
  spec=source_parameters(receipt);role=receipt.get('role')if receipt.get('schema')=='normal_market_git_component_inputs/2'else None
  names=controller_files(role)
  need(type(receipt)is dict and receipt.get('schema')in('normal_market_git_component_inputs/1','normal_market_git_component_inputs/2')
@@ -523,9 +544,10 @@ def receipt_contract(receipt,signature,controllers,cache_rows,epoch):
  for name,row in cache_rows.items():
   need(relative(name)and name.startswith('pip_packages/')and type(row)is dict and set(row)=={'bytes','sha256'}
    and type(row['bytes'])is int and 0<=row['bytes']<=MAX_FILE and hex64(row['sha256']),'cache_binding')
- value={'schema':'normal_market_controller_inputs/1','release_commit':receipt['release_commit'],'release_tree':receipt['release_tree'],
+ glibc_runtime_record(glibc_runtime)
+ value={'schema':'normal_market_controller_inputs/2','release_commit':receipt['release_commit'],'release_tree':receipt['release_tree'],
   'repository_identity':receipt['repository_identity'],'two_git_input_signature':signature,'controller_files':controllers,
-  'normal_cache_files':cache_rows,'source_date_epoch':epoch,'source_signature_format_unchanged':'normal-market-two-git-sources-v1',
+  'normal_cache_files':cache_rows,'glibc_runtime':glibc_runtime,'source_date_epoch':epoch,'source_signature_format_unchanged':'normal-market-two-git-sources-v1',
   'business_tests_actual':False,'complete_control_payload':False,'activation_authority':False,'security_accepted':False}
  return value,sha256(encoded(value)).hexdigest()
 def validate_reader_source(raw):
@@ -636,7 +658,7 @@ def actual_business81(root,raws,controllers,receipt,signature,controller_signatu
  return value
 
 
-def controller_parcel_inputs(root,receipt,controllers,cache):
+def controller_parcel_inputs(root,receipt,controllers,cache,glibc_runtime=None):
  """Explicit full CI source closure, not an operational deployment control."""
  role=receipt.get('role')if receipt.get('schema')=='normal_market_git_component_inputs/2'else None
  count=source_parameters(receipt)['count'];names=controller_files(role);release_count=20+(1 if role is not None else 0)
@@ -648,20 +670,23 @@ def controller_parcel_inputs(root,receipt,controllers,cache):
  for prefix,location,rows in [('release',root/'sealed/release',receipt['release_files']),('product',root/'sealed/product',receipt['product_files']),('controller',root/'controller-source',controllers)]:
   for row in rows:add(prefix+'/'+row['path'],location/row['path'],{k:row[k]for k in('bytes','sha256')},int(row['mode'],8)&0o777)
  for name,pin in cache.items():add('release/'+name,root/'sealed/release'/name,pin,0o644)
+ glibc_runtime_record(glibc_runtime,root)
+ for name,pin in GLIBC_FILES.items():add('glibc-runtime/'+name,root/'glibc-capsule'/name,pin,0o644)
+ add('glibc-runtime-Root-qualification.json',root/'controller-source'/GLIBC_ROOT,GLIBC_ROOT_PIN,0o644)
  need(len(receipt['release_files'])==release_count and len(receipt['product_files'])==count and len(controllers)==len(names)
-  and len(cache)==26 and len(result)==release_count+count+len(names)+26,'controller_parcel_inventory')
+  and len(cache)==26 and len(result)==release_count+count+len(names)+26+6,'controller_parcel_inventory')
  need(sum(s['binding']['bytes']for s in result.values())<=MAX_CONTEXT,'controller_parcel_bound')
  return result
 
 
-def controller_parcel(root,receipt,controllers,cache,signature,controller_signature,epoch,guard,*,retained=None,final_checks=None):
+def controller_parcel(root,receipt,controllers,cache,signature,controller_signature,epoch,guard,*,retained=None,final_checks=None,glibc_runtime=None):
  """Write and verify every selected source byte; no archive extraction/actions."""
  import io
- entries=controller_parcel_inputs(root,receipt,controllers,cache);held=[];out=None;archive=None
+ entries=controller_parcel_inputs(root,receipt,controllers,cache,glibc_runtime);held=[];out=None;archive=None;runtime_readers=None;parcel_primary=None
  rows=[{'path':name,**spec['binding'],'mode':spec['mode']}for name,spec in sorted(entries.items())]
  index={'schema':'normal_market_complete_ci_controller_sources/1','release_commit':receipt['release_commit'],
   'release_tree':receipt['release_tree'],'business_commit':receipt['business_commit'],'business_tree':receipt['business_tree'],
-  'two_git_input_signature':signature,'controller_input_signature':controller_signature,'files':rows,
+  'two_git_input_signature':signature,'controller_input_signature':controller_signature,'glibc_runtime':glibc_runtime,'files':rows,
   'source_date_epoch':epoch,'operational_deployment_control':False,'activation_authority':False,'security_accepted':False}
  raw_index=encoded(index);need(len(raw_index)<=MAX_JSON,'controller_parcel_bound')
  target=root/'controller-sources.tar.gz';fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
@@ -678,17 +703,26 @@ def controller_parcel(root,receipt,controllers,cache,signature,controller_signat
   if last[0]is None or now-last[0]>=1:
    guard()
    for row in held:row.check()
+   if runtime_readers is not None:runtime_readers.check()
    last[0]=now
  try:
-  for name,spec in sorted(entries.items()):held.append(Held(spec['path'],binding=spec['binding'],empty=spec['binding']['bytes']==0))
+  runtime_readers=RuntimeCapsule(root/'glibc-capsule',prior=glibc_runtime['custody'])
+  capsule_by_name={row.path.name:row for row in runtime_readers.inputs.files};payload_rows={}
+  for name,spec in sorted(entries.items()):
+   if name.startswith('glibc-runtime/'):
+    row=capsule_by_name[name.removeprefix('glibc-runtime/')];need(row.path==spec['path']and row.binding==spec['binding'],'glibc_runtime_binding')
+   else:row=Held(spec['path'],binding=spec['binding'],empty=spec['binding']['bytes']==0);held.append(row)
+   payload_rows[name]=row
   with gzip.GzipFile(filename='',fileobj=sink,mode='wb',mtime=0)as compressed:
    with tarfile.open(fileobj=compressed,mode='w|',format=tarfile.USTAR_FORMAT)as archive:
     def write(name,raw,mode):
      check();item=tarfile.TarInfo(name);item.uid=item.gid=0;item.uname=item.gname='';item.mode=mode;item.mtime=epoch;item.size=len(raw);archive.addfile(item,io.BytesIO(raw));check()
     write('controller-manifest.json',raw_index,0o644)
-    for(name,spec),row in zip(sorted(entries.items()),held):write(name,row.raw(MAX_FILE),spec['mode'])
+    for name,spec in sorted(entries.items()):write(name,payload_rows[name].raw(MAX_FILE),spec['mode'])
   os.fsync(fd);created=identity(os.fstat(fd));written_binding={'bytes':sink.count,'sha256':sink.digest.hexdigest()}
   need(created[6]==sink.count and identity(target.lstat())==created,'controller_parcel_binding')
+ except BaseException as primary:
+  parcel_primary=primary;raise
  finally:
   os.close(fd)
   close_error=None
@@ -698,14 +732,20 @@ def controller_parcel(root,receipt,controllers,cache,signature,controller_signat
   for row in held:
    try:row.named()
    except BaseException as e:close_error=e
-  if close_error is not None:raise close_error
+  if runtime_readers is not None:
+   try:runtime_readers.close()
+   except BaseException as e:close_error=e
+  if close_error is not None:
+   if parcel_primary is not None:
+    parcel_primary.glibc_runtime_secondary_codes=[str(close_error)if type(close_error)is RuntimeError else'glibc_runtime_close_unknown'];raise parcel_primary from close_error
+   raise close_error
  archive=Held(target,maximum=MAX_CONTEXT+4*1024**2,binding=written_binding);proofs=[];proof_checks=[]
- prior=[row.named for row in held]+[archive.named]
+ prior=[row.named for row in held]+[runtime_readers.named,archive.named]
  try:
   need(archive.before==created,'controller_parcel_binding')
   verify_controller_parcel(archive,index,guard)
   value={'schema':'normal_market_complete_ci_controller_parcel/1','archive':archive.binding,'index_sha256':sha256(raw_index).hexdigest(),
-   'members':len(rows)+1,'sources':len(rows),'release_files':len(receipt['release_files']),'product_files':len(receipt['product_files']),'controller_files':len(controllers),'cache_files':26,
+   'members':len(rows)+1,'sources':len(rows),'release_files':len(receipt['release_files']),'product_files':len(receipt['product_files']),'controller_files':len(controllers),'cache_files':26,'glibc_runtime_files':6,'glibc_runtime':glibc_runtime,
    'release_commit':receipt['release_commit'],'business_commit':receipt['business_commit'],'two_git_input_signature':signature,
    'controller_input_signature':controller_signature,'complete_ci_controller_payload':True,
    'complete_deployment_control_payload':False,'activation_authority':False,'security_accepted':False}
@@ -823,6 +863,207 @@ def prepare_checked_caches(root,context,receipt,source_guard,*,retained=None,fin
  return release
 
 
+def glibc_binding(raw,pin):
+ need(type(raw)is bytes and {'bytes':len(raw),'sha256':sha256(raw).hexdigest()}==pin,'glibc_runtime_binding')
+def glibc_sources(raws):
+ for name,pin in {**GLIBC_HELPERS,GLIBC_ROOT:GLIBC_ROOT_PIN}.items():glibc_binding(raws[name],pin)
+ adapter=module(raws[GLIBC_ADAPTER],Path(GLIBC_ADAPTER))
+ adapter.admit_future_build('market',pair_ref=GLIBC_ROOT_PIN)
+ need(adapter.APP_NODE_QUALIFICATION_REF is None and adapter.APP_FROZEN_BUSINESS_REF is None,'glibc_runtime_source')
+ need(adapter.named_context_record(GLIBC_FILES)==(GLIBC_NAMED,sha256(encoded(GLIBC_NAMED)).hexdigest()),'glibc_runtime_source')
+ return adapter
+def glibc_runtime_record(value,root=None):
+ need(type(value)is dict and set(value)=={'schema','Root_qualification','named_context','context_signature','custody'}
+  and value['schema']=='normal_market_glibc_runtime_context/1'and value['Root_qualification']==GLIBC_ROOT_PIN
+  and encoded(value['named_context'])==encoded(GLIBC_NAMED)and value['context_signature']==sha256(encoded(GLIBC_NAMED)).hexdigest(),'glibc_runtime_record')
+ custody=value['custody'];need(type(custody)is dict and set(custody)=={'root','directory','directory_flags','parents','files'}
+  and type(custody['root'])is str and Path(custody['root']).is_absolute()
+  and(root is None or custody['root']==str(root/'glibc-capsule')),'glibc_runtime_custody')
+ def ints(items,n):return type(items)is list and len(items)==n and all(type(x)is int for x in items)
+ need(ints(custody['directory'],9)and ints(custody['directory_flags'],2)and type(custody['parents'])is list
+  and all(type(p)is list and len(p)==2 and type(p[0])is str and ints(p[1],5)for p in custody['parents'])
+  and type(custody['files'])is dict and set(custody['files'])==set(GLIBC_FILES),'glibc_runtime_custody')
+ for name,row in custody['files'].items():
+  need(type(row)is dict and set(row)=={'full9','binding','flags','offset','parents'}and ints(row['full9'],9)
+   and row['binding']==GLIBC_FILES[name]and ints(row['flags'],2)and row['flags'][1]==fcntl.FD_CLOEXEC
+   and type(row['offset'])is int and row['offset']==row['full9'][6]==GLIBC_FILES[name]['bytes']
+   and type(row['parents'])is list and all(type(p)is list and len(p)==2 and type(p[0])is str and ints(p[1],5)for p in row['parents']),'glibc_runtime_custody')
+ return value
+class RuntimeCapsule:
+ """Exactly five files; each phase owns fresh originals matching old custody.
+
+ No OFD is claimed to survive separate workflow processes. The serialized first
+ full9/name/parents/pin custody must match BEFORE a later phase uses its own FDs.
+ """
+ def __init__(self,root,*,prior=None,inputs=None):
+  self.root=Path(root);self.inputs=inputs;self.fd=None;self.directory=None;self.states=[];self.closed=False;self.unknown=False
+  try:
+   need(context_rows(self.root,GLIBC_FILES)=={''},'glibc_runtime_inventory')
+   if self.inputs is None:
+    self.inputs=Inputs([]) # Register each successfully acquired prefix at once.
+    for name,pin in sorted(GLIBC_FILES.items()):self.inputs.files.append(Held(self.root/name,binding=pin))
+   need({row.path.name:row.binding for row in self.inputs.files}==GLIBC_FILES
+    and all(row.path==self.root/row.path.name for row in self.inputs.files),'glibc_runtime_inventory')
+   self.parents=[(p,identity(p.lstat())[:5])for p in self.root.parents]
+   self.directory=identity(self.root.lstat());need(stat.S_ISDIR(self.directory[2])and stat.S_IMODE(self.directory[2])==0o755
+    and self.directory[3:5]==(os.geteuid(),os.getegid()),'glibc_runtime_custody')
+   self.fd=os.open(self.root,os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+   self.dflags=(fcntl.fcntl(self.fd,fcntl.F_GETFL),fcntl.fcntl(self.fd,fcntl.F_GETFD));need(self.dflags[1]==fcntl.FD_CLOEXEC,'glibc_runtime_OFD')
+   for row in self.inputs.files:
+    flags=(fcntl.fcntl(row.fd,fcntl.F_GETFL),fcntl.fcntl(row.fd,fcntl.F_GETFD));offset=os.lseek(row.fd,0,os.SEEK_CUR)
+    need(flags[1]==fcntl.FD_CLOEXEC and offset==row.before[6],'glibc_runtime_OFD')
+    self.states.append((row,row.fd,row.before,flags,offset))
+   self.check()
+   if prior is not None:need(encoded(self.custody())==encoded(prior),'glibc_runtime_original_custody_changed')
+  except BaseException as primary:
+   try:self.close()
+   except BaseException as secondary:
+    primary.glibc_runtime_secondary_codes=[str(secondary)if type(secondary)is RuntimeError else'glibc_runtime_close_unknown']
+   raise
+ def custody(self):
+  self.check()
+  return {'root':str(self.root),'directory':list(self.directory),'directory_flags':list(self.dflags),
+   'parents':[[str(p),list(v)]for p,v in self.parents],
+   'files':{row.path.name:{'full9':list(before),'binding':dict(row.binding),'flags':list(flags),'offset':offset,
+    'parents':[[str(p),list(v)]for p,v in row.parents]}for row,fd,before,flags,offset in self.states}}
+ def record(self):return glibc_runtime_record({'schema':'normal_market_glibc_runtime_context/1','Root_qualification':dict(GLIBC_ROOT_PIN),
+  'named_context':document(encoded(GLIBC_NAMED)),'context_signature':sha256(encoded(GLIBC_NAMED)).hexdigest(),'custody':self.custody()},self.root.parent)
+ def named(self):
+  if self.inputs is not None:self.inputs.named()
+  if self.directory is not None:need(self.root.resolve(strict=True)==self.root and identity(self.root.lstat())==self.directory
+   and all(p.resolve(strict=True)==p and identity(p.lstat())[:5]==v for p,v in self.parents),'glibc_runtime_changed')
+ def check(self):
+  need(not self.closed,'glibc_runtime_closed');self.named()
+  if self.fd is not None:need(identity(os.fstat(self.fd))==self.directory
+   and(fcntl.fcntl(self.fd,fcntl.F_GETFL),fcntl.fcntl(self.fd,fcntl.F_GETFD))==self.dflags,'glibc_runtime_OFD')
+  for row,fd,before,flags,offset in self.states:
+   need(row.fd==fd and row.before==before and row.binding==GLIBC_FILES[row.path.name],'glibc_runtime_changed');row.check()
+   need((fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))==flags and os.lseek(fd,0,os.SEEK_CUR)==offset,'glibc_runtime_OFD')
+ def inventory(self):self.check();need(context_rows(self.root,GLIBC_FILES)=={''},'glibc_runtime_inventory')
+ def close(self):
+  if self.closed:
+   need(not self.unknown,'glibc_runtime_close_unknown')
+   try:return self.named()
+   except BaseException:
+    self.unknown=True;raise
+  primary=None;secondary=[]
+  try:self.check()
+  except BaseException as error:primary=error
+  self.closed=True
+  rows=[]if self.inputs is None else self.inputs.files
+  for row in reversed(rows):
+   fd=row.fd
+   if fd is None:continue
+   try:
+    need(identity(os.fstat(fd))[:6]==row.before[:6],'glibc_runtime_foreign_FD')
+   except BaseException as error:
+    secondary.append('glibc_runtime_foreign_FD');continue
+   try:row.close()
+   except BaseException as error:
+    if primary is None:primary=error
+   try:os.fstat(fd)
+   except OSError as error:
+    if error.errno!=errno.EBADF:secondary.append('glibc_runtime_close_unknown')
+   else:secondary.append('glibc_runtime_close_unknown')
+  if self.fd is not None:
+   fd=self.fd
+   try:
+    need(identity(os.fstat(fd))[:6]==self.directory[:6],'glibc_runtime_foreign_FD');os.close(fd)
+    try:os.fstat(fd)
+    except OSError as error:need(error.errno==errno.EBADF,'glibc_runtime_close_unknown')
+    else:need(False,'glibc_runtime_close_unknown')
+   except BaseException as error:secondary.append('glibc_runtime_close_unknown')
+  try:self.named()
+  except BaseException as error:
+   if primary is None:primary=error
+  self.unknown=bool(secondary)or primary is not None
+  if primary is not None:
+   primary.glibc_runtime_secondary_codes=secondary;raise primary
+  need(not secondary,'glibc_runtime_close_unknown')
+def glibc_artifact_metadata(run,artifact):
+ s=GLIBC_ARTIFACT
+ need(type(run)is dict and type(run.get('id'))is int and run['id']==s['run']and type(run.get('run_attempt'))is int
+  and run['run_attempt']==s['attempt']and run.get('head_sha')==s['head']and run.get('status')=='completed'
+  and run.get('conclusion')=='success'and run.get('event')=='workflow_dispatch'
+  and run.get('path')=='.github/workflows/two-profile-glibc-evidence-successor.yml','glibc_runtime_artifact')
+ need(type(artifact)is dict and type(artifact.get('id'))is int and artifact['id']==s['id']and artifact.get('name')==s['name']
+  and type(artifact.get('size_in_bytes'))is int and artifact['size_in_bytes']==s['bytes']and artifact.get('expired')is False
+  and artifact.get('digest')=='sha256:'+s['sha256'],'glibc_runtime_artifact')
+ w=artifact.get('workflow_run');need(type(w)is dict and w.get('id')==s['run']and w.get('head_sha')==s['head']
+  and w.get('head_branch')=='main'and w.get('repository_id')==w.get('head_repository_id')==1065680631,'glibc_runtime_artifact')
+ return True
+def glibc_prepare_boundary(root):
+ need(os.getuid()==os.geteuid()==1001 and os.environ.get('GITHUB_ACTIONS')=='true'
+  and os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted'and os.environ.get('GITHUB_REPOSITORY')==REPOSITORY
+  and os.environ.get('GITHUB_REF')=='refs/heads/main','hosted_main_only')
+ temporary=Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+ need(root.resolve(strict=True)==root and root.is_relative_to(temporary)and root!=temporary,'root_scope')
+def prepare_glibc_runtime(root,raws,epoch,guard,evidence,evidence_checks):
+ """Only the authenticated existing candidate ZIP; no Release or business IO."""
+ source_guard=guard
+ def guard():
+  source_guard()
+  for row in evidence:row.check()
+ glibc_prepare_boundary(root);adapter=glibc_sources(raws);packages=root/'glibc-qualified-inputs';packages.mkdir(mode=0o700);cache=root/'glibc-capsule'
+ s=GLIBC_ARTIFACT;api='repos/'+REPOSITORY+'/actions/'
+ run=document(command(['/usr/bin/gh','api',api+'runs/'+str(s['run'])],environment=environment(root,token=True),maximum=131072,guard=guard))
+ artifact=document(command(['/usr/bin/gh','api',api+'artifacts/'+str(s['id'])],environment=environment(root,token=True),maximum=131072,guard=guard))
+ glibc_artifact_metadata(run,artifact)
+ publish_known(root/'glibc-artifact-input.json',encoded({'run':run,'artifact':artifact,'security_accepted':False}),retained=evidence,final_checks=evidence_checks)
+ target=root/'glibc-candidate.zip';fd=os.open(target,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600);finished={}
+ def completed(binding,frame):need(not finished,'glibc_runtime_artifact');finished.update(binding=binding,frame=frame)
+ try:
+  command(['/usr/bin/gh','api','--method','GET',api+'artifacts/'+str(s['id'])+'/zip'],environment=environment(root,token=True),seconds=300,
+   maximum=s['bytes'],target=fd,guard=guard,stream_complete=completed)
+  need(finished.get('binding')=={k:s[k]for k in('bytes','sha256')},'glibc_runtime_artifact')
+  archive=hold_written(target,fd,s['bytes'],binding=finished['binding'],expected_frame=finished['frame'],guard=guard);evidence.append(archive)
+ finally:os.close(fd)
+ rootrow=public_probe_file(packages/'Root-qualification.json',raws[GLIBC_ROOT],evidence,guard)
+ with os.fdopen(os.dup(archive.fd),'rb')as stream:
+  stream.seek(0)
+  with zipfile.ZipFile(stream)as incoming:
+   entries=incoming.infolist();need(1<=len(entries)<=96 and len({r.filename for r in entries})==len(entries),'glibc_runtime_artifact')
+   for name,pin in sorted(GLIBC_DEBS.items()):
+    member=incoming.getinfo(name);need(member.filename==name and not member.is_dir()and member.file_size==pin['bytes']
+     and stat.S_IFMT(member.external_attr>>16)in(0,stat.S_IFREG),'glibc_runtime_artifact');guard();archive.check()
+    with incoming.open(member)as body:raw=body.read(pin['bytes']+1)
+    glibc_binding(raw,pin)
+    # These exact2 public DEBs exceed the controller-source helper's256KiB
+    # bound. Keep their fixed pins and use the existing bounded data writer.
+    publish_known(packages/name,raw,retained=evidence,final_checks=evidence_checks);archive.check();guard()
+ archive.check();rootrow.check();guard()
+ env=environment(root);env.update({key:os.environ[key]for key in('GITHUB_ACTIONS','RUNNER_ENVIRONMENT','GITHUB_REPOSITORY','GITHUB_REF','RUNNER_TEMP')})
+ raw=command([sys.executable,'-I','-S','-B',str(root/'controller-source'/GLIBC_INSTALLER),'--cache-dir',str(cache),'--package-dir',str(packages)],
+  environment=env,seconds=600,maximum=65536,guard=guard)
+ need(document(raw).get('status')=='cache_prepared','glibc_runtime_prepare')
+ owned=Inputs([(cache/name,pin,False)for name,pin in sorted(GLIBC_FILES.items())])
+ try:
+  restamp(cache,GLIBC_FILES,epoch,source_rows=owned.files)
+  capsule=RuntimeCapsule(cache,inputs=owned)
+ except BaseException:
+  owned.close();raise
+ # Ownership transfers to this one phase's registered capsule before use.
+ evidence.append(capsule);record=capsule.record();guard();return adapter,record,capsule
+def reopen_glibc_runtime(root,record,resources,contexts=None):
+ value=glibc_runtime_record(record['controller_inputs']['glibc_runtime'],root)
+ need(record.get('glibc_runtime')==value,'glibc_runtime_record')
+ if contexts is not None:
+  need(type(contexts)is dict and set(contexts)=={'schema','release','product','glibc_runtime','two_git_input_signature','controller_input_signature','source_date_epoch','security_accepted'}
+   and contexts['schema']=='normal_market_two_git_glibc_context_inputs/1'and contexts['security_accepted']is False
+   and contexts['glibc_runtime']==value and contexts['source_date_epoch']==record['controller_inputs']['source_date_epoch'],'glibc_runtime_record')
+ need(type(record.get('run_id'))is int and record['run_id']==int(os.environ['GITHUB_RUN_ID'])
+  and type(record.get('run_attempt'))is int and record['run_attempt']==int(os.environ['GITHUB_RUN_ATTEMPT'])
+  and record['source_inputs']['release_commit']==os.environ.get('GITHUB_SHA'),'glibc_runtime_subject')
+ rebuilt,signature=receipt_contract(record['source_inputs'],record['two_git_input_signature'],record['controller_inputs']['controller_files'],
+  record['controller_inputs']['normal_cache_files'],record['controller_inputs']['source_date_epoch'],value)
+ need(rebuilt==record['controller_inputs']and signature==record['controller_input_signature'],'controller_signature')
+ held=RuntimeCapsule(root/'glibc-capsule',prior=value['custody']);resources.append(held);held.inventory();return value
+def glibc_build_argv(adapter,original,root,runtime):
+ glibc_runtime_record(runtime,root)
+ need(not any('glibc-runtime='in x or 'io.gold-trade.glibc.'in x for x in original),'glibc_runtime_argv')
+ result=adapter.extend_argv(original,str(root/'glibc-capsule'),runtime['context_signature'])
+ return result[:8]+['--label','io.gold-trade.glibc.Root-qualification='+GLIBC_ROOT_PIN['sha256']]+result[8:]
+
 def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
  """Concrete normal build; separate full business/acceptance gates stay open."""
  global PHASE
@@ -840,20 +1081,22 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
   PHASE='git_product_seal';sealer.seal(sealer.GitRepository(repo),release,root/'sealed',role=role)
   source=Held(root/'sealed/source-inputs.json',maximum=MAX_JSON);evidence.append(source);sealed=document(source.raw())
   receipt=sealed['inputs'];signature=sealed['input_signature'];sealer.input_receipt(receipt,signature);require_selected(receipt,role)
+  need(next(({k:r[k]for k in('bytes','sha256')}for r in receipt['release_files']if r['path']=='deploy/market-data/Dockerfile.capture2'),None)==GLIBC_RECIPE_PIN,'glibc_runtime_recipe')
   need(receipt['repository_identity']=={'host':'github.com','repository':REPOSITORY},'repository_identity')
   before_main=live_main(root,receipt['repository_identity'],release);epoch=source_epoch(repo,release)
   default_driver(root);context=root/'sealed/release';product=root/'sealed/product';(context/'pip_packages').mkdir(mode=0o755)
   def source_check():
    original.check();controller_hold.check()
    space=os.statvfs(root);need(space.f_bavail*space.f_frsize>=RESERVE,'disk_reserve')
+  PHASE='glibc_runtime_prepare';runtime_adapter,runtime,runtime_capsule=prepare_glibc_runtime(root,raws,epoch,source_check,evidence,evidence_checks)
   release_sources=prepare_checked_caches(root,context,receipt,source_check,retained=evidence,final_checks=evidence_checks)
   cache,sqlite=cache_inputs(context,receipt)
   expected={r['path']:{k:r[k]for k in ('bytes','sha256')}for r in receipt['release_files']};need(not set(expected)&set(cache),'context_inventory');expected.update(cache)
   product_expected={r['path']:{k:r[k]for k in ('bytes','sha256')}for r in receipt['product_files']}
-  need(sum(row['bytes']for row in expected.values())+sum(row['bytes']for row in product_expected.values())<=MAX_CONTEXT,'context_bound')
+  need(sum(row['bytes']for row in expected.values())+sum(row['bytes']for row in product_expected.values())+sum(row['bytes']for row in GLIBC_FILES.values())<=MAX_CONTEXT,'context_bound')
   PHASE='context_restamp';restamp(context,expected,epoch,source_rows=release_sources.files,retained=evidence,final_checks=evidence_checks);restamp(product,product_expected,epoch,retained=evidence,final_checks=evidence_checks)
   snapshots.append(ContextSnapshot(context,expected));snapshots.append(ContextSnapshot(product,product_expected))
-  controller,controller_signature=receipt_contract(receipt,signature,controllers,cache,epoch)
+  controller,controller_signature=receipt_contract(receipt,signature,controllers,cache,epoch,runtime)
   def check():
    original.check();controller_hold.check()
    for row in evidence:row.check()
@@ -868,16 +1111,17 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
   revalidate_source();before_main=live_main(root,receipt['repository_identity'],release)
   publish_known(root/'source-identity.json',encoded({'schema':'normal_market_source_identity/1','inputs':receipt,'input_signature':signature,
    'controller':controller,'controller_signature':controller_signature,'live_main_before_build':before_main,'security_accepted':False}),retained=evidence,final_checks=evidence_checks)
-  publish_known(root/'input-manifest.json',encoded({'schema':'normal_market_two_context_inputs/1','release':expected,'product':product_expected,
-   'two_git_input_signature':signature,'controller_input_signature':controller_signature,'source_date_epoch':epoch,'security_accepted':False}),retained=evidence,final_checks=evidence_checks)
+  publish_known(root/'input-manifest.json',encoded({'schema':'normal_market_two_git_glibc_context_inputs/1','release':expected,'product':product_expected,
+   'glibc_runtime':runtime,'two_git_input_signature':signature,'controller_input_signature':controller_signature,'source_date_epoch':epoch,'security_accepted':False}),retained=evidence,final_checks=evidence_checks)
   argv=build_argv(root,sealer.build_contract(receipt,signature,root/'sealed'),controller_signature,epoch,os.environ['GITHUB_RUN_ID'],os.environ['GITHUB_RUN_ATTEMPT'],role=role)
+  argv=glibc_build_argv(runtime_adapter,argv,root,runtime)
   PHASE='ordinary_build';log=os.open(root/'build.log',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
   try:command(argv,environment=environment(root),seconds=2400,maximum=MAX_LOG,target=log,guard=periodic(check))
   finally:os.fsync(log);os.close(log)
   iid=Held(root/'candidate-image.id',maximum=128);evidence.append(iid);image=iid.raw(128).decode().strip()
   need(re.fullmatch('sha256:[a-f0-9]{64}',image),'image_identity')
   def inspect():return document(command([*DOCKER,'image','inspect','--format','{{json .}}',image],environment=environment(root),guard=check))
-  PHASE='actual_image';before=inspect();image_record=image_contract(before,receipt,signature,controller_signature)
+  PHASE='actual_image';before=inspect();image_record=image_contract(before,receipt,signature,controller_signature,runtime)
   if role is None:
    save(root/'proof/reader.py',raws[READER],mode=0o444);proof=Held(root/'proof/reader.py',maximum=MAX_SOURCE,binding={'bytes':len(raws[READER]),'sha256':sha256(raws[READER]).hexdigest()})
   else:
@@ -899,14 +1143,14 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
    need(relative(name)and name.split('/')[0]in('base-nonroot','base-root','added-replay')and name.split('/')[-1]in('intent.json','received.json','profile.json','tests.stderr','container-closed.json'),'business81_actual')
    needed.append((business_root/name,pin,pin['bytes']==0))
   business_hold=Inputs(needed)
-  PHASE='controller_sources_parcel';parcel=controller_parcel(root,receipt,controllers,cache,signature,controller_signature,epoch,check,retained=evidence,final_checks=evidence_checks)
+  PHASE='controller_sources_parcel';parcel=controller_parcel(root,receipt,controllers,cache,signature,controller_signature,epoch,check,retained=evidence,final_checks=evidence_checks,glibc_runtime=runtime)
   publish_known(root/'reports/actual-historical81.json',encoded(actual81),retained=evidence,final_checks=evidence_checks)
 
   PHASE='build_finalization';revalidate_source();after_main=live_main(root,receipt['repository_identity'],release)
-  need(inspect()['Config']==before['Config'],'image_config');image_contract(inspect(),receipt,signature,controller_signature)
+  need(inspect()['Config']==before['Config'],'image_config');image_contract(inspect(),receipt,signature,controller_signature,runtime)
   published={'schema':'normal_market_capture2_image_build/1','status':'built_not_accepted',**image_record,'source_inputs':receipt,
    'run_id':int(os.environ['GITHUB_RUN_ID']),'run_attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),
-   'two_git_input_signature':signature,'controller_inputs':controller,'controller_input_signature':controller_signature,
+   'two_git_input_signature':signature,'controller_inputs':controller,'controller_input_signature':controller_signature,'glibc_runtime':runtime,
    'live_main_before_build':before_main,'live_main_after_build':after_main,'actual_source93_completed':True,'actual_sqlite_completed':True,
    'hosted_vm_observed':{'cpu_count':os.cpu_count(),'physical_memory_bytes':os.sysconf('SC_PHYS_PAGES')*os.sysconf('SC_PAGE_SIZE'),
     'resource_boundary':'dedicated_GitHub_hosted_job_VM','job_timeout_minutes':60,'client_cgroup_limit_claimed':False},
@@ -963,13 +1207,14 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
    and type(record.get('run_id'))is int and record['run_id']==int(os.environ['GITHUB_RUN_ID'])
    and type(record.get('run_attempt'))is int and record['run_attempt']==int(os.environ['GITHUB_RUN_ATTEMPT']),'build_receipt')
   need(contexts.get('two_git_input_signature')==signature and contexts.get('controller_input_signature')==csig,'build_receipt')
+  runtime=reopen_glibc_runtime(root,record,snapshots,contexts)
   # Re-admit the same normal Git sources; no old single-tree receipt is eligible.
   sealer_raw=git_source(repo,release,SEALER);sealer=module(sealer_raw,root/'controller-source'/SEALER)
   current=sealer.collect(sealer.GitRepository(repo),release,sealer_raw,role=role);need(current[0]==receipt and current[1]==signature,'source_changed')
   snapshots.append(ContextSnapshot(root/'sealed/release',contexts['release']));snapshots.append(ContextSnapshot(root/'sealed/product',contexts['product']))
   for row in record['controller_inputs']['controller_files']:
    raw=git_source(repo,release,row['path']);need(len(raw)==row['bytes']and sha256(raw).hexdigest()==row['sha256'],'controller_source')
-  reconstructed,recomputed=receipt_contract(receipt,signature,record['controller_inputs']['controller_files'],record['controller_inputs']['normal_cache_files'],source_epoch(repo,release))
+  reconstructed,recomputed=receipt_contract(receipt,signature,record['controller_inputs']['controller_files'],record['controller_inputs']['normal_cache_files'],source_epoch(repo,release),runtime)
   need(reconstructed==record['controller_inputs']and recomputed==csig,'controller_signature')
   need(record.get('actual_role_source_completed'if role is not None else'actual_source93_completed')is True,'source93_probe')
   if role is not None:validate_source_probe(record['actual_role_source'],receipt)
@@ -981,7 +1226,7 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
    space=os.statvfs(root);need(space.f_bavail*space.f_frsize>=RESERVE,'disk_reserve')
   def inspect():
    value=document(command([*DOCKER,'image','inspect','--format','{{json .}}',image],environment=environment(root),guard=check))
-   image_contract(value,receipt,signature,csig);return value
+   image_contract(value,receipt,signature,csig,runtime);return value
   before=inspect();PHASE='raw_report_binding';counts,reports=raw_reports(root,image,retained=evidence,final_checks=evidence_checks)
   PHASE='ordinary_image_export';path=root/'candidate-image.tar';fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
   completion={}
@@ -1017,7 +1262,7 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
   for snap in snapshots:snap.inventory()
   output={'schema':'normal_market_two_git_image_export/1','status':'exported_not_accepted','image_id':image,'image_config_id':config_id,
    'release_commit':release,'release_tree':receipt['release_tree'],'business_commit':receipt['business_commit'],'business_tree':receipt['business_tree'],
-   'two_git_input_signature':signature,'controller_input_signature':csig,'controller_inputs':record['controller_inputs'],
+   'two_git_input_signature':signature,'controller_input_signature':csig,'controller_inputs':record['controller_inputs'],'glibc_runtime':runtime,
    'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'rootfs':before['RootFS'],
    'archive':{'format':'docker-archive+gzip',**gz_hold.binding,'uncompressed_bytes':tar_hold.binding['bytes'],'uncompressed_sha256':tar_hold.binding['sha256']},
    'raw_counts':counts,'reports':reports,'live_main_before_export':before_main,'live_main_after_export':after_main,
@@ -1033,7 +1278,9 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
  need(output is not None,'export_not_completed');publish_known(root/'image-export.json',encoded(output),[row.named for row in resources if row is not None],retained=retained,final_checks=final_checks);return output
 def raw_gate(root,repo,*,retained=None,final_checks=None,role=None):
  hosted(root,repo);row=Held(root/'image-build.json',maximum=MAX_JSON);evidence=[];checks=[]
- try:record=document(row.raw());require_selected(record['source_inputs'],role);counts,_=raw_reports(root,record['image_id'],retained=evidence,final_checks=checks)
+ try:
+  record=document(row.raw());require_selected(record['source_inputs'],role);reopen_glibc_runtime(root,record,evidence)
+  counts,_=raw_reports(root,record['image_id'],retained=evidence,final_checks=checks)
  finally:finish_or_transfer([*evidence,row],checks,retained,final_checks)
  need(counts['HIGH']==counts['CRITICAL']==0,'raw_high_critical_findings')
  return {'status':'raw_high_critical_zero','security_accepted':False}
@@ -1096,6 +1343,8 @@ def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None):
  try:
   build=Held(root/'image-build.json',maximum=MAX_JSON);held.append(build);export=Held(root/'image-export.json',maximum=MAX_JSON);held.append(export)
   record=document(build.raw());out=document(export.raw());receipt=record['source_inputs'];require_selected(receipt,role);release=receipt['release_commit'];signature=record['two_git_input_signature'];csig=record['controller_input_signature']
+  runtime=reopen_glibc_runtime(root,record,snapshots)
+  need(out.get('glibc_runtime')==runtime,'glibc_runtime_record')
   need(release==os.environ.get('GITHUB_SHA')and out.get('image_id')==record['image_id']and out.get('two_git_input_signature')==signature
    and out.get('controller_input_signature')==csig and out.get('run_id')==os.environ['GITHUB_RUN_ID']and out.get('run_attempt')==os.environ['GITHUB_RUN_ATTEMPT']
    and record.get('historical81_business_tests_completed')is True and out.get('historical81_business_tests_completed')is True,'business81_actual')
@@ -1104,7 +1353,7 @@ def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None):
   for row in record['controller_inputs']['controller_files']:
    raw=git_source(repo,release,row['path']);need((len(raw),sha256(raw).hexdigest())==(row['bytes'],row['sha256']),'controller_source')
    held.append(Held(root/'controller-source'/row['path'],maximum=MAX_CONTROLLER_SOURCE,binding={k:row[k]for k in('bytes','sha256')}))
-  recomputed,rsig=receipt_contract(receipt,signature,record['controller_inputs']['controller_files'],record['controller_inputs']['normal_cache_files'],source_epoch(repo,release))
+  recomputed,rsig=receipt_contract(receipt,signature,record['controller_inputs']['controller_files'],record['controller_inputs']['normal_cache_files'],source_epoch(repo,release),runtime)
   need(recomputed==record['controller_inputs']and rsig==csig,'controller_signature')
   def check():
    for row in [*held,*evidence]:row.check()
@@ -1116,12 +1365,12 @@ def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None):
   plans=B.profiles(selection,image=record['image_id'],release_commit=release,two_git_signature=signature,candidate_product=candidate)
   joined=B.join_actual_results(selection,plans,profiles,expected_manifest_sha256=business['test_sources_sha256'])
   need(joined['tests']==81 and joined['selected_test_ids']==business['selected_test_ids'],'business81_actual')
-  cache=record['controller_inputs']['normal_cache_files'];entries=controller_parcel_inputs(root,receipt,record['controller_inputs']['controller_files'],cache)
+  cache=record['controller_inputs']['normal_cache_files'];entries=controller_parcel_inputs(root,receipt,record['controller_inputs']['controller_files'],cache,runtime)
   snapshots.append(ContextSnapshot(root/'sealed/release',{r['path']:{k:r[k]for k in('bytes','sha256')}for r in receipt['release_files']}|cache))
   snapshots.append(ContextSnapshot(root/'sealed/product',{r['path']:{k:r[k]for k in('bytes','sha256')}for r in receipt['product_files']}))
   index={'schema':'normal_market_complete_ci_controller_sources/1','release_commit':release,'release_tree':receipt['release_tree'],
    'business_commit':receipt['business_commit'],'business_tree':receipt['business_tree'],'two_git_input_signature':signature,'controller_input_signature':csig,
-   'files':[{'path':name,**spec['binding'],'mode':spec['mode']}for name,spec in sorted(entries.items())],
+   'glibc_runtime':runtime,'files':[{'path':name,**spec['binding'],'mode':spec['mode']}for name,spec in sorted(entries.items())],
    'source_date_epoch':record['controller_inputs']['source_date_epoch'],'operational_deployment_control':False,'activation_authority':False,'security_accepted':False}
   pin=record['controller_parcel']['archive'];parcel=Held(root/'controller-sources.tar.gz',maximum=MAX_CONTEXT+4*1024**2,binding=pin);held.append(parcel)
   verify_controller_parcel(parcel,index,check)
@@ -1130,7 +1379,7 @@ def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None):
   counts,report_pins=raw_reports(root,record['image_id'],retained=evidence,final_checks=evidence_checks)
   live_main(root,receipt['repository_identity'],release);check()
   value={'schema':'normal_market_ci_observed_evidence/1','status':'existing_evidence_observed_not_security_accepted','image_id':record['image_id'],
-   'release_commit':release,'business_commit':receipt['business_commit'],'two_git_input_signature':signature,'controller_input_signature':csig,
+   'release_commit':release,'business_commit':receipt['business_commit'],'two_git_input_signature':signature,'controller_input_signature':csig,'glibc_runtime':runtime,
    'historical_business_tests':81,'source_files':len(receipt['product_files']),'complete_ci_controller_payload':True,'controller_sources':len(entries),
    'complete_deployment_control_payload':False,'physical_image_archive_admission_complete':False,
    'owned_cleanup_evidence_complete':False,'same_image_security_assessment_complete':False,
@@ -1174,6 +1423,7 @@ def main(argv=None,*,retained=None,final_checks=None):
 
 CODES=frozenset(('archive_bound', 'archive_config', 'archive_shape', 'arguments', 'build_contract', 'build_not_completed', 'build_receipt', 'buildx_driver', 'cache_binding', 'cache_inventory', 'clean_main_required', 'command_bound', 'command_contract', 'command_failed', 'command_timeout', 'context_bound', 'context_changed', 'context_directory', 'context_inventory', 'controller_inventory', 'controller_signature', 'controller_source', 'controller_source_bound', 'disk_reserve', 'export_not_completed', 'historical81_business_producer_not_integrated', 'hosted_main_only', 'image_config', 'image_identity', 'image_labels', 'image_layers', 'json_bound', 'json_duplicate', 'json_nonfinite', 'live_main_changed', 'live_main_scope', 'normal_main_integration_unarmed', 'normal_workflow_token_required', 'output_bound', 'output_write', 'probe_cleanup', 'probe_exit', 'probe_isolation', 'probe_mounts', 'probe_owner', 'probe_resources', 'probe_scope', 'raw_high_critical_findings', 'release_commit', 'report_changed', 'report_identity', 'report_shape', 'repository_identity', 'root_scope', 'source93_probe', 'source_binding', 'source_bound', 'source_changed', 'source_contract', 'source_epoch', 'source_file', 'source_parent', 'sqlite_lock', 'sqlite_probe', 'two_git_signature', 'vendor_lock'))
 CODES=CODES|frozenset(('separate_role_fixture_review_required','role_fixture_helper_pin','role_fixture_contract_pin','coreutils_lock','role_component','role_catalog','role_manifest','role_receipt','role_candidate','reader_role_source_pin','reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
+CODES=CODES|frozenset(('glibc_runtime_binding', 'glibc_runtime_source', 'glibc_runtime_record', 'glibc_runtime_custody', 'glibc_runtime_inventory', 'glibc_runtime_OFD', 'glibc_runtime_original_custody_changed', 'glibc_runtime_changed', 'glibc_runtime_closed', 'glibc_runtime_close_unknown', 'glibc_runtime_foreign_FD', 'glibc_runtime_artifact', 'glibc_runtime_prepare', 'glibc_runtime_subject', 'glibc_runtime_argv', 'glibc_runtime_recipe'))
 def closed_failure(error):
  def fields(exc):
   code=exc.args[0]if type(exc)is RuntimeError and len(exc.args)==1 and type(exc.args[0])is str and exc.args[0]in CODES else'unclassified'
@@ -1181,10 +1431,11 @@ def closed_failure(error):
   return code,kind
  code,kind=fields(error)
  history=OUTER_FAILURE if OUTER_FAILURE is not None and OUTER_FAILURE[0]is error else None
- return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','git_product_seal','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
+ return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','git_product_seal','glibc_runtime_prepare','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
   'code':code,'exception_class':kind,'outer_physical_finalizers_completed':bool(history is not None and OUTER_PHYSICAL_FINALIZERS_COMPLETED),
   'original_failure_code':fields(history[1])[0]if history is not None and history[1]is not None else None,
   'physical_finalizer_failures':[{'stage':stage,'code':fields(exc)[0],'exception_class':fields(exc)[1]}for stage,exc in history[2]]if history is not None else[],
+  'runtime_secondary_codes':[c if type(c)is str and c in CODES and c.startswith('glibc_runtime_')else'glibc_runtime_close_unknown'for c in getattr(error,'glibc_runtime_secondary_codes',[])],
   'activation_authority':False,'security_accepted':False}
 
 if __name__=='__main__':

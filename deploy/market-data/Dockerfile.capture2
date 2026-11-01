@@ -98,6 +98,11 @@ ENV LANG=C.UTF-8 \
 
 COPY --from=assembly /rootfs/ /
 WORKDIR /app
+# Exact local glibc runtime pair; assembly/toolchain base stays unchanged.
+RUN --network=none \
+    --mount=type=bind,from=glibc-runtime,target=/glibc-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-S", "-B", "/glibc-capsule/prepare_glibc_security_os_cache.py", "--install-image-cache", "--cache-dir", "/glibc-capsule"]
 RUN python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python
 RUN python -I -B /usr/local/libexec/verify_sqlite_runtime.py
 RUN --network=none python -I -S -B /usr/local/libexec/probe_python_micro_release.py --image-self-check
