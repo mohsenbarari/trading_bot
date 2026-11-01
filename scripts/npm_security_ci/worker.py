@@ -332,6 +332,34 @@ def upstream(spec,profile,node,workspace,out,env,*,test_node=None):
  artifact=log/(p['id']+'.tgz');shutil.copyfile(packs[0],artifact);archive_proof=qualify_tar(artifact,p,package)
  return{'schema':'qualified_upstream_fork/1','profile':p['id'],'original_commit':p['commit'],'original_version':p['version'],'fork_version':p['fork_version'],'source_preimage_sha256':sha256(raw).hexdigest(),'source_postimage_sha256':sha256(patched).hexdigest(),'type_only_compatibility':compatibility,'bounded_maintainer_regression':regression,'maintainer_test_node_version':spec['maintainer_test_node']['version']if p['kind']=='glob'else spec['node_version'],'Node24_compiler_output_unchanged_through_test_hooks':True if p['kind']=='glob'else None,'original_runtime_snapshot':snapshot,'archive_proof':archive_proof,'full_upstream_tests_passed':True,'two_builds_and_packages_identical':True,'tar':{'name':artifact.name,'bytes':artifact.stat().st_size,'sha256':digest(artifact)},'records':records,'security_accepted':False}
 
+def portable_overrides(lock,forkpaths):
+ # npm11 resolves file overrides from registry consumers' physical directory,
+ # but from the project for file-tar fork parents. Keep these proven bases
+ # distinct; refuse consumer movement instead of silently rebasing a graph.
+ parents={
+  'workbox-build@7.4.0':('workbox-build','7.4.0','node_modules/workbox-build',{'@rollup/plugin-node-resolve':'resolve','glob':'glob11'}),
+  'js-beautify@1.15.4':('js-beautify','1.15.4','node_modules/js-beautify',{'glob':'glob10'}),
+  '@typescript-eslint/typescript-estree@8.46.1':('@typescript-eslint/typescript-estree','8.46.1','node_modules/@typescript-eslint/typescript-estree',{'minimatch':'mm9'}),
+  'editorconfig@1.0.7':('editorconfig','1.0.7','node_modules/editorconfig',{'minimatch':'mm9'}),
+ }
+ need(set(forkpaths)=={'glob10','glob11','mm9','mm10','resolve'}and all(value=='file:vendor/security-backports/'+key+'.tgz'for key,value in forkpaths.items()),'fixed_portable_fork_paths')
+ result={}
+ for selector,(name,version,path,children)in parents.items():
+  found=[key for key,row in lock['packages'].items()if key and package_identity(key,row)[:2]==(name,version)]
+  need(found==[path],'portable_override_parent_placement')
+  result[selector]={child:'file:'+'../'*len(PurePosixPath(path).parts)+forkpaths[profile][5:]for child,profile in children.items()}
+ # Keep each fork's child rule on that same override edge: a sibling root
+ # glob selector is shadowed by the explicit parent-to-glob replacement.
+ for selector,child,version in(('js-beautify@1.15.4','mm9','10.5.0'),('workbox-build@7.4.0','mm10','11.1.0')):
+  result[selector]['glob@'+version+' || '+version+'-project.security.1']={'.':result[selector].pop('glob'),'minimatch':forkpaths[child]}
+ result['glob@10.5.0 || 10.5.0-project.security.1']={'minimatch':forkpaths['mm9']}
+ result['glob@11.1.0 || 11.1.0-project.security.1']={'minimatch':forkpaths['mm10']}
+ # npm virtual-tree reconstruction may drop a hoisted FILE parent's inherited
+ # context. Exact root fallbacks cover only the two declared target versions.
+ result['minimatch@9.0.9 || 9.0.9-project.security.1']=forkpaths['mm9']
+ result['minimatch@10.2.5 || 10.2.5-project.security.1']=forkpaths['mm10']
+ return result
+
 def frontend(spec,repo,artifacts,node,out,env):
  front=repo/'frontend';original=(front/'package-lock.json').read_bytes();need(sha256(original).hexdigest()==spec['lock_sha256'],'project_lock_changed');baseline=read_json(front/'package-lock.json');records=[]
  npm=[str(node),str(node.parent.parent/'lib/node_modules/npm/bin/npm-cli.js')]
@@ -343,8 +371,12 @@ def frontend(spec,repo,artifacts,node,out,env):
   reports=list(artifacts.rglob(p['id']+'/RESULT.json'));need(len(reports)==1,'upstream_result_inventory');result=read_json(reports[0]);need(result['profile']==p['id']and result['original_commit']==p['commit']and result['fork_version']==p['fork_version']and result['full_upstream_tests_passed']is True and result['two_builds_and_packages_identical']is True,'upstream_success_required')
   need(result['tar']['name']==p['id']+'.tgz','fixed_upstream_tar_name');tar=reports[0].parent/result['tar']['name'];need(digest(tar)==result['tar']['sha256'],'upstream_tar');target=vendor/(p['id']+'.tgz');shutil.copyfile(tar,target);forkpaths[p['id']]='file:vendor/security-backports/'+target.name
  package=read_json(front/'package.json');overrides=package.setdefault('overrides',{})
- for parent,children in{'workbox-build@7.4.0':{'@rollup/plugin-node-resolve':forkpaths['resolve'],'glob':forkpaths['glob11']},'js-beautify@1.15.4':{'glob':forkpaths['glob10']},'glob@10.5.0-project.security.1':{'minimatch':forkpaths['mm9']},'glob@11.1.0-project.security.1':{'minimatch':forkpaths['mm10']},'@typescript-eslint/typescript-estree@8.46.1':{'minimatch':forkpaths['mm9']},'editorconfig@1.0.7':{'minimatch':forkpaths['mm9']}}.items():need(parent not in overrides,'existing_override_collision');overrides[parent]=children
- (front/'package.json').write_bytes(encode(package));command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-generation');updated=read_json(front/'package-lock.json');delta=graph_gate(baseline,updated,spec['profiles']);write(out/'GRAPH-DELTA.json',encode(delta))
+ for parent,children in portable_overrides(baseline,forkpaths).items():need(parent not in overrides,'existing_override_collision');overrides[parent]=children
+ (front/'package.json').write_bytes(encode(package));command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-generation');updated=read_json(front/'package-lock.json');need(portable_overrides(updated,forkpaths)==portable_overrides(baseline,forkpaths),'portable_override_placements_changed');graph_gate(baseline,updated,spec['profiles']);first_lock_sha256=digest(front/'package-lock.json')
+ # A separate, fixed ordinary lock-only pass reconstructs the new FILE graph:
+ # npm's first replacement pass can retain a noncanonical target placement.
+ # This is not a retry loop, and both graphs must pass the same strict gate.
+ command(npm+['install','--package-lock-only','--ignore-scripts','--audit=false','--fund=false'],'proposal-lock-normalization');updated=read_json(front/'package-lock.json');need(portable_overrides(updated,forkpaths)==portable_overrides(baseline,forkpaths),'portable_override_placements_changed');delta=graph_gate(baseline,updated,spec['profiles']);write(out/'GRAPH-DELTA.json',encode(delta));write(out/'LOCK-NORMALIZATION.json',encode({'schema':'fixed_npm_file_override_normalization/1','ordinary_lock_only_passes':2,'first_lock_sha256':first_lock_sha256,'normalized_lock_sha256':digest(front/'package-lock.json'),'strict_non_target_identity_and_multiplicity_gates_passed_both_times':True,'four_registry_parent_placements_unchanged':True,'upstream_tar_bytes_changed':False}))
  # Fresh frozen npmci twice; no npm update or drift adoption between runs.
  installed=[]
  for trial in(1,2):
