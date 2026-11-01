@@ -62,7 +62,7 @@ def capture_layout(out,old,new,old_packages,new_packages,context,profile):
 def abi_observation(phase,path,facts):
  """Finite public operand prefixes in the existing bounded full-build log."""
  global ABI_OBSERVATION_BYTES
- need(phase in{'headers','properties','dynsym','inventory'}and type(path)is str and len(path)<=4096 and not path.startswith('/')and'..'not in Path(path).parts,'ABI_observation_scope')
+ need(phase in{'headers','properties','dynsym','inventory','package-control'}and type(path)is str and len(path)<=4096 and not path.startswith('/')and'..'not in Path(path).parts,'ABI_observation_scope')
  raw=enc({'schema':'Two_profile_public_ABI_operand/1','phase':phase,'path':path,'facts':facts,'disposition':'QUARANTINED_NOT_QUALIFIED','security_accepted':False})
  need(len(raw)<=1024**2 and ABI_OBSERVATION_BYTES+len(raw)<=32*1024**2,'ABI_observation_bound');ABI_OBSERVATION_BYTES+=len(raw);print(raw.decode(),end='',flush=True)
 def need(ok,code):
@@ -267,32 +267,40 @@ from hashlib import sha256
 import os,stat,json,fcntl,errno
 limits='''+repr(contract['names'])+r'''
 empty='''+repr(sorted(EMPTY_RAW_NAMES))+r'''
+debs='''+repr(contract['debs'])+r'''
 rows={}
 sizes={}
+paths={}
 for name,limit in limits.items():
- try:s=(Path('/out')/name).lstat()
- except FileNotFoundError:continue
- assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
+ p=Path('/out')/name;owner=0
+ try:s=p.lstat()
+ except FileNotFoundError:
+  if name not in debs:continue
+  p=Path('/build/build-area')/name;owner=10001
+  try:s=p.lstat()
+  except FileNotFoundError:continue
+ assert p.resolve(strict=True)==p
+ assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==owner and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
+ paths[name]=p
  sizes[name]=(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
 assert sum(row[6]for row in sizes.values())<='''+str(QUARANTINE_MAX)+r'''
 assert sum(sizes[name][6]for name in '''+repr(contract['debs'])+r''' if name in sizes)<='''+str(QUARANTINE_DEBS_MAX)+r'''
 assert sum(sizes[name][6]for name in '''+repr(QUARANTINE_PROOFS)+r''' if name in sizes)<='''+str(QUARANTINE_METADATA_MAX)+r'''
 for name,limit in limits.items():
- p=Path('/out')/name
- try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
- except FileNotFoundError:
-  assert name not in sizes;continue
+ if name not in paths:continue
+ p=paths[name];owner=0 if p==Path('/out')/name else 10001
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
  try:
   s=os.fstat(fd);key=lambda t:(t.st_dev,t.st_ino,t.st_mode,t.st_uid,t.st_gid,t.st_nlink,t.st_size,t.st_mtime_ns,t.st_ctime_ns)
   before=key(s);flags=(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD));assert flags[1]==fcntl.FD_CLOEXEC and os.lseek(fd,0,os.SEEK_CUR)==0
-  assert name in sizes and key(s)==sizes[name] and stat.S_ISREG(s.st_mode)and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
+  assert name in sizes and key(s)==sizes[name] and stat.S_ISREG(s.st_mode)and s.st_uid==s.st_gid==owner and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and (0 if name in empty else 1)<=s.st_size<=limit
   h=sha256();n=0
   while True:
    b=os.pread(fd,min(65536,limit-n+1),n)
    if not b:break
    n+=len(b);assert n<=limit;h.update(b)
   assert n==s.st_size and key(os.fstat(fd))==key(p.lstat())==before and (fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))==flags and os.lseek(fd,0,os.SEEK_CUR)==0
-  rows[name]={'bytes':n,'sha256':h.hexdigest(),'full9':list(before)}
+  rows[name]={'bytes':n,'sha256':h.hexdigest(),'full9':list(before),'source_path':str(p)}
  finally:os.close(fd)
  try:os.fstat(fd)
  except OSError as error:assert error.errno==errno.EBADF

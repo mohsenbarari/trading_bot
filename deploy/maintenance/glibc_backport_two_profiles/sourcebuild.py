@@ -364,12 +364,19 @@ def build():
  rc,raw=run([str(loader),'--library-path',oldlib,str(test)],cwd=SOURCE,env=clean,maximum=131072,with_code=True)
  counter=V.old_counterfactual(rc,raw);need(fixture=={'test':digest(test),'catalog':digest(catalog),'locale':digest(locale)},'counterfactual_fixture_changed')
  save(OUT/'old-counterfactual.log',raw);save(OUT/'old-counterfactual.json',enc({'schema':'glibc84243_same_vendor_ELF_old_library_counterfactual/1','old_libc':digest(libc,OLD_LIBC),'old_loader':digest(loader,OLD_LOADER),'loader_mapping':loadproof,'same_test_fixture':fixture,'result':counter,'security_accepted':False}))
- products=[];total=0
- for p in sorted(BUILD_AREA.glob('*.deb')):
-  control=run(['/usr/bin/dpkg-deb','-f',str(p),'Package','Version','Architecture','Source']);meta=V.package_identity(control,read(DOWNLOAD/('glibc_'+OLD+'.dsc'),131072),VERSION,p.name)
-  info=digest(p);total+=info['bytes'];need(total<=2*1024**3,'aggregate_package_bound');target=OUT/p.name;copy_payload(p,target,info);products.append({'name':p.name,**digest(target),'control':meta})
+ # The full ordinary build above is unchanged. Qualify only the fixed selected
+ # runtime family, never every binary or automatically generated debug package.
  required={name+'_'+VERSION+'_'+('all'if name=='locales'else'amd64')+'.deb'for name in RUNTIME_PACKAGES}
- need(required<={v['name']for v in products},'runtime_packages_missing')
+ products=[];total=0
+ for filename in sorted(required):
+  p=BUILD_AREA/filename;original=key(p.lstat());info=digest(p,maximum=32*1024**2)
+  total+=info['bytes'];need(total<=N.QUARANTINE_DEBS_MAX,'aggregate_package_bound')
+  control=run(['/usr/bin/dpkg-deb','-f',str(p),'Package','Version','Architecture','Source'],maximum=131072)
+  N.abi_observation('package-control',p.name,{'DEB':info,'raw_control':N.pin(control),'raw_control_hex':control.hex(),'expected_version':VERSION,'scope':'EXACT_SELECTED_RUNTIME_FAMILY_ONLY'})
+  need(key(p.lstat())==original and digest(p,maximum=32*1024**2)==info,'selected_package_changed')
+  meta=V.package_identity(control,read(DOWNLOAD/('glibc_'+OLD+'.dsc'),131072),VERSION,p.name)
+  target=OUT/p.name;copy_payload(p,target,info);products.append({'name':p.name,**digest(target),'control':meta})
+ need(required=={v['name']for v in products},'runtime_packages_missing')
  candidate=ROOT/'candidate-payload';candidate.mkdir(mode=0o755)
  for name in sorted(required):run(['/usr/bin/dpkg-deb','-x',str(OUT/name),str(candidate)])
  old_layout=N.payload_layout(base);new_layout=N.payload_layout(candidate)
@@ -397,7 +404,7 @@ def build():
   if VERSION in p.name:save(OUT/p.name,read(p,4*1024**2))
  for p in BUILD_AREA.glob('*.buildinfo'):
   if VERSION in p.name:save(OUT/p.name,read(p,16*1024**2))
- save(OUT/'provenance.json',enc({'schema':'glibc84243_unsigned_local_package_candidate/1','profile':PROFILE_NAME,'target_distribution':TARGET_DIST,'version':VERSION,'products':products,'runtime_package_family':RUNTIME_PACKAGES,'source':source_proof,'vendor_suite_required':True,'vendor_qualification':False,'two_profile_XPASS_Root_review':'PENDING','raw_fixed_case_evidence':digest(OUT/'two-profile-raw-tests.json'),'new_vendor_test_actual_PASS':True,'same_test_old_counterfactual_required':True,'all_selected_family_ELF_ABI_and_layout_checked':True,'static_archive_member_ABI_separately_qualified':False,'dependency_preparation':prep,'old_family_source_preserved':True,'official_version_fix_claimed':False,'ordinary_whole_image_scan_runtime_restore_and_rollout_still_required':True,'Host_Ubuntu_packages_eligible':False,'Host_packages_eligible':False,'security_accepted':False}))
+ save(OUT/'provenance.json',enc({'schema':'glibc84243_unsigned_local_package_candidate/1','profile':PROFILE_NAME,'target_distribution':TARGET_DIST,'version':VERSION,'products':products,'products_scope':'EXACT_SELECTED_RUNTIME_FAMILY_ONLY','full_ordinary_build_unrestricted':True,'runtime_package_family':RUNTIME_PACKAGES,'source':source_proof,'vendor_suite_required':True,'vendor_qualification':False,'two_profile_XPASS_Root_review':'PENDING','raw_fixed_case_evidence':digest(OUT/'two-profile-raw-tests.json'),'new_vendor_test_actual_PASS':True,'same_test_old_counterfactual_required':True,'all_selected_family_ELF_ABI_and_layout_checked':True,'static_archive_member_ABI_separately_qualified':False,'dependency_preparation':prep,'old_family_source_preserved':True,'official_version_fix_claimed':False,'ordinary_whole_image_scan_runtime_restore_and_rollout_still_required':True,'Host_Ubuntu_packages_eligible':False,'Host_packages_eligible':False,'security_accepted':False}))
  print(json.dumps({'status':'PACKAGES_BUILT_PENDING_TWO_PROFILE_ROOT_REVIEW','profile':PROFILE_NAME,'products':len(products),'security_accepted':False},sort_keys=True))
 
 def main(argv=None):

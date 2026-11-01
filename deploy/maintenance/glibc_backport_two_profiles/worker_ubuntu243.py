@@ -5,7 +5,7 @@ from types import ModuleType
 import errno,fcntl,json,os,re,stat,sys
 HERE=Path(__file__).absolute().parent
 SHARED_NAME='sourcebuild.py'
-SHARED_PIN=(35088, '8677b402fbd82c617a7f8c77f02596266b39d21de591963bdc5f09857117f4b0')
+SHARED_PIN=(35721, '550d6e4014cbf6c3a11a5c517d0e8fb2dd5fc503f2c355ecc669c1732ab0616b')
 PROFILE_NAME='profile243.py'
 PROFILE_PIN=(5953, '202ee45a680e100056abe167a916fa56f71bcdfdc68e866527ba1e1ce3c29d14')
 PROFILE_KEY='WORKER'

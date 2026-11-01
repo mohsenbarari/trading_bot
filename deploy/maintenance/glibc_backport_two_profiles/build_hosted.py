@@ -143,10 +143,11 @@ def preserve_two_profile_raw_failure(command,cid,nonce,destination,expected_dire
   check();value=json.loads(command([*docker,'container','exec',cid,PYTHON,'-I','-S','-B','-c',codec.failure_manifest_script(PROFILE_NAME)],maximum=16384,seconds=10));check()
   need(type(value)is dict and set(value)<=set(names),'failure_export_scope')
   for name,row in value.items():
-   need(type(row)is dict and set(row)=={'bytes','sha256','full9'}and type(row['bytes'])is int and (0 if name in codec.EMPTY_RAW_NAMES else 1)<=row['bytes']<=names[name]
+   need(type(row)is dict and set(row)=={'bytes','sha256','full9','source_path'}and type(row['bytes'])is int and (0 if name in codec.EMPTY_RAW_NAMES else 1)<=row['bytes']<=names[name]
     and type(row['full9'])is list and len(row['full9'])==9 and all(type(item)is int for item in row['full9'])
     and row['full9'][6]==row['bytes'] and stat.S_ISREG(row['full9'][2])and stat.S_IMODE(row['full9'][2])==0o644
-    and row['full9'][3:6]==[0,0,1]and re.fullmatch('[a-f0-9]{64}',row['sha256'])is not None,'failure_export_bound')
+    and row['source_path']in({'/out/'+name,'/build/build-area/'+name}if name in debs else{'/out/'+name})
+    and row['full9'][3:6]==([0,0,1]if row['source_path']=='/out/'+name else[10001,10001,1])and re.fullmatch('[a-f0-9]{64}',row['sha256'])is not None,'failure_export_bound')
   need(sum(row['bytes']for row in value.values())<=codec.QUARANTINE_MAX
    and sum(value[name]['bytes']for name in debs if name in value)<=codec.QUARANTINE_DEBS_MAX
    and sum(value[name]['bytes']for name in codec.QUARANTINE_PROOFS if name in value)<=codec.QUARANTINE_METADATA_MAX,'failure_export_aggregate')
@@ -157,7 +158,7 @@ def preserve_two_profile_raw_failure(command,cid,nonce,destination,expected_dire
   for name,value in rows.items():
    check();target=destination/name;need(not target.exists()and not target.is_symlink(),'failure_export_exclusive')
    receipt['active_copy']={'name':name,'command_completed':False,'verified':False}
-   command([*docker,'container','cp',cid+':/out/'+name,str(target)],maximum=65536,seconds=5);receipt['active_copy']['command_completed']=True;check()
+   command([*docker,'container','cp',cid+':'+value['source_path'],str(target)],maximum=65536,seconds=5);receipt['active_copy']['command_completed']=True;check()
    raw=codec.read_regular(target,names[name],empty=name in codec.EMPTY_RAW_NAMES,guard=check)
    need(codec.pin(raw)=={key:value[key]for key in('bytes','sha256')},'failure_export_changed');captured[name]=codec.pin(raw);receipt['active_copy']['verified']=True;receipt['active_copy']=None
   need(rows==manifest(),'failure_export_changed');owner();receipt['complete']=True
