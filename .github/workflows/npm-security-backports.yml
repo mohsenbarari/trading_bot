@@ -282,6 +282,14 @@ jobs:
           path: ${{ runner.temp }}/npm-browser-summary/${{ matrix.browser }}-${{ matrix.shard }}.json
           if-no-files-found: error
           retention-days: 7
+      - name: Upload small public App exception structure after a failed browser gate
+        uses: actions/upload-artifact@v4
+        if: always() && steps.browser_gate.outcome == 'failure'
+        with:
+          name: npm-backend-exceptions-${{ matrix.browser }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/npm-browser-backend-exceptions/${{ matrix.browser }}-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
