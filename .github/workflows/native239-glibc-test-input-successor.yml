@@ -32,7 +32,7 @@ jobs:
           /usr/bin/python3 -I -S -B deploy/maintenance/glibc_backport_native239/host_ubuntu239.py \
             --repo "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
             --root "$RUNNER_TEMP/glibc84243-ubuntu239-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-            --source-sha256 ea928740c736c0d0e12486f487425700d4ec4101d42ada14240fd042171c720e \
+            --source-sha256 56d7a5484f348bb45029150d41dd6c67b797171536f97aa76214ddebb008d4ad \
             --execute-hosted-build --confirm BUILD-ONLY-DISPOSABLE-CI-UBUNTU239-GLIBC-84243-FULL-PACKAGES-20261101-01
       - name: Preserve only completed candidate packages and public proofs
         if: success() && steps.build.outcome == 'success'
@@ -45,7 +45,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path: ${{ runner.temp }}/glibc84243-ubuntu239-${{ github.run_id }}-${{ github.run_attempt }}/package-output/*
-      - name: Preserve bounded capacity and failure evidence
+      - name: Preserve bounded capacity and QUARANTINED failure evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

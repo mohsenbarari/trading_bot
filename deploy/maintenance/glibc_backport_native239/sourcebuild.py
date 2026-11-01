@@ -342,6 +342,8 @@ def build():
  run(['/usr/bin/tar','--create','--xz','--file',str(OUT/'signed-APT-metadata.tar.xz'),'--directory',str(ROOT),'bootstrap-evidence','bootstrap-APT','final-APT'],seconds=180)
  (OUT/'signed-APT-metadata.tar.xz').chmod(0o644);digest(OUT/'signed-APT-metadata.tar.xz',maximum=256*1024**2)
  run(['/usr/bin/chown','-R','10001:10001',str(SOURCE)])
+ # Fail on a known source-pin mismatch before the costly unchanged full suite.
+ print(enc(N.preflight_vendor_inputs(SOURCE,read(RECIPE/'native239-original-XPASS-classification.json',131072))).decode(),end='',flush=True)
  # Standard complete binary build, no nocheck/nobiarch/stage/test selection.
  rc,log=run(['/usr/bin/dpkg-buildpackage','-b','-us','-uc','-rfakeroot'],cwd=SOURCE,seconds=13200,maximum=256*1024**2,user=10001,with_code=True,forward=True)
  save(OUT/'full-Debian-build.log',log,maximum=256*1024**2)
@@ -379,12 +381,9 @@ def build():
  need(required<={v['name']for v in products},'runtime_packages_missing')
  candidate=ROOT/'candidate-payload';candidate.mkdir(mode=0o755)
  for name in sorted(required):run(['/usr/bin/dpkg-deb','-x',str(OUT/name),str(candidate)])
- def layout(root):
-  result={}
-  for p in root.rglob('*'):
-   st=p.lstat();result[str(p.relative_to(root))]={'type':stat.S_IFMT(st.st_mode),'mode':stat.S_IMODE(st.st_mode),'uid':st.st_uid,'gid':st.st_gid,'link':os.readlink(p)if p.is_symlink()else None}
-  return result
- need(layout(base)==layout(candidate),'runtime_payload_structure_changed')
+ old_layout=N.payload_layout(base);new_layout=N.payload_layout(candidate)
+ N.capture_layout(OUT,old_layout,new_layout,{name:{'bytes':value[0],'sha256':value[1]}for name,value in BASELINE.items()},{row['name']:{key:row[key]for key in('bytes','sha256','control')}for row in products if row['name']in required},ctx)
+ need(old_layout==new_layout,'runtime_payload_structure_changed')
  ABI={}
  for old in sorted(base.rglob('*')):
   if not old.is_file()or old.is_symlink():continue
@@ -392,11 +391,16 @@ def build():
   if not elf:continue
   new=candidate/old.relative_to(base);need(new.is_file()and not new.is_symlink(),'ABI_path_missing')
   headers=[run(['/usr/bin/readelf','--file-header','--program-headers','--dynamic','--wide',str(p)])for p in(old,new)]
+  relative=str(old.relative_to(base));file_refs={'old':digest(old),'new':digest(new)}
+  N.abi_observation('headers',relative,{'files':file_refs,'old_raw':N.pin(headers[0]),'new_raw':N.pin(headers[1])})
   def properties(raw):
    text=raw.decode();return {'class':re.findall(r'Class:\s+(\S+)',text),'machine':re.findall(r'Machine:\s+(.+)',text),'interpreter':re.findall(r'\[Requesting program interpreter: ([^\]]+)\]',text),'SONAME':re.findall(r'\(SONAME\).*\[(.+)\]',text),'NEEDED':re.findall(r'\(NEEDED\).*\[(.+)\]',text)}
-  need(properties(headers[0])==properties(headers[1]),'ABI_loader_contract_changed')
+  old_properties=properties(headers[0]);new_properties=properties(headers[1]);N.abi_observation('properties',relative,{'old':old_properties,'new':new_properties})
+  need(old_properties==new_properties,'ABI_loader_contract_changed')
   symbols=[run(['/usr/bin/readelf','--dyn-syms','--wide',str(p)])for p in(old,new)]
+  N.abi_observation('dynsym',relative,{'files':file_refs,'old_raw':N.pin(symbols[0]),'new_raw':N.pin(symbols[1])})
   ABI[str(old.relative_to(base))]={'old':digest(old),'new':digest(new),'ELF_loader_properties':properties(headers[1]),'exports':V.ABI_equal(*symbols,allow_empty=not properties(headers[0])['SONAME'] and not properties(headers[0])['NEEDED'])}
+ N.abi_observation('inventory','.',{'ELF_paths':sorted(ABI),'count':len(ABI)})
  need(len(ABI)>10,'ABI_inventory_incomplete');save(OUT/'abi-contract.json',enc({'schema':'glibc84243_selected_family_ELF_ABI_and_layout/1','packages':RUNTIME_PACKAGES,'ELFs':ABI,'complete_selected_file_symlink_layout_equal':True,'static_archive_member_ABI_separately_qualified':False,'old_binary_byte_identity_required':False,'all_new_payloads_recorded':True,'security_accepted':False}))
  for p in BUILD_AREA.glob('*.changes'):
   if VERSION in p.name:save(OUT/p.name,read(p,4*1024**2))

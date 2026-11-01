@@ -17,6 +17,51 @@ RAW_NAMES={'native239-raw-tests.json':131072,'native239-raw-tests.tar.xz':16*102
  'native239-raw-libc.sum':16*1024**2}
 STATES={'PASS','FAIL','XFAIL','XPASS','UNSUPPORTED'}
 FORMAT=None
+OLD_VERSION='2.39-0ubuntu8.9';NEW_VERSION=OLD_VERSION+'+gold1'
+FAMILY=('libc6','libc-bin','libc-dev-bin','libc-devtools','libc6-dev','locales')
+QUARANTINE_DEBS=tuple(name+'_'+NEW_VERSION+'_'+('all'if name=='locales'else'amd64')+'.deb'for name in FAMILY)
+QUARANTINE_PROOFS=('source-proof.json','vendor-suite.json','old-counterfactual.json','old-counterfactual.log','preparation.json','provenance.json')
+QUARANTINE_NAMES={**RAW_NAMES,'native239-payload-layout.json':4*1024**2,**{name:32*1024**2 for name in QUARANTINE_DEBS},**{name:16*1024**2 for name in QUARANTINE_PROOFS}}
+QUARANTINE_MAX=192*1024**2;QUARANTINE_DEBS_MAX=128*1024**2;QUARANTINE_METADATA_MAX=16*1024**2
+ABI_OBSERVATION_BYTES=0
+
+def payload_layout(root):
+ """Same five metadata values as the original guard, with stable bounded reads."""
+ root=Path(root);before=frame(root.lstat());result={};originals=[];total=0
+ for path in root.rglob('*'):
+  need(len(result)<32768,'payload_layout_bound');relative=str(path.relative_to(root));s=path.lstat();initial=frame(s)
+  row={'type':stat.S_IFMT(s.st_mode),'mode':stat.S_IMODE(s.st_mode),'uid':s.st_uid,'gid':s.st_gid,'link':os.readlink(path)if stat.S_ISLNK(s.st_mode)else None}
+  size=len(enc({relative:row}));need(total+size<=1024**2,'payload_layout_bound');total+=size
+  need(frame(path.lstat())==initial,'payload_layout_changed');result[relative]=row;originals.append((path,initial,row['link']))
+ need(frame(root.lstat())==before,'payload_layout_changed')
+ for path,initial,link in originals:
+  need(frame(path.lstat())==initial and(link is None or os.readlink(path)==link),'payload_layout_changed')
+ return result
+
+def capture_layout(out,old,new,old_packages,new_packages,context):
+ need(type(old)is dict and type(new)is dict,'payload_layout_shape')
+ expected_old={name+'_'+OLD_VERSION+'_'+('all'if name=='locales'else'amd64')+'.deb'for name in FAMILY}
+ need(set(old_packages)==expected_old and set(new_packages)==set(QUARANTINE_DEBS),'payload_layout_family')
+ for collection in(old_packages,new_packages):
+  for filename,row in collection.items():
+   need(type(row)is dict and type(row.get('bytes'))is int and 0<row['bytes']<=32*1024**2 and re.fullmatch('[a-f0-9]{64}',row.get('sha256',''))is not None,'payload_layout_package_pin')
+ need(sum(row['bytes']for row in new_packages.values())<=QUARANTINE_DEBS_MAX,'payload_layout_package_bound')
+ differences=[]
+ for name in sorted(set(old)|set(new)):
+  if old.get(name)!=new.get(name):differences.append({'path':name,'old':{'status':'PRESENT','metadata':old[name]}if name in old else{'status':'ABSENT'},'new':{'status':'PRESENT','metadata':new[name]}if name in new else{'status':'ABSENT'},'fields':sorted(k for k in set(old.get(name,{}))|set(new.get(name,{}))if old.get(name,{}).get(k)!=new.get(name,{}).get(k))})
+ refs={}
+ for name in QUARANTINE_PROOFS:
+  try:refs[name]={'status':'PRESENT',**pin(read_regular(Path(out)/name,QUARANTINE_NAMES[name]))}
+  except FileNotFoundError:refs[name]={'status':'ABSENT'}
+ document={'schema':'Native239_quarantined_payload_layout/1','disposition':'QUARANTINED_NOT_QUALIFIED','old':old,'new':new,'delta':differences,'counts':{'old':len(old),'new':len(new),'changed_paths':len(differences)},'old_packages':old_packages,'new_packages':new_packages,'source_context':context,'preexisting_proofs':refs,'layout_equal':old==new,'vendor_qualification':False,'Host_packages_eligible':False,'security_accepted':False}
+ raw=enc(document);write_new(Path(out)/'native239-payload-layout.json',raw,QUARANTINE_NAMES['native239-payload-layout.json']);return document
+
+def abi_observation(phase,path,facts):
+ """Finite public operand prefixes in the existing bounded full-build log."""
+ global ABI_OBSERVATION_BYTES
+ need(phase in{'headers','properties','dynsym','inventory'}and type(path)is str and len(path)<=4096 and not path.startswith('/')and'..'not in Path(path).parts,'ABI_observation_scope')
+ raw=enc({'schema':'Native239_public_ABI_operand/1','phase':phase,'path':path,'facts':facts,'disposition':'QUARANTINED_NOT_QUALIFIED','security_accepted':False})
+ need(len(raw)<=1024**2 and ABI_OBSERVATION_BYTES+len(raw)<=32*1024**2,'ABI_observation_bound');ABI_OBSERVATION_BYTES+=len(raw);print(raw.decode(),end='',flush=True)
 MERGE_PRODUCER=(1919,'5b65a8b05c2efbe927cea77d796ffcde38013ba71f42781556027e64711169a6')
 def need(ok,code):
  if ok is not True:raise RuntimeError(code)
@@ -29,8 +74,8 @@ def close_owned(fd):
  try:os.fstat(fd)
  except OSError as error:need(error.errno==errno.EBADF,'native239_close_unknown')
  else:need(False,'native239_close_unknown')
-def read_regular(path,maximum,*,empty=False):
- path=Path(path);parents=[(p,frame(p.lstat())[:5])for p in path.parents]
+def read_regular(path,maximum,*,empty=False,guard=lambda:None):
+ guard();path=Path(path);parents=[(p,frame(p.lstat())[:5])for p in path.parents]
  need(path.resolve(strict=True)==path and all(p.resolve(strict=True)==p and stat.S_ISDIR(value[2])for p,value in parents),'native239_file_changed')
  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
  primary=None;answer=None;secondary=[]
@@ -40,19 +85,19 @@ def read_regular(path,maximum,*,empty=False):
   need(flags[1]==fcntl.FD_CLOEXEC and os.lseek(fd,0,os.SEEK_CUR)==0,'native239_OFD')
   raw=bytearray();offset=0
   while offset<before[6]:
-   block=os.pread(fd,min(65536,before[6]-offset),offset);need(len(block)>0 and len(raw)+len(block)<=maximum,'native239_read_bound');raw.extend(block);offset+=len(block)
+   guard();block=os.pread(fd,min(65536,before[6]-offset),offset);need(len(block)>0 and len(raw)+len(block)<=maximum,'native239_read_bound');raw.extend(block);offset+=len(block)
   need(os.pread(fd,1,offset)==b''and frame(os.fstat(fd))==frame(path.lstat())==before
    and(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))==flags and os.lseek(fd,0,os.SEEK_CUR)==0
    and path.resolve(strict=True)==path
    and all(p.resolve(strict=True)==p and frame(p.lstat())[:5]==value and stat.S_ISDIR(value[2])for p,value in parents),'native239_file_changed')
-  answer=bytes(raw)
+  guard();answer=bytes(raw)
  except BaseException as error:primary=error
  try:close_owned(fd)
  except BaseException:
   secondary.append('native239_close_unknown')
  if primary is not None:
   primary.native239_secondary_codes=secondary;raise primary
- need(not secondary,'native239_close_unknown');return answer
+ need(not secondary,'native239_close_unknown');guard();return answer
 def rows(raw):
  need(FORMAT is not None,'native239_vendor_format_unbound')
  parsed=FORMAT.parse_merge_ledger(raw);result={name:state for state,name in parsed['rows']}
@@ -101,6 +146,18 @@ class BoundedArchive:
    if primary is not None:primary.native239_secondary_codes=['native239_close_unknown']
    else:raise
   if primary is not None:raise primary
+def preflight_vendor_inputs(source,classification):
+ """Fail early on the same sixteen pinned inputs; no vendor-result authority."""
+ source=Path(source);same_pin(classification,CLASSIFICATION);table=json.loads(classification)
+ need(tuple(row['test']for row in table['rows'])==CASES,'native239_case_table');inputs={}
+ for name,expected in(('scripts/evaluate-test.sh',EVALUATOR),('debian/testsuite-xfail-debian.mk',EXPECTATIONS),('scripts/merge-test-results.sh',MERGE_PRODUCER)):
+  raw=read_regular(source/name,65536);same_pin(raw,expected);inputs[name]=pin(raw)
+ for row in table['rows']:
+  expected=row['source'];member=expected['member'];need(member.startswith('glibc-2.39/')and'..'not in member.split('/'),'native239_source_path')
+  name=member.removeprefix('glibc-2.39/');raw=read_regular(source/name,1024**2)
+  need(pin(raw)=={key:expected[key]for key in('bytes','sha256')},'native239_case_source_changed');inputs[name]=pin(raw)
+ return {'schema':'Native239_fixed_vendor_input_preflight/1','classification':pin(classification),'inputs':inputs,
+  'included_headers_separately_pinned':False,'actual_vendor_tests_executed':False,'vendor_qualification':False,'Host_packages_eligible':False,'security_accepted':False}
 def capture(source,out,build_code,classification):
  """Capture all fixed raw files before semantic checks, including genuine empty outputs."""
  source=Path(source);out=Path(out);same_pin(classification,CLASSIFICATION);table=json.loads(classification)
@@ -179,25 +236,41 @@ def review(raw,document,classification):
   'vendor_qualification':False,'Host_packages_eligible':False,'security_accepted':False}
 
 def failure_manifest_script():
- """Only these three public fixed leaves; no recursive or package export."""
+ """Only sixteen fixed quarantine leaves; no directory/glob/export authority."""
  return r'''from pathlib import Path
 from hashlib import sha256
-import os,stat,json
-limits='''+repr(RAW_NAMES)+r'''
+import os,stat,json,fcntl,errno
+limits='''+repr(QUARANTINE_NAMES)+r'''
 rows={}
+sizes={}
+for name,limit in limits.items():
+ try:s=(Path('/out')/name).lstat()
+ except FileNotFoundError:continue
+ assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and 0<s.st_size<=limit
+ sizes[name]=(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+assert sum(row[6]for row in sizes.values())<='''+str(QUARANTINE_MAX)+r'''
+assert sum(sizes[name][6]for name in '''+repr(QUARANTINE_DEBS)+r''' if name in sizes)<='''+str(QUARANTINE_DEBS_MAX)+r'''
+assert sum(sizes[name][6]for name in '''+repr(QUARANTINE_PROOFS)+r''' if name in sizes)<='''+str(QUARANTINE_METADATA_MAX)+r'''
 for name,limit in limits.items():
  p=Path('/out')/name
  try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
- except FileNotFoundError:continue
+ except FileNotFoundError:
+  assert name not in sizes;continue
  try:
   s=os.fstat(fd);key=lambda t:(t.st_dev,t.st_ino,t.st_mode,t.st_uid,t.st_gid,t.st_nlink,t.st_size,t.st_mtime_ns,t.st_ctime_ns)
-  before=key(s);assert stat.S_ISREG(s.st_mode)and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and 0<s.st_size<=limit
+  before=key(s);flags=(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD));assert flags[1]==fcntl.FD_CLOEXEC and os.lseek(fd,0,os.SEEK_CUR)==0
+  assert name in sizes and key(s)==sizes[name] and stat.S_ISREG(s.st_mode)and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o644 and 0<s.st_size<=limit
   h=sha256();n=0
   while True:
-   b=os.read(fd,min(65536,limit-n+1))
+   b=os.pread(fd,min(65536,limit-n+1),n)
    if not b:break
    n+=len(b);assert n<=limit;h.update(b)
-  assert n==s.st_size and key(os.fstat(fd))==key(p.lstat())==before
-  rows[name]={'bytes':n,'sha256':h.hexdigest()}
+  assert n==s.st_size and key(os.fstat(fd))==key(p.lstat())==before and (fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD))==flags and os.lseek(fd,0,os.SEEK_CUR)==0
+  rows[name]={'bytes':n,'sha256':h.hexdigest(),'full9':list(before)}
  finally:os.close(fd)
+ try:os.fstat(fd)
+ except OSError as error:assert error.errno==errno.EBADF
+ else:raise AssertionError('native239_close_unknown')
+ assert key(p.lstat())==before
+assert set(rows)==set(sizes)
 print(json.dumps(rows,sort_keys=True))'''

@@ -5,7 +5,7 @@ from types import ModuleType
 import errno,fcntl,json,os,re,stat,sys
 HERE=Path(__file__).absolute().parent
 SHARED_NAME='build_hosted.py'
-SHARED_PIN=(26196, '74e235cbebf82fcc9350f11e22073383e5244333a253030ba66c21939c36fc68')
+SHARED_PIN=(28213, 'a135c3699d0f772e546896f7a3d7deaa92c15eab3ef58a01310437089a2f08bb')
 PROFILE_NAME='profile239.py'
 PROFILE_PIN=(4624, 'd0bcc60624c2cce4a582939bbe991c9bfbffdd33e56ce21dae676987e834743e')
 PROFILE_KEY='HOST'
