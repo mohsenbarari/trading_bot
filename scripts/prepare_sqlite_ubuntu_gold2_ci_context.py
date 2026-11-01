@@ -8,8 +8,12 @@ from types import ModuleType
 import argparse,errno,fcntl,json,os,re,signal,stat,sys,threading,time
 
 TRACKED=Path('deploy/security/sqlite-ubuntu-gold2')
-PINS={'noble/sourcebuild.py': (87281, '5df3c0efd95b73c6d65eee0ca89804efde313dad34af95d3caa5527d51a979a7'), 'noble/verify_positive.py': (16832, '0c2027475c4445244eb546965e6205cc1c0bd98f7834d4bf60890015cf71a489'), 'noble/Dockerfile': (4177, '3043465b46c5b81ebf260bcbc4e854d55b752a86c0a7e38429b7d0bd2e6147f0'), 'noble/.dockerignore': (471, '73312f546dcddd8f4d2afb00c0aa8050e13ad6c9b72ad65173300988abdd4ebf'), 'noble/context-manifest.json': (1677, 'ef3b68cdd977f9bfc5eeda74767e46b8f6bd4ad950d7ed1743a5c89c6156df51'), 'noble/0002-fts5-detail-none-merge-bound.patch': (1252, 'bc1403e417a5673ad51712c36f3b9b33f87b77a6f6f06d7bedba02b46d098231'), 'noble/0003-fts5-detail-none-upstream-regression.patch': (931, '81edf417c615f7a76fe9506c74e4a05a5ee1a135bce805de7ae8ac02c3dbfaed'), 'resolute/sourcebuild.py': (84372, '7e14dbc6beaaf4d094d9ac6c9b8fd6fd1fda21c414a370694ab2795d29de808f'), 'resolute/verify_positive.py': (16835, '809d13becc325d5711ceeb5557c809a1a545dfec77ff0bba8a0bdd1651b035c4'), 'resolute/Dockerfile': (4367, '85920342ff6922b3236c06791650633127286deb3bce279a32fb6bf26245bb66'), 'resolute/.dockerignore': (428, 'ee05a695af0be06e87dc330a7438a1ec4daf90f0f6e9250f3a311acdccae2950'), 'resolute/context-manifest.json': (1542, '19d4cc4e9be3f7f01ae46b04913a7000b0276403bfbe6e27418d6d7763472d77'), 'resolute/0002-fts5-detail-none-merge-bound.patch': (1252, 'bc1403e417a5673ad51712c36f3b9b33f87b77a6f6f06d7bedba02b46d098231'), 'resolute/0003-fts5-detail-none-upstream-regression.patch': (931, '81edf417c615f7a76fe9506c74e4a05a5ee1a135bce805de7ae8ac02c3dbfaed'), 'runner/build_package.py': (24788, 'f4af92752cab1cc34fd10c1b78a00ada10cabd05dd0a82fff970ba92b4279a50'), 'runner/manifest.json': (4074, '66e8fb9401b36bd64a80021a41b6dd1ed5899ca9f1f0c92a75139e733704b2ad'), 'noble/0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), 'noble/source-signer.asc': (14582, '91b93e45fb77b7098882dc1e2035951b7c351b9d3f754990642be80191030a73'), 'noble/consumer-profile.json': (662, 'bc10b4fe4ccc1a668ce1c55a00daf8ed0f129b9298ebaf9f0487a2a14c0b4af3'), 'resolute/0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), 'resolute/source-signer.asc': (14582, '91b93e45fb77b7098882dc1e2035951b7c351b9d3f754990642be80191030a73'), 'resolute/consumer-profile.json': (665, '737e920c3421f62f90dbd814d13488778580760b401e060d1a3ec479867cd8d6'), 'noble/0004-rowid-in-view-nested-join-core.patch': (8073, 'fc7990f7375b8e8d63abc04a5c2fd66a2a6ed880e53342d37a370526e11ff018')}
+PINS={'noble/sourcebuild.py': (87229, 'fffb05570cfe424fe4a24899941e93a33e44ae7c6a1634bc96e45f6f939254eb'), 'noble/verify_positive.py': (16832, '0c2027475c4445244eb546965e6205cc1c0bd98f7834d4bf60890015cf71a489'), 'noble/Dockerfile': (4177, '3043465b46c5b81ebf260bcbc4e854d55b752a86c0a7e38429b7d0bd2e6147f0'), 'noble/.dockerignore': (471, '73312f546dcddd8f4d2afb00c0aa8050e13ad6c9b72ad65173300988abdd4ebf'), 'noble/context-manifest.json': (1677, '6a361a673eb4064097dcfd2340c0b85c906b9d480a675c87d3ebaafa1c077211'), 'noble/0002-fts5-detail-none-merge-bound.patch': (1252, 'bc1403e417a5673ad51712c36f3b9b33f87b77a6f6f06d7bedba02b46d098231'), 'noble/0003-fts5-detail-none-upstream-regression.patch': (931, '81edf417c615f7a76fe9506c74e4a05a5ee1a135bce805de7ae8ac02c3dbfaed'), 'resolute/sourcebuild.py': (84372, '7e14dbc6beaaf4d094d9ac6c9b8fd6fd1fda21c414a370694ab2795d29de808f'), 'resolute/verify_positive.py': (16835, '809d13becc325d5711ceeb5557c809a1a545dfec77ff0bba8a0bdd1651b035c4'), 'resolute/Dockerfile': (4367, '85920342ff6922b3236c06791650633127286deb3bce279a32fb6bf26245bb66'), 'resolute/.dockerignore': (428, 'ee05a695af0be06e87dc330a7438a1ec4daf90f0f6e9250f3a311acdccae2950'), 'resolute/context-manifest.json': (1542, '19d4cc4e9be3f7f01ae46b04913a7000b0276403bfbe6e27418d6d7763472d77'), 'resolute/0002-fts5-detail-none-merge-bound.patch': (1252, 'bc1403e417a5673ad51712c36f3b9b33f87b77a6f6f06d7bedba02b46d098231'), 'resolute/0003-fts5-detail-none-upstream-regression.patch': (931, '81edf417c615f7a76fe9506c74e4a05a5ee1a135bce805de7ae8ac02c3dbfaed'), 'runner/build_package.py': (24788, 'f33445c5380c38fc49ed240316a5809ad19c56ba7ee7ed494c486ce21d39bdb6'), 'runner/manifest.json': (4074, '1f35b015c4e8ec9e5a311d607b5dd45d5dfff8a0a69fffb5d4d67b4d30d117bc'), 'noble/0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), 'noble/source-signer.asc': (14582, '91b93e45fb77b7098882dc1e2035951b7c351b9d3f754990642be80191030a73'), 'noble/consumer-profile.json': (662, 'bc10b4fe4ccc1a668ce1c55a00daf8ed0f129b9298ebaf9f0487a2a14c0b4af3'), 'resolute/0001-wal-reset-production-only.patch': (6746, 'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'), 'resolute/source-signer.asc': (14582, '91b93e45fb77b7098882dc1e2035951b7c351b9d3f754990642be80191030a73'), 'resolute/consumer-profile.json': (665, '737e920c3421f62f90dbd814d13488778580760b401e060d1a3ec479867cd8d6'), 'noble/0004-rowid-in-view-nested-join-core.patch': (8073, 'fc7990f7375b8e8d63abc04a5c2fd66a2a6ed880e53342d37a370526e11ff018')}
 PROFILES={'noble': {'base': '3.45.1-1ubuntu2.8', 'version': '3.45.1-1ubuntu2.8+gold2', 'upstream': '3.45.1', 'python': '3.12.3', 'python_path': '/usr/bin/python3.12', 'os_version': '24.04', 'library': '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6', 'extension': '/usr/lib/python3.12/lib-dynload/_sqlite3.cpython-312-x86_64-linux-gnu.so'}, 'resolute': {'base': '3.46.1-9ubuntu0.3', 'version': '3.46.1-9ubuntu0.3+gold2', 'upstream': '3.46.1', 'python': '3.14.4', 'python_path': '/usr/bin/python3.14', 'os_version': '26.04', 'library': '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6', 'extension': '/usr/lib/python3.14/lib-dynload/_sqlite3.cpython-314-x86_64-linux-gnu.so'}}
+# Closed per-profile names bind counts to actual admitted members, never an open size waiver.
+CONTEXT_PAYLOADS={'noble': ('sourcebuild.py', 'Dockerfile', '0001-wal-reset-production-only.patch', '0002-fts5-detail-none-merge-bound.patch', '0003-fts5-detail-none-upstream-regression.patch', '0004-rowid-in-view-nested-join-core.patch', 'verify_positive.py', 'source-signer.asc', 'consumer-profile.json'), 'resolute': ('sourcebuild.py', 'Dockerfile', '0001-wal-reset-production-only.patch', '0002-fts5-detail-none-merge-bound.patch', '0003-fts5-detail-none-upstream-regression.patch', 'verify_positive.py', 'source-signer.asc', 'consumer-profile.json')}
+CONTEXT_CONTROLS=('.dockerignore','context-manifest.json')
+RUNNER_SOURCES=('runner/build_package.py','runner/manifest.json')
 VARIANT=None;SPEC=None;BASE=None;VERSION=None;PACKAGE=None;CHANGES=None;BUILDINFO=None;OUTPUTS={}
 PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 DISK_RESERVE=2*1024**3;DISK_GROWTH=8*1024**3
@@ -212,9 +216,16 @@ def layout(args,environ):
  need(temp.is_absolute()and temp.resolve(strict=True)==temp and repo.is_absolute()and repo.resolve(strict=True)==repo,'host_path_scope')
  need(root==temp/('sqlite-ubuntu-gold2-'+args.variant+'-'+run+'-'+attempt+'-'+args.nonce)and not os.path.lexists(root),'fresh_root_required')
  return repo,root,run,attempt
+def source_inventory_counts():
+ expected={variant+'/'+name for variant,files in CONTEXT_PAYLOADS.items()for name in (*files,*CONTEXT_CONTROLS)}|set(RUNNER_SOURCES)
+ need(set(CONTEXT_PAYLOADS)==set(PROFILES)=={'noble','resolute'}and set(PINS)==expected and len(PINS)==23,'tracked_source_inventory')
+ need(VARIANT in CONTEXT_PAYLOADS,'ubuntu_profile')
+ payload=CONTEXT_PAYLOADS[VARIANT];selected=set(payload)|set(CONTEXT_CONTROLS)
+ need(len(payload)==(9 if VARIANT=='noble'else 8)and len(selected)==(11 if VARIANT=='noble'else 10),'context_inventory_counts')
+ return {'tracked_small_files':23,'selected_small_files':len(selected),'context_payload_files':len(payload)+4,'context_control_files':2,'context_regular_files':len(selected)+4}
 def git_blobs(R,repo,commit):
  rows={}
- need(len(PINS)==22,'tracked_source_inventory')
+ source_inventory_counts()
  for relative,pin in PINS.items():
   ref=commit+':'+(TRACKED/relative).as_posix()
   kind=R.metadata(['/usr/bin/git','-C',str(repo),'cat-file','-t',ref],maximum=16)
@@ -230,7 +241,7 @@ def names(path,expected):
  need(set(values)==set(expected)and len(values)==len(expected),'exact_inventory')
 def context_inventory(context,R):
  small={name.removeprefix(VARIANT+'/')for name in PINS if name.startswith(VARIANT+'/')}
- need(len(small)==10 and len(R.SOURCE_FILES)==4,'context_inventory_counts')
+ counts=source_inventory_counts();need(small==set(CONTEXT_PAYLOADS[VARIANT])|set(CONTEXT_CONTROLS)and len(small)==counts['selected_small_files']and len(R.SOURCE_FILES)==4,'context_inventory_counts')
  names(context,small|{'inputs'});names(context/'inputs',R.SOURCE_FILES)
 def seal_context(R,root,blobs,stack,frames,uid,checks):
  context=root/'context';context.mkdir(mode=0o700);(context/'inputs').mkdir(mode=0o700);bindings={}
@@ -240,15 +251,15 @@ def seal_context(R,root,blobs,stack,frames,uid,checks):
   need((len(raw),sha256(raw).hexdigest())==pin,'context_source_pin');publish(context/leaf,raw,uid)
   _,check=held(context/leaf,stack,frames,uid=uid,pin=pin);checks.append(check)
   if leaf not in{'.dockerignore','context-manifest.json'}:bindings[leaf]={'bytes':pin[0],'sha256':pin[1]}
- need(len(bindings)==8 and len(R.SOURCE_FILES)==4,'context_payload_counts')
+ counts=source_inventory_counts();need(set(bindings)==set(CONTEXT_PAYLOADS[VARIANT])and len(bindings)+4==counts['context_payload_files']and len(R.SOURCE_FILES)==4,'context_payload_counts')
  for leaf,pin in R.SOURCE_FILES.items():
   need(re.fullmatch(r'sqlite3_[A-Za-z0-9.+_-]+\.(?:dsc|tar\.xz)',leaf),'source_archive_name')
   target=context/'inputs'/leaf;R.fetch(R.SNAPSHOT+'/pool/main/s/sqlite3/'+leaf,target,pin)
   _,check=held(target,stack,frames,uid=uid,pin=pin);checks.append(check);bindings['inputs/'+leaf]={'bytes':pin[0],'sha256':pin[1]}
  manifest=document(blobs[VARIANT+'/context-manifest.json'])
  need(type(manifest)is dict and set(manifest)=={'schema','files'}and manifest['schema']=='sqlite_allowlisted_context/1'
-  and manifest['files']==bindings and len(bindings)==12,'frozen_context_manifest')
- expected='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+name+'\n'for name in('sourcebuild.py','Dockerfile',R.PATCH,R.FTS_PATCH,R.FTS_TEST_PATCH,'verify_positive.py','source-signer.asc','consumer-profile.json'))
+  and manifest['files']==bindings and len(bindings)==counts['context_payload_files'],'frozen_context_manifest')
+ expected='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+name+'\n'for name in CONTEXT_PAYLOADS[VARIANT])
  expected+='!inputs/\n'+''.join('!inputs/'+name+'\n'for name in R.SOURCE_FILES)
  need(blobs[VARIANT+'/.dockerignore']==expected.encode(),'frozen_denyall_ignore')
  context_inventory(context,R);return context,bindings
@@ -353,7 +364,7 @@ def execute(args):
    context,inputs=seal_context(R,root,blobs,stack,frames,uid,checks)
    publish(root/'source-identity.json',encoded({'schema':'ubuntu_sqlite_hosted_source_identity/1','commit':args.commit,'run_id':run,'attempt':attempt,
     'variant':VARIANT,'nonce':args.nonce,'tracked_files':{str(TRACKED/name):{'bytes':pin[0],'sha256':pin[1]}for name,pin in PINS.items()},
-    'tracked_small_files':22,'selected_small_files':10,'context_payload_files':12,'context_control_files':2,'context_regular_files':14,'security_accepted':False}),uid)
+    **source_inventory_counts(),'security_accepted':False}),uid)
    publish(root/'reports/vm-resources.json',encoded({'schema':'ubuntu_sqlite_hosted_vm_resources/1','facts':facts,
     'admission_basis':'trusted-workflow-hosted-selection-plus-uid-os-environment','buildkit_client_cgroup_limits_claimed':False,
     'global_wall_seconds':GLOBAL_SECONDS,'build_command_max_seconds':BUILD_SECONDS,'finalize_reserve_seconds':FINALIZE_SECONDS,

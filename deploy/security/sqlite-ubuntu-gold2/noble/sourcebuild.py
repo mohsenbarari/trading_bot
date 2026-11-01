@@ -30,6 +30,7 @@ WAL_AFTER=(175230,'7287fb98dcfbfb3c33dfba555c21396f7ef53c68a325dc706e68ca3c19ab7
 FTS_PATCH='0002-fts5-detail-none-merge-bound.patch'
 FTS_PATCH_PIN=(1252, 'bc1403e417a5673ad51712c36f3b9b33f87b77a6f6f06d7bedba02b46d098231')
 FTS_TEST_PATCH='0003-fts5-detail-none-upstream-regression.patch'
+CONTEXT_PAYLOAD_FILES=('sourcebuild.py','Dockerfile',PATCH,FTS_PATCH,FTS_TEST_PATCH,'0004-rowid-in-view-nested-join-core.patch','verify_positive.py','source-signer.asc','consumer-profile.json')
 FTS_TEST_PATCH_PIN=(931, '81edf417c615f7a76fe9506c74e4a05a5ee1a135bce805de7ae8ac02c3dbfaed')
 FTS_BEFORE=(283756, 'b358488b1ff31b08b4f263eaa3c820e378218c5cf9164b74c29b647fb7f9e630')
 FTS_AFTER=(283780, '35c85de15aef3e47162a9fa8e246858304bb6f2e5a93a7ef6103157897d2c1eb')
@@ -233,6 +234,7 @@ def inputs(root,recipe):
  proofs={leaf:digest(root/leaf,pin) for leaf,pin in SOURCE_FILES.items()}
  digest(recipe/PATCH,PATCH_PIN);digest(recipe/FTS_PATCH,FTS_PATCH_PIN);digest(recipe/FTS_TEST_PATCH,FTS_TEST_PATCH_PIN);digest(recipe/'verify_positive.py',VERIFY_PIN)
  digest(recipe/'source-signer.asc',SIGNER_PIN);digest(recipe/'consumer-profile.json',PROFILE_PIN)
+ digest(recipe/ROWID_NESTED_JOIN['name'],ROWID_NESTED_JOIN['patch'])
  dsc=bytes_at(root/('sqlite3_'+BASE_VERSION+'.dsc'),SOURCE_FILES['sqlite3_'+BASE_VERSION+'.dsc']).decode('ascii')
  require(('Version: '+BASE_VERSION+'\n') in dsc and 'Format: 3.0 (quilt)\n' in dsc,'source_version')
  for leaf,(size,pin) in SOURCE_FILES.items():
@@ -252,7 +254,7 @@ def builder_context():
  current_environment()
  context=json.loads(bytes_at(RECIPE/'context-manifest.json'))
  require(type(context) is dict and set(context)=={'schema','files'} and context['schema']=='sqlite_allowlisted_context/1','build_context')
- expected={'sourcebuild.py','Dockerfile',PATCH,FTS_PATCH,FTS_TEST_PATCH,'verify_positive.py','source-signer.asc','consumer-profile.json',*('inputs/'+name for name in SOURCE_FILES)}
+ expected={*CONTEXT_PAYLOAD_FILES,*('inputs/'+name for name in SOURCE_FILES)}
  require(type(context['files']) is dict and set(context['files'])==expected,'build_context')
  for name,binding in context['files'].items():
   require(type(binding) is dict and set(binding)=={'bytes','sha256'} and type(binding['bytes']) is int
@@ -264,14 +266,14 @@ def stage_context(destination):
  destination=Path(destination);require(destination.is_absolute() and not destination.exists()
   and destination.parent.resolve(strict=True)==destination.parent and destination.parent.stat().st_uid==0
   and not destination.parent.stat().st_mode&0o022,'context_destination')
- files={name:digest(recipe/name) for name in ('sourcebuild.py','Dockerfile',PATCH,FTS_PATCH,FTS_TEST_PATCH,'verify_positive.py','source-signer.asc','consumer-profile.json')}
+ files={name:digest(recipe/name) for name in CONTEXT_PAYLOAD_FILES}
  files.update({'inputs/'+name:row for name,row in proofs.items()})
  destination.mkdir(mode=0o700);(destination/'inputs').mkdir(mode=0o700)
  for name,binding in files.items():
   original=recipe/name;target=destination/name
   expected=(binding['bytes'],binding['sha256']);copy_exact(original,target,expected)
  manifest={'schema':'sqlite_allowlisted_context/1','files':files};publish(destination/'context-manifest.json',encoded(manifest))
- allow='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+name+'\n' for name in ('sourcebuild.py','Dockerfile',PATCH,FTS_PATCH,FTS_TEST_PATCH,'verify_positive.py','source-signer.asc','consumer-profile.json'))
+ allow='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+name+'\n' for name in CONTEXT_PAYLOAD_FILES)
  allow+='!inputs/\n'+''.join('!inputs/'+name+'\n' for name in SOURCE_FILES)
  publish(destination/'.dockerignore',allow.encode())
  return {'schema':'sqlite_public_context_staged/1','context':str(destination),'files':files,'build_performed':False,'security_accepted':False}
