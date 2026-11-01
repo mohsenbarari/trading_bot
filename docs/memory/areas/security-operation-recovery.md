@@ -1,26 +1,46 @@
 # Security operation lifetime and recovery
 
-- Test actual Docker/systemd wire and omitted fields before operation entry.
-  Hand-built dictionaries cannot verify CLI serialization. systemd255
-  WorkingDirectory D-Bus uses one missing-ok `!`: strip it only there, then keep
-  path/alias checks unchanged. Marked target paths and unknown forms refuse.
-- Before launch, the original outer deadline must contain the sealed worker
-  deadline plus bounded client cleanup, reporting and physical-finalization time.
-  Declare that envelope before source loans; never extend active clocks or
-  retimestamp evidence. Refuse inadequate containment before spawning.
-- A client timeout or immediate-child reap proves neither scope cancellation
-  nor normal operation finality. Preserve failed prefixes, unknown outcomes,
-  attempt directories and owned reservations until fresh typed reconciliation.
-- A fresh nonce or runtime path cannot bypass prior attempts. Failed-only
-  recovery binds exact old source/control/intent, current holder/scope absence,
-  permanent-fence identity, image parity and genuine cleanup evidence; it grants
-  no old success, LOAD or security acceptance.
-- Keep the historical failure disposition separate from current operation
-  freshness. A fixed disposition may bind one prescribed new nonce; fresh
-  controls, policies, live checks and original guards still govern its use.
-- Dispose only the exact owned temporary reservation after fresh guarded proof.
-  Preserve permanent mutex payloads and names, all historical evidence and the
-  distinction between failed-only disposal and normal finalizer success.
-- A provisional admission file is not successful worker finality. Require the
-  genuine clean child outcome and caller finalizers before adoption. Late failed
-  admissions remain retained and need separate reconciliation; no blind retry.
+- Preflight real Docker/systemd wire, including null/omitted fields. Use
+  stop --timeout with unchanged grace; --time may emit stdout warnings.
+  IPAM.Config may be null. systemd255 WorkingDirectory allows one leading
+  missing-ok ! only there; preserve path/alias checks and reject unknown forms.
+  systemd --pipe with RemainAfterExit waits for owned-unit retirement; removing
+  --wait is insufficient. Require real ExecMain start/exit and code, then stop
+  that unit and join its client. Initial dead/PID0 proves no completion.
+- Declare outer/worker deadlines before loans, including cleanup/reporting/
+  physical finalizers. Refuse insufficient containment; never extend active
+  clocks or retimestamp evidence. Timeout/reaping alone proves no scope cancel.
+- Nonzero/unknown outcomes preserve prefixes, attempts and owned reservations.
+  No blind retry. Failed-only recovery binds original source/control/intent,
+  current actor absence, permanent fences, parity and genuine cleanup; it grants
+  neither old success nor new LOAD. Historical disposition may bind one fresh
+  nonce, governed independently by current controls/policies/guards.
+- Completion binds each original API/CLI received_at and final ACK; Root adoption
+  time never replaces the operation clock. Dispose only the exact owned temporary
+  reservation after guarded proof. Preserve permanent names/payloads/history;
+  failed disposal is separate from normal finalizer success.
+- Provisional receipts prove no child finality. Require genuine clean child and
+  caller finalizers; retain failed admissions for reconciliation. Preserve bounded
+  typed public refusal before assertions; never export locals/private stdout,
+  convert failure into acceptance, or invent original-FD closure from extra FDs.
+- RLIMIT_FSIZE affects every child-written file. Size it for the largest admitted
+  payload; never inherit small receipt caps into copy/backup/export. Bound stdout
+  separately before accumulation. Preserve primary and finalizer errors.
+- Preflight the exact runner: Ansible needs a supported empty .cfg, not /dev/null.
+  Provision caller attempt parents before issuing controls/guards; owner-created
+  nonce paths stay absent. SOURCE pilots may skip operational branches. Give
+  unrelated probes their own empty client directories, never reserved op paths.
+- Use followup_task; verify running. send_message cannot restart.
+  Discover paths/full hashes before reads; never guess case/suffixes.
+- Test actual producer→consumer modes, schemas, counts, keys, fallback codes,
+  witness/image defaults and genuine public records before remote writes.
+  Finish immutable staging and actual vendor-wire canaries before fresh intake
+  and control issuance; never spend qualified authority on unfinished tooling.
+  Changed Source hashes require every inline size and generated peer tested;
+  AST parity alone misses stale bindings. Compile readable exact entries.
+- Read-admission starts at actual collection within original authority; never
+  retime facts. A user window measured from first outage starts at actual
+  interruption, not preparation. A retired unused preparation cap permits a
+  fresh scope only after proving no control/operation: preserve original human
+  approval and active deadlines. Bind current witnesses/business/raw collectors;
+  unknown outcomes refuse. Source fixtures prove no Host operation.

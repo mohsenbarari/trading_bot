@@ -21,7 +21,8 @@
 - 2026-10-25 | Native dashboard TLS verified independently from Web on existing
   coin.362514.ir/30486; backend is loopback30487. No Writer/DNS/auth-code change.
 
-- 2026-10-24 | Unprovisioned Finland65.109.214.203:16vCPU/31.3GiBRAM; root free303.6GB.
+- 2026-11-01 | Unprovisioned Finland65.109.214.203:16vCPU/31.3GiBRAM;
+  Root read-only df measured296220508160B free, explicit key/pinned host passed.
   SSH passed using explicit `id_ed25519_finland_primary` (defaults omit it), pinned
   ED25519 `SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs`. Only scoped
   ciphertext-backup staging is authorized; no App/Writer/DNS/migration. Firewall,
