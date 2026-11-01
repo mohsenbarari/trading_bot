@@ -252,23 +252,16 @@ async function toggleAccountStatusFromAdminProfile(page: any) {
     await expect(page.locator('.settings-menu .ui-inset-group__title')).toHaveText('تنظیمات کاربر')
   }
   await expect(toggleButton).toBeVisible({ timeout: 30000 })
-  const playwrightPage = page as any
-  const dialogHandler: any = async (dialog: any) => {
-    await dialog.accept()
-  }
-  // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
-  playwrightPage.on('dialog', dialogHandler)
+  await toggleButton.click()
+  const confirmationDialog = page.getByRole('dialog', { name: /^تأیید (?:غیرفعال|فعال)‌سازی حساب$/ })
+  await expect(confirmationDialog).toBeVisible()
   const updateResponsePromise = page.waitForResponse((response) => {
     return response.request().method() === 'PUT' && /\/api\/users\/\d+$/.test(response.url())
   })
-  try {
-    await toggleButton.click()
-    const response = await updateResponsePromise
-    expect(response.ok()).toBeTruthy()
-  } finally {
-    // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
-    playwrightPage.off('dialog', dialogHandler)
-  }
+  await confirmationDialog.getByRole('button', { name: /^(?:غیرفعال|فعال) کردن$/ }).click()
+  const response = await updateResponsePromise
+  expect(response.ok()).toBeTruthy()
+  await expect(confirmationDialog).toBeHidden()
 }
 
 async function createIsolatedPage(browser: any, tokens: AuthTokens) {

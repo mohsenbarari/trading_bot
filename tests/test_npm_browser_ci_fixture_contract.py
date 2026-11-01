@@ -3,6 +3,7 @@ import ast
 import builtins
 from copy import deepcopy
 from contextlib import redirect_stderr,redirect_stdout
+from hashlib import sha256
 import io
 from itertools import permutations
 import json
@@ -51,17 +52,46 @@ def validator(settings):
    if isinstance(node,ast.Assign)and any(isinstance(t,ast.Name)and t.id in constants for t in node.targets):selected.append(node)
   exec(compile(ast.Module(body=selected,type_ignores=[]),'<owned actual public validator AST>','exec'),ns)
  return ns
-def run_preflight(values,*,function=None):
+def run_preflight(values,*,function=None,fixture_bytes=None,mime_type='text/plain',tree=None,calls=None):
  settings=SimpleNamespace(**{k.lower():v for k,v in values.items()});namespace=validator(settings)
  if function is not None:namespace['public_webapp_url_for_links']=function
- code=preflight();code.body=[n for n in code.body if not isinstance(n,(ast.Import,ast.ImportFrom))]
+ fixture_name='scripts/npm_security_ci/public_document_fixture.json'
+ if fixture_bytes is None:fixture_bytes=C.public_bytes(ROOT/fixture_name,512,(131,'8f1c0062f5c8bd157ce9145e4369bbc109f49607ac1f80a4029a170d70ba7f96'))
+ if type(fixture_bytes)is not bytes or len(fixture_bytes)>512:raise AssertionError('owned public fixture bound')
+ calls=[]if calls is None else calls
+ class PublicFixtureBytes(io.BytesIO):
+  def read(self,size=-1):
+   if size!=132:raise AssertionError('public fixture read must remain bounded132')
+   calls.append(('public_fixture_read',size));return super().read(size)
+ class PublicFixturePath:
+  def __init__(self,name):
+   if type(name)is not str or name!=fixture_name:raise AssertionError('unknown owned public path')
+  def open(self,mode):
+   if mode!='rb':raise AssertionError('public fixture read-only mode')
+   return PublicFixtureBytes(fixture_bytes)
+ def public_mime(contents,*,mime):
+  # Explicit owned double: no claim about the actual backend's libmagic.
+  if mime is not True or type(contents)is not bytes or(len(contents),sha256(contents).hexdigest())!=(12582912,'b24434d88423fe82a69c5e4a8d30d52ced4d5f22a8073310f04da1e89ded21c4'):
+   raise AssertionError('MIME double requires exact full12MiB public fixture')
+  calls.append(('owned_magic_full_fixture',len(contents)));return mime_type
+ namespace.update(Path=PublicFixturePath,sha256=sha256,json=json,magic=SimpleNamespace(from_buffer=public_mime,version=lambda:0))
+ code=preflight()if tree is None else tree
+ code.body=[n for n in code.body if not isinstance(n,(ast.Import,ast.ImportFrom))]
  real_import=builtins.__import__
  def blocked(name,*args,**kwargs):
   if name.startswith(('core.config','dotenv','pydantic_settings')):raise AssertionError('live settings imports forbidden')
   return real_import(name,*args,**kwargs)
- out=io.StringIO();err=io.StringIO()
- with patch.object(builtins,'__import__',side_effect=blocked),redirect_stdout(out),redirect_stderr(err):exec(compile(code,'<owned CI preflight>','exec'),namespace)
- if out.getvalue()or err.getvalue():raise AssertionError('preflight emitted configuration')
+ out=io.StringIO();err=io.StringIO();completed=False
+ try:
+  with patch.object(builtins,'__import__',side_effect=blocked),redirect_stdout(out),redirect_stderr(err):exec(compile(code,'<owned CI preflight>','exec'),namespace)
+  completed=True
+ finally:
+  if err.getvalue():raise AssertionError('preflight emitted unexpected stderr')
+  if out.getvalue():
+   if not completed:raise AssertionError('failed preflight emitted output')
+   if json.loads(out.getvalue())!={'public_document_mime_preflight':'PASS','bytes':12582912,'libmagic_version':0}:raise AssertionError('preflight emitted configuration')
+  elif completed:raise AssertionError('public MIME preflight receipt missing')
+ namespace['_owned_public_calls']=calls;namespace['_owned_mime_version_is_mock']=True
  return namespace
 
 class BrowserFixtureContractTests(unittest.TestCase):
@@ -93,7 +123,40 @@ class BrowserFixtureContractTests(unittest.TestCase):
   raw=C.public_bytes(ROOT/WORKFLOW,32768).decode();self.assertIn('--max-failures=3',raw)
   for bad in('ignoreHTTPSErrors','NODE_TLS_REJECT_UNAUTHORIZED','curl -k','test.skip','test.only'):self.assertNotIn(bad,raw)
   imports=[n.module for n in preflight().body if isinstance(n,ast.ImportFrom)]
-  self.assertEqual(imports,['core.config','core.public_webapp_url'])
+  self.assertEqual(imports,['core.config','core.public_webapp_url','hashlib','pathlib'])
+  self.assertEqual([(n.module,[(a.name,a.asname)for a in n.names])for n in preflight().body if isinstance(n,ast.ImportFrom)],
+   [('core.config',[('settings',None)]),('core.public_webapp_url',[('public_webapp_url_for_links',None)]),('hashlib',[('sha256',None)]),('pathlib',[('Path',None)])])
+  self.assertEqual([[(a.name,a.asname)for a in n.names]for n in preflight().body if isinstance(n,ast.Import)],[[('json',None)],[('magic',None)]])
+ def test_complete_actual_preflight_reads_one_owned_path_and_exact_full12MiB_magic_buffer(self):
+  ns=run_preflight(fixture_env());self.assertEqual(ns['_owned_public_calls'],[('public_fixture_read',132),('owned_magic_full_fixture',12582912)])
+  self.assertEqual((len(ns['document']),sha256(ns['document']).hexdigest()),(12582912,'b24434d88423fe82a69c5e4a8d30d52ced4d5f22a8073310f04da1e89ded21c4'));self.assertTrue(ns['_owned_mime_version_is_mock'])
+  with self.assertRaisesRegex(AssertionError,'unknown owned public path'):ns['Path']('/OWNED_CANARY_PRIVATE_PATH')
+  with self.assertRaisesRegex(AssertionError,'read-only'):ns['Path']('scripts/npm_security_ci/public_document_fixture.json').open('wb')
+ def test_actual_preflight_rejects_short_long_and_changed_public_template_before_magic(self):
+  raw=C.public_bytes(ROOT/'scripts/npm_security_ci/public_document_fixture.json',512)
+  for body in(raw[:-1],raw+b'X',b'X'+raw[1:]):
+   with self.subTest(bytes=len(body)):
+    calls=[]
+    with self.assertRaises(SystemExit)as error:run_preflight(fixture_env(),fixture_bytes=body,calls=calls)
+    self.assertEqual(error.exception.code,'unexpected_ci_public_document_source');self.assertEqual(calls,[('public_fixture_read',132)])
+ def test_actual_preflight_digest_guard_rejects_changed_generated_bytes_and_wrong_size(self):
+  # Mutate only owned copies of the actual producer AST as counterfactuals.
+  # The actual hash guard must refuse before the strict magic double is called.
+  for target in('size','document'):
+   with self.subTest(target=target):
+    code=preflight();assignment=next(n for n in code.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id==target for t in n.targets))
+    replacement='12582911'if target=='size'else"b'X'+document[1:]"
+    if target=='document':assignment.value=ast.BinOp(left=ast.Constant(b'X'),op=ast.Add(),right=ast.Subscript(value=assignment.value,slice=ast.Slice(lower=ast.Constant(1)),ctx=ast.Load()))
+    else:assignment.value=ast.parse(replacement,mode='eval').body
+    ast.fix_missing_locations(code);calls=[]
+    with self.assertRaises(SystemExit)as error:run_preflight(fixture_env(),tree=code,calls=calls)
+    self.assertEqual(error.exception.code,'unexpected_ci_public_document_bytes');self.assertEqual(calls,[('public_fixture_read',132)])
+ def test_actual_preflight_wrong_MIME_uses_fixed_code_without_private_value(self):
+  for mime in('application/SIMH-tape-data','OWNED_CANARY_PRIVATE_MIME'):
+   with self.subTest(mime=mime):
+    calls=[]
+    with self.assertRaises(SystemExit)as error:run_preflight(fixture_env(),mime_type=mime,calls=calls)
+    self.assertEqual(error.exception.code,'unexpected_ci_public_document_mime');self.assertNotIn('OWNED_CANARY',str(error.exception));self.assertEqual(calls,[('public_fixture_read',132),('owned_magic_full_fixture',12582912)])
  def test_advertised_links_do_not_navigate_to_synthetic_external_origin(self):
   customer=C.public_bytes(ROOT/'frontend/e2e/customer-owner-flow.spec.ts',131072).decode()
   accountant=C.public_bytes(ROOT/'frontend/e2e/accountant-owner-flow.spec.ts',131072).decode()

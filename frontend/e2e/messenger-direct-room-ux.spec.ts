@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { mkdtempSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
@@ -182,7 +182,7 @@ function createPlaywrightBinaryFile(name: string, mimeType: string, bodyBase64: 
   }
 }
 
-function createPlaywrightTextFilePath(name: string, contents: string) {
+function createPlaywrightTextFilePath(name: string, contents: string | Buffer) {
   const filePath = join(PLAYWRIGHT_TMP_DIR, name)
   writeFileSync(filePath, contents, 'utf8')
   return filePath
@@ -516,11 +516,16 @@ async function injectDocument(page: Page, options?: { prefix?: string; sizeBytes
   const suffix = Date.now()
   const prefix = options?.prefix ?? 'pw-direct'
   const requestedSizeBytes = Math.max(0, Number(options?.sizeBytes ?? 0))
-  const baseContent = `Playwright document ${suffix}\n`
+  const fixture = JSON.parse(readFileSync(new URL('../../scripts/npm_security_ci/public_document_fixture.json', import.meta.url), 'utf8')) as { template: string }
+  const baseContent = fixture.template.replace('{seed}', String(suffix))
   const repeatCount = requestedSizeBytes > 0
     ? Math.max(1, Math.ceil(requestedSizeBytes / Buffer.byteLength(baseContent, 'utf8')))
     : 1
-  const filePath = createPlaywrightTextFilePath(`${prefix}-${suffix}.txt`, baseContent.repeat(repeatCount))
+  const contents = Buffer.from(baseContent.repeat(repeatCount), 'utf8')
+  const filePath = createPlaywrightTextFilePath(
+    `${prefix}-${suffix}.txt`,
+    requestedSizeBytes > 0 ? contents.subarray(0, requestedSizeBytes) : contents,
+  )
   await page.locator('input[type="file"][accept="*"]').setInputFiles(filePath)
 }
 

@@ -192,6 +192,10 @@ jobs:
           docker compose exec -T app python - <<'PY'
           from core.config import settings
           from core.public_webapp_url import public_webapp_url_for_links
+          from hashlib import sha256
+          from pathlib import Path
+          import json
+          import magic
 
           EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN = "https://ci-iran.invalid"
 
@@ -207,6 +211,20 @@ jobs:
               raise SystemExit("invalid_ci_public_webapp_origin") from None
           if public_origin != EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN:
               raise SystemExit("unexpected_ci_public_webapp_origin")
+          # Same public template used by injectDocument; no upload/API or MIME bypass.
+          with Path("scripts/npm_security_ci/public_document_fixture.json").open("rb") as fixture_file:
+              fixture_raw = fixture_file.read(132)
+          if (len(fixture_raw), sha256(fixture_raw).hexdigest()) != (131, "8f1c0062f5c8bd157ce9145e4369bbc109f49607ac1f80a4029a170d70ba7f96"):
+              raise SystemExit("unexpected_ci_public_document_source")
+          fixture = json.loads(fixture_raw)
+          unit = fixture["template"].replace("{seed}", "1793552400000").encode("ascii")
+          size = 12 * 1024 * 1024
+          document = (unit * ((size + len(unit) - 1) // len(unit)))[:size]
+          if sha256(document).hexdigest() != "b24434d88423fe82a69c5e4a8d30d52ced4d5f22a8073310f04da1e89ded21c4":
+              raise SystemExit("unexpected_ci_public_document_bytes")
+          if magic.from_buffer(document, mime=True) != "text/plain":
+              raise SystemExit("unexpected_ci_public_document_mime")
+          print(json.dumps({"public_document_mime_preflight": "PASS", "bytes": size, "libmagic_version": magic.version()}))
           PY
           curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
             -H 'Content-Type: application/json'

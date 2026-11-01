@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
+import { readFileSync } from 'node:fs'
 import { expect, test, type APIRequestContext, type APIResponse, type Locator, type Page } from '@playwright/test'
 import { primeAuthSession } from './helpers/auth'
 
@@ -1148,7 +1149,10 @@ async function injectGalleryImageAndVideo(page: Page) {
 
 async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
   const suffix = Date.now()
-  const baseContent = `Playwright document ${suffix}\n`
+  // The same public template is checked with the CI backend's real libmagic
+  // before the browser matrix; repeated "Playwright ..." can resemble SIMH tape.
+  const fixture = JSON.parse(readFileSync(new URL('../../scripts/npm_security_ci/public_document_fixture.json', import.meta.url), 'utf8')) as { template: string }
+  const baseContent = fixture.template.replace('{seed}', String(suffix))
   const repeatCount = sizeBytes > 0
     ? Math.max(1, Math.ceil(sizeBytes / Buffer.byteLength(baseContent, 'utf8')))
     : 1
@@ -1158,7 +1162,9 @@ async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
     {
       name: fileName,
       mimeType: 'text/plain',
-      buffer: Buffer.from(baseContent.repeat(repeatCount), 'utf8'),
+      buffer: sizeBytes > 0
+        ? Buffer.from(baseContent.repeat(repeatCount), 'utf8').subarray(0, sizeBytes)
+        : Buffer.from(baseContent, 'utf8'),
     },
   ])
 

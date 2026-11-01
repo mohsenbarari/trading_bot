@@ -551,7 +551,8 @@ test.describe('accountant owner lifecycle', () => {
       .locator('.accountant-pending-card')
       .filter({ hasText: cancelledRelationDisplayName })
     await expect(cancelledPendingCard).toContainText('دعوت', { timeout: 30000 })
-    await cancelledPendingCard.getByRole('button', { name: 'لغو دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('button', { name: 'اقدام‌های دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('menuitem', { name: 'لغو دعوت', exact: true }).click()
 
     const cancellationDialog = page.getByRole('dialog', {
       name: 'لغو رابطه و دعوت حسابدار',
