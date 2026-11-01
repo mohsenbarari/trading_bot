@@ -1,0 +1,174 @@
+"""Ordinary exact-six rehearsal inside the one owned disposable Ubuntu only."""
+from pathlib import Path
+from types import ModuleType
+from hashlib import sha256
+import argparse,errno,json,os,re,shutil,sys,time
+
+FAMILIES={'ubuntu239':('libc-bin','libc-dev-bin','libc-devtools','libc6','libc6-dev','locales'),
+          'ubuntu243':('libc-bin','libc-dev-bin','libc-gconv-modules-extra','libc6','libc6-dev','locales')}
+VERSIONS={'ubuntu239':'2.39-0ubuntu8.9','ubuntu243':'2.43-2ubuntu2.4'}
+M_PIN=(53351,'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82')
+def need(value,code):
+    if not value:raise RuntimeError(code)
+def encoded(value):
+    parts=[];size=1
+    for part in json.JSONEncoder(sort_keys=True,separators=(',',':'),allow_nan=False).iterencode(value):
+        raw=part.encode();need(size+len(raw)<=4*1024**2,'report_bound');size+=len(raw);parts.append(raw)
+    return b''.join(parts)+b'\n'
+def read_pin(path,pin,maximum):
+    path=Path(path);s=path.lstat();need(path.resolve(strict=True)==path and path.is_file()and s.st_nlink==1 and 0<s.st_size<=maximum,'input_scope')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        raw=os.pread(fd,s.st_size+1,0)
+        def identity(v):return(v.st_dev,v.st_ino,v.st_mode,v.st_uid,v.st_gid,v.st_nlink,v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+        need(len(raw)==s.st_size and sha256(raw).hexdigest()==pin and identity(s)==identity(os.fstat(fd))==identity(path.lstat()),'input_pin')
+    finally:os.close(fd)
+    return raw
+def no_policy():
+    try:Path('/usr/sbin/policy-rc.d').lstat()
+    except FileNotFoundError as error:need(error.errno==errno.ENOENT,'policy_unknown')
+    else:need(False,'policy_suppression_or_unknown')
+def solver(raw,names,version):
+    installs={};configured=set()
+    for line in raw.decode('utf8','strict').splitlines():
+        need(not line.startswith(('Remv ','Purg ')),'solver_removal')
+        if line.startswith('Inst '):
+            match=re.fullmatch(r'Inst ([A-Za-z0-9+.-]+)(?::amd64)?(?: \[[^\]]+\])? \(([^ )]+)[^\n]*\)',line)
+            need(match is not None and match[1]in names and match[1]not in installs and match[2]==version,'solver_nonfamily_or_version');installs[match[1]]=match[2]
+        if line.startswith('Conf '):
+            match=re.fullmatch(r'Conf ([A-Za-z0-9+.-]+)(?::amd64)? \(([^ )]+)[^\n]*\)',line)
+            need(match is not None and match[1]in names and match[1]not in configured and match[2]==version,'solver_configuration');configured.add(match[1])
+    need(set(installs)==set(names)==configured,'solver_incomplete_family');return installs
+def package_state(raw):
+    result={}
+    for line in raw.decode('utf8','strict').splitlines():
+        fields=line.split('\t');need(len(fields)==4 and fields[0]not in result and fields[3]=='ii ','package_database_not_clean')
+        result[fields[0]]=fields[1:]
+    need(1<=len(result)<=1024,'package_database_bound');return result
+def unchanged_nonfamily(before,after,names):
+    need(set(before)==set(after)and{k:v for k,v in before.items()if k not in names}=={k:v for k,v in after.items()if k not in names},'nonfamily_package_changed')
+def configuration():
+    result={}
+    for name in ('/etc/locale.gen','/etc/default/locale','/etc/locale.conf','/etc/ld.so.conf'):
+        p=Path(name)
+        try:s=p.lstat()
+        except FileNotFoundError as error:need(error.errno==errno.ENOENT,'configuration_unknown');result[name]={'absent':True};continue
+        if p.is_symlink():result[name]={'symlink':os.readlink(p)};continue
+        need(p.is_file()and s.st_nlink==1 and s.st_size<=16384,'configuration_bound')
+        fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+        try:raw=os.pread(fd,16385,0);need(len(raw)==s.st_size and len(raw)<=16384,'configuration_bound')
+        finally:os.close(fd)
+        result[name]={'sha256':sha256(raw).hexdigest(),'bytes':len(raw),'mode':s.st_mode&0o7777}
+    return result
+def apt_snapshot(profile):
+    suite='noble'if profile=='ubuntu239'else'resolute'
+    leaf='ubuntu.sources'if profile=='ubuntu239'else'locked-snapshot-bootstrap.sources'
+    suites=[suite,suite+'-updates',*([suite+'-backports']if profile=='ubuntu239'else[]),suite+'-security']
+    components='main restricted universe multiverse'if profile=='ubuntu239'else'main universe'
+    sources=Path('/etc/apt/sources.list.d');names=sorted(p.name for p in sources.iterdir())
+    need(names==[leaf],'unexpected_APT_source')
+    plain=Path('/etc/apt/sources.list');need(not plain.is_symlink()and plain.is_file()and plain.stat().st_size==0,'unexpected_plain_APT_source')
+    path=sources/leaf;fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:raw=os.pread(fd,16385,0);need(len(raw)<=16384,'APT_source_bound')
+    finally:os.close(fd)
+    expected=('Types: deb\nURIs: https://snapshot.ubuntu.com/ubuntu/20261101T000000Z/\nSuites: '+' '.join(suites)+'\nComponents: '+components+'\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n').encode()
+    need(raw==expected,'APT_source_identity')
+    records={};expected_names={'snapshot.ubuntu.com_ubuntu_20261101T000000Z_dists_'+s+'_InRelease'for s in suites}
+    for p in Path('/var/lib/apt/lists').iterdir():
+        if not p.name.endswith('_InRelease'):continue
+        need(p.name in expected_names and not p.is_symlink(),'APT_InRelease_scope')
+        fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+        try:body=os.pread(fd,512*1024+1,0);need(0<len(body)<=512*1024,'APT_InRelease_bound')
+        finally:os.close(fd)
+        records[p.name]={'bytes':len(body),'sha256':sha256(body).hexdigest()}
+    need(set(records)==expected_names,'APT_InRelease_count');return{'sources':raw.decode(),'authenticated_by_normal_APT_update':True,'InRelease':records}
+
+def execute(stage,expected_input):
+    need(os.getuid()==os.geteuid()==0 and re.fullmatch('[a-f0-9]{32}',os.environ.get('FAMILY6_NONCE',''))and Path('/.dockerenv').is_file(),'owned_disposable_only')
+    cfg=json.loads(read_pin('/inputs/input.json',expected_input,65536));profile=cfg['profile'];need(profile in FAMILIES,'profile')
+    names=FAMILIES[profile];old=VERSIONS[profile];new=old+'+gold1'
+    need(cfg['old_version']==old and cfg['new_version']==new and set(cfg['old'])==set(cfg['new'])==set(names),'exact_family')
+    raw=read_pin('/inputs/host_io_original.py',M_PIN[1],65536);need(len(raw)==M_PIN[0],'command_source_pin')
+    M=ModuleType('_bounded_family6');M.__file__='/inputs/host_io_original.py';exec(compile(raw,M.__file__,'exec'),M.__dict__)
+    end=time.monotonic()+1200
+    env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','HOME':'/root','LANG':'C.UTF-8','LC_ALL':'C.UTF-8','DEBIAN_FRONTEND':'noninteractive'}
+    commands=[];remaining=3*1024**2
+    def command(args,maximum=256*1024):
+        nonlocal remaining
+        need(remaining>0,'command_evidence_bound')
+        try:raw=M.run(args,env=env,deadline=end,maximum=min(maximum,remaining))
+        except BaseException as error:
+            truth=getattr(error,'public_command_failure',{})
+            captured=truth.get('captured_output',b'');need(type(captured)is bytes and len(captured)<=maximum,'failed_output_bound')
+            error.family6_failed_command={'argv':args,'actual_returncode':truth.get('actual_returncode'),'actual_pipe_closed':truth.get('actual_pipe_closed'),'stdout_eof_observed':truth.get('stdout_eof_observed'),'captured_bytes':len(captured),'captured_output_utf8':captured.decode('utf8','replace'),'command_accepted':False}
+            raise
+        remaining-=len(raw)
+        commands.append({'argv':args,'bytes':len(raw),'sha256':sha256(raw).hexdigest(),'actual_returncode':0,'output_utf8':raw.decode('utf8','replace')})
+        return raw
+    def status():return package_state(command(['/usr/bin/dpkg-query','-W','-f=${Package}\t${Version}\t${Architecture}\t${db:Status-Abbrev}\n']))
+    def verify(version):
+        current=status()
+        for name in names:need(current.get(name)==[version,'all'if name=='locales'else'amd64','ii '],'installed_family')
+        need(command(['/usr/bin/dpkg','--audit'])==b'','pending_dpkg_audit')
+        command(['/usr/bin/apt-get','--no-download','check'])
+        command(['/usr/sbin/ldconfig'])
+        command(['/lib64/ld-linux-x86-64.so.2','--list','/bin/true'])
+        need(command(['/usr/bin/getconf','GNU_LIBC_VERSION']).strip()==('glibc '+old.split('-')[0]).encode(),'actual_libc_version')
+        locales=command(['/usr/bin/locale','-a']).decode().splitlines()
+        need('en_US.utf8'in locales and'fa_IR.utf8'in locales,'selected_locales_missing')
+        command(['/usr/bin/getent','passwd','root'])
+        no_policy();return current
+    def archives(which):
+        paths=[]
+        for name in names:
+            record=cfg[which][name];leaf=name+'_'+(old if which=='old'else new)+'_'+('all'if name=='locales'else'amd64')+'.deb'
+            source=Path('/inputs')/which/leaf
+            raw=read_pin(source,record['sha256'],8*1024**2);need(len(raw)==record['bytes'],'package_size')
+            control=command(['/usr/bin/dpkg-deb','-f',str(source)]).decode()
+            fields={}
+            for line in control.splitlines():
+                if line and not line[0].isspace()and': 'in line:
+                    key,value=line.split(': ',1);need(key not in fields,'duplicate_package_control');fields[key]=value
+            for key,value in {'Package':name,'Version':old if which=='old'else new,'Architecture':'all'if name=='locales'else'amd64','Source':'glibc'}.items():need(fields.get(key)==value,'package_control')
+            target=Path('/var/cache/apt/archives')/leaf
+            # Populate ordinary APT's cache, never transplant payload binaries.
+            shutil.copyfile(source,target);target.chmod(0o644);need(len(read_pin(target,record['sha256'],8*1024**2))==record['bytes'],'cache_copy')
+            paths.append(str(target))
+        return paths
+    def apt(paths,rollback=False,simulate=False):
+        args=['/usr/bin/apt-get','--no-download','--no-remove']
+        if rollback:args.append('--allow-downgrades')
+        args+=['--simulate']if simulate else['-y']
+        return command(args+['install',*paths])
+    no_policy();report={'schema':'disposable_exact_family6_worker/1','profile':profile,'stage':stage,'Host_install_allowed':False,'real_Host_PID1_reexec_proven':False,'security_accepted':False}
+    if stage=='prepare':
+        # Signed network preparation is done by the outer fixed bootstrap.
+        # No build/multilib cohort is added to the ordinary six-family baseline.
+        preparation=['/usr/bin/apt-get','--no-remove','--no-install-recommends']
+        report['preparation_solver_utf8']=command(preparation+['--simulate','install',*[name+'='+old for name in names]]).decode('utf8','strict')
+        command(preparation+['-y','install',*[name+'='+old for name in names]])
+        Path('/etc/locale.gen').write_text('en_US.UTF-8 UTF-8\nfa_IR.UTF-8 UTF-8\n')
+        command(['/usr/sbin/locale-gen']);command(['/usr/sbin/update-locale','LANG=en_US.UTF-8'])
+        report['baseline']=verify(old);report['configuration']=configuration();report['signed_APT']=apt_snapshot(profile)
+        report['baseline_snapshot_sha256']=sha256(encoded({'packages':report['baseline'],'configuration':report['configuration'],'apt':report['signed_APT']})).hexdigest()
+    else:
+        need(stage=='exercise','stage')
+        baseline=verify(old);before=configuration();apt_before=apt_snapshot(profile)
+        report['baseline_snapshot_sha256']=sha256(encoded({'packages':baseline,'configuration':before,'apt':apt_before})).hexdigest()
+        forward=archives('new');report['forward_solver']=solver(apt(forward,simulate=True),names,new)
+        apt(forward);after=verify(new);unchanged_nonfamily(baseline,after,names);report['forward_configuration']=configuration()
+        rollback=archives('old');report['rollback_solver']=solver(apt(rollback,rollback=True,simulate=True),names,old)
+        apt(rollback,rollback=True);restored=verify(old);need(restored==baseline,'rollback_package_state');need(configuration()==before,'rollback_configuration_drift');need(apt_snapshot(profile)==apt_before,'offline_APT_sources_changed')
+        report.update(forward_exact_six=True,rollback_exact_six=True,nonfamily_packages_unchanged=True,configuration_restored_exactly=True)
+    report['commands']=commands;report['status']='PASS_DISPOSABLE_ONLY'
+    raw=encoded(report);need(len(raw)<=4*1024**2,'report_bound');sys.stdout.write(raw.decode());return report
+def main(argv=None):
+    argv=sys.argv[1:]if argv is None else argv
+    if len(argv)!=3 or argv[0]!='--owned-family6' or argv[1]not in{'prepare','exercise'}or re.fullmatch('[a-f0-9]{64}',argv[2])is None:
+        print('{"status":"UNARMED","Host_action":false}');return 0
+    try:execute(argv[1],argv[2]);return 0
+    except BaseException as error:
+        text=str(error);code=text if type(error)is RuntimeError and re.fullmatch('[A-Za-z0-9_]{1,80}',text)else'rehearsal_refused'
+        value={'status':'FAILED','code':code,'failed_public_command':getattr(error,'family6_failed_command',None),'automatic_retry':False,'Host_install_allowed':False,'security_accepted':False}
+        print(json.dumps(value,sort_keys=True));return 1
+if __name__=='__main__':raise SystemExit(main())

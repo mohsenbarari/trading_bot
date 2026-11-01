@@ -1,0 +1,1148 @@
+{
+  "Host_install_allowed": false,
+  "Root_compatibility": {
+    "bytes": 13934,
+    "full9": [
+      2049,
+      448787,
+      33152,
+      0,
+      0,
+      1,
+      13934,
+      1793524244492904802,
+      1793524244492904802
+    ],
+    "original_reader_physical_EBADF": true,
+    "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-two-families-static-ABI-acceptance-20261101-01/ROOT-ACCEPTANCE.json",
+    "sha256": "55ede30abdaf80e9e82cdc910c8d15e85e34512b1d6baead0f09610182c6aac8"
+  },
+  "Root_control_scope_addendum": {
+    "bytes": 1018,
+    "full9": [
+      2049,
+      448690,
+      33152,
+      0,
+      0,
+      1,
+      1018,
+      1793522992434029166,
+      1793522992434029166
+    ],
+    "original_reader_physical_EBADF": true,
+    "path": "/root/trading-bot/trading_bot/.local/security-Root-glibc12-new-control-review-20261101-01/SCOPE-AND-SYMBOL-ADDENDUM.json",
+    "sha256": "6b96d5081dcff773c7fffa44b341454c1fbdded5ae526484744d13f2b9f959d6"
+  },
+  "Root_controls": {
+    "bytes": 47402,
+    "full9": [
+      2049,
+      448670,
+      33152,
+      0,
+      0,
+      1,
+      47402,
+      1793522936687633477,
+      1793522936687633477
+    ],
+    "original_reader_physical_EBADF": true,
+    "path": "/root/trading-bot/trading_bot/.local/security-Root-glibc12-new-control-review-20261101-01/CONTROL-COMPARISON.json",
+    "sha256": "620a62a1cb0dbafb645ee54be47862197392ec3800f3b71ab54e764e1bd50fac"
+  },
+  "Root_current_body_review": {
+    "bytes": 11111,
+    "full9": [
+      2049,
+      1053704,
+      33152,
+      0,
+      0,
+      1,
+      11111,
+      1793522415087931158,
+      1793522415087931158
+    ],
+    "original_reader_physical_EBADF": true,
+    "path": "/root/trading-bot/trading_bot/.local/security-Root-current-vendor-bodies-20261101-01/ROOT-BODY-ACCEPTANCE.json",
+    "sha256": "8814c08585c5faecee86dbd65803c6a029cf75328c74de4100df29ece034dafb"
+  },
+  "Root_signed_old_family_manifest": {
+    "bytes": 13864,
+    "full9": [
+      2049,
+      534787,
+      33188,
+      0,
+      0,
+      1,
+      13864,
+      1793494660781651315,
+      1793494660781651315
+    ],
+    "original_reader_physical_EBADF": true,
+    "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/UBUNTU-INSTALLED-FAMILY6-BINARY-INPUTS.json",
+    "sha256": "c589251337ef4d22940a42de5447df9052c9743a7b227cdd54995533646bc85a"
+  },
+  "accepted_for": "new independently reviewed exact-pin rehearsal consumer only; old success/provenance consumers must continue refusing",
+  "activation_authority": false,
+  "candidate_status": "unsigned local backport; Native test-only patch and original x32 absent retained; not official or reproducible-build claim",
+  "new_derived_static_headers_dynamic_ABI_literal_docs_qualified": true,
+  "normal_configuration_admitted": false,
+  "old_producer_wrappers_remain_failed": true,
+  "original_CI_ABI_loop_reached": false,
+  "original_check_source": {
+    "bytes": 11243,
+    "path": "/root/trading-bot/trading_bot/.local/security-Ubuntu-failed-export-Root-bridge-feasibility-20261101-01/check_existing_joins.py",
+    "sha256": "46ad71310a2d12ba714078d1b1f979276802d499e01131fe05250d1c976e4344"
+  },
+  "original_normalized_provenance_absent": true,
+  "profiles": [
+    {
+      "Root_derivative_exit_code": 0,
+      "Root_derivative_original_FD_physical_closes": 1860,
+      "Source_or_package_official_signature_claim": false,
+      "actual_dpkg_vendor_exit_code": 0,
+      "attempt": 1,
+      "complete_dependency_closure": {
+        "authenticated_dependency_DEBs": 225,
+        "base": 92,
+        "installed": 317
+      },
+      "context_frozen_files_verified": 15,
+      "derivative": {
+        "bytes": 600213,
+        "full9": [
+          2049,
+          448776,
+          33152,
+          0,
+          0,
+          1,
+          600213,
+          1793523831290975016,
+          1793523831290975016
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-finite-qualification-source-20261101-04/DERIVATIVE-OBSERVATION.json",
+        "sha256": "b4aebaa51b578ad9b0872e2e82861c6613428adb1a4f0ea056cb371e36091e4d"
+      },
+      "derived_rehearsal_input_qualified": true,
+      "failure": {
+        "bytes": 5814,
+        "full9": [
+          2049,
+          663257,
+          33152,
+          0,
+          0,
+          1,
+          5814,
+          1793517677752324691,
+          1793517677752324691
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/members/hosted-failure.json",
+        "sha256": "e1411920dc9ddd2f152453747d0c49bf2be8b358d67fb1f742c9b787f648b0fc"
+      },
+      "failure_export": {
+        "bytes": 5457,
+        "full9": [
+          2049,
+          663262,
+          33152,
+          0,
+          0,
+          1,
+          5457,
+          1793517677769324811,
+          1793517677769324811
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/members/reports/native239-raw-failure/failure-export.json",
+        "sha256": "03abb612b06ef329b7c1a733e96408e12cc12db4e5c2d4b6909ee1de4f8e89ef"
+      },
+      "full_raw_original": {
+        "bytes": 122304861,
+        "member": "reports/full_Debian_build-partial-failure.log",
+        "sha256": "5a86e025dd10541ffb00289089703d099411337e2f18b92cdecd95d14bf5d03e",
+        "streamed_not_duplicated": true
+      },
+      "head": "48c9706b10d7db802e0a7552e26aea6ab4921299",
+      "immutable_base": "ubuntu:24.04@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d",
+      "layout": {
+        "bytes": 293032,
+        "full9": [
+          2049,
+          663260,
+          33152,
+          0,
+          0,
+          1,
+          293032,
+          1793517677758324733,
+          1793517677758324733
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/members/reports/native239-raw-failure/native239-payload-layout.json",
+        "sha256": "ea8626c4ac23899bb7c059100edc71de8800cca3cdc36835d71df54523a55bc9"
+      },
+      "missing_original_provenance": true,
+      "ordinary_producer_success": false,
+      "original_API": {
+        "artifacts": {
+          "bytes": 763,
+          "full9": [
+            2049,
+            1151815,
+            33188,
+            0,
+            0,
+            1,
+            763,
+            1793528593848779286,
+            1793528593848779286
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-qualification-Native-artifacts-20261101-01/PUBLIC-OUTPUT.bin",
+          "sha256": "24186ac5eda2ab78075b33559f9ef0401aad2ebb9c1f0e57c5775a71b2b42491"
+        },
+        "jobs": {
+          "bytes": 2245,
+          "full9": [
+            2049,
+            1151781,
+            33188,
+            0,
+            0,
+            1,
+            2245,
+            1793528593560777241,
+            1793528593560777241
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-qualification-Native-jobs-20261101-01/PUBLIC-OUTPUT.bin",
+          "sha256": "136e9de2a1f592f899e3f1b288d5985318fa1e2be560fd898d152920854ed957"
+        },
+        "run": {
+          "bytes": 12732,
+          "full9": [
+            2049,
+            1151819,
+            33188,
+            0,
+            0,
+            1,
+            12732,
+            1793528593889779577,
+            1793528593889779577
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-qualification-Native-run-20261101-01/PUBLIC-OUTPUT.bin",
+          "sha256": "17cba7839a3ba979378cd510c5941c66def35ca55e2229d0db6fc2958dd15fdc"
+        }
+      },
+      "original_Source_finality_basis": "Exact pinned wrapper runs scope.finish/workspace/bootstrap physical-close checks before hosted-failure; empty finalizer classes and STOPPED are original evidence, not a fabricated original-success field.",
+      "original_ZIP": {
+        "bytes": 13255992,
+        "full9": [
+          2049,
+          663254,
+          33152,
+          0,
+          0,
+          1,
+          13255992,
+          1793517677730324535,
+          1793517677730324535
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/13074712047.zip",
+        "sha256": "0d881f298a9ad72fa70b773f09249c2563fc32a306f9696d10e86c9299c0d527"
+      },
+      "original_artifact": {
+        "archive_download_url": "https://api.github.com/repos/mohsenbarari/trading_bot/actions/artifacts/13074712047/zip",
+        "created_at": "2026-11-01T07:19:26Z",
+        "digest": "sha256:0d881f298a9ad72fa70b773f09249c2563fc32a306f9696d10e86c9299c0d527",
+        "expired": false,
+        "expires_at": "2026-11-11T07:19:24Z",
+        "id": 13074712047,
+        "name": "ubuntu239-successor-glibc84243-evidence-41279931704-1",
+        "node_id": "MDg6QXJ0aWZhY3QxMzA3NDcxMjA0Nw==",
+        "size_in_bytes": 13255992,
+        "updated_at": "2026-11-01T07:19:26Z",
+        "url": "https://api.github.com/repos/mohsenbarari/trading_bot/actions/artifacts/13074712047",
+        "workflow_run": {
+          "head_branch": "main",
+          "head_repository_id": 1065680631,
+          "head_sha": "48c9706b10d7db802e0a7552e26aea6ab4921299",
+          "id": 41279931704,
+          "repository_id": 1065680631
+        }
+      },
+      "original_job": 124769599828,
+      "original_job_completion": "2026-11-01T07:19:28Z",
+      "original_run": 41279931704,
+      "original_wrapper_exit_code": 1,
+      "preparation": {
+        "bytes": 592086,
+        "full9": [
+          2049,
+          663278,
+          33152,
+          0,
+          0,
+          1,
+          592086,
+          1793517825252371305,
+          1793517825252371305
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/members/reports/native239-raw-failure/preparation.json",
+        "sha256": "254564b7fd89bd6a0c418e7dbff0a6774f545a1c70a0e3dc70d1c849702d4e90"
+      },
+      "product_ZIP_members": [
+        {
+          "bytes": 723984,
+          "member": "reports/native239-raw-failure/libc-bin_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "f6a5279d79a88b1cc7bde808799c7f51da8739289739e2db17902e73d7d2b104"
+        },
+        {
+          "bytes": 62566,
+          "member": "reports/native239-raw-failure/libc-dev-bin_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "11b5bcb58a22a4cea594ad56033ae75b6a3d21dfb2e6e52d4894b35d46377a29"
+        },
+        {
+          "bytes": 71550,
+          "member": "reports/native239-raw-failure/libc-devtools_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "23087755608a941eeea3a8ca207598f7d253a4748ef29b888a6515872c4093b1"
+        },
+        {
+          "bytes": 3264394,
+          "member": "reports/native239-raw-failure/libc6_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "f3d6304915531e4cd596871d63af587a7741b506453b3e58d79a63beb663c4c7"
+        },
+        {
+          "bytes": 2167306,
+          "member": "reports/native239-raw-failure/libc6-dev_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "8adf5b3328047161d8d1440b8a3dee371ff7371dd545619f2ce3ad4dc574fe5b"
+        },
+        {
+          "bytes": 4232300,
+          "member": "reports/native239-raw-failure/locales_2.39-0ubuntu8.9+gold1_all.deb",
+          "sha256": "f23d260d322f62a8c90e1884b56688cf0924b279df96070bc68bf2c4a8219832"
+        }
+      ],
+      "products": [
+        {
+          "bytes": 723984,
+          "full9": [
+            2049,
+            663269,
+            33152,
+            0,
+            0,
+            1,
+            723984,
+            1793517825071370021,
+            1793517825071370021
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc-bin",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/quarantined-packages/libc-bin_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "f6a5279d79a88b1cc7bde808799c7f51da8739289739e2db17902e73d7d2b104"
+        },
+        {
+          "bytes": 62566,
+          "full9": [
+            2049,
+            663270,
+            33152,
+            0,
+            0,
+            1,
+            62566,
+            1793517825080370085,
+            1793517825080370085
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc-dev-bin",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/quarantined-packages/libc-dev-bin_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "11b5bcb58a22a4cea594ad56033ae75b6a3d21dfb2e6e52d4894b35d46377a29"
+        },
+        {
+          "bytes": 71550,
+          "full9": [
+            2049,
+            663271,
+            33152,
+            0,
+            0,
+            1,
+            71550,
+            1793517825083370106,
+            1793517825083370106
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc-devtools",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/quarantined-packages/libc-devtools_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "23087755608a941eeea3a8ca207598f7d253a4748ef29b888a6515872c4093b1"
+        },
+        {
+          "bytes": 3264394,
+          "full9": [
+            2049,
+            663273,
+            33152,
+            0,
+            0,
+            1,
+            3264394,
+            1793517825143370532,
+            1793517825143370532
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc6",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/quarantined-packages/libc6_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "f3d6304915531e4cd596871d63af587a7741b506453b3e58d79a63beb663c4c7"
+        },
+        {
+          "bytes": 2167306,
+          "full9": [
+            2049,
+            663272,
+            33152,
+            0,
+            0,
+            1,
+            2167306,
+            1793517825105370262,
+            1793517825105370262
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc6-dev",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/quarantined-packages/libc6-dev_2.39-0ubuntu8.9+gold1_amd64.deb",
+          "sha256": "8adf5b3328047161d8d1440b8a3dee371ff7371dd545619f2ce3ad4dc574fe5b"
+        },
+        {
+          "bytes": 4232300,
+          "full9": [
+            2049,
+            663274,
+            33152,
+            0,
+            0,
+            1,
+            4232300,
+            1793517825201370943,
+            1793517825201370943
+          ],
+          "original_producer_control": {
+            "Architecture": "all",
+            "Package": "locales",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/quarantined-packages/locales_2.39-0ubuntu8.9+gold1_all.deb",
+          "sha256": "f23d260d322f62a8c90e1884b56688cf0924b279df96070bc68bf2c4a8219832"
+        }
+      ],
+      "profile": "ubuntu239",
+      "rollback_old_six": {
+        "libc-bin": {
+          "bytes": 682164,
+          "full9": [
+            2049,
+            533903,
+            33188,
+            0,
+            0,
+            1,
+            682164,
+            1793493616712246947,
+            1793493616712246947
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc-bin_2.39-0ubuntu8.9_amd64.deb",
+          "sha256": "066398a06ef1a218d4109461d4c636eafe83322ad19b179de9ef7af42b3fec58"
+        },
+        "libc-dev-bin": {
+          "bytes": 20402,
+          "full9": [
+            2049,
+            534768,
+            33188,
+            0,
+            0,
+            1,
+            20402,
+            1793494657649629101,
+            1793494657649629101
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc-dev-bin_2.39-0ubuntu8.9_amd64.deb",
+          "sha256": "77db23aba4582d034d9a95e4818a16e7e51a2d4fb17a9204439688e288d67f4c"
+        },
+        "libc-devtools": {
+          "bytes": 29334,
+          "full9": [
+            2049,
+            534770,
+            33188,
+            0,
+            0,
+            1,
+            29334,
+            1793494657910630952,
+            1793494657910630952
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc-devtools_2.39-0ubuntu8.9_amd64.deb",
+          "sha256": "3eff6f67712cfb5b4586e1276fbb5cd481102a28241058a8a8258f8ce0c660b0"
+        },
+        "libc6": {
+          "bytes": 3264314,
+          "full9": [
+            2049,
+            533887,
+            33188,
+            0,
+            0,
+            1,
+            3264314,
+            1793493616191243253,
+            1793493616191243253
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc6_2.39-0ubuntu8.9_amd64.deb",
+          "sha256": "ff5557d99b51f761c4b7c92368b9cc45565eda17df9bf9eb4b134d09825008be"
+        },
+        "libc6-dev": {
+          "bytes": 2125612,
+          "full9": [
+            2049,
+            534773,
+            33188,
+            0,
+            0,
+            1,
+            2125612,
+            1793494658484635023,
+            1793494658484635023
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc6-dev_2.39-0ubuntu8.9_amd64.deb",
+          "sha256": "e13d5fcc1b2a86f75bca8e0026a8e39f24fe97ca86e92be79991f8697eb1306f"
+        },
+        "locales": {
+          "bytes": 4231704,
+          "full9": [
+            2049,
+            534775,
+            33188,
+            0,
+            0,
+            1,
+            4231704,
+            1793494659105639428,
+            1793494659105639428
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-locales_2.39-0ubuntu8.9_all.deb",
+          "sha256": "f8310ef4ba442845cf5d44a5ce3d5d7accb659bae96b3a0999002132209cd367"
+        }
+      },
+      "site": "Native",
+      "source_proof": {
+        "bytes": 1710,
+        "full9": [
+          2049,
+          663263,
+          33152,
+          0,
+          0,
+          1,
+          1710,
+          1793517677772324833,
+          1793517677772324833
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/members/reports/native239-raw-failure/source-proof.json",
+        "sha256": "5bb670f7f69e97b7d2df77a77ef87fd2748222705b5eb9a97df3671d8ec321b2"
+      },
+      "vendor": {
+        "bytes": 3808,
+        "full9": [
+          2049,
+          663261,
+          33152,
+          0,
+          0,
+          1,
+          3808,
+          1793517677766324790,
+          1793517677766324790
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Native04-CI-assessment-20261101-01/members/reports/native239-raw-failure/vendor-suite.json",
+        "sha256": "f291d02105cbf5d6259cc99eaa359ffb5511f7a10184909c15840551472abbc7"
+      }
+    },
+    {
+      "Root_derivative_exit_code": 0,
+      "Root_derivative_original_FD_physical_closes": 1848,
+      "Source_or_package_official_signature_claim": false,
+      "actual_dpkg_vendor_exit_code": 0,
+      "attempt": 1,
+      "complete_dependency_closure": {
+        "authenticated_dependency_DEBs": 225,
+        "base": 87,
+        "installed": 312
+      },
+      "context_frozen_files_verified": 16,
+      "derivative": {
+        "bytes": 596943,
+        "full9": [
+          2049,
+          448778,
+          33152,
+          0,
+          0,
+          1,
+          596943,
+          1793523838045022886,
+          1793523838045022886
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Web24304-finite-qualification-source-20261101-03/DERIVATIVE-OBSERVATION.json",
+        "sha256": "131a3ae35fdcb12e5b0ec712ca0041a5e2bf733a09692b49dfc6306ad16ebe90"
+      },
+      "derived_rehearsal_input_qualified": true,
+      "failure": {
+        "bytes": 6203,
+        "full9": [
+          2049,
+          663898,
+          33152,
+          0,
+          0,
+          1,
+          6203,
+          1793519107313463927,
+          1793519107313463927
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-members/hosted-failure.json",
+        "sha256": "9b8c8e3a4ba6908af117bbb2456a6696acbce66b30c20e5a8c77bceda2c05591"
+      },
+      "failure_export": {
+        "bytes": 5846,
+        "full9": [
+          2049,
+          663901,
+          33152,
+          0,
+          0,
+          1,
+          5846,
+          1793519107315463942,
+          1793519107315463942
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-members/reports/two-profile-raw-failure/failure-export.json",
+        "sha256": "37383c37d45cae7437e802d9c30b0029c3890b509aa90deeca4563a556518028"
+      },
+      "full_raw_original": {
+        "bytes": 164972861,
+        "member": "reports/full_Debian_build-partial-failure.log",
+        "sha256": "0a5126e624258bf0abafc25f8053cdd3b72217c1960095b8b9867088fdda42af",
+        "streamed_not_duplicated": true
+      },
+      "head": "48c9706b10d7db802e0a7552e26aea6ab4921299",
+      "immutable_base": "ubuntu:26.04@sha256:157dc3d6e4a3e4f2c68d12df9df9ed6e808b59af6d4c3757b432b4f519916725",
+      "layout": {
+        "bytes": 293494,
+        "full9": [
+          2049,
+          663905,
+          33152,
+          0,
+          0,
+          1,
+          293494,
+          1793519107324464005,
+          1793519107324464005
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-members/reports/two-profile-raw-failure/two-profile-payload-layout.json",
+        "sha256": "1654fba9510c3cd13e9d6f88f45b231381301c40a4ad94e1a621f6f99c99f09a"
+      },
+      "missing_original_provenance": true,
+      "ordinary_producer_success": false,
+      "original_API": {
+        "artifacts": {
+          "bytes": 1474,
+          "full9": [
+            2049,
+            1151823,
+            33188,
+            0,
+            0,
+            1,
+            1474,
+            1793528594242782084,
+            1793528594242782084
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-qualification-Web-artifacts-20261101-01/PUBLIC-OUTPUT.bin",
+          "sha256": "ffee5125304fe231df746713e4df83cbaa56deeb02ca02ba15b93a9a2e01eac4"
+        },
+        "jobs": {
+          "bytes": 4616,
+          "full9": [
+            2049,
+            1151837,
+            33188,
+            0,
+            0,
+            1,
+            4616,
+            1793528594279782347,
+            1793528594279782347
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-qualification-Web-jobs-20261101-01/PUBLIC-OUTPUT.bin",
+          "sha256": "4ec98d80aaca43fddc2a52747d1304bbabd3ce299fc01719d9fa2e8df3f65c43"
+        },
+        "run": {
+          "bytes": 12728,
+          "full9": [
+            2049,
+            1151820,
+            33188,
+            0,
+            0,
+            1,
+            12728,
+            1793528593891779591,
+            1793528593891779591
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Root-Ubuntu-qualification-Web-run-20261101-01/PUBLIC-OUTPUT.bin",
+          "sha256": "4fff3d63dc9cac81361e2ff5feccde2bfa56b1e1c94f62c8f53d1ac5d996c20c"
+        }
+      },
+      "original_Source_finality_basis": "Exact pinned wrapper runs scope.finish/workspace/bootstrap physical-close checks before hosted-failure; empty finalizer classes and STOPPED are original evidence, not a fabricated original-success field.",
+      "original_ZIP": {
+        "bytes": 14222239,
+        "full9": [
+          2049,
+          663894,
+          33152,
+          0,
+          0,
+          1,
+          14222239,
+          1793519107293463786,
+          1793519107293463786
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/13074862752.zip",
+        "sha256": "fc4c50977c4f288a1d5a1f80ba1a45d6e93471a0a21c7a6735bdb2f32485e132"
+      },
+      "original_artifact": {
+        "archive_download_url": "https://api.github.com/repos/mohsenbarari/trading_bot/actions/artifacts/13074862752/zip",
+        "created_at": "2026-11-01T07:42:58Z",
+        "digest": "sha256:fc4c50977c4f288a1d5a1f80ba1a45d6e93471a0a21c7a6735bdb2f32485e132",
+        "expired": false,
+        "expires_at": "2026-11-11T07:42:56Z",
+        "id": 13074862752,
+        "name": "ubuntu243-glibc84243-evidence-41279933499-1",
+        "node_id": "MDg6QXJ0aWZhY3QxMzA3NDg2Mjc1Mg==",
+        "size_in_bytes": 14222239,
+        "updated_at": "2026-11-01T07:42:58Z",
+        "url": "https://api.github.com/repos/mohsenbarari/trading_bot/actions/artifacts/13074862752",
+        "workflow_run": {
+          "head_branch": "main",
+          "head_repository_id": 1065680631,
+          "head_sha": "48c9706b10d7db802e0a7552e26aea6ab4921299",
+          "id": 41279933499,
+          "repository_id": 1065680631
+        }
+      },
+      "original_job": 124769606293,
+      "original_job_completion": "2026-11-01T07:43:00Z",
+      "original_run": 41279933499,
+      "original_wrapper_exit_code": 1,
+      "preparation": {
+        "bytes": 509540,
+        "full9": [
+          2049,
+          663903,
+          33152,
+          0,
+          0,
+          1,
+          509540,
+          1793519107318463963,
+          1793519107318463963
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-members/reports/two-profile-raw-failure/preparation.json",
+        "sha256": "202f5397b522a6a4b9057820c2e3b636b34f2aee9d24868639fbdc5096cc2b11"
+      },
+      "product_ZIP_members": [
+        {
+          "bytes": 724710,
+          "member": "reports/two-profile-raw-failure/libc-bin_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "ad22cbea6eca51bac47d5b400653a66b001b817d60b9f7965286dd98472e20ff"
+        },
+        {
+          "bytes": 47210,
+          "member": "reports/two-profile-raw-failure/libc-dev-bin_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "275c7fa9ad460ca7d7d0df6ed2c7bae6f5a78ef9bc7483997d16a740c06858c4"
+        },
+        {
+          "bytes": 1362562,
+          "member": "reports/two-profile-raw-failure/libc-gconv-modules-extra_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "f2886e300de8d9ec4c5f40b221154804fe2629458c418d258a0992f82517b4fe"
+        },
+        {
+          "bytes": 2104348,
+          "member": "reports/two-profile-raw-failure/libc6_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "a4598cc671395485009b2fbb7962402f4179564d7081ed52ca695f62ded9b09b"
+        },
+        {
+          "bytes": 2318388,
+          "member": "reports/two-profile-raw-failure/libc6-dev_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "583ef88291eca6bc5453f42ba85331a67bc19c648fbbf0d06708172f684cf652"
+        },
+        {
+          "bytes": 4225300,
+          "member": "reports/two-profile-raw-failure/locales_2.43-2ubuntu2.4+gold1_all.deb",
+          "sha256": "070c9264c12cc6e95429b52cf9df630187f62241c80143e5db5c58c441e34a45"
+        }
+      ],
+      "products": [
+        {
+          "bytes": 724710,
+          "full9": [
+            2049,
+            663943,
+            33152,
+            0,
+            0,
+            1,
+            724710,
+            1793519134924659753,
+            1793519134924659753
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc-bin",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-quarantined-packages/libc-bin_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "ad22cbea6eca51bac47d5b400653a66b001b817d60b9f7965286dd98472e20ff"
+        },
+        {
+          "bytes": 47210,
+          "full9": [
+            2049,
+            663944,
+            33152,
+            0,
+            0,
+            1,
+            47210,
+            1793519134928659781,
+            1793519134928659781
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc-dev-bin",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-quarantined-packages/libc-dev-bin_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "275c7fa9ad460ca7d7d0df6ed2c7bae6f5a78ef9bc7483997d16a740c06858c4"
+        },
+        {
+          "bytes": 1362562,
+          "full9": [
+            2049,
+            663945,
+            33152,
+            0,
+            0,
+            1,
+            1362562,
+            1793519134940659866,
+            1793519134940659866
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc-gconv-modules-extra",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-quarantined-packages/libc-gconv-modules-extra_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "f2886e300de8d9ec4c5f40b221154804fe2629458c418d258a0992f82517b4fe"
+        },
+        {
+          "bytes": 2104348,
+          "full9": [
+            2049,
+            663947,
+            33152,
+            0,
+            0,
+            1,
+            2104348,
+            1793519134985660185,
+            1793519134985660185
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc6",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-quarantined-packages/libc6_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "a4598cc671395485009b2fbb7962402f4179564d7081ed52ca695f62ded9b09b"
+        },
+        {
+          "bytes": 2318388,
+          "full9": [
+            2049,
+            663946,
+            33152,
+            0,
+            0,
+            1,
+            2318388,
+            1793519134968660065,
+            1793519134968660065
+          ],
+          "original_producer_control": {
+            "Architecture": "amd64",
+            "Package": "libc6-dev",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-quarantined-packages/libc6-dev_2.43-2ubuntu2.4+gold1_amd64.deb",
+          "sha256": "583ef88291eca6bc5453f42ba85331a67bc19c648fbbf0d06708172f684cf652"
+        },
+        {
+          "bytes": 4225300,
+          "full9": [
+            2049,
+            663948,
+            33152,
+            0,
+            0,
+            1,
+            4225300,
+            1793519135037660554,
+            1793519135037660554
+          ],
+          "original_producer_control": {
+            "Architecture": "all",
+            "Package": "locales",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4+gold1"
+          },
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-quarantined-packages/locales_2.43-2ubuntu2.4+gold1_all.deb",
+          "sha256": "070c9264c12cc6e95429b52cf9df630187f62241c80143e5db5c58c441e34a45"
+        }
+      ],
+      "profile": "ubuntu243",
+      "rollback_old_six": {
+        "libc-bin": {
+          "bytes": 700954,
+          "full9": [
+            2049,
+            534308,
+            33188,
+            0,
+            0,
+            1,
+            700954,
+            1793493617403251847,
+            1793493617403251847
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc-bin_2.43-2ubuntu2.4_amd64.deb",
+          "sha256": "bc4f50a0aebbb348598749c291a3742f9485d94b044715d382388607b9159a1b"
+        },
+        "libc-dev-bin": {
+          "bytes": 23328,
+          "full9": [
+            2049,
+            534778,
+            33188,
+            0,
+            0,
+            1,
+            23328,
+            1793494659533642464,
+            1793494659533642464
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc-dev-bin_2.43-2ubuntu2.4_amd64.deb",
+          "sha256": "515a2f156a94b7467842409f9bd9db1330b136f44a1791ed747f0708fb1a7227"
+        },
+        "libc-gconv-modules-extra": {
+          "bytes": 1362202,
+          "full9": [
+            2049,
+            534780,
+            33188,
+            0,
+            0,
+            1,
+            1362202,
+            1793494659746643974,
+            1793494659746643974
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc-gconv-modules-extra_2.43-2ubuntu2.4_amd64.deb",
+          "sha256": "c2194b87c7f628722036bbe9f9bbdf20c1ebdb05ecd68b7a3a52dd1a76f3c5d6"
+        },
+        "libc6": {
+          "bytes": 2104056,
+          "full9": [
+            2049,
+            534197,
+            33188,
+            0,
+            0,
+            1,
+            2104056,
+            1793493617102249713,
+            1793493617102249713
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc6_2.43-2ubuntu2.4_amd64.deb",
+          "sha256": "a613b457f3ff9c84ebd28af8a05afdec22605ad9aed87c71e3a6ae5170aeb9ca"
+        },
+        "libc6-dev": {
+          "bytes": 2294116,
+          "full9": [
+            2049,
+            534783,
+            33188,
+            0,
+            0,
+            1,
+            2294116,
+            1793494660178647038,
+            1793494660178647038
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc6-dev_2.43-2ubuntu2.4_amd64.deb",
+          "sha256": "17bb816a65a25c3416854eef7e9cc6d9a3761f45bad0d44e49bc676b7bab1769"
+        },
+        "locales": {
+          "bytes": 4225234,
+          "full9": [
+            2049,
+            534785,
+            33188,
+            0,
+            0,
+            1,
+            4225234,
+            1793494660746651067,
+            1793494660746651067
+          ],
+          "original_reader_physical_EBADF": true,
+          "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-locales_2.43-2ubuntu2.4_all.deb",
+          "sha256": "a1abf41b517f767018d5eab519d55b9269fe0a04ae49ea35f7c3ad1b8870ab32"
+        }
+      },
+      "site": "Web",
+      "source_proof": {
+        "bytes": 1415,
+        "full9": [
+          2049,
+          663904,
+          33152,
+          0,
+          0,
+          1,
+          1415,
+          1793519107323463998,
+          1793519107323463998
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-members/reports/two-profile-raw-failure/source-proof.json",
+        "sha256": "5e79fbc0f77a3013a6bafe8d54cd0748e263dc7c506e228c92af8c46e2318c5f"
+      },
+      "vendor": {
+        "bytes": 3865,
+        "full9": [
+          2049,
+          663910,
+          33152,
+          0,
+          0,
+          1,
+          3865,
+          1793519107332464062,
+          1793519107332464062
+        ],
+        "original_reader_physical_EBADF": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-Default04-CI-assessment-20261101-01/ubuntu243-members/reports/two-profile-raw-failure/vendor-suite.json",
+        "sha256": "a28489ab8efaad00f49ca5bd725530b9b989522687f3038b808e852d8059c0f5"
+      }
+    }
+  ],
+  "refactor_automation": "STOP_SECURITY_GATE",
+  "remaining": [
+    "Ordinary dependency/coinstallation/locales/trigger/rollback rehearsal with exact old/new six",
+    "Protected tested actual application/Market/golden_bot/configuration backups",
+    "Fresh complete actual Host activation and restart graph; current capacity and solver",
+    "Independent console/rescue/control; fresh whole-host/GoldenBot window; actual install/reboot/health checks"
+  ],
+  "reviewed_at": "2026-11-01T10:26:21.128463+00:00",
+  "schema": "Root_derived_Ubuntu_family6_rehearsal_inputs/1",
+  "scope": "EXACT_TWO_UBUNTU_SIX_PACKAGE_DISPOSABLE_ORDINARY_FORWARD_ROLLBACK_REHEARSAL_INPUTS_ONLY",
+  "security_accepted": false,
+  "source_authentication": "Ubuntu archive SignedSources and exact rooted descriptor hashes; DSC_VALID_SIG empty, no Debian signer claim",
+  "verified_original_public_readers_physically_closed": 102
+}
