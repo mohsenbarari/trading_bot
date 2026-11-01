@@ -33,9 +33,10 @@ jobs:
   candidate:
     if: github.ref == 'refs/heads/main' && github.repository == 'mohsenbarari/trading_bot'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Fetch normal Main and the immutable published product objects
+        timeout-minutes: 3
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Root supplied official immutable metadata
         with:
           ref: main
@@ -52,7 +53,8 @@ jobs:
         run: |
           python3 -I -S -B - <<'PY'
           from hashlib import sha256
-          import os,pathlib,re,resource,stat,subprocess,sys,tempfile
+          import os,pathlib,re,resource,stat,subprocess,sys,tempfile,time
+          operation_started_ns=time.monotonic_ns()
           assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
           assert os.environ['GITHUB_REF']=='refs/heads/main' and os.environ['GITHUB_REPOSITORY']=='mohsenbarari/trading_bot'
           assert os.environ.get('NORMAL_MARKET_ROLE','capture2-f79') in ('capture2-f79', 'native/coin-estimator', 'native/estimator-snapshot-sender', 'native/market-fact-receiver', 'native/market-store-adapter', 'web/estimator-snapshot-receiver', 'web/market-capture-account1', 'web/market-capture-external', 'web/market-fact-sync-worker', 'web/market-processor')
@@ -107,7 +109,7 @@ jobs:
                       os.close(fd);driver_open[0]=False
                   driver_named()
               try:
-                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named,operation_started_ns=operation_started_ns,operation_driver_sha256=sha256(raw).hexdigest())
               except Exception as error:
                   print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
               raise SystemExit(result)
@@ -119,9 +121,51 @@ jobs:
               if before is not None:assert before==frame(path.lstat())
           PY
 
+      - name: Check original operation clock before vulnerability scan
+        id: clock_before_vulnerabilities
+        if: always() && steps.build.outcome == 'success'
+        env:
+          ROOT: ${{ steps.build.outputs.root }}
+          EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import errno,fcntl,json,os,pathlib,stat
+          root=pathlib.Path(os.environ['ROOT']);path=root/'source/prepare_market_capture2_image.py'
+          frame=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          fd=None;before=None;fl=None;errors=[];value=None
+          try:
+              before=frame(path.lstat());fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+              fl=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL));raw=os.pread(fd,131073,0)
+              assert before[2]==0o100600 and before[3:6]==(1001,os.getegid(),1) and 0<len(raw)==before[6]<=131072
+              assert frame(os.fstat(fd))==frame(path.lstat())==before and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
+              namespace={'__name__':'_sealed_normal_operation_guard','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              role=os.environ.get('NORMAL_MARKET_ROLE','capture2-f79');role=None if role=='capture2-f79'else role
+              value=namespace['normal_operation_guard'](root,pathlib.Path(os.environ['GITHUB_WORKSPACE']),sha256(raw).hexdigest(),role)
+          except BaseException as error:errors.append(error)
+          finally:
+              if fd is not None:
+                  try:
+                      assert before==frame(os.fstat(fd))==frame(path.lstat()) and fl==(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))
+                      assert os.lseek(fd,0,os.SEEK_CUR)==0
+                  except BaseException as error:errors.append(error)
+                  try:
+                      os.close(fd)
+                      try:os.fstat(fd)
+                      except OSError as error:assert error.errno==errno.EBADF
+                      else:raise RuntimeError('operation_source_close')
+                      assert before==frame(path.lstat())
+                  except BaseException as error:errors.append(error)
+          if errors:raise BaseExceptionGroup('operation guard and Source finalizers',errors)
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8')as output:output.write('scan_timeout='+value['scan_timeout']+'\n')
+          PY
+
       - name: Preserve every raw finding for the same actual image
         id: vulnerabilities
-        if: always() && steps.build.outcome == 'success'
+        timeout-minutes: 16
+        if: always() && steps.build.outcome == 'success' && steps.clock_before_vulnerabilities.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, same normal App path
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -138,11 +182,53 @@ jobs:
           ignore-unfixed: 'false'
           exit-code: '0'
           trivy-config: ${{ steps.build.outputs.root }}/empty-trivy.yaml
-          timeout: 15m
+          timeout: ${{ steps.clock_before_vulnerabilities.outputs.scan_timeout }}
+
+      - name: Check original operation clock between scans
+        id: clock_before_sbom
+        if: always() && steps.build.outcome == 'success' && steps.clock_before_vulnerabilities.outcome == 'success'
+        env:
+          ROOT: ${{ steps.build.outputs.root }}
+          EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import errno,fcntl,json,os,pathlib,stat
+          root=pathlib.Path(os.environ['ROOT']);path=root/'source/prepare_market_capture2_image.py'
+          frame=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          fd=None;before=None;fl=None;errors=[];value=None
+          try:
+              before=frame(path.lstat());fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+              fl=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL));raw=os.pread(fd,131073,0)
+              assert before[2]==0o100600 and before[3:6]==(1001,os.getegid(),1) and 0<len(raw)==before[6]<=131072
+              assert frame(os.fstat(fd))==frame(path.lstat())==before and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
+              namespace={'__name__':'_sealed_normal_operation_guard','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              role=os.environ.get('NORMAL_MARKET_ROLE','capture2-f79');role=None if role=='capture2-f79'else role
+              value=namespace['normal_operation_guard'](root,pathlib.Path(os.environ['GITHUB_WORKSPACE']),sha256(raw).hexdigest(),role)
+          except BaseException as error:errors.append(error)
+          finally:
+              if fd is not None:
+                  try:
+                      assert before==frame(os.fstat(fd))==frame(path.lstat()) and fl==(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))
+                      assert os.lseek(fd,0,os.SEEK_CUR)==0
+                  except BaseException as error:errors.append(error)
+                  try:
+                      os.close(fd)
+                      try:os.fstat(fd)
+                      except OSError as error:assert error.errno==errno.EBADF
+                      else:raise RuntimeError('operation_source_close')
+                      assert before==frame(path.lstat())
+                  except BaseException as error:errors.append(error)
+          if errors:raise BaseExceptionGroup('operation guard and Source finalizers',errors)
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8')as output:output.write('scan_timeout='+value['scan_timeout']+'\n')
+          PY
 
       - name: Preserve the SBOM of that same actual image
         id: sbom
-        if: always() && steps.build.outcome == 'success'
+        timeout-minutes: 16
+        if: always() && steps.build.outcome == 'success' && steps.clock_before_vulnerabilities.outcome == 'success' && steps.clock_before_sbom.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -154,14 +240,56 @@ jobs:
           format: cyclonedx
           output: ${{ steps.build.outputs.root }}/reports/sbom.cdx.json
           trivy-config: ${{ steps.build.outputs.root }}/empty-trivy.yaml
-          timeout: 15m
+          timeout: ${{ steps.clock_before_sbom.outputs.scan_timeout }}
 
-      - name: Bind reports and export the same unaccepted ordinary image
-        id: finalize
-        if: always() && steps.build.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+      - name: Check original operation clock after scans
+        id: clock_after_scans
+        if: always() && steps.build.outcome == 'success' && steps.clock_before_vulnerabilities.outcome == 'success' && steps.clock_before_sbom.outcome == 'success'
         env:
           ROOT: ${{ steps.build.outputs.root }}
           EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
+        run: |
+          python3 -I -S -B - <<'PY'
+          from hashlib import sha256
+          import errno,fcntl,json,os,pathlib,stat
+          root=pathlib.Path(os.environ['ROOT']);path=root/'source/prepare_market_capture2_image.py'
+          frame=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          fd=None;before=None;fl=None;errors=[];value=None
+          try:
+              before=frame(path.lstat());fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+              fl=(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL));raw=os.pread(fd,131073,0)
+              assert before[2]==0o100600 and before[3:6]==(1001,os.getegid(),1) and 0<len(raw)==before[6]<=131072
+              assert frame(os.fstat(fd))==frame(path.lstat())==before and sha256(raw).hexdigest()==os.environ['EXPECTED_DRIVER']
+              namespace={'__name__':'_sealed_normal_operation_guard','__file__':str(path)}
+              exec(compile(raw,str(path),'exec'),namespace)
+              role=os.environ.get('NORMAL_MARKET_ROLE','capture2-f79');role=None if role=='capture2-f79'else role
+              value=namespace['normal_operation_guard'](root,pathlib.Path(os.environ['GITHUB_WORKSPACE']),sha256(raw).hexdigest(),role)
+          except BaseException as error:errors.append(error)
+          finally:
+              if fd is not None:
+                  try:
+                      assert before==frame(os.fstat(fd))==frame(path.lstat()) and fl==(fcntl.fcntl(fd,fcntl.F_GETFD),fcntl.fcntl(fd,fcntl.F_GETFL))
+                      assert os.lseek(fd,0,os.SEEK_CUR)==0
+                  except BaseException as error:errors.append(error)
+                  try:
+                      os.close(fd)
+                      try:os.fstat(fd)
+                      except OSError as error:assert error.errno==errno.EBADF
+                      else:raise RuntimeError('operation_source_close')
+                      assert before==frame(path.lstat())
+                  except BaseException as error:errors.append(error)
+          if errors:raise BaseExceptionGroup('operation guard and Source finalizers',errors)
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8')as output:output.write('scan_timeout='+value['scan_timeout']+'\n')
+          PY
+
+      - name: Bind reports and export the same unaccepted ordinary image
+        id: finalize
+        if: always() && steps.build.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success' && steps.clock_after_scans.outcome == 'success'
+        env:
+          ROOT: ${{ steps.build.outputs.root }}
+          EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 -I -S -B - <<'PY'
@@ -190,7 +318,7 @@ jobs:
                       os.close(fd);driver_open[0]=False
                   driver_named()
               try:
-                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named,operation_driver_sha256=sha256(raw).hexdigest())
               except Exception as error:
                   print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
               raise SystemExit(result)
@@ -204,6 +332,7 @@ jobs:
 
       - name: Preserve the ordinary unaccepted image archive
         if: always() && steps.finalize.outcome == 'success'
+        timeout-minutes: 3
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, Root supplied official immutable metadata
         with:
           name: normal-market-${{ steps.build.outputs.role_slug }}-image-${{ github.run_id }}-${{ github.run_attempt }}
@@ -215,6 +344,7 @@ jobs:
 
       - name: Preserve the complete normal CI source and controller parcel
         if: always() && steps.finalize.outcome == 'success'
+        timeout-minutes: 3
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: normal-market-${{ steps.build.outputs.role_slug }}-controller-${{ github.run_id }}-${{ github.run_attempt }}
@@ -226,6 +356,7 @@ jobs:
 
       - name: Preserve raw source, native, scan and failure evidence
         if: always() && steps.build.outputs.root != ''
+        timeout-minutes: 3
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: normal-market-${{ steps.build.outputs.role_slug }}-evidence-${{ github.run_id }}-${{ github.run_attempt }}
@@ -233,6 +364,7 @@ jobs:
           if-no-files-found: warn
           path: |
             ${{ steps.build.outputs.root }}/source-identity.json
+            ${{ steps.build.outputs.root }}/normal-operation-clock.json
             ${{ steps.build.outputs.root }}/glibc-artifact-input.json
             ${{ steps.build.outputs.root }}/input-manifest.json
             ${{ steps.build.outputs.root }}/image-build.json
@@ -247,6 +379,7 @@ jobs:
         env:
           ROOT: ${{ steps.build.outputs.root }}
           EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
         run: |
           python3 -I -S -B - <<'PY'
           from hashlib import sha256
@@ -274,7 +407,7 @@ jobs:
                       os.close(fd);driver_open[0]=False
                   driver_named()
               try:
-                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named,operation_driver_sha256=sha256(raw).hexdigest())
               except Exception as error:
                   print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
               raise SystemExit(result)
@@ -292,6 +425,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ROOT: ${{ steps.build.outputs.root }}
           EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
+          NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
         run: |
           python3 -I -S -B - <<'PY'
           from hashlib import sha256
@@ -319,7 +453,7 @@ jobs:
                       os.close(fd);driver_open[0]=False
                   driver_named()
               try:
-                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named)
+                  result=namespace['outer_main'](sys.argv[1:],close_driver=close_driver,driver_named=driver_named,operation_driver_sha256=sha256(raw).hexdigest())
               except Exception as error:
                   print(json.dumps(namespace['closed_failure'](error),sort_keys=True));raise SystemExit(1) from None
               raise SystemExit(result)
@@ -333,6 +467,7 @@ jobs:
 
       - name: Preserve factual completion evidence without acceptance
         if: always() && steps.finalize.outcome == 'success'
+        timeout-minutes: 3
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: normal-market-${{ steps.build.outputs.role_slug }}-factual-completion-unaccepted-${{ github.run_id }}-${{ github.run_attempt }}

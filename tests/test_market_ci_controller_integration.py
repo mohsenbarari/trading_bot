@@ -17,7 +17,10 @@ class IntegrationTests(unittest.TestCase):
  def write(self,p,raw):p.parent.mkdir(mode=0o755,parents=True,exist_ok=True);p.write_bytes(raw);p.chmod(0o644)
  def pin(self,raw):return{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
  def test_explicit_20_release_30_controller_inventory_and_old_product_stays93(self):
-  self.assertEqual(len(S.RELEASE_FILES),20);self.assertEqual(len(M.CONTROLLER_FILES),35);self.assertEqual(len(set(M.CONTROLLER_FILES)),35)
+  self.assertEqual(len(S.RELEASE_FILES),20);self.assertEqual(len(M.CONTROLLER_FILES),47);self.assertEqual(len(set(M.CONTROLLER_FILES)),47)
+  probe=load('owned_probe_membership',ROOT/'scripts/market_sqlite_component_probe.py')
+  self.assertTrue({probe.COHORT[k][0]for k in probe.COHORT}<set(M.CONTROLLER_FILES))
+  self.assertIn('scripts/market_sqlite_component_probe.py',M.CONTROLLER_FILES)
   self.assertIn('scripts/prepare_tar_acl_os_cache.py',S.RELEASE_FILES);self.assertIn(M.TAR_LOCK,S.RELEASE_FILES)
   self.assertEqual(len(S.PRODUCT_COPY_LINES),5);self.assertEqual(len(S.PRODUCT_COPY_LINES|S.RELEASE_COPY_LINES),17)
   self.assertEqual(M.MAX_SOURCE,131072);self.assertEqual(M.MAX_CONTROLLER_SOURCE,262144)
@@ -89,12 +92,12 @@ class IntegrationTests(unittest.TestCase):
   return root,receipt,controllers,cache
  def test_full_declared_controller_parcel_roundtrip_no_extract_or_authority(self):
   root,receipt,controllers,cache=self.fixture();value=M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,glibc_runtime=self.runtime)
-  self.assertEqual((value['sources'],value['members']),(180,181));self.assertTrue(value['complete_ci_controller_payload'])
+  self.assertEqual((value['sources'],value['members']),(192,193));self.assertTrue(value['complete_ci_controller_payload'])
   self.assertFalse(value['complete_deployment_control_payload']);self.assertFalse(value['activation_authority']);self.assertFalse(value['security_accepted'])
   with tarfile.open(root/'controller-sources.tar.gz','r:gz')as archive:
-   items=archive.getmembers();self.assertEqual(len(items),181);self.assertEqual(len({x.name for x in items}),181)
+   items=archive.getmembers();self.assertEqual(len(items),193);self.assertEqual(len({x.name for x in items}),193)
    self.assertTrue(all(x.isfile()and x.uid==x.gid==0 and not x.pax_headers for x in items));self.assertTrue(any(len(x.name)>100 for x in items))
-   index=json.load(archive.extractfile('controller-manifest.json'));self.assertEqual(len(index['files']),180)
+   index=json.load(archive.extractfile('controller-manifest.json'));self.assertEqual(len(index['files']),192)
  def test_missing_duplicate_unknown_binding_and_hardlink_refuse(self):
   root,receipt,controllers,cache=self.fixture()
   with self.assertRaisesRegex(RuntimeError,'controller_parcel_inventory'):M.controller_parcel_inputs(root,{**receipt,'release_files':receipt['release_files'][:-1]},controllers,cache,self.runtime)

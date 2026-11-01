@@ -98,7 +98,7 @@ GLIBC_ARTIFACT={'id':13077600231,'run':41286801923,'attempt':1,'head':'a80b91ecc
  'name':'trixie241-glibc84243-candidates-PENDING-ROOT-REVIEW-41286801923-1','bytes':35878836,'sha256':'bb5dc6aef44629d0f72cdf095832c4e7ec523eea06902c57121c983f4fb06f22'}
 GLIBC_RECIPE_PIN={'bytes':7308,'sha256':'09f57f4d846f4d6f85bb6fa412b237bdc40b6840743dfb9796facdabc5ee3dcc'}
 CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT),
- GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT,SHARED_CACHE)
+ GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT,SHARED_CACHE,'scripts/market_sqlite_component_probe.py','deploy/maintenance/app_r2_observe02/run_app_image_ci_smoke.py','deploy/maintenance/app_gold2_smoke/export_controller_gold2.py','deploy/maintenance/app_gold2_smoke/archive_inventory_gold2.py','deploy/maintenance/app_r2_observe02/inventory.py','deploy/maintenance/app_r2_observe02/compose_security_os_candidate.py','deploy/maintenance/app_r2_observe02/compose_app_mountpoint_image.py','deploy/maintenance/app_r2_observe02/compose_market_security_os_candidate.py','deploy/maintenance/app_r2_observe02/admit_security_component_image_reuse.py','deploy/maintenance/app_r2_observe02/datastore_candidate_contract.py','deploy/maintenance/app_r2_observe02/runtime_image_archive_transport.py','scripts/security_age132_tool/source_io.py')
 DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 MANIFEST_SHA='fef6305b1d7e6db851d1d0b77f3aa9910aad535e83f64f012790165a3d62c81b'
 ROWS_SHA='75d7d2cfb2c20fd036501e7aac198cb5567fb82c53301fb3972f8c81b935e57f'
@@ -174,6 +174,73 @@ def hex64(value):return type(value)is str and re.fullmatch('[a-f0-9]{64}',value)
 def relative(value):
  return type(value)is str and 0<len(value)<=4096 and not any(c in value for c in ('\0','\n','\\'))and str(PurePosixPath(value))==value and not value.startswith('/')and not {'..','.git'}&set(PurePosixPath(value).parts)
 def identity(s):return(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+# Original operation time is supplied only by the sealed workflow bootstrap.
+CLOCK_SOURCE='scripts/market_sqlite_component_probe.py'
+NORMAL_OPERATION=None
+NORMAL_CLOCK_SOURCE=None
+NORMAL_OPERATION_BOOTSTRAP=None
+NORMAL_PROBE=None
+NORMAL_OPERATION_ADMITTED=False
+def open_normal_operation(root,repo,role,driver,started=None):
+ global NORMAL_OPERATION,NORMAL_CLOCK_SOURCE,NORMAL_PROBE,NORMAL_OPERATION_ADMITTED
+ hosted(root,repo);need(hex64(driver),'operation_bootstrap_missing')
+ need(role is None or type(role)is str and role in ROLE_MAP,'role_component')
+ need(NORMAL_OPERATION is None and NORMAL_CLOCK_SOURCE is None,'operation_active')
+ need(os.environ.get('GITHUB_JOB')=='candidate'and all(re.fullmatch('[1-9][0-9]{0,19}',os.environ.get(k,''))for k in('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT')),'operation_identity')
+ raw=git_source(repo,os.environ['GITHUB_SHA'],CLOCK_SOURCE);path=root/'source/market_sqlite_component_probe.py'
+ api=module(raw,path);name,size,digest=api.COHORT['IO'];io_raw=git_source(repo,os.environ['GITHUB_SHA'],name)
+ need((len(io_raw),sha256(io_raw).hexdigest())==(size,digest),'operation_source')
+ io_path=root/'source/source_io.py';io=module(io_raw,io_path);NORMAL_PROBE=api
+ if started is not None:
+  need(type(started)is int and 0<started<=time.monotonic_ns(),'operation_bootstrap_missing')
+  end=started+api.NORMAL_OPERATION_SECONDS*10**9
+  io_pin=api.write_operation_file(io_path,io_raw,io,end);pin=api.write_operation_file(path,raw,io,end)
+ else:
+  io_pin={'bytes':size,'sha256':digest,'full9':list(identity(io_path.lstat()))}
+  pin={'bytes':len(raw),'sha256':sha256(raw).hexdigest(),'full9':list(identity(path.lstat()))}
+ source=api.ClockSource.__new__(api.ClockSource);NORMAL_CLOCK_SOURCE=source
+ api.ClockSource.__init__(source,path,pin,io,io_pin)
+ context={'root':str(root),'release_commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],
+  'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'job':'candidate','role':role or'capture2-f79','driver_sha256':driver,
+  'boot_id':api.normal_boot_id(),'clock_source_sha256':sha256(raw).hexdigest(),'clock_source_full9':list(source.before),
+  'io_source_sha256':digest,'io_source_full9':list(source.io_row.before)}
+ source.check();clock_pin=(api.create_normal_operation(root,context,started,source)if started is not None else
+  api.clock_document(os.environ.get('NORMAL_OPERATION_PIN','').encode()))
+ clock=api.NormalOperationClock.__new__(api.NormalOperationClock);NORMAL_OPERATION=clock
+ api.NormalOperationClock.__init__(clock,root/'normal-operation-clock.json',clock_pin,context,source)
+ NORMAL_OPERATION_ADMITTED=True;return source,clock
+
+def normal_operation_guard(root,repo,driver,role=None):
+ global NORMAL_OPERATION,NORMAL_CLOCK_SOURCE,NORMAL_PROBE,NORMAL_OPERATION_ADMITTED
+ errors=[];value=None
+ try:
+  source,clock=open_normal_operation(root,repo,role,driver)
+  seconds=int(clock.remaining());need(seconds>0,'operation_deadline');value={'remaining_seconds':seconds,'scan_timeout':str(min(900,seconds))+'s'}
+ except BaseException as error:errors.append(error)
+ for row in(NORMAL_OPERATION,NORMAL_CLOCK_SOURCE):
+  if row is not None:
+   try:row.close()
+   except BaseException as error:errors.append(error)
+ if NORMAL_OPERATION_ADMITTED:
+  try:NORMAL_OPERATION.final_check()
+  except BaseException as error:errors.append(error)
+ NORMAL_OPERATION=None;NORMAL_CLOCK_SOURCE=None;NORMAL_PROBE=None;NORMAL_OPERATION_ADMITTED=False
+ if errors:raise BaseExceptionGroup('operation guard and original Source finalizers',errors)
+ return value
+
+
+def collect_sqlite_inventory(root,record,inspected,archive,evidence,evidence_checks,check):
+ need(NORMAL_OPERATION_ADMITTED and NORMAL_PROBE is not None,'operation_bootstrap_missing')
+ reports=[row for row in evidence if hasattr(row,'path')and row.path in(root/'reports/vulnerabilities.json',root/'reports/sbom.cdx.json')]
+ need(len(reports)==2 and len({row.path for row in reports})==2,'probe_input_owner')
+ by_name={row.path.name:row for row in reports}
+ value=NORMAL_PROBE.collect(NORMAL_OPERATION,root,root/'controller-source',record['image_id'],record['source_inputs']['release_commit'],inspected,
+  by_name['vulnerabilities.json'],by_name['sbom.cdx.json'],archive,check)
+ need(value['status']=='UNASSESSED'and value['collection_performed']is True and value['security_accepted']is False,'probe_inventory_join')
+ publish_known(root/'reports/sqlite-component-inventory.json',encoded(value),[check],retained=evidence,final_checks=evidence_checks)
+ return{'path':'reports/sqlite-component-inventory.json','bytes':len(encoded(value)),'sha256':sha256(encoded(value)).hexdigest(),'status':'UNASSESSED','source_link_join':'MISSING','security_accepted':False}
+
+
 def cleanup_child(child):
  if child.returncode is not None:return
  try:os.waitid(os.P_PID,child.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
@@ -193,6 +260,11 @@ def command(argv,*,environment,seconds=60,maximum=MAX_JSON,target=None,guard=lam
   and type(maximum)is int and 0<maximum<=2*1024**3 and type(seconds)in(int,float)and math.isfinite(seconds)and 0<seconds<=3600,'command_contract')
  need(stream_complete is None or target is not None and callable(stream_complete),'command_contract')
  need(nonzero is None or target is None and callable(nonzero),'command_contract')
+ if NORMAL_OPERATION is not None:
+  prior_guard=guard
+  def guard():NORMAL_OPERATION.check();prior_guard();NORMAL_OPERATION.check()
+  seconds=min(seconds,NORMAL_OPERATION.remaining())
+ if NORMAL_OPERATION_ADMITTED:seconds=min(seconds,NORMAL_OPERATION.remaining())
  guard();end=time.monotonic()+seconds
  child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
   env=environment,close_fds=True,start_new_session=True);parts=[];count=0;stream_hash=sha256()
@@ -223,6 +295,7 @@ def command(argv,*,environment,seconds=60,maximum=MAX_JSON,target=None,guard=lam
  except BaseException:
   cleanup_child(child);raise
  finally:child.stdout.close()
+
 def environment(root,*,token=False):
  value={'PATH':'/usr/local/bin:/usr/bin:/bin','HOME':str(root),'DOCKER_CONFIG':str(root/'docker-config'),
   'GH_CONFIG_DIR':str(root/'gh-config'),'LC_ALL':'C.UTF-8','DOCKER_BUILDKIT':'1','PYTHONDONTWRITEBYTECODE':'1'}
@@ -837,10 +910,12 @@ def hold_written(path,fd,maximum,*,binding=None,guard=lambda:None,expected_frame
   row.close();raise
 
 
-def outer_main(argv=None,*,close_driver,driver_named):
+def outer_main(argv=None,*,close_driver,driver_named,operation_started_ns=None,operation_driver_sha256=None):
  """Physical finalizer failures outrank a prior main failure, never hide it."""
- global OUTER_PHYSICAL_FINALIZERS_COMPLETED,OUTER_FAILURE
+ global OUTER_PHYSICAL_FINALIZERS_COMPLETED,OUTER_FAILURE,NORMAL_OPERATION,NORMAL_CLOCK_SOURCE,NORMAL_OPERATION_BOOTSTRAP,NORMAL_PROBE,NORMAL_OPERATION_ADMITTED
  OUTER_PHYSICAL_FINALIZERS_COMPLETED=False;OUTER_FAILURE=None
+ need(NORMAL_OPERATION is None and NORMAL_CLOCK_SOURCE is None and NORMAL_OPERATION_BOOTSTRAP is None,'operation_active')
+ NORMAL_OPERATION_BOOTSTRAP=(operation_started_ns,operation_driver_sha256)
  resources=[];checks=[];error=None;code=None;physical=[]
  try:code=main(argv,retained=resources,final_checks=checks)
  except BaseException as exc:error=exc
@@ -848,6 +923,17 @@ def outer_main(argv=None,*,close_driver,driver_named):
  except BaseException as exc:physical.append(('close_driver',exc))
  try:finish_evidence(resources,[*checks,lambda:need(driver_named()is None,'physical_finalizer')])
  except BaseException as exc:physical.append(('finish_evidence',exc))
+ if NORMAL_OPERATION_ADMITTED:
+  try:NORMAL_OPERATION.check()
+  except BaseException as exc:physical.append(('operation_deadline',exc))
+ for row in(NORMAL_OPERATION,NORMAL_CLOCK_SOURCE):
+  if row is not None:
+   try:row.close()
+   except BaseException as exc:physical.append(('operation_close',exc))
+ if NORMAL_OPERATION_ADMITTED:
+  try:NORMAL_OPERATION.final_check()
+  except BaseException as exc:physical.append(('operation_finality',exc))
+ NORMAL_OPERATION=None;NORMAL_CLOCK_SOURCE=None;NORMAL_OPERATION_BOOTSTRAP=None;NORMAL_PROBE=None;NORMAL_OPERATION_ADMITTED=False
  OUTER_PHYSICAL_FINALIZERS_COMPLETED=not physical
  selected=physical[0][1]if physical else error
  if selected is not None:
@@ -855,6 +941,7 @@ def outer_main(argv=None,*,close_driver,driver_named):
   if physical and error is not None:raise selected from error
   raise selected
  return code
+
 
 
 def prepare_checked_caches(root,context,receipt,source_guard,*,retained=None,final_checks=None):
@@ -1111,6 +1198,7 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
   before_main=live_main(root,receipt['repository_identity'],release);epoch=source_epoch(repo,release)
   default_driver(root);context=root/'sealed/release';product=root/'sealed/product';(context/'pip_packages').mkdir(mode=0o755)
   def source_check():
+   if NORMAL_OPERATION is not None:NORMAL_OPERATION.check()
    original.check();controller_hold.check()
    space=os.statvfs(root);need(space.f_bavail*space.f_frsize>=RESERVE,'disk_reserve')
   PHASE='glibc_runtime_prepare';runtime_adapter,runtime,runtime_capsule=prepare_glibc_runtime(root,raws,epoch,source_check,evidence,evidence_checks)
@@ -1123,6 +1211,7 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
   snapshots.append(ContextSnapshot(context,expected));snapshots.append(ContextSnapshot(product,product_expected))
   controller,controller_signature=receipt_contract(receipt,signature,controllers,cache,epoch,runtime)
   def check():
+   if NORMAL_OPERATION is not None:NORMAL_OPERATION.check()
    original.check();controller_hold.check()
    for row in evidence:row.check()
    if business_hold is not None:business_hold.check()
@@ -1245,6 +1334,7 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
   if role is not None:validate_source_probe(record['actual_role_source'],receipt)
   before_main=live_main(root,receipt['repository_identity'],release)
   def check():
+   if NORMAL_OPERATION is not None:NORMAL_OPERATION.check()
    build.check();inputs.check()
    for row in evidence:row.check()
    for snap in snapshots:snap.check()
@@ -1263,6 +1353,7 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
    tar_hold=hold_written(path,fd,2*1024**3,binding=completion['binding'],expected_frame=completion['frame'],guard=check)
   finally:os.close(fd)
   tar_hold.check();config_id=archive_configuration(tar_hold.fd,image,before['RootFS']['Layers']);tar_hold.check()
+  inventory=collect_sqlite_inventory(root,record,before,tar_hold,evidence,evidence_checks,check)
   PHASE='ordinary_image_compression';target=root/'candidate-image.tar.gz';out=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
   class BoundedOutput:
    def __init__(self):self.count=0;self.digest=sha256()
@@ -1290,7 +1381,7 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
    'two_git_input_signature':signature,'controller_input_signature':csig,'controller_inputs':record['controller_inputs'],'glibc_runtime':runtime,
    'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'rootfs':before['RootFS'],
    'archive':{'format':'docker-archive+gzip',**gz_hold.binding,'uncompressed_bytes':tar_hold.binding['bytes'],'uncompressed_sha256':tar_hold.binding['sha256']},
-   'raw_counts':counts,'reports':reports,'live_main_before_export':before_main,'live_main_after_export':after_main,
+   'sqlite_component_inventory':inventory,'raw_counts':counts,'reports':reports,'live_main_before_export':before_main,'live_main_after_export':after_main,
    ('actual_role_source_completed'if role is not None else'actual_source93_completed'):record['actual_role_source_completed'if role is not None else'actual_source93_completed'],'actual_sqlite_completed':record['actual_sqlite_completed'],
    'historical81_business_tests_completed':record['historical81_business_tests_completed'],'historical81':record['historical81'],
    'complete_ci_controller_payload':record['complete_ci_controller_payload'],'controller_parcel':record['controller_parcel'],
@@ -1301,6 +1392,7 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
   resources=[*evidence,gz_hold,tar_hold,inputs,build,*snapshots]
   finish_or_transfer(resources,evidence_checks,retained,final_checks)
  need(output is not None,'export_not_completed');publish_known(root/'image-export.json',encoded(output),[row.named for row in resources if row is not None],retained=retained,final_checks=final_checks);return output
+
 def raw_gate(root,repo,*,retained=None,final_checks=None,role=None):
  hosted(root,repo);row=Held(root/'image-build.json',maximum=MAX_JSON);evidence=[];checks=[]
  try:
@@ -1440,8 +1532,15 @@ def main(argv=None,*,retained=None,final_checks=None):
  # Hosted Main/source/ownership and strict evidence checks remain mandatory.
  need(EXECUTION_ARMED is True,'normal_main_integration_unarmed')
  need(args.root is not None and args.repo is not None,'arguments')
+ global NORMAL_OPERATION,NORMAL_CLOCK_SOURCE
+ need(NORMAL_OPERATION is None and NORMAL_OPERATION_BOOTSTRAP is not None,'operation_bootstrap_missing')
+ start,driver=NORMAL_OPERATION_BOOTSTRAP
+ need(args.phase!='build'or type(start)is int,'operation_bootstrap_missing')
+ NORMAL_CLOCK_SOURCE,NORMAL_OPERATION=open_normal_operation(args.root,args.repo,args.role,driver,start if args.phase=='build'else None)
  value={'build':normal_build,'finalize':finalize,'raw-gate':raw_gate,'complete-evidence':complete_evidence,'complete-gate':complete_gate}[args.phase](args.root,args.repo,retained=retained,final_checks=final_checks,role=args.role)
+ NORMAL_OPERATION.check()
  if args.phase=='build':
+  with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8')as output:output.write('operation_pin='+json.dumps(NORMAL_OPERATION.pin,separators=(',',':'))+'\n')
   need(type(value.get('image_id'))is str and re.fullmatch('sha256:[a-f0-9]{64}',value['image_id']),'image_identity')
   with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8')as output:output.write('image_id='+value['image_id']+'\n')
  print(json.dumps(value,sort_keys=True));return 0
@@ -1462,6 +1561,7 @@ def closed_failure(error):
   'physical_finalizer_failures':[{'stage':stage,'code':fields(exc)[0],'exception_class':fields(exc)[1]}for stage,exc in history[2]]if history is not None else[],
   'runtime_secondary_codes':[c if type(c)is str and c in CODES and c.startswith('glibc_runtime_')else'glibc_runtime_close_unknown'for c in getattr(error,'glibc_runtime_secondary_codes',[])],
   'activation_authority':False,'security_accepted':False}
+CODES=CODES|frozenset(('operation_active','operation_bootstrap_missing','operation_deadline','operation_pin','operation_changed','operation_record','operation_original_clock','operation_physical_close','operation_file','operation_parent','operation_boot_identity','operation_origin','operation_retired','operation_bound','operation_duplicate','operation_nonfinite','operation_short','operation_write','operation_own_write'))
 
 if __name__=='__main__':
  try:raise SystemExit(main())
