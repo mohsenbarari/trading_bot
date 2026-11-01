@@ -3,7 +3,7 @@ from pathlib import Path,PurePosixPath
 from types import ModuleType
 from hashlib import sha256
 from uuid import uuid4
-import argparse,errno,fcntl,io,json,os,re,shutil,stat,sys,tarfile,time,urllib.request
+import argparse,base64,errno,fcntl,io,json,os,re,shutil,stat,sys,tarfile,time,urllib.request
 HERE=Path(__file__).absolute().parent
 IO_PIN=(8831,'b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568')
 PINS={'source_io.py': (8831, 'b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568'), 'host_io_original.py': (53351, 'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82'), 'contracts.py': (11551, 'bac0d626957c40659d5dfd79b6d5f5bf05773ba6e8ceef526e0926d84f9dd8f5'), 'inputs.json': (14758, '9cfa5c3dd9e3faa6c85201c1337933aa77a2115e6b44823daf4f36d4488ad642'), 'age.go.mod': (619, '53e9fdd9fd328e14aab3eebe759c5ab048c1a7a8bbacbb8a853556b26efedc9c'), 'age.go.sum': (2823, '1f504fde4a3f8cbc4c159ac4e75f17cee7015b1d74d555feb79e06a34365eb75'), 'scanner.go.mod': (624, '5c3d2dd42ed9e7fa9d0025334c7edcf8bcf5fff788b0a836cbd746f444690b2c'), 'scanner.go.sum': (2625, '11a4fa1753df1bb15e5bc4fba3192eeab54764274f213c77f034c916217d7bdb')}
@@ -126,8 +126,48 @@ def sdk_inventory(reader):
 def hosted():
  expected={'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64','GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REPOSITORY_ID':'1065680631','GITHUB_REF':'refs/heads/main','GITHUB_EVENT_NAME':'workflow_dispatch'}
  need(os.getuid()==os.geteuid()==1001 and all(os.environ.get(k)==v for k,v in expected.items()),'hosted_main_UID1001_only')
+def workspace_manifests(mod,sums,main,expected):
+ """Validate final managed manifests, never infer a future selected graph."""
+ need(type(mod)is bytes and type(sums)is bytes and 0<len(mod)<=65536 and 0<len(sums)<=65536,'workspace_manifest_bound')
+ directives={};requirements={};block=False
+ for raw in mod.decode('ascii').splitlines():
+  line=raw.partition('//')[0].strip()
+  if not line:continue
+  if line=='require (':need(not block,'workspace_module_syntax');block=True;continue
+  if line==')':need(block,'workspace_module_syntax');block=False;continue
+  fields=line.split()
+  if block:need(len(fields)==2,'workspace_module_syntax');path,version=fields;need(path not in requirements,'workspace_module_duplicate');requirements[path]=version
+  elif fields[0]=='require':need(len(fields)==3 and fields[1]not in requirements,'workspace_module_syntax');requirements[fields[1]]=fields[2]
+  else:need(len(fields)==2 and fields[0]in{'module','go','toolchain'}and fields[0]not in directives,'workspace_root_directive');directives[fields[0]]=fields[1]
+ need(not block and directives=={'module':main,'go':'1.26.0','toolchain':'go1.27.3'},'workspace_root_directive')
+ versions={r['path']:r['version']for r in expected};need(requirements==versions,'workspace_requirements_exact')
+ approved={(r['path'],r['version']):r['module_sum']for r in expected};approved.update({(r['path'],r['version']+'/go.mod'):r['gomod_sum']for r in expected});observed={};metadata=[]
+ for line in sums.decode('ascii').splitlines():
+  need(0<len(line)<=512,'workspace_sum_syntax');fields=line.split();need(len(fields)==3,'workspace_sum_syntax');path,version,value=fields;key=(path,version)
+  need(key not in observed and path in versions and re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?(?:/go.mod)?',version)is not None and re.fullmatch(r'h1:[A-Za-z0-9+/]{43}=',value)is not None,'workspace_sum_inventory')
+  if key in approved:need(value==approved[key],'workspace_selected_checksum')
+  else:
+   # MVS may retain hashes of other go.mod files. They grant no selection,
+   # source, origin, build or backup authority; unknown paths/full zips refuse.
+   need(version.endswith('/go.mod')and version!=versions[path]+'/go.mod','workspace_unapproved_sum');metadata.append({'path':path,'version':version,'sum':value,'selected_or_qualified':False})
+  observed[key]=value
+ need(all(observed.get(k)==v for k,v in approved.items()),'workspace_selected_checksum')
+ return{'root_directives':directives,'exact_requirements':versions,'nonselected_go_mod_checksum_metadata':metadata,'selected_graph_requires_separate_actual_validation':True}
+def public_code(error,fallback):
+ value=str(error);return value if re.fullmatch('[A-Za-z0-9_]{1,100}',value)else fallback
+def publication_failure(result,error):
+ """Keep the original build failure and command/finalizer truth intact."""
+ out=dict(result);prior=result['status'];out['prior_build_status']=prior
+ failure={'phase':'final_RESULT_publication','code':public_code(error,'result_publication_refused'),'truth':getattr(error,'age_result_publication_truth',None)}
+ out['final_publication_failure']=failure
+ if prior!='FAILED':out.update(phase=failure['phase'],code=failure['code'])
+ out.update(status='FAILED',runtime_install_allowed=False,backup_eligibility=False,security_accepted=False,actual_install_or_backup_performed=False);return out
 def publish_result(M,path,result,source_rows,deadline):
- """Post-Source-scope public receipt; retain reader across original writer close."""
+ """Finite public JSON receipt or pinned template bytes; no Source registration.
+
+ Retain the reader across original writer close. Template roles retire before
+ their names enter the explicit Go-managed mutable workspace phase.
+ """
  fd=None;reader=None;writer_before=None;writer_flags=None;writer_offset=0;parents=();writer_attempted=False;writer_closed=False;writer_held=False;primary=None;errors=[]
  def writer_check():
   need(time.monotonic()<deadline and fd is not None and writer_before is not None,'result_writer_prefix')
@@ -139,7 +179,7 @@ def publish_result(M,path,result,source_rows,deadline):
   try:writer_check();os.close(fd);closed(fd);writer_closed=True;need(frame(path.lstat())==writer_before,'result_writer_postclose_named')
   except BaseException:writer_held=not writer_closed;raise
  try:
-  body=json.dumps(result,sort_keys=True).encode()+b'\n';need(0<len(body)<=65536,'result_bound');parents=tuple(M.parent_frame(path));need(not path.exists(),'result_exists')
+  body=result if type(result)is bytes else json.dumps(result,sort_keys=True).encode()+b'\n';need(0<len(body)<=65536,'result_bound');parents=tuple(M.parent_frame(path));need(not path.exists(),'result_exists')
   fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,0o600)
   writer_before=frame(os.fstat(fd));writer_flags=(fcntl.fcntl(fd,fcntl.F_GETFL),fcntl.fcntl(fd,fcntl.F_GETFD));need(writer_before[2]==0o100600 and writer_before[3:7]==(os.geteuid(),os.getegid(),1,0)and writer_flags[0]&os.O_ACCMODE==os.O_WRONLY and writer_flags[1]==fcntl.FD_CLOEXEC,'result_writer_metadata');writer_check()
   view=memoryview(body)
@@ -170,7 +210,7 @@ def publish_result(M,path,result,source_rows,deadline):
 def execute(source_sha):
  hosted()
  need(set(PINS)=={'source_io.py','host_io_original.py','contracts.py','inputs.json','age.go.mod','age.go.sum','scanner.go.mod','scanner.go.sum'},'source_inventory')
- IO=bootstrap();scope=IO.Scope(3720);primary=None;final=[];phase='source';exports=None;result=None;products=[];failure_fact=None
+ IO=bootstrap();scope=IO.Scope(3720);primary=None;final=[];phase='source';exports=None;result=None;products=[];failure_fact=None;failure_output=None;workspaces={};mutable_kind=None;workspace_truth={}
  started=time.monotonic();end=started+3600;payload_end=end-90
  try:
   scope.open(Path(__file__).absolute(),(Path(__file__).stat().st_size,source_sha),131072);held={name:scope.open(HERE/name,pin,262144)for name,pin in PINS.items()}
@@ -180,6 +220,11 @@ def execute(source_sha):
   def guard():
    need(time.monotonic()<payload_end,'build_deadline');scope.check()
    for item in products:item.check()
+   for kind,rows in workspaces.items():
+    for row in rows:
+     path,before,parents=row;now=frame(path.lstat())
+     need(path.resolve(strict=True)==path and now[2]==0o100600 and now[3:6]==(os.geteuid(),os.getegid(),1)and 0<=now[6]<=65536 and all(p.resolve(strict=True)==p and frame(p.lstat())[:5]==old for p,old in parents),'workspace_mutable_metadata')
+     if mutable_kind!=kind:need(now==before and now[6]>0,'workspace_outside_producer_changed')
   temp=Path(os.environ['RUNNER_TEMP']);workspace=Path(os.environ['GITHUB_WORKSPACE']);need(temp.resolve(strict=True)==temp and workspace.resolve(strict=True)==workspace and HERE.is_relative_to(workspace),'hosted_paths')
   need(shutil.disk_usage(temp).free>=4*1024**3,'disk_floor');root=temp/('age132-build-'+uuid4().hex);owned_directory(root,0o700,guard);exports=temp/'security-age132-public';owned_directory(exports,0o700,guard)
   for name in('home','gopath','gocache','modcache','tmp','sdk','age-output','scanner-output'):owned_directory(root/name,0o700,guard)
@@ -190,16 +235,31 @@ def execute(source_sha):
    need(type(body)is bytes and 0<len(body)<=64*1024**2,'output_bound');w=scope.create(path,64*1024**2)
    for i in range(0,len(body),65536):w.append(body[i:i+65536])
    w.check();before=w.before;os.fchmod(w.original_fd,mode);after=IO.frame(os.fstat(w.original_fd));need(after[:2]==before[:2]and after[2]==stat.S_IFREG|mode and after[3:8]==before[3:8]and after[8]>=before[8],'output_chmod_identity');w.before=after;pin=w.seal((len(body),sha256(body).hexdigest()));r=held_product(path,64*1024**2,(pin['bytes'],pin['sha256']))if mode==0o755 else scope.open(path,(pin['bytes'],pin['sha256']),64*1024**2);need(r.before==w.before,'output_reader_writer_identity');w.close();r.check();return r
-  def command(argv,name,maximum=8*1024**2,extra=None):
-   nonlocal failure_fact
-   guard()
+  def command(argv,name,maximum=8*1024**2,extra=None,mutable=None):
+   nonlocal failure_fact,failure_output,mutable_kind
+   guard();need(mutable_kind is None,'workspace_parallel_producer');body=None;caught=None
+   if mutable is not None:
+    need(mutable in workspaces and Path.cwd()==projects[mutable]and name in{mutable+'-dependency-download',mutable+'-module-verify',mutable+'-module-graph',mutable+'-vendor-source'},'workspace_mutation_command');mutable_kind=mutable
    try:body=M.run(argv,env={**env,**(extra or{})},deadline=payload_end,maximum=maximum,guard=guard)
    except BaseException as e:
+    caught=e
     fact=getattr(e,'public_command_failure',None)
     if type(fact)is dict:
      failure_fact={k:fact[k]for k in('actual_returncode','observed_output_bytes','actual_pipe_closed','stdout_eof_observed','maximum_output_bytes')};failure_fact['command_name']=name
-     if type(fact.get('captured_output'))is bytes and fact['captured_output']:save(exports/(name+'.failed-public-output.bin'),fact['captured_output'])
-    raise
+     captured=fact.get('captured_output')
+     if type(captured)is bytes:
+      prefix=captured[:16384];failure_output={'encoding':'base64','prefix_bytes':len(prefix),'captured_bytes':len(captured),'prefix_truncated':len(prefix)<len(captured),'prefix_base64':base64.b64encode(prefix).decode('ascii'),'public_tool_output_only':True,'diagnostic_never_acceptance':True}
+   finally:
+    if mutable is not None:
+     try:
+      guard()
+      # The finite transport has reaped its producer and closed its pipe before
+      # returning. Admit metadata changes only at this command boundary.
+      for row in workspaces[mutable]:row[1]=frame(row[0].lstat())
+     except BaseException as e:
+      if caught is None:caught=e
+     finally:mutable_kind=None
+   if caught is not None:raise caught
    if body:save(exports/(name+'.log'),body)
    need(shutil.disk_usage(root).free>=1024**3,'disk_floor');guard();return body
   phase='authenticated_Go_SDK';sdk=root/'go-sdk.tar.gz';w=scope.create(sdk,lock['go']['bytes'])
@@ -217,18 +277,27 @@ def execute(source_sha):
   phase='authenticated_module_sources';os.chdir(root);module_downloads={}
   projects={};source_files={}
   for kind in('age','scanner'):
-   pin=lock[kind];download=C.download_record(command([str(go),'mod','download','-json',pin['path']+'@'+pin['version']],kind+'-source-download',65536),pin);directory=Path(download['Dir']);need(directory.resolve(strict=True)==directory and directory.is_relative_to(root/'modcache'),'module_directory')
+   # Version-query downloads run outside either managed main module, so the
+   # scanner acquisition cannot rewrite the already sealed age manifests.
+   os.chdir(root);pin=lock[kind];download=C.download_record(command([str(go),'mod','download','-json',pin['path']+'@'+pin['version']],kind+'-source-download',65536),pin);directory=Path(download['Dir']);need(directory.resolve(strict=True)==directory and directory.is_relative_to(root/'modcache'),'module_directory')
    target=root/(kind+'-source');clone_public_module(directory,target);need(target.resolve(strict=True)==target,'source_copy');projects[kind]=target;module_downloads[kind]=download;source_files[kind]=[]
    for path in sorted(target.rglob('*.go')):
     item=held_product(path,4*1024**2,allow_empty=True);source_files[kind].append({'path':str(path.relative_to(target)),'bytes':item.pin[0],'sha256':item.pin[1],'original_full9':list(item.before)})
+   rows=[];template_truth=[]
    for name in('go.mod','go.sum'):
     path=target/name
     if path.exists():save(exports/(kind+'-original-'+name),path.read_bytes());path.unlink()
-    save(path,raw(kind+'.'+name))
-   os.chdir(target);downloads=C.documents(command([str(go),'mod','download','-json','all'],kind+'-dependency-download',2*1024**2));expected={r['path']:r for r in lock[kind+'_modules']};seen=set()
+    guard();template_truth.append(publish_result(M,path,raw(kind+'.'+name),(),scope.end));guard();rows.append([path,frame(path.lstat()),tuple(M.parent_frame(path))])
+   workspaces[kind]=rows
+   os.chdir(target);downloads=C.documents(command([str(go),'mod','download','-json','all'],kind+'-dependency-download',2*1024**2,mutable=kind));expected={r['path']:r for r in lock[kind+'_modules']};seen=set()
    for row in downloads:
     need(row.get('Path')in expected and row['Path']not in seen,'dependency_download_inventory');C.download_record(C.encoded(row),expected[row['Path']]);seen.add(row['Path'])
-   need(seen==set(expected),'dependency_download_inventory');command([str(go),'mod','verify'],kind+'-module-verify',65536);C.graph(command([str(go),'list','-m','-json','all'],kind+'-module-graph',2*1024**2),pin['path'],lock[kind+'_modules'])
+   need(seen==set(expected),'dependency_download_inventory');command([str(go),'mod','verify'],kind+'-module-verify',65536,mutable=kind)
+   if kind=='age':command([str(go),'mod','vendor'],kind+'-vendor-source',1024**2,mutable=kind)
+   graph=C.graph(command([str(go),'list','-mod=readonly','-m','-json','all'],kind+'-module-graph',2*1024**2,mutable=kind),pin['path'],lock[kind+'_modules'])
+   guard();sealed={name:held_product(target/name,65536)for name in('go.mod','go.sum')};semantics=workspace_manifests(sealed['go.mod'].body(),sealed['go.sum'].body(),pin['path'],lock[kind+'_modules']);guard()
+   for name,item in sealed.items():save(exports/(kind+'-final-'+name),item.body())
+   workspace_truth[kind]={'initial_template_original_writer_and_reader_finality':template_truth,'resolved_actual_manifests':{name:{'bytes':item.pin[0],'sha256':item.pin[1],'original_full9':list(item.before)}for name,item in sealed.items()},'manifest_semantics':semantics,'actual_selected_graph':graph,'selected_download_checksums_and_origins_match_lock':True,'sealed_before_any_build_or_test':True};save(exports/(kind+'-resolved-manifests.json'),C.encoded(workspace_truth[kind]))
   env['GOPROXY']='off';phase='scanner_build';os.chdir(projects['scanner']);scanner=root/'scanner-output/govulncheck';command([str(go),'build','-mod=readonly','-trimpath','-buildvcs=false','-o',str(scanner),'./cmd/govulncheck'],'scanner-build',2*1024**2);scanner_reader=held_product(scanner,32*1024**2);scanner_info=command([str(go),'version','-m',str(scanner)],'scanner-build-info',65536);C.build_info(scanner_info,'golang.org/x/vuln',lock['scanner_modules'])
   phase='complete_upstream_tests';os.chdir(projects['age']);tests={}
   for name,cgo,args in[('upstream-tests-static','0',[]),('upstream-tests-race','1',['-race'])]:tests[name]=C.test_result(command([str(go),'test','-mod=readonly','-json',*args,'./...'],name,16*1024**2,{'CGO_ENABLED':cgo}))
@@ -240,12 +309,12 @@ def execute(source_sha):
    need(command([str(path),'--version'],name+'-version',4096).strip()==b'v1.3.2+gold1','CLI_version');info=command([str(go),'version','-m',str(path)],name+'-build-info',65536);compiled_modules=C.build_info(info,'filippo.io/age',lock['age_modules'])
    r=held_product(path,32*1024**2);elfs[name]=C.static_amd64(r.body());binaries[name]=r;graphs[name]=C.package_graph(command([str(go),'list','-mod=readonly','-deps','-f','{{.ImportPath}}','./cmd/'+name],name+'-packages',1024**2),'filippo.io/age/cmd/'+name);symbols[name]=command([str(go),'tool','nm',str(path)],name+'-linked-symbols',16*1024**2);binary_sca[name]=C.sca(command([str(scanner),'-mode=binary','-scan=module','-json',str(path)],name+'-binary-SCA',16*1024**2),'binary');C.sca_subject(binary_sca[name],compiled_modules,'filippo.io/age')
   phase='benign_native_format';payload=b'Trading Bot public native format compatibility fixture\n';save(root/'PUBLIC-PLAINTEXT.txt',payload);cipher=root/'PUBLIC-NATIVE-FORMAT.age';command([str(root/'age-output/age'),'--encrypt','--recipient','age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p','--output',str(cipher),str(root/'PUBLIC-PLAINTEXT.txt')],'public-native-encrypt',4096);cipher_reader=held_product(cipher,65536);native=C.native_format(cipher_reader.body());save(exports/'public-native-format.age',cipher_reader.body())
-  phase='preserved_vendor_source';command([str(go),'mod','vendor'],'vendor-source',1024**2);vendor_tar=exports/'age132-vendor-source.tar.gz';command(['/usr/bin/tar','-czf',str(vendor_tar),'-C',str(projects['age']),'.'],'vendor-source-archive',65536)
+  phase='preserved_vendor_source';vendor_tar=exports/'age132-vendor-source.tar.gz';command(['/usr/bin/tar','-czf',str(vendor_tar),'-C',str(projects['age']),'.'],'vendor-source-archive',65536)
   all_sca={'source':source_sca,'scanner':scanner_sca,'published_age':published_age_sca,**binary_sca};unresolved=sorted({v for s in all_sca.values()for v in s['unresolved_ids']});proposals=[]
   for id in unresolved:
    osv=next(s['all_OSV'][id]for s in all_sca.values()if id in s['all_OSV']);paths=sorted({i['path']for a in osv.get('affected',[])for i in a.get('ecosystem_specific',{}).get('imports',[])})
    proposals.append({'id':id,'affected_packages':paths,'both_CLI_package_and_symbol_observations':{name:{p:{'package_in_actual_build_graph':p in graphs[name],'linked_symbol_prefix_observed':p.encode()+b'.'in symbols[name]}for p in paths}for name in binaries},'Root_assessment_required':True,'component_not_present_accepted':False})
-  provenance={'schema':'age132_managed_tool_build_provenance/1','upstream_commit':lock['age']['origin']['Hash'],'upstream_module_checksum':lock['age']['module_sum'],'go':lock['go'],'module_versions':{r['path']:r['version']for r in lock['age_modules']},'all_SCA_unresolved':unresolved,'Root_component_absence_proposals':proposals,'tests':tests,'native_format':native,'SDK_archive':archive_truth,'ELF':elfs,'CLI_files':{n:{'bytes':r.before[6],'sha256':r.pin[1],'original_full9':list(r.before)}for n,r in binaries.items()},'held_original_go_source_files':source_files,'no_operational_key_generation_or_private_data_access':True,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False};save(exports/'BUILD-PROVENANCE.json',C.encoded(provenance))
+  provenance={'schema':'age132_managed_tool_build_provenance/1','upstream_commit':lock['age']['origin']['Hash'],'upstream_module_checksum':lock['age']['module_sum'],'go':lock['go'],'module_versions':{r['path']:r['version']for r in lock['age_modules']},'resolved_managed_workspaces':workspace_truth,'all_SCA_unresolved':unresolved,'Root_component_absence_proposals':proposals,'tests':tests,'native_format':native,'SDK_archive':archive_truth,'ELF':elfs,'CLI_files':{n:{'bytes':r.before[6],'sha256':r.pin[1],'original_full9':list(r.before)}for n,r in binaries.items()},'held_original_go_source_files':source_files,'no_operational_key_generation_or_private_data_access':True,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False};save(exports/'BUILD-PROVENANCE.json',C.encoded(provenance))
   phase='managed_deb_no_hooks';stage=root/'package';owned_directory(stage,0o755,guard)
   for path in('DEBIAN','usr','usr/bin','usr/share','usr/share/doc','usr/share/doc/age'):owned_directory(stage/path,0o755,guard)
   save(stage/'DEBIAN/control',b'Package: age\nVersion: 1.3.2+gold1\nArchitecture: amd64\nMaintainer: Trading Bot Operations <operations@localhost>\nSection: utils\nPriority: optional\nDescription: Managed standalone age security tool; Root qualification required\n',0o644);expected_files={}
@@ -271,12 +340,12 @@ def execute(source_sha):
    final.append('source_finality_unknown')
    if primary is None:primary=e
  if primary is not None:
-  value=str(primary);result={'schema':'age132_managed_tool_SOURCE_build_result/1','status':'FAILED','phase':phase,'code':value if re.fullmatch('[A-Za-z0-9_]{1,100}',value)else'build_refused','failed_command_truth':failure_fact,'finalizer_codes':final,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
+  result={'schema':'age132_managed_tool_SOURCE_build_result/1','status':'FAILED','phase':phase,'code':public_code(primary,'build_refused'),'failed_command_truth':failure_fact,'failed_public_output_prefix':failure_output,'finalizer_codes':final,'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False}
  result.update(original_Source_FDs_physically_closed=len(scope.rows)if scope.finished and not final else None,original_product_FDs_physically_closed=sum(getattr(x,'physical_EBADF',False)and getattr(x,'closed',False)and not getattr(x,'unknown',True)for x in products),source_finality_proven=scope.finished and not final,actual_install_or_backup_performed=False)
  if exports is not None:
   try:publish_result(M,exports/'RESULT.json',result,scope.rows,scope.end)
   except BaseException as error:
-   code=str(error);result={'schema':'age132_managed_tool_SOURCE_build_result/1','status':'FAILED','phase':'final_RESULT_publication','code':code if re.fullmatch('[A-Za-z0-9_]{1,100}',code)else'result_publication_refused','prior_build_status':result['status'],'final_publication_truth':getattr(error,'age_result_publication_truth',None),'runtime_install_allowed':False,'backup_eligibility':False,'security_accepted':False,'actual_install_or_backup_performed':False};print(json.dumps(result,sort_keys=True));return 1
+   result=publication_failure(result,error);print(json.dumps(result,sort_keys=True));return 1
  print(json.dumps(result,sort_keys=True));return 1 if primary is not None else(2 if result['status']=='BUILT_QUARANTINED_PENDING_ROOT_REVIEW'else 0)
 def main():
  if len(sys.argv)!=3 or sys.argv[1]!='--build-managed-age132' or re.fullmatch('[a-f0-9]{64}',sys.argv[2])is None:
