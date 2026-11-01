@@ -529,6 +529,28 @@ export const MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE = Object.freeze({
   sha256: 'b6055a4b3a3d5dfa92f40294d2617875a58761a75babe45342e08bc979f46d97',
 })
 
+// Root-reviewed f6ec76e0: exact type-only repairs after the uniform-live
+// snapshot. Both historical19/20-file baselines stay immutable. Root and peer
+// compiled all eight changed files to byte-identical JavaScript; this admits
+// only these two exact Market source identities, never arbitrary type edits.
+export const MARKET_SECURITY_TYPE_ONLY_KIND = 'market-security-exact-type-only-f6ec76e0'
+export const MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/utils/offerDraftText.ts',
+  'frontend/src/views/MarketView.vue',
+])
+export const MARKET_SECURITY_TYPE_ONLY_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/utils/offerDraftText.ts':
+    '6bd9b51a73e1d4b72b9baf1ef45358e6dccbf2728ace33ff1ce5221f56d6c17e',
+  'frontend/src/views/MarketView.vue':
+    '63ab5c11a3e43c64e20a2a5d432e47cb0f4034aa8a1b93f66f6dfa5fe4e3ee8a',
+})
+export const MARKET_SECURITY_TYPE_ONLY_EVIDENCE = Object.freeze({
+  count: 20,
+  contentBytes: 180196,
+  pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+  sha256: 'ac0797b344c3d740ef6f101f7b01106f440aba6c1f6d7baded54ea55fce6110c',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1665,7 +1687,42 @@ export function assertMarketHistoryUniformLiveDisposition(entries) {
   )
 }
 
+export function assertMarketSecurityTypeOnlyDisposition(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market security type-only allowed file is missing: ${repoPath}`)
+    const expected = MARKET_SECURITY_TYPE_ONLY_ALLOWED_FILE_SHA256[repoPath]
+    if (fileSha256(entry.content) !== expected) {
+      throw new Error(`Market security type-only allowed file drift: ${repoPath}`)
+    }
+  }
+  assertMarketHistoryUniformLiveSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market security type-only disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_SECURITY_TYPE_ONLY_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
+  try {
+    return resolveHistoricalMarketRuntimeDisposition(entries)
+  } catch (historicalError) {
+    try {
+      return {
+        kind: MARKET_SECURITY_TYPE_ONLY_KIND,
+        evidence: assertMarketSecurityTypeOnlyDisposition(entries),
+      }
+    } catch (typeOnlyError) {
+      throw new Error(
+        `${historicalError.message}; Market security type-only disposition rejected (${typeOnlyError.message})`,
+      )
+    }
+  }
+}
+
+function resolveHistoricalMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
     return {
