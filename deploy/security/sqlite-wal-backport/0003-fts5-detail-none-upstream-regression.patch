@@ -1,0 +1,32 @@
+Description: CVE-2026-119373 official detail=none FTS5 merge bound upstream regression only; no product code.
+Origin: upstream, https://github.com/sqlite/sqlite/commit/e1c9934f9f11a499029abb020ea715a08970da80
+Fossil-Origin: a7f8c92f623e9cbe8a61266d949916acc9e5110c94dff4aa6fd1ad2ea8a60d4e
+Forwarded: not-needed
+Last-Update: 2026-11-01
+
+--- a/ext/fts5/test/fts5prefix2.test
++++ b/ext/fts5/test/fts5prefix2.test
+@@ -80,6 +80,23 @@
+   } $newrowid
+ }
+ 
++#-------------------------------------------------------------------------
++foreach_detail_mode $::testprefix-4 {
++  reset_db
++  do_execsql_test 1 {
++    CREATE VIRTUAL TABLE t1 USING fts5(x, detail=%DETAIL%);
++    WITH RECURSIVE c(x) AS (
++      VALUES(1) UNION ALL SELECT x+1 FROM c WHERE x<55
++    )
++    INSERT INTO t1(rowid, x) SELECT x,'ab' FROM c;
++    INSERT INTO t1(rowid, x) VALUES(-9223372036854775808,'abc');
++  }
++
++  do_execsql_test 2 {
++    SELECT count(*) FROM t1('a*')
++  } {56}
++}
++
+ finish_test
+ 
+ 

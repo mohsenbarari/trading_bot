@@ -27,8 +27,10 @@ def fixtures():
  changes=('Format: 1.8\nChecksums-Sha256:\n '+p['sha256']+' '+str(p['bytes'])+' '+A.PACKAGE+'\n '+b['sha256']+' '+str(b['bytes'])+' '+A.BUILDINFO+'\n').encode()
  rows={A.PACKAGE:package,A.CHANGES:changes,A.BUILDINFO:buildinfo,'positive-baseline.json':positive(A.BASE),'positive-candidate.json':positive(A.VERSION),
   'abi-contract.json':{'soname':'libsqlite3.so.0','needed':['libc.so.6'],'exports':sorted(['sqlite3_open_v2','sqlite3_prepare_v2','sqlite3_backup_init','sqlite3_wal_checkpoint_v2']),'glibc_versions':['GLIBC_2.2.5']}}
+ rows['vendor-standard.log']=b'0 errors out of 15000 tests on OWNED UNIT ONLY\n'
+ rows['vendor-fts5-regression.log']=b'\n'.join([f'fts5prefix2-4-{d}-{n}... Ok'.encode()for d in('full','col','none')for n in(1,2)])+b'\n0 errors out of 40 tests on OWNED UNIT ONLY\n'
  proofs={k:proof(A.encoded(v)if type(v)is dict else v)for k,v in rows.items()}
- provenance={'schema':'sqlite_wal_local_debian_package/1','package':'libsqlite3-0','base_package_version':A.BASE,'local_package_version':A.VERSION,
+ provenance={'schema':'sqlite_wal_fts5_local_debian_package/2','package':'libsqlite3-0','base_package_version':A.BASE,'local_package_version':A.VERSION,
   'upstream_version_unchanged':'3.46.1','architecture':'amd64','repository_snapshot':R.SNAPSHOT,'repository_release':{'bytes':R.INRELEASE[0],'sha256':R.INRELEASE[1]},
   'source_files':{k:{'bytes':v[0],'sha256':v[1]}for k,v in R.SOURCE_FILES.items()},'source_maintainer_signature_verified':True,
   'debian_rules':{'bytes':512,'sha256':'d'*64},'production_patch':{'bytes':R.PATCH_PIN[0],'sha256':R.PATCH_PIN[1]},
@@ -42,6 +44,11 @@ def fixtures():
   'sqlite_stdlib_extension_unchanged':True,'mapped_installed_libraries_verified':True,'build_toolchain_packages':['gcc 1.0'],
   'full_sqlite_documentation_restored':True,'dpkg_path_includes':list(R.DOC_INCLUDES),'runtime_loader_override_used':False,
   'production_data_accessed':False,'app_ci_restore_gate_required':True,'security_accepted':False}
+ for key,constant in [('fts5_patch',R.FTS_PATCH_PIN),('fts5_regression_patch',R.FTS_TEST_PATCH_PIN),('fts5_source_before',R.FTS_BEFORE),('fts5_source_after',R.FTS_AFTER),('fts5_regression_before',R.FTS_TEST_BEFORE),('fts5_regression_after',R.FTS_TEST_AFTER)]:provenance[key]={'bytes':constant[0],'sha256':constant[1]}
+ provenance['official_fts5_commit']=R.UPSTREAM_FTS_COMMIT
+ provenance['vendor_tests']={'same_configured_source':{'Makefile':{'bytes':42,'sha256':'e'*64},'debian/rules':dict(provenance['debian_rules']),'src/wal.c':dict(provenance['wal_after']),'ext/fts5/fts5_index.c':dict(provenance['fts5_source_after']),'ext/fts5/test/fts5prefix2.test':dict(provenance['fts5_regression_after'])},'standard_and_official_regression':{n:R.vendor_log_contract(n,rows[n])for n in R.VENDOR_COMMANDS},'no_new_filters_or_exclusions':True,'full_all_permutations_claimed':False,'default_omissions_are_not_waivers':True}
+ provenance['vendor_tests']['same_configured_source'].update({name:{'bytes':pin[0],'sha256':pin[1]}for name,pin in R.VENDOR_HELPERS.items()})
+ provenance['vendor_tests']['standard_scope']=deepcopy(R.VENDOR_STANDARD_SCOPE)
  rows['provenance.json']=provenance;proofs['provenance.json']=proof(A.encoded(provenance));return rows,proofs
 
 class DriverTests(unittest.TestCase):
@@ -77,7 +84,7 @@ class DriverTests(unittest.TestCase):
     calls.append(argv);leaf=argv[-1].split(':',1)[1].split('/')[-1]
     return b'blob\n'if argv[-2]=='-t'else str(A.PINS[leaf][0]).encode()+b'\n'
    def bounded_command(self,argv,**kwargs):calls.append(argv);return(source/argv[-1].split('/')[-1]).read_bytes()
-  blobs=A.git_blobs(Client(),self.root,'a'*40);self.assertEqual(set(blobs),set(A.PINS));self.assertEqual(len(calls),12)
+  blobs=A.git_blobs(Client(),self.root,'a'*40);self.assertEqual(set(blobs),set(A.PINS));self.assertEqual(len(calls),3*len(A.PINS))
   self.assertTrue(all(argv[:4]==['/usr/bin/git','-C',str(self.root),'cat-file']for argv in calls))
  def test_mutated_or_nonblob_git_object_rejected_before_context_write(self):
   fake=SimpleNamespace(metadata=lambda *a,**k:b'tree\n')
@@ -99,13 +106,13 @@ class DriverTests(unittest.TestCase):
   fake.fetch=lambda url,target,pin:A.publish(target,payloads[target.name],os.geteuid())
   frames=[]
   with ExitStack()as stack:
-   context,bindings=A.seal_context(fake,self.root,blobs,stack,frames,os.geteuid());self.assertEqual(len(bindings),8)
+   context,bindings=A.seal_context(fake,self.root,blobs,stack,frames,os.geteuid());self.assertEqual(len(bindings),len(A.PINS)+len(R.SOURCE_FILES))
    self.assertTrue((context/'.dockerignore').read_text().startswith('**\n'))
    self.assertEqual(set(json.loads((context/'context-manifest.json').read_bytes())['files']),set(bindings))
    (context/'history-only.txt').write_text('OWNED EXTRA')
    with self.assertRaises(RuntimeError):A.context_inventory(context,fake)
   A.named(frames)
- def test_exact_seven_ordinary_artifacts_pass_without_install_or_package_execution(self):
+ def test_exact_nine_artifacts_pass_without_install_or_package_execution(self):
   rows,proofs=fixtures();v=A.verify_artifacts(R,rows,proofs);self.assertTrue(v['baseline_pass']);self.assertFalse(v['security_accepted'])
  def test_extra_missing_or_symlink_like_output_inventory_cannot_be_accepted(self):
   rows,proofs=fixtures();rows['extra']=b'OWNED'

@@ -2,7 +2,9 @@
 
 Only Root/CI runs an actual build in the disposable Docker builder. The output
 is a proper local-version libsqlite3-0 package, never a loader-path override.
-The approved scope excludes fault injection and bug-triggering reproduction.
+Gold2 retains the production WAL fix and adds only the official FTS5 fix.
+The same configured source must pass unfiltered standard make test and the
+official FTS5 regression. No actual test/build is performed by importing this file.
 """
 from hashlib import sha256
 from pathlib import Path
@@ -10,8 +12,8 @@ import argparse,datetime,email.utils,json,os,re,select,selectors,shutil,signal,s
 from urllib.parse import urlsplit
 from urllib.request import build_opener,HTTPSHandler,ProxyHandler,Request
 
-BASE_VERSION='3.46.1-7+deb13u2';VERSION=BASE_VERSION+'+gold1'
-SOURCE_EPOCH=1792972800  # Authored2026-10-26, reproducible local changelog date.
+BASE_VERSION='3.46.1-7+deb13u2';VERSION=BASE_VERSION+'+gold2'
+SOURCE_EPOCH=1793491200  # Authored2026-11-01, reproducible local changelog date.
 SNAPSHOT='https://snapshot.debian.org/archive/debian/20261025T000000Z'
 INRELEASE=(140421,'0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675')
 SOURCE_FILES={
@@ -21,6 +23,26 @@ SOURCE_FILES={
  'sqlite3_3.46.1-7+deb13u2.debian.tar.xz':(37084,'59d33bc436258603702bb051d645743ab03612b82f79e7c7d638c65127c21261')}
 PATCH='0001-wal-reset-production-only.patch'
 PATCH_PIN=(6746,'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85')
+FTS_PATCH='0002-fts5-detail-none-merge-bound.patch'
+FTS_PATCH_PIN=(1240, '90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8')
+FTS_TEST_PATCH='0003-fts5-detail-none-upstream-regression.patch'
+FTS_TEST_PATCH_PIN=(968, 'b1936d0f06461f7eb7a3517b7c56dcdfcb1606c6c52338cf50bb3b82bb2523e7')
+FTS_BEFORE=(283821, 'a8cb1edfb4772d6f6d2c5fa417c9802c905e56e420832e216337dad4579455e9')
+FTS_AFTER=(283845, '2a64009c24fd1194027d2383754545edf9a55c2134ce5588a22143d52bf1e495')
+FTS_TEST_BEFORE=(2113, 'd4260474ddc5d374c5fc932c1251f695fcfac57c2ce2f43b3f2056e426ebab46')
+FTS_TEST_AFTER=(2598, 'b03372c1a4d9b112b09a75574fcff4414d2eab431ae4d9f3bd156a648fe8d58e')
+UPSTREAM_FTS_COMMIT='e1c9934f9f11a499029abb020ea715a08970da80'
+VENDOR_HELPERS={'test/tester.tcl': (78000, '5c4c2881737e9b5d488ad453be74630bc8209d3ee5cf1492dc08a9a1f6166aa7'), 'ext/fts5/test/fts5_common.tcl': (17586, '7600a7adf913e45113ea66d0395de96d18dff9b187599c01151de5dd61e26e80'), 'Makefile.in': (52641, '78ebd7e89c5c95d9a8e30c39a5da99155e8d0d8cc901e36e74c4e6b20ddb0074'), 'test/veryquick.test': (587, '814df9511e0412a654e721851613f9061bbd7557c688b50d7bd57c980e4ec773')}
+VENDOR_STANDARD_SCOPE={'standard_target':'test',
+ 'standard_prerequisites':['srctree-check','fuzztest','sourcetest','$(TESTPROGS)','tcltest'],
+ 'executed_standard_subtargets':['srctree-check','fuzztest','sourcetest','tcltest'],
+ 'default_tcl_suite':'test/veryquick.test',
+ 'vendor_default_omissions_scope':'upstream_veryquick_excludes_malloc_and_io_error_simulations',
+ 'all_fault_permutations_run':False}
+RECIPE_FILES=('sourcebuild.py','Dockerfile',PATCH,FTS_PATCH,FTS_TEST_PATCH,'verify_positive.py')
+VENDOR_LOG_LIMITS={'vendor-standard.log':32*1024**2,'vendor-fts5-regression.log':4*1024**2}
+VENDOR_COMMANDS={'vendor-standard.log':['/usr/bin/make','test'],
+ 'vendor-fts5-regression.log':['./testfixture','ext/fts5/test/fts5prefix2.test']}
 VERIFY_PIN=(16377, '623384cc7e63c04834d1042c63064b85a83c6966d0cc95da172f5e719f8f06ab')
 WAL_BEFORE=(174376,'d4a104b5f3cb807e026a9dbcdb77519358b06b66f76cb6b6ef70e3793379dd62')
 WAL_AFTER=(175230,'7287fb98dcfbfb3c33dfba555c21396f7ef53c68a325dc706e68ca3c19ab73a7')
@@ -143,7 +165,7 @@ def forward(raw,end):
   ready=select.select([], [fd], [], min(1,left))[1]
   if not ready:continue
   count=os.write(fd,view[:4096]);require(count>0,'output_write');view=view[count:]
-def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False):
+def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False,tee=False):
  """Bound bytes BEFORE accumulation/forwarding; no payload file-size limit."""
  child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
   env=current_environment(),cwd=cwd,close_fds=True,start_new_session=True)
@@ -158,7 +180,7 @@ def bounded_command(argv,*,cwd,timeout,maximum,capture,with_code=False):
     if not raw:break
     count+=len(raw);require(count<=maximum,'command_output_bound')
     if capture:parts.append(raw)
-    else:forward(raw,end)
+    if not capture or tee:forward(raw,end)
   code=child.wait(timeout=max(.1,end-time.monotonic()))
   if with_code:
    require(capture,'capture_contract');return code,b''.join(parts)
@@ -196,7 +218,7 @@ def fetch(url,target,expected):
   if partial.exists():partial.unlink()
 def inputs(root,recipe):
  proofs={leaf:digest(root/leaf,pin) for leaf,pin in SOURCE_FILES.items()}
- digest(recipe/PATCH,PATCH_PIN);digest(recipe/'verify_positive.py',VERIFY_PIN)
+ digest(recipe/PATCH,PATCH_PIN);digest(recipe/FTS_PATCH,FTS_PATCH_PIN);digest(recipe/FTS_TEST_PATCH,FTS_TEST_PATCH_PIN);digest(recipe/'verify_positive.py',VERIFY_PIN)
  dsc=bytes_at(root/('sqlite3_'+BASE_VERSION+'.dsc'),SOURCE_FILES['sqlite3_'+BASE_VERSION+'.dsc']).decode('ascii')
  require(('Version: '+BASE_VERSION+'\n') in dsc and 'Format: 3.0 (quilt)\n' in dsc,'source_version')
  for leaf,(size,pin) in SOURCE_FILES.items():
@@ -215,7 +237,7 @@ def builder_context():
  current_environment()
  context=json.loads(bytes_at(RECIPE/'context-manifest.json'))
  require(type(context) is dict and set(context)=={'schema','files'} and context['schema']=='sqlite_allowlisted_context/1','build_context')
- expected={'sourcebuild.py','Dockerfile',PATCH,'verify_positive.py',*('inputs/'+name for name in SOURCE_FILES)}
+ expected={*RECIPE_FILES,*('inputs/'+name for name in SOURCE_FILES)}
  require(type(context['files']) is dict and set(context['files'])==expected,'build_context')
  for name,binding in context['files'].items():
   require(type(binding) is dict and set(binding)=={'bytes','sha256'} and type(binding['bytes']) is int
@@ -227,14 +249,14 @@ def stage_context(destination):
  destination=Path(destination);require(destination.is_absolute() and not destination.exists()
   and destination.parent.resolve(strict=True)==destination.parent and destination.parent.stat().st_uid==0
   and not destination.parent.stat().st_mode&0o022,'context_destination')
- files={name:digest(recipe/name) for name in ('sourcebuild.py','Dockerfile',PATCH,'verify_positive.py')}
+ files={name:digest(recipe/name) for name in RECIPE_FILES}
  files.update({'inputs/'+name:row for name,row in proofs.items()})
  destination.mkdir(mode=0o700);(destination/'inputs').mkdir(mode=0o700)
  for name,binding in files.items():
   original=recipe/name;target=destination/name
   expected=(binding['bytes'],binding['sha256']);copy_exact(original,target,expected)
  manifest={'schema':'sqlite_allowlisted_context/1','files':files};publish(destination/'context-manifest.json',encoded(manifest))
- allow='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+name+'\n' for name in ('sourcebuild.py','Dockerfile',PATCH,'verify_positive.py'))
+ allow='**\n!.dockerignore\n!context-manifest.json\n'+''.join('!'+name+'\n' for name in RECIPE_FILES)
  allow+='!inputs/\n'+''.join('!inputs/'+name+'\n' for name in SOURCE_FILES)
  publish(destination/'.dockerignore',allow.encode())
  return {'schema':'sqlite_public_context_staged/1','context':str(destination),'files':files,'build_performed':False,'security_accepted':False}
@@ -300,6 +322,41 @@ def elf(path):
  versions=metadata(['/usr/bin/readelf','--version-info','--wide',str(path)]).decode('ascii')
  required=sorted(set(re.findall(r'Name:\s+(GLIBC_[0-9.]+)',versions)))
  require(exports and required,'elf_contract');return {'soname':names[0],'needed':needed,'exports':exports,'glibc_versions':required}
+def vendor_log_contract(name,raw):
+ """Parse only genuine bounded vendor stdout; observations grant no CVE acceptance."""
+ require(name in VENDOR_COMMANDS and type(raw)is bytes and 0<len(raw)<=VENDOR_LOG_LIMITS[name],'vendor_log_bound')
+ summaries=re.findall(rb'(?m)^([0-9]+) errors out of ([0-9]+) tests(?: on [^\r\n]*)?$',raw)
+ require(summaries and all(int(errors)==0 and int(count)>0 for errors,count in summaries),'vendor_test_summary')
+ require(b' new errors and 'not in raw and b'!Failures on these tests:'not in raw,'vendor_known_errors_not_waived')
+ omissions=[line.decode('utf-8','replace')for line in raw.splitlines()if line.startswith(b'.  ')]
+ require(len(omissions)<=4096 and all(len(line)<=1024 for line in omissions),'vendor_omission_bound')
+ markers=[]
+ if name=='vendor-fts5-regression.log':
+  markers=[f'fts5prefix2-4-{detail}-{case}... Ok'for detail in('full','col','none')for case in(1,2)]
+  require(all(raw.splitlines().count(marker.encode())==1 for marker in markers),'official_fts5_cases_missing')
+ return {'argv':VENDOR_COMMANDS[name],'actual_returncode':0,'unfiltered_standard_target':name=='vendor-standard.log',
+  'raw_output':{'name':name,'bytes':len(raw),'sha256':sha256(raw).hexdigest()},
+  'zero_error_summaries':[{'errors':int(e),'tests':int(n)}for e,n in summaries],
+  'official_regression_markers':markers,'vendor_default_omissions':omissions,
+  'raw_omissions_retained':True,'omissions_accepted':False,'security_accepted':False}
+def vendor_tests(src):
+ # Debian has already configured/built this exact source with its unchanged
+ # rules/feature flags. Do not reconfigure, filter TESTOPTS, or substitute a suite.
+ watched=('Makefile','debian/rules','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*VENDOR_HELPERS)
+ before={name:digest(src/name,maximum=4*1024**2)for name in watched}
+ require(all(before[name]=={'bytes':pin[0],'sha256':pin[1]}for name,pin in VENDOR_HELPERS.items()),'vendor_naming_helper_changed')
+ require(not any(k in current_environment()for k in('TESTOPTS','TESTS','EXTRA_QUICKTEST','SQLITE_TEST_PREFIX')),'vendor_test_filter')
+ logs={};facts={}
+ for name,timeout in(('vendor-standard.log',1200),('vendor-fts5-regression.log',180)):
+  code,raw=bounded_command(VENDOR_COMMANDS[name],cwd=src,timeout=timeout,
+   maximum=VENDOR_LOG_LIMITS[name],capture=True,with_code=True,tee=True)
+  require(code==0,'vendor_test_command_refused')
+  facts[name]=vendor_log_contract(name,raw);logs[name]=raw
+ require({name:digest(src/name,maximum=4*1024**2)for name in watched}==before,'vendor_source_or_flags_changed')
+ return {'same_configured_source':before,'standard_and_official_regression':facts,
+  'standard_scope':dict(VENDOR_STANDARD_SCOPE),
+  'no_new_filters_or_exclusions':True,'full_all_permutations_claimed':False,
+  'default_omissions_are_not_waivers':True},logs
 def build():
  builder_context();proofs=inputs(INPUTS,RECIPE);require(not WORK.exists() and not OUT.exists(),'build_once')
  WORK.mkdir(mode=0o700);Path(ENV['HOME']).mkdir(mode=0o700,exist_ok=True)
@@ -320,23 +377,31 @@ def build():
  src=WORK/'source'
  command(['/usr/bin/dpkg-source','-x',str(INPUTS/('sqlite3_'+BASE_VERSION+'.dsc')),str(src)],timeout=180)
  digest(src/'debian/rules',rules_pin);digest(src/'src/wal.c',WAL_BEFORE)
- selected=src/'debian/patches/trading-bot-production-wal-reset.patch'
- publish(selected,bytes_at(RECIPE/PATCH,PATCH_PIN))
- series=src/'debian/patches/series';previous=series.read_bytes();require(b'trading-bot-production-wal-reset.patch' not in previous,'patch_once')
- series.write_bytes(previous+(b'' if previous.endswith(b'\n') else b'\n')+b'trading-bot-production-wal-reset.patch\n')
- command(['/usr/bin/quilt','--quiltrc','/dev/null','push'],cwd=src,timeout=30)
- digest(src/'src/wal.c',WAL_AFTER)
+ for name,pin in VENDOR_HELPERS.items():digest(src/name,pin)
+ digest(src/'ext/fts5/fts5_index.c',FTS_BEFORE);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_BEFORE)
+ series=src/'debian/patches/series';previous=bytes_at(series,maximum=65536)
+ patches=[('trading-bot-production-wal-reset.patch',PATCH,PATCH_PIN),
+  ('trading-bot-fts5-detail-none-merge.patch',FTS_PATCH,FTS_PATCH_PIN),
+  ('trading-bot-fts5-upstream-regression.patch',FTS_TEST_PATCH,FTS_TEST_PATCH_PIN)]
+ require(all(name.encode()not in previous for name,_,_ in patches),'patch_once')
+ for name,leaf,pin in patches:publish(src/'debian/patches'/name,bytes_at(RECIPE/leaf,pin))
+ series.write_bytes(previous+(b''if previous.endswith(b'\n')else b'\n')+b''.join(name.encode()+b'\n'for name,_,_ in patches))
+ command(['/usr/bin/quilt','--quiltrc','/dev/null','push','-a'],cwd=src,timeout=30)
+ digest(src/'src/wal.c',WAL_AFTER);digest(src/'ext/fts5/fts5_index.c',FTS_AFTER)
+ digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  changelog=src/'debian/changelog';original=changelog.read_bytes();require(original.startswith(('sqlite3 ('+BASE_VERSION+')').encode()),'changelog_base')
  date=email.utils.format_datetime(datetime.datetime.fromtimestamp(SOURCE_EPOCH,datetime.timezone.utc))
  entry=('sqlite3 ('+VERSION+') trixie; urgency=high\n\n'
-  '  * Local production-only upstream WAL-reset checkpoint backport.\n'
+  '  * Retain production WAL-reset backport; add official FTS5 merge bound fix.\n'
   '  * Keep upstream3.46.1 ABI, Debian build rules and feature flags.\n'
-  '  * Fault/bug-reproduction suites excluded; ordinary compatibility required.\n\n'
+  '  * Require unchanged standard vendor make test and official FTS5 regression.\n\n'
   ' -- Trading Bot Security Build <security-build@localhost>  '+date+'\n\n').encode()
  changelog.write_bytes(entry+original)
  require(metadata(['/usr/bin/dpkg-parsechangelog','-S','Version'],cwd=src).decode().strip()==VERSION,'local_package_version')
  command(['/usr/bin/dpkg-buildpackage','-B','-uc','-us','-j2'],cwd=src,timeout=1800)
+ vendor,vendor_logs=vendor_tests(src)
  digest(src/'debian/rules',rules_pin);digest(src/'src/wal.c',WAL_AFTER)
+ digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  packages=list(WORK.glob('libsqlite3-0_'+VERSION+'_amd64.deb'));require(len(packages)==1,'runtime_package_inventory');package=packages[0]
  for field,expected in (('Package','libsqlite3-0'),('Version',VERSION),('Architecture','amd64'),('Multi-Arch','same')):
   require(metadata(['/usr/bin/dpkg-deb','-f',str(package),field]).decode().strip()==expected,'runtime_package_control')
@@ -359,11 +424,18 @@ def build():
  for item,binding in build_metadata:
   copy_exact(item,OUT/item.name,(binding['bytes'],binding['sha256']),mode=0o644)
   metadata_proofs[item.name]=binding
- report={'schema':'sqlite_wal_local_debian_package/1','package':'libsqlite3-0','base_package_version':BASE_VERSION,
+ report={'schema':'sqlite_wal_fts5_local_debian_package/2','package':'libsqlite3-0','base_package_version':BASE_VERSION,
   'local_package_version':VERSION,'upstream_version_unchanged':'3.46.1','architecture':'amd64',
   'repository_snapshot':SNAPSHOT,'repository_release':{'bytes':INRELEASE[0],'sha256':INRELEASE[1]},
   'source_files':proofs,'source_maintainer_signature_verified':True,'debian_rules':{'bytes':rules_pin[0],'sha256':rules_pin[1]},
   'production_patch':{'bytes':PATCH_PIN[0],'sha256':PATCH_PIN[1]},'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
+  'fts5_patch':{'bytes':FTS_PATCH_PIN[0],'sha256':FTS_PATCH_PIN[1]},
+  'fts5_regression_patch':{'bytes':FTS_TEST_PATCH_PIN[0],'sha256':FTS_TEST_PATCH_PIN[1]},
+  'fts5_source_before':{'bytes':FTS_BEFORE[0],'sha256':FTS_BEFORE[1]},
+  'fts5_source_after':{'bytes':FTS_AFTER[0],'sha256':FTS_AFTER[1]},
+  'fts5_regression_before':{'bytes':FTS_TEST_BEFORE[0],'sha256':FTS_TEST_BEFORE[1]},
+  'fts5_regression_after':{'bytes':FTS_TEST_AFTER[0],'sha256':FTS_TEST_AFTER[1]},
+  'official_fts5_commit':UPSTREAM_FTS_COMMIT,'vendor_tests':vendor,
   'wal_after':{'bytes':WAL_AFTER[0],'sha256':WAL_AFTER[1]},'positive_verifier':{'bytes':VERIFY_PIN[0],'sha256':VERIFY_PIN[1]},
   'source_date_epoch':SOURCE_EPOCH,'build_options':ENV['DEB_BUILD_OPTIONS'],'upstream_fault_suites_run':False,
   'wal_reset_reproduction_performed':False,'full_upstream_suite_pass_claimed':False,
@@ -375,6 +447,7 @@ def build():
    'gcc','g++','libc6','libc6-dev','binutils','dpkg-dev','debhelper','libtool','autoconf','automake']).decode('ascii').splitlines(),
   'full_sqlite_documentation_restored':True,'dpkg_path_includes':list(DOC_INCLUDES),
   'runtime_loader_override_used':False,'production_data_accessed':False,'app_ci_restore_gate_required':True,'security_accepted':False}
+ for name,raw in vendor_logs.items():publish(OUT/name,raw);(OUT/name).chmod(0o644)
  for name,value in (('provenance.json',report),('positive-baseline.json',baseline),('positive-candidate.json',candidate),('abi-contract.json',new_elf)):
   publish(OUT/name,encoded(value));(OUT/name).chmod(0o644)
  return report

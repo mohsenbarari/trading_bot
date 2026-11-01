@@ -119,7 +119,7 @@ class SQLiteRuntimeSecurityTests(unittest.TestCase):
 
     def test_app_gate_checks_magic_and_both_system_libraries_without_claiming_all_cves(self):
         fake_magic = SimpleNamespace(from_buffer=lambda body, **kwargs: 'text/plain')
-        with patch.object(G.sys, 'version_info', (3, 11, 17)), \
+        with patch.object(G.sys, 'version_info', (3, 11, 18)), \
              patch.object(G, 'platform_package', return_value='3.46.1-7+deb13u2+gold1'), \
              patch.object(G, 'loader_identity', return_value={'path':'PUBLIC_STDLIB_EXTENSION'}), \
              patch.object(G, 'installed_sqlite_identity', return_value={'path':'PUBLIC_SYSTEM_LIBRARY'}) as installed, \
