@@ -62,18 +62,20 @@ def package_projection(raw,main,expected,pattern,required_roots):
  packages={};owners={};roots=[];versions={r['path']:r['version']for r in expected};required=set(GO_PACKAGE_FIELDS.split(','))
  def path(value):return type(value)is str and re.fullmatch(r'[A-Za-z0-9_./!-]+',value)is not None and not value.startswith('/')and'..'not in value.split('/')
  need(type(required_roots)in{tuple,list}and 0<len(required_roots)<=3 and all(path(p)for p in required_roots),'package_projection_required_root')
+ # The real partial-field producer preserves JSON omitempty: absent documented
+ # zero fields have Go zero values; identifiers and every present type stay strict.
  for row in rows:
-  need(type(row)is dict and required<=set(row),'package_projection_fields');name=row['ImportPath']
+  need(type(row)is dict and {'ImportPath','Name'}<=set(row)<=required,'package_projection_fields');name=row['ImportPath']
   need(path(name)and name not in packages and type(row['Name'])is str and re.fullmatch('[A-Za-z_][A-Za-z0-9_]*',row['Name'])is not None,'package_projection_package')
-  need(row['Error']is None and row['DepsErrors']in(None,[])and row['Incomplete']is False and row['ForTest']=='','package_projection_errors')
-  need(type(row['Standard'])is bool and type(row['DepOnly'])is bool,'package_projection_flags')
-  imports=row['Imports']if row['Imports']is not None else[];aliases=row['ImportMap']if row['ImportMap']is not None else{};matches=row['Match']if row['Match']is not None else[]
+  need(row.get('Error')is None and row.get('DepsErrors')in(None,[])and row.get('Incomplete',False)is False and row.get('ForTest','')=='','package_projection_errors')
+  need(type(row.get('Standard',False))is bool and type(row.get('DepOnly',False))is bool,'package_projection_flags')
+  imports=row.get('Imports')if row.get('Imports')is not None else[];aliases=row.get('ImportMap')if row.get('ImportMap')is not None else{};matches=row.get('Match')if row.get('Match')is not None else[]
   need(type(imports)is list and all(path(p)for p in imports)and len(imports)==len(set(imports))and type(aliases)is dict and all(path(k)and path(v)and v in imports for k,v in aliases.items()),'package_projection_imports')
   need(type(matches)is list and all(type(p)is str for p in matches),'package_projection_matches')
-  if not row['DepOnly']:
+  if not row.get('DepOnly',False):
    need(pattern in matches and(name==main or name.startswith(main+'/')),'package_projection_root');roots.append(name)
-  module=row['Module']
-  if row['Standard']:
+  module=row.get('Module')
+  if row.get('Standard',False):
    need(module is None,'package_projection_stdlib');owner='stdlib';version='v1.27.3'
   else:
    need(type(module)is dict and module.get('Error')is None and module.get('Replace')is None,'package_projection_module')
