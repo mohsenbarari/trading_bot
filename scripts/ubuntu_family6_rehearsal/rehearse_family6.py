@@ -13,7 +13,7 @@ RECEIPT_PIN=(40229,'bd092ff4f49ed00fcca21afacb68628913fba76407b87c5a1738bcbe4aac
 POLICY_PINS={key:{'bytes':19,'sha256':'c2bcd9decf63ff2c0d9f473f38bc3607900530aad80f99139855d56678456230','mode':0o100755,'uid':0,'gid':0,'nlink':1}for key in ('ubuntu239','ubuntu243')}
 PINS={'source_io.py':(8831,'b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568'),
  'host_io_original.py':(53351,'fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82'),
- 'worker.py':(20903, '10bfcd5b062f540926545bef38b848b239bdfd16a738b622b35847a246111ed7'),
+ 'worker.py':(21151, '511a8eab735d7b539eb5d4585a9a51189a6080dec01c6d5f45482afec93490ba'),
  'profile239.py':(5262,'420c3b55567fd93d200386b4572dfc143da1df8b5bc2114409babf2209c9f767'),
  'profile243.py':(5953,'202ee45a680e100056abe167a916fa56f71bcdfdc68e866527ba1e1ce3c29d14'),
  'ROOT-DERIVED-INPUTS.json':RECEIPT_PIN,

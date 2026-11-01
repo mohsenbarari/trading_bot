@@ -46,7 +46,7 @@ jobs:
           /usr/bin/git diff --quiet
           /usr/bin/git diff --cached --quiet
           test "$(/usr/bin/git ls-files --others --exclude-standard -z | wc -c)" -eq 0
-          printf '%s  %s\n' a6cef2a7936b6f426f3764996a98c59c5f1ad767771747410929c6adb86ada4d scripts/ubuntu_family6_rehearsal/rehearse_family6.py | sha256sum -c -
+          printf '%s  %s\n' b5435d2d88f1f4243bb12c4ab94bd447eeb073f0158abc616c025130ad364b01 scripts/ubuntu_family6_rehearsal/rehearse_family6.py | sha256sum -c -
           printf '%s  %s\n' 784961753e73e06acee2a64f196d1610befa935fe9e6cf31bab2d184b27e7094 scripts/ubuntu_family6_rehearsal/collect_public_evidence.py | sha256sum -c -
       - name: Run one ordinary exact-six forward and rollback
         id: rehearsal
@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           umask 077
           /usr/bin/python3 -I -S -B scripts/ubuntu_family6_rehearsal/rehearse_family6.py \
-            --execute-family6-rehearsal "$PROFILE" --source-sha256 a6cef2a7936b6f426f3764996a98c59c5f1ad767771747410929c6adb86ada4d \
+            --execute-family6-rehearsal "$PROFILE" --source-sha256 b5435d2d88f1f4243bb12c4ab94bd447eeb073f0158abc616c025130ad364b01 \
             > "$RUNNER_TEMP/family6-result-$PROFILE.json"
       - name: Collect only bounded public receipts and original failed producer proofs
         if: always()

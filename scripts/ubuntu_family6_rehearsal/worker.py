@@ -201,6 +201,9 @@ def _execute(stage,expected_input,failure_context):
         command(preparation+['-y','install',*[name+'='+old for name in names]])
         Path('/etc/locale.gen').write_text('en_US.UTF-8 UTF-8\nfa_IR.UTF-8 UTF-8\n')
         command(['/usr/sbin/locale-gen']);command(['/usr/sbin/update-locale','LANG=en_US.UTF-8'])
+        # Finish the installed vendor locale configuration before freezing the
+        # ordinary baseline; package postinst adds its supported-locale inventory.
+        command(['/usr/sbin/dpkg-reconfigure','--frontend=noninteractive','locales'])
         report['baseline']=verify(old);report['configuration']=configuration();report['signed_APT']=apt_snapshot(profile)
         report['baseline_snapshot_sha256']=sha256(encoded({'packages':report['baseline'],'configuration':report['configuration'],'apt':report['signed_APT']})).hexdigest()
     else:
