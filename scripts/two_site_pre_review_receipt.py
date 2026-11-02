@@ -968,7 +968,7 @@ def run_candidate_tests(
             total_bytes += byte_count
             cap = profile["file_limits"][path]
             if path in new_tests:
-                cap = min(cap, MAX_NEW_TEST_BYTES)
+                cap = min(32000, cap, profile["total_limit"])
             if byte_count > cap:
                 profile_findings.append(f"AssertionError: {path} exceeds {cap} byte limit: {byte_count} bytes")
         if total_bytes > profile["total_limit"]:
@@ -986,7 +986,7 @@ def run_candidate_tests(
 
     oversize_findings: list[str] = []
     for change in raw_changes:
-        if _is_canonical_new_test(change):
+        if profile is None and _is_canonical_new_test(change):
             path = change["path"]
             content = change["content"]
             byte_count = len(content.encode("utf-8"))

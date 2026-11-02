@@ -683,11 +683,14 @@ def preparation_notes(task, sources):
         # Expose every success coverage ID; do not infer coverage from R-labels.
         out_contract["success_covered_requirements"] = list(range(1, len(reqs) + 1))
         allowed_new_tests = sorted(set(raw_new_tests) & set(profile["file_limits"]))
-        if len(allowed_new_tests) == 1:
-            cap = min(24000, profile["total_limit"],
-                      profile["file_limits"][allowed_new_tests[0]])
+        if allowed_new_tests:
+            # Global drafting ceiling; the complete per-path profile below still
+            # limits smaller siblings independently.
+            cap = max(min(32000, profile["total_limit"], profile["file_limits"][path])
+                      for path in allowed_new_tests)
             out_contract["max_new_test_file_utf8_bytes"] = cap
-            out_contract["new_test_file_draft_target_utf8_bytes"] = (3 * cap) // 4
+            if len(allowed_new_tests) == 1:
+                out_contract["new_test_file_draft_target_utf8_bytes"] = (3 * cap) // 4
         # Multiple new files have independent caps in the profile. Never apply
         # the smallest path's cap globally to a larger permitted sibling.
         if any(path.startswith(("tests/test_p1_00_characterization_",
