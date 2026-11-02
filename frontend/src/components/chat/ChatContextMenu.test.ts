@@ -337,7 +337,7 @@ describe('ChatContextMenu.vue', () => {
   })
   it('places the measured DOM bounds inside the viewport instead of trusting the model estimate', async () => {
     const originalRect = HTMLElement.prototype.getBoundingClientRect
-    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.getAttribute('role') !== 'menu') return originalRect.call(this)
       // Owned DOM geometry: real fonts/touch targets can exceed the initial estimate.
       return new DOMRect(0, 0, 296, Math.min(640, Number.parseFloat(this.style.maxHeight) || 640))
@@ -372,7 +372,7 @@ describe('ChatContextMenu.vue', () => {
 
   it('re-measures on viewport resize and disconnects the actual observer on unmount', async () => {
     const originalRect = HTMLElement.prototype.getBoundingClientRect
-    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.getAttribute('role') !== 'menu') return originalRect.call(this)
       return new DOMRect(0, 0, 220, Math.min(600, Number.parseFloat(this.style.maxHeight) || 600))
     })

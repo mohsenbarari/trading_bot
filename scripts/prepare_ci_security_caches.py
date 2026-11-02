@@ -2,6 +2,7 @@
 # No rebuild, mutable tag fallback, cache healing or deployment authorization.
 import argparse,errno,json,os,re,runpy,stat,sys,tempfile
 from contextlib import ExitStack
+from datetime import datetime,timezone
 from hashlib import sha256
 from pathlib import Path
 
@@ -14,10 +15,15 @@ LINEAGE = {
     'util':(394981846,'trixie-util-linux-build.yml','bfc769e97b3da3d61ee2a84b12d8bf7ad636eebb'),
     'ncurses':(395251997,'trixie-ncurses-build.yml','bfc769e97b3da3d61ee2a84b12d8bf7ad636eebb'),
     'acl-tar':(395274440,'trixie-acl-tar-build.yml','ec6131f41d9719bbaf2f45b3100b5b4a74f4f693'),
-    'sqlite-wal':(397322674, 'sqlite-wal-package.yml', 'a32f0e187cea7aa11c0fac2977d31f31315093da'),
+    'sqlite-wal':(397322674, 'sqlite-wal-package.yml', 'f88ef1d9dddd3c091b647e21d6c24f500a7212ce'),
     'tar-acl':(397517752, 'tar-acl-descriptor-package.yml', '81ff65c9c9238a4797dc2824c5c51d274afdd6bd'),
     'coreutils-acl':(398051843, 'coreutils-acl-descriptor-package.yml', 'aed063887607a7ee8e219f7e99b14c4761fccdaf'),
 }
+# The retained release catalog is immutable. Its old SQLite ZIP is checked
+# as catalog history only; the active cache uses the Root-admitted CI artifact.
+RETAINED_SQLITE = {'bytes':933486,'sha256':'974c48ab927cc4b4aa2de963cf6745a65c0245121185804a69e8c4fc0f78a265'}
+SQLITE_ROOT_RECEIPT = '004e80fee6548d8b1f447620f79918ecc819577546e2aa21892999e6b270b5ac'
+SQLITE_ARTIFACT_EXPIRY = '2027-01-30T22:38:13Z'
 REPO = 'mohsenbarari/trading_bot'
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -105,11 +111,12 @@ def main(context=None):
          and len(set(ASSET_IDS.values()))==len(ASSET_IDS),'release_unarmed')
     with ExitStack() as stack:
         held=helper['Held'](stack);recipe=helper['load_recipe'](held)
-        specs=dict(recipe.lock['artifacts']);extras={}
+        specs=dict(recipe.lock['artifacts']);extras={};sqlite_source=None
         for group,name in EXTRA_HELPERS.items():
             extra=runpy.run_path(str(root/('scripts/prepare_'+name+'_os_cache.py')))
             gate=stack.enter_context(extra['Held']());lock=extra['load_lock'](gate)
             specs[group]=lock['artifact'];extras[group]=(extra,gate)
+            if group=='sqlite-wal':sqlite_source=lock['source']
         cache=root/'pip_packages/security-os-capsule'
         present=[]
         for group in ('security-os',*extras):
@@ -141,6 +148,25 @@ def main(context=None):
                   run.get('head_repository',{}).get('id'))
                  ==(spec['run_id'],1,workflow,'.github/workflows/'+name,head,'workflow_dispatch','completed','success',1065680631,1065680631),
                  'release_lineage')
+        sqlite=specs['sqlite-wal'];source=sqlite_source
+        need(source['commit']==LINEAGE['sqlite-wal'][2]
+             and source['root_build_receipt_sha256']==SQLITE_ROOT_RECEIPT,'release_sqlite_source')
+        artifact=document(api('actions/artifacts/'+str(sqlite['id']),65536))
+        need(type(artifact) is dict,'release_sqlite_artifact')
+        workflow=artifact.get('workflow_run',{})
+        need(type(artifact.get('id')) is int and type(artifact.get('size_in_bytes')) is int
+             and type(workflow) is dict and all(type(workflow.get(k)) is int
+                 for k in ('id','repository_id','head_repository_id'))
+             and artifact.get('id')==sqlite['id'] and artifact.get('size_in_bytes')==sqlite['bytes']
+             and artifact.get('name')=='sqlite-wal-package-'+str(sqlite['run_id'])+'-1'
+             and artifact.get('digest')=='sha256:'+sqlite['sha256'] and artifact.get('expired') is False
+             and artifact.get('expires_at')==SQLITE_ARTIFACT_EXPIRY
+             and datetime.now(timezone.utc)<datetime.strptime(SQLITE_ARTIFACT_EXPIRY,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+             and artifact.get('url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(sqlite['id'])
+             and artifact.get('archive_download_url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(sqlite['id'])+'/zip'
+             and (workflow.get('id'),workflow.get('repository_id'),workflow.get('head_repository_id'),
+                  workflow.get('head_branch'),workflow.get('head_sha'))
+                 ==(sqlite['run_id'],1065680631,1065680631,'main',source['commit']),'release_sqlite_artifact')
         release=document(api('releases/'+str(RELEASE_ID),65536))
         need(type(release.get('id')) is int and release.get('id')==RELEASE_ID and release.get('tag_name')==RELEASE_TAG
              and release.get('target_commitish')==RELEASE_TARGET
@@ -149,7 +175,7 @@ def main(context=None):
         assets=release.get('assets');need(type(assets) is list and len(assets)==len(ASSET_IDS),'release_assets')
         need(len({a.get('id') for a in assets})==len(assets) and len({a.get('name') for a in assets})==len(assets),'release_assets')
         for group,identifier in ASSET_IDS.items():
-            spec=specs[group]
+            spec=RETAINED_SQLITE if group=='sqlite-wal' else specs[group]
             rows=[a for a in assets if a.get('id')==identifier]
             need(len(rows)==1,'release_asset_identity');asset=rows[0]
             need(type(asset.get('id')) is int and type(asset.get('size')) is int
@@ -163,7 +189,9 @@ def main(context=None):
             paths={}
             for group,identifier in ASSET_IDS.items():
                 spec=specs[group]
-                raw=api('releases/assets/'+str(identifier),spec['bytes'],'application/octet-stream')
+                endpoint=('actions/artifacts/'+str(spec['id'])+'/zip' if group=='sqlite-wal'
+                          else 'releases/assets/'+str(identifier))
+                raw=api(endpoint,spec['bytes'],'application/octet-stream')
                 need(len(raw)==spec['bytes'] and sha256(raw).hexdigest()==spec['sha256'],'release_payload_pin')
                 path=Path(temporary)/(group+'.zip');helper['write_new'](path,raw,0o600);paths[group]=path
                 held.check()
@@ -175,7 +203,7 @@ def main(context=None):
                 result=extra['prepare'](cache.parent/(group+'-capsule'),paths[group]);gate.check()
                 need(result.get('status') in {'cache_prepared','cache_verified'}
                      and result.get('security_accepted') is False,'release_cache_admission')
-    print('Exact retained security release assets admitted; security acceptance remains false.')
+    print('Exact retained release assets and Root-admitted SQLite CI artifact admitted; security acceptance remains false.')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description='Admit only the exact public shared CI cache assets.')

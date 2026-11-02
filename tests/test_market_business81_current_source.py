@@ -16,7 +16,7 @@ def load(name):
  exec(compile(path.read_bytes(),str(path),'exec'),value.__dict__);return value
 M=load('scripts/prepare_market_capture2_image.py');O=load('scripts/market_business81_outer.py')
 F=load('tests/market_security_source_fixtures.py')
-OLD_ACTUAL_PIN=(101762,'65ec5e1957cdb066971cccf130348b8a87dc5e106b825baa867781e1fa888049')
+OLD_ACTUAL_PIN=(122815, '2ceab68cfc7830a4a59ba46acb4b0a3bccf9995142c9cc73350d5addc6884909')
 def pin(raw):return{'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
 
 class CurrentSourceTests(unittest.TestCase):
@@ -107,12 +107,12 @@ class CurrentSourceTests(unittest.TestCase):
   for name in('actual_business81','preflight_business81_sources'):
    fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name==name)
    self.assertEqual(sum(isinstance(n,ast.Call)and isinstance(n.func,ast.Name)and n.func.id=='business81_source_paths'for n in ast.walk(fn)),1)
- def test_exact35_controller_inventory_not_len_any_and_all_role38_sets(self):
-  self.assertEqual(len(M.CONTROLLER_FILES),35)
-  self.assertEqual(sha256(M.encoded(sorted(M.CONTROLLER_FILES))).hexdigest(),'427da2ab5225afbd3ca601a049b01b81062acd9b15765c93993681de10282b75')
+ def test_exact47_controller_inventory_not_len_any_and_all_role50_sets(self):
+  self.assertEqual(len(M.CONTROLLER_FILES),47)
+  self.assertEqual(sha256(M.encoded(sorted(M.CONTROLLER_FILES))).hexdigest(),'ed2a7e4b488bca04664bd69a79568b93e5b815044bd14b80b2bedf7ce7eac3b5')
   for role in M.ROLE_MAP:
    self.assertEqual(set(M.controller_files(role)),set(M.CONTROLLER_FILES)|{M.ROLE_READER,M.ROLE_CATALOG_PATH,M.BUSINESS_DIR+'/role_fixture_contract.py'})
-   self.assertEqual(len(M.controller_files(role)),38)
+   self.assertEqual(len(M.controller_files(role)),50)
   controllers=[{'path':name,'mode':'100644','git_blob':'e'*40,**pin((ROOT/name).read_bytes())}for name in sorted(M.CONTROLLER_FILES)]
   receipt={'schema':'normal_market_git_component_inputs/1','signature_format':'normal-market-two-git-sources-v1','accepted_manifest_sha256':M.MANIFEST_SHA,'repository_identity':{'host':'github.com','repository':M.REPOSITORY},'release_commit':'a'*40,'release_tree':'b'*40,'business_commit':'c'*40,'business_tree':'d'*40}
   signature=sha256(M.encoded(receipt)).hexdigest();cache={'pip_packages/OWNED-codec-only-'+str(i):pin(b'X')for i in range(26)}
