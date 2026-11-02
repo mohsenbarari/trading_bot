@@ -16,11 +16,11 @@ PREFIX='sqlite-src-3540100'
 LIBRARY='/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6'
 PROFILES={
  'trixie':{'base':'python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3',
-  'os':'debian','version':'13','python':'/usr/local/bin/python3','baseline':'3.46.1-7+deb13u2'},
+  'os':'debian','version':'13','python':'/usr/local/bin/python3','baseline':'3.46.1-7+deb13u2','baseline_pin':{'bytes':914584,'sha256':'0a459adaffd901109f7811ab65f58e7a957b4907d05539cf3d1184efdcde0468'}},
  'noble':{'base':'ubuntu:24.04@sha256:a2d43bffc46670d7108bb3c0468c67c5557c4c92e83e1e34cbff1322ad1b94dc',
-  'os':'ubuntu','version':'24.04','python':'/usr/bin/python3.12','baseline':'3.45.1-1ubuntu2.8'},
+  'os':'ubuntu','version':'24.04','python':'/usr/bin/python3.12','baseline':'3.45.1-1ubuntu2.8','baseline_pin':{'bytes':701602,'sha256':'b1190bb72359f5fcc47406aa46065eaf4f1ca208085c51224a52b04bedc0b4bb'}},
  'resolute':{'base':'ubuntu:26.04@sha256:42527649dbc4f9197a6073f426f488cbff0e9cc9f2afce32d91c383e4875634a',
-  'os':'ubuntu','version':'26.04','python':'/usr/bin/python3.14','baseline':'3.46.1-9ubuntu0.3'}}
+  'os':'ubuntu','version':'26.04','python':'/usr/bin/python3.14','baseline':'3.46.1-9ubuntu0.3','baseline_pin':{'bytes':719538,'sha256':'ff4b5a1e7c028a4bcc30076e4d8197aad1a910df44f4dc8dcf253e9ee9a3a367'}}}
 FEATURES={'ENABLE_FTS3':'fts3','ENABLE_FTS4':'fts4','ENABLE_FTS5':'fts5','ENABLE_RTREE':'rtree',
  'ENABLE_SESSION':'session','ENABLE_COLUMN_METADATA':'column-metadata','ENABLE_DBPAGE_VTAB':'dbpage',
  'ENABLE_DBSTAT_VTAB':'dbstat','ENABLE_MATH_FUNCTIONS':'math','ENABLE_UPDATE_DELETE_LIMIT':'update-limit'}
@@ -117,8 +117,14 @@ def elf(path,root,label):
  return{'soname':sonames[0],'needed':sorted(re.findall(r'\(NEEDED\).*?\[([^]]+)\]',dynamic)),
   'exports':sorted({line.split()[0]for line in symbols.splitlines()if line.strip()})}
 
+def public_exports(abi):
+ # Documented SQLite C/session APIs use these namespaces. sqlite3Btree*,
+ # sqlite3Vdbe*, etc. are internal and become static in the amalgamation.
+ return {name for name in abi['exports']if re.fullmatch(r'(?:sqlite3_|sqlite3(?:session|changeset|changegroup|rebaser)_)[A-Za-z0-9_]+',name)}
+
 def compatible_abi(before,after):
- need(before['soname']==after['soname']=='libsqlite3.so.0'and set(before['exports'])<=set(after['exports'])
+ required=public_exports(before)
+ need(required and before['soname']==after['soname']=='libsqlite3.so.0'and required<=public_exports(after)
   and before['needed']==after['needed'],'backward_abi')
 
 def vendor_source_copy(source,destination):
@@ -140,7 +146,9 @@ def build(variant):
  out=Path('/out');out.mkdir(mode=0o755);recipe=Path('/recipe');work=Path('/build');python=profile['python']
  compat=work/'compat';compat.mkdir(mode=0o700);os.chown(compat,10001,10001)
  base_debs=list((work/'old-package').glob('libsqlite3-0_*.deb'));need(len(base_debs)==1,'baseline_package')
- baseline_deb=base_debs[0];baseline_library=pin(LIBRARY);baseline_elf=elf(LIBRARY,out,'baseline')
+ baseline_deb=base_debs[0];need(pin(baseline_deb)==profile['baseline_pin'],'baseline_package_identity')
+ shutil.copytree(work/'build-inputs',out/'build-inputs')
+ baseline_library=pin(LIBRARY);baseline_elf=elf(LIBRARY,out,'baseline')
  run([python,'-I','-B',str(recipe/'verify.py'),'baseline',str(compat),profile['baseline']],out/'baseline.log',user=True)
  baseline=json.loads((compat/'baseline.json').read_bytes());configure,macros=options(baseline['compile_options'])
  source=work/'canonical-source';extract_source(Path('/inputs/sqlite-src-3540100.zip'),source)
@@ -150,7 +158,6 @@ def build(variant):
  vendor=work/'vendor';vendor.mkdir();os.chown(vendor,10001,10001)
  vendor_source=vendor_source_copy(source,work/'vendor-source')
  run([str(vendor_source/'configure'),*configure],out/'vendor-configure.log',cwd=vendor,user=True,extra_env={'CFLAGS':common_flags})
- vendor_tests(vendor_source,vendor,out)
  production=work/'production';production.mkdir();os.chown(production,10001,10001)
  flags=common_flags+' -DSQLITE_EXTRA_INIT_MUTEXED=sqlite3_trading_legacy_fp_init'
  run([str(source/'configure'),*configure],out/'production-configure.log',cwd=production,user=True,extra_env={'CFLAGS':flags})
@@ -195,15 +202,19 @@ def build(variant):
  run([python,'-I','-B',str(recipe/'verify.py'),'candidate-reopen',str(compat),version],out/'candidate-reopen.log',user=True)
  run(['/usr/bin/dpkg','--verify','libsqlite3-0'],out/'dpkg-verify.log')
  need((out/'dpkg-verify.log').stat().st_size==0,'package_payload_changed')
+ vendor_tests(vendor_source,vendor,out)
  for name in('baseline.json','candidate.json','old-reopen.json','candidate-reopen.json'):shutil.copyfile(compat/name,out/name)
  provenance={'schema':'sqlite3541_library_candidate/1','status':'BUILT_NOT_ACCEPTED','variant':variant,'base_image':profile['base'],
+  'build_inputs':pin(out/'build-inputs/provenance.json'),
   'source':{'url':SOURCE_URL,'bytes':SOURCE_BYTES,'sha3_256':SOURCE_SHA3,'source_id':SOURCE_ID},'configure_argv':configure,
   'production_cflags':flags,'upstream_core_source_modified':False,'legacy_numeric_initializer':pin(recipe/'legacy_fp.c'),
   'vendor_default17_tests':{'argv':['make','-j2','test'],'actual_returncode':0,'raw_log':pin(out/'vendor-standard.log'),
    'same_library_as_production15':False,'vendor_assertions_modified':False},
   'production15_targeted_compatibility':True,'baseline_package':{'version':profile['baseline'],**pin(baseline_deb)},
   'baseline_library':baseline_library,'candidate_library':pin(LIBRARY),'baseline_abi':baseline_elf,'candidate_abi':candidate_elf,
-  'old_required_exports_retained':True,'added_exports':sorted(set(candidate_elf['exports'])-set(baseline_elf['exports'])),
+  'old_required_public_exports_retained':True,'public_abi_reference':'https://www.sqlite.org/capi3ref.html',
+  'removed_private_exports':sorted(set(baseline_elf['exports'])-public_exports(baseline_elf)-set(candidate_elf['exports'])),
+  'added_exports':sorted(set(candidate_elf['exports'])-set(baseline_elf['exports'])),
   'package':{'name':deb.name,'version':version,**pin(deb)},'payload_regular_files':[{**pin(p),'path':str(p.relative_to(package))}for p in files],
   'CLI_in_runtime_package':False,'old_new_database_reopen_passed':True,'thread_initialize_shutdown_passed':True,
   'production_data_accessed':False,'business81_or_App32_run':False,'host_installed':False,'security_accepted':False}

@@ -3,8 +3,13 @@ This workflow builds one fresh SQLite 3.54.1 shared-library candidate for Debian
 an existing package lock, replace f88 rollback, activate an application or grant
 security acceptance. Root reviews and dispatches the workflow from Main.
 
-Each disposable matrix VM uses the existing pinned distro image and signed,
-hash-checked 2026-10-25 repository snapshot. The canonical upstream source ZIP is
+Each disposable matrix VM uses the existing pinned distro image and first tries
+the signed, hash-checked 2026-10-25 repository snapshot. When that Ubuntu snapshot
+is unavailable, a fresh build may use the official TLS-verified, signed Ubuntu
+archive for the same distro. Actual signed indexes, installed dependency versions
+and downloaded dependency hashes are recorded in the exported build inputs. The
+old baseline SQLite DEB remains pinned by both version and authenticated prior
+package hash; if that exact package is unavailable or differs, the build fails. The canonical upstream source ZIP is
 bounded at 14,899,528 bytes and verified with the official SHA3-256. VERSION and
 manifest.uuid must identify 3.54.1 and the reviewed upstream source ID. Existing
 source/build producers are not repointed.
@@ -12,7 +17,9 @@ source/build producers are not repointed.
 The baseline Python process records actual distro compile options and limits.
 The builder preserves those feature and limit macros, explicitly generates the
 UPDATE/DELETE LIMIT parser from canonical sources, keeps libsqlite3.so.0 and all
-old public exports, and allows compatible new exports. Each native DEB contains
+old public exports, and allows compatible new exports. Public C and session API
+names are checked independently of accidental private exports in the old distro
+build; the full raw export lists and removed private-symbol delta stay in evidence. Each native DEB contains
 only the shared library, its SONAME symlink and documentation. The CLI is never
 included. Native runtime dependencies come from dpkg-shlibdeps.
 
@@ -40,6 +47,8 @@ App32, Market81, image scans and release/rollback checks remain required on the
 resulting actual images; package-only tests cannot claim those outcomes.
 
 Official references:
+
+- https://www.sqlite.org/capi3ref.html (supported API compatibility)
 
 - https://www.sqlite.org/download.html
 - https://www.sqlite.org/releaselog/3_54_1.html

@@ -122,4 +122,66 @@ class CandidateSourceTests(unittest.TestCase):
     self.assertEqual(call.call_args_list[0].args[0],['/usr/bin/make','-j2','test'])
     self.assertEqual(call.call_args_list[1].args[0],['/usr/bin/tclsh8.6','/PUBLIC-SOURCE/test/testrunner.tcl','errors','--verbose'])
 
+ def test_actual_CI_336_public_exports_are_retained_without_freezing_1091_private_internals(self):
+  fixture=json.loads((ROOT/'tests/fixtures/sqlite3541-ci-41418809295-abi.json').read_bytes())
+  before,after=fixture['before'],fixture['after']
+  self.assertEqual(len(before['exports']),1427);self.assertEqual(len(after['exports']),353)
+  self.assertEqual(len(B.public_exports(before)),336);self.assertEqual(len(B.public_exports(after)),353)
+  self.assertEqual(B.public_exports(before)-B.public_exports(after),set())
+  B.compatible_abi(before,after)
+  for public in ('sqlite3_open','sqlite3session_create','sqlite3changeset_apply','sqlite3changegroup_new','sqlite3rebaser_create'):
+   broken=deepcopy(after);broken['exports'].remove(public)
+   with self.subTest(symbol=public),self.assertRaisesRegex(RuntimeError,'backward_abi'):B.compatible_abi(before,broken)
+ def test_no_public_API_cannot_pass_and_private_changes_remain_disclosed(self):
+  private={'soname':'libsqlite3.so.0','needed':['libc.so.6'],'exports':['sqlite3BtreeOpen']}
+  with self.assertRaisesRegex(RuntimeError,'backward_abi'):B.compatible_abi(private,private)
+  builder=(AREA/'build.py').read_text()
+  self.assertIn("'removed_private_exports':",builder)
+  self.assertIn("'old_required_public_exports_retained':True",builder)
+  self.assertNotIn("'old_required_exports_retained':True",builder)
+ def test_full_vendor_suite_remains_mandatory_after_fast_failure_checks(self):
+  tree=ast.parse((AREA/'build.py').read_bytes());build=next(n for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='build')
+  calls=[(n.lineno,n.func.id)for n in ast.walk(build)if isinstance(n,ast.Call)and isinstance(n.func,ast.Name)]
+  self.assertEqual(sum(name=='vendor_tests'for _,name in calls),1)
+  self.assertLess(next(line for line,name in calls if name=='compatible_abi'),next(line for line,name in calls if name=='vendor_tests'))
+
+ def test_baseline_package_hashes_and_versions_are_fixed_before_any_candidate_build(self):
+  expected={'trixie':(914584,'0a459adaffd901109f7811ab65f58e7a957b4907d05539cf3d1184efdcde0468'),
+   'noble':(701602,'b1190bb72359f5fcc47406aa46065eaf4f1ca208085c51224a52b04bedc0b4bb'),
+   'resolute':(719538,'ff4b5a1e7c028a4bcc30076e4d8197aad1a910df44f4dc8dcf253e9ee9a3a367')}
+  for variant,(size,digest)in expected.items():
+   self.assertEqual(B.PROFILES[variant]['baseline_pin'],{'bytes':size,'sha256':digest})
+  builder=(AREA/'build.py').read_text()
+  self.assertIn("need(pin(baseline_deb)==profile['baseline_pin'],'baseline_package_identity')",builder)
+ def test_all_real_bootstrap_embedded_Python_parses_and_build_input_identity_is_exported(self):
+  bootstrap=(AREA/'bootstrap.sh').read_text()
+  for delimiter in ('BASELINE','VERIFY_BASELINE','BUILD_INPUTS'):
+   code=bootstrap.split("<<'"+delimiter+"'\n",1)[1].split('\n'+delimiter+'\n',1)[0]
+   compile(code,delimiter,'exec')
+  builder=(AREA/'build.py').read_text()
+  self.assertIn("shutil.copytree(work/'build-inputs',out/'build-inputs')",builder)
+  self.assertIn("'build_inputs':pin(out/'build-inputs/provenance.json')",builder)
+  self.assertIn("'actual_downloaded_build_packages'",bootstrap);self.assertIn("'actual_indexes'",bootstrap)
+ def test_real_shell_archive_fallback_preserves_signed_TLS_sources_and_failure_status(self):
+  raw=(AREA/'bootstrap.sh').read_text();start=raw.index('mode=immutable_snapshot\n')
+  block=raw[start:raw.index('if [ "$mode" = immutable_snapshot ]; then',start)]
+  for variant,first,second,success,expected_mode,calls in (
+   ('noble',42,0,True,'signed_archive_fallback',2),('resolute',42,0,True,'signed_archive_fallback',2),
+   ('noble',0,0,True,'immutable_snapshot',1),('trixie',42,0,False,None,1),('noble',42,43,False,None,2)):
+   with self.subTest(variant=variant,first=first,second=second),tempfile.TemporaryDirectory(prefix='sqlite3541-fallback-',dir=ROOT/'tests')as folder:
+    root=Path(folder);(root/'lists/partial').mkdir(parents=True);(root/'sources').write_text('old snapshot')
+    local=block.replace('/etc/apt/sources.list',str(root/'sources')).replace('/var/lib/apt/lists',str(root/'lists'))
+    self.assertNotIn('/etc/apt',local)
+    script='set -eu\nvariant='+variant+'\nsuites="'+variant+' '+variant+'-updates '+variant+'-security"\nkey=/PUBLIC-UBUNTU-KEY\ncount=0\n'
+    script+='apt_read() { count=$((count+1)); printf "%s\\n" "$*" >> "'+str(root/'calls')+'"; if [ "$count" = 1 ]; then return '+str(first)+'; else return '+str(second)+'; fi; }\n'
+    script+=local+'\nprintf "%s:%s\\n" "$mode" "$snapshot_status"\n'
+    result=subprocess.run(['/bin/sh','-c',script],capture_output=True,text=True,timeout=3)
+    self.assertEqual(result.returncode==0,success)
+    self.assertEqual(len((root/'calls').read_text().splitlines()),calls)
+    if success:self.assertEqual(result.stdout.strip(),expected_mode+':'+str(first))
+    if expected_mode=='signed_archive_fallback':
+     sources=(root/'sources').read_text()
+     self.assertIn('https://archive.ubuntu.com/ubuntu',sources);self.assertIn('signed-by=/PUBLIC-UBUNTU-KEY',sources)
+     self.assertNotIn('check-valid-until=no',sources);self.assertNotIn('trusted=yes',sources)
+
 if __name__=='__main__':unittest.main()
