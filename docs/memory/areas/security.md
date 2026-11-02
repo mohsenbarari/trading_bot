@@ -1,46 +1,37 @@
 # Security remediation
 
-- Global acceptance false; refactor STOP/streak0. After security closure require
-  30 consecutive completed accepted clean units. Polls/tests never count;
-  failures reset streak without deleting history.
-- Preserve product/Market behavior, capture ownership and user changes. Necessary
-  maintenance is authorized; Writer/DNS stay human. No Final App migration.
-- Host/SQLite gold1 done; preserve COW/rollback. Capture identity conflicts open.
-  Endpoint changes need stable observation/persistent policy.
-- App2389 prior32fixed/12absent PASS, raw44 retained;
-  new glibc HOLD supersedes release eligibility. Both LOADs,11213 backup/COPY
-  and five same-data drills PASS; old20607 preserved. Never LOAD for freshness.
-  Failed/recovery operations remain spent.
-  Native3 activation remains open; Web App/Sync new, Native3 old.
-  Activation approved; call_db942 Native3-only90m window remains unused.
-  Parity/CHECK causes unproven; no invented RAM operands.
-- Four staging workers parked, data/policies preserved. Own secure readiness
-  before restart; no wholesale staging up. App precedes legacy parking/Market
-  release; parking admits no mounts/data.
-- PG49a8/Redis98c4 built/scanned/loaded, unactivated. Preserve PG Windows UNKNOWN
-  versus proven Linux absence and original source/compatibility facts.
-- Market: four pyasn10.6.4 advisories fixed by0.6.5; ten builds PASS,
-  raw44HIGH/0CRITICAL retained. Nine business components frozen;
-  no F79/latest-Main fallback. App lacks pyasn1/rsa/Telethon.
-  Only940 loaded/qualified; other9 not loaded. App controller uses f073 worktree.
-- Failed/expired attempts never retry/relabel/fabricate closure; typed recovery
-  and original clocks follow security-operation-recovery.md.
-- Native SOURCE is a permanent empty mutex: preserve inode, flock only; never
-  read/hash/write/remove/replace payload. Preserve markers/active Compose refs.
-- No diagnostic Env/session/key reads/copies/hashes. Config comparisons RAM-only.
-- Config IDs differ from OCI manifests. Classic Config never queries Descriptor;
-  logical layers may repeat, physical TAR members cannot; ordered DiffIDs strict.
-- Preserve active/rollback tooling, incident evidence and backups.
-  Resource/I/O guards follow routed security areas.
-  App Env delta only PYTHONDONTWRITEBYTECODE=1; no code/cache adoption.
-- USER resumed; checkpoint276 links275/full226. Main9c69aa1 security-only.
-  Native04 CI41279931704/Default04 CI41279933499 head48c running;
-  subphases/strict layout cause unknown, future products unbound.
-  Public release430404133 six exact ZIPs explicitly approved call_9837;
-  exact readback/all4 normal helpers PASS. Shared finite cache entry covers
-  npm/merge/pre-release; helper/lock/pins unchanged, uncertain cache errors fatal.
-  Fresh NPM41283074741 head9c:5upstream PASS, exact prior package bytes
-  Root-joined; frontend PASS, browsers running. Prior browser3 failed before App.
-  Exact Moderate cause Root-accepted only; no deployment.
-  PG13,417,315,687B; Market backup/holders open. Exact old estimator/Compose
-  current metadata confirmed; no comparator rebind. Whole-host window NULL.
+- ACTIVE continuation, security scope CLOSED by Root. User authorizes necessary
+  outages and routine work without reapproval; Root alone mutates Git/CI/production
+  and finally accepts. No extra frameworks/rebuilds/repeated valid tests. Preserve
+  raw scans, failures, business code, data and rollback. DNS/Writer remain human.
+- Current checkpoint `.local/security-fast-closure-continuation-20261102-12.json`;
+  final proof `.local/security-closure-resume-20261102-07/Root-GLOBAL-SECURITY-CLOSURE-20261102.json`.
+  All20 currentproduction roles actualimage/singleowner/health PASS (Native9/Web11),
+  all15 App/Market mappedSQLite3.54.1/2048numeric passed, durable refs and allowned
+  fences released. Bothhosts glibc/reboot/SQLite and prior runtime upgrades done.
+- Final70s publicpublication continuous: maxage3.559s, heartbeat0.304s,15samples
+  allREADY; same5functional App/Bot/Sync probes passed, Botowners/OTPworker true.
+  Component rawfindings retained with exact same-image fixed/component-absence
+  proofs and original expiry; no universal/advisory-future clean claim.
+- Normal App/Golden and2.53GBMarketPG backup/restore proofs reused. Sevenobsolete
+  containers parked/dataretained. Qualified separateNativeba1f+34securityoverrides
+  andWeb4df business preserved; AppCI unchanged32 passed61/65seconds.
+- Capture1 exit78 cause was release-bound authoritymarker; BOTHcaptures fixed
+  with4096B release-only CAS after oldSTOP/PID0+existingphysicalowner locks.
+  Preserve timestamp/extras/UID10001/mode0600 and empty replaypair. Exactoriginal
+  marker restore precedes oldSTART on knownrollback; unknown staysreconciliation.
+  Root+peer24testPASS; no sessionDB/key reads or image rebuild. Priorfailure retained.
+- Node24.22.1 fullstandardcopy/global/NVMdefault verified; npm/npx11.19.1.
+  Old20 retained outsidePATH;4idleAPIkeyhelpers pidfd-exited, parentpreserved;
+  actualHost Node20processes0. Sandbox/proc absence proves nothing.
+- Refactor security gate resolved; actualSTOP remains for exactRootsecuritymerge
+  transition and complete8-key successor. Root authorizes narrow newactualauthority
+  attempt preservingoldc003/6/7/8 failures/reservations/checkpoint/credit. All9
+  contexts+33fixturepins independently matched. BridgeV3 closed2-ref/2-parent
+  securitymerge+703601/fullDAG/19unchangedcontrols passed182tests+independentreview;
+  payload ready, Rootintegration pending. Do not blindremoveSTOP or editoldCP.
+- After merge/transition resume and observe30 genuine completed/reviewed/accepted
+  consecutiveclean units; polls/tests/shards do not count. Current cleanstreak0.
+- Preserve user coin-market-retention.md SHA5fbbf84d and SOURCE inode1835555/flock.
+  NormalConfig RAM only; never diagnosticEnv/session/key values or privatehashes.
+  Large artifacts attached; protect active/rollback images and tested backups.

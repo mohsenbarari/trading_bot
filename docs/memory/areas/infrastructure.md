@@ -1,15 +1,18 @@
 # Infrastructure
 
-- 2026-10-30 | Web `/tmp` tmpfs limit temporarily4GiB, previously4058132480B.
-  In-place remount preserved identity/fsid/1777/flags/existing entries; no disk
-  resize, billing or persistent config. Restore old limit after scoped image
-  operations if usage fits. Resource source/guards unchanged.
+- 2026-11-01 | Native volume root `/srv/trading-bot/production-data` contains the
+  staging-data bind; df/du differences are not deleted-open proof
+  (0/6623FDs). Old relocation3.15GB holds protected Codex sessions.
 
-- 2026-10-30 | Cleanup freed~8.8GiB from expired tools/backups/caches,
- 206729216B from52 APT indexes under APT's lock, and1753612288B from four old
- restore copies. Their directory/six backup originals were retained. Preserve
- active/rollback tools,worktrees/IDE history,exports,last8 tested App backups
- and Market data; refresh APT indexes/capacity before use.
+- 2026-11-02 | Web `/tmp` already back at original4058132480B, used0.
+  Actual bounded check retained tmpfsidentity/fsid/1777/flags/owner; no remount,
+  file deletion, disk resize or billing. Prior temporary4GiB image-work limit
+  is no longer active.
+
+- 2026-10-30 | Cleanup freed~8.8GiB tools/backups/caches,206729216B APT indexes
+ underlock and1753612288B four restore copies. Six originals,last8 tested App
+ backups,active/rollback tools,exports,worktrees,IDE history and Market data
+ remain protected. Refresh APT/capacity before use.
 
 - 2026-10-25 | Security maintenance: Native engine/kernel/Brotli completed,
  15 containers; bind Brotli evidence to current boot/PID/unit. Web OP08 has
@@ -28,12 +31,13 @@
   ciphertext-backup staging is authorized; no App/Writer/DNS/migration. Firewall,
   SSH hardening, updates, swap, monitoring and backups remain provisioning gates.
 
-- 2026-09-03 | Initial provisioning and later infrastructure maintenance use version-controlled, idempotent Ansible against verified inventory; no operator shell execution is required. This neither automates Writer/DNS transfer nor authorizes server work before the refactor plan enters its explicitly approved execution phase.
+- 2026-09-03 | Provisioning/maintenance use version-controlled idempotent Ansible
+ and verified inventory. No automatic Writer/DNS or server work before the
+ explicitly approved refactor execution phase.
 
-- 2026-09-02 | Architecture Full Matrix uses the final Finland host, existing Iran
-  host and existing Object Storage; no separate VM. Acceptance stacks, DB/Redis,
-  Control Store, DNS and storage namespace/IAM remain isolated. Host-wide faults run
-  pre-production or in an explicitly authorized maintenance window, never by simulation.
+- 2026-09-02 | Full Matrix uses final Finland, existing Iran and Object Storage,
+ no separate VM. Acceptance stacks/DB/Redis/control/DNS/storage-IAM stay isolated;
+ real host faults run preproduction or in an approved maintenance window.
 - 2026-09-02 | DNS mutation authority stays on Finland: one root-mounted least-privilege
   Arvan token can change only the registered product A record; Iran verifies only.
   Provider-panel fallback remains human, reconciled and fully verified/audited.
