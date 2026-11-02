@@ -1,0 +1,151 @@
+---
+# Root invokes one phase at a time from the OTHER host. Never invokes old guards.
+- name: One-host offline glibc maintenance preserving the observed runtime
+  hosts: maintenance
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    token: '{{ maintenance_dir }}/QUIESCED'
+    dropin: 97-security-glibc-20261102.conf
+    container_format: !unsafe '{"id":{{json .Id}},"running":{{json .State.Running}},"restart_policy":{{json .HostConfig.RestartPolicy}},"image":{{json .Image}},"name":{{json .Name}}}'
+  tasks:
+    - name: Require the Root-reviewed one-host inputs
+      ansible.builtin.assert:
+        that:
+          - phase in ['snapshot', 'quiesce', 'install', 'reboot', 'restore', 'finish', 'cleanup']
+          - maintenance_units | length > 0
+          - "'cron.service' in maintenance_units"
+          - "'atd.service' in maintenance_units"
+          - new_debs | length == 6
+          - datastore_ids is defined
+          - health_urls | length > 0
+    - name: Check mode performs no partial maintenance
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+    - name: Snapshot units including dependency and trigger graph without Env
+      when: phase == 'snapshot'
+      block:
+        - ansible.builtin.stat: {path: '{{ maintenance_dir }}/snapshot.json'}
+          register: old_snapshot
+        - ansible.builtin.assert: {that: 'not old_snapshot.stat.exists'}
+        - ansible.builtin.command:
+            argv: [/usr/bin/systemctl, show, '{{ item }}', '--property=Id,LoadState,ActiveState,SubState,UnitFileState,Type,Requires,Wants,Requisite,BindsTo,PartOf,Triggers,TriggeredBy,Before,After,RequiresMountsFor']
+          loop: '{{ maintenance_units }}'
+          register: units
+          changed_when: false
+        - ansible.builtin.set_fact:
+            unit_rows: '{{ unit_rows | default([]) + [{"Type": ""} | combine(dict(item.stdout_lines | map("split", "=", 1)))] }}'
+          loop: '{{ units.results }}'
+        - ansible.builtin.command: {argv: [/usr/bin/docker, container, ls, -aq, --no-trunc]}
+          register: ids
+          changed_when: false
+        - ansible.builtin.command:
+            argv: '{{ ["/usr/bin/docker", "inspect", "--format", container_format] + ids.stdout_lines }}'
+          register: containers
+          changed_when: false
+        - ansible.builtin.copy:
+            dest: '{{ maintenance_dir }}/snapshot.json'
+            content: '{{ {"units": unit_rows, "containers": containers.stdout_lines | map("from_json") | list} | to_nice_json }}'
+            mode: '0600'
+            force: false
+    - name: Load the original snapshot for subsequent phases
+      when: phase != 'snapshot'
+      block:
+        - ansible.builtin.slurp: {src: '{{ maintenance_dir }}/snapshot.json'}
+          register: snapshot
+        - ansible.builtin.set_fact:
+            prior: '{{ snapshot.content | b64decode | from_json }}'
+        - ansible.builtin.assert:
+            that:
+              - datastore_ids | unique | list | length == datastore_ids | length
+              - datastore_ids | difference(prior.containers | selectattr('running', 'equalto', true) | map(attribute='id') | list) | length == 0
+    - name: Require the persistent inhibition before any installation reboot or restoration
+      when: phase in ['install', 'reboot', 'restore', 'finish']
+      block:
+        - ansible.builtin.stat: {path: '{{ token }}'}
+          register: fence
+        - ansible.builtin.assert:
+            that: fence.stat.exists and fence.stat.isreg and fence.stat.uid == 0 and fence.stat.mode == '0600'
+    - name: Persistently inhibit triggers before naturally draining oneshots
+      when: phase == 'quiesce'
+      block:
+        - ansible.builtin.copy: {dest: '{{ token }}', content: 'QUIESCED', mode: '0600', force: false}
+        - ansible.builtin.file: {path: '/etc/systemd/system/{{ item }}.d', state: directory, mode: '0755'}
+          loop: '{{ maintenance_units }}'
+        - ansible.builtin.copy:
+            dest: '/etc/systemd/system/{{ item }}.d/{{ dropin }}'
+            content: "# Temporary glibc maintenance; Root-owned.\n[Unit]\nConditionPathExists=!{{ token }}\n"
+            mode: '0644'
+            force: false
+          loop: '{{ maintenance_units }}'
+        - ansible.builtin.systemd_service: {daemon_reload: true}
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: stopped}
+          loop: '{{ prior.units | selectattr("Id", "search", "[.](timer|socket)$") | list }}'
+        - ansible.builtin.systemd_service: {name: '{{ item }}', state: stopped}
+          loop: [cron.service, atd.service]
+        - ansible.builtin.command: {argv: [/usr/bin/systemctl, show, '{{ item.Id }}', --property=SubState, --value]}
+          loop: '{{ prior.units | selectattr("Type", "equalto", "oneshot") | list }}'
+          register: drain
+          until: drain.stdout in ['dead', 'exited', 'failed', 'condition']
+          retries: 90
+          delay: 2
+          changed_when: false
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: stopped}
+          loop: '{{ prior.units | rejectattr("Type", "equalto", "oneshot") | selectattr("Id", "search", "[.]service$") | list }}'
+        - ansible.builtin.command: {argv: [/usr/bin/docker, update, --restart=no, '{{ item.id }}']}
+          loop: '{{ prior.containers }}'
+        - ansible.builtin.command: {argv: [/usr/bin/docker, stop, --timeout, '45', '{{ item.id }}']}
+          loop: '{{ prior.containers | selectattr("running", "equalto", true) | list }}'
+          timeout: 60
+    - name: Install only the six exact staged packages in one offline APT transaction
+      ansible.builtin.command:
+        argv: '{{ ["/usr/bin/apt-get", "--yes", "--no-download", "--no-remove", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", "install"] + new_debs }}'
+      environment: {DEBIAN_FRONTEND: noninteractive, NEEDRESTART_MODE: l}
+      when: phase == 'install'
+    - name: Reboot from an external controller leaving all inhibitors in place
+      ansible.builtin.reboot: {reboot_timeout: 600, connect_timeout: 10, post_reboot_delay: 10}
+      when: phase == 'reboot'
+    - name: Start only original running datastores before Root checks their health
+      ansible.builtin.command: {argv: [/usr/bin/docker, start, '{{ item }}']}
+      loop: '{{ datastore_ids }}'
+      when: phase == 'restore'
+    - name: Finish only under Root datastore proof and recover inhibition on any failure
+      when: phase == 'finish'
+      block:
+        - name: Start remaining original running containers
+          ansible.builtin.command: {argv: [/usr/bin/docker, start, '{{ item.id }}']}
+          loop: '{{ prior.containers | selectattr("running", "equalto", true) | rejectattr("id", "in", datastore_ids) | list }}'
+        - name: Require API health before releasing project unit inhibitors
+          ansible.builtin.uri: {url: '{{ item }}', status_code: 200, return_content: false}
+          loop: '{{ health_urls }}'
+          register: health
+          until: health is succeeded
+          retries: 30
+          delay: 2
+          no_log: true
+        - ansible.builtin.file: {path: '{{ token }}', state: absent}
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: started}
+          loop: '{{ prior.units | selectattr("ActiveState", "equalto", "active") | selectattr("Id", "search", "[.]service$") | rejectattr("Type", "equalto", "oneshot") | rejectattr("Id", "search", "^(cron|atd)[.]service$") | list }}'
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: started}
+          loop: '{{ prior.units | selectattr("ActiveState", "equalto", "active") | selectattr("Id", "search", "[.](timer|socket)$") | list }}'
+        - ansible.builtin.command:
+            argv: [/usr/bin/docker, update, '--restart={{ item.restart_policy.Name }}{{ ":" ~ item.restart_policy.MaximumRetryCount if item.restart_policy.Name == "on-failure" and item.restart_policy.MaximumRetryCount > 0 else "" }}', '{{ item.id }}']
+          loop: '{{ prior.containers }}'
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: started}
+          loop: '{{ prior.units | selectattr("Id", "search", "^(cron|atd)[.]service$") | selectattr("ActiveState", "equalto", "active") | list }}'
+      rescue:
+        - ansible.builtin.set_fact:
+            finish_primary_task: '{{ ansible_failed_task.name }}'
+        - name: Reinstate the owned token without replacing an existing fence
+          ansible.builtin.copy: {dest: '{{ token }}', content: 'QUIESCED', mode: '0600', force: false}
+          register: refence
+          ignore_errors: true
+        - ansible.builtin.fail:
+            msg: 'Finish failed at {{ finish_primary_task }}; original Ansible failure retained. QUIESCED restored={{ not (refence.failed | default(false)) }}; all owned drop-ins retained. Root must reconcile before recovery.'
+    - name: Cleanup only after Root independently proves actual complete health
+      when: phase == 'cleanup'
+      block:
+        - ansible.builtin.file: {path: '/etc/systemd/system/{{ item }}.d/{{ dropin }}', state: absent}
+          loop: '{{ prior.units | map(attribute="Id") | list }}'
+        - ansible.builtin.systemd_service: {daemon_reload: true}
