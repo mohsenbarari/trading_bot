@@ -242,6 +242,8 @@ jobs:
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
           FRONTEND_URL=http://127.0.0.1:4173
+          PUBLIC_WEBAPP_URL=https://ci-iran.invalid
+          IRAN_SERVER_DOMAIN=ci-iran.invalid
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
@@ -278,13 +280,22 @@ jobs:
         run: |
           docker compose exec -T app python - <<'PY'
           from core.config import settings
+          from core.public_webapp_url import public_webapp_url_for_links
+
+          EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN = "https://ci-iran.invalid"
 
           environment = (settings.environment or "").strip().lower()
           server_mode = (settings.server_mode or "").strip().lower()
           if environment != "staging":
-              raise SystemExit(f"unexpected environment={environment!r}")
+              raise SystemExit("unexpected_ci_environment")
           if server_mode != "iran":
-              raise SystemExit(f"unexpected server_mode={server_mode!r}")
+              raise SystemExit("unexpected_ci_server_mode")
+          try:
+              public_origin = public_webapp_url_for_links(settings_obj=settings)
+          except Exception:
+              raise SystemExit("invalid_ci_public_webapp_origin") from None
+          if public_origin != EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN:
+              raise SystemExit("unexpected_ci_public_webapp_origin")
           PY
           curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
             -H 'Content-Type: application/json'
