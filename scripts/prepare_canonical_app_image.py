@@ -67,6 +67,8 @@ GLIBC_DEBS={'libc6_2.41-12+deb13u4+gold1_amd64.deb':{'bytes':2850128,'sha256':'0
 GLIBC_MANIFEST_PIN={'bytes':1245,'sha256':'d2b8bf088159575896f7924cda1f33036c4a257b640522055ae8adb1121b88aa'}
 GLIBC_FILES={'manifest.json':GLIBC_MANIFEST_PIN,**{Path(k).name:v for k,v in GLIBC_HELPERS.items()},**GLIBC_DEBS}
 GLIBC_ARTIFACT={'id':13077600231,'bytes':35878836,'sha256':'bb5dc6aef44629d0f72cdf095832c4e7ec523eea06902c57121c983f4fb06f22'}
+APP32_INPUTS='scripts/app32_dependency_inputs.py'
+APP32_LOCK='deploy/security/app32-dependencies.lock.json'
 SMOKE_BASE='deploy/maintenance/app_r2_observe02/'
 SMOKE_DRIVER=SMOKE_BASE+'run_app_image_ci_smoke.py'
 SMOKE_ADAPTER=SMOKE_BASE+'producer02_controller.py'
@@ -85,13 +87,15 @@ SECURITY_SEED='deploy/security/normal-market-assessment/stable-source-inputs.zip
 SECURITY_REVIEW='deploy/security/normal-market-assessment/current-review.json'
 SECURITY_SEED_PIN={'bytes':202287,'sha256':'0a908fe0b1a4c3042dfc1bd4378530349a27aaf6b169910df0e10f74d30d68a6'}
 SECURITY_CONTROLLERS=(SECURITY_RUNTIME,SECURITY_NORMALIZER,SECURITY_ASSESSOR,SECURITY_COMPONENT,SECURITY_ACL,SECURITY_SEED,SECURITY_REVIEW)
-CANONICAL_EXTRA=(APP_RECIPE,GLIBC_ROOT,SMOKE_DRIVER,SMOKE_ADAPTER,*SMOKE_SOURCES.values(),*SECURITY_CONTROLLERS)
+CANONICAL_EXTRA=(APP_RECIPE,GLIBC_ROOT,APP32_LOCK,SMOKE_DRIVER,SMOKE_ADAPTER,*SMOKE_SOURCES.values(),*SECURITY_CONTROLLERS)
 CODES=frozenset(('hosted_only','root_scope','path','metadata','source_changed','source_inventory','git_identity',
     'git_dirty','command_failed','command_timeout','command_output_bound','cleanup_unproven','input_bound',
     'input_inventory','input_changed','source_fd_budget','state','image_identity','image_config','image_labels','archive_bound',
     'archive_shape','archive_config','report_identity','report_shape','raw_findings','output_exists','io_refusal','refused'))
 CODES=CODES|frozenset(('artifact_download_failed','artifact_size','artifact_digest','download_exists',
-    'vendor_release_source','vendor_release_token','vendor_release_metadata','vendor_asset_metadata','vendor_asset_pin','app_profile'))
+    'vendor_release_source','vendor_release_token','vendor_release_metadata','vendor_asset_metadata','vendor_asset_pin','app_profile',
+    'app32_inventory','app32_transport_pin','app32_transport_inventory','app32_transport_descriptor',
+    'app32_dependency_token','app32_release_metadata','app32_offline_transport'))
 
 def need(ok,code):
     if not ok:raise RuntimeError(code)
@@ -350,6 +354,31 @@ def canonical_vendor_originals(root,context,release):
     SUBPHASE='vendor_cache_prepare'
     return arguments
 
+def app32_sources(proofroot,release):
+    old_raw,_=read_file(release/SMOKE_DRIVER,131072);adapter_raw,_=read_file(release/SMOKE_ADAPTER,131072)
+    need((len(old_raw),sha256(old_raw).hexdigest())==SMOKE_PIN
+        and (len(adapter_raw),sha256(adapter_raw).hexdigest())==SMOKE_ADAPTER_PIN,'source_changed')
+    old=source_module(old_raw,release/SMOKE_DRIVER);adapter=source_module(adapter_raw,release/SMOKE_ADAPTER)
+    for name,path in SMOKE_SOURCES.items():
+        raw,_=read_file(release/path,131072)
+        expected=old.SELECTORS[name][2] if name in old.SELECTORS else old.HELPERS[name][1]
+        need(sha256(raw).hexdigest()==expected,'source_changed');write_new(proofroot/'source'/name,raw)
+    inputs=source_module(read_file(release/APP32_INPUTS,131072)[0],release/APP32_INPUTS)
+    return old,adapter,inputs
+
+
+def canonical_app32_prepare(root,release,environment):
+    """Admit every fixed smoke input before vendor/npm/Docker work starts."""
+    proofroot=Path(tempfile.mkdtemp(prefix='security-app-ci-smoke-',dir=canonical(os.environ['RUNNER_TEMP'])))
+    for name in ('source','reports','docker-config'):(proofroot/name).mkdir(mode=0o700)
+    with ExitStack()as stack:
+        old,_,inputs=app32_sources(proofroot,release)
+        ctx=old.Controller(proofroot,stack)
+        lock=inputs.inventory(read_file(release/APP32_LOCK,65536)[0],old,ctx)
+        need(bool(environment.get('GH_TOKEN')),'app32_dependency_token')
+        inputs.prepare(root,old,ctx,lock,command=command,environment=environment,write=write_new,digest=file_digest)
+
+
 def canonical_external_rows(root):
     pins={**{'glibc-capsule/'+name:pin for name,pin in GLIBC_FILES.items()},
         **{'glibc-source/'+Path(name).name:pin for name,pin in GLIBC_HELPERS.items()},
@@ -358,10 +387,15 @@ def canonical_external_rows(root):
     lock=document(read_file(root/'app-context/scripts/app_security_os_packages.lock.json',65536)[0])
     pins.update({'security-originals/'+group+'.zip':{key:spec[key]for key in('bytes','sha256')}
         for group,spec in lock['artifacts'].items()})
+    lock=document(read_file(root/'app32-dependencies/inventory.json',65536)[0])
+    for fixture in lock['fixtures'].values():
+        for kind in ('image','evidence'):
+            asset=fixture[kind];pins['app32-dependencies/'+asset['name']]={key:asset[key]for key in('bytes','sha256')}
     rows=[]
     for name,pin in sorted(pins.items()):
-        raw,metadata=read_file(root/name,64*1024**2)
-        need({'bytes':len(raw),'sha256':sha256(raw).hexdigest()}==pin,'input_changed')
+        path=root/name;metadata=identity(path.lstat())
+        actual=file_digest(path,512*1024**2 if name.startswith('app32-dependencies/')else 64*1024**2)
+        need(actual==pin and metadata==identity(path.lstat()),'input_changed')
         rows.append({'path':name,**pin,'identity':metadata})
     return rows
 
@@ -377,17 +411,13 @@ def canonical_smoke(root):
     with ExitStack() as stack:
         held=HeldSource(stack,repo,source['files']);external=HeldSource(stack,root,canonical_external_rows(root))
         unchanged(root,repo,source,held);inspect(root,image,source,record['input_signature'])
-        old_raw,_=read_file(release/SMOKE_DRIVER,131072);adapter_raw,_=read_file(release/SMOKE_ADAPTER,131072)
-        need((len(old_raw),sha256(old_raw).hexdigest())==SMOKE_PIN
-            and (len(adapter_raw),sha256(adapter_raw).hexdigest())==SMOKE_ADAPTER_PIN,'source_changed')
-        old=source_module(old_raw,release/SMOKE_DRIVER);adapter=source_module(adapter_raw,release/SMOKE_ADAPTER)
-        for name,path in SMOKE_SOURCES.items():
-            raw,_=read_file(release/path,131072)
-            expected=old.SELECTORS[name][2] if name in old.SELECTORS else old.HELPERS[name][1]
-            need(sha256(raw).hexdigest()==expected,'source_changed');write_new(proofroot/'source'/name,raw)
+        old,adapter,inputs=app32_sources(proofroot,release)
         ctx=None;primary=None;cleanup_errors=[]
         try:
             SUBPHASE='actual_unchanged_app32';ctx=old.Controller(proofroot,stack)
+            lock=inputs.inventory(read_file(release/APP32_LOCK,65536)[0],old,ctx)
+            need(document(read_file(root/'app32-dependencies/inventory.json',65536)[0])==lock,'app32_inventory')
+            inputs.bind(ctx,old,root,lock,stack)
             ctx.checks.extend((lambda:unchanged(root,repo,source,held),external.check,
                 lambda:inspect(root,image,source,record['input_signature'])))
             result=adapter.run_smoke(ctx,old,image,{'image_id':image})
@@ -585,7 +615,12 @@ class HeldSource:
             path=canonical(repo/row['path']);fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC);stack.callback(os.close,fd)
             def check(fd=fd,path=path,row=row):
                 need(identity(os.fstat(fd))==identity(path.lstat())==row['identity'],'source_changed')
-                need(sha256(os.pread(fd,row['bytes']+1,0)).hexdigest()==row['sha256'],'source_changed')
+                digest=sha256();offset=0
+                while offset<row['bytes']:
+                    block=os.pread(fd,min(65536,row['bytes']-offset),offset);need(block,'source_changed')
+                    offset+=len(block);digest.update(block)
+                need(not os.pread(fd,1,offset)and digest.hexdigest()==row['sha256']
+                    and identity(os.fstat(fd))==identity(path.lstat())==row['identity'],'source_changed')
             check();self.checks.append(check)
     def check(self):
         for check in self.checks:check()
@@ -727,6 +762,9 @@ def prepare(root,repo):
         held=HeldSource(stack,repo,rows);(repo/'pip_packages').mkdir(exist_ok=True)
         child_env={**env(root)}
         if os.environ.get('GH_TOKEN'):child_env['GH_TOKEN']=os.environ['GH_TOKEN']
+        if CANONICAL3541:
+            SUBPHASE='app32_dependency_prepare'
+            canonical_app32_prepare(root,release,child_env)
         SUBPHASE='vendor_cache_prepare'
         vendor_arguments=canonical_vendor_originals(root,repo,release) if CANONICAL3541 else []
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_app_security_os_cache.py'),
