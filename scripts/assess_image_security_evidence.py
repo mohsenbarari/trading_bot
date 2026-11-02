@@ -13,11 +13,14 @@ import json,math,re
 MAX_JSON=8*1024**2;MAX_TOTAL=32*1024**2;MAX_ROWS=1024;MAX_COMPONENTS=8192
 SCOPE={'image_id','platform','source_commit','source_tree','input_signature','build_run_id','build_run_attempt'}
 ROW={'advisory','package','installed_version','source_package','source_version','source_release','package_type','purl','bom_ref','layer_diff_id','layer_digest','severity','scan_status','fixed_version','target'}
-KINDS={'source_backport','runtime_payload','component_absence','caller_fix','mandatory_gate','advisory_review'}
+KINDS={'source_backport','runtime_payload','component_absence','caller_fix','mandatory_gate','advisory_review','upstream_release'}
 HEX=re.compile('[a-f0-9]{64}');NAME=re.compile('[A-Za-z0-9_.-]{1,128}')
 SOURCES={'CVE-2026-76642':'util-linux','CVE-2026-78408':'util-linux','CVE-2026-78409':'util-linux',
  'CVE-2026-78410':'util-linux','CVE-2025-69720':'ncurses','CVE-2026-54369':'acl','CVE-2026-16742':'systemd','CVE-2026-9538':'perl',
  'CVE-2026-119373':'sqlite3'}
+SQLITE_ENGINE_CVES=frozenset(('CVE-2026-119373','CVE-2026-119378','CVE-2026-119591','CVE-2026-50812','CVE-2026-50813',
+ 'CVE-2026-119371','CVE-2026-119372','CVE-2026-119374','CVE-2026-119375','CVE-2026-119376','CVE-2026-119377','CVE-2026-119379'))
+SOURCES.update({name:'sqlite3'for name in SQLITE_ENGINE_CVES})
 ABSENCE={'CVE-2026-16742':('systemd_homed','known_vendor_paths_names_and_actual_perl_inc'),
  'CVE-2026-9538':('archive_tar','known_vendor_paths_names_and_actual_perl_inc'),
  'CVE-2026-78409':('restricted_user_detached_tree_fast_path','stable_source_vulnerable_path_absent')}
@@ -107,7 +110,8 @@ def findings(scan,sbom,expected_scope):
   need(type(vulns)is list and len(vulns)<=8192,'scan_vulnerabilities')
   for value in vulns:
    total+=1;need(total<=16384 and type(value)is dict and value.get('Severity')in counts,'scan_severity');counts[value['Severity']]+=1
-   if value['Severity']not in ('HIGH','CRITICAL'):continue
+   canonical_engine=value.get('PkgName')=='libsqlite3-0'and value.get('InstalledVersion')=='3.54.1-0+trading1~trixie1'and value.get('VulnerabilityID')in SQLITE_ENGINE_CVES
+   if value['Severity']not in ('HIGH','CRITICAL')and not canonical_engine:continue
    need(len(rows)<MAX_ROWS,'finding_bound');identifier=value.get('PkgIdentifier')
    need(type(identifier)is dict and text(identifier.get('PURL')),'finding_identifier');purl=identifier['PURL'];candidates=by_purl.get(purl,[])
    # SBOMs may list the same non-vulnerable Python package at two locations.
@@ -266,6 +270,7 @@ def product_profile(lock,inputs):
  return {'profile':profile,'recipe':recipe,'role':role,'input_names':frozenset(names.values()),
   'original_inputs':{key:lock['inputs'][name]for key,name in names.items()}}
 
+
 def normal_controller_v2(controller,manifest,build,receipt):
  """The actual normal producer's glibc context is part of the signed record."""
  keys(controller,{'schema','release_commit','release_tree','repository_identity','two_git_input_signature','controller_files',
@@ -326,6 +331,28 @@ def sqlite_fts5_fixed(package,selected,inputs,product_inputs):
   and probe.get('production_data_accessed')is False and probe.get('all_cves_attested')is False
   and same(probe.get('sqlite_system_library'),{**library,'mapped_inode_verified':True}),'sqlite_fts5_probe')
 
+
+
+def sqlite_canonical_fixed(package,selected,inputs,product_inputs):
+ """Actual qualified canonical release and current mapped payload, never f88 claims."""
+ proofs=[p for p in selected.values()if p['kind']=='upstream_release'and set(p['observations']['advisory_ids'])&SQLITE_ENGINE_CVES]
+ need(len(proofs)==1,'sqlite_canonical_source');originals=proofs[0]['original_inputs']
+ required={'sqlite-canonical-package.py','sqlite-canonical-provenance.json','sqlite-lock.json','sqlite-probe.json'}
+ need(product_inputs<=set(originals)and required<=set(originals),'sqlite_canonical_originals')
+ from types import ModuleType
+ C=ModuleType('actual_canonical_sqlite_assessment')
+ need((len(inputs['sqlite-canonical-package.py']),sha256(inputs['sqlite-canonical-package.py']).hexdigest())==(9153,'817b7535cbbfc03f26d3612fde90008f90fa3380fdb447ec47778da2dbb3f05e'),'sqlite_canonical_helper')
+ exec(compile(inputs['sqlite-canonical-package.py'],'<actual-canonical-sqlite-package>','exec'),C.__dict__)
+ profile=C.validate_lock(document(inputs['sqlite-lock.json']));C.check_provenance(inputs['sqlite-canonical-provenance.json'],profile)
+ version=profile['version'];library=profile['installed_library']
+ need(all(package[k]==v for k,v in {'package':'libsqlite3-0','installed_version':version,'source_package':'sqlite3',
+  'source_version':'3.54.1','source_release':version.split('-',1)[1],'deb_sha256':profile['package']['sha256']}.items()),'sqlite_canonical_package')
+ need(sum(all(file[k]==v for k,v in library.items())for file in package['actual_files'])==1,'sqlite_canonical_payload')
+ probe=document(inputs['sqlite-probe.json'])
+ need(probe.get('status')=='PASS'and probe.get('sqlite_package')==version and probe.get('production_data_accessed')is False
+  and probe.get('all_cves_attested')is False and probe.get('canonical_release_identity_checked')is True
+  and probe.get('legacy_cast15_verified')is True and probe.get('numeric_contract')==C.NUMERIC_CONTRACT and probe.get('canonical_source_id')==C.SOURCE['source_id']
+  and same(probe.get('sqlite_system_library'),{**library,'mapped_inode_verified':True}),'sqlite_canonical_probe')
 
 def verified_component_absence(row,selected,inputs,expected_scope):
  """Only the reviewed same-image vendor-component probe replaces a DEB join.
@@ -433,7 +460,7 @@ def assess(lock_raw,scan_raw,sbom_raw,inputs,*,now,finalizer):
    verified_component_absence(row,selected,inputs,lock['scope']);resolutions.append({'row':row,'disposition':status,'proofs':sorted(names)});continue
   need(len(native)==1,'native_payload_missing_or_ambiguous')
   if status=='fixed':
-   candidates=[p['observations']for p in selected.values()if p['kind']=='source_backport'];valid=0
+   candidates=[p['observations']for p in selected.values()if p['kind']=='source_backport'or(p['kind']=='upstream_release'and row['source_package']=='sqlite3'and row['installed_version']=='3.54.1-0+trading1~trixie1')];valid=0
    for facts in candidates:
     keys(facts,{'advisory_ids','source_package','source_version','source_release','source_verified','build_abi_verified','packages'},'source_shape')
     need(facts['source_verified']is True and facts['build_abi_verified']is True and type(facts['advisory_ids'])is list and facts['advisory_ids']
@@ -447,7 +474,9 @@ def assess(lock_raw,scan_raw,sbom_raw,inputs,*,now,finalizer):
     if (row['advisory']in facts['advisory_ids']and all(facts[k]==row[k]for k in ('source_package','source_version','source_release'))
      and {'package':row['package'],'installed_version':row['installed_version'],'deb_sha256':native[0]['deb_sha256']}in facts['packages']):valid+=1
    need(valid==1,'source_fix_missing_or_ambiguous')
-   if row['advisory']=='CVE-2026-119373':sqlite_fts5_fixed(native[0],selected,inputs,product['input_names'])
+   if row['source_package']=='sqlite3'and row['installed_version']=='3.54.1-0+trading1~trixie1':
+    need(row['advisory']in SQLITE_ENGINE_CVES,'sqlite_canonical_advisory');sqlite_canonical_fixed(native[0],selected,inputs,product['input_names'])
+   elif row['advisory']=='CVE-2026-119373':sqlite_fts5_fixed(native[0],selected,inputs,product['input_names'])
    if row['advisory']=='CVE-2026-54369':
     callers=[p['observations']for p in selected.values()if p['kind']=='caller_fix'];need(len(callers)==1,'acl_caller_fix_missing');facts=callers[0]
     keys(facts,{'whole_image_inventory_complete','all_callers_bound_to_reviewed_source','unresolved_legacy_callers','ordinary_compatibility_passed','callers'},'caller_shape')

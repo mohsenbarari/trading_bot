@@ -11,6 +11,10 @@ from zipfile import ZipFile,ZIP_STORED,ZIP_DEFLATED
 import argparse,ctypes,errno,fcntl,io,json,os,platform,re,resource,selectors,shutil,signal,stat,subprocess,sys,tempfile,time
 
 ROOT=Path(__file__).resolve().parent
+CANONICAL_CAPSULE=Path('/sqlite3541-capsule')
+CANONICAL_PACKAGE='libsqlite3-0_3.54.1-0+trading1~trixie1_amd64.deb'
+CANONICAL_MODULE=('sqlite3541_package.py', 9153, '817b7535cbbfc03f26d3612fde90008f90fa3380fdb447ec47778da2dbb3f05e')
+CANONICAL_LOCK_SHA='5d8404a66866dd1e33191aeece8d8a6a2d500702efcfc0ea43b23b50305ca25d'
 LOCK_NAME='sqlite_wal_package.lock.json'
 LOCK_SHA='384102147c9289d4f1d57c199c9c40fa57bc179c833ff9c9d5ba55f6b69876d0'
 BASE_VERSION='3.46.1-7+deb13u2';VERSION=BASE_VERSION+'+gold2'
@@ -117,6 +121,29 @@ class Held:
 def load_lock(held):
  row=held.read(ROOT/LOCK_NAME,65536,owner=(os.geteuid(),os.getegid()))
  need(row.binding['sha256']==LOCK_SHA,'lock_contract');return validate_lock(document(row.raw))
+def load_canonical(held):
+ name,size,digest=CANONICAL_MODULE
+ row=held.read(ROOT/name,65536,{'bytes':size,'sha256':digest},owner=(os.geteuid(),os.getegid()))
+ module=ModuleType('_sealed_canonical_sqlite_package');module.__file__=str(ROOT/name)
+ exec(compile(row.raw,module.__file__,'exec'),module.__dict__)
+ row=held.read(ROOT/'sqlite3541_packages.lock.json',1024**2,owner=(os.geteuid(),os.getegid()))
+ need(row.binding['sha256']==CANONICAL_LOCK_SHA,'lock_contract')
+ return module,module.validate_lock(document(row.raw),'trixie')
+
+def verify_canonical_cache(cache,profile,module,held,owner=None):
+ cache=Path(cache).absolute();ancestors=parents(cache);before=identity(cache.lstat());name=profile['package']['path']
+ expected={name,'manifest.json','provenance.json'}
+ need(cache.resolve(strict=True)==cache and stat.S_ISDIR(before[2])and stat.S_IMODE(before[2])==0o755
+  and(owner is None or before[3:5]==owner),'directory');inventory(cache,expected)
+ pair=before[3:5];cache_owner=before[3]
+ manifest=held.read(cache/'manifest.json',65536,owner=pair,cache_owner=cache_owner)
+ need(manifest.raw==module.cache_manifest(profile),'cache_inventory')
+ package=held.read(cache/name,32*1024**2,{k:profile['package'][k]for k in('bytes','sha256')},owner=pair,cache_owner=cache_owner)
+ proof=held.read(cache/'provenance.json',4*1024**2,profile['provenance'],owner=pair,cache_owner=cache_owner)
+ module.check_provenance(proof.raw,profile)
+ def check():check_parents(ancestors);need(identity(cache.lstat())==before,'cache_changed');inventory(cache,expected)
+ check();held.final_checks.append(check);return package
+
 def inventory(path,expected):
  rows=[]
  with os.scandir(path) as stream:
@@ -186,32 +213,42 @@ def download(lock,target,held):
  name,size,digest=FETCHER;row=held.read(ROOT/name,131072,{'bytes':size,'sha256':digest},owner=(os.geteuid(),os.getegid()))
  module=ModuleType('_sealed_sqlite_artifact_fetcher');module.__file__=str(ROOT/name);exec(compile(row.raw,module.__file__,'exec'),module.__dict__)
  module.fetch_artifact(lock['artifact']['id'],target,lock['artifact']['bytes'],lock['artifact']['sha256']);held.check()
-def prepare(cache,artifact_zip=None,check_only=False):
- cache=Path(cache).absolute();need(cache.name=='sqlite-wal-capsule' and cache.parent.resolve(strict=True)==cache.parent,'path');parents(cache)
+def prepare(cache,artifact_zip=None,check_only=False,*,canonical3541=False):
+ cache=Path(cache).absolute();need(cache.name==('sqlite3541-capsule'if canonical3541 else'sqlite-wal-capsule')and cache.parent.resolve(strict=True)==cache.parent,'path');parents(cache)
  with tempfile.TemporaryDirectory(prefix='.sqlite-wal-download-',dir=cache.parent) as temporary:
   with Held() as held:
-   lock=load_lock(held)
+   if canonical3541:
+    module,lock=load_canonical(held);package_name=lock['package']['path'];selected_version=lock['version']
+    def verify(path,selected,files,owner=None):return verify_canonical_cache(path,selected,module,files,owner)
+   else:lock=load_lock(held);package_name=PACKAGE;selected_version=VERSION;verify=verify_cache
    # Close/unlock this owned lock BEFORE finalizing the retained data/source
    # FDs. A physical lock close can never hide a late data mutation.
    with CacheLock(cache) as busy:
-    if cache.exists():verify_cache(cache,lock,held,(os.geteuid(),os.getegid()));held.check();status='cache_verified'
+    if cache.exists():verify(cache,lock,held,(os.geteuid(),os.getegid()));held.check();status='cache_verified'
     else:
      need(not check_only,'cache_inventory');stage=Path(tempfile.mkdtemp(prefix='.sqlite-wal-capsule-',dir=cache.parent));stage_id=identity(stage.lstat())[:2];published=False
      try:
       target=Path(artifact_zip).absolute() if artifact_zip else Path(temporary)/'artifact.zip'
       if artifact_zip is None:download(lock,target,held)
       archive=held.read(target,MAX_ZIP,{k:lock['artifact'][k] for k in ('bytes','sha256')},owner=(os.geteuid(),os.getegid()))
-      package=admit_archive(archive.raw,lock);write_new(stage/PACKAGE,package);write_new(stage/'manifest.json',cache_manifest(lock));stage.chmod(0o755)
+      if canonical3541:
+       admitted=module.admit_archive(archive.raw,lock);package=admitted['package'];manifest=module.cache_manifest(lock)
+       write_new(stage/'provenance.json',admitted['provenance'])
+      else:package=admit_archive(archive.raw,lock);manifest=cache_manifest(lock)
+      write_new(stage/package_name,package);write_new(stage/'manifest.json',manifest);stage.chmod(0o755)
       # Verify the new namespace completely before its no-clobber publication;
       # open fresh held output FDs immediately after that exact owned rename.
-      with Held() as staged:verify_cache(stage,lock,staged,(os.geteuid(),os.getegid()));staged.check()
+      with Held() as staged:verify(stage,lock,staged,(os.geteuid(),os.getegid()));staged.check()
       held.check();busy.check();need(identity(stage.lstat())[:2]==stage_id,'cache_changed')
       rename_noreplace(stage,cache);published=True;need(identity(cache.lstat())[:2]==stage_id,'publication')
-      verify_cache(cache,lock,held,(os.geteuid(),os.getegid()));held.check();status='cache_prepared'
+      verify(cache,lock,held,(os.geteuid(),os.getegid()));held.check();status='cache_prepared'
      finally:
       if not published and stage.exists():need(identity(stage.lstat())[:2]==stage_id,'cache_changed');shutil.rmtree(stage)
     busy.check()
- return {'status':status,'packages':1,'sqlite_package':VERSION,'security_accepted':False}
+ return {'status':status,'packages':1,'sqlite_package':selected_version,'security_accepted':False}
+
+def canonical_prepare(cache,artifact_zip=None,check_only=False):
+ return prepare(cache,artifact_zip,check_only,canonical3541=True)
 
 def owned(pid):
  try:return os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
@@ -268,8 +305,8 @@ def bounded(argv,allowed,*,guard=lambda:None,seconds=120):
   except BaseException:bad=True
   child.stdout.close()
   if bad and not active:raise RuntimeError('installer_cleanup')
-def commands(path):
- need(Path(path)==CAPSULE/PACKAGE,'installer_command')
+def commands(path,*,canonical3541=False):
+ need(Path(path)==(CANONICAL_CAPSULE/CANONICAL_PACKAGE if canonical3541 else CAPSULE/PACKAGE),'installer_command')
  return {INVENTORY,('/usr/bin/dpkg','--audit'),('/usr/bin/dpkg','--verify','libsqlite3-0'),
   ('/usr/bin/dpkg',*DOC_INCLUDES,'--install',str(path)),
   *(('/usr/bin/dpkg-deb','-f',str(path),field) for field in ('Package','Version','Architecture','Multi-Arch'))}
@@ -280,8 +317,8 @@ def package_inventory(raw):
    and re.fullmatch('[a-z0-9][a-z0-9+.-]*(?::[a-z0-9]+)?',parts[0]) and parts[1] and parts[2] in {'installed','config-files'},'package_inventory')
   out[parts[0]]=(parts[1],parts[2]);need(len(out)<=4096,'package_inventory')
  need(out,'package_inventory');return out
-def image_boundary(cache):
- need(os.geteuid()==os.getegid()==0 and platform.machine() in {'x86_64','amd64'} and cache==CAPSULE
+def image_boundary(cache,*,canonical3541=False):
+ need(os.geteuid()==os.getegid()==0 and platform.machine() in {'x86_64','amd64'} and cache==(CANONICAL_CAPSULE if canonical3541 else CAPSULE)
   and os.statvfs(cache).f_flag&os.ST_RDONLY,'image_boundary')
  with Held() as held:
   release=held.read(Path('/etc/os-release').resolve(strict=True),65536,owner=(0,0))
@@ -301,34 +338,46 @@ def capability_contract(rows):
  need(rows.get('NoNewPrivs','').strip()=='1' and int(rows['CapBnd'],16)==mask
   and int(rows['CapEff'],16)&~mask==0 and int(rows['CapPrm'],16)&~mask==0
   and int(rows['CapInh'],16)==int(rows['CapAmb'],16)==0,'image_boundary')
-def install_admitted(cache):
+def install_admitted(cache,*,canonical3541=False):
  with Held() as held:
-  lock=load_lock(held);package=verify_cache(cache,lock,held);allowed=commands(package.path)
+  if canonical3541:
+   module,lock=load_canonical(held);package=verify_canonical_cache(cache,lock,module,held)
+   selected_version=lock['version'];baselines={BASE_VERSION,BASE_VERSION+'+gold1',VERSION,selected_version}
+   allowed=commands(package.path,canonical3541=True)
+  else:
+   lock=load_lock(held);package=verify_cache(cache,lock,held);allowed=commands(package.path)
+   selected_version=VERSION;baselines={BASE_VERSION,VERSION}
   need(ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0,'installer_cleanup')
   before=package_inventory(bounded(list(INVENTORY),allowed,guard=held.check))
-  target='libsqlite3-0:amd64';need(target in before and before[target][0] in {BASE_VERSION,VERSION} and before[target][1]=='installed','package_baseline')
+  target='libsqlite3-0:amd64';need(target in before and before[target][0] in baselines and before[target][1]=='installed','package_baseline')
   need(bounded(['/usr/bin/dpkg','--audit'],allowed,guard=held.check).strip()==b'','package_inventory')
-  for field,expected in [('Package','libsqlite3-0'),('Version',VERSION),('Architecture','amd64'),('Multi-Arch','same')]:
+  for field,expected in [('Package','libsqlite3-0'),('Version',selected_version),('Architecture','amd64'),('Multi-Arch','same')]:
    need(bounded(['/usr/bin/dpkg-deb','-f',str(package.path),field],allowed,guard=held.check).decode('ascii').strip()==expected,'package_control')
   bounded(['/usr/bin/dpkg',*DOC_INCLUDES,'--install',str(package.path)],allowed,guard=held.check)
-  after=package_inventory(bounded(list(INVENTORY),allowed,guard=held.check));expected=dict(before);expected[target]=(VERSION,'installed')
+  after=package_inventory(bounded(list(INVENTORY),allowed,guard=held.check));expected=dict(before);expected[target]=(selected_version,'installed')
   need(after==expected,'package_inventory')
   need(bounded(['/usr/bin/dpkg','--audit'],allowed,guard=held.check).strip()==b'' and bounded(['/usr/bin/dpkg','--verify','libsqlite3-0'],allowed,guard=held.check).strip()==b'','package_payload')
   library=lock['installed_library'];held.read(Path(library['path']),16*1024**2,{k:library[k] for k in ('bytes','sha256')},owner=(0,0))
   held.check()
- return {'status':'image_package_installed','packages':1,'sqlite_package':VERSION,'security_accepted':False}
-def install(cache):
- cache=Path(cache);image_boundary(cache)
+ return {'status':'image_package_installed','packages':1,'sqlite_package':selected_version,'security_accepted':False}
+def install(cache,*,canonical3541=False):
+ cache=Path(cache)
+ if canonical3541:image_boundary(cache,canonical3541=True)
+ else:image_boundary(cache)
  def expired(*_):raise RuntimeError('installer_deadline')
  previous=signal.signal(signal.SIGALRM,expired);signal.alarm(600)
- try:return install_admitted(cache)
+ try:return install_admitted(cache,canonical3541=True)if canonical3541 else install_admitted(cache)
  finally:signal.alarm(0);signal.signal(signal.SIGALRM,previous)
+def canonical_install(cache):
+ return install(cache,canonical3541=True)
+
 def main(argv=None):
- parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--cache-dir',type=Path,required=True);parser.add_argument('--artifact-zip',type=Path)
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--cache-dir',type=Path,required=True);parser.add_argument('--artifact-zip',type=Path);parser.add_argument('--canonical3541',action='store_true')
  mode=parser.add_mutually_exclusive_group();mode.add_argument('--check',action='store_true');mode.add_argument('--install-image-cache',action='store_true')
  try:
   args=parser.parse_args(argv);need(not args.artifact_zip or not (args.check or args.install_image_cache),'path')
-  result=install(args.cache_dir) if args.install_image_cache else prepare(args.cache_dir,args.artifact_zip,args.check)
+  if args.canonical3541:result=canonical_install(args.cache_dir)if args.install_image_cache else canonical_prepare(args.cache_dir,args.artifact_zip,args.check)
+  else:result=install(args.cache_dir) if args.install_image_cache else prepare(args.cache_dir,args.artifact_zip,args.check)
  except Exception as error:
   code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CODES else 'unexpected_refusal'
   result={'status':'refused','code':code,'security_accepted':False};print(json.dumps(result,sort_keys=True));return 1

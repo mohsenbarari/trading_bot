@@ -4,6 +4,12 @@ name: Normal Capture2 two Git sources image evidence
 on:
   workflow_dispatch:
     inputs:
+      sqlite_family:
+        description: Explicit reviewed SQLite package family
+        type: choice
+        required: true
+        default: gold2
+        options: [gold2, canonical3541]
       role:
         description: Exact published business role; default retains Capture2 F79
         type: choice
@@ -22,6 +28,7 @@ on:
           - web/market-processor
 env:
   NORMAL_MARKET_ROLE: ${{ inputs.role || 'capture2-f79' }}
+  NORMAL_MARKET_SQLITE: ${{ inputs.sqlite_family || 'gold2' }}
 permissions:
   contents: read
   actions: read

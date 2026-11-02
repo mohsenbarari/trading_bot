@@ -3,13 +3,15 @@ ARG PYTHON_BASE_IMAGE=python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958c
 ARG SOURCE_DATE_EPOCH=0
 
 FROM ${PYTHON_BASE_IMAGE} AS patched-base
+ARG SQLITE_CACHE=sqlite-wal-capsule
+ARG SQLITE_TARGET=/sqlite-capsule
 RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/debian-security#g' /etc/apt/sources.list.d/debian.sources \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true upgrade -y --no-install-recommends \
     && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends ca-certificates libpq5 \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/prepare_app_security_os_cache.py scripts/app_security_os_packages.lock.json scripts/compose_security_os_candidate.py /usr/local/libexec/
-COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json /usr/local/libexec/
+COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json scripts/sqlite3541_package.py scripts/sqlite3541_packages.lock.json /usr/local/libexec/
 COPY scripts/prepare_tar_acl_os_cache.py scripts/tar_acl_package.lock.json /usr/local/libexec/
 COPY scripts/prepare_coreutils_acl_os_cache.py scripts/coreutils_acl_package.lock.json /usr/local/libexec/
 RUN --network=none \
@@ -17,9 +19,15 @@ RUN --network=none \
     --mount=type=tmpfs,target=/tmp \
     ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_app_security_os_cache.py", "--install-image-cache", "--cache-dir", "/capsule"]
 RUN --network=none \
-    --mount=type=bind,source=pip_packages/sqlite-wal-capsule,target=/sqlite-capsule,ro \
+    --mount=type=bind,source=pip_packages/${SQLITE_CACHE},target=${SQLITE_TARGET},ro \
     --mount=type=tmpfs,target=/tmp \
-    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_sqlite_wal_os_cache.py", "--install-image-cache", "--cache-dir", "/sqlite-capsule"]
+    case "$SQLITE_CACHE:$SQLITE_TARGET" in \
+      sqlite-wal-capsule:/sqlite-capsule) canonical= ;; \
+      sqlite3541-capsule:/sqlite3541-capsule) canonical=--canonical3541 ;; \
+      *) exit 2 ;; \
+    esac && /usr/bin/setpriv --bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid \
+      --inh-caps=-all --ambient-caps=-all --no-new-privs /usr/local/bin/python3 -I -B \
+      /usr/local/libexec/prepare_sqlite_wal_os_cache.py --install-image-cache --cache-dir "$SQLITE_TARGET" $canonical
 RUN --network=none \
     --mount=type=bind,source=pip_packages/tar-acl-capsule,target=/tar-capsule,ro \
     --mount=type=tmpfs,target=/tmp \

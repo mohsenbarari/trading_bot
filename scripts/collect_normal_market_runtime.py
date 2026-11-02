@@ -52,11 +52,17 @@ def prepare_request(build,vector_raw,sqlite_lock_raw,component_raw,acl_raw):
         need(package['actual_files']==package['expected_files'],'runtime_original_vector')
         if package['package']not in{'libsystemd0','libudev1','perl-base'}:
             expected.append({key:value for key,value in package.items()if key!='actual_files'})
-    sqlite=document(sqlite_lock_raw);package=sqlite['package'];library=sqlite['installed_library']
-    need(sqlite.get('armed')is True and sqlite.get('schema')=='sqlite_wal_image_package_lock/1'and package['name']=='libsqlite3-0','runtime_sqlite_lock')
+    sqlite=document(sqlite_lock_raw);canonical=sqlite.get('schema')=='sqlite3541_qualified_packages/1'
+    need(sqlite.get('armed')is True,'runtime_sqlite_lock')
+    if canonical:
+        selected=sqlite['profiles']['trixie'];package=selected['package'];library=selected['installed_library'];version=selected['version'];deb_sha256=package['sha256']
+        need(version=='3.54.1-0+trading1~trixie1'and package['path']=='libsqlite3-0_'+version+'_amd64.deb','runtime_sqlite_lock')
+    else:
+        package=sqlite['package'];library=sqlite['installed_library'];version=package['version'];deb_sha256=sqlite['outputs'][package['path']]['sha256']
+        need(sqlite.get('schema')=='sqlite_wal_image_package_lock/1'and package['name']=='libsqlite3-0','runtime_sqlite_lock')
     current=next(item for item in expected if item['package']=='libsqlite3-0');old=current['expected_files'][0]
-    version=package['version'];parts=version.split('-',1);need(len(parts)==2,'runtime_sqlite_lock')
-    current.update(installed_version=version,source_version=parts[0],source_release=parts[1],deb_sha256=sqlite['outputs'][package['path']]['sha256'],
+    parts=version.split('-',1);need(len(parts)==2,'runtime_sqlite_lock')
+    current.update(installed_version=version,source_version=parts[0],source_release=parts[1],deb_sha256=deb_sha256,
         expected_files=[{'path':library['path'],'bytes':library['bytes'],'sha256':library['sha256'],**{key:old[key]for key in('mode','uid','gid')}}])
     need(len(expected)==20,'runtime_expected_packages')
     paths=[file['path']for package in expected for file in package['expected_files']]

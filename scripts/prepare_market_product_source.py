@@ -93,7 +93,7 @@ RELEASE_FILES = (
     'scripts/verify_psycopg2_runtime.py', 'scripts/verify_sqlite_runtime.py',
     'scripts/prepare_app_security_os_cache.py', 'scripts/app_security_os_packages.lock.json',
     'scripts/compose_security_os_candidate.py', 'scripts/prepare_sqlite_wal_os_cache.py',
-    'scripts/sqlite_wal_package.lock.json', 'scripts/prepare_tar_acl_os_cache.py',
+    'scripts/sqlite_wal_package.lock.json', 'scripts/sqlite3541_package.py', 'scripts/sqlite3541_packages.lock.json', 'scripts/prepare_tar_acl_os_cache.py',
     'scripts/tar_acl_package.lock.json', 'scripts/prepare_coreutils_acl_os_cache.py',
     'scripts/coreutils_acl_package.lock.json', 'scripts/remove_runtime_pip.py',
     'scripts/verify_image_trust.py', 'scripts/probe_python_micro_release.py', SELF_PATH, LOCK_PATH, MANIFEST_PATH)
@@ -105,7 +105,7 @@ PRODUCT_COPY_LINES = frozenset((
     'COPY --from=business-source deploy/market-data/migrations /rootfs/app/deploy/market-data/migrations'))
 RELEASE_COPY_LINES = frozenset((
     'COPY scripts/prepare_app_security_os_cache.py scripts/app_security_os_packages.lock.json scripts/compose_security_os_candidate.py /usr/local/libexec/',
-    'COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json /usr/local/libexec/',
+    'COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json scripts/sqlite3541_package.py scripts/sqlite3541_packages.lock.json /usr/local/libexec/',
     'COPY scripts/prepare_tar_acl_os_cache.py scripts/tar_acl_package.lock.json /usr/local/libexec/',
     'COPY scripts/prepare_coreutils_acl_os_cache.py scripts/coreutils_acl_package.lock.json /usr/local/libexec/',
     'COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py',

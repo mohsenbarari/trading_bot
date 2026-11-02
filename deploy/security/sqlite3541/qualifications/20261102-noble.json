@@ -1,0 +1,43 @@
+{
+  "2048_legacy_CAST_byte_parity_and_exact_finite_numeric_roundtrip": true,
+  "App32_or_Market81_on_resulting_images_claimed": false,
+  "Host_install_or_activation_authorized_by_this_receipt": false,
+  "actual32_concurrent4_reinitialize_and24_fresh_connections": true,
+  "actual_artifact": {
+    "bytes": 972850,
+    "head_sha": "caf4ec17f4d8b69c084c3436857fe896237900da",
+    "id": 13137866890,
+    "job_id": 125251338081,
+    "members": 34,
+    "name": "sqlite3541-library-noble-41437637885-1",
+    "run_attempt": 1,
+    "run_id": 41437637885,
+    "sha256": "feca33964d00dd81b73021f89fda23d069fd9a3b845cfc75813ef562753537dc",
+    "workflow_id": 404280924
+  },
+  "genuine_source_provenance_and_original_archive_admitted": true,
+  "global_security_accepted": false,
+  "installed_library": {
+    "bytes": 1599752,
+    "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+    "sha256": "2eec48b8c41ab066099c83d8c85e303853fe1b6fbc0f7a7d11b6c05d408d552c"
+  },
+  "numeric_contract": "legacy_cast15_exact_quote_json_numeric_roundtrip_exact",
+  "package": {
+    "bytes": 755166,
+    "path": "libsqlite3-0_3.54.1-0+trading1~noble1_amd64.deb",
+    "sha256": "68400fc5b7b479b566cca273293a88515e21923b858d73ae7d78db8386d4fb0f"
+  },
+  "proof_valid_until_epoch": 1793705549,
+  "public_ABI_features_limits_and_old_new_reopen_passed": true,
+  "reviewed_at": "2026-11-02T12:01:51.487196+00:00",
+  "schema": "sqlite3541_Root_component_qualification/1",
+  "source_qualification": {
+    "bytes": 3471,
+    "sha256": "bd8e35ade9080f934de2a1250877a9667e17d808eaab5466d326e1741d709700"
+  },
+  "status": "ACCEPTED_FOR_EXACT_LIBRARY_COMPONENT",
+  "unused_quote_JSON_format_bytes_equal_claimed": false,
+  "upstream_979160_tests_zero_errors": true,
+  "variant": "noble"
+}

@@ -31,6 +31,23 @@ def sqlite_fts5_source(A,inputs,payload):
  return{'advisory_ids':['CVE-2026-119373'],'source_package':'sqlite3','source_version':'3.46.1','source_release':'7+deb13u2+gold2',
   'source_verified':True,'build_abi_verified':True,'packages':[{key:package[key]for key in('package','installed_version','deb_sha256')}]}
 
+
+def canonical_source(A,inputs,payload):
+ lock=A.document(inputs['sqlite-lock.json'])
+ if lock.get('schema')!='sqlite3541_qualified_packages/1':return None
+ required=('sqlite-canonical-package.py','sqlite-canonical-provenance.json')
+ A.need(all(name in inputs for name in required),'normal_canonical_originals')
+ C=ModuleType('actual_canonical_sqlite_package')
+ A.need((len(inputs[required[0]]),sha256(inputs[required[0]]).hexdigest())==(9153,'817b7535cbbfc03f26d3612fde90008f90fa3380fdb447ec47778da2dbb3f05e'),'sqlite_canonical_helper')
+ exec(compile(inputs[required[0]],'<actual-canonical-sqlite-package>','exec'),C.__dict__)
+ profile=C.validate_lock(lock);C.check_provenance(inputs[required[1]],profile)
+ version=profile['version'];package=next(item for item in payload['packages']if item['package']=='libsqlite3-0')
+ A.need(all(package[k]==v for k,v in {'installed_version':version,'source_package':'sqlite3','source_version':'3.54.1',
+  'source_release':version.split('-',1)[1],'deb_sha256':profile['package']['sha256']}.items()),'normal_canonical_package')
+ A.need(sum(all(file[k]==v for k,v in profile['installed_library'].items())for file in package['actual_files'])==1,'normal_canonical_payload')
+ return {'advisory_ids':sorted(A.SQLITE_ENGINE_CVES),'source_package':'sqlite3','source_version':'3.54.1','source_release':version.split('-',1)[1],
+  'source_verified':True,'build_abi_verified':True,'packages':[{k:package[k]for k in('package','installed_version','deb_sha256')}]}
+
 def callers(A,inputs,runtime,payload):
  for name,expected in CALLER_PINS.items():A.need((len(inputs[name]),sha256(inputs[name]).hexdigest())==expected,'normal_caller_original')
  original=A.document(inputs['caller-acl.json']);A.need(original['kind']=='caller_fix'and original['scope']['image_id']=='sha256:2389c900dbbf520bd7d7f723e8c48a5c258f1612c43e80d2b66c6d046f9f8434','normal_caller_original')
@@ -81,8 +98,10 @@ def prepare(A,R,originals,*,now):
  historical=build['historical81'];A.need(historical.get('source_and_output_finalizers_completed')is True
   and historical.get('actual_same_candidate_image_verified')is True and historical.get('actual_profile_containers_removed')==3
   and historical.get('actual_outer_authentication_and_cleanup_still_required')is False,'normal_cleanup_gate')
- A.need(sqlite.get('status')=='PASS'and sqlite.get('sqlite_package')==lock_sqlite['package']['version']
-  and sqlite.get('sqlite_system_library')=={**lock_sqlite['installed_library'],'mapped_inode_verified':True}
+ selected_sqlite=lock_sqlite['profiles']['trixie']if lock_sqlite.get('schema')=='sqlite3541_qualified_packages/1'else lock_sqlite
+ selected_version=selected_sqlite['version']if 'version'in selected_sqlite else selected_sqlite['package']['version']
+ A.need(sqlite.get('status')=='PASS'and sqlite.get('sqlite_package')==selected_version
+  and sqlite.get('sqlite_system_library')=={**selected_sqlite['installed_library'],'mapped_inode_verified':True}
   and sqlite.get('production_data_accessed')is False and sqlite.get('all_cves_attested')is False,'normal_sqlite_gate')
  review=A.document(inputs['current-review.json']);A.need(review.get('schema')=='normal_market_current_security_review/1'
   and review.get('official_sources_reviewed')is True and review.get('old_probe_or_gate_retimestamps')is False
@@ -120,8 +139,11 @@ def prepare(A,R,originals,*,now):
   facts=S.subdir_absence_facts(A,inputs['subdir.zip'],family_inputs['util-linux'],primary)
   proof('subdir-absence-proof.json','component_absence',facts,['source03.py','subdir.zip',*('historic.'+name for name in S.PRIMARY),
    'util.candidate.zip',*('util.recipe-'+name for name in S.FAMILIES['util-linux']['recipe'])])
- sqlite_facts=sqlite_fts5_source(A,inputs,payload)if any(row['advisory']=='CVE-2026-119373'for row in rows)else None
- if sqlite_facts is not None:
+ canonical_facts=canonical_source(A,inputs,payload)if any(row['source_package']=='sqlite3'for row in rows)else None
+ sqlite_facts=canonical_facts or(sqlite_fts5_source(A,inputs,payload)if any(row['advisory']=='CVE-2026-119373'for row in rows)else None)
+ if canonical_facts is not None:
+  proof('sqlite-canonical-source-proof.json','upstream_release',canonical_facts,['sqlite-canonical-package.py','sqlite-canonical-provenance.json','sqlite-probe.json','sqlite-lock.json','runtime-observation.json','runtime-collector.py'])
+ elif sqlite_facts is not None:
   proof('sqlite-fts5-source-proof.json','source_backport',sqlite_facts,[*SQLITE_FTS_PINS,'sqlite-probe.json','sqlite-lock.json','runtime-observation.json','runtime-collector.py'])
  native_required=sqlite_facts is not None or any(row['source_package']in('util-linux','ncurses','acl')for row in rows)
  if native_required:proof('runtime-payload-proof.json','runtime_payload',payload,['runtime-observation.json','runtime-vector.json','runtime-collector.py','sqlite-lock.json','component-verifier.py','acl-verifier.py'])
@@ -146,6 +168,7 @@ def prepare(A,R,originals,*,now):
   elif row['source_package']=='util-linux':selected+=['util-source-proof.json']
   elif row['source_package']=='ncurses':selected+=['ncurses-source-proof.json']
   elif row['source_package']=='acl':selected+=['acl-source-proof.json','caller-proof.json']
+  elif row['source_package']=='sqlite3'and canonical_facts is not None and cve in A.SQLITE_ENGINE_CVES:selected+=['sqlite-canonical-source-proof.json']
   elif cve=='CVE-2026-119373'and sqlite_facts is not None:selected+=['sqlite-fts5-source-proof.json']
   else:disposition='unresolved';selected=[]
   rules.append({'row':row,'disposition':disposition,'proofs':selected})

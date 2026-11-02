@@ -19,6 +19,27 @@ import tempfile
 
 MINIMUM_PACKAGE = '3.46.1-7+deb13u2+gold2'
 WAL_RESET_PACKAGE = MINIMUM_PACKAGE
+CANONICAL_VERSION = '3.54.1-0+trading1~trixie1'
+
+def canonical_profile():
+    from types import ModuleType
+    parent = Path(__file__).resolve().parent
+    def read(name, maximum):
+        path = parent/name; before = path.lstat()
+        identity = lambda row: (row.st_dev,row.st_ino,row.st_mode,row.st_uid,row.st_gid,row.st_nlink,row.st_size,row.st_mtime_ns,row.st_ctime_ns)
+        require(path.resolve(strict=True) == path and stat.S_ISREG(before.st_mode) and
+                before.st_uid == before.st_gid == 0 and before.st_nlink == 1 and
+                not before.st_mode & 0o022 and 0 < before.st_size <= maximum, 'canonical_source')
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            raw = os.read(fd, maximum+1)
+            require(len(raw) == before.st_size and identity(os.fstat(fd)) == identity(before) == identity(path.lstat()), 'canonical_source')
+        finally: os.close(fd)
+        return raw
+    raw = read('sqlite3541_package.py', 65536)
+    module = ModuleType('_canonical_sqlite_runtime'); module.__file__ = str(parent/'sqlite3541_package.py')
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    return module, module.validate_lock(module.document(read('sqlite3541_packages.lock.json', 65536)))
 QUERY = ('SELECT source,event_id,commodity,price FROM quotes WHERE commodity=? '
          'ORDER BY seen_at DESC,event_id DESC,source')
 EXPECTED = [('g2', 3, 'emami', 62000000), ('g1', 1, 'emami', 61500000)]
@@ -64,7 +85,10 @@ def platform_package():
     command(['/usr/bin/dpkg', '--compare-versions', version, 'ge', MINIMUM_PACKAGE])
     # This exact local package is bound to the reviewed production backport.
     # An unknown later distro revision is not assumed to carry this fix.
-    require(version == WAL_RESET_PACKAGE, 'wal_reset_package_not_admitted')
+    if version == CANONICAL_VERSION:
+        canonical_profile()
+    else:
+        require(version == WAL_RESET_PACKAGE, 'wal_reset_package_not_admitted')
     require(command(['/usr/bin/dpkg', '--verify', 'libsqlite3-0']) == '', 'sqlite_package_payload_changed')
     require(version.rsplit(':', 1)[-1].split('-', 1)[0] == sqlite3.sqlite_version and
             sqlite3.sqlite_version_info >= (3, 46, 1), 'sqlite_runtime_package_mismatch')
@@ -266,15 +290,32 @@ def verify(require_libmagic=False):
     with open('/proc/self/maps', encoding='ascii') as stream:
         maps = stream.read(2 * 1024 * 1024 + 1)
     library = installed_sqlite_identity(maps)
+    canonical = version == CANONICAL_VERSION
+    if canonical:
+        module, profile = canonical_profile()
+        require(library == {**profile['installed_library'], 'mapped_inode_verified': True}, 'canonical_library')
+        connection = sqlite3.connect(':memory:')
+        try:
+            require(connection.execute('SELECT CAST(1.2345678901234567 AS TEXT)').fetchone() == ('1.23456789012346',), 'legacy_cast15')
+            # Rendering is allowed to differ. The actual finite numeric value
+            # must survive all three official constructors and their readers.
+            import struct
+            for value in (0.1, 1.2345678901234567, 61500000.12345678, 1.2345678901234567e-100, -1.2345678901234567e100):
+                restored = connection.execute("SELECT CAST(quote(?) AS REAL),json_extract(json_array(?),'$[0]'),json_extract(json_object('p',?),'$.p')", (value,)*3).fetchone()
+                require(all(struct.pack('>d', float(v)) == struct.pack('>d', value) for v in restored), 'numeric_roundtrip')
+        finally: connection.close()
     if require_libmagic:
         system_library(maps, 'libmagic')
-    return {'status': 'PASS', 'sqlite_package': version, 'sqlite_runtime': sqlite3.sqlite_version,
+    result = {'status': 'PASS', 'sqlite_package': version, 'sqlite_runtime': sqlite3.sqlite_version,
             'libmagic_checked': require_libmagic, 'sqlite_system_library': library,
             'sqlite_stdlib_extension': extension,
             'python_environment_ignored': True, 'compatibility': compatibility(),
-            'wal_reset_package_identity_checked': True,
+            'wal_reset_package_identity_checked': not canonical,
             'wal_reset_reproduction_performed': False,
             'production_data_accessed': False, 'all_cves_attested': False}
+    if canonical:
+        result.update(canonical_release_identity_checked=True, legacy_cast15_verified=True, canonical_source_id=module.SOURCE['source_id'], numeric_contract=module.NUMERIC_CONTRACT)
+    return result
 
 
 def main():

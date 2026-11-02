@@ -27,7 +27,7 @@ SQLITE_ARTIFACT_EXPIRY = '2027-01-30T22:38:13Z'
 REPO = 'mohsenbarari/trading_bot'
 ROOT = Path(__file__).resolve().parents[1]
 
-def context_root(value):
+def context_root(value,*,canonical3541=False):
     # NPM's no-argument path stays anchored to this script, never cwd.
     if value is None:return ROOT
     def require(ok,code):
@@ -93,19 +93,62 @@ def context_root(value):
     names=('prepare_app_security_os_cache.py','compose_security_os_candidate.py','app_security_os_packages.lock.json',
         'prepare_sqlite_wal_os_cache.py','sqlite_wal_package.lock.json','prepare_tar_acl_os_cache.py','tar_acl_package.lock.json',
         'prepare_coreutils_acl_os_cache.py','coreutils_acl_package.lock.json')
-    entries=receipt['release_files'];require(type(entries)is list and len(entries)in{20,21}
+    entries=receipt['release_files'];require(type(entries)is list and len(entries)in{20,21,22,23}
         and all(type(row)is dict and type(row.get('path'))is str for row in entries)
         and len({row['path']for row in entries})==len(entries),'release_context_receipt')
     indexed={row['path']:row for row in entries}
-    for name in names:
+    canonical_names=('sqlite3541_package.py','sqlite3541_packages.lock.json')
+    selected={name for name in canonical_names if 'scripts/'+name in indexed}
+    require(not selected or selected==set(canonical_names),'release_context_receipt')
+    require((len(entries)in{22,23})is bool(selected),'release_context_receipt')
+    require(not canonical3541 or selected==set(canonical_names),'release_context_receipt')
+    for name in (names+canonical_names if selected else names):
         row=indexed['scripts/'+name];pin={key:row[key]for key in('bytes','sha256')}
         read(root/'scripts'/name,1024**2,pin)
     return root
 
-def main(context=None,*,retain_normal_original_zips=False):
+def validate_canonical_artifact(api,document,need,profile):
+    """Require this successful profile job; a sibling matrix failure grants nothing.
+
+    The versioned trusted lock is armed manually by Root only after genuine
+    package/job/source qualification. Its Root receipt pin is not a fabricated
+    post-CI file in the upstream artifact.
+    """
+    spec=profile['artifact']
+    run=document(api('actions/runs/'+str(spec['run_id'])+'/attempts/'+str(spec['run_attempt']),65536))
+    need(type(run)is dict and type(run.get('repository'))is dict and type(run.get('head_repository'))is dict,
+        'release_lineage')
+    need(all(type(run.get(k))is int for k in('id','run_attempt','workflow_id'))
+        and(run.get('id'),run.get('run_attempt'),run.get('workflow_id'),run.get('path'),run.get('head_sha'),run.get('event'),
+            run['repository'].get('id'),run['head_repository'].get('id'))
+        ==(spec['run_id'],spec['run_attempt'],spec['workflow_id'],'.github/workflows/sqlite3541-library.yml',spec['head_sha'],'workflow_dispatch',1065680631,1065680631)
+        and run.get('status')in{'in_progress','completed'},'release_lineage')
+    job=document(api('actions/jobs/'+str(spec['job_id']),65536))
+    need(type(job)is dict and all(type(job.get(k))is int for k in('id','run_id','run_attempt'))
+        and(job.get('id'),job.get('run_id'),job.get('run_attempt'),job.get('name'),job.get('head_sha'),job.get('status'),job.get('conclusion'))
+        ==(spec['job_id'],spec['run_id'],spec['run_attempt'],'package (trixie)',spec['head_sha'],'completed','success'),'release_lineage')
+    artifact=document(api('actions/artifacts/'+str(spec['id']),65536))
+    need(type(artifact)is dict,'release_sqlite_artifact')
+    workflow=artifact.get('workflow_run',{});expires=artifact.get('expires_at')
+    need(type(expires)is str and expires.endswith('Z'),'release_sqlite_artifact')
+    try:expiry=datetime.fromisoformat(expires[:-1]+'+00:00')
+    except ValueError:need(False,'release_sqlite_artifact')
+    need(type(artifact.get('id'))is int and type(artifact.get('size_in_bytes'))is int
+        and(artifact.get('id'),artifact.get('size_in_bytes'),artifact.get('name'),artifact.get('digest'))
+        ==(spec['id'],spec['bytes'],spec['name'],'sha256:'+spec['sha256'])and artifact.get('expired')is False
+        and datetime.now(timezone.utc)<expiry
+        and artifact.get('url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(spec['id'])
+        and artifact.get('archive_download_url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(spec['id'])+'/zip'
+        and type(workflow)is dict and all(type(workflow.get(k))is int for k in('id','repository_id','head_repository_id'))
+        and(workflow.get('id'),workflow.get('repository_id'),workflow.get('head_repository_id'),workflow.get('head_branch'),workflow.get('head_sha'))
+        ==(spec['run_id'],1065680631,1065680631,'main',spec['head_sha']),'release_sqlite_artifact')
+    return artifact
+
+def main(context=None,*,retain_normal_original_zips=False,canonical3541=False):
     if type(retain_normal_original_zips) is not bool or (retain_normal_original_zips and context is None):
         raise RuntimeError('release_originals_normal_context_required')
-    root=context_root(context)
+    if type(canonical3541)is not bool:raise RuntimeError('release_sqlite_source')
+    root=context_root(context,canonical3541=True)if canonical3541 else context_root(context)
     helper=runpy.run_path(str(root/'scripts/prepare_app_security_os_cache.py'))
     need=helper['need'];document=helper['document']
     need(type(RELEASE_ID) is int and RELEASE_ID>0 and set(ASSET_IDS)==set(LINEAGE)
@@ -116,9 +159,13 @@ def main(context=None,*,retain_normal_original_zips=False):
         specs=dict(recipe.lock['artifacts']);extras={};sqlite_source=None
         for group,name in EXTRA_HELPERS.items():
             extra=runpy.run_path(str(root/('scripts/prepare_'+name+'_os_cache.py')))
-            gate=stack.enter_context(extra['Held']());lock=extra['load_lock'](gate)
+            gate=stack.enter_context(extra['Held']())
+            if group=='sqlite-wal'and canonical3541:
+                _,lock=extra['load_canonical'](gate);group='sqlite3541'
+            else:lock=extra['load_lock'](gate)
             specs[group]=lock['artifact'];extras[group]=(extra,gate)
             if group=='sqlite-wal':sqlite_source=lock['source']
+            elif group=='sqlite3541':sqlite_source=lock
         cache=root/'pip_packages/security-os-capsule'
         present=[]
         for group in ('security-os',*extras):
@@ -129,9 +176,9 @@ def main(context=None,*,retain_normal_original_zips=False):
             present.append(exists)
             if exists:
                 if group=='security-os':result=helper['prepare_cache'](path,check_only=True)
-                else:result=extras[group][0]['prepare'](path,check_only=True)
+                else:result=extras[group][0]['canonical_prepare'if group=='sqlite3541'else'prepare'](path,check_only=True)
                 need(result.get('status')=='cache_verified' and result.get('security_accepted') is False,'release_existing_cache')
-        if all(present) and not retain_normal_original_zips:
+        if all(present) and not retain_normal_original_zips and not canonical3541:
             held.check()
             for _,gate in extras.values():gate.check()
             print('All four authentic CI caches verified without download; security acceptance remains false.')
@@ -142,6 +189,7 @@ def main(context=None,*,retain_normal_original_zips=False):
                 'repos/'+REPO+'/'+endpoint],seconds=120,maximum=maximum,
                 environment={'GH_TOKEN':os.environ['GH_TOKEN']})
         for group,(workflow,name,head) in LINEAGE.items():
+            if canonical3541 and group=='sqlite-wal':continue
             spec=specs[group]
             run=document(api('actions/runs/'+str(spec['run_id'])+'/attempts/1',65536))
             need(all(type(run.get(k)) is int for k in ('id','run_attempt','workflow_id'))
@@ -150,25 +198,28 @@ def main(context=None,*,retain_normal_original_zips=False):
                   run.get('head_repository',{}).get('id'))
                  ==(spec['run_id'],1,workflow,'.github/workflows/'+name,head,'workflow_dispatch','completed','success',1065680631,1065680631),
                  'release_lineage')
-        sqlite=specs['sqlite-wal'];source=sqlite_source
-        need(source['commit']==LINEAGE['sqlite-wal'][2]
-             and source['root_build_receipt_sha256']==SQLITE_ROOT_RECEIPT,'release_sqlite_source')
-        artifact=document(api('actions/artifacts/'+str(sqlite['id']),65536))
-        need(type(artifact) is dict,'release_sqlite_artifact')
-        workflow=artifact.get('workflow_run',{})
-        need(type(artifact.get('id')) is int and type(artifact.get('size_in_bytes')) is int
-             and type(workflow) is dict and all(type(workflow.get(k)) is int
-                 for k in ('id','repository_id','head_repository_id'))
-             and artifact.get('id')==sqlite['id'] and artifact.get('size_in_bytes')==sqlite['bytes']
-             and artifact.get('name')=='sqlite-wal-package-'+str(sqlite['run_id'])+'-1'
-             and artifact.get('digest')=='sha256:'+sqlite['sha256'] and artifact.get('expired') is False
-             and artifact.get('expires_at')==SQLITE_ARTIFACT_EXPIRY
-             and datetime.now(timezone.utc)<datetime.strptime(SQLITE_ARTIFACT_EXPIRY,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
-             and artifact.get('url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(sqlite['id'])
-             and artifact.get('archive_download_url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(sqlite['id'])+'/zip'
-             and (workflow.get('id'),workflow.get('repository_id'),workflow.get('head_repository_id'),
-                  workflow.get('head_branch'),workflow.get('head_sha'))
-                 ==(sqlite['run_id'],1065680631,1065680631,'main',source['commit']),'release_sqlite_artifact')
+        if canonical3541:
+            validate_canonical_artifact(api,document,need,sqlite_source)
+        else:
+            sqlite=specs['sqlite-wal'];source=sqlite_source
+            need(source['commit']==LINEAGE['sqlite-wal'][2]
+                 and source['root_build_receipt_sha256']==SQLITE_ROOT_RECEIPT,'release_sqlite_source')
+            artifact=document(api('actions/artifacts/'+str(sqlite['id']),65536))
+            need(type(artifact) is dict,'release_sqlite_artifact')
+            workflow=artifact.get('workflow_run',{})
+            need(type(artifact.get('id')) is int and type(artifact.get('size_in_bytes')) is int
+                 and type(workflow) is dict and all(type(workflow.get(k)) is int
+                     for k in ('id','repository_id','head_repository_id'))
+                 and artifact.get('id')==sqlite['id'] and artifact.get('size_in_bytes')==sqlite['bytes']
+                 and artifact.get('name')=='sqlite-wal-package-'+str(sqlite['run_id'])+'-1'
+                 and artifact.get('digest')=='sha256:'+sqlite['sha256'] and artifact.get('expired') is False
+                 and artifact.get('expires_at')==SQLITE_ARTIFACT_EXPIRY
+                 and datetime.now(timezone.utc)<datetime.strptime(SQLITE_ARTIFACT_EXPIRY,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+                 and artifact.get('url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(sqlite['id'])
+                 and artifact.get('archive_download_url')=='https://api.github.com/repos/'+REPO+'/actions/artifacts/'+str(sqlite['id'])+'/zip'
+                 and (workflow.get('id'),workflow.get('repository_id'),workflow.get('head_repository_id'),
+                      workflow.get('head_branch'),workflow.get('head_sha'))
+                     ==(sqlite['run_id'],1065680631,1065680631,'main',source['commit']),'release_sqlite_artifact')
         release=document(api('releases/'+str(RELEASE_ID),65536))
         need(type(release.get('id')) is int and release.get('id')==RELEASE_ID and release.get('tag_name')==RELEASE_TAG
              and release.get('target_commitish')==RELEASE_TARGET
@@ -195,6 +246,7 @@ def main(context=None,*,retain_normal_original_zips=False):
                 need(not originals.exists(),'release_originals_preexisting')
                 originals.mkdir(mode=0o755)
             for group,identifier in ASSET_IDS.items():
+                if canonical3541 and group=='sqlite-wal':continue
                 spec=specs[group]
                 endpoint=('actions/artifacts/'+str(spec['id'])+'/zip' if group=='sqlite-wal'
                           else 'releases/assets/'+str(identifier))
@@ -205,12 +257,18 @@ def main(context=None,*,retain_normal_original_zips=False):
                 if retain_normal_original_zips:
                     helper['write_new'](originals/(group+'.zip'),raw,0o644)
                 held.check()
+            if canonical3541:
+                group='sqlite3541';spec=specs[group]
+                raw=api('actions/artifacts/'+str(spec['id'])+'/zip',spec['bytes'])
+                need(len(raw)==spec['bytes']and sha256(raw).hexdigest()==spec['sha256'],'release_payload_pin')
+                path=Path(temporary)/(group+'.zip');helper['write_new'](path,raw,0o600);paths[group]=path
+                if retain_normal_original_zips:helper['write_new'](originals/(group+'.zip'),raw,0o644)
             cache.parent.mkdir(exist_ok=True)
             result=helper['prepare_cache'](cache,{group:paths[group] for group in recipe.lock['artifacts']});held.check()
             need(result.get('status') in {'cache_prepared','cache_verified'} and result.get('packages')==15
                  and result.get('security_accepted') is False,'release_cache_admission')
             for group,(extra,gate) in extras.items():
-                result=extra['prepare'](cache.parent/(group+'-capsule'),paths[group]);gate.check()
+                result=extra['canonical_prepare'if group=='sqlite3541'else'prepare'](cache.parent/(group+'-capsule'),paths[group]);gate.check()
                 need(result.get('status') in {'cache_prepared','cache_verified'}
                      and result.get('security_accepted') is False,'release_cache_admission')
     print('Exact retained release assets and Root-admitted SQLite CI artifact admitted; security acceptance remains false.')
@@ -219,5 +277,6 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description='Admit only the exact public shared CI cache assets.')
     parser.add_argument('--context-root',type=Path)
     parser.add_argument('--retain-normal-original-zips',action='store_true')
+    parser.add_argument('--canonical3541',action='store_true')
     args=parser.parse_args()
-    main(args.context_root,retain_normal_original_zips=args.retain_normal_original_zips)
+    main(args.context_root,retain_normal_original_zips=args.retain_normal_original_zips,canonical3541=args.canonical3541)

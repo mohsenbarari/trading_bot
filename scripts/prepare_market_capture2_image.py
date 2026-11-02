@@ -105,7 +105,7 @@ GLIBC_FILES={'manifest.json':GLIBC_MANIFEST_PIN,'prepare_glibc_security_os_cache
 GLIBC_NAMED={'schema':'glibc84243_exact_runtime_named_context/1','files':GLIBC_FILES,'security_accepted':False}
 GLIBC_ARTIFACT={'id':13077600231,'run':41286801923,'attempt':1,'head':'a80b91eccdcd0b981c3c08888937a739869b64cf',
  'name':'trixie241-glibc84243-candidates-PENDING-ROOT-REVIEW-41286801923-1','bytes':35878836,'sha256':'bb5dc6aef44629d0f72cdf095832c4e7ec523eea06902c57121c983f4fb06f22'}
-GLIBC_RECIPE_PIN={'bytes':7308,'sha256':'09f57f4d846f4d6f85bb6fa412b237bdc40b6840743dfb9796facdabc5ee3dcc'}
+GLIBC_RECIPE_PIN={'bytes':7644,'sha256':'2854e229ba9338965ebce51546078804df5a1c452e1a57493f9ae76cc7ebca65'}
 CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*SECURITY_CONTROLLERS,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT),
  GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT,SHARED_CACHE,'scripts/market_sqlite_component_probe.py','deploy/maintenance/app_r2_observe02/run_app_image_ci_smoke.py','deploy/maintenance/app_gold2_smoke/export_controller_gold2.py','deploy/maintenance/app_gold2_smoke/archive_inventory_gold2.py','deploy/maintenance/app_r2_observe02/inventory.py','deploy/maintenance/app_r2_observe02/compose_security_os_candidate.py','deploy/maintenance/app_r2_observe02/compose_app_mountpoint_image.py','deploy/maintenance/app_r2_observe02/compose_market_security_os_candidate.py','deploy/maintenance/app_r2_observe02/admit_security_component_image_reuse.py','deploy/maintenance/app_r2_observe02/datastore_candidate_contract.py','deploy/maintenance/app_r2_observe02/runtime_image_archive_transport.py','scripts/security_age132_tool/source_io.py')
 DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
@@ -117,12 +117,28 @@ OUTER_PHYSICAL_FINALIZERS_COMPLETED=False
 OUTER_FAILURE=None
 APT_LOCK='scripts/app_security_os_packages.lock.json'
 SQLITE_LOCK='scripts/sqlite_wal_package.lock.json'
+SQLITE_FAMILY='gold2'
+CANONICAL_SQLITE_MODULE='scripts/sqlite3541_package.py'
 TAR_LOCK='scripts/tar_acl_package.lock.json'
 COREUTILS_LOCK='scripts/coreutils_acl_package.lock.json'
 CACHE_ROOTS=('pip_packages/security-os-capsule','pip_packages/sqlite-wal-capsule','pip_packages/tar-acl-capsule','pip_packages/coreutils-acl-capsule')
 CACHE_ORIGINAL_ROOT='pip_packages/security-assessment-originals'
 CACHE_ORIGINAL_GROUPS=('util','ncurses','acl-tar','sqlite-wal','tar-acl','coreutils-acl')
 NORMAL_CACHE_COUNT=32
+
+def configure_sqlite_family(value):
+ global SQLITE_FAMILY,SQLITE_LOCK,CACHE_ROOTS,CACHE_ORIGINAL_GROUPS,NORMAL_CACHE_COUNT
+ need(type(value)is str and value in{'gold2','canonical3541'},'sqlite_lock');SQLITE_FAMILY=value
+ SQLITE_LOCK='scripts/sqlite3541_packages.lock.json'if value=='canonical3541'else'scripts/sqlite_wal_package.lock.json'
+ CACHE_ROOTS=('pip_packages/security-os-capsule','pip_packages/'+('sqlite3541-capsule'if value=='canonical3541'else'sqlite-wal-capsule'),'pip_packages/tar-acl-capsule','pip_packages/coreutils-acl-capsule')
+ CACHE_ORIGINAL_GROUPS=('util','ncurses','acl-tar','sqlite3541'if value=='canonical3541'else'sqlite-wal','tar-acl','coreutils-acl')
+ NORMAL_CACHE_COUNT=33 if value=='canonical3541'else 32
+
+def canonical_sqlite_module(release,rows):
+ row=rows[CANONICAL_SQLITE_MODULE]
+ source=Held(release/CANONICAL_SQLITE_MODULE,maximum=65536,binding={k:row[k]for k in('bytes','sha256')})
+ try:return module(source.raw(),release/CANONICAL_SQLITE_MODULE)
+ finally:source.close()
 
 
 ROLE_READER_PIN = (19587, '7de62bb2c8564fd13271413ca3362bcbd9bf6c3775a3d57536a6566c2347f606')
@@ -415,7 +431,9 @@ def cache_inputs(release,receipt):
   finally:held.close()
  old,new,tar=values[APT_LOCK],values[SQLITE_LOCK],values[TAR_LOCK]
  need(old.get('schema')=='app_security_os_packages_lock/1'and type(old.get('packages'))is list and len(old['packages'])==15,'vendor_lock')
- need(new.get('schema')=='sqlite_wal_image_package_lock/1'and new.get('armed')is True and type(new.get('package'))is dict,'sqlite_lock')
+ canonical=canonical_sqlite_module(release,rows)if SQLITE_FAMILY=='canonical3541'else None
+ if canonical is not None:new=canonical.validate_lock(new,'trixie')
+ else:need(new.get('schema')=='sqlite_wal_image_package_lock/1'and new.get('armed')is True and type(new.get('package'))is dict,'sqlite_lock')
  expected={}
  def add(path,pin):
   need(relative(path)and path not in expected and type(pin)is dict and type(pin.get('bytes'))is int and 0<pin['bytes']<=MAX_FILE and hex64(pin.get('sha256')),'cache_binding')
@@ -423,9 +441,12 @@ def cache_inputs(release,receipt):
  add(CACHE_ROOTS[0]+'/manifest.json',old['manifest'])
  for package in old['packages']:add(CACHE_ROOTS[0]+'/'+package['path'],package)
  package=new['package'];need(relative(package['path'])and '/'not in package['path'],'cache_binding')
- add(CACHE_ROOTS[1]+'/'+package['path'],new['outputs'][package['path']])
- meta=encoded({'schema':'sqlite_wal_image_package_cache/1','package':package,'binding':new['outputs'][package['path']],
-  'source':{key:new['source'][key]for key in ('recipe_sha256','production_patch_sha256')}})
+ if canonical is not None:
+  add(CACHE_ROOTS[1]+'/'+package['path'],package);add(CACHE_ROOTS[1]+'/provenance.json',new['provenance']);meta=canonical.cache_manifest(new)
+ else:
+  add(CACHE_ROOTS[1]+'/'+package['path'],new['outputs'][package['path']])
+  meta=encoded({'schema':'sqlite_wal_image_package_cache/1','package':package,'binding':new['outputs'][package['path']],
+   'source':{key:new['source'][key]for key in ('recipe_sha256','production_patch_sha256')}})
  add(CACHE_ROOTS[1]+'/manifest.json',{'bytes':len(meta),'sha256':sha256(meta).hexdigest()})
  need(tar.get('schema')=='tar_acl_image_package_lock/1'and tar.get('armed')is True and type(tar.get('package'))is dict,'tar_lock')
  package=tar['package'];need(package.get('name')=='tar'and package.get('version')=='1.35+dfsg-5~trixie+gold2'
@@ -440,9 +461,9 @@ def cache_inputs(release,receipt):
  meta=encoded({'schema':'coreutils_acl_image_package_cache/1','package':package,'binding':core['outputs'][package['path']],
   'source':{key:core['source'][key]for key in('recipe_sha256','production_patch_sha256','parent_patch_sha256','parent_cp')},'runtime_payload':core['outputs']['runtime-payload.json']})
  add(CACHE_ROOTS[3]+'/manifest.json',{'bytes':len(meta),'sha256':sha256(meta).hexdigest()})
- for path in ('pip_packages/.security-os-capsule.lock','pip_packages/.sqlite-wal-capsule.lock','pip_packages/.tar-acl-capsule.lock','pip_packages/.coreutils-acl-capsule.lock'):
+ for path in ('pip_packages/.security-os-capsule.lock',('pip_packages/.sqlite3541-capsule.lock'if canonical is not None else'pip_packages/.sqlite-wal-capsule.lock'),'pip_packages/.tar-acl-capsule.lock','pip_packages/.coreutils-acl-capsule.lock'):
   expected[path]={'bytes':0,'sha256':sha256(b'').hexdigest()}
- artifacts={**old['artifacts'],'sqlite-wal':new['artifact'],'tar-acl':tar['artifact'],'coreutils-acl':core['artifact']}
+ artifacts={**old['artifacts'],('sqlite3541'if canonical is not None else'sqlite-wal'):new['artifact'],'tar-acl':tar['artifact'],'coreutils-acl':core['artifact']}
  need(set(artifacts)==set(CACHE_ORIGINAL_GROUPS),'cache_inventory')
  for group in CACHE_ORIGINAL_GROUPS:add(CACHE_ORIGINAL_ROOT+'/'+group+'.zip',artifacts[group])
  need(len(expected)==NORMAL_CACHE_COUNT,'cache_inventory');return expected,new
@@ -496,6 +517,7 @@ def build_argv(root,contract,controller_signature,epoch,run,attempt,*,role=None)
   '--iidfile',str(root/'candidate-image.id'),'--tag','normal-market-capture2:'+run+'-'+attempt,
   '--build-context','business-source='+str(root/'sealed/product'),
   '--label','io.gold-trade.release.controller-input-signature='+controller_signature]
+ if SQLITE_FAMILY=='canonical3541':args+=['--build-arg','SQLITE_CACHE=sqlite3541-capsule','--build-arg','SQLITE_TARGET=/sqlite3541-capsule']
  for name,value in sorted({**contract['build_args'],'SOURCE_DATE_EPOCH':str(epoch)}.items()):
   need(type(name)is str and re.fullmatch('[A-Z_][A-Z0-9_]*',name)and type(value)is str and '\n'not in value,'build_contract');args+=['--build-arg',name+'='+value]
  return args+['--file',str(root/'sealed/release/deploy/market-data/Dockerfile.capture2'),str(root/'sealed/release')]
@@ -570,10 +592,17 @@ def validate_source_probe(value,receipt=None):
 def validate_sqlite_probe(value,lock):
  keys={'status','sqlite_package','sqlite_runtime','libmagic_checked','sqlite_system_library','sqlite_stdlib_extension','python_environment_ignored','compatibility',
   'wal_reset_package_identity_checked','wal_reset_reproduction_performed','production_data_accessed','all_cves_attested'}
- need(type(value)is dict and set(value)==keys and value.get('status')=='PASS'and value.get('sqlite_package')==lock['package']['version']
-  and value.get('sqlite_runtime')==lock['package']['version'].split('-',1)[0]
-  and value.get('python_environment_ignored')is True and value.get('wal_reset_package_identity_checked')is True
+ canonical=SQLITE_FAMILY=='canonical3541'
+ if canonical:
+  keys|={'canonical_release_identity_checked','legacy_cast15_verified','canonical_source_id','numeric_contract'}
+  need(type(lock)is dict and lock.get('version')=='3.54.1-0+trading1~trixie1','sqlite_probe')
+  selected_version=lock['version']
+ else:selected_version=lock['package']['version']
+ need(type(value)is dict and set(value)==keys and value.get('status')=='PASS'and value.get('sqlite_package')==selected_version
+  and value.get('sqlite_runtime')==selected_version.split('-',1)[0]
+  and value.get('python_environment_ignored')is True and value.get('wal_reset_package_identity_checked')is(not canonical)
   and all(value.get(key)is False for key in ('libmagic_checked','wal_reset_reproduction_performed','production_data_accessed','all_cves_attested')),'sqlite_probe')
+ if canonical:need(value.get('numeric_contract')=='legacy_cast15_exact_quote_json_numeric_roundtrip_exact'and value.get('canonical_release_identity_checked')is True and value.get('legacy_cast15_verified')is True and value.get('canonical_source_id')=='555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76','sqlite_probe')
  actual=value.get('sqlite_system_library');need(type(actual)is dict and actual.get('mapped_inode_verified')is True
   and all(actual.get(key)==item for key,item in lock['installed_library'].items())and type(value.get('compatibility'))is dict,'sqlite_probe')
  ext=value['sqlite_stdlib_extension'];need(type(ext)is dict and set(ext)=={'path','bytes','sha256','mapped_inode_verified'}and ext['mapped_inode_verified']is True
@@ -764,7 +793,7 @@ def actual_business81(root,raws,controllers,receipt,signature,controller_signatu
 def controller_parcel_inputs(root,receipt,controllers,cache,glibc_runtime=None):
  """Explicit full CI source closure, not an operational deployment control."""
  role=receipt.get('role')if receipt.get('schema')=='normal_market_git_component_inputs/2'else None
- count=source_parameters(receipt)['count'];names=controller_files(role);release_count=20+(1 if role is not None else 0)
+ count=source_parameters(receipt)['count'];names=controller_files(role);release_count=22+(1 if role is not None else 0)
  result={}
  def add(name,path,pin,mode):
   need(relative(name)and name not in result and type(pin)is dict and set(pin)=={'bytes','sha256'}
@@ -969,17 +998,17 @@ def prepare_checked_caches(root,context,receipt,source_guard,*,retained=None,fin
   try:
    env=environment(root,token=True)
    env.update({key:os.environ[key]for key in('GITHUB_ACTIONS','RUNNER_ENVIRONMENT','GITHUB_REPOSITORY','GITHUB_REF','RUNNER_TEMP','GITHUB_WORKSPACE','GITHUB_SHA')})
-   command([sys.executable,'-I','-S','-B',str(root/'controller-source'/SHARED_CACHE),'--context-root',str(context),'--retain-normal-original-zips'],
+   command([sys.executable,'-I','-S','-B',str(root/'controller-source'/SHARED_CACHE),'--context-root',str(context),'--retain-normal-original-zips']+(['--canonical3541']if SQLITE_FAMILY=='canonical3541'else[]),
     environment=env,seconds=900,maximum=MAX_JSON,guard=check,target=fd)
   finally:os.fsync(fd);os.close(fd)
   for name,cache in [('prepare_app_security_os_cache.py',CACHE_ROOTS[0]),('prepare_sqlite_wal_os_cache.py',CACHE_ROOTS[1]),('prepare_tar_acl_os_cache.py',CACHE_ROOTS[2]),('prepare_coreutils_acl_os_cache.py',CACHE_ROOTS[3])]:
    PHASE='normal_cache_prepare';fd=os.open(root/('cache-'+name+'-prepare.log'),os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
-   try:command([sys.executable,'-I','-B',str(context/'scripts'/name),'--cache-dir',str(context/cache)],
+   try:command([sys.executable,'-I','-B',str(context/'scripts'/name),'--cache-dir',str(context/cache)]+(['--canonical3541']if name=='prepare_sqlite_wal_os_cache.py'and SQLITE_FAMILY=='canonical3541'else[]),
     environment=environment(root,token=True),seconds=900,maximum=MAX_JSON,guard=check,target=fd)
    finally:os.fsync(fd);os.close(fd)
   for name,cache_name in [('prepare_app_security_os_cache.py',CACHE_ROOTS[0]),('prepare_sqlite_wal_os_cache.py',CACHE_ROOTS[1]),('prepare_tar_acl_os_cache.py',CACHE_ROOTS[2]),('prepare_coreutils_acl_os_cache.py',CACHE_ROOTS[3])]:
    PHASE='normal_cache_check';fd=os.open(root/('cache-'+name+'-check.log'),os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
-   try:command([sys.executable,'-I','-B',str(context/'scripts'/name),'--check','--cache-dir',str(context/cache_name)],
+   try:command([sys.executable,'-I','-B',str(context/'scripts'/name),'--check','--cache-dir',str(context/cache_name)]+(['--canonical3541']if name=='prepare_sqlite_wal_os_cache.py'and SQLITE_FAMILY=='canonical3541'else[]),
     environment=environment(root),seconds=180,guard=check,target=fd)
    finally:os.fsync(fd);os.close(fd)
   check()
@@ -1470,6 +1499,11 @@ def same_image_security_gate(root,repo,observed,*,gate):
     'product-manifest.json':root/'input-manifest.json','product-Dockerfile':root/'sealed/release/deploy/market-data/Dockerfile.capture2',
     'scan.json':root/'reports/vulnerabilities.json','sbom.json':root/'reports/sbom.cdx.json','image-export.json':root/'image-export.json',
     'sqlite-probe.json':root/'reports/actual-sqlite.json','sqlite-lock.json':root/'sealed/release'/SQLITE_LOCK}
+   if SQLITE_FAMILY=='canonical3541':
+    row=next(r for r in receipt['release_files']if r['path']==CANONICAL_SQLITE_MODULE)
+    originals['sqlite-canonical-package.py']=take(root/'sealed/release'/CANONICAL_SQLITE_MODULE,binding={k:row[k]for k in('bytes','sha256')})
+    path=CACHE_ROOTS[1]+'/provenance.json';pin=build['controller_inputs']['normal_cache_files'][path]
+    originals['sqlite-canonical-provenance.json']=take(root/'sealed/release'/path,binding=pin)
    for name,path in original_paths.items():originals[name]=take(path)
    for name,group in(('util.candidate.zip','util'),('ncurses.candidate.zip','ncurses'),('acl.candidate.zip','acl-tar')):
     relative_name=CACHE_ORIGINAL_ROOT+'/'+group+'.zip';pin=build['controller_inputs']['normal_cache_files'].get(relative_name)
@@ -1678,6 +1712,7 @@ def main(argv=None,*,retained=None,final_checks=None):
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--execute',action='store_true');p.add_argument('--root',type=Path);p.add_argument('--repo',type=Path);p.add_argument('--phase',choices=('build','finalize','raw-gate','complete-evidence','complete-gate'),default='build')
  p.add_argument('--role',choices=tuple(ROLE_MAP))
  args=p.parse_args(argv)
+ configure_sqlite_family(os.environ.get('NORMAL_MARKET_SQLITE','gold2'))
  if not args.execute:
   print(json.dumps({'schema':'normal_market_two_source_ci_proposal/1','status':'UNARMED','execution_armed':EXECUTION_ARMED,
    'build_performed':False,'activation_authority':False,'security_accepted':False}));return 0
