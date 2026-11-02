@@ -191,7 +191,8 @@ def main(context=None):
                 spec=specs[group]
                 endpoint=('actions/artifacts/'+str(spec['id'])+'/zip' if group=='sqlite-wal'
                           else 'releases/assets/'+str(identifier))
-                raw=api(endpoint,spec['bytes'],'application/octet-stream')
+                accept='application/vnd.github+json' if group=='sqlite-wal' else 'application/octet-stream'
+                raw=api(endpoint,spec['bytes'],accept)
                 need(len(raw)==spec['bytes'] and sha256(raw).hexdigest()==spec['sha256'],'release_payload_pin')
                 path=Path(temporary)/(group+'.zip');helper['write_new'](path,raw,0o600);paths[group]=path
                 held.check()

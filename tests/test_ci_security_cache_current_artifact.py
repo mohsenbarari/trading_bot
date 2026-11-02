@@ -51,7 +51,9 @@ class CurrentArtifactTests(unittest.TestCase):
  def invoke(self,payloads=None,context=None):
   actual_run_path=runpy.run_path
   def transport(argv,*,seconds,maximum,environment):
-   self.assertEqual(argv[:6],['/usr/bin/gh','api','--method','GET','-H','Accept: '+('application/octet-stream'if argv[-1].endswith('/zip')or '/releases/assets/'in argv[-1]else'application/vnd.github+json')])
+   # Actions ZIP rejects octet-stream with real HTTP415; Release assets keep it.
+   expected_accept='application/octet-stream' if '/releases/assets/'in argv[-1] else'application/vnd.github+json'
+   self.assertEqual(argv[:6],['/usr/bin/gh','api','--method','GET','-H','Accept: '+expected_accept])
    self.assertEqual(seconds,120);self.assertEqual(environment,{'GH_TOKEN':'PUBLIC-OWNED-NO-CREDENTIAL'})
    prefix='repos/'+self.M.REPO+'/';self.assertTrue(argv[-1].startswith(prefix));key=argv[-1][len(prefix):]
    self.calls.append((key,maximum,argv[5]));self.assertLessEqual(maximum,64*1024**2)
@@ -92,7 +94,23 @@ class CurrentArtifactTests(unittest.TestCase):
   return output.getvalue()
  def refuse(self,code):
   with self.assertRaisesRegex(RuntimeError,'^'+code+'$'):self.invoke()
-  self.assertFalse(any(accept=='Accept: application/octet-stream'for _,_,accept in self.calls))
+  self.assertFalse(any(key==self.binary_key or key.startswith('releases/assets/') for key,_,_ in self.calls))
+ def test_metadata_refusal_metaguard_detects_normalized_binary_keys(self):
+  # The transport stores repo-relative keys, with no leading slash. Exercise
+  # the actual refuse() guard so both binary endpoints stay negative forever.
+  original_calls=self.calls
+  try:
+   for key,forbidden in [(self.binary_key,True),('releases/assets/123',True),('actions/artifacts/123',False)]:
+    with self.subTest(key=key):
+     self.calls=[]
+     def denied():
+      self.calls.append((key,19,'Accept: application/vnd.github+json'))
+      raise RuntimeError('OWNED_METADATA_REFUSAL')
+     with patch.object(self,'invoke',denied):
+      if forbidden:
+       with self.assertRaises(AssertionError):self.refuse('OWNED_METADATA_REFUSAL')
+      else:self.refuse('OWNED_METADATA_REFUSAL')
+  finally:self.calls=original_calls
  def test_actual_entry_passes_genuine_f88_run_artifact_and_retained_six_asset_catalog_before_binary(self):
   self.assertEqual((self.specs['sqlite-wal']['bytes'],self.specs['sqlite-wal']['sha256']),PUBLIC_SQLITE_PIN)
   self.assertEqual(self.metadata['provenance']['Root_acceptance']['sha256'],self.M.SQLITE_ROOT_RECEIPT)
@@ -101,6 +119,26 @@ class CurrentArtifactTests(unittest.TestCase):
   self.assertEqual(len(self.source_fds),5)
   self.assertEqual(self.loaded,['prepare_app_security_os_cache.py','prepare_sqlite_wal_os_cache.py','prepare_tar_acl_os_cache.py','prepare_coreutils_acl_os_cache.py'])
   self.assertNotEqual(self.M.RETAINED_SQLITE['sha256'],self.specs['sqlite-wal']['sha256'])
+ def test_actual_Actions_ZIP_provider_contract_refuses_old_octet_header(self):
+  source=(self.root/'scripts/prepare_ci_security_caches.py').read_bytes()
+  marker=b"accept='application/vnd.github+json' if group=='sqlite-wal' else 'application/octet-stream'"
+  self.assertEqual(source.count(marker),1)
+  old=ModuleType('owned_old_Actions_accept');old.__file__=str(self.root/'scripts/prepare_ci_security_caches.py')
+  exec(compile(source.replace(marker,b"accept='application/octet-stream'"),old.__file__,'exec'),old.__dict__)
+  real=self.M
+  # Same six admitted identities; move Actions first only in this owned wire
+  # counterfactual, so no genuine Release package is needed to reach its header.
+  order=dict(real.ASSET_IDS)
+  first={'sqlite-wal':order['sqlite-wal'],**{k:v for k,v in order.items()if k!='sqlite-wal'}}
+  old.ASSET_IDS=first
+  try:
+   self.M=old
+   with self.assertRaises(AssertionError):self.invoke()
+   self.assertFalse(any(key==self.binary_key for key,_,_ in self.calls))
+   self.M=real;real.ASSET_IDS=first;self.calls=[];self.source_fds=[]
+   with self.assertRaisesRegex(BinaryBoundary,'^OWNED_BINARY_TRANSPORT_BOUNDARY$'):self.invoke()
+   self.assertEqual(self.calls[-1],(self.binary_key,self.specs['sqlite-wal']['bytes'],'Accept: application/vnd.github+json'))
+  finally:self.M=real;real.ASSET_IDS=order
  def test_stale_or_foreign_run_and_boolean_provider_identity_refuse(self):
   original=deepcopy(self.wire)
   for key,value in [('id',40365945429),('head_sha','a32f0e187cea7aa11c0fac2977d31f31315093da'),('workflow_id',1),('run_attempt',True),('conclusion','failure'),('repository',{'id':1}),('head_repository',{'id':1})]:
