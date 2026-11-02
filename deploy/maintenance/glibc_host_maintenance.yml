@@ -98,9 +98,17 @@
         - ansible.builtin.command: {argv: [/usr/bin/docker, stop, --timeout, '45', '{{ item.id }}']}
           loop: '{{ prior.containers | selectattr("running", "equalto", true) | list }}'
           timeout: 60
-    - name: Install only the six exact staged packages in one offline APT transaction
+    - name: Stage only the six admitted packages in the ordinary APT archive cache
+      ansible.builtin.copy:
+        src: '{{ item }}'
+        dest: '/var/cache/apt/archives/{{ item | basename }}'
+        remote_src: true
+        mode: '0644'
+      loop: '{{ new_debs }}'
+      when: phase == 'install'
+    - name: Install only the six exact cached packages in one offline APT transaction
       ansible.builtin.command:
-        argv: '{{ ["/usr/bin/apt-get", "--yes", "--no-download", "--no-remove", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", "install"] + new_debs }}'
+        argv: '{{ ["/usr/bin/apt-get", "--yes", "--no-download", "--no-remove", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold", "install"] + (new_debs | map("basename") | map("regex_replace", "^", "/var/cache/apt/archives/") | list) }}'
       environment: {DEBIAN_FRONTEND: noninteractive, NEEDRESTART_MODE: l}
       when: phase == 'install'
     - name: Reboot from an external controller leaving all inhibitors in place
