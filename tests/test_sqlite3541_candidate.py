@@ -4,7 +4,7 @@ from hashlib import sha3_256
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
-import ast,io,json,os,tempfile,unittest,zipfile
+import ast,io,json,os,subprocess,tempfile,unittest,zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 AREA=ROOT/'deploy/security/sqlite3541'
@@ -82,5 +82,44 @@ class CandidateSourceTests(unittest.TestCase):
   self.assertIn('SQLITE_DBCONFIG_FP_DIGITS, 0, &digits',lifecycle);self.assertIn('cycle < 4',lifecycle)
   self.assertIn('legacy_CAST_JSON_numeric_parity',verify);self.assertIn('fresh_connection_numeric_parity',verify)
   self.assertIn("sqlite3.connect(root/'candidate-backup.db')",verify);self.assertIn("connection.set_authorizer",verify)
+ def test_vendor_shell_probe_gets_a_separate_writable_source_copy(self):
+  with tempfile.TemporaryDirectory(prefix='sqlite3541-vendor-copy-',dir=ROOT/'tests')as folder:
+   root=Path(folder);source=root/'canonical';(source/'test').mkdir(parents=True)
+   (source/'test/shellB.test').write_bytes(b'PUBLIC SYNTHETIC source fixture')
+   (source/'VERSION').write_bytes(b'3.54.1\n')
+   before={str(p.relative_to(source)):p.read_bytes()for p in source.rglob('*')if p.is_file()}
+   with patch.object(B.os,'chown')as ownership:result=B.vendor_source_copy(source,root/'vendor-source')
+   self.assertEqual(result,root/'vendor-source')
+   self.assertEqual({str(p.relative_to(source)):p.read_bytes()for p in source.rglob('*')if p.is_file()},before)
+   (result/'test/probe.txt').write_bytes(b'xyzzy')
+   self.assertFalse((source/'test/probe.txt').exists())
+   self.assertEqual({call.args[0]for call in ownership.call_args_list},{result,*result.rglob('*')}-{result/'test/probe.txt'})
+   self.assertTrue(all(call.args[1:]==(10001,10001)for call in ownership.call_args_list))
+ def test_pinned_snapshot_bootstrap_keeps_TLS_verification_and_finite_retry(self):
+  from hashlib import sha256
+  bootstrap=(AREA/'bootstrap.sh').read_text();certificate=(AREA/'snapshot-public-isrg-root-x1.crt').read_bytes()
+  self.assertEqual(sha256(certificate).hexdigest(),'22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1')
+  self.assertIn('Acquire::https::CaInfo=$ca',bootstrap);self.assertIn('Acquire::Retries=3',bootstrap)
+  self.assertIn('timeout "$apt_limit" apt-get',bootstrap)
+  self.assertIn('Acquire::AllowInsecureRepositories=false',bootstrap);self.assertIn('APT::Get::AllowUnauthenticated=false',bootstrap)
+  self.assertNotIn('Verify-Peer=false',bootstrap);self.assertNotIn('Verify-Host=false',bootstrap)
+  self.assertNotIn('http://snapshot.',bootstrap)
+ def test_read_only_APT_retry_wrapper_runs_under_real_POSIX_shell(self):
+  raw=(AREA/'bootstrap.sh').read_text();start=raw.index('apt_read() {');end=raw.index('\n}',start)+2
+  with tempfile.TemporaryDirectory(prefix='sqlite3541-shell-',dir=ROOT/'tests')as folder:
+   root=Path(folder);stub=root/'timeout';stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n');stub.chmod(0o755)
+   script=raw[start:end]+'\nca=/PUBLIC-PINNED-CA\napt_read 300 -o APT::Update::Error-Mode=any update\n'
+   result=subprocess.run(['/bin/sh','-eu','-c',script],env={'PATH':str(root)},capture_output=True,timeout=3,check=True)
+   argv=result.stdout.decode().splitlines()
+   self.assertEqual(argv[:4],['300','apt-get','-o','Acquire::https::CaInfo=/PUBLIC-PINNED-CA'])
+   self.assertEqual(argv[-3:],['-o','APT::Update::Error-Mode=any','update']);self.assertEqual(result.stderr,b'')
+ def test_vendor_failure_prints_real_upstream_errors_and_preserves_primary_failure(self):
+  primary=RuntimeError('command_failed:vendor-standard.log')
+  for diagnostic in (b'PUBLIC REAL ERROR OUTPUT',RuntimeError('diagnostic_failed')):
+   with self.subTest(diagnostic=type(diagnostic).__name__),patch.object(B,'run',side_effect=[primary,diagnostic])as call:
+    with self.assertRaises(RuntimeError)as caught:B.vendor_tests(Path('/PUBLIC-SOURCE'),Path('/PUBLIC-BUILD'),Path('/PUBLIC-OUT'))
+    self.assertIs(caught.exception,primary)
+    self.assertEqual(call.call_args_list[0].args[0],['/usr/bin/make','-j2','test'])
+    self.assertEqual(call.call_args_list[1].args[0],['/usr/bin/tclsh8.6','/PUBLIC-SOURCE/test/testrunner.tcl','errors','--verbose'])
 
 if __name__=='__main__':unittest.main()

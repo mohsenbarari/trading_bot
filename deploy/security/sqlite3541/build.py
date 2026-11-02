@@ -121,6 +121,18 @@ def compatible_abi(before,after):
  need(before['soname']==after['soname']=='libsqlite3.so.0'and set(before['exports'])<=set(after['exports'])
   and before['needed']==after['needed'],'backward_abi')
 
+def vendor_source_copy(source,destination):
+ """Upstream shellB writes test/probe.txt; only its disposable copy is writable."""
+ shutil.copytree(source,destination)
+ for path in [destination,*destination.rglob('*')]:os.chown(path,10001,10001)
+ return destination
+
+def vendor_tests(source,build_directory,out):
+ try:run(['/usr/bin/make','-j2','test'],out/'vendor-standard.log',cwd=build_directory,user=True,seconds=5400,maximum=32*1024**2)
+ except RuntimeError as primary:
+  try:run(['/usr/bin/tclsh8.6',str(source/'test/testrunner.tcl'),'errors','--verbose'],out/'vendor-errors.log',cwd=build_directory,user=True,seconds=60,maximum=4*1024**2)
+  finally:raise primary
+
 def build(variant):
  profile=PROFILES[variant];need(os.geteuid()==0 and Path(__file__).resolve()==Path('/recipe/build.py'),'disposable_builder_only')
  release=dict(line.split('=',1)for line in Path('/etc/os-release').read_text().splitlines()if'='in line)
@@ -136,8 +148,9 @@ def build(variant):
  # Upstream tests retain upstream's default17. The installed production
  # library has the explicitly disclosed15-digit connection initializer.
  vendor=work/'vendor';vendor.mkdir();os.chown(vendor,10001,10001)
- run([str(source/'configure'),*configure],out/'vendor-configure.log',cwd=vendor,user=True,extra_env={'CFLAGS':common_flags})
- run(['/usr/bin/make','-j2','test'],out/'vendor-standard.log',cwd=vendor,user=True,seconds=5400,maximum=32*1024**2)
+ vendor_source=vendor_source_copy(source,work/'vendor-source')
+ run([str(vendor_source/'configure'),*configure],out/'vendor-configure.log',cwd=vendor,user=True,extra_env={'CFLAGS':common_flags})
+ vendor_tests(vendor_source,vendor,out)
  production=work/'production';production.mkdir();os.chown(production,10001,10001)
  flags=common_flags+' -DSQLITE_EXTRA_INIT_MUTEXED=sqlite3_trading_legacy_fp_init'
  run([str(source/'configure'),*configure],out/'production-configure.log',cwd=production,user=True,extra_env={'CFLAGS':flags})
@@ -202,7 +215,7 @@ def stage(variant,root):
  root=root.absolute();temporary=Path(os.environ['RUNNER_TEMP']).resolve();need(root.is_relative_to(temporary)and root!=temporary,'fresh_CI_root')
  root.mkdir(mode=0o700);context=root/'context';recipe=context/'deploy/security/sqlite3541';recipe.mkdir(parents=True);(context/'inputs').mkdir()
  original=Path(__file__).resolve().parent
- for name in('build.py','verify.py','legacy_fp.c','lifecycle.c','bootstrap.sh','Dockerfile'):
+ for name in('build.py','verify.py','legacy_fp.c','lifecycle.c','bootstrap.sh','Dockerfile','snapshot-public-isrg-root-x1.crt'):
   shutil.copyfile(original/name,recipe/name);(recipe/name).chmod(0o644)
  archive=context/'inputs/sqlite-src-3540100.zip';digest=sha3_256();count=0;end=time.monotonic()+120
  with urlopen(SOURCE_URL,timeout=60)as incoming,archive.open('xb')as output:
