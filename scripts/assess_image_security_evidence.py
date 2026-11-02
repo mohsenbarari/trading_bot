@@ -297,6 +297,51 @@ def sqlite_fts5_fixed(package,selected,inputs,product_inputs):
   and same(probe.get('sqlite_system_library'),{**library,'mapped_inode_verified':True}),'sqlite_fts5_probe')
 
 
+def verified_component_absence(row,selected,inputs,expected_scope):
+ """Only the reviewed same-image vendor-component probe replaces a DEB join.
+
+ An absent homed/Archive::Tar implementation has no vulnerable payload to
+ compare. All fixed/source-backport package paths keep their native DEB join.
+ Root still authenticates the actual container producer and these originals.
+ """
+ expected={'CVE-2026-16742':('systemd_homed',{'libsystemd0','libudev1'}),
+  'CVE-2026-9538':('archive_tar',{'perl-base'})}
+ need(row['advisory']in expected,'component_absence_advisory');component,packages=expected[row['advisory']]
+ need(row['package']in packages,'component_absence_package')
+ proofs=[proof for proof in selected.values()if proof['kind']=='component_absence'];need(len(proofs)==1,'component_absence_proof')
+ proof=proofs[0];facts=proof['observations']
+ keys(facts,{'advisory_ids','component','absent','inventory_complete','unreadable_inputs','limit_exceeded','scope'},'absence_shape')
+ need(facts['advisory_ids']==[row['advisory']]and facts['component']==component and facts['absent']is True
+  and facts['inventory_complete']is True and type(facts['unreadable_inputs'])is int and facts['unreadable_inputs']==0
+  and facts['limit_exceeded']is False and facts['scope']=='known_vendor_paths_names_and_actual_perl_inc','component_absence_facts')
+ verifier=(11840,'36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3')
+ originals=proof['original_inputs'];need(verifier in{(pin['bytes'],pin['sha256'])for pin in originals.values()},'component_absence_verifier')
+ observations=[]
+ for name in originals:
+  raw=inputs[name]
+  if raw.lstrip().startswith(b'{')and b'"security_image_component_presence/1"'in raw:
+   value=document(raw)
+   if type(value)is dict and value.get('schema')=='security_image_component_presence/1':observations.append(value)
+ need(len(observations)==1,'component_absence_original');actual=observations[0]
+ need(actual.get('image_id')==expected_scope['image_id']and actual.get('source_commit')==expected_scope['source_commit']
+  and actual.get('verifier_sha256')==verifier[1]and actual.get('scope')=='known_vendor_component_paths_and_names_plus_actual_perl_inc','component_absence_identity')
+ need(all(actual.get(key)is False for key in('directory_symlinks_followed','dynamic_runtime_code_downloads_analyzed',
+  'renamed_or_obfuscated_embedded_code_analyzed','production_mounts_or_data_used','scanner_findings_modified','security_accepted')),'component_absence_scope')
+ installed=actual.get('packages');need(type(installed)is dict and installed.get(row['package'])==row['installed_version']
+  and all(type(installed.get(name))is str and installed[name]for name in('libsystemd0','libudev1','perl-base')),'component_absence_installed')
+ inventory=actual.get('inventory');keys(inventory,{'entries_examined','roots','matches'},'component_absence_inventory')
+ need(integer(inventory['entries_examined'],1,100000)and type(inventory['roots'])is list and len(inventory['roots'])<=8
+  and all(type(name)is str and name in{'/usr','/lib','/lib64','/bin','/sbin','/app','/opt','/etc'}for name in inventory['roots'])
+  and len(set(inventory['roots']))==len(inventory['roots'])and {'/usr','/app','/opt','/etc'}<=set(inventory['roots']),'component_absence_roots')
+ matches=inventory['matches'];keys(matches,{'systemd_homed','archive_tar'},'component_absence_matches')
+ need(matches[component]==[],'component_absence_present')
+ components=actual.get('components');need(type(components)is dict and type(components.get(component))is dict
+  and components[component].get('advisory')==row['advisory']and components[component].get('component_absent')is True,'component_absence_present')
+ inc=actual.get('perl_inc');need(type(inc)is list and 0<len(inc)<=64 and all(type(name)is str and text(name)
+  and name.startswith('/')and '..'not in PurePosixPath(name).parts for name in inc)and len(set(inc))==len(inc),'component_absence_perl_inc')
+ if component=='archive_tar':need(actual.get('perl_inc_archive_tar_matches')==[],'component_absence_perl_present')
+
+
 def assess(lock_raw,scan_raw,sbom_raw,inputs,*,now,finalizer):
  """Return only after all byte bindings, row proofs and caller finals pass."""
  need(all(type(raw)is bytes and 0<len(raw)<=MAX_JSON for raw in (lock_raw,scan_raw,sbom_raw)),'input_buffer_type')
@@ -354,6 +399,8 @@ def assess(lock_raw,scan_raw,sbom_raw,inputs,*,now,finalizer):
   for name in selected:
    package=payloads.get(name,{}).get(row['package'])
    if package and all(package[k]==row[k]for k in ('package','installed_version','source_package','source_version','source_release')):native.append(package)
+  if status=='component_not_present'and not native and row['advisory']in('CVE-2026-16742','CVE-2026-9538'):
+   verified_component_absence(row,selected,inputs,lock['scope']);resolutions.append({'row':row,'disposition':status,'proofs':sorted(names)});continue
   need(len(native)==1,'native_payload_missing_or_ambiguous')
   if status=='fixed':
    candidates=[p['observations']for p in selected.values()if p['kind']=='source_backport'];valid=0

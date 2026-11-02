@@ -1353,7 +1353,8 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
    tar_hold=hold_written(path,fd,2*1024**3,binding=completion['binding'],expected_frame=completion['frame'],guard=check)
   finally:os.close(fd)
   tar_hold.check();config_id=archive_configuration(tar_hold.fd,image,before['RootFS']['Layers']);tar_hold.check()
-  inventory=collect_sqlite_inventory(root,record,before,tar_hold,evidence,evidence_checks,check)
+  # Optional CLI source-link research grants no disposition and is separate from transport.
+  inventory={'status':'UNASSESSED','collection_performed':False,'source_link_join':'MISSING','security_accepted':False}
   PHASE='ordinary_image_compression';target=root/'candidate-image.tar.gz';out=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
   class BoundedOutput:
    def __init__(self):self.count=0;self.digest=sha256()

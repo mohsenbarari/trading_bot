@@ -1,0 +1,65 @@
+name: Canonical SQLite 3.54.1 library candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sqlite3541-library-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        variant: [trixie, noble, resolute]
+    steps:
+      - name: Check out the exact reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build one matching library-only candidate on the disposable VM
+        id: build
+        timeout-minutes: 135
+        env:
+          SQLITE_VARIANT: ${{ matrix.variant }}
+        run: |
+          candidate_root="$RUNNER_TEMP/sqlite3541-$SQLITE_VARIANT-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "root=$candidate_root" >> "$GITHUB_OUTPUT"
+          python3 -I -B deploy/security/sqlite3541/build.py --stage "$SQLITE_VARIANT" --root "$candidate_root"
+
+      - name: Retain the library DEB and genuine compatibility/source/test evidence
+        if: success() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sqlite3541-library-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ steps.build.outputs.root }}/package-output/
+
+      - name: Preserve bounded source and failure evidence
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sqlite3541-library-failure-evidence-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: warn
+          path: |
+            ${{ steps.build.outputs.root }}/source-identity.json
+            ${{ steps.build.outputs.root }}/build.log

@@ -1,0 +1,49 @@
+This workflow builds one fresh SQLite 3.54.1 shared-library candidate for Debian
+13, Ubuntu 24.04 and Ubuntu 26.04. It does not install anything on a host, edit
+an existing package lock, replace f88 rollback, activate an application or grant
+security acceptance. Root reviews and dispatches the workflow from Main.
+
+Each disposable matrix VM uses the existing pinned distro image and signed,
+hash-checked 2026-10-25 repository snapshot. The canonical upstream source ZIP is
+bounded at 14,899,528 bytes and verified with the official SHA3-256. VERSION and
+manifest.uuid must identify 3.54.1 and the reviewed upstream source ID. Existing
+source/build producers are not repointed.
+
+The baseline Python process records actual distro compile options and limits.
+The builder preserves those feature and limit macros, explicitly generates the
+UPDATE/DELETE LIMIT parser from canonical sources, keeps libsqlite3.so.0 and all
+old public exports, and allows compatible new exports. Each native DEB contains
+only the shared library, its SONAME symlink and documentation. The CLI is never
+included. Native runtime dependencies come from dpkg-shlibdeps.
+
+SQLite changed default REAL-to-text precision from 15 to 17 digits. There is no
+compile-time FP_DIGITS default in this canonical source. A small static extension
+uses the upstream SQLITE_EXTRA_INIT_MUTEXED hook to register an automatic
+connection initializer, then the official SQLITE_DBCONFIG_FP_DIGITS API sets 15
+on every new connection. A failed API call refuses the connection. The mutexed
+hook avoids a race between concurrent first opens; SQLite core stays unmodified.
+
+The unmodified upstream `make test` suite runs in a separate default-17 build.
+Its result is explicitly not claimed as a production-15 test result. Production
+probes compare 2,048 deterministic CAST/quote/JSON numeric samples with the actual
+old library, exercise multiple fresh Python processes, and test eight simultaneous
+first connections in each of four shutdown/reinitialize cycles (32 total). They also exercise
+WAL snapshots, upsert, rollback/savepoints, JSON/FTS/RTree, the lookup index and
+authorizer, backup/integrity and old→new→old→new database reopen. All databases
+are new synthetic files confined to the disposable builder.
+
+Any numeric, ABI, feature, source, test or database compatibility failure blocks
+the candidate. Raw bounded logs survive in the CI build log, including failures;
+successful exports retain the exact upstream test output and package provenance.
+No vendor expected results are rewritten or skipped by this candidate. Actual
+App32, Market81, image scans and release/rollback checks remain required on the
+resulting actual images; package-only tests cannot claim those outcomes.
+
+Official references:
+
+- https://www.sqlite.org/download.html
+- https://www.sqlite.org/releaselog/3_54_1.html
+- https://www.sqlite.org/releaselog/3_53_0.html (floating-point change, item 9)
+- https://www.sqlite.org/c3ref/c_dbconfig_defensive.html#sqlitedbconfigfpdigits
+- https://www.sqlite.org/c3ref/auto_extension.html
+- https://www.sqlite.org/formatchng.html
