@@ -322,20 +322,60 @@ def run_estimator_snapshot_receiver_service(
     from .private_pipeline_foundation import atomic_json_write
 
     started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    next_compaction_at = datetime.min.replace(tzinfo=timezone.utc)
+    stopping = threading.Event()
+    failures: list[BaseException] = []
     retention: Mapping[str, int] = {}
-    try:
-        while not stop.is_set():
-            observed_at = datetime.now(timezone.utc)
-            connection = connect_snapshot_receiver(database_path)
-            try:
+
+    def accept_requests() -> None:
+        try:
+            while not stop.is_set() and not stopping.is_set():
+                server.handle_request()
+        except BaseException as exc:
+            failures.append(exc)
+            stopping.set()
+
+    def maintain_receiver() -> None:
+        nonlocal retention
+        next_compaction_at = datetime.min.replace(tzinfo=timezone.utc)
+        try:
+            while not stop.is_set() and not stopping.is_set():
+                observed_at = datetime.now(timezone.utc)
                 if observed_at >= next_compaction_at:
-                    retention = compact_snapshot_receiver(
-                        connection, now_utc=observed_at
-                    )
+                    connection = connect_snapshot_receiver(database_path)
+                    try:
+                        retention = compact_snapshot_receiver(
+                            connection, now_utc=observed_at
+                        )
+                    finally:
+                        connection.close()
                     next_compaction_at = observed_at.replace(microsecond=0) + timedelta(
                         minutes=1
                     )
+                stopping.wait(0.25)
+        except BaseException as exc:
+            failures.append(exc)
+            stopping.set()
+
+    # Neither bookkeeping nor compaction may prevent the bounded TLS workers
+    # from receiving a connection. Each owner opens and closes its own SQLite
+    # connection; only complete retention results are shared with health.
+    acceptor = threading.Thread(
+        target=accept_requests, name="snapshot-receiver-accept", daemon=False
+    )
+    maintenance = threading.Thread(
+        target=maintain_receiver, name="snapshot-receiver-maintenance", daemon=False
+    )
+    started_threads: list[threading.Thread] = []
+    first_health = not stop.is_set()
+    try:
+        for thread in (acceptor, maintenance):
+            thread.start()
+            started_threads.append(thread)
+        while first_health or (not stop.is_set() and not stopping.is_set()):
+            first_health = False
+            observed_at = datetime.now(timezone.utc)
+            connection = connect_snapshot_receiver(database_path)
+            try:
                 metrics = snapshot_receiver_metrics(
                     connection,
                     now_utc=observed_at,
@@ -345,6 +385,8 @@ def run_estimator_snapshot_receiver_service(
                 )
             finally:
                 connection.close()
+            if failures:
+                break
             health_status = _health_status(metrics)
             atomic_json_write(
                 state_directory / "health.json",
@@ -355,6 +397,8 @@ def run_estimator_snapshot_receiver_service(
                     "release_sha": release_sha,
                     "pid": os.getpid(),
                     "started_at_utc": started,
+                    # This is the observation time, never completion of a slow
+                    # metrics query or file write presented as fresh evidence.
                     "updated_at_utc": observed_at.isoformat().replace("+00:00", "Z"),
                     "status": health_status,
                     "private_transport_only": True,
@@ -363,9 +407,18 @@ def run_estimator_snapshot_receiver_service(
                     **metrics,
                 },
             )
-            server.handle_request()
+            stopping.wait(0.25)
     finally:
-        server.server_close()
+        stopping.set()
+        try:
+            for thread in started_threads:
+                thread.join()
+        finally:
+            server.server_close()
+    if failures:
+        raise EstimatorSnapshotReceiverServiceError(
+            "snapshot_receiver_background_failed"
+        ) from failures[0]
     return 0
 
 
