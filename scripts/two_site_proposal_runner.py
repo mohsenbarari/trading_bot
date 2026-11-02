@@ -3477,6 +3477,35 @@ _FRAMED_INPUT = "FULL_INPUT_ACK_V1"
 _FRAMED_MANIFEST = "input-framing.json"
 
 
+class _FramedQuotaError(ProposalError):
+    """Existing strict quota evidence from a rejected real ERROR turn only."""
+
+    def __init__(self, evidence: dict) -> None:
+        super().__init__("provider quota observed; no replay authority")
+        self.quota_evidence = dict(evidence)
+
+
+def _raise_framed_terminal_error(events: list[dict], init: dict, start: int,
+                                 model: str) -> None:
+    """Classify an ERROR-only real turn, never a success/proof transcript."""
+    turn = events[start:]
+    if turn and turn[0] is init:
+        turn = turn[1:]
+    projection = "\n".join(json.dumps(e, ensure_ascii=False) for e in [init, *turn]) + "\n"
+    try:
+        # ERROR is already guarded by the caller, so business parsing is unreachable.
+        _parse_stream(projection, {}, {}, "worker", expected_model=model)
+    except ProposalError as error:
+        quota = classify_gemini_quota_stream(projection, model, datetime.now(timezone.utc))
+        if quota is not None:
+            raise _FramedQuotaError(quota) from None
+        if isinstance(error, RetryableProviderSessionError):
+            # This path previously blocked; classification grants no new auto-retry.
+            raise ProposalError(str(error)) from None
+        raise
+    raise ProposalError("framed ERROR unexpectedly passed legacy rejection")
+
+
 def _input_ack(index: int, count: int, token: str) -> dict:
     # This exact transport-only object fits BOTH unchanged role schemas.
     return {"status": "BLOCKED", "summary": f"{_FRAMED_INPUT}:{index}/{count}:{token}",
@@ -3564,7 +3593,7 @@ def _framed_stream_projection(raw: str, manifest: dict, model: str, session: str
         if kind != "result":
             continue
         envelope = event.get("result")
-        if (init is None or type(envelope) is not dict or envelope.get("status") != "SUCCESS"
+        if (init is None or type(envelope) is not dict
                 or envelope.get("conversation_id") != session or envelope.get("denied_actions")):
             raise ProposalError("framed terminal is not successful")
         terminals += 1
@@ -3572,6 +3601,18 @@ def _framed_stream_projection(raw: str, manifest: dict, model: str, session: str
             raise ProposalError("framed cumulative turn count mismatch")
         if terminals > manifest["frame_count"]:
             raise ProposalError("extra framed terminal")
+        if envelope.get("status") == "ERROR":
+            # Keep the full raw transcript on disk; this projection is error-only.
+            for item in events[start:pos + 1]:
+                for obj in (item, item.get("step_update")):
+                    if isinstance(obj, dict) and (
+                            any(k in obj for k in ("tool_name", "tool_info", "subagent_info"))
+                            or obj.get("step_type") in {"tool", "subagent"}
+                            or obj.get("denied_actions")):
+                        raise ProposalError("tool or denial invalidates framed ERROR")
+            _raise_framed_terminal_error(events[:pos + 1], init, start, model)
+        if envelope.get("status") != "SUCCESS":
+            raise ProposalError("framed terminal is not successful")
         if terminals < manifest["frame_count"]:
             if "structured_output" in envelope:
                 value = envelope["structured_output"]
@@ -3661,6 +3702,8 @@ def _capture_framed_process(process: subprocess.Popen, wires: list[bytes], manif
                         if type(event) is not dict:
                             raise ProposalError("framed event must be an object")
                         if event.get("event") == "result":
+                            if offsets[active] != len(wires[active]):
+                                raise ProposalError("framed terminal preceded its complete input")
                             count, _ = _framed_stream_projection(accepted.decode("utf-8"), manifest,
                                                                  model, session, complete=False)
                             if count != active + 1 or offsets[active] != len(wires[active]):
@@ -4077,6 +4120,11 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                                 pipe.close()
                         except BaseException:
                             pass
+                    if isinstance(capture_error, _FramedQuotaError):
+                        if cli_identity(disposable_cli) != initial_cli_identity:
+                            first_primary = ProposalError("CLI identity changed during generation")
+                            raise first_primary from None
+                        meta["quota_evidence"] = dict(capture_error.quota_evidence)
                     raise
                 if capture_outcome is not None:
                     if (type(capture_outcome) is not dict
