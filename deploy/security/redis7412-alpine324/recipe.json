@@ -12,8 +12,8 @@
   "base_platform": "linux/amd64",
   "base_digest": "sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f",
   "Dockerfile": {
-    "bytes": 4352,
-    "sha256": "5903bab69ad84e82f3b1ad71c9401b89892befa719031884c75711418fbcacf8"
+    "bytes": 4526,
+    "sha256": "73f4d3461f66d1839b0a4405e2b8ddf7b61a91fa713a488dbb98baeea889139c"
   },
   "entrypoint": {
     "bytes": 714,
@@ -25,7 +25,8 @@
   "upstream_source_and_build_flags_unchanged": true,
   "source_deltas": [
     "FROM alpine:3.21 -> FROM alpine:3.24.1@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f",
-    "RUN apk upgrade --no-cache immediately after FROM; base package DB proved old vulnerable OS revisions"
+    "RUN apk upgrade --no-cache immediately after FROM; base package DB proved old vulnerable OS revisions",
+    "Exact owned compatibility symlink /usr/bin/setpriv -> /bin/setpriv after apk setpriv install; official entrypoint and Redis source/build flags unchanged"
   ],
   "base_installed_vulnerable_revisions": {
     "apk-tools": "3.0.6-r0",

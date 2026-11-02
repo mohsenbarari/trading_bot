@@ -1,7 +1,8 @@
 """Finite normal-Market producer for the unchanged strict evidence assessor.
 
-Pure normalization of authenticated originals. The normal driver retains their
-readers and supplies actual closure. No old App gate/probe is made fresh.
+Pure normalization of authenticated originals. The caller retains their readers
+and supplies actual closure. App builds require their genuine fresh32 and export;
+Market builds retain their genuine81 requirements. Old observations stay old.
 """
 from hashlib import sha256
 from types import ModuleType
@@ -75,9 +76,17 @@ def prepare(A,R,originals,*,now):
  """No observation DTO, waiver, profile selector or guessed successful gate."""
  A.need(type(originals)is dict and all(type(name)is str and A.NAME.fullmatch(name)and type(raw)is bytes and 0<len(raw)<=A.MAX_JSON for name,raw in originals.items())
   and len(originals)<110 and sum(map(len,originals.values()))<=A.MAX_TOTAL-4*1024**2,'normal_original_inputs')
- inputs=dict(originals);build=A.document(inputs[PRODUCT['build']]);receipt=build['source_inputs']
- scope={'image_id':build['image_id'],'platform':'linux/amd64','source_commit':receipt['release_commit'],'source_tree':receipt['release_tree'],
-  'input_signature':build['two_git_input_signature'],'build_run_id':build['run_id'],'build_run_attempt':build['run_attempt']};A.scope(scope)
+ inputs=dict(originals);build=A.document(inputs[PRODUCT['build']]);app=build.get('schema')=='canonical_app_image_build/1'
+ if app:
+  A.need(build.get('platform')=='linux/amd64'and build.get('activation_performed')is False and build.get('market_roles_built')is False
+   and not any(key in build for key in('source_inputs','historical81','two_git_input_signature')),'normal_app_product')
+  scope={'image_id':build['image_id'],'platform':'linux/amd64','source_commit':build['source_commit'],'source_tree':build['source_tree'],
+   'input_signature':build['input_signature'],'build_run_id':int(build['run_id']),'build_run_attempt':int(build['run_attempt'])}
+ else:
+  receipt=build['source_inputs']
+  scope={'image_id':build['image_id'],'platform':'linux/amd64','source_commit':receipt['release_commit'],'source_tree':receipt['release_tree'],
+   'input_signature':build['two_git_input_signature'],'build_run_id':build['run_id'],'build_run_attempt':build['run_attempt']}
+ A.scope(scope)
  scan_raw=inputs['scan.json'];sbom_raw=inputs['sbom.json'];rows,counts=A.findings(A.document(scan_raw),A.document(sbom_raw),scope)
  expected,bundle=R.prepare_request(build,inputs['runtime-vector.json'],inputs['sqlite-lock.json'],inputs['component-verifier.py'],inputs['acl-verifier.py'])
  runtime=A.document(inputs['runtime-observation.json']);A.need(runtime.get('schema')=='normal_market_same_image_runtime_observation/1'
@@ -87,17 +96,36 @@ def prepare(A,R,originals,*,now):
  A.need(A.same(A.document(inputs['component-original.json']),runtime['component_presence']),'normal_component_projection')
  export=A.document(inputs['image-export.json']);factual=A.document(inputs['factual-evidence.json']);sqlite=A.document(inputs['sqlite-probe.json']);lock_sqlite=A.document(inputs['sqlite-lock.json'])
  A.need(export.get('status')=='exported_not_accepted'and export.get('image_id')==export.get('image_config_id')==scope['image_id']
-  and export.get('release_commit')==scope['source_commit']and export.get('release_tree')==scope['source_tree']
-  and export.get('two_git_input_signature')==scope['input_signature']and export.get('raw_counts')==counts
+  and export.get('source_commit'if app else'release_commit')==scope['source_commit']and export.get('source_tree'if app else'release_tree')==scope['source_tree']
+  and export.get('input_signature'if app else'two_git_input_signature')==scope['input_signature']and export.get('raw_counts')==counts
   and export.get('reports')=={'vulnerabilities.json':pin(scan_raw),'sbom.cdx.json':pin(sbom_raw)}
   and export.get('security_accepted')is False,'normal_export_gate')
- A.need(factual.get('image_id')==scope['image_id']and factual.get('release_commit')==scope['source_commit']
-  and factual.get('two_git_input_signature')==scope['input_signature']and factual.get('historical_business_tests')==81
-  and factual.get('complete_ci_controller_payload')is True and factual.get('raw_counts')==counts
-  and factual.get('security_accepted')is False,'normal_factual_gate')
- historical=build['historical81'];A.need(historical.get('source_and_output_finalizers_completed')is True
-  and historical.get('actual_same_candidate_image_verified')is True and historical.get('actual_profile_containers_removed')==3
-  and historical.get('actual_outer_authentication_and_cleanup_still_required')is False,'normal_cleanup_gate')
+ if app:
+  A.need(factual.get('schema')=='canonical_app_actual_unchanged32/1'and factual.get('image_id')==scope['image_id']
+   and factual.get('assertions_changed')is False and factual.get('security_accepted')is False,'normal_app_factual_gate')
+  A.need(factual.get('driver')=={'bytes':68163,'sha256':'b2c958060d176c0098b86a44d0dc225d4494023120b3253239bef9e2f3f2acb2'}
+   and factual.get('adapter')=={'bytes':57553,'sha256':'9de2b86dedbb773351b042bcd3177ebb41a88272cfd76e13f24de5ece6d49a25'},'normal_app_unchanged32_source')
+  actual=factual.get('actual');A.need(type(actual)is dict and actual.get('image_config_id')==scope['image_id']and actual.get('status')=='passed'
+   and A.same(actual.get('runtime'),{'expected':8,'run':8,'passed':8,'failures':[]})
+   and A.same(actual.get('components'),{'expected':24,'run':24,'passed':24,'failures':[],'errors':0,'skipped':0})
+   and A.same(actual.get('migration'),{'invocation_attempted':True,'child_completed':True,'return_code':0})
+   and actual.get('runtime_cleanup_failures')==[]and actual.get('app_source_masked')is False
+   and actual.get('production_config_guards_active')is True and actual.get('real_provider_used')is False
+   and actual.get('security_accepted')is False and actual.get('full_matrix_accepted')is False,'normal_app_unchanged32_gate')
+  cleanup=A.document(inputs['app-cleanup.json']);A.need(cleanup.get('owned_cleanup_complete')is True
+   and cleanup.get('closed_causes')==[]and cleanup.get('primary_failure_retained')is False,'normal_app_cleanup_gate')
+  A.need(export.get('schema')=='canonical_app_image_export/1'and export.get('full_config_compared_in_ram')is True
+   and export.get('rootfs')==build.get('rootfs')and export.get('activation_performed')is False
+   and export.get('native_abi_checks',{}).get('completed_with_build')is True
+   and export.get('inputs')=={name:pin(inputs[key])for name,key in(('source-identity.json',PRODUCT['source']),('input-manifest.json',PRODUCT['manifest']),('image-build.json',PRODUCT['build']))},'normal_app_source_archive_daemon')
+ else:
+  A.need(factual.get('image_id')==scope['image_id']and factual.get('release_commit')==scope['source_commit']
+   and factual.get('two_git_input_signature')==scope['input_signature']and factual.get('historical_business_tests')==81
+   and factual.get('complete_ci_controller_payload')is True and factual.get('raw_counts')==counts
+   and factual.get('security_accepted')is False,'normal_factual_gate')
+  historical=build['historical81'];A.need(historical.get('source_and_output_finalizers_completed')is True
+   and historical.get('actual_same_candidate_image_verified')is True and historical.get('actual_profile_containers_removed')==3
+   and historical.get('actual_outer_authentication_and_cleanup_still_required')is False,'normal_cleanup_gate')
  selected_sqlite=lock_sqlite['profiles']['trixie']if lock_sqlite.get('schema')=='sqlite3541_qualified_packages/1'else lock_sqlite
  selected_version=selected_sqlite['version']if 'version'in selected_sqlite else selected_sqlite['package']['version']
  A.need(sqlite.get('status')=='PASS'and sqlite.get('sqlite_package')==selected_version
@@ -156,9 +184,9 @@ def prepare(A,R,originals,*,now):
     'inventory_complete':True,'unreadable_inputs':0,'limit_exceeded':False,'scope':'known_vendor_paths_names_and_actual_perl_inc'},
     ['runtime-observation.json','component-original.json','runtime-collector.py','component-verifier.py'])
  gates=[]
- for name,gate in(('compatibility','normal_market_81_unchanged'),('cleanup','owned_cleanup'),('admission','normal_market_source_archive_daemon'),('sqlite','sqlite_native_installed')):
+ for name,gate in(('compatibility','canonical_32_unchanged'if app else'normal_market_81_unchanged'),('cleanup','owned_cleanup'),('admission','canonical_source_archive_daemon'if app else'normal_market_source_archive_daemon'),('sqlite','sqlite_native_installed')):
   name=name+'-gate-proof.json';proof(name,'mandatory_gate',{'passed':True,'failures':0,'skipped':0,'scope':gate},
-   ['factual-evidence.json','image-export.json','runtime-observation.json','sqlite-probe.json','runtime-collector.py']);gates.append(name)
+   ['factual-evidence.json','image-export.json','runtime-observation.json','sqlite-probe.json','runtime-collector.py']+(['app-cleanup.json']if app else[]));gates.append(name)
  rules=[]
  for row in rows:
   cve=row['advisory'];selected=['runtime-payload-proof.json'];disposition='fixed'

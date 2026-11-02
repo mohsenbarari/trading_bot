@@ -66,9 +66,17 @@ def prepare_request(build,vector_raw,sqlite_lock_raw,component_raw,acl_raw):
         expected_files=[{'path':library['path'],'bytes':library['bytes'],'sha256':library['sha256'],**{key:old[key]for key in('mode','uid','gid')}}])
     need(len(expected)==20,'runtime_expected_packages')
     paths=[file['path']for package in expected for file in package['expected_files']]
-    receipt=build['source_inputs']
-    bundle={'image_id':build['image_id'],'source_commit':receipt['release_commit'],'source_tree':receipt['release_tree'],
-        'input_signature':build['two_git_input_signature'],'run_id':build['run_id'],'run_attempt':build['run_attempt'],
+    app=build.get('schema')=='canonical_app_image_build/1'
+    if app:
+        need(build.get('platform')=='linux/amd64'and build.get('activation_performed')is False
+            and build.get('market_roles_built')is False and not any(key in build for key in('source_inputs','historical81','two_git_input_signature')),'runtime_app_product')
+        commit,tree,signature=build['source_commit'],build['source_tree'],build['input_signature']
+        run,attempt=int(build['run_id']),int(build['run_attempt'])
+    else:
+        receipt=build['source_inputs'];commit,tree,signature=receipt['release_commit'],receipt['release_tree'],build['two_git_input_signature']
+        run,attempt=build['run_id'],build['run_attempt']
+    bundle={'image_id':build['image_id'],'source_commit':commit,'source_tree':tree,
+        'input_signature':signature,'run_id':run,'run_attempt':attempt,
         'vector_sha256':sha256(vector_raw).hexdigest(),'paths':sorted(paths),'packages':sorted(item['package']for item in expected),
         'component_source':component_raw.decode(),'component_sha256':sha256(component_raw).hexdigest(),'acl_source':acl_raw.decode(),'acl_sha256':sha256(acl_raw).hexdigest()}
     return expected,request(bundle)

@@ -248,7 +248,7 @@ hash_file_or_dir() {
     def test_workflow_exact_scanner_and_phase_order_do_not_activate(self):
         value=yaml.safe_load((ROOT/'.github/workflows/canonical-app-image.yml').read_text());job=value['jobs']['candidate'];steps=job['steps']
         self.assertEqual(value['permissions'],{'contents':'read','actions':'read'});self.assertEqual(job['if'],"github.ref == 'refs/heads/main'")
-        token=[s for s in steps if 'GH_TOKEN' in s.get('env',{})];self.assertEqual([s.get('id') for s in token],['prepare'])
+        token=[s for s in steps if 'GH_TOKEN' in s.get('env',{})];self.assertEqual([s.get('id') for s in token],['prepare','app32']);self.assertEqual(token[1]['if'],'inputs.canonical3541')
         scans=[s for s in steps if s.get('uses','').startswith('aquasecurity/trivy-action@')]
         self.assertEqual(len(scans),2)
         for scan in scans:
@@ -260,7 +260,10 @@ hash_file_or_dir() {
         ids={s['id']:i for i,s in enumerate(steps) if 'id' in s}
         self.assertLess(ids['prepare'],ids['build']);self.assertLess(ids['build'],ids['finalize'])
         uploads=[i for i,s in enumerate(steps) if s.get('uses')=='actions/upload-artifact@v4']
-        self.assertEqual(len(uploads),2);self.assertLess(ids['finalize'],min(uploads));self.assertLess(max(uploads),len(steps)-1)
+        self.assertEqual(len(uploads),4);self.assertLess(ids['finalize'],min(uploads))
+        ordinary=[i for i in uploads if steps[i]['with']['name'].startswith(('canonical-app-image-','canonical-app-evidence-'))]
+        self.assertEqual(len(ordinary),2);self.assertLess(max(ordinary),ids['security_gate'])
+        assessment=steps[uploads[-1]];self.assertIn('always()',assessment['if']);self.assertIn('inputs.canonical3541',assessment['if']);self.assertGreater(uploads[-1],ids['security_gate'])
         for step in steps:
             text=step.get('run','')
             if "<<'PY'" in text:ast.parse(text.split("<<'PY'\n",1)[1].rsplit('\nPY',1)[0])

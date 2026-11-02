@@ -22,7 +22,7 @@ class Tests(unittest.TestCase):
   self.assertIn('ARG REDIS_DOWNLOAD_SHA='+M.SOURCE_SHA,dockerfile);self.assertIn('echo "$REDIS_DOWNLOAD_SHA *redis.tar.gz" | sha256sum -c -',dockerfile)
   self.assertIn('export BUILD_TLS=yes',dockerfile);self.assertIn('addgroup -S -g 1000 redis',dockerfile);self.assertIn('adduser -S -G redis -u 999 redis',dockerfile)
   self.assertEqual(sha256((AREA/'docker-entrypoint.sh').read_bytes()).hexdigest(),M.ENTRYPOINT);self.assertTrue((AREA/'docker-entrypoint.sh').stat().st_mode&0o111);self.assertIn('test -x /usr/local/bin/docker-entrypoint.sh',(AREA/'build_candidate.py').read_text())
-  restored=dockerfile.replace('FROM '+M.BASE+'\n','FROM alpine:3.21\n',1).replace('\n# Current signed Alpine3.24 security revisions; Redis sources/flags stay official.\nRUN apk upgrade --no-cache\n','',1)
+  restored=dockerfile.replace(M.SETPRIV_COMPAT,'',1).replace('FROM '+M.BASE+'\n','FROM alpine:3.21\n',1).replace('\n# Current signed Alpine3.24 security revisions; Redis sources/flags stay official.\nRUN apk upgrade --no-cache\n','',1)
   recipe=__import__('json').loads((AREA/'recipe.json').read_bytes());self.assertEqual(sha256(restored.encode()).hexdigest(),recipe['original_Dockerfile']['sha256'])
  def test_runtime_metadata_requires_actual_supported_OS_exact_redis_and_uid_gid(self):
   rows=['Redis server v=7.4.12 sha=00000000:0 malloc=jemalloc bits=64','3.24.1','999','1000',M.ENTRYPOINT,'musl-1.2.6-r3']
@@ -67,5 +67,89 @@ class Tests(unittest.TestCase):
  def test_host_execution_is_refused_before_any_Docker_call(self):
   with patch.object(M.os,'geteuid',return_value=0),patch.object(M,'run',side_effect=AssertionError('Docker must not run')):
    with self.assertRaisesRegex(RuntimeError,'hosted_Main_only'):M.inputs(Path('/UNUSED'))
+
+ def startup_fixture(self,root,*,bad_uid=False,bad_cleanup=False,missing_entrypoint=False,bad_shutdown=False):
+  # Inert CLI wire only. Real authenticated normal-entrypoint execution is
+  # required by the hosted build before any scanner/export step can run.
+  source={'commit':'a'*40,'run_id':123,'run_attempt':1};cid='c'*64;calls=[]
+  def command(argv,log,**kwargs):
+   calls.append(argv);name=log.name;value=''
+   if name=='startup-create.log':value=cid
+   elif name=='startup-config.log':
+    value=__import__('json').dumps({'id':cid,'image':IID,'entrypoint':['docker-entrypoint.sh'],
+     'cmd':['redis-server','--save','','--appendonly','no','--requirepass',M.PUBLIC_AUTH],'user':''})
+   elif name.startswith('startup-ping-'):
+    if missing_entrypoint:
+     log.write_text('');raise RuntimeError('command_nonzero:'+name)
+    value='PONG'
+   elif name=='startup-unauthenticated.log':value='UNAUTHENTICATED_REFUSED'
+   elif name=='startup-process-identity.log':value='0 0 0 0\n1000 1000 1000 1000'if bad_uid else'999 999 999 999\n1000 1000 1000 1000'
+   elif name=='startup-set.log':value='OK'
+   elif name=='startup-get.log':value='public-synthetic-fixture'
+   elif name=='startup-del.log':value='1'
+   elif name=='startup-dbsize.log':value='0'
+   elif name=='startup-cleanup-before.log':value=cid
+   elif name=='startup-cleanup-identity.log':
+    value=__import__('json').dumps({'id':cid,'name':'/redis7412-startup-123-1','image':IID,'owner':'FOREIGN'if bad_cleanup else'source-commit'})
+    value=value.replace('source-commit',source['commit'])
+   elif name=='startup-exit.log':value='1'if bad_shutdown else'0'
+   log.write_text(value+'\n'if value else'')
+  return source,calls,command
+
+ def test_normal_entrypoint_gate_requires_real_server_identity_auth_and_owned_shutdown(self):
+  with tempfile.TemporaryDirectory()as folder:
+   root=Path(folder);(root/'reports').mkdir();source,calls,command=self.startup_fixture(root)
+   with patch.object(M,'run',side_effect=command):result=M.normal_entrypoint_startup(root,IID,source)
+   self.assertEqual(result['status'],'PASS');self.assertEqual(result['actual_server_uid'],999);self.assertEqual(result['actual_server_gid'],1000)
+   self.assertTrue(result['authenticated_ping']and result['unauthenticated_refused']and result['synthetic_set_get_delete']and result['owned_cleanup_proven'])
+   self.assertEqual(result['actual_server_shutdown_exit'],0)
+   create=next(row for row in calls if row[1]=='create');self.assertNotIn('--entrypoint',create);self.assertIn('redis-server',create)
+   self.assertIn(['stop','--timeout','5','c'*64],[row[1:]for row in calls]);self.assertIn(['rm','--force','--volumes','c'*64],[row[1:]for row in calls])
+   self.assertFalse(result['production_data_used']);self.assertFalse(result['security_accepted'])
+
+ def test_wrong_actual_server_UID_refuses_and_cleanup_is_still_required(self):
+  with tempfile.TemporaryDirectory()as folder:
+   root=Path(folder);(root/'reports').mkdir();source,calls,command=self.startup_fixture(root,bad_uid=True)
+   with patch.object(M,'run',side_effect=command),self.assertRaisesRegex(RuntimeError,'normal_startup_process_identity'):M.normal_entrypoint_startup(root,IID,source)
+   self.assertFalse((root/'reports/normal-entrypoint-startup.json').exists())
+   cleanup=__import__('json').loads((root/'reports/normal-entrypoint-cleanup.json').read_bytes());self.assertTrue(cleanup['owned_cleanup_proven']);self.assertTrue(cleanup['primary_failure_retained'])
+   self.assertTrue(any(row[1:3]==['rm','--force']for row in calls))
+
+ def test_original_missing_setpriv_startup_cannot_pass_version_only_metadata(self):
+  with tempfile.TemporaryDirectory()as folder:
+   root=Path(folder);(root/'reports').mkdir();source,calls,command=self.startup_fixture(root,missing_entrypoint=True)
+   with patch.object(M,'run',side_effect=command),patch.object(M.time,'sleep'),self.assertRaisesRegex(RuntimeError,'normal_startup_not_ready'):M.normal_entrypoint_startup(root,IID,source)
+   self.assertFalse((root/'reports/normal-entrypoint-startup.json').exists());self.assertTrue(any(row[1:3]==['rm','--force']for row in calls))
+
+ def test_actual_nonzero_server_shutdown_cannot_publish_clean_startup_PASS(self):
+  with tempfile.TemporaryDirectory()as folder:
+   root=Path(folder);(root/'reports').mkdir();source,calls,command=self.startup_fixture(root,bad_shutdown=True)
+   with patch.object(M,'run',side_effect=command),self.assertRaisesRegex(RuntimeError,'normal_startup_shutdown_nonzero'):M.normal_entrypoint_startup(root,IID,source)
+   self.assertFalse((root/'reports/normal-entrypoint-startup.json').exists());self.assertTrue(any(row[1:3]==['rm','--force']for row in calls))
+
+ def test_foreign_cleanup_identity_is_never_removed_and_primary_error_survives(self):
+  with tempfile.TemporaryDirectory()as folder:
+   root=Path(folder);(root/'reports').mkdir();source,calls,command=self.startup_fixture(root,bad_uid=True,bad_cleanup=True)
+   with patch.object(M,'run',side_effect=command),self.assertRaises(BaseExceptionGroup)as raised:M.normal_entrypoint_startup(root,IID,source)
+   self.assertEqual(len(raised.exception.exceptions),2);self.assertFalse(any(row[1]=='rm'for row in calls))
+   self.assertFalse(__import__('json').loads((root/'reports/normal-entrypoint-cleanup.json').read_bytes())['owned_cleanup_proven'])
+
+ def test_exact_owned_symlink_is_the_only_additional_official_recipe_delta(self):
+  dockerfile=(AREA/'Dockerfile').read_text();recipe=__import__('json').loads((AREA/'recipe.json').read_text());M.recipe_contract(dockerfile,recipe)
+  self.assertIn('test -x /bin/setpriv; test ! -e /usr/bin/setpriv; ln -s /bin/setpriv /usr/bin/setpriv',dockerfile)
+  with self.assertRaisesRegex(RuntimeError,'recipe_delta'):M.recipe_contract(dockerfile.replace(M.SETPRIV_COMPAT,''),recipe)
+  altered=dockerfile+'\nRUN echo unreviewed\n';changed=deepcopy(recipe);changed['Dockerfile']={'bytes':len(altered.encode()),'sha256':sha256(altered.encode()).hexdigest()}
+  with self.assertRaisesRegex(RuntimeError,'official_recipe_changed'):M.recipe_contract(altered,changed)
+
+ def test_hosted_build_requires_authenticated_startup_before_scans_and_export(self):
+  tree=ast.parse((AREA/'build_candidate.py').read_text());build=next(node for node in tree.body if isinstance(node,ast.FunctionDef)and node.name=='build')
+  start=next(node.lineno for node in ast.walk(build)if isinstance(node,ast.Call)and isinstance(node.func,ast.Name)and node.func.id=='normal_entrypoint_startup')
+  saved=next(node.lineno for node in ast.walk(build)if isinstance(node,ast.Call)and isinstance(node.func,ast.Name)and node.func.id=='save'and any(isinstance(value,ast.Constant)and value.value=='build.json'for value in ast.walk(node)))
+  self.assertLess(start,saved)
+  finalize=next(node for node in tree.body if isinstance(node,ast.FunctionDef)and node.name=='finalize')
+  text=ast.get_source_segment((AREA/'build_candidate.py').read_text(),finalize);self.assertIn("'normal_startup_required'",text)
+  self.assertLess(text.index("'normal_startup_required'"),text.index('counts=assess('))
+  steps=yaml.safe_load((ROOT/'.github/workflows/redis7412-supported-alpine.yml').read_text())['jobs']['redis7412']['steps'];ids=[row.get('id')for row in steps]
+  self.assertLess(ids.index('build'),ids.index('scan'));self.assertLess(ids.index('build'),ids.index('export'))
 
 if __name__=='__main__':unittest.main()

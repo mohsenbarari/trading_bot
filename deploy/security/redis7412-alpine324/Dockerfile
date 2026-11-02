@@ -17,6 +17,8 @@ RUN set -eux; \
 # we need setpriv package as busybox provides very limited functionality
 		setpriv \
 	;
+# Alpine3.24 installs setpriv in /bin; keep the official entrypoint path.
+RUN set -eux; test -x /bin/setpriv; test ! -e /usr/bin/setpriv; ln -s /bin/setpriv /usr/bin/setpriv
 ENV REDIS_VERSION=7.4.12
 ARG REDIS_DOWNLOAD_URL=https://github.com/redis/redis/archive/refs/tags/7.4.12.tar.gz
 ARG REDIS_DOWNLOAD_SHA=324ab63d55c607639b419f547b213c62ae39ff50e09870e450a11c272567b84f
