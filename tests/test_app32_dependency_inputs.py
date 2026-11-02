@@ -32,8 +32,8 @@ class InputsTests(unittest.TestCase):
                 'archive':{'uncompressed_bytes':7}}
         self.ctx=SimpleNamespace(D=SimpleNamespace(PROFILES=self.specs),end=time.monotonic()+60)
 
-    def row(self,profile):
-        raw=b'public image graph';compressed=gzip.compress(raw,mtime=0)
+    def row(self,profile,payload=b'public image graph'):
+        raw=payload;compressed=gzip.compress(raw,mtime=0)
         archive={'format':'docker-archive+gzip','name':'candidate-image.tar.gz',
             'size_bytes':len(compressed),'sha256':sha256(compressed).hexdigest(),'uncompressed_bytes':len(raw)}
         description=M.descriptor(profile,self.specs[profile],archive)
@@ -101,6 +101,41 @@ class InputsTests(unittest.TestCase):
         path=self.root/'image.zip';path.write_bytes(bytes([raw[0]^1])+raw[1:]);evidence=self.root/'evidence.zip';evidence.write_bytes(b'postgres')
         with self.assertRaisesRegex(RuntimeError,'^app32_transport_pin$'):
             M.admit(ctx,None,'postgres',self.root/'admission',path,evidence,row)
+        ctx.D.validate_archive.assert_not_called()
+
+    def test_transport_checks_original_whole_guards_once_before_and_after_copy(self):
+        ctx=self.admission_context();row,raw=self.row('postgres')
+        path=self.root/'image.zip';path.write_bytes(raw);evidence=self.root/'evidence.zip';evidence.write_bytes(b'postgres')
+        folder=self.root/'admission';states=[]
+        def guard():
+            compressed=folder/'candidate-image.tar.gz'
+            states.append(compressed.stat().st_size if compressed.exists()else None)
+        ctx.check=Mock(side_effect=guard)
+        M.admit(ctx,None,'postgres',folder,path,evidence,row)
+        self.assertEqual(states,[None,row['descriptor']['archive']['size_bytes']])
+        self.assertEqual(ctx.check.call_count,2)
+
+    def test_multiple_transport_chunks_keep_two_whole_guards_and_per_read_deadline_checks(self):
+        ctx=self.admission_context()
+        payload=b''.join(sha256(str(i).encode()).digest()for i in range(8192))
+        row,raw=self.row('postgres',payload);self.assertGreater(row['descriptor']['archive']['size_bytes'],3*65536)
+        path=self.root/'image.zip';path.write_bytes(raw);evidence=self.root/'evidence.zip';evidence.write_bytes(b'postgres')
+        ctx.D.validate_archive=Mock(return_value={'physical_graph_closed':True})
+        ctx.end=100
+        with patch.object(M.time,'monotonic',return_value=1)as clock:
+            tar,_,_=M.admit(ctx,None,'postgres',self.root/'admission',path,evidence,row)
+        self.assertEqual(tar.read_bytes(),payload);self.assertEqual(ctx.check.call_count,2)
+        chunks=(row['descriptor']['archive']['size_bytes']+65535)//65536
+        self.assertEqual(clock.call_count,2*(chunks+1))
+
+    def test_transport_checks_original_deadline_before_each_read_without_mutating_it(self):
+        ctx=self.admission_context();row,raw=self.row('postgres')
+        path=self.root/'image.zip';path.write_bytes(raw);evidence=self.root/'evidence.zip';evidence.write_bytes(b'postgres')
+        ctx.end=1234.5
+        with patch.object(M.time,'monotonic',return_value=1234.5),self.assertRaisesRegex(RuntimeError,'^app32_transport_deadline$'):
+            M.admit(ctx,None,'postgres',self.root/'admission',path,evidence,row)
+        self.assertEqual(ctx.end,1234.5)
+        self.assertEqual((self.root/'admission/candidate-image.tar.gz').stat().st_size,0)
         ctx.D.validate_archive.assert_not_called()
 
     def test_prepare_fetches_exactly_four_retained_assets_then_authenticates_both_graphs(self):

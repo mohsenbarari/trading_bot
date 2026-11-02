@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import time
 import zipfile
 
 LOCK='deploy/security/app32-dependencies.lock.json'
@@ -19,7 +20,7 @@ EVIDENCE_IDS={'postgres':12579072479,'redis':12579152538}
 MAX_ZIP=512*1024**2
 MAX_JSON=65536
 PUBLIC_CODES=frozenset(('app32_inventory','app32_transport_pin','app32_transport_inventory',
-    'app32_transport_descriptor','app32_dependency_token','app32_release_metadata','app32_offline_transport'))
+    'app32_transport_descriptor','app32_dependency_token','app32_release_metadata','app32_offline_transport','app32_transport_deadline'))
 
 
 def need(ok,code):
@@ -88,7 +89,7 @@ def admit(ctx,old,profile,folder,image_zip,evidence_zip,row):
     data=ctx.D.evidence(ctx.C.read(evidence_zip,spec['evidence_bytes']),spec)
     wanted=row['descriptor'];archive=wanted['archive']
     ctx.capacity(archive['size_bytes']+archive['uncompressed_bytes']+MAX_JSON)
-    folder.mkdir(mode=0o700)
+    folder.mkdir(mode=0o700);ctx.check()
     with ctx.C.pinned(image_zip,row['image']['bytes'])as(stream,size):
         need(size==row['image']['bytes']and ctx.C.stream_digest(stream,size)==row['image']['sha256'],'app32_transport_pin')
         stream.seek(0)
@@ -103,10 +104,17 @@ def admit(ctx,old,profile,folder,image_zip,evidence_zip,row):
             fd=os.open(compressed,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
             with os.fdopen(fd,'wb')as output,incoming.open(item)as source:
                 total=0;digest=sha256()
-                while block:=source.read(min(65536,item.file_size+1-total)):
-                    total+=len(block);need(total<=item.file_size,'app32_transport_pin');ctx.check();output.write(block);digest.update(block)
+                while True:
+                    # The original whole-source guards bracket this bounded read.
+                    # Rehashing all external artifacts per chunk is redundant.
+                    need(time.monotonic()<ctx.end,'app32_transport_deadline')
+                    block=source.read(min(65536,item.file_size+1-total))
+                    need(time.monotonic()<ctx.end,'app32_transport_deadline')
+                    if not block:break
+                    total+=len(block);need(total<=item.file_size,'app32_transport_pin');output.write(block);digest.update(block)
                 need(total==item.file_size and digest.hexdigest()==archive['sha256'],'app32_transport_pin')
                 output.flush();os.fsync(output.fileno())
+    ctx.check()
     tar=folder/'candidate-image.tar'
     with ctx.C.pinned(compressed,archive['size_bytes'])as(stream,size):ctx.P.decode_gzip(stream,size,tar,archive['uncompressed_bytes'])
     # Only transport length changes. All original image/Config/layer operands stay.

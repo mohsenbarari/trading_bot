@@ -95,7 +95,7 @@ CODES=frozenset(('hosted_only','root_scope','path','metadata','source_changed','
 CODES=CODES|frozenset(('artifact_download_failed','artifact_size','artifact_digest','download_exists',
     'vendor_release_source','vendor_release_token','vendor_release_metadata','vendor_asset_metadata','vendor_asset_pin','app_profile',
     'app32_inventory','app32_transport_pin','app32_transport_inventory','app32_transport_descriptor',
-    'app32_dependency_token','app32_release_metadata','app32_offline_transport'))
+    'app32_dependency_token','app32_release_metadata','app32_offline_transport','app32_transport_deadline'))
 
 def need(ok,code):
     if not ok:raise RuntimeError(code)
