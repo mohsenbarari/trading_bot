@@ -127,7 +127,7 @@ class RoleBuilderTests(unittest.TestCase):
                                      'd' * 64, 1793085646, '123', '1', role=role)
             self.assertIn('BUSINESS_SOURCE_COMMIT=' + spec['business_commit'], argv)
             self.assertIn('BUSINESS_SOURCE_MANIFEST_SHA256=' + spec['manifest_sha256'], argv)
-            self.assertEqual(len(receipt['release_files']), 21)
+            self.assertEqual(len(receipt['release_files']), 23)
             self.assertNotIn('--secret', argv)
 
     def test_receipt_mutation_cannot_relabel_f79_or_different_component(self):
@@ -161,14 +161,14 @@ class RoleBuilderTests(unittest.TestCase):
             # Inert metadata tests the controller/parcel codec only. The real
             # authentic Coreutils lock independently gates actual preparation.
             cache = {'pip_packages/OWNED-DTO-ONLY/cache-' + str(i):
-                     {'bytes': 1, 'sha256': sha256(b'X').hexdigest()} for i in range(26)}
+                     {'bytes': 1, 'sha256': sha256(b'X').hexdigest()} for i in range(32)}
             with tempfile.TemporaryDirectory(prefix='.owned-role-codec-runtime-', dir=ROOT/'tests') as tmp:
                 runtime = self.F.owned_glibc_runtime(self,self.M, Path(tmp))
                 value, _ = self.M.receipt_contract(receipt, signature, controllers, cache, 1793085646, runtime)
                 parcel = self.M.controller_parcel_inputs(Path(tmp), receipt,
                                                          controllers, cache, runtime)
             self.assertFalse(value['activation_authority'])
-            self.assertEqual(len(parcel), 21 + spec['count'] + len(controllers) + 26 + 6)
+            self.assertEqual(len(parcel), 23 + spec['count'] + len(controllers) + 32 + 6)
             self.assertIn('controller/' + self.M.ROLE_READER, parcel)
             self.assertIn('release/' + self.M.ROLE_CATALOG_PATH, parcel)
 
@@ -360,7 +360,7 @@ class RoleBuilderTests(unittest.TestCase):
         for role in self.M.ROLE_MAP:
             self.assertIn('- ' + role, workflow)
         scripts = workflow.split("python3 -I -S -B - <<'PY'\n")[1:]
-        self.assertEqual(len(scripts), 4)
+        self.assertEqual(len(scripts), 7)
         for script in scripts:
             body = script.split('\n          PY', 1)[0]
             ast.parse('\n'.join(line[10:] if line.startswith(' ' * 10) else line

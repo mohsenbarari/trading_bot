@@ -25,7 +25,7 @@ class Tests(unittest.TestCase):
  def test_F79_bytes_never_receive_a_role_derivative(self):
   for name in('base','replay'):self.assertEqual(C.propose(self.fixture(name),None,fixture=name),(self.fixture(name),[]))
  def test_exact_approved_contract_and_unapproved_source_preflight(self):
-  expected='b1ceeb9eb95de2696a55781c8e47267b2c5597ac126a6e8e0663622b94cc37be'
+  expected='f903b821c6d2223ebe46e55817e6eeee05ac86bb10d5f8a34bf9f6d514e2a1d0'
   self.assertEqual(B.ROLE_FIXTURE_CONTRACT_APPROVED_SHA256, expected)
   self.assertEqual(sha256((T/'deploy/market-data/business81/role-fixture-contract.PROPOSAL.json').read_bytes()).hexdigest(), expected)
   self.assertEqual(B.role_fixture_helper((T/'deploy/market-data/business81/role_fixture_contract.py').read_bytes()).CONTRACT_SHA256, expected)
@@ -45,8 +45,8 @@ class Tests(unittest.TestCase):
   for unknown in('deploy/market-data/business81/OWNED-UNKNOWN.py',helper+'/extra','/absolute/'+helper):
    with patch.object(M,'git',side_effect=AssertionError('unknown source must stop before Git')):
     with self.assertRaisesRegex(RuntimeError,'controller_source'):M.git_source(Path('/OWNED-NOT-OPENED'),'b'*40,unknown)
-  self.assertEqual(len(M.controller_files(None)),35)
-  for role in M.ROLE_MAP:self.assertEqual(len(M.controller_files(role)),38)
+  self.assertEqual(len(M.controller_files(None)),54)
+  for role in M.ROLE_MAP:self.assertEqual(len(M.controller_files(role)),57)
  def test_wrong_helper_unknown_component_and_method_drift_refuse(self):
   with self.assertRaisesRegex(RuntimeError,'role_fixture_helper_pin'):B.role_fixture_helper(b'OWNED_UNKNOWN_HELPER')
   with self.assertRaisesRegex(ValueError,'role_fixture_component'):C.propose(self.fixture('base'),'OWNED_UNKNOWN_COMPONENT',fixture='base')

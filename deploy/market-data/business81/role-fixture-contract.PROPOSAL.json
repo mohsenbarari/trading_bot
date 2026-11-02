@@ -3,8 +3,8 @@
   "approved": false,
   "business_code_modified": false,
   "catalog": {
-    "bytes": 179771,
-    "sha256": "33c092cafd2cd301bd1f7b92a73aeca7c685ea189ddc44e8f98bd8d7c09c2831"
+    "bytes": 202327,
+    "sha256": "b591850831d9140bcaadb5612a1f7f2d67939929097067b401e24947557af0c3"
   },
   "changes": {
     "canonical": {
@@ -80,6 +80,39 @@
           "bytes": 107308,
           "git_blob": "429473cc6fd95918a72fc3cb9fd47f1d86a03fd6",
           "sha256": "dccb2760de7c36cd34dcd3bd4e440a2ebf43a8a3b13ef276c0495d71dd1a94e3"
+        },
+        "core/market_intelligence/private_capture.py": {
+          "bytes": 117651,
+          "git_blob": "31ef217661eed3fd388b7abc7cc82f0cbd2db1f9",
+          "sha256": "9872dd683847fb245e07a286777cc51d7d6e3298366016f245d085f8211aee9d"
+        },
+        "core/market_intelligence/private_capture_telegram.py": {
+          "bytes": 58013,
+          "git_blob": "2df7c918126aacb18f981089b2d84ab1c79bbb1e",
+          "sha256": "e21a3a9c5689b35d709934511216742df6b96d4996f0d2413e20eaa01dcd355a"
+        }
+      }
+    },
+    "21f92e07bbf592260bd2391796f9e296dfbaeaa4ab658011c830c805ab645b8f": {
+      "business_commit": "0b33e3dd1459746082924eb7cc7177eb5a2b1c03",
+      "business_tree": "1cf5a3eb9667ea0da0d6f7a36b1c3b64688f0966",
+      "changes": [
+        "retry",
+        "migration"
+      ],
+      "facts": {
+        "min_id_resume": true,
+        "schema": 9,
+        "streamer": true
+      },
+      "roles": [
+        "web/estimator-snapshot-receiver"
+      ],
+      "sources": {
+        "core/market_intelligence/capture_event_adapter.py": {
+          "bytes": 115011,
+          "git_blob": "1efcf4d23cecb2e0112a9f667848667e7de6985a",
+          "sha256": "a1dd60e539cce2252beb643e375cc925986ec98e08736e49192491f3d78cfc0d"
         },
         "core/market_intelligence/private_capture.py": {
           "bytes": 117651,
