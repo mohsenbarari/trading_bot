@@ -19,7 +19,7 @@
           - "'atd.service' in maintenance_units"
           - new_debs | length == 6
           - datastore_ids is defined
-          - health_urls | length > 0
+          - (health_urls | default([]) | length) + (health_commands | default([]) | length) > 0
     - name: Check mode performs no partial maintenance
       ansible.builtin.meta: end_play
       when: ansible_check_mode
@@ -67,6 +67,18 @@
           register: fence
         - ansible.builtin.assert:
             that: fence.stat.exists and fence.stat.isreg and fence.stat.uid == 0 and fence.stat.mode == '0600'
+    - name: Check the full remaining maintenance budget before first interruption
+      when: phase == 'quiesce'
+      block:
+        - ansible.builtin.command: {argv: [/usr/bin/date, '+%s']}
+          register: budget_clock
+          changed_when: false
+        - name: Reserve reboot readiness and restoration within the original user cap
+          ansible.builtin.assert:
+            that:
+              - maintenance_absolute_deadline_epoch is defined
+              - (maintenance_absolute_deadline_epoch | int) - (budget_clock.stdout | int) >= (maintenance_quiesce_install_budget_seconds | default(600) | int) + 2 * (maintenance_reboot_timeout_seconds | default(300) | int) + (maintenance_restore_budget_seconds | default(600) | int) + 40
+            fail_msg: 'Insufficient original outage budget; no inhibition, stop or reboot was requested.'
     - name: Persistently inhibit triggers before naturally draining oneshots
       when: phase == 'quiesce'
       block:
@@ -112,7 +124,7 @@
       environment: {DEBIAN_FRONTEND: noninteractive, NEEDRESTART_MODE: l}
       when: phase == 'install'
     - name: Reboot from an external controller leaving all inhibitors in place
-      ansible.builtin.reboot: {reboot_timeout: 600, connect_timeout: 10, post_reboot_delay: 10}
+      ansible.builtin.reboot: {reboot_timeout: '{{ maintenance_reboot_timeout_seconds | default(300) | int }}', connect_timeout: 10, post_reboot_delay: 10}
       when: phase == 'reboot'
     - name: Start only original running datastores before Root checks their health
       ansible.builtin.command: {argv: [/usr/bin/docker, start, '{{ item }}']}
@@ -126,9 +138,18 @@
           loop: '{{ prior.containers | selectattr("running", "equalto", true) | rejectattr("id", "in", datastore_ids) | list }}'
         - name: Require API health before releasing project unit inhibitors
           ansible.builtin.uri: {url: '{{ item }}', status_code: 200, return_content: false}
-          loop: '{{ health_urls }}'
+          loop: '{{ health_urls | default([]) }}'
           register: health
           until: health is succeeded
+          retries: 30
+          delay: 2
+          no_log: true
+        - name: Require the reviewed role-specific loopback health commands
+          ansible.builtin.command: {argv: '{{ item }}'}
+          loop: '{{ health_commands | default([]) }}'
+          changed_when: false
+          register: command_health
+          until: command_health is succeeded
           retries: 30
           delay: 2
           no_log: true
