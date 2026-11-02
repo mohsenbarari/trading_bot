@@ -95,6 +95,7 @@ import {
   STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS,
   NATIVE_APP_MESSENGER_VISUAL_KIND,
   NATIVE_APP_MESSENGER_VISUAL_EVIDENCE,
+  NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE,
   assertNativeAppMessengerVisualDisposition,
   assertStage8CreateChannelHelpPopoverPlacementDisposition,
   assertStage8MessengerUnnamedControlDisposition,
@@ -1247,8 +1248,41 @@ describe('Stage 4 protected surface baseline', () => {
     expect(assertNativeAppMessengerVisualDisposition(entries)).toMatchObject({
       sha256: actual.sha256,
     })
-    expect(actual).toMatchObject(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE)
+    expect(actual).toMatchObject(NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE)
     expect(Object.isFrozen(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE)).toBe(true)
+  })
+
+  it('retains the earlier native visual snapshot beside the exact menu-geometry evidence', () => {
+    expect(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE).toEqual({
+      count: 85,
+      contentBytes: 1292059,
+      pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+      sha256: '466798f7bd57a3b0874fc559677af7d21685981e5e08c2fd518e3aff5d298b1f',
+    })
+    expect(Object.isFrozen(NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE)).toBe(true)
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const menu = entries.find(({ path: repoPath }) => repoPath === 'frontend/src/components/chat/ChatContextMenu.vue')
+    expect(fileSha256(menu.content)).toBe('52c3da85ec910ae62a1ae3c64fd673472b64cf2822b1ba503c4bdcdefb213fa4')
+  })
+
+  it.each([
+    'frontend/src/components/chat/ChatContextMenu.vue',
+    'frontend/src/components/ChatView.vue',
+    'frontend/src/components/chat/ChatHeader.vue',
+  ])('rejects same-length drift after exact menu geometry: %s', (repoPath) => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const changed = entries.map((entry) => {
+      if (entry.path !== repoPath) return entry
+      const content = Buffer.from(entry.content)
+      content[0] ^= 1
+      return { ...entry, content }
+    })
+    const actual = protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT)
+    const mutated = protectedFileSetEvidence(changed, MESSENGER_RUNTIME_CONTRACT)
+    expect(mutated.contentBytes).toBe(actual.contentBytes)
+    expect(mutated.pathSetSha256).toBe(actual.pathSetSha256)
+    expect(mutated.sha256).not.toBe(actual.sha256)
+    expect(() => resolveMessengerRuntimeDisposition(changed)).toThrow(/native-app-messenger-visual-v1 rejected/)
   })
 
   it('fails closed for protected runtime content and path-set drift', () => {

@@ -660,6 +660,15 @@ export const NATIVE_APP_MESSENGER_VISUAL_EVIDENCE = Object.freeze({
   sha256: '466798f7bd57a3b0874fc559677af7d21685981e5e08c2fd518e3aff5d298b1f',
 })
 
+// Exact viewport-geometry change from 713f22; the earlier 85-file visual
+// snapshot above remains accepted and immutable. No path or behavior expansion.
+export const NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE = Object.freeze({
+  count: 85,
+  contentBytes: 1294283,
+  pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+  sha256: 'be5246ea89b1d72f68d0b46516e89604bfb0e23ba3180d6d61e18ac2526e83b9',
+})
+
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
 
@@ -2223,11 +2232,10 @@ export function assertNativeAppMessengerVisualDisposition(entries) {
   if (joined.includes('--ui-v2-') || joined.includes('data-ui-system')) {
     throw new Error('native-app-messenger-visual-v1 must not introduce V2 catalog markers')
   }
-  return assertProtectedFileSetEvidence(
-    'native-app-messenger-visual-v1',
-    actual,
-    NATIVE_APP_MESSENGER_VISUAL_EVIDENCE,
-  )
+  const expected = actual.sha256 === NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE.sha256
+    ? NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE
+    : NATIVE_APP_MESSENGER_VISUAL_EVIDENCE
+  return assertProtectedFileSetEvidence('native-app-messenger-visual-v1', actual, expected)
 }
 
 /**
